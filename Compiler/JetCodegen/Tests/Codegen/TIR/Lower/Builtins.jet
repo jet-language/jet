@@ -1,0 +1,56 @@
+use jet_foundation.[Type, NamedType, Span]
+use jet_codegen.TIR.[TExpr, TExprKind, ListRemoveMode]
+use jet_codegen.TIR.Lower.Builtins.[sequence_elem_ty, list_receiver, view_receiver, remove_mode_variant, tuple_fields, tuple_list_elem_fields, option_tuple_fields, result_tuple_fields, invariant_expr, wrap_set_receiver_as_list]
+use jet_syntax as Syntax
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:23-65
+#Test("builtin_sequence_shapes_preserve_exact_receiver_kind") {
+    assert(sequence_elem_ty(Type.List(Type.Int)) == Val(Type.Int))
+    assert(sequence_elem_ty(Type.Apply("ViewMut", [Type.String])) == Val(Type.String))
+    assert(sequence_elem_ty(Type.Apply("ViewMut", [])) == None)
+    assert(sequence_elem_ty(Type.Apply("ViewMut", [Type.Int, Type.String])) == None)
+    assert(list_receiver(Type.List(Type.Int)))
+    assert(!list_receiver(Type.Apply("ViewMut", [Type.Int])))
+    assert(view_receiver(Type.Apply("ComputeViewMut", [Type.Int])))
+    assert(!view_receiver(Type.Apply(Syntax.TYPE_ITER, [Type.Int])))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:67-80
+#Test("builtin_remove_mode_accepts_only_canonical_selectors") {
+    assert(remove_mode_variant("Val") == Val(ListRemoveMode.Value))
+    assert(remove_mode_variant("Slot") == Val(ListRemoveMode.Slot))
+    assert(remove_mode_variant("{Syntax.GENERATED_NAME_PREFIX}Val") == Val(ListRemoveMode.Value))
+    assert(remove_mode_variant("{Syntax.GENERATED_NAME_PREFIX}Slot") == Val(ListRemoveMode.Slot))
+    assert(remove_mode_variant("Value") == None)
+    assert(remove_mode_variant("Other") == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:119-152
+#Test("builtin_tuple_metadata_retains_carrier_and_field_order") {
+    ty :: Type.Tuple([NamedType{name: "a", ty: Type.Int}, NamedType{name: "b", ty: Type.String}])
+    expected :: Val([("a", Type.Int), ("b", Type.String)])
+    assert(tuple_fields(Val(ty)) == expected)
+    assert(tuple_list_elem_fields(Val(Type.List(ty))) == expected)
+    assert(option_tuple_fields(Val(Type.Option(ty))) == expected)
+    assert(result_tuple_fields(Val(Type.Result(ty, Type.String))) == expected)
+    assert(option_tuple_fields(Val(Type.List(ty))) == None)
+    assert(tuple_fields(None) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:14-21,89-117
+#Test("builtin_set_adapter_rejects_invalid_arity_as_invariant") {
+    span :: Span.new(4, 9)
+    original :: invariant_expr(span, "input")
+    malformed := original
+    malformed.ty = Type.Apply("Set", [])
+    missing :: wrap_set_receiver_as_list(~malformed, span)
+    assert(missing.ty == Type.Named(Syntax.TYPE_NEVER))
+    if missing.kind == .InvariantViolation(construct, location) {
+        assert(construct == "set receiver missing element type")
+        assert(location == span)
+    } else -> assert(false)
+    malformed.ty = Type.Apply("Set", [Type.Int, Type.String])
+    invalid :: wrap_set_receiver_as_list(^malformed, span)
+    if invalid.kind == .InvariantViolation(construct, _) -> assert(construct == "set receiver has invalid generic arity")
+    else -> assert(false)
+}

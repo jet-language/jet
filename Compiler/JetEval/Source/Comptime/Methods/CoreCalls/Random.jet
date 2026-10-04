@@ -1,127 +1,69 @@
-// PORT-PENDING 0591 crates-jet-comptime-src-comptime-methods-core-calls-impure-module-group: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:1-123
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Ambient random evaluator adapters.
-//RS 
-//RS // D-DET1 / I9: ambient random behavior is the runtime Prelude kernel. These
-//RS // wrappers only marshal CtValue containers around that kernel.
-//RS pub(super) mod ambient_random_kernel {
-//RS     pub(crate) mod jet_std {
-//RS         #[derive(Clone)]
-//RS         pub(crate) struct Rng {
-//RS             pub(crate) state: u64,
-//RS         }
-//RS     }
-//RS     type WorldRngNext = fn() -> Option<u64>;
-//RS     type WorldRngSeed = fn(i64) -> bool;
-//RS 
-//RS     thread_local! {
-//RS         static WORLD_RNG_NEXT: std::cell::Cell<Option<WorldRngNext>> =
-//RS             const { std::cell::Cell::new(None) };
-//RS         static WORLD_RNG_SEED: std::cell::Cell<Option<WorldRngSeed>> =
-//RS             const { std::cell::Cell::new(None) };
-//RS     }
-//RS 
-//RS     struct WorldRngProviderGuard {
-//RS         previous_next: Option<WorldRngNext>,
-//RS         previous_seed: Option<WorldRngSeed>,
-//RS     }
-//RS 
-//RS     impl Drop for WorldRngProviderGuard {
-//RS         fn drop(&mut self) {
-//RS             WORLD_RNG_NEXT.with(|provider| provider.set(self.previous_next));
-//RS             WORLD_RNG_SEED.with(|provider| provider.set(self.previous_seed));
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn with_world_rng_provider<T>(
-//RS         next: WorldRngNext,
-//RS         seed: WorldRngSeed,
-//RS         callback: impl FnOnce() -> T,
-//RS     ) -> T {
-//RS         let previous_next = WORLD_RNG_NEXT.with(|provider| provider.replace(Some(next)));
-//RS         let previous_seed = WORLD_RNG_SEED.with(|provider| provider.replace(Some(seed)));
-//RS         let _guard = WorldRngProviderGuard {
-//RS             previous_next,
-//RS             previous_seed,
-//RS         };
-//RS         callback()
-//RS     }
-//RS 
-//RS     fn world_rng_next() -> Option<u64> {
-//RS         WORLD_RNG_NEXT.with(|provider| provider.get().and_then(|provider| provider()))
-//RS     }
-//RS 
-//RS     fn world_rng_seed(seed: i64) -> bool {
-//RS         WORLD_RNG_SEED.with(|provider| provider.get().is_some_and(|provider| provider(seed)))
-//RS     }
-//RS 
-//RS 
-//RS     // The comptime adapter has no direct dependency on jet-codegen's
-//RS     // Scheduler. Its scoped provider hook carries the same active-world
-//RS     // lookup across that crate boundary; absent scope keeps the host stream.
-//RS     fn jet_scheduler_world_rng_next() -> Option<u64> {
-//RS         world_rng_next()
-//RS     }
-//RS     fn jet_scheduler_world_rng_seed(seed: i64) -> bool {
-//RS         world_rng_seed(seed)
-//RS     }
-//RS     include!("../../../../../jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs");
-//RS 
-//RS     pub(crate) fn seed(seed: i64) {
-//RS         jet_std_random_seed(seed);
-//RS     }
-//RS 
-//RS     pub(crate) fn getrandbits(bits: i64) -> i64 {
-//RS         jet_std_random_getrandbits(bits)
-//RS     }
-//RS 
-//RS     pub(crate) fn int(low: i64, high: i64) -> i64 {
-//RS         jet_std_random_int(low, high)
-//RS     }
-//RS 
-//RS     pub(crate) fn float() -> f64 {
-//RS         jet_std_random_float()
-//RS     }
-//RS 
-//RS     pub(crate) fn split(seed: i64) -> u64 {
-//RS         jet_std_random_split(seed).state
-//RS     }
-//RS 
-//RS     pub(crate) fn float_range(low: f64, high: f64) -> f64 {
-//RS         jet_std_random_float_range(low, high)
-//RS     }
-//RS 
-//RS     pub(crate) fn bool_p(p: f64) -> bool {
-//RS         jet_std_random_bool(p)
-//RS     }
-//RS 
-//RS     pub(crate) fn normal(mean: f64, stddev: f64) -> f64 {
-//RS         jet_std_random_normal(mean, stddev)
-//RS     }
-//RS 
-//RS     pub(crate) fn exponential(lambda: f64) -> f64 {
-//RS         jet_std_random_exponential(lambda)
-//RS     }
-//RS 
-//RS     pub(crate) fn bytes(count: i64) -> Vec<u8> {
-//RS         jet_std_random_bytes(count)
-//RS     }
-//RS 
-//RS     pub(crate) fn pick<T: Clone>(items: &Vec<T>) -> Option<T> {
-//RS         jet_std_random_pick(items)
-//RS     }
-//RS 
-//RS     pub(crate) fn weighted_pick<T: Clone>(items: &Vec<T>, weights: &Vec<f64>) -> Option<T> {
-//RS         jet_std_random_weighted_pick(items, weights)
-//RS     }
-//RS 
-//RS     pub(crate) fn sample<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
-//RS         jet_std_random_sample(items, count)
-//RS     }
-//RS 
-//RS     pub(crate) fn shuffle<T>(items: &mut Vec<T>) {
-//RS         jet_std_random_shuffle(items);
-//RS     }
-//RS }
-// END-PORT-PENDING 0591 crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:1-123
-
+// D-DET1 / I9: adapters marshal containers around the one runtime random kernel.
+use jet_codegen.Prelude.CoreLib.Top.MathRandomFns.*
+use std.cell.Cell
+use std.thread_local.ThreadLocal
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:7
+// The included kernel's Rng is the canonical carrier, not an ambient duplicate.
+use jet_codegen.Prelude.CoreLib.JetStd.Rng
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:12
+type WorldRngNext = fn() -> U64?
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:13
+type WorldRngSeed = fn(I64) -> Bool
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:16
+// GATE #4494: provider scope is invocation-thread-local, restored on unwind.
+const WORLD_RNG_NEXT: ThreadLocal<Cell<WorldRngNext?>> = ThreadLocal.new(fn() { Cell.new(None) })
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:18
+const WORLD_RNG_SEED: ThreadLocal<Cell<WorldRngSeed?>> = ThreadLocal.new(fn() { Cell.new(None) })
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:22
+struct WorldRngProviderGuard { previous_next: WorldRngNext?, previous_seed: WorldRngSeed? }
+impl WorldRngProviderGuard {
+    // Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:28
+    fn drop(self: &Self) {
+        WORLD_RNG_NEXT.with(fn(p) { p.set(self.previous_next) })
+        WORLD_RNG_SEED.with(fn(p) { p.set(self.previous_seed) })
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:34
+pub fn with_world_rng_provider<T>(next: WorldRngNext, seed: WorldRngSeed, callback: fn() -> T) -> T {
+    previous_next := WORLD_RNG_NEXT.with(fn(p) { p.replace(Val(next)) })
+    previous_seed := WORLD_RNG_SEED.with(fn(p) { p.replace(Val(seed)) })
+    guard := WorldRngProviderGuard { previous_next, previous_seed }
+    defer { guard.drop() }
+    callback()
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:48
+fn world_rng_next() -> U64? { WORLD_RNG_NEXT.with(fn(p) { p.get().and_then(fn(provider) { provider() }) }) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:52
+fn world_rng_seed(seed: I64) -> Bool { WORLD_RNG_SEED.with(fn(p) { p.get().is_some_and(fn(provider) { provider(seed) }) }) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:60
+fn jet_scheduler_world_rng_next() -> U64? { world_rng_next() }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:63
+fn jet_scheduler_world_rng_seed(seed: I64) -> Bool { world_rng_seed(seed) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:68
+pub fn seed(seed: I64) { jet_std_random_seed(seed) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:72
+pub fn getrandbits(bits: I64) -> I64 { jet_std_random_getrandbits(bits) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:76
+pub fn int(low: I64, high: I64) -> I64 { jet_std_random_int(low, high) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:80
+pub fn float() -> F64 { jet_std_random_float() }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:84
+pub fn split(seed: I64) -> U64 { jet_std_random_split(seed).state }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:88
+pub fn float_range(low: F64, high: F64) -> F64 { jet_std_random_float_range(low, high) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:92
+pub fn bool_p(p: F64) -> Bool { jet_std_random_bool(p) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:96
+pub fn normal(mean: F64, stddev: F64) -> F64 { jet_std_random_normal(mean, stddev) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:100
+pub fn exponential(lambda: F64) -> F64 { jet_std_random_exponential(lambda) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:104
+pub fn bytes(count: I64) -> [U8] { jet_std_random_bytes(count) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:108
+pub fn pick<T: Clone>(items: &[T]) -> T? { jet_std_random_pick(items) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:112
+pub fn weighted_pick<T: Clone>(items: &[T], weights: &[F64]) -> T? { jet_std_random_weighted_pick(items, weights) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:116
+pub fn sample<T: Clone>(items: &[T], count: I64) -> [T] { jet_std_random_sample(items, count) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs:120
+pub fn shuffle<T>(items: &[T]) { jet_std_random_shuffle(items) }

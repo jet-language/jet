@@ -1,0 +1,37 @@
+use jet_foundation.[DataPlanSourceKind, DataPlanOperationKind, Type, Span]
+use jet_sema.DataPlan.[DataPlanCallKind, DataPlanBuildError, classify_data_call, classify_data_receiver_call, scalar_schema, callable_fact]
+
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:28 (behavioral controls; no inline Rust tests)
+#Test("data_source_classification_requires_the_canonical_module") {
+    assert(classify_data_call("core.data", "csv") == Val(DataPlanCallKind.Scan(DataPlanSourceKind.Csv)))
+    assert(classify_data_call("core.data", "load_default") == Val(DataPlanCallKind.Scan(DataPlanSourceKind.Loader)))
+    assert(classify_data_call("data", "csv") == None)
+    assert(classify_data_call("core.data", "unknown") == None)
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:51 (behavioral control)
+#Test("query_receiver_classification_retains_plan_inspection_without_a_node") {
+    assert(classify_data_receiver_call(["Other", "Query"], "plan") == Val(DataPlanCallKind.InspectPlan))
+    assert(classify_data_receiver_call(["Query"], "filter") == Val(DataPlanCallKind.Filter))
+    assert(classify_data_receiver_call(["Other"], "filter") == None)
+    assert(classify_data_receiver_call(["Query"], "unknown") == None)
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:296 (behavioral control)
+#Test("plan_callable_diagnostics_preserve_parameter_and_result_distinctions") {
+    parameter :: DataPlanBuildError.CallableParameter(DataPlanOperationKind.Filter, "Int", "String")
+    result :: DataPlanBuildError.CallableResult(DataPlanOperationKind.Filter, "Bool", "Int")
+    assert(parameter.show() == "table plan `filter` callback takes String, expected Int")
+    assert(result.show() == "table plan `filter` callback returns Int, expected Bool")
+    assert(DataPlanBuildError.MissingPhysicalReason.show() == "table plan physical choice needs a reason")
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:333/343 (behavioral control)
+#Test("scalar_schema_and_callable_facts_retain_checked_types") {
+    schema :: scalar_schema(Type.Option(Type.Int))
+    assert(schema.row_type == Type.Option(Type.Int))
+    assert(schema.columns.len() == 1)
+    assert(schema.columns[0].name == "value")
+    assert(schema.columns[0].nullable)
+    callable :: callable_fact("predicate", Type.Int, Type.Bool, Span{start: 2, end: 5})
+    assert(callable.parameter == Type.Int)
+    assert(callable.result == Type.Bool)
+    assert(callable.span == Span{start: 2, end: 5})
+}

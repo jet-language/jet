@@ -1,514 +1,196 @@
-// PORT-PENDING 0521 crates-jet-codegen-src-codegen-tir-subset-core-calls-module-group: crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs:1-510
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::AST::Expr;
-//RS use crate::Codegen::Cx;
-//RS use crate::Codegen::TIR::expr_in_subset;
-//RS use crate::Codegen::TIR::lambda_in_subset;
-//RS use std::collections::HashSet;
-//RS 
-//RS /// c109 Phase 10: is a core/stdlib call `(module, method)` one the TIR lowers? The
-//RS /// covered set is the **type-monomorphic** core calls. A call that is a row in the
-//RS /// foundation Core-call registry is decided by that row's own `TIR_SUBSET`
-//RS /// projection bit; every other call key falls back to `Sema::core_fixed_sig`,
-//RS /// whose full signature (param conventions + return type) is fixed. Either
-//RS /// source is total: the resolved return type gives the node's total `ty` (for
-//RS /// `?`-unwrap and binding inference), and `emit_tir_core_call` has a matching
-//RS /// emit arm for every covered key.
-//RS ///
-//RS /// Gating on `core_fixed_sig(...).is_some()` cleanly EXCLUDES the deferred calls:
-//RS ///   - **closure-taking** (`http.serve`, `scope.guard`) — not in the
-//RS ///     table / typed `None` → Phase 11 lambdas;
-//RS ///   - **polymorphic** math/random/io specials (`math.abs`/`min`/`max`/`clamp`,
-//RS ///     `random.pick`/`shuffle`, `io.input`/`io.eprint`) — return type depends on the
-//RS ///     arg type, resolved by bespoke `check_core_call` logic, not the fixed table, so
-//RS ///     a total `ty` would need re-inference (I3) → deferred;
-//RS ///   - **handle-constructor** specials NOT in the table (`tasks.channel`,
-//RS ///     `http.router`/`parse`/`dispatch`) and `core.mem` ptr/alloc (`#Unsafe`).
-//RS /// A handle-PRODUCING call that IS in the table (`files.open` → `FileReader`,
-//RS /// `net.tcp_connect` → `TcpStream`, `time.start` → `Stopwatch`, …) is covered: the
-//RS /// CALL emits a plain helper call (parity-exact), and any later METHOD on the
-//RS /// returned handle is itself out of subset → excludes the enclosing function.
-//RS pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
-//RS     // Plain Core calls are rows in the foundation registry, and the row's own
-//RS     // TIR_SUBSET projection bit is the entire decision for a registry key. A row
-//RS     // that genuinely has no TIR lowering drops that bit in the table; nothing
-//RS     // here may veto a row on a fact that belongs to another tier.
-//RS     //
-//RS     // This lookup used to also require `row.has_direct_symbol()` — an AOT-only
-//RS     // fact (`aot_direct`). Because the lookup returns early, every row that
-//RS     // deliberately keeps a typed AOT emitter instead of a direct Prelude symbol
-//RS     // (`time.new`/`today`/`parse`/`from_timestamp`, `compute.set`, `ui.box`,
-//RS     // `time.parse_time`, `encoding.xml.decode`/`decode_bytes`, the
-//RS     // `crypto.expert` calls, the `crypto.__*` field extracts) was reported as
-//RS     // out of subset, which took the whole enclosing function out of TIR and off
-//RS     // the resident JIT even though every tier had a lowering for it. Coverage is
-//RS     // a TIR fact; the AOT projection is read by `emit_plain_core_call` alone.
-//RS     //
-//RS     // Argument expressions and resolved value types are checked by the callers
-//RS     // below; this lookup owns the call-key coverage decision.
-//RS     if let Some(row) = crate::Syntax::core_call(module, method) {
-//RS         return row
-//RS             .coverage
-//RS             .contains(crate::Syntax::CoreCallCoverage::TIR_SUBSET);
-//RS     }
-//RS     // c109 Phase 18: `mem.address_of` is not a registry row — it has a bespoke
-//RS     // sema return type and Rust expression — so it needs its own admission here.
-//RS     // The enclosing `#Unsafe` gate is checked by the statement and expression
-//RS     // subset walkers; this only admits its total call shape. `volatile_read` and
-//RS     // `volatile_write` ARE registry rows and ride the lookup above.
-//RS     if module == "core.mem" && method == "address_of" {
-//RS         return true;
-//RS     }
-//RS     // D-SHAPE-DURATION1=A: duration constructors are Prelude calls with a unit
-//RS     // selected by the method name, and they are not registry rows. Their fixed
-//RS     // integer argument and Result type are already resolved by sema.
-//RS     if module == "core.time"
-//RS         && matches!(
-//RS             method,
-//RS             "nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours"
-//RS         )
-//RS     {
-//RS         return true;
-//RS     }
-//RS     if module == "core.tasks" && matches!(method, "yield_now" | "current_task") {
-//RS         return true;
-//RS     }
-//RS     // D-PIN1=A: `mem.pin(&place)` lowers to the same exclusive borrow node as
-//RS     // `&place` (see `lower_method_call`), so every tier emits the identical
-//RS     // form and none of them re-encodes the address-stability rule — sema owns
-//RS     // it (I3/I9). The `Pin<T>` return type is total from the argument's type.
-//RS     if module == "core.mem" && method == crate::Syntax::MEM_PIN {
-//RS         return true;
-//RS     }
-//RS     // c109 Phase 20: the polymorphic core specials (`math.abs/min/max/clamp`,
-//RS     // `random.pick/shuffle`, `io.eprint`). NOT in `core_fixed_sig` — their return
-//RS     // type is arg-type dependent, resolved by sema's bespoke `infer_core_call` and
-//RS     // written onto the node's `resolved_ret` field (read at lowering, so it's total —
-//RS     // I3). The EMITTED form is a fixed per-`(module, method)` string (reproduced in
-//RS     // `emit_tir_core_call`), args emitted plainly, preserving canonical encoding.
-//RS     // (`io.input` is NOT here — it IS in `core_fixed_sig`, covered by Phase 10.)
-//RS     // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` is now a polymorphic core special
-//RS     // (registered in `is_polymorphic_core_special` above) — its `(Sender<T>,
-//RS     // Receiver<T>)` return type is arg-type dependent (the call-site turbofish
-//RS     // `<T>`, sema E0904 requires it), so it's covered by the check just above, not
-//RS     // a dedicated block here. Sema writes the resolved `Type::Tuple` onto the
-//RS     // node's `resolved_ret`; lowering reads it totally (I3), and the emit reads `T`
-//RS     // off that same type to build `{root}jet_std::channel::<{T}>()`
-//RS     // (Source/Codegen/TIR/emit.rs `emit_tir_core_call`). The `Receiver`/`Sender`/
-//RS     // `Task` METHODS route via their own shape (d3 below).
-//RS     if crate::Sema::is_polymorphic_core_special(module, method) {
-//RS         return true;
-//RS     }
-//RS     // c109 Phase 25 / D-FOUND-LIFECYCLE1: HTTP constructors. The ordinary
-//RS     // `http.serve(mux, deadline:)` call now rides the registry like router
-//RS     // creation and request dispatch; the legacy address/handler spelling
-//RS     // remains a separate `CoreClosureCall` path.
-//RS     if module == "core.http" && matches!(method, "router" | "parse" | "dispatch" | "serve") {
-//RS         return true;
-//RS     }
-//RS     // D-TEXTWIDTH1=B: `text.display_width` used to be claimed here by name.
-//RS     // It is now registered in `is_polymorphic_core_special` (its return type
-//RS     // is arity-dependent: `Int` for 1 arg, `Int !TextError` for the `policy:`
-//RS     // form), so the check above already covers it and sema carries the
-//RS     // resolved type on `resolved_ret`. One coverage mechanism, not two (I8).
-//RS     // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return
-//RS     // type (`Result<String, IOError>`) lives in sema's bespoke `infer_core_call` arm
-//RS     // (CheckerCoreLib.rs), carried total by `core_call_return_ty`. It is the DISTINCT
-//RS     // qualified MethodCall on a `core.term` alias (the ambient bare `input()`, Phase 25, is
-//RS     // a separate `Expr::Call` node → `AmbientInput`). Emits the same fixed-string CoreCall
-//RS     // `{root}jet_std_io_input(None|Some(&(prompt)))` (reproduced in `emit_tir_core_call`),
-//RS     // byte-for-byte the TIR core-call encoding. Composes with the Phase-8 `?? return`.
-//RS     // parity: guard tests/tir_language_features.rs::ambient_input
-//RS     if module == "core.term" && method == "input" {
-//RS         return true;
-//RS     }
-//RS     // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`. NOT in `core_fixed_sig` (the
-//RS     // param type is "any printable value", not a fixed `Type`), but the
-//RS     // return type IS fixed regardless of the arg (always `Value`) — total,
-//RS     // not arg-dependent, so it's covered like the other fixed-but-not-in-
-//RS     // the-table specials above.
-//RS     if module == "core.reflect" && method == "of" {
-//RS         return true;
-//RS     }
-//RS     // Source-owned Core members are ordinary Jet module calls in TIR. Their
-//RS     // checked fixed signature remains sema's type contract; the source
-//RS     // package owns the implementation and no CoreCall registry row is needed.
-//RS     if jet_foundation::CoreModuleExports::core_source_owns(module, method) {
-//RS         return true;
-//RS     }
-//RS     // D-APPROX1=A: `HLL.new()`, `TD.new()`, `CMS.new()`, `RS.new(capacity)`. NOT in `core_fixed_sig`.
-//RS     if matches!(
-//RS         module,
-//RS         "core.data.sketch.hll"
-//RS             | "core.data.sketch.tdigest"
-//RS             | "core.data.sketch.cms"
-//RS             | "core.data.sketch.reservoir"
-//RS     ) && method == "new"
-//RS     {
-//RS         return true;
-//RS     }
-//RS     // D-EVENT1=D: Event/Hook constructors are generic over the payload/result
-//RS     // types, so their real return type comes from sema's resolved call.
-//RS     if module == "core.event"
-//RS         && matches!(
-//RS             method,
-//RS             "new"
-//RS                 | "with_policy"
-//RS                 | "hook"
-//RS                 | "decision_hook"
-//RS                 | "scope"
-//RS                 | "policy_sync"
-//RS                 | "async_result"
-//RS         )
-//RS     {
-//RS         return true;
-//RS     }
-//RS     // D-SYNC1: the application sync publisher is a typed, deterministic
-//RS     // Prelude call. Its return is String and its named `over:` label is
-//RS     // already checked by sema; no closure or host policy remains for TIR.
-//RS     if matches!(module, "app" | "core.web") && method == "sync" {
-//RS         return true;
-//RS     }
-//RS     // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors. NOT in `core_fixed_sig`.
-//RS     if matches!(
-//RS         module,
-//RS         "core.http.client" | "core.http.server" | "core.http.middleware"
-//RS     ) && matches!(
-//RS         method,
-//RS         "get"
-//RS             | "post"
-//RS             | "request"
-//RS             | "bind"
-//RS             | "mux"
-//RS             | "mux_handler"
-//RS             | "serve"
-//RS             | "serve_once"
-//RS             | "serve_once_listener"
-//RS             | "response"
-//RS             | "tls"
-//RS             | "sse"
-//RS             | "static_file"
-//RS             | "static_file_range"
-//RS             | "static_files"
-//RS             | "json"
-//RS             | "access_log"
-//RS             | "request_id"
-//RS             | "timeout"
-//RS             | "body_limit"
-//RS             | "cors"
-//RS             | "cors_policy"
-//RS             | "compress"
-//RS     ) {
-//RS         return true;
-//RS     }
-//RS     // D-WS1=B: WebSocket entry points live in core.net.ws (not core.http).
-//RS     if module == "core.net.ws" && matches!(method, "connect" | "upgrade") {
-//RS         return true;
-//RS     }
-//RS     // D-BROWSER-AUTO1=A: fixed native BiDi entry points.
-//RS     if module == "core.web.browser"
-//RS         && matches!(
-//RS             method,
-//RS             "profile" | "timeout" | "locked" | "connect" | "connect_profile"
-//RS         )
-//RS     {
-//RS         return true;
-//RS     }
-//RS     // D-UI-MOUNT1=A: bespoke arity (2|3) + backend union; Unit return from sema.
-//RS     if module == "core.ui" && method == "mount" {
-//RS         return true;
-//RS     }
-//RS     crate::Sema::core_fixed_sig(module, method).is_some()
-//RS }
-//RS 
-//RS pub(super) fn core_call_args_in_subset(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: &[crate::AST::CallArg],
-//RS     cx: &Cx,
-//RS     locals: &std::collections::HashSet<String>,
-//RS ) -> bool {
-//RS     // D-TASKRUNTIME1=A: the bounded channel form requires `capacity:`.
-//RS     // Sema has bound the label and checked its integer type.
-//RS     if module == "core.tasks" && method == "channel" {
-//RS         return match args {
-//RS             [] => true,
-//RS             [arg] => {
-//RS                 matches!(
-//RS                     arg.label.as_ref().map(|(label, _)| label.as_str()),
-//RS                     None | Some("capacity")
-//RS                 ) && expr_in_subset(&arg.expr, cx, locals)
-//RS             }
-//RS             _ => false,
-//RS         };
-//RS     }
-//RS     // D-REGEX-LIT1=D: regex one-shot calls support `pattern:` and `text:`.
-//RS     // Sema binds each label; lowering preserves written expression order.
-//RS     if module == "core.regex" {
-//RS         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     if module == "core.auth" && matches!(method, "verify_jwt" | "verify_paseto") {
-//RS         let labels: &[Option<&str>] = if method == "verify_jwt" {
-//RS             &[
-//RS                 None,
-//RS                 Some("key"),
-//RS                 Some("audience"),
-//RS                 Some("issuer"),
-//RS                 Some("clock_skew"),
-//RS             ]
-//RS         } else {
-//RS             &[
-//RS                 None,
-//RS                 Some("key"),
-//RS                 Some("audience"),
-//RS                 Some("issuer"),
-//RS                 Some("clock_skew"),
-//RS                 Some("footer"),
-//RS                 Some("implicit"),
-//RS             ]
-//RS         };
-//RS         return args.len() >= 3
-//RS             && args.len() <= labels.len()
-//RS             && args.iter().zip(labels).all(|(arg, expected)| {
-//RS                 arg.label.as_ref().map(|(label, _)| label.as_str()) == *expected
-//RS                     && expr_in_subset(&arg.expr, cx, locals)
-//RS             });
-//RS     }
-//RS     if module == "core.net.tls" && method == "client" && args.len() == 4 {
-//RS         let labels = [None, Some("server_name"), Some("config"), Some("deadline")];
-//RS         return args.iter().zip(labels).all(|(arg, expected)| {
-//RS             arg.label.as_ref().map(|(label, _)| label.as_str()) == expected
-//RS                 && expr_in_subset(&arg.expr, cx, locals)
-//RS         });
-//RS     }
-//RS     if module == "core.net.tls" && method == "client" && args.len() == 3 {
-//RS         return args.iter().enumerate().all(|(idx, arg)| {
-//RS             let label_ok = if idx == 2 {
-//RS                 matches!(
-//RS                     arg.label.as_ref().map(|(label, _)| label.as_str()),
-//RS                     Some("deadline")
-//RS                 )
-//RS             } else {
-//RS                 arg.label.is_none()
-//RS             };
-//RS             label_ok && expr_in_subset(&arg.expr, cx, locals)
-//RS         });
-//RS     }
-//RS     if module == "core.net" && method == "unix_connect" && args.len() == 2 {
-//RS         return args.iter().enumerate().all(|(idx, arg)| {
-//RS             let label_ok = if idx == 1 {
-//RS                 matches!(
-//RS                     arg.label.as_ref().map(|(label, _)| label.as_str()),
-//RS                     Some("deadline")
-//RS                 )
-//RS             } else {
-//RS                 arg.label.is_none()
-//RS             };
-//RS             label_ok && expr_in_subset(&arg.expr, cx, locals)
-//RS         });
-//RS     }
-//RS     // D-FOUND-LIFECYCLE1: the shared Core binder materializes both optional
-//RS     // labeled server controls before TIR sees the call. Present values are
-//RS     // wrapped as typed options by lowering; absent slots remain `None`.
-//RS     if module == "core.http.server" && matches!(method, "serve" | "bind") && args.len() == 4 {
-//RS         return args.iter().enumerate().all(|(idx, a)| {
-//RS             let label_ok = match idx {
-//RS                 2 => matches!(
-//RS                     a.label.as_ref().map(|(label, _)| label.as_str()),
-//RS                     None | Some("tls")
-//RS                 ),
-//RS                 3 => matches!(
-//RS                     a.label.as_ref().map(|(label, _)| label.as_str()),
-//RS                     None | Some("deadline")
-//RS                 ),
-//RS                 _ => a.label.is_none(),
-//RS             };
-//RS             label_ok && expr_in_subset(&a.expr, cx, locals)
-//RS         });
-//RS     }
-//RS     if module == "core.game" && method == "run" && matches!(args.len(), 1..=4) {
-//RS         return args.iter().enumerate().all(|(idx, a)| {
-//RS             let label_ok = match idx {
-//RS                 0 => a.label.is_none(),
-//RS                 1 => {
-//RS                     matches!(&a.expr, Expr::Absent(_))
-//RS                         || a.label.is_none()
-//RS                         || a.label.as_ref().map(|(label, _)| label.as_str()) == Some("replay")
-//RS                 }
-//RS                 2 => {
-//RS                     matches!(&a.expr, Expr::Absent(_))
-//RS                         || a.label.is_none()
-//RS                         || a.label.as_ref().map(|(label, _)| label.as_str()) == Some("backend")
-//RS                 }
-//RS                 3 => {
-//RS                     matches!(&a.expr, Expr::Absent(_))
-//RS                         || a.label.is_none()
-//RS                         || a.label.as_ref().map(|(label, _)| label.as_str()) == Some("frames")
-//RS                 }
-//RS                 _ => false,
-//RS             };
-//RS             label_ok && expr_in_subset(&a.expr, cx, locals)
-//RS         });
-//RS     }
-//RS     if module == "core.text" && method == "display_width" {
-//RS         return matches!(args.len(), 1 | 2)
-//RS             && args.iter().enumerate().all(|(idx, arg)| {
-//RS                 let label_ok = if idx == 1 {
-//RS                     arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("policy")
-//RS                 } else {
-//RS                     arg.label.is_none()
-//RS                 };
-//RS                 label_ok && expr_in_subset(&arg.expr, cx, locals)
-//RS             });
-//RS     }
-//RS     if matches!(module, "app" | "core.web") && method == "sync" {
-//RS         return args.len() == 2
-//RS             && args.iter().enumerate().all(|(idx, arg)| {
-//RS                 let label_ok = if idx == 1 {
-//RS                     arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("over")
-//RS                 } else {
-//RS                     arg.label.is_none()
-//RS                 };
-//RS                 label_ok && expr_in_subset(&arg.expr, cx, locals)
-//RS             });
-//RS     }
-//RS     // D-SERVICE-AUTHORITY1=A: `services.runtime(store, retention: duration)`
-//RS     // publishes `retention`. Sema binds it; keep that resolved shape in TIR.
-//RS     if module == "core.service" && method == "runtime" {
-//RS         return args.len() == 2
-//RS             && args.iter().enumerate().all(|(idx, arg)| {
-//RS                 let label_ok = if idx == 1 {
-//RS                     arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("retention")
-//RS                 } else {
-//RS                     arg.label.is_none()
-//RS                 };
-//RS                 label_ok && expr_in_subset(&arg.expr, cx, locals)
-//RS             });
-//RS     }
-//RS     // D-WEB-CLICK-PORT1=D: the plain button form is a fixed direct call;
-//RS     // only the optional labeled handler takes the closure route below.
-//RS     if module == "core.ui" && method == "button" && args.len() == 1 {
-//RS         return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // D-FOUND-COREAPI1=A: `files.walk(root, ignore: .gitignore)` remains a
-//RS     // checked two-slot route after the binder fills an omitted ignore value.
-//RS     if module == "core.files" && matches!(method, "walk" | "walk_parallel" | "walk_files") {
-//RS         return matches!(args.len(), 1 | 2)
-//RS             && args.iter().enumerate().all(|(index, arg)| {
-//RS                 let label_ok = if index == 1 {
-//RS                     matches!(
-//RS                         arg.label.as_ref().map(|(label, _)| label.as_str()),
-//RS                         None | Some("ignore")
-//RS                     )
-//RS                 } else {
-//RS                     arg.label.is_none()
-//RS                 };
-//RS                 !arg.spread && label_ok && expr_in_subset(&arg.expr, cx, locals)
-//RS             });
-//RS     }
-//RS     if crate::Syntax::core_call(module, method).is_some() {
-//RS         return crate::Syntax::core_call_projection(
-//RS             module,
-//RS             method,
-//RS             crate::Syntax::CoreCallCoverage::TIR_SUBSET,
-//RS             args.len(),
-//RS         )
-//RS         .is_ok()
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     args.iter().all(|a| expr_in_subset(&a.expr, cx, locals))
-//RS }
-//RS 
-//RS /// c109 Phase 13: a closure-taking core call (`tasks.spawn`, the legacy
-//RS /// address/handler `http.serve`, or `scope.guard`) inside the subset? These
-//RS /// are NOT in `core_fixed_sig` — each has a bespoke emit shape. We cover only
-//RS /// the cleanest, byte-reproducible case for each, where the closure arg is a
-//RS /// LITERAL in-subset lambda:
-//RS ///   - `http.serve(addr, <lambda>)` — 2 args; arg0 (addr) any in-subset value, arg1 a
-//RS ///     literal lambda (the `jet_http_serve(&(addr), <lambda>)` branch). The
-//RS ///     router-handler branch needs an HTTPRouter value, which can only come from
-//RS ///     `http.router()` (not in `core_fixed_sig`) — so it can't arise in a covered fn.
-//RS ///   - `scope.guard(<lambda>)` — 1 arg, a literal zero-param lambda.
-//RS ///   - `tasks.spawn(<lambda>)` — 1 arg, a literal zero-param lambda.
-//RS pub(crate) fn core_closure_call_in_subset(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: &[crate::AST::CallArg],
-//RS     cx: &Cx,
-//RS     locals: &HashSet<String>,
-//RS ) -> bool {
-//RS     let lambda_arg = |i: usize| matches!(args.get(i).map(|a| &a.expr), Some(Expr::Lambda(lam)) if lambda_in_subset(lam, cx, locals));
-//RS     let no_labels = args.iter().all(|a| a.label.is_none());
-//RS     match (module, method) {
-//RS         // D-SERVICE1=D: this is a declarative callback. Lowering accepts only
-//RS         // its static worker statements and carries them as a typed payload;
-//RS         // arbitrary callback execution is not a service-tree operation.
-//RS         ("core.service", "tree") => {
-//RS             args.len() == 1 && no_labels && matches!(args[0].expr, Expr::Lambda(_))
-//RS         }
-//RS         ("core.tasks", "spawn") => args.len() == 1 && no_labels && lambda_arg(0),
-//RS         ("core.http", "serve") => {
-//RS             args.len() == 2
-//RS                 && no_labels
-//RS                 && expr_in_subset(&args[0].expr, cx, locals)
-//RS                 && lambda_arg(1)
-//RS         }
-//RS         ("core.mem.scope", "guard") => args.len() == 1 && no_labels && lambda_arg(0),
-//RS         // D-OSINTERRUPT1: the callback itself is canonicalized by lowering;
-//RS         // admit all in-subset callback shapes so inline, named, and indirect
-//RS         // values use the same `CoreClosureCall` path in every tier.
-//RS         ("core.sys", "on_interrupt") => {
-//RS             args.len() == 1 && no_labels && expr_in_subset(&args[0].expr, cx, locals)
-//RS         }
-//RS         // D-QUERY-RETAIN1=A: `core.data.query(rows)` builds one typed
-//RS         // deferred Query value; its receiver methods are admitted by the
-//RS         // method-call subset gate below.
-//RS         ("core.data", "query") => {
-//RS             args.len() == 1 && no_labels && expr_in_subset(&args[0].expr, cx, locals)
-//RS         }
-//RS         ("core.data", "inner_join" | "left_join") => {
-//RS             args.len() == 4
-//RS                 && no_labels
-//RS                 && expr_in_subset(&args[0].expr, cx, locals)
-//RS                 && expr_in_subset(&args[1].expr, cx, locals)
-//RS                 && lambda_arg(2)
-//RS                 && lambda_arg(3)
-//RS         }
-//RS         ("core.data", "pivot_sum") => {
-//RS             args.len() == 4
-//RS                 && no_labels
-//RS                 && expr_in_subset(&args[0].expr, cx, locals)
-//RS                 && lambda_arg(1)
-//RS                 && lambda_arg(2)
-//RS                 && lambda_arg(3)
-//RS         }
-//RS         // D-REACT1=B / D-SIGNAL1: `reactive.derived/computed/effect(<lambda>)` —
-//RS         // 1 arg, a literal zero-param in-subset lambda (rendered by `render_lambda_str`).
-//RS         ("core.reactive", "derived" | "computed" | "effect") => {
-//RS             args.len() == 1 && no_labels && lambda_arg(0)
-//RS         }
-//RS         // D-RENDERTGT2=A (c133 M2): `ui.reactive_render(<lambda>)`.
-//RS         ("core.ui", "reactive_render") => args.len() == 1 && no_labels && lambda_arg(0),
-//RS         // D-WEB-CLICK-PORT1=D: `ui.button(label, on_click: <lambda>)`.
-//RS         ("core.ui", "button") => {
-//RS             args.len() == 2
-//RS                 && lambda_arg(1)
-//RS                 && args.get(1).is_some_and(|a| {
-//RS                     a.label
-//RS                         .as_ref()
-//RS                         .is_some_and(|(label, _)| label == "on_click")
-//RS                 })
-//RS                 && expr_in_subset(&args[0].expr, cx, locals)
-//RS         }
-//RS         // D-UI-MOUNT1=A: `ui.mount(backend, tree[, constraint])` — bespoke
-//RS         // arity/types in sema (not `core_fixed_sig`); emit uses Prelude mount.
-//RS         ("core.ui", "mount") => {
-//RS             (args.len() == 2 || args.len() == 3)
-//RS                 && no_labels
-//RS                 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals))
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-// END-PORT-PENDING 0521 crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs:1-510
+use JetSema.AST.[Expr, CallArg]
+use JetSema.[Sema, Syntax]
+use JetCodegen.Codegen.Cx
+use JetCodegen.Codegen.TIR.[expr_in_subset, lambda_in_subset]
+use JetFoundation.CoreModuleExports
+use core.collections.Set
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs:29
+// Registry coverage is solely the TIR_SUBSET projection, never an AOT fact.
+pub fn core_call_covered(module: String, method: String) -> Bool {
+    if Syntax.core_call(module, method) == {
+        Val(row) -> return row.coverage.contains(Syntax.CoreCallCoverage.TIR_SUBSET)
+        else -> {}
+    }
+    if module == "core.mem" && method == "address_of" -> return true
+    if module == "core.time" && if method == {
+        "nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours" -> true
+        else -> false
+    } -> return true
+    if module == "core.tasks" && (method == "yield_now" || method == "current_task") -> return true
+    if module == "core.mem" && method == Syntax.MEM_PIN -> return true
+    if Sema.is_polymorphic_core_special(module, method) -> return true
+    if module == "core.http" && if method == {
+        "router" | "parse" | "dispatch" | "serve" -> true; else -> false
+    } -> return true
+    if module == "core.term" && method == "input" -> return true
+    if module == "core.reflect" && method == "of" -> return true
+    if CoreModuleExports.core_source_owns(module, method) -> return true
+    if method == "new" && if module == {
+        "core.data.sketch.hll" | "core.data.sketch.tdigest"
+        | "core.data.sketch.cms" | "core.data.sketch.reservoir" -> true
+        else -> false
+    } -> return true
+    if module == "core.event" && if method == {
+        "new" | "with_policy" | "hook" | "decision_hook" | "scope" | "policy_sync" | "async_result" -> true
+        else -> false
+    } -> return true
+    if (module == "app" || module == "core.web") && method == "sync" -> return true
+    if (module == "core.http.client" || module == "core.http.server" || module == "core.http.middleware")
+        && if method == {
+            "get" | "post" | "request" | "bind" | "mux" | "mux_handler" | "serve"
+            | "serve_once" | "serve_once_listener" | "response" | "tls" | "sse"
+            | "static_file" | "static_file_range" | "static_files" | "json"
+            | "access_log" | "request_id" | "timeout" | "body_limit" | "cors"
+            | "cors_policy" | "compress" -> true
+            else -> false
+        } -> return true
+    if module == "core.net.ws" && (method == "connect" || method == "upgrade") -> return true
+    if module == "core.web.browser" && if method == {
+        "profile" | "timeout" | "locked" | "connect" | "connect_profile" -> true
+        else -> false
+    } -> return true
+    if module == "core.ui" && method == "mount" -> return true
+    Sema.core_fixed_sig(module, method).is_some()
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs:222
+pub fn core_call_args_in_subset(module: String, method: String, args: [CallArg], cx: Cx, locals: Set<String>) -> Bool {
+    if module == "core.tasks" && method == "channel" {
+        if args.len() == 0 -> return true
+        if args.len() != 1 -> return false
+        label := args[0].label.map(fn((label, _)) { label })
+        return (label == None || label == Val("capacity")) && expr_in_subset(args[0].expr, cx, locals)
+    }
+    // Written expression order is preserved for labeled one-shot regex calls.
+    if module == "core.regex" -> return args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) })
+    if module == "core.auth" && (method == "verify_jwt" || method == "verify_paseto") {
+        labels: [String?] := if method == "verify_jwt" {
+            [None, Val("key"), Val("audience"), Val("issuer"), Val("clock_skew")]
+        } else {
+            [None, Val("key"), Val("audience"), Val("issuer"), Val("clock_skew"), Val("footer"), Val("implicit")]
+        }
+        return args.len() >= 3 && args.len() <= labels.len()
+            && args.iter().zip(labels).all(fn((arg, expected)) {
+                arg.label.map(fn((label, _)) { label }) == expected && expr_in_subset(arg.expr, cx, locals)
+            })
+    }
+    if module == "core.net.tls" && method == "client" && args.len() == 4 {
+        labels: [String?] := [None, Val("server_name"), Val("config"), Val("deadline")]
+        return args.iter().zip(labels).all(fn((arg, expected)) {
+            arg.label.map(fn((label, _)) { label }) == expected && expr_in_subset(arg.expr, cx, locals)
+        })
+    }
+    if module == "core.net.tls" && method == "client" && args.len() == 3 {
+        return args.iter().enumerate().all(fn((idx, arg)) {
+            label_ok := if idx == 2 { arg.label.map(fn((label, _)) { label }) == Val("deadline") }
+                else { arg.label.is_none() }
+            label_ok && expr_in_subset(arg.expr, cx, locals)
+        })
+    }
+    if module == "core.net" && method == "unix_connect" && args.len() == 2 {
+        return args.iter().enumerate().all(fn((idx, arg)) {
+            label_ok := if idx == 1 { arg.label.map(fn((label, _)) { label }) == Val("deadline") }
+                else { arg.label.is_none() }
+            label_ok && expr_in_subset(arg.expr, cx, locals)
+        })
+    }
+    // The binder materializes absent optional TLS and deadline slots.
+    if module == "core.http.server" && (method == "serve" || method == "bind") && args.len() == 4 {
+        return args.iter().enumerate().all(fn((idx, a)) {
+            label := a.label.map(fn((label, _)) { label })
+            label_ok := if idx == {
+                2 -> label == None || label == Val("tls")
+                3 -> label == None || label == Val("deadline")
+                else -> a.label.is_none()
+            }
+            label_ok && expr_in_subset(a.expr, cx, locals)
+        })
+    }
+    if module == "core.game" && method == "run" && args.len() >= 1 && args.len() <= 4 {
+        return args.iter().enumerate().all(fn((idx, a)) {
+            absent := if a.expr == { .Absent(_) -> true; else -> false }
+            label := a.label.map(fn((label, _)) { label })
+            label_ok := if idx == {
+                0 -> a.label.is_none()
+                1 -> absent || a.label.is_none() || label == Val("replay")
+                2 -> absent || a.label.is_none() || label == Val("backend")
+                3 -> absent || a.label.is_none() || label == Val("frames")
+                else -> false
+            }
+            label_ok && expr_in_subset(a.expr, cx, locals)
+        })
+    }
+    if module == "core.text" && method == "display_width" {
+        return (args.len() == 1 || args.len() == 2) && args.iter().enumerate().all(fn((idx, arg)) {
+            label_ok := if idx == 1 { arg.label.map(fn((label, _)) { label }) == Val("policy") }
+                else { arg.label.is_none() }
+            label_ok && expr_in_subset(arg.expr, cx, locals)
+        })
+    }
+    if (module == "app" || module == "core.web") && method == "sync" {
+        return args.len() == 2 && args.iter().enumerate().all(fn((idx, arg)) {
+            label_ok := if idx == 1 { arg.label.map(fn((label, _)) { label }) == Val("over") }
+                else { arg.label.is_none() }
+            label_ok && expr_in_subset(arg.expr, cx, locals)
+        })
+    }
+    if module == "core.service" && method == "runtime" {
+        return args.len() == 2 && args.iter().enumerate().all(fn((idx, arg)) {
+            label_ok := if idx == 1 { arg.label.map(fn((label, _)) { label }) == Val("retention") }
+                else { arg.label.is_none() }
+            label_ok && expr_in_subset(arg.expr, cx, locals)
+        })
+    }
+    if module == "core.ui" && method == "button" && args.len() == 1 {
+        return args[0].label.is_none() && expr_in_subset(args[0].expr, cx, locals)
+    }
+    if module == "core.files" && (method == "walk" || method == "walk_parallel" || method == "walk_files") {
+        return (args.len() == 1 || args.len() == 2) && args.iter().enumerate().all(fn((index, arg)) {
+            label := arg.label.map(fn((label, _)) { label })
+            label_ok := if index == 1 { label == None || label == Val("ignore") }
+                else { arg.label.is_none() }
+            !arg.spread && label_ok && expr_in_subset(arg.expr, cx, locals)
+        })
+    }
+    if Syntax.core_call(module, method).is_some() {
+        return Syntax.core_call_projection(module, method, Syntax.CoreCallCoverage.TIR_SUBSET, args.len()).is_ok()
+            && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) })
+    }
+    args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs:431
+pub fn core_closure_call_in_subset(module: String, method: String, args: [CallArg], cx: Cx, locals: Set<String>) -> Bool {
+    lambda_arg := fn(i: USize) {
+        if args.get(i).map(fn(a) { a.expr }) == {
+            Val(.Lambda(lam)) -> lambda_in_subset(lam, cx, locals)
+            else -> false
+        }
+    }
+    no_labels := args.iter().all(fn(a) { a.label.is_none() })
+    if (module, method) == {
+        // Service tree lambdas are declarative typed payloads, not arbitrary callbacks.
+        ("core.service", "tree") -> args.len() == 1 && no_labels
+            && if args[0].expr == { .Lambda(_) -> true; else -> false }
+        ("core.tasks", "spawn") -> args.len() == 1 && no_labels && lambda_arg(0)
+        ("core.http", "serve") -> args.len() == 2 && no_labels
+            && expr_in_subset(args[0].expr, cx, locals) && lambda_arg(1)
+        ("core.mem.scope", "guard") -> args.len() == 1 && no_labels && lambda_arg(0)
+        ("core.sys", "on_interrupt") -> args.len() == 1 && no_labels && expr_in_subset(args[0].expr, cx, locals)
+        ("core.data", "query") -> args.len() == 1 && no_labels && expr_in_subset(args[0].expr, cx, locals)
+        ("core.data", "inner_join" | "left_join") -> args.len() == 4 && no_labels
+            && expr_in_subset(args[0].expr, cx, locals) && expr_in_subset(args[1].expr, cx, locals)
+            && lambda_arg(2) && lambda_arg(3)
+        ("core.data", "pivot_sum") -> args.len() == 4 && no_labels
+            && expr_in_subset(args[0].expr, cx, locals) && lambda_arg(1) && lambda_arg(2) && lambda_arg(3)
+        ("core.reactive", "derived" | "computed" | "effect") -> args.len() == 1 && no_labels && lambda_arg(0)
+        ("core.ui", "reactive_render") -> args.len() == 1 && no_labels && lambda_arg(0)
+        ("core.ui", "button") -> args.len() == 2 && lambda_arg(1)
+            && args.get(1).is_some_and(fn(a) { a.label.is_some_and(fn((label, _)) { label == "on_click" }) })
+            && expr_in_subset(args[0].expr, cx, locals)
+        ("core.ui", "mount") -> (args.len() == 2 || args.len() == 3) && no_labels
+            && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) })
+        else -> false
+    }
+}

@@ -1,0 +1,71 @@
+use jet_codegen.Entry.development_receipt.*
+use std.[fs, env, process]
+
+// Rust: crates/jet-codegen/src/lib.rs:60
+fn receipt(inputs: [JetDevelopmentReceiptInput]) -> JetDevelopmentReceipt Never! {
+    JetDevelopmentReceipt(
+        act: "package-realization",
+        locked_closure: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        inputs: ^inputs,
+        planned_action: "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        outputs: [JetDevelopmentReceiptInput(name: "out", digest: "sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")],
+        activation_proof: "", parent_generation: "", witness: "jetpack", outcome: "passed", failure_path: None
+    )
+}
+// Rust: crates/jet-codegen/src/lib.rs:82
+#Test("receipt_identity_is_content_addressed_and_order_stable") {
+    first :: receipt([
+        JetDevelopmentReceiptInput(name: "source", digest: "sha256-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"),
+        JetDevelopmentReceiptInput(name: "toolchain", digest: "sha256-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+    ])
+    second :: receipt([
+        JetDevelopmentReceiptInput(name: "toolchain", digest: "sha256-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+        JetDevelopmentReceiptInput(name: "source", digest: "sha256-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+    ])
+    assert(first.identity_bytes() == second.identity_bytes())
+    assert(jet_development_receipt_render(&first) == jet_development_receipt_render(&second))
+    assert(is_content_address(&first.locked_closure))
+    assert(is_content_address(&first.inputs[0].digest))
+    assert(!is_content_address("source-v1"))
+    assert(!is_content_address("sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))
+}
+// Rust: crates/jet-codegen/src/lib.rs:121
+#Test("development_receipt_is_one_shared_source_across_tiers") {
+    // The retired resident engine is replaced by the canonical Jet seam.
+    codegen :: fs.read_to_string(OSPath.new("crates/jet-codegen/src/Codegen/mod.rs")).unwrap()
+    entry :: fs.read_to_string(OSPath.new("Compiler/JetCodegen/Source/Entry.jet")).unwrap()
+    assert(codegen.matches("include_str!(\"../Prelude/DevelopmentReceipt.rs\")").count() == 1)
+    assert(entry.matches("pub use jet_codegen.Prelude.DevelopmentReceipt.*").count() == 1)
+}
+// Rust: crates/jet-codegen/src/lib.rs:138
+#Test("production_failure_writer_redacts_dynamic_values") {
+    // GATE #4494: real process environment and filesystem, not receipt mocks.
+    root :: env.temp_dir().join("jet-production-receipt-unit-{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    digest :: fn(byte: U8) { "sha256-" + Char.from(byte).to_string().repeat(64) }
+    env.set_var(JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV, &root)
+    env.set_var(JET_DEVELOPMENT_RECEIPT_ENTRY_ENV, "service.jet")
+    env.set_var(JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV, digest(b'a'))
+    env.set_var(JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV, digest(b'b'))
+    env.set_var(JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV, digest(b'c'))
+    env.set_var(JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV, "1")
+    env.set_var(JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV, digest(b'd'))
+    env.set_var(JET_DEVELOPMENT_RECEIPT_TARGET_ENV, "native")
+    env.set_var(JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV, digest(b'e'))
+    path :: jet_production_failure_receipt_write("E3001", "/outside/USER_DATA_SECRET.jet", 9, "run").unwrap()
+    text :: fs.read_to_string(path).unwrap()
+    assert(text.starts_with("jet-development-receipt-v1\n"))
+    assert(!text.contains("USER_DATA_SECRET"))
+    assert(!text.contains("argv"))
+    assert(text.contains("failure-path"))
+    fs.remove_dir_all(root).unwrap()
+}
+// Rust: crates/jet-codegen/src/lib.rs:345
+#Test("unmatched_enum_match_fails_closed") {
+    lowering :: fs.read_to_string(OSPath.new("crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs")).unwrap()
+    assert(lowering.contains("checked exhaustive match fallthrough"), "a sema-proved exhaustive match must not fall through")
+    assert(lowering.contains("MirTerminator::Unreachable"), "exhaustive match fallthrough must be unreachable, not a silent continue")
+    eval :: fs.read_to_string(OSPath.new("crates/jet-codegen/src/Codegen/MIREval.rs")).unwrap()
+    assert(eval.contains("MIR reached an unreachable terminator"), "the evaluator must fail closed when an exhaustive match falls through")
+}

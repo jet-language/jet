@@ -1,0 +1,46 @@
+use jet_codegen.Codegen.TIR.[THandleOp, TRoutePlan, TFailureCarrier]
+use jet_codegen.Codegen.TIR.Routes03.[handle_route_plan_3154]
+use jet_foundation.AST.[Type]
+use jet_foundation.Effects.[Effect]
+use jet_foundation.MIR.[MirPreludeAbi]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:3185-3398
+#Test("process_spec_checked_arity_and_exec_effect") {
+    carrier :: TFailureCarrier.Infallible
+    route :: handle_route_plan_3154(THandleOp.ProcessSpecMethod("run", 0), Type.Named("ProcessSpec"), carrier)?
+    if route == {
+        .Prelude(row) -> {
+            assert(row.member == "process.spec.run")
+            assert(row.signature.arity == 1)
+            assert(row.signature.borrow_mask == [Bool]{true})
+            assert(row.effect == Val(Effect.Exec))
+        }
+        else -> assert(false)
+    }
+    assert(handle_route_plan_3154(THandleOp.ProcessSpecMethod("run", 1), Type.Named("ProcessSpec"), carrier).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:3544-3565
+#Test("reader_over_preserves_owned_and_borrowed_masks") {
+    carrier :: TFailureCarrier.Infallible
+    owned :: handle_route_plan_3154(THandleOp.ReaderOver(true), Type.Named("Reader"), carrier)?
+    borrowed :: handle_route_plan_3154(THandleOp.ReaderOver(false), Type.Named("Reader"), carrier)?
+    if owned == { .Prelude(row) -> assert(row.signature.borrow_mask == [Bool]{false}) else -> assert(false) }
+    if borrowed == { .Prelude(row) -> assert(row.signature.borrow_mask == [Bool]{true}) else -> assert(false) }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4244-4304
+#Test("math_reduce_and_structural_rejection") {
+    carrier :: TFailureCarrier.Infallible
+    route :: handle_route_plan_3154(THandleOp.MathMethod("Vec3", "dot", None), Type.Named("Vec3"), carrier)?
+    if route == {
+        .Prelude(row) -> {
+            assert(row.member == "Vec3.dot")
+            assert(row.signature.arity == 2)
+            assert(row.signature.borrow_mask == [Bool]{true, false})
+            assert(row.abi == MirPreludeAbi.Value)
+        }
+        else -> assert(false)
+    }
+    assert(handle_route_plan_3154(THandleOp.MathMethod("Vec2", "cross", None), Type.Named("Vec2"), carrier).is_err())
+}

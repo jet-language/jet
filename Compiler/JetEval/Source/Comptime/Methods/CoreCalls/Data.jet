@@ -1,425 +1,171 @@
-// PORT-PENDING 0570 crates-jet-comptime-src-comptime-build-targets-module-group: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:1-421
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS 
-//RS /// `[Float]` argument — `core.data`'s stats functions all take `&Vec<f64>`.
-//RS pub(super) fn as_float_list(v: &CtValue, span: Span) -> Result<Vec<f64>, Diagnostic> {
-//RS     match v {
-//RS         CtValue::List(xs) => xs.iter().map(|x| as_float(x, span)).collect(),
-//RS         _ => Err(unsupported("core.data: argument must be `[Float]`", span)),
-//RS     }
-//RS }
-//RS 
-//RS /// `[Group<K, Int>]` argument for the bar renderers.
-//RS pub(super) fn as_data_bar_groups(
-//RS     v: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<Vec<data_kernel::jet_std::GroupValue<CtValue, i64>>, Diagnostic> {
-//RS     let CtValue::List(items) = v else {
-//RS         return Err(unsupported(
-//RS             "core.data: argument must be `[Group<K, Int>]`",
-//RS             span,
-//RS         ));
-//RS     };
-//RS     items
-//RS         .iter()
-//RS         .map(|item| {
-//RS             let CtValue::Struct { type_name, fields } = item else {
-//RS                 return Err(unsupported(
-//RS                     "core.data: argument must be `[Group<K, Int>]`",
-//RS                     span,
-//RS                 ));
-//RS             };
-//RS             if type_name != "Group" {
-//RS                 return Err(unsupported(
-//RS                     "core.data: argument must be `[Group<K, Int>]`",
-//RS                     span,
-//RS                 ));
-//RS             }
-//RS             let field = |name: &str| {
-//RS                 fields
-//RS                     .iter()
-//RS                     .find(|(field, _)| field == name)
-//RS                     .map(|(_, value)| value)
-//RS             };
-//RS             let key = field("key").cloned().ok_or_else(|| {
-//RS                 unsupported(
-//RS                     "core.data: a `Group` needs `key` and `value: Int`",
-//RS                     span,
-//RS                 )
-//RS             })?;
-//RS             let value = match field("value") {
-//RS                 Some(CtValue::Int(value)) => *value,
-//RS                 _ => {
-//RS                     return Err(unsupported(
-//RS                         "core.data: a `Group` needs `key` and `value: Int`",
-//RS                         span,
-//RS                     ))
-//RS                 }
-//RS             };
-//RS             Ok(data_kernel::jet_std::GroupValue { key, value })
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS /// `[Group<K, Float>]` argument for the line renderers.
-//RS pub(super) fn as_data_line_groups(
-//RS     v: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<Vec<data_kernel::jet_std::GroupValue<CtValue, f64>>, Diagnostic> {
-//RS     let CtValue::List(items) = v else {
-//RS         return Err(unsupported(
-//RS             "core.data: argument must be `[Group<K, Float>]`",
-//RS             span,
-//RS         ));
-//RS     };
-//RS     items
-//RS         .iter()
-//RS         .map(|item| {
-//RS             let CtValue::Struct { type_name, fields } = item else {
-//RS                 return Err(unsupported(
-//RS                     "core.data: argument must be `[Group<K, Float>]`",
-//RS                     span,
-//RS                 ));
-//RS             };
-//RS             if type_name != "Group" {
-//RS                 return Err(unsupported(
-//RS                     "core.data: argument must be `[Group<K, Float>]`",
-//RS                     span,
-//RS                 ));
-//RS             }
-//RS             let field = |name: &str| {
-//RS                 fields
-//RS                     .iter()
-//RS                     .find(|(field, _)| field == name)
-//RS                     .map(|(_, value)| value)
-//RS             };
-//RS             let key = field("key").cloned().ok_or_else(|| {
-//RS                 unsupported(
-//RS                     "core.data: a `Group` needs `key` and `value: Float`",
-//RS                     span,
-//RS                 )
-//RS             })?;
-//RS             let value = field("value")
-//RS                 .ok_or_else(|| {
-//RS                     unsupported(
-//RS                         "core.data: a `Group` needs `key` and `value: Float`",
-//RS                         span,
-//RS                     )
-//RS                 })
-//RS                 .and_then(|value| as_float(value, span))?;
-//RS             Ok(data_kernel::jet_std::GroupValue { key, value })
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub(super) fn as_data_line_options(
-//RS     v: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<data_kernel::jet_std::DataLineOptions, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = v else {
-//RS         return Err(unsupported(
-//RS             "core.data line renderers need `DataLineOptions`",
-//RS             span,
-//RS         ));
-//RS     };
-//RS     if type_name != "DataLineOptions" {
-//RS         return Err(unsupported(
-//RS             "core.data line renderers need `DataLineOptions`",
-//RS             span,
-//RS         ));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find(|(field, _)| field == name)
-//RS             .map(|(_, value)| value.clone())
-//RS             .ok_or_else(|| unsupported("DataLineOptions is missing a required field", span))
-//RS     };
-//RS     let string = |name: &str| match field(name)? {
-//RS         CtValue::Str(value) => Ok(value),
-//RS         _ => Err(unsupported(
-//RS             "DataLineOptions string field has the wrong type",
-//RS             span,
-//RS         )),
-//RS     };
-//RS     let markers = match field("markers")? {
-//RS         CtValue::Bool(value) => value,
-//RS         _ => return Err(unsupported("DataLineOptions `markers` must be Bool", span)),
-//RS     };
-//RS     let reference = match field("reference")? {
-//RS         CtValue::Present(value) => Ok(as_float(&value, span)?),
-//RS         CtValue::Failed(CtReport::Clean(_)) => Err(jet_foundation::Outcome::JetAbsent),
-//RS         _ => {
-//RS             return Err(unsupported(
-//RS                 "DataLineOptions `reference` must be Float?",
-//RS                 span,
-//RS             ))
-//RS         }
-//RS     };
-//RS     Ok(data_kernel::jet_std::DataLineOptions {
-//RS         title: string("title")?,
-//RS         x_label: string("x_label")?,
-//RS         y_label: string("y_label")?,
-//RS         markers,
-//RS         reference,
-//RS         style: string("style")?,
-//RS         color: string("color")?,
-//RS         legend: string("legend")?,
-//RS     })
-//RS }
-//RS 
-//RS /// #1657 / I9: the checked `core.data` surface is the edition-2027 default and
-//RS /// older editions type the same calls as plain values. Sema picks the return
-//RS /// type from this same question (`fixed_sigs.rs`), so comptime asks it too.
-//RS fn data_checked_surface() -> bool {
-//RS     jet_foundation::PackageEdition::package_edition_at_least("2027")
-//RS }
-//RS 
-//RS /// One `DataError` value for every `core.data` failure, built from the kernel's
-//RS /// own error — comptime never writes its own reason text.
-//RS pub(super) fn data_error_value(error: &data_kernel::jet_std::DataError) -> CtValue {
-//RS     let index = |slot: &jet_foundation::Outcome::JetOutcome<
-//RS         i64,
-//RS         jet_foundation::Outcome::JetAbsent,
-//RS     >| match slot {
-//RS         Ok(value) => CtValue::Present(Box::new(CtValue::Int(*value))),
-//RS         Err(_) => CtValue::absent(Type::Int),
-//RS     };
-//RS     CtValue::Struct {
-//RS         type_name: "DataError".to_string(),
-//RS         fields: vec![
-//RS             (
-//RS                 "kind".to_string(),
-//RS                 CtValue::Enum {
-//RS                     type_name: "DataErrorKind".to_string(),
-//RS                     variant: format!("{:?}", error.kind),
-//RS                     args: Vec::new(),
-//RS                 },
-//RS             ),
-//RS             (
-//RS                 "operation".to_string(),
-//RS                 CtValue::Str(error.operation.clone()),
-//RS             ),
-//RS             ("row".to_string(), index(&error.row)),
-//RS             ("column".to_string(), index(&error.column)),
-//RS             ("index".to_string(), index(&error.index)),
-//RS             ("reason".to_string(), CtValue::Str(error.reason.clone())),
-//RS             (
-//RS                 "cause".to_string(),
-//RS                 CtValue::absent(Type::Named("EncodingError".to_string())),
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS /// Marshal one kernel result onto the surface the current edition types.
-//RS pub(super) fn data_result_value<T>(
-//RS     checked: Result<T, data_kernel::jet_std::DataError>,
-//RS     unchecked: impl FnOnce() -> T,
-//RS     to_value: impl Fn(T) -> CtValue,
-//RS ) -> CtValue {
-//RS     data_result_value_for_type(checked, unchecked, to_value, None)
-//RS }
-//RS 
-//RS /// Marshal one kernel result while honoring a checked return type supplied by
-//RS /// the MIR route.  MIR carries the declaration's result shape even when the
-//RS /// ambient package-edition thread is not set to the checked default.
-//RS pub(super) fn data_result_value_for_type<T>(
-//RS     checked: Result<T, data_kernel::jet_std::DataError>,
-//RS     unchecked: impl FnOnce() -> T,
-//RS     to_value: impl Fn(T) -> CtValue,
-//RS     resolved_ret: Option<&Type>,
-//RS ) -> CtValue {
-//RS     let checked_surface =
-//RS         matches!(resolved_ret, Some(Type::Result { .. })) || data_checked_surface();
-//RS     if !checked_surface {
-//RS         return to_value(unchecked());
-//RS     }
-//RS     match checked {
-//RS         Ok(value) => CtValue::Present(Box::new(to_value(value))),
-//RS         Err(error) => CtValue::failed(Box::new(data_error_value(&error))),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn data_summary_value(summary: data_kernel::jet_std::DataSummary) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "DataSummary".to_string(),
-//RS         fields: vec![
-//RS             ("count".to_string(), CtValue::Int(summary.count)),
-//RS             ("sum".to_string(), data_float_value(summary.sum)),
-//RS             ("mean".to_string(), data_float_value(summary.mean)),
-//RS             ("min".to_string(), data_float_value(summary.min)),
-//RS             ("max".to_string(), data_float_value(summary.max)),
-//RS             ("median".to_string(), data_float_value(summary.median)),
-//RS             ("variance".to_string(), data_float_value(summary.variance)),
-//RS             ("stddev".to_string(), data_float_value(summary.stddev)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS /// Evaluate `core.data.describe` at the stateful MIR boundary without losing
-//RS /// the fallible carrier declared by sema.
-//RS pub(crate) fn eval_data_describe(
-//RS     args: &[CtValue],
-//RS     resolved_ret: Option<&Type>,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let values = as_float_list(
-//RS         args.first()
-//RS             .ok_or_else(|| unsupported("core.data.describe(): missing arg 0", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(data_result_value_for_type(
-//RS         data_kernel::jet_data_describe_checked(&values),
-//RS         || data_kernel::jet_data_describe(&values),
-//RS         data_summary_value,
-//RS         resolved_ret,
-//RS     ))
-//RS }
-//RS 
-//RS /// Evaluate `core.data.pivot_sum` through the shared checked aggregation
-//RS /// kernel.  Both the stateful MIR route and the AST route call this adapter.
-//RS pub(super) fn data_pivot_sum<F>(
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS     mut call: F,
-//RS ) -> Result<CtValue, Diagnostic>
-//RS where
-//RS     F: FnMut(&CtValue, Vec<CtValue>, Span) -> Result<CtValue, Diagnostic>,
-//RS {
-//RS     let [rows, row_key, column_key, value] = args else {
-//RS         return Err(unsupported(
-//RS             "`data.pivot_sum()` expects rows and three callbacks",
-//RS             span,
-//RS         ));
-//RS     };
-//RS     let CtValue::List(rows) = rows else {
-//RS         return Err(unsupported(
-//RS             "`data.pivot_sum()` needs a row list",
-//RS             span,
-//RS         ));
-//RS     };
-//RS     let mut values = Vec::with_capacity(rows.len());
-//RS     for row in rows {
-//RS         let row_key_value = call(row_key, vec![row.clone()], span)?;
-//RS         let row_key = as_string(&row_key_value, span)?.to_owned();
-//RS         let column_key_value = call(column_key, vec![row.clone()], span)?;
-//RS         let column_key = as_string(&column_key_value, span)?.to_owned();
-//RS         let amount_value = call(value, vec![row.clone()], span)?;
-//RS         let amount = as_float(&amount_value, span)?;
-//RS         values.push((row_key, column_key, amount));
-//RS     }
-//RS 
-//RS     let limits = data_kernel::jet_std::DataLimits::safe();
-//RS     let checked = data_kernel::jet_data_pivot_sum_values(
-//RS         &values,
-//RS         &data_kernel::jet_data_kernel_limits(
-//RS             limits.max_groups,
-//RS             limits.max_sort_rows,
-//RS             limits.max_join_rows,
-//RS             limits.max_output_rows,
-//RS         ),
-//RS     );
-//RS     let to_value = |cells: Vec<data_kernel::JetDataPivotCell>| {
-//RS         CtValue::List(
-//RS             cells
-//RS                 .into_iter()
-//RS                 .map(|cell| CtValue::Struct {
-//RS                     type_name: "DataPivotCell".to_string(),
-//RS                     fields: vec![
-//RS                         ("row_key".to_string(), CtValue::Str(cell.row_key)),
-//RS                         (
-//RS                             "column_key".to_string(),
-//RS                             CtValue::Str(cell.column_key),
-//RS                         ),
-//RS                         ("count".to_string(), CtValue::Int(cell.count)),
-//RS                         ("sum".to_string(), data_float_value(cell.sum)),
-//RS                         ("mean".to_string(), data_float_value(cell.mean)),
-//RS                     ],
-//RS                 })
-//RS                 .collect(),
-//RS         )
-//RS     };
-//RS     Ok(match checked {
-//RS         Ok(cells) => CtValue::Present(Box::new(to_value(cells))),
-//RS         Err(error) => CtValue::failed(Box::new(data_error_value(&error))),
-//RS     })
-//RS }
-//RS 
-//RS 
-//RS pub(super) fn data_float_value(value: f64) -> CtValue {
-//RS     CtValue::Float(CtFloat::f64(value))
-//RS }
-//RS 
-//RS /// D-DATA-STATUS1 / #708: the `data.status()` rows for `jet inspect dossier`,
-//RS /// read from the one kernel rather than a second table.
-//RS pub fn data_status_rows() -> Vec<(String, String, String, String, String, String, String)> {
-//RS     data_kernel::jet_data_status()
-//RS         .into_iter()
-//RS         .map(|row| {
-//RS             (
-//RS                 row.step,
-//RS                 row.path,
-//RS                 row.clone_value,
-//RS                 row.ownership,
-//RS                 row.trust,
-//RS                 row.fallback,
-//RS                 row.replacement,
-//RS             )
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn apply_data_line_call(
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     resolved_ret: Option<&Type>,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let groups = as_data_line_groups(
-//RS         args.first()
-//RS             .ok_or_else(|| unsupported("core.data line renderers need groups", span))?,
-//RS         span,
-//RS     )?;
-//RS     let options = as_data_line_options(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("core.data line renderers need options", span))?,
-//RS         span,
-//RS     )?;
-//RS     let plot_error = |error: data_plot_rt::DataPlotError| data_kernel::jet_std::DataError {
-//RS         kind: match error.kind {
-//RS             "NonFinite" => data_kernel::jet_std::DataErrorKind::NonFinite,
-//RS             _ => data_kernel::jet_std::DataErrorKind::InvalidArgument,
-//RS         },
-//RS         operation: error.operation.to_string(),
-//RS         row: Err(jet_foundation::Outcome::JetAbsent),
-//RS         column: Err(jet_foundation::Outcome::JetAbsent),
-//RS         index: match error.index {
-//RS             Some(index) => Ok(index),
-//RS             None => Err(jet_foundation::Outcome::JetAbsent),
-//RS         },
-//RS         reason: error.reason.to_string(),
-//RS         cause: Err(jet_foundation::Outcome::JetAbsent),
-//RS     };
-//RS     match method {
-//RS         "line_text" => Ok(data_result_value_for_type(
-//RS             data_plot_rt::jet_data_line_text_plot_checked(&groups, &options).map_err(plot_error),
-//RS             || data_plot_rt::jet_data_line_text(&groups, &options),
-//RS             CtValue::Str,
-//RS             resolved_ret,
-//RS         )),
-//RS         "line_svg" => Ok(data_result_value_for_type(
-//RS             data_plot_rt::jet_data_line_svg_plot_checked(&groups, &options).map_err(plot_error),
-//RS             || data_plot_rt::jet_data_line_svg(&groups, &options),
-//RS             CtValue::Str,
-//RS             resolved_ret,
-//RS         )),
-//RS         _ => Err(unsupported(
-//RS             &format!("unsupported core.data line renderer `{method}`"),
-//RS             span,
-//RS         )),
-//RS     }
-//RS }
-// END-PORT-PENDING 0570 crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:1-421
+use jet_foundation.AST.[CtValue, CtFloat, CtReport, Type]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.Outcome.JetAbsent
+use jet_foundation.PackageEdition.package_edition_at_least
+use jet_comptime.Comptime.Diagnostics.unsupported
+use jet_comptime.Comptime.Methods.CoreCalls.Values.[as_float, as_string]
+// Shared canonical Core kernels: the interpreter only marshals, never implements another policy.
+use jet_codegen.Prelude.CoreLib.Top.DataStats as data_kernel
+use jet_codegen.Prelude.CoreLib.Top.DataPlot as data_plot_rt
+use jet_codegen.Prelude.CoreLib.Top.DataStats.[GroupValue, DataLineOptions, DataError, DataErrorKind, DataSummary, DataLimits, JetDataPivotCell]
 
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:4
+fn as_float_list(v: &CtValue, span: Span) -> [F64] Diagnostic! {
+    if v == {
+        .List(xs) -> xs.iter().map(fn(x) { as_float(x, span) }).collect::<[F64] Diagnostic!>()
+        _ -> Err(unsupported("core.data: argument must be `[Float]`", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:12
+fn as_data_bar_groups(v: &CtValue, span: Span) -> [GroupValue<CtValue, I64>] Diagnostic! {
+    if v != .List(items) -> return Err(unsupported("core.data: argument must be `[Group<K, Int>]`", span))
+    items.iter().map(fn(item) -> GroupValue<CtValue, I64> Diagnostic! {
+        if item != .Struct{type_name, fields} -> return Err(unsupported("core.data: argument must be `[Group<K, Int>]`", span))
+        if type_name != "Group" -> return Err(unsupported("core.data: argument must be `[Group<K, Int>]`", span))
+        field := fn(name: String) { fields.iter().find(fn(pair) { pair.0 == name }).map(fn(pair) { &pair.1 }) }
+        key := field("key").cloned() ?? return Err(unsupported("core.data: a `Group` needs `key` and `value: Int`", span))
+        value := if field("value") == {
+            Some(CtValue.Int(value)) -> value
+            _ -> return Err(unsupported("core.data: a `Group` needs `key` and `value: Int`", span))
+        }
+        Ok(GroupValue{key: ^key, value: value})
+    }).collect::<[GroupValue<CtValue, I64>] Diagnostic!>()
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:64
+fn as_data_line_groups(v: &CtValue, span: Span) -> [GroupValue<CtValue, F64>] Diagnostic! {
+    if v != .List(items) -> return Err(unsupported("core.data: argument must be `[Group<K, Float>]`", span))
+    items.iter().map(fn(item) -> GroupValue<CtValue, F64> Diagnostic! {
+        if item != .Struct{type_name, fields} -> return Err(unsupported("core.data: argument must be `[Group<K, Float>]`", span))
+        if type_name != "Group" -> return Err(unsupported("core.data: argument must be `[Group<K, Float>]`", span))
+        field := fn(name: String) { fields.iter().find(fn(pair) { pair.0 == name }).map(fn(pair) { &pair.1 }) }
+        key := field("key").cloned() ?? return Err(unsupported("core.data: a `Group` needs `key` and `value: Float`", span))
+        value := field("value") ?? return Err(unsupported("core.data: a `Group` needs `key` and `value: Float`", span))
+        value := as_float(value, span)?
+        Ok(GroupValue{key: ^key, value: value})
+    }).collect::<[GroupValue<CtValue, F64>] Diagnostic!>()
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:114
+fn as_data_line_options(v: &CtValue, span: Span) -> DataLineOptions Diagnostic! {
+    if v != .Struct{type_name, fields} -> return Err(unsupported("core.data line renderers need `DataLineOptions`", span))
+    if type_name != "DataLineOptions" -> return Err(unsupported("core.data line renderers need `DataLineOptions`", span))
+    field := fn(name: String) -> CtValue Diagnostic! {
+        fields.iter().find(fn(pair) { pair.0 == name }).map(fn(pair) { pair.1.clone() }) ?? return Err(unsupported("DataLineOptions is missing a required field", span))
+    }
+    string := fn(name: String) -> String Diagnostic! {
+        if field(name)? == {
+            .Str(value) -> Ok(^value)
+            _ -> Err(unsupported("DataLineOptions string field has the wrong type", span))
+        }
+    }
+    markers := if field("markers")? == {
+        .Bool(value) -> value
+        _ -> return Err(unsupported("DataLineOptions `markers` must be Bool", span))
+    }
+    reference := if field("reference")? == {
+        .Present(value) -> Ok(as_float(&value, span)?)
+        .Failed(CtReport.Clean(_)) -> Err(JetAbsent)
+        _ -> return Err(unsupported("DataLineOptions `reference` must be Float?", span))
+    }
+    Ok(DataLineOptions{title: string("title")?, x_label: string("x_label")?, y_label: string("y_label")?, markers: markers, reference: reference, style: string("style")?, color: string("color")?, legend: string("legend")?})
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:173
+fn data_checked_surface() -> Bool { package_edition_at_least("2027") }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:179
+fn data_error_value(error: &DataError) -> CtValue {
+    index := fn(slot: &(I64 JetAbsent!)) -> CtValue {
+        if slot == { .Ok(value) -> CtValue.Present(CtValue.Int(value)); .Err(_) -> CtValue.absent(Type.Int) }
+    }
+    CtValue.Struct{type_name: "DataError", fields: [
+        ("kind", CtValue.Enum{type_name: "DataErrorKind", variant: "{error.kind:?}", args: []}),
+        ("operation", CtValue.Str(error.operation.clone())),
+        ("row", index(&error.row)), ("column", index(&error.column)), ("index", index(&error.index)),
+        ("reason", CtValue.Str(error.reason.clone())),
+        ("cause", CtValue.absent(Type.Named("EncodingError"))),
+    ]}
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:215
+fn data_result_value<T>(checked: T DataError!, unchecked: fn() -> T, to_value: fn(T) -> CtValue) -> CtValue {
+    data_result_value_for_type(^checked, unchecked, to_value, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:226
+fn data_result_value_for_type<T>(checked: T DataError!, unchecked: fn() -> T, to_value: fn(T) -> CtValue, resolved_ret: Type?) -> CtValue {
+    checked_surface := (resolved_ret is Some(Type.Result{..})) || data_checked_surface()
+    if !checked_surface -> return to_value(unchecked())
+    if checked == {
+        .Ok(value) -> CtValue.Present(to_value(^value))
+        .Err(error) -> CtValue.failed(data_error_value(&error))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:243
+fn data_summary_value(summary: DataSummary) -> CtValue {
+    CtValue.Struct{type_name: "DataSummary", fields: [
+        ("count", CtValue.Int(summary.count)), ("sum", data_float_value(summary.sum)),
+        ("mean", data_float_value(summary.mean)), ("min", data_float_value(summary.min)),
+        ("max", data_float_value(summary.max)), ("median", data_float_value(summary.median)),
+        ("variance", data_float_value(summary.variance)), ("stddev", data_float_value(summary.stddev)),
+    ]}
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:261
+pub fn eval_data_describe(args: &[CtValue], resolved_ret: Type?, span: Span) -> CtValue Diagnostic! {
+    arg := args.first() ?? return Err(unsupported("core.data.describe(): missing arg 0", span))
+    values := as_float_list(arg, span)?
+    Ok(data_result_value_for_type(data_kernel.jet_data_describe_checked(&values), fn() { data_kernel.jet_data_describe(&values) }, data_summary_value, resolved_ret))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:281
+fn data_pivot_sum(args: &[CtValue], span: Span, call: fn(&CtValue, [CtValue], Span) -> CtValue Diagnostic!) -> CtValue Diagnostic! {
+    if args.len() != 4 -> return Err(unsupported("`data.pivot_sum()` expects rows and three callbacks", span))
+    row_key := &args[1]
+    column_key := &args[2]
+    value := &args[3]
+    if args[0] != .List(rows) -> return Err(unsupported("`data.pivot_sum()` needs a row list", span))
+    values := [(String, String, F64)].with_capacity(rows.len())
+    for row in rows {
+        row_key_value := call(row_key, [row.clone()], span)?
+        row_key_text := as_string(&row_key_value, span)?.to_owned()
+        column_key_value := call(column_key, [row.clone()], span)?
+        column_key_text := as_string(&column_key_value, span)?.to_owned()
+        amount_value := call(value, [row.clone()], span)?
+        amount := as_float(&amount_value, span)?
+        values.push((^row_key_text, ^column_key_text, amount))
+    }
+    limits := DataLimits.safe()
+    checked := data_kernel.jet_data_pivot_sum_values(&values, &data_kernel.jet_data_kernel_limits(limits.max_groups, limits.max_sort_rows, limits.max_join_rows, limits.max_output_rows))
+    to_value := fn(cells: [JetDataPivotCell]) -> CtValue {
+        CtValue.List(cells.into_iter().map(fn(cell) {
+            CtValue.Struct{type_name: "DataPivotCell", fields: [
+                ("row_key", CtValue.Str(^cell.row_key)), ("column_key", CtValue.Str(^cell.column_key)),
+                ("count", CtValue.Int(cell.count)), ("sum", data_float_value(cell.sum)), ("mean", data_float_value(cell.mean)),
+            ]}
+        }).collect::<[CtValue]>())
+    }
+    Ok(if checked == {
+        .Ok(cells) -> CtValue.Present(to_value(^cells))
+        .Err(error) -> CtValue.failed(data_error_value(&error))
+    })
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:349
+fn data_float_value(value: F64) -> CtValue { CtValue.Float(CtFloat.f64(value)) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:355
+pub fn data_status_rows() -> [(String, String, String, String, String, String, String)] {
+    data_kernel.jet_data_status().into_iter().map(fn(row) {
+        (^row.step, ^row.path, ^row.clone_value, ^row.ownership, ^row.trust, ^row.fallback, ^row.replacement)
+    }).collect::<[_]>()
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:372
+pub fn apply_data_line_call(method: String, args: [CtValue], resolved_ret: Type?, span: Span) -> CtValue Diagnostic! {
+    group_arg := args.first() ?? return Err(unsupported("core.data line renderers need groups", span))
+    groups := as_data_line_groups(group_arg, span)?
+    options_arg := args.get(1) ?? return Err(unsupported("core.data line renderers need options", span))
+    options := as_data_line_options(options_arg, span)?
+    plot_error := fn(error: data_plot_rt.DataPlotError) -> DataError {
+        DataError{kind: if error.kind == "NonFinite" -> DataErrorKind.NonFinite else -> DataErrorKind.InvalidArgument,
+            operation: error.operation.to_string(), row: Err(JetAbsent), column: Err(JetAbsent),
+            index: if error.index is Some(index) -> Ok(index) else -> Err(JetAbsent),
+            reason: error.reason.to_string(), cause: Err(JetAbsent)}
+    }
+    if method == {
+        "line_text" -> Ok(data_result_value_for_type(data_plot_rt.jet_data_line_text_plot_checked(&groups, &options).map_err(plot_error), fn() { data_plot_rt.jet_data_line_text(&groups, &options) }, fn(text) { CtValue.Str(^text) }, resolved_ret))
+        "line_svg" -> Ok(data_result_value_for_type(data_plot_rt.jet_data_line_svg_plot_checked(&groups, &options).map_err(plot_error), fn() { data_plot_rt.jet_data_line_svg(&groups, &options) }, fn(text) { CtValue.Str(^text) }, resolved_ret))
+        _ -> Err(unsupported("unsupported core.data line renderer `{method}`", span))
+    }
+}

@@ -1,0 +1,37 @@
+use jet_foundation.[Expr, Stmt, LValue, Type, IndexKind, Span]
+use jet_lexer.[lex]
+use jet_parser.[parse]
+use JetCodegen.Codegen.Context.[Cx, build_cx]
+use JetCodegen.Codegen.TIR.[LowerEnv]
+use JetCodegen.Codegen.TIR.Lower.Expressions.[lower_expr]
+use JetCodegen.Codegen.TIR.Lower.Statements.[lower_stmts]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:4877
+fn empty_cx() -> Cx {
+    src :: "fn run() {}\n"
+    (toks, lex_diags) :: lex(src)
+    assert(lex_diags.is_empty(), "lex errors: {lex_diags:?}")
+    prog :: parse(toks).expect("parse failed")
+    build_cx(prog, src, "test.jet")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:4887
+// Publish under original cfg(debug_assertions); expected stop text: sema-to-TIR handoff violated.
+#Test("index_read_unknown_kind_trips_handoff_assert", expected_fail: true) {
+    cx :: empty_cx()
+    env := LowerEnv.new("run")
+    span :: Span{start: 0, end: 0}
+    idx_expr :: Expr.Index{base: Expr.Int(0, span, None, None), index: Expr.Int(0, span, None, None), span: span, kind: IndexKind.Unknown}
+    _ :: lower_expr(idx_expr, cx, &env)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:4901
+// Publish under original cfg(debug_assertions); expected stop text: sema-to-TIR handoff violated.
+#Test("index_assign_unknown_kind_trips_handoff_assert", expected_fail: true) {
+    cx :: empty_cx()
+    env := LowerEnv.new("run")
+    span :: Span{start: 0, end: 0}
+    stmt :: Stmt.Assign{target: LValue.Index{base: Expr.Int(0, span, None, None), index: Expr.Int(0, span, None, None), span: span, kind: IndexKind.Unknown},
+        op: None, op_span: span, value: Expr.Int(1, span, None, None)}
+    _ :: lower_stmts([stmt], cx, &env)
+}

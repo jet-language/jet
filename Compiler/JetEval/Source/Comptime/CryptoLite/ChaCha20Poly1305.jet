@@ -1,421 +1,176 @@
-// PORT-PENDING 0579 crates-jet-comptime-src-comptime-cryptolite-aes256gcm-module-group: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:1-417
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Std-only XChaCha20-Poly1305 (draft-irtf-cfrg-xchacha) matching RustCrypto.
-//RS 
-//RS fn quarter_round(state: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) {
-//RS     state[a] = state[a].wrapping_add(state[b]);
-//RS     state[d] ^= state[a];
-//RS     state[d] = state[d].rotate_left(16);
-//RS     state[c] = state[c].wrapping_add(state[d]);
-//RS     state[b] ^= state[c];
-//RS     state[b] = state[b].rotate_left(12);
-//RS     state[a] = state[a].wrapping_add(state[b]);
-//RS     state[d] ^= state[a];
-//RS     state[d] = state[d].rotate_left(8);
-//RS     state[c] = state[c].wrapping_add(state[d]);
-//RS     state[b] ^= state[c];
-//RS     state[b] = state[b].rotate_left(7);
-//RS }
-//RS 
-//RS fn chacha20_block(key: &[u8; 32], counter: u32, nonce: &[u8; 12]) -> [u8; 64] {
-//RS     let mut state = [
-//RS         0x6170_7865,
-//RS         0x3320_646e,
-//RS         0x7962_2d32,
-//RS         0x6b20_6574,
-//RS         u32::from_le_bytes(key[0..4].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[4..8].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[8..12].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[12..16].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[16..20].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[20..24].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[24..28].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[28..32].try_into().unwrap()),
-//RS         counter,
-//RS         u32::from_le_bytes(nonce[0..4].try_into().unwrap()),
-//RS         u32::from_le_bytes(nonce[4..8].try_into().unwrap()),
-//RS         u32::from_le_bytes(nonce[8..12].try_into().unwrap()),
-//RS     ];
-//RS     let initial = state;
-//RS     for _ in 0..10 {
-//RS         quarter_round(&mut state, 0, 4, 8, 12);
-//RS         quarter_round(&mut state, 1, 5, 9, 13);
-//RS         quarter_round(&mut state, 2, 6, 10, 14);
-//RS         quarter_round(&mut state, 3, 7, 11, 15);
-//RS         quarter_round(&mut state, 0, 5, 10, 15);
-//RS         quarter_round(&mut state, 1, 6, 11, 12);
-//RS         quarter_round(&mut state, 2, 7, 8, 13);
-//RS         quarter_round(&mut state, 3, 4, 9, 14);
-//RS     }
-//RS     let mut out = [0u8; 64];
-//RS     for (index, word) in state.iter_mut().enumerate() {
-//RS         *word = word.wrapping_add(initial[index]);
-//RS         out[index * 4..(index + 1) * 4].copy_from_slice(&word.to_le_bytes());
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
-//RS     let mut state = [
-//RS         0x6170_7865,
-//RS         0x3320_646e,
-//RS         0x7962_2d32,
-//RS         0x6b20_6574,
-//RS         u32::from_le_bytes(key[0..4].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[4..8].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[8..12].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[12..16].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[16..20].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[20..24].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[24..28].try_into().unwrap()),
-//RS         u32::from_le_bytes(key[28..32].try_into().unwrap()),
-//RS         u32::from_le_bytes(nonce[0..4].try_into().unwrap()),
-//RS         u32::from_le_bytes(nonce[4..8].try_into().unwrap()),
-//RS         u32::from_le_bytes(nonce[8..12].try_into().unwrap()),
-//RS         u32::from_le_bytes(nonce[12..16].try_into().unwrap()),
-//RS     ];
-//RS     for _ in 0..10 {
-//RS         quarter_round(&mut state, 0, 4, 8, 12);
-//RS         quarter_round(&mut state, 1, 5, 9, 13);
-//RS         quarter_round(&mut state, 2, 6, 10, 14);
-//RS         quarter_round(&mut state, 3, 7, 11, 15);
-//RS         quarter_round(&mut state, 0, 5, 10, 15);
-//RS         quarter_round(&mut state, 1, 6, 11, 12);
-//RS         quarter_round(&mut state, 2, 7, 8, 13);
-//RS         quarter_round(&mut state, 3, 4, 9, 14);
-//RS     }
-//RS     let mut out = [0u8; 32];
-//RS     for (index, word) in [
-//RS         state[0], state[1], state[2], state[3], state[12], state[13], state[14], state[15],
-//RS     ]
-//RS     .into_iter()
-//RS     .enumerate()
-//RS     {
-//RS         out[index * 4..(index + 1) * 4].copy_from_slice(&word.to_le_bytes());
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn chacha20_xor(key: &[u8; 32], nonce: &[u8; 12], counter: u32, input: &[u8]) -> Vec<u8> {
-//RS     let mut out = Vec::with_capacity(input.len());
-//RS     let mut block_counter = counter;
-//RS     for chunk in input.chunks(64) {
-//RS         let keystream = chacha20_block(key, block_counter, nonce);
-//RS         for (byte, mask) in chunk.iter().zip(keystream.iter()) {
-//RS             out.push(byte ^ mask);
-//RS         }
-//RS         block_counter = block_counter.wrapping_add(1);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS /// Poly1305 (26-bit limbs) matching RustCrypto `poly1305` soft backend.
-//RS fn poly1305_mac(key: &[u8; 32], message: &[u8]) -> [u8; 16] {
-//RS     let mut r = [0u32; 5];
-//RS     let mut h = [0u32; 5];
-//RS     let mut pad = [0u32; 4];
-//RS     r[0] = u32::from_le_bytes(key[0..4].try_into().unwrap()) & 0x3ff_ffff;
-//RS     r[1] = (u32::from_le_bytes(key[3..7].try_into().unwrap()) >> 2) & 0x3ff_ff03;
-//RS     r[2] = (u32::from_le_bytes(key[6..10].try_into().unwrap()) >> 4) & 0x3ff_c0ff;
-//RS     r[3] = (u32::from_le_bytes(key[9..13].try_into().unwrap()) >> 6) & 0x3f0_3fff;
-//RS     r[4] = (u32::from_le_bytes(key[12..16].try_into().unwrap()) >> 8) & 0x00f_ffff;
-//RS     pad[0] = u32::from_le_bytes(key[16..20].try_into().unwrap());
-//RS     pad[1] = u32::from_le_bytes(key[20..24].try_into().unwrap());
-//RS     pad[2] = u32::from_le_bytes(key[24..28].try_into().unwrap());
-//RS     pad[3] = u32::from_le_bytes(key[28..32].try_into().unwrap());
-//RS 
-//RS     let compute_block = |h: &mut [u32; 5], block: &[u8; 16], partial: bool| {
-//RS         let hibit = if partial { 0 } else { 1 << 24 };
-//RS         let r0 = r[0];
-//RS         let r1 = r[1];
-//RS         let r2 = r[2];
-//RS         let r3 = r[3];
-//RS         let r4 = r[4];
-//RS         let s1 = r1 * 5;
-//RS         let s2 = r2 * 5;
-//RS         let s3 = r3 * 5;
-//RS         let s4 = r4 * 5;
-//RS 
-//RS         let mut h0 = h[0];
-//RS         let mut h1 = h[1];
-//RS         let mut h2 = h[2];
-//RS         let mut h3 = h[3];
-//RS         let mut h4 = h[4];
-//RS 
-//RS         h0 += u32::from_le_bytes(block[0..4].try_into().unwrap()) & 0x3ff_ffff;
-//RS         h1 += (u32::from_le_bytes(block[3..7].try_into().unwrap()) >> 2) & 0x3ff_ffff;
-//RS         h2 += (u32::from_le_bytes(block[6..10].try_into().unwrap()) >> 4) & 0x3ff_ffff;
-//RS         h3 += (u32::from_le_bytes(block[9..13].try_into().unwrap()) >> 6) & 0x3ff_ffff;
-//RS         h4 += (u32::from_le_bytes(block[12..16].try_into().unwrap()) >> 8) | hibit;
-//RS 
-//RS         let d0 = u64::from(h0) * u64::from(r0)
-//RS             + u64::from(h1) * u64::from(s4)
-//RS             + u64::from(h2) * u64::from(s3)
-//RS             + u64::from(h3) * u64::from(s2)
-//RS             + u64::from(h4) * u64::from(s1);
-//RS         let mut d1 = u64::from(h0) * u64::from(r1)
-//RS             + u64::from(h1) * u64::from(r0)
-//RS             + u64::from(h2) * u64::from(s4)
-//RS             + u64::from(h3) * u64::from(s3)
-//RS             + u64::from(h4) * u64::from(s2);
-//RS         let mut d2 = u64::from(h0) * u64::from(r2)
-//RS             + u64::from(h1) * u64::from(r1)
-//RS             + u64::from(h2) * u64::from(r0)
-//RS             + u64::from(h3) * u64::from(s4)
-//RS             + u64::from(h4) * u64::from(s3);
-//RS         let mut d3 = u64::from(h0) * u64::from(r3)
-//RS             + u64::from(h1) * u64::from(r2)
-//RS             + u64::from(h2) * u64::from(r1)
-//RS             + u64::from(h3) * u64::from(r0)
-//RS             + u64::from(h4) * u64::from(s4);
-//RS         let mut d4 = u64::from(h0) * u64::from(r4)
-//RS             + u64::from(h1) * u64::from(r3)
-//RS             + u64::from(h2) * u64::from(r2)
-//RS             + u64::from(h3) * u64::from(r1)
-//RS             + u64::from(h4) * u64::from(r0);
-//RS 
-//RS         let mut c = (d0 >> 26) as u32;
-//RS         h0 = d0 as u32 & 0x3ff_ffff;
-//RS         d1 += u64::from(c);
-//RS         c = (d1 >> 26) as u32;
-//RS         h1 = d1 as u32 & 0x3ff_ffff;
-//RS         d2 += u64::from(c);
-//RS         c = (d2 >> 26) as u32;
-//RS         h2 = d2 as u32 & 0x3ff_ffff;
-//RS         d3 += u64::from(c);
-//RS         c = (d3 >> 26) as u32;
-//RS         h3 = d3 as u32 & 0x3ff_ffff;
-//RS         d4 += u64::from(c);
-//RS         c = (d4 >> 26) as u32;
-//RS         h4 = d4 as u32 & 0x3ff_ffff;
-//RS         h0 += c * 5;
-//RS         c = h0 >> 26;
-//RS         h0 &= 0x3ff_ffff;
-//RS         h1 += c;
-//RS 
-//RS         h[0] = h0;
-//RS         h[1] = h1;
-//RS         h[2] = h2;
-//RS         h[3] = h3;
-//RS         h[4] = h4;
-//RS     };
-//RS 
-//RS     let mut offset = 0usize;
-//RS     while offset + 16 <= message.len() {
-//RS         let block: [u8; 16] = message[offset..offset + 16].try_into().unwrap();
-//RS         compute_block(&mut h, &block, false);
-//RS         offset += 16;
-//RS     }
-//RS     if offset < message.len() {
-//RS         let mut block = [0u8; 16];
-//RS         let rem = &message[offset..];
-//RS         block[..rem.len()].copy_from_slice(rem);
-//RS         block[rem.len()] = 1;
-//RS         compute_block(&mut h, &block, true);
-//RS     }
-//RS 
-//RS     let mut h0 = h[0];
-//RS     let mut h1 = h[1];
-//RS     let mut h2 = h[2];
-//RS     let mut h3 = h[3];
-//RS     let mut h4 = h[4];
-//RS 
-//RS     let mut c = h1 >> 26;
-//RS     h1 &= 0x3ff_ffff;
-//RS     h2 += c;
-//RS     c = h2 >> 26;
-//RS     h2 &= 0x3ff_ffff;
-//RS     h3 += c;
-//RS     c = h3 >> 26;
-//RS     h3 &= 0x3ff_ffff;
-//RS     h4 += c;
-//RS     c = h4 >> 26;
-//RS     h4 &= 0x3ff_ffff;
-//RS     h0 += c * 5;
-//RS     c = h0 >> 26;
-//RS     h0 &= 0x3ff_ffff;
-//RS     h1 += c;
-//RS 
-//RS     let mut g0 = h0.wrapping_add(5);
-//RS     c = g0 >> 26;
-//RS     g0 &= 0x3ff_ffff;
-//RS     let mut g1 = h1.wrapping_add(c);
-//RS     c = g1 >> 26;
-//RS     g1 &= 0x3ff_ffff;
-//RS     let mut g2 = h2.wrapping_add(c);
-//RS     c = g2 >> 26;
-//RS     g2 &= 0x3ff_ffff;
-//RS     let mut g3 = h3.wrapping_add(c);
-//RS     c = g3 >> 26;
-//RS     g3 &= 0x3ff_ffff;
-//RS     let mut g4 = h4.wrapping_add(c).wrapping_sub(1 << 26);
-//RS 
-//RS     let mut mask = (g4 >> 31).wrapping_sub(1);
-//RS     g0 &= mask;
-//RS     g1 &= mask;
-//RS     g2 &= mask;
-//RS     g3 &= mask;
-//RS     g4 &= mask;
-//RS     mask = !mask;
-//RS     h0 = (h0 & mask) | g0;
-//RS     h1 = (h1 & mask) | g1;
-//RS     h2 = (h2 & mask) | g2;
-//RS     h3 = (h3 & mask) | g3;
-//RS     h4 = (h4 & mask) | g4;
-//RS 
-//RS     h0 |= h1 << 26;
-//RS     h1 = (h1 >> 6) | (h2 << 20);
-//RS     h2 = (h2 >> 12) | (h3 << 14);
-//RS     h3 = (h3 >> 18) | (h4 << 8);
-//RS 
-//RS     let mut f = u64::from(h0) + u64::from(pad[0]);
-//RS     h0 = f as u32;
-//RS     f = u64::from(h1) + u64::from(pad[1]) + (f >> 32);
-//RS     h1 = f as u32;
-//RS     f = u64::from(h2) + u64::from(pad[2]) + (f >> 32);
-//RS     h2 = f as u32;
-//RS     f = u64::from(h3) + u64::from(pad[3]) + (f >> 32);
-//RS     h3 = f as u32;
-//RS 
-//RS     let mut tag = [0u8; 16];
-//RS     tag[0..4].copy_from_slice(&h0.to_le_bytes());
-//RS     tag[4..8].copy_from_slice(&h1.to_le_bytes());
-//RS     tag[8..12].copy_from_slice(&h2.to_le_bytes());
-//RS     tag[12..16].copy_from_slice(&h3.to_le_bytes());
-//RS     tag
-//RS }
-//RS 
-//RS fn pad16(buf: &mut Vec<u8>) {
-//RS     while buf.len() % 16 != 0 {
-//RS         buf.push(0);
-//RS     }
-//RS }
-//RS 
-//RS fn chacha20poly1305_seal(
-//RS     key: &[u8; 32],
-//RS     nonce: &[u8; 12],
-//RS     plaintext: &[u8],
-//RS     aad: &[u8],
-//RS ) -> Vec<u8> {
-//RS     let mut poly_key = [0u8; 32];
-//RS     poly_key.copy_from_slice(&chacha20_block(key, 0, nonce)[..32]);
-//RS     let ciphertext = chacha20_xor(key, nonce, 1, plaintext);
-//RS     let mut mac_data = Vec::with_capacity(aad.len() + 16 + ciphertext.len() + 16 + 16);
-//RS     mac_data.extend_from_slice(aad);
-//RS     pad16(&mut mac_data);
-//RS     mac_data.extend_from_slice(&ciphertext);
-//RS     pad16(&mut mac_data);
-//RS     mac_data.extend_from_slice(&(aad.len() as u64).to_le_bytes());
-//RS     mac_data.extend_from_slice(&(ciphertext.len() as u64).to_le_bytes());
-//RS     let tag = poly1305_mac(&poly_key, &mac_data);
-//RS     let mut out = ciphertext;
-//RS     out.extend_from_slice(&tag);
-//RS     out
-//RS }
-//RS 
-//RS fn chacha20poly1305_open(
-//RS     key: &[u8; 32],
-//RS     nonce: &[u8; 12],
-//RS     ciphertext: &[u8],
-//RS     aad: &[u8],
-//RS ) -> Result<Vec<u8>, ()> {
-//RS     if ciphertext.len() < 16 {
-//RS         return Err(());
-//RS     }
-//RS     let (body, tag) = ciphertext.split_at(ciphertext.len() - 16);
-//RS     let mut poly_key = [0u8; 32];
-//RS     poly_key.copy_from_slice(&chacha20_block(key, 0, nonce)[..32]);
-//RS     let mut mac_data = Vec::with_capacity(aad.len() + 16 + body.len() + 16 + 16);
-//RS     mac_data.extend_from_slice(aad);
-//RS     pad16(&mut mac_data);
-//RS     mac_data.extend_from_slice(body);
-//RS     pad16(&mut mac_data);
-//RS     mac_data.extend_from_slice(&(aad.len() as u64).to_le_bytes());
-//RS     mac_data.extend_from_slice(&(body.len() as u64).to_le_bytes());
-//RS     let expected = poly1305_mac(&poly_key, &mac_data);
-//RS     let mut diff = 0u8;
-//RS     for (left, right) in expected.iter().zip(tag.iter()) {
-//RS         diff |= left ^ right;
-//RS     }
-//RS     if diff != 0 {
-//RS         return Err(());
-//RS     }
-//RS     Ok(chacha20_xor(key, nonce, 1, body))
-//RS }
-//RS 
-//RS pub(super) fn xchacha20poly1305_seal(
-//RS     key: &[u8],
-//RS     nonce: &[u8],
-//RS     plaintext: &[u8],
-//RS     aad: &[u8],
-//RS ) -> Result<Vec<u8>, ()> {
-//RS     let key: [u8; 32] = key.try_into().map_err(|_| ())?;
-//RS     let nonce: [u8; 24] = nonce.try_into().map_err(|_| ())?;
-//RS     let subkey = hchacha20(&key, nonce[..16].try_into().unwrap());
-//RS     let mut sub_nonce = [0u8; 12];
-//RS     sub_nonce[4..].copy_from_slice(&nonce[16..]);
-//RS     Ok(chacha20poly1305_seal(&subkey, &sub_nonce, plaintext, aad))
-//RS }
-//RS 
-//RS pub(super) fn xchacha20poly1305_open(
-//RS     key: &[u8],
-//RS     nonce: &[u8],
-//RS     ciphertext: &[u8],
-//RS     aad: &[u8],
-//RS ) -> Result<Vec<u8>, ()> {
-//RS     let key: [u8; 32] = key.try_into().map_err(|_| ())?;
-//RS     let nonce: [u8; 24] = nonce.try_into().map_err(|_| ())?;
-//RS     let subkey = hchacha20(&key, nonce[..16].try_into().unwrap());
-//RS     let mut sub_nonce = [0u8; 12];
-//RS     sub_nonce[4..].copy_from_slice(&nonce[16..]);
-//RS     chacha20poly1305_open(&subkey, &sub_nonce, ciphertext, aad)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn hex(text: &str) -> Vec<u8> {
-//RS         text.as_bytes()
-//RS             .chunks_exact(2)
-//RS             .map(|pair| {
-//RS                 let digit = |byte: u8| {
-//RS                     if byte <= b'9' {
-//RS                         byte - b'0'
-//RS                     } else {
-//RS                         byte - b'a' + 10
-//RS                     }
-//RS                 };
-//RS                 digit(pair[0]) * 16 + digit(pair[1])
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn cfrg_xchacha_appendix_a31() {
-//RS         let key = hex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f");
-//RS         let nonce = hex("404142434445464748494a4b4c4d4e4f5051525354555657");
-//RS         let plaintext = hex(concat!(
-//RS             "4c616469657320616e642047656e746c656d656e206f662074686520636c6173",
-//RS             "73206f66202739393a204966204920636f756c64206f6666657220796f75206f",
-//RS             "6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73",
-//RS             "637265656e20776f756c642062652069742e",
-//RS         ));
-//RS         let aad = hex("50515253c0c1c2c3c4c5c6c7");
-//RS         let expected = hex(concat!(
-//RS             "bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb",
-//RS             "731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b452",
-//RS             "2f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff9",
-//RS             "21f9664c97637da9768812f615c68b13b52e",
-//RS             "c0875924c1c7987947deafd8780acf49",
-//RS         ));
-//RS         let sealed = xchacha20poly1305_seal(&key, &nonce, &plaintext, &aad).unwrap();
-//RS         assert_eq!(sealed, expected);
-//RS         assert_eq!(
-//RS             xchacha20poly1305_open(&key, &nonce, &sealed, &aad).unwrap(),
-//RS             plaintext
-//RS         );
-//RS     }
-//RS }
-// END-PORT-PENDING 0579 crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:1-417
-
+// Std-only XChaCha20-Poly1305 matching draft-irtf-cfrg-xchacha and RustCrypto.
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:3
+fn quarter_round(state: &[U32#16], a: USize, b: USize, c: USize, d: USize) {
+    state[a] = state[a].wrapping_add(state[b]); state[d] ^= state[a]; state[d] = state[d].rotate_left(16)
+    state[c] = state[c].wrapping_add(state[d]); state[b] ^= state[c]; state[b] = state[b].rotate_left(12)
+    state[a] = state[a].wrapping_add(state[b]); state[d] ^= state[a]; state[d] = state[d].rotate_left(8)
+    state[c] = state[c].wrapping_add(state[d]); state[b] ^= state[c]; state[b] = state[b].rotate_left(7)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:18
+fn chacha20_block(key: &[U8#32], counter: U32, nonce: &[U8#12]) -> [U8#64] {
+    state: [U32#16] = [0x6170_7865, 0x3320_646e, 0x7962_2d32, 0x6b20_6574,
+        U32.from_le_bytes(key[0..4].try_into().unwrap()), U32.from_le_bytes(key[4..8].try_into().unwrap()),
+        U32.from_le_bytes(key[8..12].try_into().unwrap()), U32.from_le_bytes(key[12..16].try_into().unwrap()),
+        U32.from_le_bytes(key[16..20].try_into().unwrap()), U32.from_le_bytes(key[20..24].try_into().unwrap()),
+        U32.from_le_bytes(key[24..28].try_into().unwrap()), U32.from_le_bytes(key[28..32].try_into().unwrap()), counter,
+        U32.from_le_bytes(nonce[0..4].try_into().unwrap()), U32.from_le_bytes(nonce[4..8].try_into().unwrap()), U32.from_le_bytes(nonce[8..12].try_into().unwrap())]
+    initial := state.clone()
+    for _ in 0..10 {
+        quarter_round(&state, 0, 4, 8, 12); quarter_round(&state, 1, 5, 9, 13)
+        quarter_round(&state, 2, 6, 10, 14); quarter_round(&state, 3, 7, 11, 15)
+        quarter_round(&state, 0, 5, 10, 15); quarter_round(&state, 1, 6, 11, 12)
+        quarter_round(&state, 2, 7, 8, 13); quarter_round(&state, 3, 4, 9, 14)
+    }
+    out := [U8#64]{uninit}
+    for index in 0..16 {
+        state[index] = state[index].wrapping_add(initial[index])
+        out[index * 4..(index + 1) * 4].copy_from_slice(&state[index].to_le_bytes())
+    }
+    out
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:56
+fn hchacha20(key: &[U8#32], nonce: &[U8#16]) -> [U8#32] {
+    state: [U32#16] = [0x6170_7865, 0x3320_646e, 0x7962_2d32, 0x6b20_6574,
+        U32.from_le_bytes(key[0..4].try_into().unwrap()), U32.from_le_bytes(key[4..8].try_into().unwrap()),
+        U32.from_le_bytes(key[8..12].try_into().unwrap()), U32.from_le_bytes(key[12..16].try_into().unwrap()),
+        U32.from_le_bytes(key[16..20].try_into().unwrap()), U32.from_le_bytes(key[20..24].try_into().unwrap()),
+        U32.from_le_bytes(key[24..28].try_into().unwrap()), U32.from_le_bytes(key[28..32].try_into().unwrap()),
+        U32.from_le_bytes(nonce[0..4].try_into().unwrap()), U32.from_le_bytes(nonce[4..8].try_into().unwrap()),
+        U32.from_le_bytes(nonce[8..12].try_into().unwrap()), U32.from_le_bytes(nonce[12..16].try_into().unwrap())]
+    for _ in 0..10 {
+        quarter_round(&state, 0, 4, 8, 12); quarter_round(&state, 1, 5, 9, 13)
+        quarter_round(&state, 2, 6, 10, 14); quarter_round(&state, 3, 7, 11, 15)
+        quarter_round(&state, 0, 5, 10, 15); quarter_round(&state, 1, 6, 11, 12)
+        quarter_round(&state, 2, 7, 8, 13); quarter_round(&state, 3, 4, 9, 14)
+    }
+    out := [U8#32]{uninit}
+    words: [U32#8] = [state[0], state[1], state[2], state[3], state[12], state[13], state[14], state[15]]
+    for (index, word) in words.iter().enumerate() { out[index * 4..(index + 1) * 4].copy_from_slice(&word.to_le_bytes()) }
+    out
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:97
+fn chacha20_xor(key: &[U8#32], nonce: &[U8#12], counter: U32, input: &[U8]) -> [U8] {
+    out := [U8].with_capacity(input.len()); block_counter := counter
+    for chunk in input.chunks(64) {
+        keystream := chacha20_block(key, block_counter, nonce)
+        for (byte, mask) in chunk.iter().zip(keystream.iter()) { out.push(byte ~| mask) }
+        block_counter = block_counter.wrapping_add(1)
+    }
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:111
+fn poly1305_mac(key: &[U8#32], message: &[U8]) -> [U8#16] {
+    r := [U32#5]{uninit}; h := [U32#5]{uninit}; h.fill(0)
+    pad := [U32#4]{uninit}
+    r[0] = U32.from_le_bytes(key[0..4].try_into().unwrap()) & 0x3ff_ffff
+    r[1] = (U32.from_le_bytes(key[3..7].try_into().unwrap()) >> 2) & 0x3ff_ff03
+    r[2] = (U32.from_le_bytes(key[6..10].try_into().unwrap()) >> 4) & 0x3ff_c0ff
+    r[3] = (U32.from_le_bytes(key[9..13].try_into().unwrap()) >> 6) & 0x3f0_3fff
+    r[4] = (U32.from_le_bytes(key[12..16].try_into().unwrap()) >> 8) & 0x00f_ffff
+    pad[0] = U32.from_le_bytes(key[16..20].try_into().unwrap()); pad[1] = U32.from_le_bytes(key[20..24].try_into().unwrap())
+    pad[2] = U32.from_le_bytes(key[24..28].try_into().unwrap()); pad[3] = U32.from_le_bytes(key[28..32].try_into().unwrap())
+    compute_block := fn(h: &[U32#5], block: &[U8#16], partial: Bool) {
+        hibit := if partial -> U32{0} else -> U32{1} << 24
+        r0 := r[0]; r1 := r[1]; r2 := r[2]; r3 := r[3]; r4 := r[4]
+        s1 := r1 * 5; s2 := r2 * 5; s3 := r3 * 5; s4 := r4 * 5
+        h0 := h[0]; h1 := h[1]; h2 := h[2]; h3 := h[3]; h4 := h[4]
+        h0 += U32.from_le_bytes(block[0..4].try_into().unwrap()) & 0x3ff_ffff
+        h1 += (U32.from_le_bytes(block[3..7].try_into().unwrap()) >> 2) & 0x3ff_ffff
+        h2 += (U32.from_le_bytes(block[6..10].try_into().unwrap()) >> 4) & 0x3ff_ffff
+        h3 += (U32.from_le_bytes(block[9..13].try_into().unwrap()) >> 6) & 0x3ff_ffff
+        h4 += (U32.from_le_bytes(block[12..16].try_into().unwrap()) >> 8) | hibit
+        d0 := h0 as U64 * r0 as U64 + h1 as U64 * s4 as U64 + h2 as U64 * s3 as U64 + h3 as U64 * s2 as U64 + h4 as U64 * s1 as U64
+        d1 := h0 as U64 * r1 as U64 + h1 as U64 * r0 as U64 + h2 as U64 * s4 as U64 + h3 as U64 * s3 as U64 + h4 as U64 * s2 as U64
+        d2 := h0 as U64 * r2 as U64 + h1 as U64 * r1 as U64 + h2 as U64 * r0 as U64 + h3 as U64 * s4 as U64 + h4 as U64 * s3 as U64
+        d3 := h0 as U64 * r3 as U64 + h1 as U64 * r2 as U64 + h2 as U64 * r1 as U64 + h3 as U64 * r0 as U64 + h4 as U64 * s4 as U64
+        d4 := h0 as U64 * r4 as U64 + h1 as U64 * r3 as U64 + h2 as U64 * r2 as U64 + h3 as U64 * r1 as U64 + h4 as U64 * r0 as U64
+        c := (d0 >> 26) as U32; h0 = d0 as U32 & 0x3ff_ffff; d1 += c as U64
+        c = (d1 >> 26) as U32; h1 = d1 as U32 & 0x3ff_ffff; d2 += c as U64
+        c = (d2 >> 26) as U32; h2 = d2 as U32 & 0x3ff_ffff; d3 += c as U64
+        c = (d3 >> 26) as U32; h3 = d3 as U32 & 0x3ff_ffff; d4 += c as U64
+        c = (d4 >> 26) as U32; h4 = d4 as U32 & 0x3ff_ffff; h0 += c * 5
+        c = h0 >> 26; h0 &= 0x3ff_ffff; h1 += c
+        h[0] = h0; h[1] = h1; h[2] = h2; h[3] = h3; h[4] = h4
+    }
+    offset := USize{0}
+    while offset + 16 <= message.len() {
+        block := message[offset..offset + 16].try_into::<[U8#16]>().unwrap()
+        compute_block(&h, &block, false); offset += 16
+    }
+    if offset < message.len() {
+        block := [U8#16]{uninit}; block.fill(0)
+        rem := &message[offset..]
+        block[..rem.len()].copy_from_slice(rem); block[rem.len()] = 1
+        compute_block(&h, &block, true)
+    }
+    h0 := h[0]; h1 := h[1]; h2 := h[2]; h3 := h[3]; h4 := h[4]
+    c := h1 >> 26; h1 &= 0x3ff_ffff; h2 += c
+    c = h2 >> 26; h2 &= 0x3ff_ffff; h3 += c
+    c = h3 >> 26; h3 &= 0x3ff_ffff; h4 += c
+    c = h4 >> 26; h4 &= 0x3ff_ffff; h0 += c * 5
+    c = h0 >> 26; h0 &= 0x3ff_ffff; h1 += c
+    g0 := h0.wrapping_add(5); c = g0 >> 26; g0 &= 0x3ff_ffff
+    g1 := h1.wrapping_add(c); c = g1 >> 26; g1 &= 0x3ff_ffff
+    g2 := h2.wrapping_add(c); c = g2 >> 26; g2 &= 0x3ff_ffff
+    g3 := h3.wrapping_add(c); c = g3 >> 26; g3 &= 0x3ff_ffff
+    g4 := h4.wrapping_add(c).wrapping_sub(1 << 26)
+    mask := (g4 >> 31).wrapping_sub(1)
+    g0 &= mask; g1 &= mask; g2 &= mask; g3 &= mask; g4 &= mask
+    mask = !mask
+    h0 = (h0 & mask) | g0; h1 = (h1 & mask) | g1; h2 = (h2 & mask) | g2; h3 = (h3 & mask) | g3; h4 = (h4 & mask) | g4
+    h0 |= h1 << 26; h1 = (h1 >> 6) | (h2 << 20); h2 = (h2 >> 12) | (h3 << 14); h3 = (h3 >> 18) | (h4 << 8)
+    f := h0 as U64 + pad[0] as U64; h0 = f as U32
+    f = h1 as U64 + pad[1] as U64 + (f >> 32); h1 = f as U32
+    f = h2 as U64 + pad[2] as U64 + (f >> 32); h2 = f as U32
+    f = h3 as U64 + pad[3] as U64 + (f >> 32); h3 = f as U32
+    tag := [U8#16]{uninit}
+    tag[0..4].copy_from_slice(&h0.to_le_bytes()); tag[4..8].copy_from_slice(&h1.to_le_bytes())
+    tag[8..12].copy_from_slice(&h2.to_le_bytes()); tag[12..16].copy_from_slice(&h3.to_le_bytes())
+    tag
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:286
+fn pad16(buf: &[U8]) { while buf.len() % 16 != 0 { buf.push(0) } }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:292
+fn chacha20poly1305_seal(key: &[U8#32], nonce: &[U8#12], plaintext: &[U8], aad: &[U8]) -> [U8] {
+    poly_key := [U8#32]{uninit}
+    poly_key.copy_from_slice(&chacha20_block(key, 0, nonce)[..32])
+    ciphertext := chacha20_xor(key, nonce, 1, plaintext)
+    mac_data := [U8].with_capacity(aad.len() + 16 + ciphertext.len() + 16 + 16)
+    mac_data.extend_from_slice(aad); pad16(&mac_data); mac_data.extend_from_slice(&ciphertext); pad16(&mac_data)
+    mac_data.extend_from_slice(&(aad.len() as U64).to_le_bytes()); mac_data.extend_from_slice(&(ciphertext.len() as U64).to_le_bytes())
+    tag := poly1305_mac(&poly_key, &mac_data)
+    out := ^ciphertext; out.extend_from_slice(&tag)
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:314
+fn chacha20poly1305_open(key: &[U8#32], nonce: &[U8#12], ciphertext: &[U8], aad: &[U8]) -> [U8] Unit! {
+    if ciphertext.len() < 16 -> return Err(())
+    (body, tag) := ciphertext.split_at(ciphertext.len() - 16)
+    poly_key := [U8#32]{uninit}
+    poly_key.copy_from_slice(&chacha20_block(key, 0, nonce)[..32])
+    mac_data := [U8].with_capacity(aad.len() + 16 + body.len() + 16 + 16)
+    mac_data.extend_from_slice(aad); pad16(&mac_data); mac_data.extend_from_slice(body); pad16(&mac_data)
+    mac_data.extend_from_slice(&(aad.len() as U64).to_le_bytes()); mac_data.extend_from_slice(&(body.len() as U64).to_le_bytes())
+    expected := poly1305_mac(&poly_key, &mac_data); diff := U8{0}
+    for (left, right) in expected.iter().zip(tag.iter()) { diff |= left ~| right }
+    if diff != 0 -> return Err(())
+    Ok(chacha20_xor(key, nonce, 1, body))
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:344
+fn xchacha20poly1305_seal(key: &[U8], nonce: &[U8], plaintext: &[U8], aad: &[U8]) -> [U8] Unit! {
+    key := key.try_into::<[U8#32]>().map_err(fn(_) { () })?
+    nonce := nonce.try_into::<[U8#24]>().map_err(fn(_) { () })?
+    subkey := hchacha20(&key, nonce[..16].try_into().unwrap())
+    sub_nonce := [U8#12]{uninit}; sub_nonce.fill(0)
+    sub_nonce[4..].copy_from_slice(&nonce[16..])
+    Ok(chacha20poly1305_seal(&subkey, &sub_nonce, plaintext, aad))
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/ChaCha20Poly1305.rs:358
+fn xchacha20poly1305_open(key: &[U8], nonce: &[U8], ciphertext: &[U8], aad: &[U8]) -> [U8] Unit! {
+    key := key.try_into::<[U8#32]>().map_err(fn(_) { () })?
+    nonce := nonce.try_into::<[U8#24]>().map_err(fn(_) { () })?
+    subkey := hchacha20(&key, nonce[..16].try_into().unwrap())
+    sub_nonce := [U8#12]{uninit}; sub_nonce.fill(0)
+    sub_nonce[4..].copy_from_slice(&nonce[16..])
+    chacha20poly1305_open(&subkey, &sub_nonce, ciphertext, aad)
+}

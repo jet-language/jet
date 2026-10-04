@@ -1,214 +1,70 @@
-// PORT-PENDING 0558 crates-jet-comptime-src-comptime-argslite-module-group: crates/jet-comptime/src/Comptime/AuthLite.rs:1-210
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-AUTH1=A / I9: `core.auth` ambient includes Prelude `AuthSession.rs` — the
-//RS //! session, password, magic-link, OAuth-state, and `app.auth` mechanisms. It does
-//RS //! NOT include `Auth.rs`, so `verify_jwt`/`verify_paseto` have no comptime
-//RS //! implementation; `Comptime/Methods/core_calls.rs` routes them to the AOT/subset
-//RS //! path instead. That is a named tier gap, not a second policy: no token rule is
-//RS //! re-encoded here.
-//RS 
-//RS use super::Diagnostics::unsupported;
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::{CtValue, Type};
-//RS 
-//RS #[allow(unused_imports)]
-//RS pub use jet_foundation::Outcome::*;
-//RS include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
-//RS use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
-//RS include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
-//RS #[allow(unused_imports)]
-//RS pub use jet_foundation::Outcome::*;
-//RS include!("../../../jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
-//RS 
-//RS fn session_to_ct(s: &JetAuthSession) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "Session".to_string(),
-//RS         fields: vec![
-//RS             ("id".to_string(), CtValue::Str(s.id.clone())),
-//RS             ("user_id".to_string(), CtValue::Str(s.user_id.clone())),
-//RS             ("expires_at".to_string(), CtValue::Int(s.expires_at)),
-//RS             ("cookie".to_string(), CtValue::Str(s.cookie.clone())),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn ct_to_session(v: &CtValue, span: Span) -> Result<JetAuthSession, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = v else {
-//RS         return Err(unsupported("Session", span));
-//RS     };
-//RS     if type_name != "Session" && type_name != "JetAuthSession" {
-//RS         return Err(unsupported("Session", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find(|(n, _)| n == name)
-//RS             .map(|(_, v)| v)
-//RS             .ok_or_else(|| unsupported("Session field", span))
-//RS     };
-//RS     Ok(JetAuthSession {
-//RS         id: match field("id")? {
-//RS             CtValue::Str(s) => s.clone(),
-//RS             _ => return Err(unsupported("id", span)),
-//RS         },
-//RS         user_id: match field("user_id")? {
-//RS             CtValue::Str(s) => s.clone(),
-//RS             _ => return Err(unsupported("user_id", span)),
-//RS         },
-//RS         expires_at: match field("expires_at")? {
-//RS             CtValue::Int(n) => *n,
-//RS             _ => return Err(unsupported("expires_at", span)),
-//RS         },
-//RS         cookie: match field("cookie")? {
-//RS             CtValue::Str(s) => s.clone(),
-//RS             _ => return Err(unsupported("cookie", span)),
-//RS         },
-//RS     })
-//RS }
-//RS 
-//RS fn auth_to_ct(a: &JetAuthApp) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "Auth".to_string(),
-//RS         fields: vec![
-//RS             (
-//RS                 "users_table".to_string(),
-//RS                 CtValue::Str(a.users_table.clone()),
-//RS             ),
-//RS             ("providers".to_string(), CtValue::Str(a.providers.join(","))),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn ct_to_auth(v: &CtValue, span: Span) -> Result<JetAuthApp, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = v else {
-//RS         return Err(unsupported("Auth", span));
-//RS     };
-//RS     if type_name != "Auth" && type_name != "JetAuthApp" {
-//RS         return Err(unsupported("Auth", span));
-//RS     }
-//RS     let users = fields
-//RS         .iter()
-//RS         .find(|(n, _)| n == "users_table")
-//RS         .and_then(|(_, v)| match v {
-//RS             CtValue::Str(s) => Some(s.clone()),
-//RS             _ => None,
-//RS         })
-//RS         .ok_or_else(|| unsupported("users_table", span))?;
-//RS     let providers = fields
-//RS         .iter()
-//RS         .find(|(n, _)| n == "providers")
-//RS         .and_then(|(_, v)| match v {
-//RS             CtValue::Str(s) => Some(
-//RS                 s.split(',')
-//RS                     .filter(|p| !p.is_empty())
-//RS                     .map(str::to_string)
-//RS                     .collect(),
-//RS             ),
-//RS             _ => None,
-//RS         })
-//RS         .ok_or_else(|| unsupported("providers", span))?;
-//RS     Ok(JetAuthApp {
-//RS         users_table: users,
-//RS         providers,
-//RS     })
-//RS }
-//RS 
-//RS fn result_session(r: Result<JetAuthSession, String>) -> CtValue {
-//RS     match r {
-//RS         Ok(s) => CtValue::Present(Box::new(session_to_ct(&s))),
-//RS         Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-//RS     }
-//RS }
-//RS 
-//RS fn result_unit(r: Result<(), String>) -> CtValue {
-//RS     match r {
-//RS         Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-//RS         Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-//RS     }
-//RS }
-//RS 
-//RS fn result_str(r: Result<String, String>) -> CtValue {
-//RS     match r {
-//RS         Ok(s) => CtValue::Present(Box::new(CtValue::Str(s))),
-//RS         Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-//RS     }
-//RS }
-//RS 
-//RS pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let one = |i: usize| {
-//RS         args.get(i)
-//RS             .ok_or_else(|| unsupported(&format!("core.auth.{method} arg {i}"), span))
-//RS     };
-//RS     let as_str = |i: usize| match one(i)? {
-//RS         CtValue::Str(s) => Ok(s.clone()),
-//RS         _ => Err(unsupported("String", span)),
-//RS     };
-//RS     let as_int = |i: usize| match one(i)? {
-//RS         CtValue::Int(n) => Ok(*n),
-//RS         _ => Err(unsupported("Int", span)),
-//RS     };
-//RS     match method {
-//RS         "register_user" => Ok(result_unit(jet_auth_register_user(as_str(0)?, as_str(1)?))),
-//RS         "password_login" => Ok(result_session(jet_auth_password_login(
-//RS             as_str(0)?,
-//RS             as_str(1)?,
-//RS             as_int(2)?,
-//RS             as_int(3)?,
-//RS         ))),
-//RS         "session_validate" => Ok(result_session(jet_auth_session_validate(
-//RS             &as_str(0)?,
-//RS             as_int(1)?,
-//RS         ))),
-//RS         "session_show" => Ok(CtValue::Str(jet_auth_session_show(&ct_to_session(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "session_user" => Ok(CtValue::Str(jet_auth_session_user(&ct_to_session(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "session_cookie" => Ok(CtValue::Str(jet_auth_session_cookie(&ct_to_session(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "session_id" => Ok(CtValue::Str(jet_auth_session_id(&ct_to_session(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "magic_link_issue" => Ok(result_str(jet_auth_magic_link_issue(
-//RS             as_str(0)?,
-//RS             as_int(1)?,
-//RS             as_int(2)?,
-//RS         ))),
-//RS         "magic_link_consume" => Ok(result_session(jet_auth_magic_link_consume(
-//RS             as_str(0)?,
-//RS             as_int(1)?,
-//RS             as_int(2)?,
-//RS         ))),
-//RS         "oauth_begin" => Ok(result_str(jet_auth_oauth_begin(as_str(0)?))),
-//RS         "oauth_finish" => Ok(result_session(jet_auth_oauth_finish(
-//RS             as_str(0)?,
-//RS             as_str(1)?,
-//RS             as_int(2)?,
-//RS             as_int(3)?,
-//RS         ))),
-//RS         "auth" => Ok(auth_to_ct(&jet_app_auth(as_str(0)?))),
-//RS         "auth_oauth" => Ok(auth_to_ct(&jet_app_auth_oauth(
-//RS             ct_to_auth(one(0)?, span)?,
-//RS             as_str(1)?,
-//RS         ))),
-//RS         "auth_routes" => Ok(CtValue::Str(jet_app_auth_routes(&ct_to_auth(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "auth_show" => Ok(CtValue::Str(jet_app_auth_show(&ct_to_auth(one(0)?, span)?))),
-//RS         _ => Err(unsupported(&format!("`core.auth.{method}()`"), span)),
-//RS     }
-//RS }
-//RS 
-//RS #[allow(dead_code)]
-//RS fn _type_anchor() -> Type {
-//RS     Type::Named("Session".to_string())
-//RS }
-// END-PORT-PENDING 0558 crates/jet-comptime/src/Comptime/AuthLite.rs:1-210
+// core.auth shares session/password/magic-link/OAuth policy with canonical kernels.
+// JWT/PASETO verification is intentionally routed to the AOT/subset tier, not here.
+use jet_comptime.Comptime.Diagnostics.unsupported
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.AST.[CtValue, Type]
+use jet_foundation.Outcome.*
+use jet_codegen.Prelude.CoreLib.Top.[CryptoEntropy, SHA256Raw, AuthSession]
+use jet_crypto_entropy.[jet_crypto_entropy_fill, JetCryptoEntropyError]
+use jet_codegen.Prelude.CoreLib.Top.AuthSession.*
 
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:21
+fn session_to_ct(s: JetAuthSession) -> CtValue {
+    CtValue.Struct { type_name: "Session", fields: [("id", CtValue.Str(s.id.clone())), ("user_id", CtValue.Str(s.user_id.clone())), ("expires_at", CtValue.Int(s.expires_at)), ("cookie", CtValue.Str(s.cookie.clone()))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:33
+fn ct_to_session(v: CtValue, span: Span) -> JetAuthSession Diagnostic! {
+    (type_name, fields) := v == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("Session", span) } }
+    if type_name != "Session" && type_name != "JetAuthSession" { fail unsupported("Session", span) }
+    field := fn(name: String) -> CtValue Diagnostic! { fields.iter().find(fn(entry) { entry.0 == name }).map(fn(entry) { entry.1 }) == { Val(value) -> value; None -> { fail unsupported("Session field", span) } } }
+    JetAuthSession {
+        id: field("id")? == { Str(s) -> s.clone(); _ -> { fail unsupported("id", span) } },
+        user_id: field("user_id")? == { Str(s) -> s.clone(); _ -> { fail unsupported("user_id", span) } },
+        expires_at: field("expires_at")? == { Int(n) -> n; _ -> { fail unsupported("expires_at", span) } },
+        cookie: field("cookie")? == { Str(s) -> s.clone(); _ -> { fail unsupported("cookie", span) } }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:67
+fn auth_to_ct(a: JetAuthApp) -> CtValue { CtValue.Struct { type_name: "Auth", fields: [("users_table", CtValue.Str(a.users_table.clone())), ("providers", CtValue.Str(a.providers.join(",")))] } }
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:80
+fn ct_to_auth(v: CtValue, span: Span) -> JetAuthApp Diagnostic! {
+    (type_name, fields) := v == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("Auth", span) } }
+    if type_name != "Auth" && type_name != "JetAuthApp" { fail unsupported("Auth", span) }
+    users := fields.iter().find(fn(entry) { entry.0 == "users_table" }).and_then(fn(entry) { entry.1 == { Str(s) -> Val(s.clone()); _ -> None } }) == { Val(users) -> ^users; None -> { fail unsupported("users_table", span) } }
+    providers := fields.iter().find(fn(entry) { entry.0 == "providers" }).and_then(fn(entry) { entry.1 == { Str(s) -> Val(s.split(',').filter(fn(p) { !p.is_empty() }).map(fn(p) { p.to_string() }).collect()); _ -> None } }) == { Val(providers) -> ^providers; None -> { fail unsupported("providers", span) } }
+    JetAuthApp { users_table: ^users, providers: ^providers }
+}
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:114
+fn result_session(r: JetAuthSession Err!) -> CtValue { r == { Ok(s) -> CtValue.Present(session_to_ct(s)); Err(e) -> CtValue.failed(CtValue.Str(^e)) } }
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:121
+fn result_unit(r: Unit Err!) -> CtValue { r == { Ok(_) -> CtValue.Present(CtValue.Unit); Err(e) -> CtValue.failed(CtValue.Str(^e)) } }
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:128
+fn result_str(r: String Err!) -> CtValue { r == { Ok(s) -> CtValue.Present(CtValue.Str(^s)); Err(e) -> CtValue.failed(CtValue.Str(^e)) } }
+
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:135
+pub fn apply(method: String, args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    one := fn(i: USize) -> CtValue Diagnostic! { args.get(i) == { Val(value) -> value; None -> { fail unsupported("core.auth.{method} arg {i}", span) } } }
+    as_str := fn(i: USize) -> String Diagnostic! { one(i)? == { Str(s) -> s.clone(); _ -> { fail unsupported("String", span) } } }
+    as_int := fn(i: USize) -> I64 Diagnostic! { one(i)? == { Int(n) -> n; _ -> { fail unsupported("Int", span) } } }
+    // GATE #4494: canonical AuthSession kernel uses real entropy/session providers.
+    method == {
+        "register_user" -> result_unit(jet_auth_register_user(as_str(0)?, as_str(1)?))
+        "password_login" -> result_session(jet_auth_password_login(as_str(0)?, as_str(1)?, as_int(2)?, as_int(3)?))
+        "session_validate" -> result_session(jet_auth_session_validate(as_str(0)?, as_int(1)?))
+        "session_show" -> CtValue.Str(jet_auth_session_show(ct_to_session(one(0)?, span)?))
+        "session_user" -> CtValue.Str(jet_auth_session_user(ct_to_session(one(0)?, span)?))
+        "session_cookie" -> CtValue.Str(jet_auth_session_cookie(ct_to_session(one(0)?, span)?))
+        "session_id" -> CtValue.Str(jet_auth_session_id(ct_to_session(one(0)?, span)?))
+        "magic_link_issue" -> result_str(jet_auth_magic_link_issue(as_str(0)?, as_int(1)?, as_int(2)?))
+        "magic_link_consume" -> result_session(jet_auth_magic_link_consume(as_str(0)?, as_int(1)?, as_int(2)?))
+        "oauth_begin" -> result_str(jet_auth_oauth_begin(as_str(0)?))
+        "oauth_finish" -> result_session(jet_auth_oauth_finish(as_str(0)?, as_str(1)?, as_int(2)?, as_int(3)?))
+        "auth" -> auth_to_ct(jet_app_auth(as_str(0)?))
+        "auth_oauth" -> auth_to_ct(jet_app_auth_oauth(ct_to_auth(one(0)?, span)?, as_str(1)?))
+        "auth_routes" -> CtValue.Str(jet_app_auth_routes(ct_to_auth(one(0)?, span)?))
+        "auth_show" -> CtValue.Str(jet_app_auth_show(ct_to_auth(one(0)?, span)?))
+        _ -> { fail unsupported("`core.auth.{method}()`", span) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:208
+fn _type_anchor() -> Type { Type.Named("Session") }

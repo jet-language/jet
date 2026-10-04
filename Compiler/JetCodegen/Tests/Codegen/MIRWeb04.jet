@@ -1,0 +1,51 @@
+use jet_foundation.[AppRouteBoundaries, AppRouteField, MirSymbol]
+use JetCodegen.Codegen.MIRWeb.[js_history_absent_schema, js_optional_string, js_route_boundaries, js_route_field, js_route_fields, js_route_island, js_route_loader, js_symbol_expression, web_data_symbol_name, web_runtime_link]
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5589-5647 (behavioral control; no inline Rust tests)
+#Test("web_data_bridge_vocabulary_is_closed_except_registered_loader_namespace") {
+    assert(web_data_symbol_name("jet_data_query"))
+    assert(web_data_symbol_name("jet_data_loader_file_member"))
+    assert(web_data_symbol_name("jet_data_inner_join_checked_default"))
+    assert(web_data_symbol_name("jet_data.loader.load"))
+    assert(!web_data_symbol_name("jet_data_unknown"))
+    assert(!web_data_symbol_name("unrelated.loader.load"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6009-6640 (behavioral control)
+#Test("web_symbol_linkage_keeps_explicit_aliases_and_rejects_ambient_runtime") {
+    assert(js_symbol_expression(MirSymbol.Prelude("jet_app_route")).unwrap() == "jetDom.jetAppRoute")
+    assert(js_symbol_expression(MirSymbol.Prelude("jet_data_load")).unwrap() == "jet_data_loader_load")
+    assert(js_symbol_expression(MirSymbol.Prelude("jet_std::JetSignal::get")).unwrap() == "jetDom.signalGet")
+    assert(js_symbol_expression(MirSymbol.Prelude("$direct_1")).unwrap() == "$direct_1")
+    assert(js_symbol_expression(MirSymbol.Prelude("missing::ambient")).is_err())
+    assert(js_symbol_expression(MirSymbol.Prelude("1not_an_identifier")).is_err())
+    assert(js_symbol_expression(MirSymbol.Runtime("jet_web_stream_hydration_complete")).unwrap() == "jetDom.webStreamHydrationComplete")
+    assert(js_symbol_expression(MirSymbol.Runtime("jet_std::JetAsyncEvent::emit_async_result")).unwrap() == "jet_async_event_emit")
+    assert(js_symbol_expression(MirSymbol.Runtime("jet_time_zone_local_to_utc_offset")).unwrap() == "jet_time_zone_local_to_utc_offset")
+    assert(js_symbol_expression(MirSymbol.Runtime("unregistered_direct_name")).is_err())
+    assert(web_runtime_link("unregistered_direct_name") == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5717-5724 (behavioral control)
+#Test("history_absent_schema_is_idempotent_and_reserves_one_canonical_key") {
+    schemas := [String:String]{}
+    assert(js_history_absent_schema(&schemas) == "jet.absent")
+    first :: schemas["jet.absent"]
+    assert(first.contains("kind: \"absent\""))
+    assert(js_history_absent_schema(&schemas) == "jet.absent")
+    assert(schemas.len() == 1)
+    assert(schemas["jet.absent"] == first)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6747-6800 (behavioral control)
+#Test("route_projections_distinguish_absence_and_checked_field_defaults") {
+    assert(js_optional_string(None) == "null")
+    assert(js_optional_string(Val("")) == "\"\"")
+    assert(js_route_loader(None) == "null")
+    assert(js_route_island(None) == "null")
+    field :: AppRouteField{name: "count", ty: "Int", codec: "int", required: true, default: Val("4")}
+    assert(js_route_field(field) == "Object.freeze({{ name: \"count\", ty: \"Int\", codec: \"int\", required: true, default: \"4\" }})")
+    assert(js_route_fields([]) == "Object.freeze([])")
+    boundaries :: AppRouteBoundaries{pending: Val("Loading"), not_found: None, error: Val("Failure")}
+    assert(js_route_boundaries(boundaries) == "Object.freeze({{ pending: \"Loading\", not_found: null, error: \"Failure\" }})")
+}

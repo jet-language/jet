@@ -1,0 +1,26 @@
+use jet_driver.Trace.*
+use std.[env, fs, process]
+
+// Rust: crates/jet-driver/src/Trace.rs:339
+#Test("end_closes_abandoned_spans_and_every_line_is_one_event") {
+    path :: env.temp_dir().join("jet-trace-test-{process.id()}.json")
+    sink :: TraceSink.create(path, false).expect("trace file")
+    sink.begin("compile", "", -1, -1)
+    sink.begin("sema.module", "a \"quoted\" module", 0, 2)
+    sink.progress("sema.bodies", 0, 10)
+    sink.progress("sema.bodies", 1, 10)
+    sink.progress("sema.bodies", 9, 10)
+    sink.end("missing", 1)
+    sink.end("compile", 3)
+    text :: fs.read_to_string(path).expect("trace text")
+    _ :: fs.remove_file(path)
+    lines :: text.lines().collect::<[String]>()
+    assert_eq(lines[0], "[")
+    assert(lines[1..].iter().all(fn(line) { line.starts_with('{') && line.ends_with("},") }))
+    assert(text.contains("\"name\":\"a \\\"quoted\\\" module\",\"cat\":\"sema.module\",\"ph\":\"B\""))
+    assert_eq(text.matches("\"name\":\"sema.bodies\",\"ph\":\"C\"").count(), 2)
+    ends :: lines.iter().filter(fn(line) { line.contains("\"ph\":\"E\"") }).collect::<[String]>()
+    assert_eq(ends.len(), 2)
+    assert(ends[0].contains("\"cat\":\"sema.module\""))
+    assert(ends[1].contains("\"cat\":\"compile\"") && ends[1].contains("\"items\":3"))
+}

@@ -1,918 +1,321 @@
-// PORT-PENDING 0417 crates-jet-sema-src-sema-checkerkernel: crates/jet-sema/src/Sema/CheckerKernel.rs:1-914
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-COMPUTE-KERNEL-SURFACE1=B: the conservative safe-kernel proof.
-//RS //!
-//RS //! A marker is not a proof. This pass accepts only read-only, effect-free
-//RS //! expression kernels whose safety obligations are either structural or
-//RS //! delegated to the checked Core compute family. Flat and projected accesses,
-//RS //! masked additions, first-match exits, and fixed-order reductions are admitted
-//RS //! only when their exact loop shape is proven; calls, aliases, and unsupported
-//RS //! operations remain rejected until their proof facts exist.
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::Sema::SendCrossing;
-//RS use crate::AST::{
-//RS     AccessConvention, AutoVectorizationFacts, BinOp, Binding, Expr, ForKind, Func, KernelMode,
-//RS     KernelProof, LValue, Stmt, Type, UnOp,
-//RS };
-//RS 
-//RS const SAFE_COMPUTE_CALLS: &[&str] = &[
-//RS     "abs",
-//RS     "add",
-//RS     "broadcast_to",
-//RS     "det",
-//RS     "div",
-//RS     "exp",
-//RS     "fft",
-//RS     "full",
-//RS     "from_list",
-//RS     "inv",
-//RS     "matmul",
-//RS     "maximum",
-//RS     "minimum",
-//RS     "mul",
-//RS     "negate",
-//RS     "numel",
-//RS     "ones",
-//RS     "rank",
-//RS     "reshape",
-//RS     "shape",
-//RS     "solve",
-//RS     "sqrt",
-//RS     "sub",
-//RS     "sum_axis",
-//RS     "to_list",
-//RS     "to_sparse",
-//RS     "transpose",
-//RS     "zeros",
-//RS ];
-//RS 
-//RS struct KernelFailure {
-//RS     obligation: &'static str,
-//RS     span: Span,
-//RS }
-//RS 
-//RS struct AutoVectorBodyProof {
-//RS     outputs: std::collections::BTreeSet<String>,
-//RS     inputs: std::collections::BTreeSet<String>,
-//RS     element_type: Type,
-//RS     no_early_exit: bool,
-//RS     no_cross_iteration_deps: bool,
-//RS }
-//RS 
-//RS 
-//RS impl<'a> super::Checker<'a> {
-//RS     /// D-SIMD3=B: prove a safe source shape before the native backend can mark
-//RS     /// it vectorizable. The proof accepts flat elementwise stores, projected
-//RS     /// AoS/columnar field stores, masked additive reductions, first-match
-//RS     /// exits, and the ratified fixed-order Float reduction. Every control-flow
-//RS     /// form remains narrow and effect-free so MIR can re-check the exact CFG.
-//RS     pub(crate) fn prove_auto_vectorization_loop(
-//RS         &mut self,
-//RS         kind: &ForKind,
-//RS         loop_var: &str,
-//RS         body: &[Stmt],
-//RS         before_direct: &std::collections::BTreeSet<String>,
-//RS         before_edges: &std::collections::BTreeSet<String>,
-//RS         before_maximal: bool,
-//RS     ) -> Option<AutoVectorizationFacts> {
-//RS         let ForKind::Range {
-//RS             start,
-//RS             end,
-//RS             step,
-//RS             exclusive,
-//RS         } = kind
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         if !*exclusive || step.is_some() {
-//RS             return None;
-//RS         }
-//RS         if !matches!(start.without_parens(), Expr::Int(0, ..)) {
-//RS             return None;
-//RS         }
-//RS         let end_root = match end.without_parens() {
-//RS             Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 args,
-//RS                 ..
-//RS             } if method == "len" && args.is_empty() => {
-//RS                 let Expr::Ident(root, _) = receiver.without_parens() else {
-//RS                     return None;
-//RS                 };
-//RS                 Some(root.as_str())
-//RS             }
-//RS             _ => None,
-//RS         };
-//RS         let extent = match end.without_parens() {
-//RS             Expr::Int(value, ..) if *value >= 0 => Some(u64::try_from(*value).ok()?),
-//RS             _ => {
-//RS                 let root = end_root?;
-//RS                 let info = self.lookup(root)?;
-//RS                 match &info.ty {
-//RS                     Type::FixedList { len, .. } => Some(len.literal_value()?),
-//RS                     Type::List(_) => None,
-//RS                     _ => return None,
-//RS                 }
-//RS             }
-//RS         };
-//RS         let proof = self.prove_auto_body(body, loop_var, extent)?;
-//RS         if proof.outputs.is_empty() && proof.inputs.is_empty() {
-//RS             return None;
-//RS         }
-//RS         let collection_roots = proof
-//RS             .outputs
-//RS             .iter()
-//RS             .chain(proof.inputs.iter())
-//RS             .collect::<std::collections::BTreeSet<_>>();
-//RS         if collection_roots.iter().any(|root| {
-//RS             self.lookup(root.as_str())
-//RS                 .is_some_and(|info| matches!(&info.ty, Type::List(_)))
-//RS         }) && (end_root.is_none()
-//RS             || collection_roots.len() != 1
-//RS             || !collection_roots
-//RS                 .iter()
-//RS                 .any(|root| root.as_str() == end_root.unwrap()))
-//RS         {
-//RS             return None;
-//RS         }
-//RS         // Two shared parameter roots could name the same backing storage. A
-//RS         // single input is safe; multiple inputs must be owned local arrays.
-//RS         if proof.inputs.len() > 1
-//RS             && proof.inputs.iter().any(|name| {
-//RS                 self.lookup(name)
-//RS                     .is_some_and(|info| info.param_conv == Some(AccessConvention::Read))
-//RS             })
-//RS         {
-//RS             return None;
-//RS         }
-//RS 
-//RS         let effect_free_body = self.fx_direct.difference(before_direct).next().is_none()
-//RS             && self.fx_edges.difference(before_edges).next().is_none()
-//RS             && self.fx_maximal == before_maximal;
-//RS         if !effect_free_body {
-//RS             return None;
-//RS         }
-//RS 
-//RS         Some(AutoVectorizationFacts {
-//RS             element_type: proof.element_type,
-//RS             no_aliasing: true,
-//RS             no_early_exit: proof.no_early_exit,
-//RS             effect_free_body,
-//RS             no_cross_iteration_deps: proof.no_cross_iteration_deps,
-//RS         })
-//RS     }
-//RS 
-//RS     fn prove_auto_body(
-//RS         &mut self,
-//RS         body: &[Stmt],
-//RS         loop_var: &str,
-//RS         extent: Option<u64>,
-//RS     ) -> Option<AutoVectorBodyProof> {
-//RS         self.prove_auto_control_body(body, loop_var, extent)
-//RS             .or_else(|| self.prove_auto_reduction_body(body, loop_var, extent))
-//RS             .or_else(|| self.prove_auto_elementwise_body(body, loop_var, extent))
-//RS     }
-//RS 
-//RS     /// Runtime `if` statements are normalized to a subjectless `Stmt::Switch`.
-//RS     /// Keep the source proof narrow: one pure guard, one straight-line arm,
-//RS     /// and either one masked add or one first-match exit.
-//RS     fn prove_auto_control_body(
-//RS         &mut self,
-//RS         body: &[Stmt],
-//RS         loop_var: &str,
-//RS         extent: Option<u64>,
-//RS     ) -> Option<AutoVectorBodyProof> {
-//RS         let [Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body: None,
-//RS             ..
-//RS         }] = body
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         let [arm] = arms.as_slice() else {
-//RS             return None;
-//RS         };
-//RS         if !matches!(subject.without_parens(), Expr::Bool(true, _)) {
-//RS             return None;
-//RS         }
-//RS         let mut inputs = std::collections::BTreeSet::new();
-//RS         let mut condition_type = None;
-//RS         if !self.prove_auto_condition_expr(
-//RS             &arm.cond,
-//RS             loop_var,
-//RS             extent,
-//RS             &mut condition_type,
-//RS             &mut inputs,
-//RS         ) {
-//RS             return None;
-//RS         }
-//RS         let element_type = condition_type?;
-//RS         if !is_auto_scalar(&element_type) || inputs.is_empty() {
-//RS             return None;
-//RS         }
-//RS         match arm.body.as_slice() {
-//RS             [Stmt::Assign {
-//RS                 target: LValue::Local { name, .. },
-//RS                 op: Some(BinOp::Add),
-//RS                 value,
-//RS                 ..
-//RS             }] => {
-//RS                 let info = self.lookup(name)?;
-//RS                 if !is_auto_vectorizable_scalar(&element_type)
-//RS                     || info.ty != element_type
-//RS                     || !info.mutable
-//RS                     || info.param_conv.is_some()
-//RS                 {
-//RS                     return None;
-//RS                 }
-//RS                 if self.expr_mentions_ident(value, name) {
-//RS                     return None;
-//RS                 }
-//RS                 if !self.prove_auto_element_expr(
-//RS                     value,
-//RS                     loop_var,
-//RS                     &element_type,
-//RS                     extent,
-//RS                     "",
-//RS                     false,
-//RS                     &mut inputs,
-//RS                 ) {
-//RS                     return None;
-//RS                 }
-//RS                 Some(AutoVectorBodyProof {
-//RS                     outputs: std::collections::BTreeSet::new(),
-//RS                     inputs,
-//RS                     element_type,
-//RS                     no_early_exit: true,
-//RS                     no_cross_iteration_deps: false,
-//RS                 })
-//RS             }
-//RS             [Stmt::Return(Some(value), _)]
-//RS                 if self.prove_auto_condition_expr(
-//RS                     value,
-//RS                     loop_var,
-//RS                     extent,
-//RS                     &mut Some(element_type.clone()),
-//RS                     &mut inputs,
-//RS                 ) =>
-//RS             {
-//RS                 Some(AutoVectorBodyProof {
-//RS                     outputs: std::collections::BTreeSet::new(),
-//RS                     inputs,
-//RS                     element_type,
-//RS                     no_early_exit: false,
-//RS                     no_cross_iteration_deps: true,
-//RS                 })
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn prove_auto_condition_expr(
-//RS         &mut self,
-//RS         expr: &Expr,
-//RS         loop_var: &str,
-//RS         extent: Option<u64>,
-//RS         element_type: &mut Option<Type>,
-//RS         inputs: &mut std::collections::BTreeSet<String>,
-//RS     ) -> bool {
-//RS         match expr.without_parens() {
-//RS             Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) => true,
-//RS             Expr::Ident(name, _) if name == loop_var => true,
-//RS             Expr::Ident(name, _) => self.lookup(name).is_some_and(|info| {
-//RS                 is_auto_scalar(&info.ty)
-//RS                     && element_type
-//RS                         .as_ref()
-//RS                         .is_none_or(|expected| expected == &info.ty)
-//RS             }),
-//RS             Expr::Unary(UnOp::Neg | UnOp::Not, inner, ..) => self.prove_auto_condition_expr(
-//RS                 inner,
-//RS                 loop_var,
-//RS                 extent,
-//RS                 element_type,
-//RS                 inputs,
-//RS             ),
-//RS             Expr::Binary(op, left, right, ..)
-//RS                 if op.is_comparison()
-//RS                     || matches!(
-//RS                         op,
-//RS                         BinOp::And | BinOp::Or | BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
-//RS                     ) =>
-//RS             {
-//RS                 self.prove_auto_condition_expr(
-//RS                     left,
-//RS                     loop_var,
-//RS                     extent,
-//RS                     element_type,
-//RS                     inputs,
-//RS                 ) && self.prove_auto_condition_expr(
-//RS                     right,
-//RS                     loop_var,
-//RS                     extent,
-//RS                     element_type,
-//RS                     inputs,
-//RS                 )
-//RS             }
-//RS             Expr::Index { base, index, .. } => {
-//RS                 let Expr::Ident(root, _) = base.without_parens() else {
-//RS                     return false;
-//RS                 };
-//RS                 let Some(ty) = self.auto_collection_element_type(root, index, loop_var, extent)
-//RS                 else {
-//RS                     return false;
-//RS                 };
-//RS                 if !is_auto_scalar(&ty) {
-//RS                     return false;
-//RS                 }
-//RS                 if element_type.as_ref().is_some_and(|expected| expected != &ty) {
-//RS                     return false;
-//RS                 }
-//RS                 *element_type = Some(ty);
-//RS                 inputs.insert(root.clone());
-//RS                 true
-//RS             }
-//RS             Expr::Field(base, field, span) => {
-//RS                 let Expr::Index { base, index, .. } = base.without_parens() else {
-//RS                     return false;
-//RS                 };
-//RS                 let Expr::Ident(root, _) = base.without_parens() else {
-//RS                     return false;
-//RS                 };
-//RS                 let Some(elem) = self.auto_collection_element_type(root, index, loop_var, extent)
-//RS                 else {
-//RS                     return false;
-//RS                 };
-//RS                 let Some(ty) = self.field_type(&elem, field, *span) else {
-//RS                     return false;
-//RS                 };
-//RS                 if !is_auto_scalar(&ty)
-//RS                     || element_type.as_ref().is_some_and(|expected| expected != &ty)
-//RS                 {
-//RS                     return false;
-//RS                 }
-//RS                 *element_type = Some(ty);
-//RS                 inputs.insert(root.clone());
-//RS                 true
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn prove_auto_elementwise_body(
-//RS         &mut self,
-//RS         body: &[Stmt],
-//RS         loop_var: &str,
-//RS         extent: Option<u64>,
-//RS     ) -> Option<AutoVectorBodyProof> {
-//RS         let mut outputs = std::collections::BTreeSet::new();
-//RS         let mut inputs = std::collections::BTreeSet::new();
-//RS         let mut written = std::collections::BTreeSet::new();
-//RS         let mut element_type = None;
-//RS         for stmt in body {
-//RS             let Stmt::Assign {
-//RS                 target,
-//RS                 op: None,
-//RS                 value,
-//RS                 ..
-//RS             } = stmt
-//RS             else {
-//RS                 return None;
-//RS             };
-//RS             let (root, field, output_elem) =
-//RS                 self.auto_output_place(target, loop_var, extent)?;
-//RS             if !written.insert((root.clone(), field)) {
-//RS                 return None;
-//RS             }
-//RS             outputs.insert(root.clone());
-//RS             if !is_auto_vectorizable_scalar(&output_elem) {
-//RS                 return None;
-//RS             }
-//RS             if let Some(expected) = &element_type {
-//RS                 if expected != &output_elem {
-//RS                     return None;
-//RS                 }
-//RS             } else {
-//RS                 element_type = Some(output_elem.clone());
-//RS             }
-//RS             if !self.prove_auto_element_expr(
-//RS                 value,
-//RS                 loop_var,
-//RS                 &output_elem,
-//RS                 extent,
-//RS                 &root,
-//RS                 true,
-//RS                 &mut inputs,
-//RS             ) {
-//RS                 return None;
-//RS             }
-//RS         }
-//RS         Some(AutoVectorBodyProof {
-//RS             outputs,
-//RS             inputs,
-//RS             element_type: element_type?,
-//RS             no_early_exit: true,
-//RS             no_cross_iteration_deps: true,
-//RS         })
-//RS     }
-//RS 
-//RS     fn auto_output_place(
-//RS         &mut self,
-//RS         target: &LValue,
-//RS         loop_var: &str,
-//RS         extent: Option<u64>,
-//RS     ) -> Option<(String, Option<String>, Type)> {
-//RS         let (root, field, index) = match target {
-//RS             LValue::Index { base, index, .. } => {
-//RS                 let Expr::Ident(root, _) = base.without_parens() else {
-//RS                     return None;
-//RS                 };
-//RS                 (root.clone(), None, index.as_ref())
-//RS             }
-//RS             LValue::Field { base, field, span } => {
-//RS                 let Expr::Index { base, index, .. } = base.without_parens() else {
-//RS                     return None;
-//RS                 };
-//RS                 let Expr::Ident(root, _) = base.without_parens() else {
-//RS                     return None;
-//RS                 };
-//RS                 let elem = self.auto_collection_element_type(root, index, loop_var, extent)?;
-//RS                 let ty = self.field_type(&elem, field, *span)?;
-//RS                 return self.check_auto_output_root(root, extent).map(|_| {
-//RS                     (root.clone(), Some(field.clone()), ty)
-//RS                 });
-//RS             }
-//RS             LValue::Local { .. } => return None,
-//RS         };
-//RS         if !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var) {
-//RS             return None;
-//RS         }
-//RS         let elem = self.auto_collection_element_type(&root, index, loop_var, extent)?;
-//RS         self.check_auto_output_root(&root, extent)?;
-//RS         Some((root, field, elem))
-//RS     }
-//RS 
-//RS     fn check_auto_output_root(&self, root: &str, extent: Option<u64>) -> Option<()> {
-//RS         let info = self.lookup(root)?;
-//RS         match &info.ty {
-//RS             Type::FixedList { len, .. } => {
-//RS                 if Some(len.literal_value()?) != extent {
-//RS                     return None;
-//RS                 }
-//RS                 if info.param_conv.is_some() || !info.mutable {
-//RS                     return None;
-//RS                 }
-//RS             }
-//RS             Type::List(_) => {
-//RS                 if info
-//RS                     .param_conv
-//RS                     .is_some_and(|conv| conv != AccessConvention::Write)
-//RS                     || (!info.mutable && info.param_conv != Some(AccessConvention::Write))
-//RS                 {
-//RS                     return None;
-//RS                 }
-//RS             }
-//RS             _ => return None,
-//RS         }
-//RS         Some(())
-//RS     }
-//RS 
-//RS     fn auto_collection_element_type(
-//RS         &self,
-//RS         root: &str,
-//RS         index: &Expr,
-//RS         loop_var: &str,
-//RS         extent: Option<u64>,
-//RS     ) -> Option<Type> {
-//RS         if !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var) {
-//RS             return None;
-//RS         }
-//RS         let info = self.lookup(root)?;
-//RS         match &info.ty {
-//RS             Type::FixedList { elem, len } => {
-//RS                 if Some(len.literal_value()?) != extent {
-//RS                     return None;
-//RS                 }
-//RS                 Some((**elem).clone())
-//RS             }
-//RS             Type::List(elem) => Some((**elem).clone()),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     fn prove_auto_reduction_body(
-//RS         &mut self,
-//RS         body: &[Stmt],
-//RS         loop_var: &str,
-//RS         extent: Option<u64>,
-//RS     ) -> Option<AutoVectorBodyProof> {
-//RS         let [Stmt::Assign {
-//RS             target: LValue::Local { name, .. },
-//RS             op,
-//RS             value,
-//RS             ..
-//RS         }] = body
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         let info = self.lookup(name)?;
-//RS         let element_type = info.ty.clone();
-//RS         if !is_auto_vectorizable_scalar(&element_type)
-//RS             || !info.mutable
-//RS             || info.param_conv.is_some()
-//RS         {
-//RS             return None;
-//RS         }
-//RS         let addend = match op {
-//RS             Some(BinOp::Add) if !self.expr_mentions_ident(value, name) => value,
-//RS             None => {
-//RS                 let Expr::Binary(BinOp::Add, left, right, _) = value.without_parens() else {
-//RS                     return None;
-//RS                 };
-//RS                 let left_has = self.expr_mentions_ident(left, name);
-//RS                 let right_has = self.expr_mentions_ident(right, name);
-//RS                 match (left_has, right_has) {
-//RS                     (true, false) => right.as_ref(),
-//RS                     (false, true) => left.as_ref(),
-//RS                     _ => return None,
-//RS                 }
-//RS             }
-//RS             _ => return None,
-//RS         };
-//RS         let mut inputs = std::collections::BTreeSet::new();
-//RS         if !self.prove_auto_element_expr(
-//RS             addend,
-//RS             loop_var,
-//RS             &element_type,
-//RS             extent,
-//RS             "",
-//RS             false,
-//RS             &mut inputs,
-//RS         ) || inputs.is_empty()
-//RS         {
-//RS             return None;
-//RS         }
-//RS         Some(AutoVectorBodyProof {
-//RS             outputs: std::collections::BTreeSet::new(),
-//RS             inputs,
-//RS             element_type,
-//RS             no_early_exit: true,
-//RS             // The source accumulator is loop-carried. MIR replaces it with
-//RS             // the ratified fixed-width lane tree before packing.
-//RS             no_cross_iteration_deps: false,
-//RS         })
-//RS     }
-//RS 
-//RS 
-//RS     fn expr_mentions_ident(&self, expr: &Expr, name: &str) -> bool {
-//RS         match expr.without_parens() {
-//RS             Expr::Ident(current, _) => current == name,
-//RS             Expr::Unary(_, inner, ..) => self.expr_mentions_ident(inner, name),
-//RS             Expr::Binary(_, left, right, ..) => {
-//RS                 self.expr_mentions_ident(left, name) || self.expr_mentions_ident(right, name)
-//RS             }
-//RS             Expr::Field(base, _, _) | Expr::Index { base, .. } => {
-//RS                 self.expr_mentions_ident(base, name)
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn prove_auto_element_expr(
-//RS         &mut self,
-//RS         expr: &Expr,
-//RS         loop_var: &str,
-//RS         element_type: &Type,
-//RS         extent: Option<u64>,
-//RS         output: &str,
-//RS         same_lane_output: bool,
-//RS         inputs: &mut std::collections::BTreeSet<String>,
-//RS     ) -> bool {
-//RS         match expr.without_parens() {
-//RS             Expr::Int(..) | Expr::Float(..) => true,
-//RS             Expr::Ident(name, _) if name == loop_var => true,
-//RS             Expr::Ident(name, _) => self.lookup(name).is_some_and(|info| {
-//RS                 is_auto_vectorizable_scalar(&info.ty) && &info.ty == element_type
-//RS             }),
-//RS             Expr::Unary(UnOp::Neg, inner, ..) => self.prove_auto_element_expr(
-//RS                 inner,
-//RS                 loop_var,
-//RS                 element_type,
-//RS                 extent,
-//RS                 output,
-//RS                 same_lane_output,
-//RS                 inputs,
-//RS             ),
-//RS             Expr::Binary(op, left, right, ..)
-//RS                 if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div) =>
-//RS             {
-//RS                 self.prove_auto_element_expr(
-//RS                     left,
-//RS                     loop_var,
-//RS                     element_type,
-//RS                     extent,
-//RS                     output,
-//RS                     same_lane_output,
-//RS                     inputs,
-//RS                 ) && self.prove_auto_element_expr(
-//RS                     right,
-//RS                     loop_var,
-//RS                     element_type,
-//RS                     extent,
-//RS                     output,
-//RS                     same_lane_output,
-//RS                     inputs,
-//RS                 )
-//RS             }
-//RS             Expr::Index { base, index, .. } => {
-//RS                 let Expr::Ident(root, _) = base.without_parens() else {
-//RS                     return false;
-//RS                 };
-//RS                 let Some(ty) = self.auto_collection_element_type(root, index, loop_var, extent)
-//RS                 else {
-//RS                     return false;
-//RS                 };
-//RS                 if &ty != element_type || !is_auto_vectorizable_scalar(&ty) {
-//RS                     return false;
-//RS                 }
-//RS                 if root == output {
-//RS                     return false;
-//RS                 }
-//RS                 let _ = same_lane_output;
-//RS                 inputs.insert(root.clone());
-//RS                 true
-//RS             }
-//RS             Expr::Field(base, field, span) => {
-//RS                 let Expr::Index { base, index, .. } = base.without_parens() else {
-//RS                     return false;
-//RS                 };
-//RS                 let Expr::Ident(root, _) = base.without_parens() else {
-//RS                     return false;
-//RS                 };
-//RS                 let Some(elem) = self.auto_collection_element_type(root, index, loop_var, extent)
-//RS                 else {
-//RS                     return false;
-//RS                 };
-//RS                 let Some(ty) = self.field_type(&elem, field, *span) else {
-//RS                     return false;
-//RS                 };
-//RS                 if &ty != element_type || !is_auto_vectorizable_scalar(&ty) {
-//RS                     return false;
-//RS                 }
-//RS                 if root == output {
-//RS                     return false;
-//RS                 }
-//RS                 let _ = same_lane_output;
-//RS                 inputs.insert(root.clone());
-//RS                 true
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS     /// Attach a proof only after the ordinary function body has been checked.
-//RS     /// The TIR and every execution tier then receive the same proof record.
-//RS     pub(crate) fn check_kernel_marker(&mut self, f: &mut Func, owner_type: Option<&str>) {
-//RS         let Some(marker) = f.kernel.as_mut() else {
-//RS             return;
-//RS         };
-//RS 
-//RS         let failure = if owner_type.is_some() {
-//RS             Some(KernelFailure {
-//RS                 obligation: "top-level declaration",
-//RS                 span: marker.span,
-//RS             })
-//RS         } else if marker.mode != KernelMode::Parallel {
-//RS             Some(KernelFailure {
-//RS                 obligation: "parallel execution mode",
-//RS                 span: marker.span,
-//RS             })
-//RS         } else if f.is_unsafe {
-//RS             Some(KernelFailure {
-//RS                 obligation: "safe memory boundary",
-//RS                 span: f.unsafe_span.unwrap_or(marker.span),
-//RS             })
-//RS         } else if f.is_reactive || f.is_job || f.inline_foreign.is_some() {
-//RS             Some(KernelFailure {
-//RS                 obligation: "effect-free function body",
-//RS                 span: marker.span,
-//RS             })
-//RS         } else if !f.type_params.is_empty()
-//RS             || f.params
-//RS                 .iter()
-//RS                 .any(|param| param.variadic || !matches!(param.convention, AccessConvention::Read))
-//RS         {
-//RS             Some(KernelFailure {
-//RS                 obligation: "read-only, monomorphic parameters",
-//RS                 span: marker.span,
-//RS             })
-//RS         } else if f.params.iter().any(|param| {
-//RS             self.crossing_problem(&param.ty, SendCrossing::Kernel, true)
-//RS                 .is_some()
-//RS         }) || f.return_type.as_ref().is_some_and(|ty| {
-//RS             self.crossing_problem(ty, SendCrossing::Kernel, true)
-//RS                 .is_some()
-//RS         }) {
-//RS             Some(KernelFailure {
-//RS                 obligation: "sendable kernel boundary values",
-//RS                 span: marker.span,
-//RS             })
-//RS         } else if f
-//RS             .declared_effects
-//RS             .as_ref()
-//RS             .is_some_and(|effects| !effects.is_empty())
-//RS             || !self.fx_direct.is_empty()
-//RS             || !self.fx_edges.is_empty()
-//RS             || self.fx_maximal
-//RS         {
-//RS             Some(KernelFailure {
-//RS                 obligation: "no reachable effects or opaque calls",
-//RS                 span: marker.span,
-//RS             })
-//RS         } else {
-//RS             let mut names = f
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|param| param.name.clone())
-//RS                 .collect::<std::collections::HashSet<_>>();
-//RS             let mut failure = None;
-//RS             for statement in &f.body {
-//RS                 if failure.is_some() {
-//RS                     break;
-//RS                 }
-//RS                 if let Err(found) = self.prove_kernel_statement(statement, &mut names) {
-//RS                     failure = Some(found);
-//RS                 }
-//RS             }
-//RS             failure
-//RS         };
-//RS 
-//RS         if let Some(failure) = failure {
-//RS             marker.proof = None;
-//RS             if failure.obligation == "sendable kernel boundary values" {
-//RS                 if let Some((name, ty, problem)) = f.params.iter().find_map(|param| {
-//RS                     self.crossing_problem(&param.ty, SendCrossing::Kernel, true)
-//RS                         .map(|problem| (param.name.clone(), param.ty.clone(), problem))
-//RS                 }) {
-//RS                     self.report_unsendable(&name, &ty, problem, SendCrossing::Kernel, marker.span);
-//RS                     return;
-//RS                 }
-//RS                 if let Some(ty) = f.return_type.as_ref() {
-//RS                     if let Some(problem) = self.crossing_problem(ty, SendCrossing::Kernel, true) {
-//RS                         self.report_unsendable(
-//RS                             "kernel result",
-//RS                             ty,
-//RS                             problem,
-//RS                             SendCrossing::Kernel,
-//RS                             marker.span,
-//RS                         );
-//RS                         return;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             self.diags
-//RS                 .push(kernel_failure(failure.obligation, failure.span));
-//RS         } else {
-//RS             marker.proof = Some(KernelProof::parallel());
-//RS         }
-//RS     }
-//RS 
-//RS     fn prove_kernel_statement(
-//RS         &self,
-//RS         statement: &Stmt,
-//RS         names: &mut std::collections::HashSet<String>,
-//RS     ) -> Result<(), KernelFailure> {
-//RS         match statement {
-//RS             Stmt::Expr(expression) => self.prove_kernel_expr(expression, names),
-//RS             Stmt::Return(Some(expression), _) => self.prove_kernel_expr(expression, names),
-//RS             Stmt::Return(None, _) => Ok(()),
-//RS             Stmt::Val(binding) if !binding.mutable && binding.pattern.is_none() => {
-//RS                 self.prove_kernel_binding(binding, names)
-//RS             }
-//RS             Stmt::Val(binding) => Err(KernelFailure {
-//RS                 obligation: "immutable scalar locals",
-//RS                 span: binding.name_span,
-//RS             }),
-//RS             _ => Err(KernelFailure {
-//RS                 obligation: "uniform straight-line control flow",
-//RS                 span: statement.span(),
-//RS             }),
-//RS         }
-//RS     }
-//RS 
-//RS     fn prove_kernel_binding(
-//RS         &self,
-//RS         binding: &Binding,
-//RS         names: &mut std::collections::HashSet<String>,
-//RS     ) -> Result<(), KernelFailure> {
-//RS         self.prove_kernel_expr(&binding.init, names)?;
-//RS         names.insert(binding.name.clone());
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn prove_kernel_expr(
-//RS         &self,
-//RS         expression: &Expr,
-//RS         names: &std::collections::HashSet<String>,
-//RS     ) -> Result<(), KernelFailure> {
-//RS         match expression {
-//RS             Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) => Ok(()),
-//RS             Expr::Ident(name, _) if names.contains(name) => Ok(()),
-//RS             Expr::Ident(_, span) => Err(KernelFailure {
-//RS                 obligation: "closed captures",
-//RS                 span: *span,
-//RS             }),
-//RS             Expr::Unary(_, inner, _)
-//RS             | Expr::Paren(inner, _)
-//RS             | Expr::Copy(inner, _)
-//RS             | Expr::Ok(inner, _)
-//RS             | Expr::Err(inner, _)
-//RS             | Expr::Present(inner, _)
-//RS             | Expr::Tainted(inner, _, _)
-//RS             | Expr::Place(inner, crate::AST::PlaceAccess::Read, _) => {
-//RS                 self.prove_kernel_expr(inner, names)
-//RS             }
-//RS             Expr::Binary(_, left, right, _) => {
-//RS                 self.prove_kernel_expr(left, names)?;
-//RS                 self.prove_kernel_expr(right, names)
-//RS             }
-//RS             Expr::Field(base, _, _) => self.prove_kernel_expr(base, names),
-//RS             Expr::ListLit(items, _) => {
-//RS                 for item in items {
-//RS                     self.prove_kernel_expr(item, names)?;
-//RS                 }
-//RS                 Ok(())
-//RS             }
-//RS             Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 args,
-//RS                 ..
-//RS             } if matches!(receiver.as_ref(), Expr::Ident(alias, _) if self
-//RS                 .core_imports
-//RS                 .get(alias)
-//RS                 .is_some_and(|module| module == "core.compute"))
-//RS                 && SAFE_COMPUTE_CALLS.contains(&method.as_str()) =>
-//RS             {
-//RS                 for argument in args {
-//RS                     self.prove_kernel_expr(&argument.expr, names)?;
-//RS                 }
-//RS                 Ok(())
-//RS             }
-//RS             Expr::MethodCall {
-//RS                 method: _,
-//RS                 method_span,
-//RS                 ..
-//RS             } => Err(KernelFailure {
-//RS                 obligation: "audited Core compute calls only",
-//RS                 span: *method_span,
-//RS             }),
-//RS             Expr::Call(call) => Err(KernelFailure {
-//RS                 obligation: "closed captures and provider calls",
-//RS                 span: call.name_span,
-//RS             }),
-//RS             Expr::Index { span, .. } | Expr::Slice { span, .. } => Err(KernelFailure {
-//RS                 obligation: "statically proved bounds",
-//RS                 span: *span,
-//RS             }),
-//RS             Expr::Lambda(lambda) => Err(KernelFailure {
-//RS                 obligation: "no captures",
-//RS                 span: lambda.span,
-//RS             }),
-//RS             Expr::CallValue { span, .. } => Err(KernelFailure {
-//RS                 obligation: "closed calls",
-//RS                 span: *span,
-//RS             }),
-//RS             _ => Err(KernelFailure {
-//RS                 obligation: "race-free straight-line body",
-//RS                 span: expression.span(),
-//RS             }),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn is_auto_vectorizable_scalar(ty: &Type) -> bool {
-//RS     matches!(ty, Type::Float | Type::Float32)
-//RS }
-//RS 
-//RS fn is_auto_scalar(ty: &Type) -> bool {
-//RS     matches!(
-//RS         ty,
-//RS         Type::Int | Type::Float | Type::Bool | Type::IntN { .. } | Type::Float32
-//RS     )
-//RS }
-//RS 
-//RS fn kernel_failure(obligation: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E1102",
-//RS         format!("`#Kernel(.parallel)` cannot cross its worker boundary: sema cannot prove {obligation}"),
-//RS         "a safe kernel crosses a worker boundary only after sema proves sendability, bounds, aliasing, captures, races, barriers, and control flow before TIR".to_string(),
-//RS         "use a read-only effect-free expression over checked Core compute operations, or move provider/raw code behind its typed `#Unsafe` boundary".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-// END-PORT-PENDING 0417 crates/jet-sema/src/Sema/CheckerKernel.rs:1-914
+// Conservative safe-kernel proof: a marker is not a proof. Only exact checked
+// loop shapes or read-only effect-free expressions over audited Core compute qualify.
+use jet_foundation.[Diagnostic, Span, AccessConvention, AutoVectorizationFacts, BinOp, Binding, Expr, ForKind, Func, KernelMode, KernelProof, LValue, Stmt, Type, UnOp, PlaceAccess]
+use jet_sema.[Checker, SendCrossing]
 
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:17
+const SAFE_COMPUTE_CALLS :: ["abs", "add", "broadcast_to", "det", "div", "exp", "fft", "full", "from_list", "inv", "matmul", "maximum", "minimum", "mul", "negate", "numel", "ones", "rank", "reshape", "shape", "solve", "sqrt", "sub", "sum_axis", "to_list", "to_sparse", "transpose", "zeros"]
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:48
+#Error
+struct KernelFailure { obligation: String, span: Span }
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:53
+struct AutoVectorBodyProof {
+    outputs: [String:Bool]
+    inputs: [String:Bool]
+    element_type: Type
+    no_early_exit: Bool
+    no_cross_iteration_deps: Bool
+}
+
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:68
+    pub fn prove_auto_vectorization_loop(self: &Self, kind: &ForKind, loop_var: String, body: &[Stmt], before_direct: &[String:Bool], before_edges: &[String:Bool], before_maximal: Bool) -> AutoVectorizationFacts? {
+        if kind != .Range(start: start, end: end, step: step, exclusive: exclusive) -> return None
+        if !exclusive || step != None -> return None
+        if start.without_parens() != .Int(0, ..) -> return None
+        end_root :: if end.without_parens() == {
+            .MethodCall(receiver: receiver, method: method, args: args, ..) && method == "len" && args.is_empty() -> if receiver.without_parens() == { .Ident(root, _) -> Val(~root); _ -> return None }
+            _ -> None
+        }
+        extent :: if end.without_parens() == {
+            .Int(value, ..) && value >= 0 -> Val(U64.try_from(value).ok() ?? return None)
+            _ -> {
+                root :: end_root ?? return None
+                info :: self.lookup(root) ?? return None
+                if info.ty == { .FixedList(_, len) -> Val(len.literal_value() ?? return None); .List -> None; _ -> return None }
+            }
+        }
+        proof :: self.prove_auto_body(body, loop_var, extent) ?? return None
+        if proof.outputs.is_empty() && proof.inputs.is_empty() -> return None
+        collection_roots := [String:Bool]{}
+        loop (root, _) in proof.outputs { collection_roots.insert(~root, true) }
+        loop (root, _) in proof.inputs { collection_roots.insert(~root, true) }
+        dynamic_root :: collection_roots.keys().any(root -> self.lookup(root).is_some_and(info -> if info.ty == { .List -> true; _ -> false }))
+        if dynamic_root && (end_root == None || collection_roots.len() != 1 || !end_root.is_some_and(root -> collection_roots.contains_key(root))) -> return None
+        if proof.inputs.len() > 1 && proof.inputs.keys().any(name -> self.lookup(name).is_some_and(info -> info.param_conv == Val(AccessConvention.Read))) -> return None
+        effect_free :: self.fx_direct.keys().all(name -> before_direct.contains_key(name)) && self.fx_edges.keys().all(name -> before_edges.contains_key(name)) && self.fx_maximal == before_maximal
+        if !effect_free -> return None
+        Val(AutoVectorizationFacts{element_type: ^proof.element_type, no_aliasing: true, no_early_exit: proof.no_early_exit, effect_free_body: effect_free, no_cross_iteration_deps: proof.no_cross_iteration_deps})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:165
+    fn prove_auto_body(self: &Self, body: &[Stmt], loop_var: String, extent: U64?) -> AutoVectorBodyProof? {
+        self.prove_auto_control_body(body, loop_var, extent).or_else(fn() { self.prove_auto_reduction_body(body, loop_var, extent) }).or_else(fn() { self.prove_auto_elementwise_body(body, loop_var, extent) })
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:179
+    fn prove_auto_control_body(self: &Self, body: &[Stmt], loop_var: String, extent: U64?) -> AutoVectorBodyProof? {
+        if body.len() != 1 -> return None
+        if body[0] != .Switch(subject: subject, arms: arms, else_body: None, ..) -> return None
+        if arms.len() != 1 || subject.without_parens() != .Bool(true, _) -> return None
+        arm :: &arms[0]
+        inputs := [String:Bool]{}
+        condition_type := Type?{None}
+        if !self.prove_auto_condition_expr(arm.cond, loop_var, extent, &condition_type, &inputs) -> return None
+        element_type :: condition_type ?? return None
+        if !is_auto_scalar(element_type) || inputs.is_empty() || arm.body.len() != 1 -> return None
+        if arm.body[0] == {
+            .Assign(target: .Local(name: name, ..), op: .Val(.Add), value: value, ..) -> {
+                info :: self.lookup(name) ?? return None
+                if !is_auto_vectorizable_scalar(element_type) || info.ty != element_type || !info.mutable || info.param_conv != None -> return None
+                if self.expr_mentions_ident(value, name) -> return None
+                if !self.prove_auto_element_expr(value, loop_var, element_type, extent, "", false, &inputs) -> return None
+                Val(AutoVectorBodyProof{outputs: [:], inputs: ^inputs, element_type: ^element_type, no_early_exit: true, no_cross_iteration_deps: false})
+            }
+            .Return(.Val(value), _) -> {
+                expected := Val(~element_type)
+                if !self.prove_auto_condition_expr(value, loop_var, extent, &expected, &inputs) -> return None
+                Val(AutoVectorBodyProof{outputs: [:], inputs: ^inputs, element_type: ^element_type, no_early_exit: false, no_cross_iteration_deps: true})
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:273
+    fn prove_auto_condition_expr(self: &Self, expr: &Expr, loop_var: String, extent: U64?, element_type: &Type?, inputs: &[String:Bool]) -> Bool {
+        if expr.without_parens() == {
+            .Int, .Float, .Bool -> true
+            .Ident(name, _) && name == loop_var -> true
+            .Ident(name, _) -> self.lookup(name).is_some_and(info -> is_auto_scalar(info.ty) && element_type.is_none_or(expected -> expected == info.ty))
+            .Unary(UnOp.Neg, inner, _), .Unary(UnOp.Not, inner, _) -> self.prove_auto_condition_expr(inner, loop_var, extent, &element_type, &inputs)
+            .Binary(op, left, right, _) && (op.is_comparison() || op == BinOp.And || op == BinOp.Or || op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) -> self.prove_auto_condition_expr(left, loop_var, extent, &element_type, &inputs) && self.prove_auto_condition_expr(right, loop_var, extent, &element_type, &inputs)
+            .Index(base: base, index: index, ..) -> {
+                if base.without_parens() != .Ident(root, _) -> return false
+                ty :: self.auto_collection_element_type(root, index, loop_var, extent) ?? return false
+                if !is_auto_scalar(ty) || element_type.is_some_and(expected -> expected != ty) -> return false
+                element_type = Val(^ty)
+                inputs.insert(~root, true)
+                true
+            }
+            .Field(base, field, span) -> {
+                if base.without_parens() != .Index(base: collection, index: index, ..) -> return false
+                if collection.without_parens() != .Ident(root, _) -> return false
+                elem :: self.auto_collection_element_type(root, index, loop_var, extent) ?? return false
+                ty :: self.field_type(elem, field, span) ?? return false
+                if !is_auto_scalar(ty) || element_type.is_some_and(expected -> expected != ty) -> return false
+                element_type = Val(^ty)
+                inputs.insert(~root, true)
+                true
+            }
+            _ -> false
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:363
+    fn prove_auto_elementwise_body(self: &Self, body: &[Stmt], loop_var: String, extent: U64?) -> AutoVectorBodyProof? {
+        outputs := [String:Bool]{}
+        inputs := [String:Bool]{}
+        // GATE #4499: exact tuple key identity; do not stringify output places.
+        written := [(String, String?):Bool]{}
+        element_type := Type?{None}
+        loop stmt in body {
+            if stmt != .Assign(target: target, op: None, value: value, ..) -> return None
+            (root, field, output_elem) :: self.auto_output_place(target, loop_var, extent) ?? return None
+            key :: (~root, ^field)
+            if written.contains_key(key) -> return None
+            written.insert(^key, true)
+            outputs.insert(~root, true)
+            if !is_auto_vectorizable_scalar(output_elem) -> return None
+            if element_type == .Val(expected) {
+                if expected != output_elem -> return None
+            } else { element_type = Val(~output_elem) }
+            if !self.prove_auto_element_expr(value, loop_var, output_elem, extent, root, true, &inputs) -> return None
+        }
+        Val(AutoVectorBodyProof{outputs: ^outputs, inputs: ^inputs, element_type: element_type ?? return None, no_early_exit: true, no_cross_iteration_deps: true})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:420
+    fn auto_output_place(self: &Self, target: &LValue, loop_var: String, extent: U64?) -> (String, String?, Type)? {
+        if target == {
+            .Index(base: base, index: index, ..) -> {
+                if base.without_parens() != .Ident(root, _) -> return None
+                if index.without_parens() != .Ident(name, _) || name != loop_var -> return None
+                elem :: self.auto_collection_element_type(root, index, loop_var, extent) ?? return None
+                _ :: self.check_auto_output_root(root, extent) ?? return None
+                Val((~root, None, ^elem))
+            }
+            .Field(base: base, field: field, span: span) -> {
+                if base.without_parens() != .Index(base: collection, index: index, ..) -> return None
+                if collection.without_parens() != .Ident(root, _) -> return None
+                elem :: self.auto_collection_element_type(root, index, loop_var, extent) ?? return None
+                ty :: self.field_type(elem, field, span) ?? return None
+                _ :: self.check_auto_output_root(root, extent) ?? return None
+                Val((~root, Val(~field), ^ty))
+            }
+            .Local -> None
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:456
+    fn check_auto_output_root(self: &Self, root: String, extent: U64?) -> Unit? {
+        info :: self.lookup(root) ?? return None
+        if info.ty == {
+            .FixedList(_, len) -> {
+                if Val(len.literal_value() ?? return None) != extent -> return None
+                if info.param_conv != None || !info.mutable -> return None
+            }
+            .List -> {
+                if info.param_conv.is_some_and(conv -> conv != AccessConvention.Write) || (!info.mutable && info.param_conv != Val(AccessConvention.Write)) -> return None
+            }
+            _ -> return None
+        }
+        Val(())
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:481
+    fn auto_collection_element_type(self: &Self, root: String, index: &Expr, loop_var: String, extent: U64?) -> Type? {
+        if index.without_parens() != .Ident(name, _) || name != loop_var -> return None
+        info :: self.lookup(root) ?? return None
+        if info.ty == {
+            .FixedList(elem, len) -> {
+                if Val(len.literal_value() ?? return None) != extent -> return None
+                Val(~elem)
+            }
+            .List(elem) -> Val(~elem)
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:505
+    fn prove_auto_reduction_body(self: &Self, body: &[Stmt], loop_var: String, extent: U64?) -> AutoVectorBodyProof? {
+        if body.len() != 1 -> return None
+        if body[0] != .Assign(target: .Local(name: name, ..), op: op, value: value, ..) -> return None
+        info :: self.lookup(name) ?? return None
+        element_type :: ~info.ty
+        if !is_auto_vectorizable_scalar(element_type) || !info.mutable || info.param_conv != None -> return None
+        addend :: if op == {
+            .Val(.Add) && !self.expr_mentions_ident(value, name) -> &value
+            .None -> {
+                if value.without_parens() != .Binary(BinOp.Add, left, right, _) -> return None
+                left_has :: self.expr_mentions_ident(left, name)
+                right_has :: self.expr_mentions_ident(right, name)
+                if (left_has, right_has) == { (true, false) -> &right; (false, true) -> &left; _ -> return None }
+            }
+            _ -> return None
+        }
+        inputs := [String:Bool]{}
+        if !self.prove_auto_element_expr(addend, loop_var, element_type, extent, "", false, &inputs) || inputs.is_empty() -> return None
+        // MIR replaces the loop-carried accumulator with the fixed-width lane tree.
+        Val(AutoVectorBodyProof{outputs: [:], inputs: ^inputs, element_type: ^element_type, no_early_exit: true, no_cross_iteration_deps: false})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:569
+    fn expr_mentions_ident(self: &Self, expr: &Expr, name: String) -> Bool {
+        if expr.without_parens() == {
+            .Ident(current, _) -> current == name
+            .Unary(_, inner, _) -> self.expr_mentions_ident(inner, name)
+            .Binary(_, left, right, _) -> self.expr_mentions_ident(left, name) || self.expr_mentions_ident(right, name)
+            .Field(base, _, _), .Index(base: base, ..) -> self.expr_mentions_ident(base, name)
+            _ -> false
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:583
+    fn prove_auto_element_expr(self: &Self, expr: &Expr, loop_var: String, element_type: &Type, extent: U64?, output: String, same_lane_output: Bool, inputs: &[String:Bool]) -> Bool {
+        if expr.without_parens() == {
+            .Int, .Float -> true
+            .Ident(name, _) && name == loop_var -> true
+            .Ident(name, _) -> self.lookup(name).is_some_and(info -> is_auto_vectorizable_scalar(info.ty) && info.ty == element_type)
+            .Unary(UnOp.Neg, inner, _) -> self.prove_auto_element_expr(inner, loop_var, element_type, extent, output, same_lane_output, &inputs)
+            .Binary(op, left, right, _) && (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) -> self.prove_auto_element_expr(left, loop_var, element_type, extent, output, same_lane_output, &inputs) && self.prove_auto_element_expr(right, loop_var, element_type, extent, output, same_lane_output, &inputs)
+            .Index(base: base, index: index, ..) -> {
+                if base.without_parens() != .Ident(root, _) -> return false
+                ty :: self.auto_collection_element_type(root, index, loop_var, extent) ?? return false
+                if ty != element_type || !is_auto_vectorizable_scalar(ty) || root == output -> return false
+                inputs.insert(~root, true)
+                true
+            }
+            .Field(base, field, span) -> {
+                if base.without_parens() != .Index(base: collection, index: index, ..) -> return false
+                if collection.without_parens() != .Ident(root, _) -> return false
+                elem :: self.auto_collection_element_type(root, index, loop_var, extent) ?? return false
+                ty :: self.field_type(elem, field, span) ?? return false
+                if ty != element_type || !is_auto_vectorizable_scalar(ty) || root == output -> return false
+                inputs.insert(~root, true)
+                true
+            }
+            _ -> false
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:676
+    pub fn check_kernel_marker(self: &Self, f: &Func, owner_type: String?) {
+        if f.kernel != .Val(marker) -> return
+        failure := KernelFailure?{None}
+        if owner_type != None { failure = Val(KernelFailure{obligation: "top-level declaration", span: marker.span}) }
+        else if marker.mode != KernelMode.Parallel { failure = Val(KernelFailure{obligation: "parallel execution mode", span: marker.span}) }
+        else if f.is_unsafe { failure = Val(KernelFailure{obligation: "safe memory boundary", span: f.unsafe_span.unwrap_or(marker.span)}) }
+        else if f.is_reactive || f.is_job || f.inline_foreign != None { failure = Val(KernelFailure{obligation: "effect-free function body", span: marker.span}) }
+        else if !f.type_params.is_empty() || f.params.any(param -> param.variadic || param.convention != AccessConvention.Read) { failure = Val(KernelFailure{obligation: "read-only, monomorphic parameters", span: marker.span}) }
+        else if f.params.any(param -> self.crossing_problem(param.ty, SendCrossing.Kernel, true) != None) || f.return_type.is_some_and(ty -> self.crossing_problem(ty, SendCrossing.Kernel, true) != None) { failure = Val(KernelFailure{obligation: "sendable kernel boundary values", span: marker.span}) }
+        else if f.declared_effects.is_some_and(effects -> !effects.is_empty()) || !self.fx_direct.is_empty() || !self.fx_edges.is_empty() || self.fx_maximal { failure = Val(KernelFailure{obligation: "no reachable effects or opaque calls", span: marker.span}) }
+        else {
+            names := [String:Bool]{}
+            loop param in f.params { names.insert(~param.name, true) }
+            loop statement in f.body {
+                if failure != None -> break
+                self.prove_kernel_statement(statement, &names) catch found -> { failure = Val(^found) }
+            }
+        }
+        if failure == .Val(found) {
+            marker.proof = None
+            if found.obligation == "sendable kernel boundary values" {
+                loop param in f.params {
+                    if self.crossing_problem(param.ty, SendCrossing.Kernel, true) == .Val(problem) {
+                        self.report_unsendable(param.name, param.ty, ^problem, SendCrossing.Kernel, marker.span)
+                        return
+                    }
+                }
+                if f.return_type == .Val(ty) {
+                    if self.crossing_problem(ty, SendCrossing.Kernel, true) == .Val(problem) {
+                        self.report_unsendable("kernel result", ty, ^problem, SendCrossing.Kernel, marker.span)
+                        return
+                    }
+                }
+            }
+            self.diags.push(kernel_failure(found.obligation, found.span))
+        } else { marker.proof = Val(KernelProof.parallel()) }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:781
+    fn prove_kernel_statement(self: &Self, statement: &Stmt, names: &[String:Bool]) KernelFailure! {
+        if statement == {
+            .Expr(expression), .Return(.Val(expression), _) -> self.prove_kernel_expr(expression, names)
+            .Return(.None, _) -> {}
+            .Val(binding) && !binding.mutable && binding.pattern == None -> self.prove_kernel_binding(binding, &names)
+            .Val(binding) -> throw KernelFailure{obligation: "immutable scalar locals", span: binding.name_span}
+            _ -> throw KernelFailure{obligation: "uniform straight-line control flow", span: statement.span()}
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:804
+    fn prove_kernel_binding(self: &Self, binding: &Binding, names: &[String:Bool]) KernelFailure! {
+        self.prove_kernel_expr(binding.init, names)
+        names.insert(~binding.name, true)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:814
+    fn prove_kernel_expr(self: &Self, expression: &Expr, names: &[String:Bool]) KernelFailure! {
+        if expression == {
+            .Int, .Float, .Bool, .Char -> {}
+            .Ident(name, _) && names.contains_key(name) -> {}
+            .Ident(_, span) -> throw KernelFailure{obligation: "closed captures", span: span}
+            .Unary(_, inner, _), .Paren(inner, _), .Copy(inner, _), .Ok(inner, _), .Err(inner, _), .Present(inner, _), .Tainted(inner, _, _), .Place(inner, PlaceAccess.Read, _) -> self.prove_kernel_expr(inner, names)
+            .Binary(_, left, right, _) -> { self.prove_kernel_expr(left, names); self.prove_kernel_expr(right, names) }
+            .Field(base, _, _) -> self.prove_kernel_expr(base, names)
+            .ListLit(items, _) -> loop item in items { self.prove_kernel_expr(item, names) }
+            .MethodCall(receiver: receiver, method: method, args: args, ..) && (if receiver == { .Ident(alias, _) -> self.core_imports.get(alias).is_some_and(module -> module == "core.compute"); _ -> false }) && SAFE_COMPUTE_CALLS.contains(method) -> loop argument in args { self.prove_kernel_expr(argument.expr, names) }
+            .MethodCall(method_span: span, ..) -> throw KernelFailure{obligation: "audited Core compute calls only", span: span}
+            .Call(call) -> throw KernelFailure{obligation: "closed captures and provider calls", span: call.name_span}
+            .Index(span: span, ..), .Slice(span: span, ..) -> throw KernelFailure{obligation: "statically proved bounds", span: span}
+            .Lambda(lambda) -> throw KernelFailure{obligation: "no captures", span: lambda.span}
+            .CallValue(span: span, ..) -> throw KernelFailure{obligation: "closed calls", span: span}
+            _ -> throw KernelFailure{obligation: "race-free straight-line body", span: expression.span()}
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:895
+fn is_auto_vectorizable_scalar(ty: &Type) -> Bool { ty == Type.Float || ty == Type.Float32 }
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:899
+fn is_auto_scalar(ty: &Type) -> Bool { if ty == { .Int, .Float, .Bool, .IntN, .Float32 -> true; _ -> false } }
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:906
+fn kernel_failure(obligation: String, span: Span) -> Diagnostic {
+    Diagnostic.error("E1102", "`#Kernel(.parallel)` cannot cross its worker boundary: sema cannot prove {obligation}", "a safe kernel crosses a worker boundary only after sema proves sendability, bounds, aliasing, captures, races, barriers, and control flow before TIR", "use a read-only effect-free expression over checked Core compute operations, or move provider/raw code behind its typed `#Unsafe` boundary", Val(span))
+}

@@ -1,0 +1,40 @@
+use jet_comptime.Comptime.ServicesLite.[runtime_to_restart_budget, restart_budget_to_runtime, runtime_to_task_outcome, task_outcome_to_runtime, runtime_to_queue_state, queue_state_to_runtime, intern_slot, tag_tree_slot]
+use jet_codegen.Prelude.CoreLib.Top.Services.[JetServiceRestartBudget]
+use jet_codegen.Prelude.TaskGroup.[JetTaskOutcome]
+use jet_codegen.Prelude.JobQueueTypes.[JetJobQueueState]
+use jet_foundation.[Span]
+use jet_foundation.MIR.[MIRRuntimeValue, MIRRuntimeField, MIRRuntimeEnumArg]
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:265-294
+#Test("restart_budget_roundtrip_and_range_refusal") {
+    span :: Span.new(0, 0)
+    budget :: JetServiceRestartBudget{max: 3, per_ms: 1000}
+    restored :: runtime_to_restart_budget(&restart_budget_to_runtime(&budget), span)!
+    assert(restored.max == 3 && restored.per_ms == 1000)
+    invalid :: MIRRuntimeValue.Struct{type_name: "ServiceRestartBudget", fields: [MIRRuntimeField]{MIRRuntimeField{name: "max", value: MIRRuntimeValue.Int{value: -1}}, MIRRuntimeField{name: "per_ms", value: MIRRuntimeValue.Int{value: 1000}}}}
+    assert(runtime_to_restart_budget(&invalid, span).is_err())
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:320-371
+#Test("task_outcome_roundtrip_and_empty_panic_refusal") {
+    span :: Span.new(0, 0)
+    original :: JetTaskOutcome.Panicked{reason: "worker panicked"}
+    restored :: runtime_to_task_outcome(&task_outcome_to_runtime(&original), span)!
+    assert(restored == original)
+    invalid :: MIRRuntimeValue.Enum{type_name: "TaskOutcome", variant: "Panicked", args: [MIRRuntimeEnumArg]{MIRRuntimeEnumArg{name: None, value: MIRRuntimeValue.String{value: ""}}}}
+    assert(runtime_to_task_outcome(&invalid, span).is_err())
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1641-1682
+#Test("queue_state_roundtrip_rejects_payload") {
+    span :: Span.new(0, 0)
+    loop state in [JetJobQueueState]{JetJobQueueState.Queued, JetJobQueueState.Running, JetJobQueueState.Retrying, JetJobQueueState.Completed, JetJobQueueState.Failed, JetJobQueueState.DeadLettered, JetJobQueueState.Cancelled} {
+        assert(runtime_to_queue_state(&queue_state_to_runtime(state), span)! == state)
+    }
+    invalid :: MIRRuntimeValue.Enum{type_name: "JobQueueState", variant: "Queued", args: [MIRRuntimeEnumArg]{MIRRuntimeEnumArg{name: None, value: MIRRuntimeValue.Unit}}}
+    assert(runtime_to_queue_state(&invalid, span).is_err())
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:43-71
+#Test("tree_slot_retag_replaces_existing_slot") {
+    original :: MIRRuntimeValue.Struct{type_name: "ServiceTree", fields: [MIRRuntimeField]{MIRRuntimeField{name: "__slot", value: MIRRuntimeValue.Int{value: 1}}, MIRRuntimeField{name: "name", value: MIRRuntimeValue.String{value: "tree"}}}}
+    tagged :: tag_tree_slot(^original, 5)
+    assert(intern_slot(&tagged) == Val(5))
+    if tagged == .Struct(_, fields) -> assert(fields.len() == 2) else -> assert(false)
+}

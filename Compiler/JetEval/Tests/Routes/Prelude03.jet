@@ -1,0 +1,28 @@
+use jet_foundation.AST.[CtValue, Type]
+
+// Rust: crates/jet-comptime/src/Comptime/TextLite.rs:361
+#Test("string_route_find_retains_utf8_byte_offset_and_checks_carrier") {
+    assert_eq(string_route("éx", "find", &[CtValue.Str("x")]), Val(CtValue.Int(2)))
+    assert_eq(string_route("éx", "find", &[CtValue.Int(1)]), None)
+    assert_eq(string_route("éx", "find", &[]), None)
+    assert_eq(string_route("éx", "not_a_kernel_row", &[]), None)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/TextLite.rs:376
+#Test("string_route_partition_keeps_head_sep_tail_nominal_shape") {
+    expected := CtValue.Struct { type_name: "(head,sep,tail)", fields: [("head", CtValue.Str("é")), ("sep", CtValue.Str(":")), ("tail", CtValue.Str("x"))] }
+    assert_eq(string_route("é:x", "partition", &[CtValue.Str(":")]), Val(^expected))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/TextLite.rs:594
+#Test("io_error_projection_preserves_operation_resource_code_and_absence") {
+    error := IOError.NotFound(IOContext.new(IOOperation.Read, Val("missing"), Val(2), None))
+    context := CtValue.Struct { type_name: "IOContext", fields: [
+        ("operation", CtValue.Enum { type_name: "IOOperation", variant: "Read", args: [] }),
+        ("resource", CtValue.Present(CtValue.Str("missing"))),
+        ("os_code", CtValue.Present(CtValue.Int(2))),
+        ("cause", CtValue.absent(Type.String)),
+    ] }
+    expected := CtValue.Enum { type_name: "IOError", variant: "NotFound", args: [(None, ^context)] }
+    assert_eq(io_error_ct(^error), expected)
+}

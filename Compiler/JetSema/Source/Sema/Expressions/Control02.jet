@@ -1,1904 +1,816 @@
-// PORT-PENDING 0412 crates-jet-sema-src-sema-checkerinfer-fallible-module-group: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1-1900
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Type inference: fallible forms (`ok`/`err`/`try`/`or`-fallback).
-//RS //!
-//RS //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
-//RS 
-//RS use super::*;
-//RS use crate::Diagnostics::{Diagnostic, FixApplicability, FixSafety, Span, TextEdit};
-//RS use crate::Sema::Diagnostics::{is_core_error_family_type, is_default_error};
-//RS use crate::Syntax;
-//RS use crate::AST::{Call, Expr, LambdaBody, OrFallback, Stmt, TryConvert, Type};
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS struct FailureCallProvenance {
-//RS     callee: String,
-//RS     definition: String,
-//RS     contract: String,
-//RS }
-//RS 
-//RS fn publish_try_call_carrier(inner: &mut Expr, carrier: impl FnOnce() -> Type) {
-//RS     let mut carrier_expr = inner;
-//RS     while let Expr::Paren(paren, _) = carrier_expr {
-//RS         carrier_expr = paren.as_mut();
-//RS     }
-//RS     let checked_return = match carrier_expr {
-//RS         Expr::Call(call) => call.resolved_ret.as_mut(),
-//RS         Expr::MethodCall { resolved_ret, .. } => resolved_ret.as_mut(),
-//RS         _ => None,
-//RS     };
-//RS     if let Some(checked_return) = checked_return {
-//RS         if !checked_return.is_fallible() {
-//RS             *checked_return = carrier();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     pub(crate) fn infer_ok(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
-//RS         let expected_result = self.expected_type.clone().and_then(|expected| {
-//RS             expected
-//RS                 .unwrap_result()
-//RS                 .map(|(ok_ty, err_ty)| (ok_ty.clone(), err_ty.clone()))
-//RS         });
-//RS         let payload = if let Some((ok_ty, _)) = expected_result.as_ref() {
-//RS             self.infer_with_expected(inner, ok_ty)?
-//RS         } else {
-//RS             self.infer_owning_value(inner)?
-//RS         };
-//RS         if let Some((ok_ty, err_ty)) = expected_result {
-//RS             let ok_payload = payload == ok_ty
-//RS                 || matches!(&ok_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
-//RS             if !ok_payload {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0108",
-//RS                     format!(
-//RS                         "this `{}` holds {}, but {} was expected",
-//RS                         Syntax::LIT_OK,
-//RS                         payload.show(),
-//RS                         ok_ty.show()
-//RS                     ),
-//RS                     "the success value must match the result's value type".to_string(),
-//RS                     type_fix_hint(&ok_ty, &payload),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS             return Some(Type::Result {
-//RS                 ok: Box::new(ok_ty),
-//RS                 err: Box::new(err_ty),
-//RS             });
-//RS         }
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0404",
-//RS             format!("`{}(...)` only fits where a fallible result is expected", Syntax::LIT_OK),
-//RS             format!(
-//RS                 "`{}` builds the success side of a `T !E` result",
-//RS                 Syntax::LIT_OK
-//RS             ),
-//RS             "use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one"
-//RS                 .to_string(),
-//RS             Some(span),
-//RS         ));
-//RS         None
-//RS     }
-//RS 
-//RS     /// D-FAIL-INFER-UNION1=A: the pre-pass probes the function body itself;
-//RS     /// a callback's failures belong to the callback's own carrier.
-//RS     pub(crate) fn failure_union_probing(&self) -> bool {
-//RS         self.failure_union_probe.is_some() && !self.in_lambda_body
-//RS     }
-//RS 
-//RS     /// D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: record the value an `Err(...)`
-//RS     /// sends down the default route. A leading-dot case with no expected
-//RS     /// type (`Err(.NotFound(n))`) becomes a case of the function's own error
-//RS     /// type, with the payload types of its checked arguments.
-//RS     fn probe_failure_value(&mut self, inner: &mut Expr) {
-//RS         let saved_expected = self.expected_type.take();
-//RS         if let Expr::EnumLit {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS             span,
-//RS             ..
-//RS         } = inner
-//RS         {
-//RS             if type_name.is_empty() {
-//RS                 let name = variant.clone();
-//RS                 let span = *span;
-//RS                 let mut payload = Vec::with_capacity(args.len());
-//RS                 for arg in args.iter_mut() {
-//RS                     let (label, expr) = match arg {
-//RS                         crate::AST::EnumLitArg::Positional(expr) => (None, expr),
-//RS                         crate::AST::EnumLitArg::Named { label, expr } => {
-//RS                             (Some(label.clone()), expr)
-//RS                         }
-//RS                     };
-//RS                     let ty = self
-//RS                         .infer_owning_value(expr)
-//RS                         .unwrap_or_else(|| Type::Named("_".to_string()));
-//RS                     payload.push((label, ty));
-//RS                 }
-//RS                 self.expected_type = saved_expected;
-//RS                 if let Some(probe) = self.failure_union_probe.as_mut() {
-//RS                     probe.cases.push(crate::Sema::FailureCase {
-//RS                         name,
-//RS                         payload,
-//RS                         span,
-//RS                     });
-//RS                 }
-//RS                 return;
-//RS             }
-//RS         }
-//RS         let payload = self.infer_owning_value(inner);
-//RS         self.expected_type = saved_expected;
-//RS         if let Some(probe) = self.failure_union_probe.as_mut() {
-//RS             match payload {
-//RS                 Some(payload) => probe.add_member(&payload),
-//RS                 None => probe.general = true,
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn infer_err(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
-//RS         let expected_result = self.expected_type.clone().and_then(|expected| {
-//RS             expected
-//RS                 .unwrap_result()
-//RS                 .map(|(ok_ty, err_ty)| (ok_ty.clone(), err_ty.clone()))
-//RS         });
-//RS         if let Some((ok_ty, err_ty)) = expected_result
-//RS             .as_ref()
-//RS             .filter(|(_, err_ty)| is_default_error(err_ty) && self.failure_union_probing())
-//RS         {
-//RS             let carrier = Type::Result {
-//RS                 ok: Box::new(ok_ty.clone()),
-//RS                 err: Box::new(err_ty.clone()),
-//RS             };
-//RS             self.probe_failure_value(inner);
-//RS             return Some(carrier);
-//RS         }
-//RS         // D-FAIL-INFER-UNION1=A: an inferred union that holds the general
-//RS         // `Err` builds that member from a message, like the default route.
-//RS         let general_target = expected_result.as_ref().is_some_and(|(_, err_ty)| {
-//RS             is_default_error(err_ty)
-//RS                 || err_ty.union_contains(&Type::Named(Syntax::TYPE_ERR.to_string()))
-//RS         });
-//RS         let message_literal = matches!(inner.without_parens(), Expr::Str(..));
-//RS         let payload_expected = expected_result.as_ref().map(|(_, err_ty)| {
-//RS             if is_default_error(err_ty) || (general_target && message_literal) {
-//RS                 Type::String
-//RS             } else {
-//RS                 err_ty.clone()
-//RS             }
-//RS         });
-//RS         let mut payload = if let Some(expected) = payload_expected.as_ref() {
-//RS             self.infer_with_expected(inner, expected)?
-//RS         } else {
-//RS             self.infer_owning_value(inner)?
-//RS         };
-//RS         if let Some((ok_ty, err_ty)) = expected_result {
-//RS             if general_target && payload == Type::String {
-//RS                 let message = std::mem::replace(inner.as_mut(), Expr::Absent(span));
-//RS                 let call = Call {
-//RS                     name: Syntax::LIT_ERR.to_string(),
-//RS                     name_span: span,
-//RS                     type_args: Vec::new(),
-//RS                     args: vec![crate::AST::CallArg {
-//RS                         convention: crate::AST::AccessConvention::Read,
-//RS                         span,
-//RS                         expr: message,
-//RS                         flags: Default::default(),
-//RS                         label: None,
-//RS                         spread: false,
-//RS                     }],
-//RS                     resolved_ret: None,
-//RS                     range_checked: false,
-//RS                     widen_approx: false,
-//RS                 };
-//RS                 *inner = Box::new(self.default_err_value(call, false));
-//RS                 payload = Type::Named(Syntax::TYPE_ERR.to_string());
-//RS             }
-//RS             let ok_payload = payload == err_ty
-//RS                 || matches!(&err_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
-//RS             if !ok_payload {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0108",
-//RS                     format!(
-//RS                         "this `{}` holds {}, but {} was expected",
-//RS                         Syntax::LIT_ERR,
-//RS                         payload.show(),
-//RS                         err_ty.show()
-//RS                     ),
-//RS                     "the failure value must match the result's error type".to_string(),
-//RS                     type_fix_hint(&err_ty, &payload),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS             return Some(Type::Result {
-//RS                 ok: Box::new(ok_ty),
-//RS                 err: Box::new(err_ty),
-//RS             });
-//RS         }
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0404",
-//RS             format!("`{}(...)` only fits where a fallible result is expected", Syntax::LIT_ERR),
-//RS             format!(
-//RS                 "`{}` builds the failure side of a `T !E` result",
-//RS                 Syntax::LIT_ERR
-//RS             ),
-//RS             "use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one"
-//RS                 .to_string(),
-//RS             Some(span),
-//RS         ));
-//RS         None
-//RS     }
-//RS     fn resolve_failure_function_in_module(
-//RS         &self,
-//RS         mut module_idx: usize,
-//RS         mut name: String,
-//RS     ) -> Option<(usize, String, crate::AST::FuncSig)> {
-//RS         let modules = self.modules?;
-//RS         let mut visited = std::collections::HashSet::new();
-//RS         loop {
-//RS             if !visited.insert((module_idx, name.clone())) {
-//RS                 return None;
-//RS             }
-//RS             let module = modules.get(module_idx)?;
-//RS             if let Some((real_name, real_module)) = module.reexports.get(&name) {
-//RS                 name = real_name.clone();
-//RS                 module_idx = *real_module;
-//RS                 continue;
-//RS             }
-//RS             let semantic_name = name
-//RS                 .split_once('.')
-//RS                 .and_then(|(inline_module, item)| {
-//RS                     module
-//RS                         .code_modules
-//RS                         .get(inline_module)
-//RS                         .map(|canonical| jet_foundation::Names::member_name(canonical, item))
-//RS                 })
-//RS                 .unwrap_or_else(|| name.clone());
-//RS             let signature = module.funcs.get(&semantic_name)?.clone();
-//RS             return Some((module_idx, semantic_name, signature));
-//RS         }
-//RS     }
-//RS 
-//RS     fn resolve_failure_function(&self, name: &str) -> Option<(usize, String, crate::AST::FuncSig)> {
-//RS         if let Some(signature) = self.funcs.get(name) {
-//RS             return Some((self.module_idx, name.to_string(), signature.clone()));
-//RS         }
-//RS         if let Some(mangled) = self.inline_module.as_ref().and_then(|module| {
-//RS             self.inline_unqualified
-//RS                 .get(&(module.clone(), name.to_string()))
-//RS         }) {
-//RS             if let Some(signature) = self.funcs.get(mangled) {
-//RS                 return Some((self.module_idx, mangled.clone(), signature.clone()));
-//RS             }
-//RS         }
-//RS         if let Some(mangled) = self.unqualified.get(name) {
-//RS             if let Some(signature) = self.funcs.get(mangled) {
-//RS                 return Some((self.module_idx, mangled.clone(), signature.clone()));
-//RS             }
-//RS         }
-//RS         if let Some((function, module_idx)) = self.inline_module.as_ref().and_then(|module| {
-//RS             self.inline_unqualified_file
-//RS                 .get(&(module.clone(), name.to_string()))
-//RS         }) {
-//RS             if let Some(target) =
-//RS                 self.resolve_failure_function_in_module(*module_idx, function.clone())
-//RS             {
-//RS                 return Some(target);
-//RS             }
-//RS         }
-//RS         if let Some((function, module_idx)) = self.unqualified_file.get(name) {
-//RS             if let Some(target) =
-//RS                 self.resolve_failure_function_in_module(*module_idx, function.clone())
-//RS             {
-//RS                 return Some(target);
-//RS             }
-//RS         }
-//RS         if let Some((_, module_idx, function)) = self.resolve_import_call_path(name) {
-//RS             if let Some(target) = self.resolve_failure_function_in_module(module_idx, function) {
-//RS                 return Some(target);
-//RS             }
-//RS         }
-//RS         let (alias, item) = name.split_once('.')?;
-//RS         if let Some(canonical) = self.code_modules.get(alias) {
-//RS             let mangled = jet_foundation::Names::member_name(canonical, item);
-//RS             if let Some(signature) = self.funcs.get(&mangled) {
-//RS                 return Some((self.module_idx, mangled, signature.clone()));
-//RS             }
-//RS         }
-//RS         if let Some((_, mangled)) = self
-//RS             .inline_reexport_inline
-//RS             .get(&(alias.to_string(), item.to_string()))
-//RS         {
-//RS             if let Some(signature) = self.funcs.get(mangled) {
-//RS                 return Some((self.module_idx, mangled.clone(), signature.clone()));
-//RS             }
-//RS         }
-//RS         if let Some((function, module_idx)) = self
-//RS             .inline_reexport_file
-//RS             .get(&(alias.to_string(), item.to_string()))
-//RS         {
-//RS             return self.resolve_failure_function_in_module(*module_idx, function.clone());
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS     fn definition_location(&self, module_idx: usize, span: Span) -> Option<String> {
-//RS         let module = self.modules.and_then(|modules| modules.get(module_idx))?;
-//RS         if module.module_path.is_empty() || module.source.is_empty() {
-//RS             return None;
-//RS         }
-//RS         let (line, col) = crate::Diagnostics::span_line_col(&module.source, span.start);
-//RS         Some(format!("{}:{line}:{col}", module.module_path))
-//RS     }
-//RS 
-//RS     fn definition_span_text(&self, owner: usize, name: &str) -> String {
-//RS         let Some(declaration) = self.name_ledger.declaration(owner, name) else {
-//RS             return "Core or generated callable (no user source location)".to_string();
-//RS         };
-//RS         self.definition_location(declaration.module, declaration.span)
-//RS             .unwrap_or_else(|| "Core or generated callable (no user source location)".to_string())
-//RS     }
-//RS 
-//RS     fn definition_fallback_text(&self) -> String {
-//RS         "Core or generated callable (no user source location)".to_string()
-//RS     }
-//RS 
-//RS     fn failure_call_provenance(&self, inner: &Expr) -> FailureCallProvenance {
-//RS         match inner {
-//RS             Expr::Call(call) => {
-//RS                 let (definition, contract) = self
-//RS                     .resolve_failure_function(&call.name)
-//RS                     .map(|(owner, name, signature)| {
-//RS                         (
-//RS                             self.definition_span_text(owner, &name),
-//RS                             signature.failure_contract().source(),
-//RS                         )
-//RS                     })
-//RS                     .unwrap_or_else(|| {
-//RS                         (
-//RS                             self.definition_span_text(self.module_idx, &call.name),
-//RS                             call.resolved_ret
-//RS                                 .as_ref()
-//RS                                 .map(|return_type| {
-//RS                                     crate::AST::FailureContract::from_return_type(Some(return_type))
-//RS                                         .source()
-//RS                                 })
-//RS                                 .unwrap_or_else(|| "inferred failure contract".to_string()),
-//RS                         )
-//RS                     });
-//RS                 FailureCallProvenance {
-//RS                     callee: call.name.clone(),
-//RS                     definition,
-//RS                     contract,
-//RS                 }
-//RS             }
-//RS             Expr::MethodCall {
-//RS                 method, recv_type, ..
-//RS             } => {
-//RS                 let mut contract = "inferred failure contract".to_string();
-//RS                 let mut definition = self.definition_fallback_text();
-//RS                 if let Some(type_name) = recv_type.as_deref() {
-//RS                     if let Some((owner, signature)) = self.resolve_method_sig(type_name, method) {
-//RS                         contract = signature.failure_contract().source();
-//RS                         let (_, leaf) = self.struct_type_name_parts(type_name);
-//RS                         if let Some(declaration) = self
-//RS                             .name_ledger
-//RS                             .declaration(owner, &format!("{leaf}.{method}"))
-//RS                         {
-//RS                             definition = self
-//RS                                 .definition_location(declaration.module, declaration.span)
-//RS                                 .unwrap_or_else(|| self.definition_fallback_text());
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 FailureCallProvenance {
-//RS                     callee: format!("{method}()"),
-//RS                     definition,
-//RS                     contract,
-//RS                 }
-//RS             }
-//RS             _ => FailureCallProvenance {
-//RS                 callee: "this fallible expression".to_string(),
-//RS                 definition: self.definition_fallback_text(),
-//RS                 contract: "inferred failure contract".to_string(),
-//RS             },
-//RS         }
-//RS     }
-//RS 
-//RS     /// #3708: the unannotated callee of a failure-domain diagnostic, as
-//RS     /// `(module index, function name)`, when the bundle failure solve may
-//RS     /// still prove its failure set empty. A Core wrapper (`math.inv`) is an
-//RS     /// ordinary source function in its own module, so it reaches the same
-//RS     /// solve as a same-module callee; its `T Never!` contract is only known
-//RS     /// once every body is checked.
-//RS     fn inferable_failure_callee(&self, inner: &Expr) -> Option<(usize, String)> {
-//RS         let (module_idx, name, signature) = match inner.without_parens() {
-//RS             Expr::Call(call) => self.resolve_failure_function(&call.name)?,
-//RS             Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 args,
-//RS                 ..
-//RS             } => {
-//RS                 if let Some((module, _, _)) = self.core_module_path_from_receiver(receiver) {
-//RS                     let source = jet_foundation::CoreModuleExports::core_source_module(&module)?;
-//RS                     if !jet_foundation::CoreModuleExports::core_source_owns_call(
-//RS                         &module,
-//RS                         method,
-//RS                         args.len(),
-//RS                     ) {
-//RS                         return None;
-//RS                     }
-//RS                     let source_idx = self
-//RS                         .modules?
-//RS                         .iter()
-//RS                         .position(|candidate| candidate.module_alias == source.alias)?;
-//RS                     self.resolve_failure_function_in_module(source_idx, method.clone())?
-//RS                 } else {
-//RS                     let Expr::Ident(alias, _) = receiver.without_parens() else {
-//RS                         return None;
-//RS                     };
-//RS                     self.resolve_failure_function(&format!("{alias}.{method}"))?
-//RS                 }
-//RS             }
-//RS             _ => return None,
-//RS         };
-//RS         (!signature.is_extern && signature.failure_contract().is_default())
-//RS             .then_some((module_idx, name))
-//RS     }
-//RS 
-//RS     /// #3708: hand the failure-domain diagnostic just reported against an
-//RS     /// inferable callee to the bundle failure solve. The call is checked as
-//RS     /// the `T Never!` plain return it has when the solve discharges the
-//RS     /// obligation; otherwise the solve emits the diagnostic unchanged.
-//RS     fn defer_failure_obligation(
-//RS         &mut self,
-//RS         callee: (usize, String),
-//RS         inner: &mut Expr,
-//RS         convert: &mut TryConvert,
-//RS         ok: &Type,
-//RS         err: &Type,
-//RS     ) -> Option<Type> {
-//RS         let (module_idx, callee) = callee;
-//RS         if let Some(diagnostic) = self.diags.last_mut() {
-//RS             let detail = diagnostic.detail.take().unwrap_or_default();
-//RS             diagnostic.detail = Some(format!(
-//RS                 "{}{module_idx}:{callee}\n{detail}",
-//RS                 crate::Sema::FAILURE_OBLIGATION_MARK,
-//RS             ));
-//RS         }
-//RS         *convert = TryConvert::Never;
-//RS         publish_try_call_carrier(inner, || Type::Result {
-//RS             ok: Box::new(ok.clone()),
-//RS             err: Box::new(err.clone()),
-//RS         });
-//RS         Some(ok.clone())
-//RS     }
-//RS 
-//RS     /// Build the caller-side repair from the source declaration when the
-//RS     /// declaration is available. Keeping the authored success spelling avoids
-//RS     /// putting diagnostic glosses such as `(a whole number)` into a source
-//RS     /// edit, and also covers the implicit `Err` route (`fn f() Int`).
-//RS     fn failure_domain_caller_edit(&self, source_name: &str) -> Option<TextEdit> {
-//RS         if let Some(span) = self.current_return_type_span {
-//RS             let authored = self.source.get(span.start..span.end);
-//RS             let success = authored
-//RS                 .and_then(Self::authored_contract_success)
-//RS                 .map_or_else(
-//RS                     || {
-//RS                         self.declared_return_type
-//RS                             .as_ref()
-//RS                             .and_then(|return_type| return_type.unwrap_result())
-//RS                             .map(|(ok, _)| ok.name())
-//RS                             .unwrap_or_default()
-//RS                     },
-//RS                     str::to_string,
-//RS                 );
-//RS             let new_text = if success.is_empty() {
-//RS                 format!("{}{}", source_name, Syntax::TYPE_FALLIBLE_MARK)
-//RS             } else {
-//RS                 format!("{} {}{}", success, source_name, Syntax::TYPE_FALLIBLE_MARK)
-//RS             };
-//RS             return Some(TextEdit { span, new_text });
-//RS         }
-//RS 
-//RS         // No written return type means a unit callable with the implicit
-//RS         // default route. Insert the explicit domain at its body boundary.
-//RS         let body = self
-//RS             .source
-//RS             .get(self.current_function_span.start..self.current_function_span.end)?;
-//RS         let body_offset = body
-//RS             .find('{')
-//RS             .or_else(|| body.find(Syntax::OP_UNIFIED_ARROW))?;
-//RS         let insertion = self.current_function_span.start + body_offset;
-//RS         Some(TextEdit {
-//RS             span: Span::new(insertion, insertion),
-//RS             new_text: format!("{}{} ", source_name, Syntax::TYPE_FALLIBLE_MARK),
-//RS         })
-//RS     }
-//RS 
-//RS     /// D-TYPE-SUFFIX1=A: the success spelling before an authored suffix
-//RS     /// contract (`Int? ParseError!` → `Int?`, `(A | B)!` → ``). `None` when
-//RS     /// the authored return type carries no contract.
-//RS     fn authored_contract_success(text: &str) -> Option<&str> {
-//RS         let body = text.trim_end().strip_suffix(Syntax::TYPE_FALLIBLE_MARK)?;
-//RS         let mut depth = 0i32;
-//RS         for (index, ch) in body.char_indices().rev() {
-//RS             match ch {
-//RS                 '>' if body[..index].ends_with('-') => {}
-//RS                 ')' | '>' | ']' => depth += 1,
-//RS                 '(' | '<' | '[' => depth -= 1,
-//RS                 c if c.is_whitespace() && depth == 0 => return Some(body[..index].trim()),
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         Some("")
-//RS     }
-//RS 
-//RS     /// Build the declaration-site template for the second repair. The body
-//RS     /// needs the user's source-to-target mapping, so this remains a reviewable
-//RS     /// suggestion rather than an automatic edit.
-//RS     fn failure_domain_conversion_edit(
-//RS         &self,
-//RS         source_name: &str,
-//RS         target_name: &str,
-//RS     ) -> Option<TextEdit> {
-//RS         if source_name.is_empty()
-//RS             || target_name.is_empty()
-//RS             || source_name
-//RS                 .chars()
-//RS                 .chain(target_name.chars())
-//RS                 .any(|character| character.is_whitespace() || matches!(character, '|'))
-//RS         {
-//RS             return None;
-//RS         }
-//RS         let separator = if self.source.ends_with('\n') {
-//RS             "\n"
-//RS         } else {
-//RS             "\n\n"
-//RS         };
-//RS         Some(TextEdit {
-//RS             span: Span::new(self.source.len(), self.source.len()),
-//RS             new_text: format!(
-//RS                 "{separator}impl {source_name} -> {target_name} {{\n    // map each {source_name} case into {target_name}\n}}\n"
-//RS             ),
-//RS         })
-//RS     }
-//RS 
-//RS     fn report_failure_domain_mismatch(
-//RS         &mut self,
-//RS         span: Span,
-//RS         inner: &Expr,
-//RS         source: &Type,
-//RS         target: &Type,
-//RS     ) {
-//RS         let provenance = self.failure_call_provenance(inner);
-//RS         let callee = provenance.callee;
-//RS         let definition = provenance.definition;
-//RS         let contract = provenance.contract;
-//RS         let caller = self
-//RS             .declared_return_type
-//RS             .as_ref()
-//RS             .map(|return_type| {
-//RS                 crate::AST::FailureContract::from_return_type(Some(return_type)).source()
-//RS             })
-//RS             .unwrap_or_else(|| "no declared failure contract".to_string());
-//RS         let source_name = source.name();
-//RS         let target_name = target.name();
-//RS         let mut diagnostic = Diagnostic::from_row(
-//RS             "E2404",
-//RS             &[
-//RS                 ("Source", &source_name),
-//RS                 ("Target", &target_name),
-//RS                 ("callee", &callee),
-//RS                 ("definition", &definition),
-//RS                 ("contract", &contract),
-//RS                 ("caller", &caller),
-//RS             ],
-//RS             Some(span),
-//RS         )
-//RS         .with_detail(format!(
-//RS             "failure-domain:{callee}|{source_name}|{target_name}\ncallee: {callee}\ndefinition: {definition}\neffective contract: {contract}\ncaller contract: {caller}"
-//RS         ));
-//RS         if let Some(edit) = self.failure_domain_caller_edit(&source_name) {
-//RS             diagnostic = diagnostic.with_edit_grade(
-//RS                 edit,
-//RS                 FixApplicability::Suggested,
-//RS                 FixSafety::NeedsReview,
-//RS             );
-//RS         }
-//RS         if target_name != Syntax::TYPE_NEVER {
-//RS             if let Some(edit) = self.failure_domain_conversion_edit(&source_name, &target_name) {
-//RS                 diagnostic = diagnostic.with_alternative_edit(edit);
-//RS             }
-//RS         }
-//RS         self.diags.push(diagnostic);
-//RS     }
-//RS 
-//RS     pub(crate) fn infer_try(
-//RS         &mut self,
-//RS         inner: &mut Box<Expr>,
-//RS         span: Span,
-//RS         convert: &mut TryConvert,
-//RS         note: &mut Option<Box<Expr>>,
-//RS     ) -> Option<Type> {
-//RS         self.infer_try_with_inner_type(inner, span, convert, note, None)
-//RS     }
-//RS 
-//RS     pub(crate) fn infer_try_with_inner_type(
-//RS         &mut self,
-//RS         inner: &mut Box<Expr>,
-//RS         span: Span,
-//RS         convert: &mut TryConvert,
-//RS         note: &mut Option<Box<Expr>>,
-//RS         checked_inner_type: Option<Type>,
-//RS     ) -> Option<Type> {
-//RS         let implicit_propagation = checked_inner_type.as_ref().is_some_and(Type::is_fallible);
-//RS         if let Some(note) = note.as_mut() {
-//RS             let saved = self.expected_type.clone();
-//RS             self.expected_type = Some(Type::String);
-//RS             let note_ty = self.infer(note);
-//RS             self.expected_type = saved;
-//RS             if let Some(note_ty) = note_ty {
-//RS                 self.check_type_assignable(&Type::String, &note_ty, note.span());
-//RS             }
-//RS         }
-//RS         if let Expr::Call(call) = inner.as_mut() {
-//RS             if self.registry.distinct_range(&call.name).is_some() {
-//RS                 call.range_checked = true;
-//RS             }
-//RS         }
-//RS         // Explicit `?` infers its operand here. Automatic propagation passes
-//RS         // the type already returned by `infer_checked`; re-inference would
-//RS         // run call-owned diagnostics a second time.
-//RS         let inner_ty = match checked_inner_type {
-//RS             Some(inner_ty) => Some(inner_ty),
-//RS             None => {
-//RS                 self.failure_auto_depth += 1;
-//RS                 let inner_ty = self.infer_without_auto_propagation(inner);
-//RS                 self.failure_auto_depth -= 1;
-//RS                 inner_ty
-//RS             }
-//RS         };
-//RS         let inner_ty = inner_ty?;
-//RS         // The source-return fact remains untouched through all sema diagnostics;
-//RS         // successful Try propagation publishes its effective carrier below for
-//RS         // TIR to lower as the Try operand.
-//RS         match inner_ty {
-//RS             Type::Result { ok, err } => {
-//RS                 let ret = self.resolve_type(self.ret.clone().unwrap_or(Type::Int));
-//RS                 // `Never` is uninhabited regardless of the caller's return
-//RS                 // rail. Unwrap this carrier directly; every backend lowers
-//RS                 // its impossible error arm as unreachable.
-//RS                 if matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER) {
-//RS                     *convert = TryConvert::Never;
-//RS                     publish_try_call_carrier(inner.as_mut(), || Type::Result {
-//RS                         ok: Box::new((*ok).clone()),
-//RS                         err: Box::new((*err).clone()),
-//RS                     });
-//RS                     return Some((*ok).clone());
-//RS                 }
-//RS                 match &ret {
-//RS                     // D-FAIL-INFER-UNION1=A: the failure-union pre-pass
-//RS                     // records what passes up into the default route; the
-//RS                     // conversion is decided by the real check once the
-//RS                     // function's failure set is known.
-//RS                     Type::Result { err: ret_err, .. }
-//RS                         if is_default_error(ret_err) && self.failure_union_probing() =>
-//RS                     {
-//RS                         let callee = is_default_error(&err)
-//RS                             .then(|| self.inferable_failure_callee(inner.as_ref()))
-//RS                             .flatten();
-//RS                         if let Some(probe) = self.failure_union_probe.as_mut() {
-//RS                             match callee {
-//RS                                 Some(callee) => {
-//RS                                     probe.edges.insert(callee);
-//RS                                 }
-//RS                                 None => probe.add_member(&err),
-//RS                             }
-//RS                         }
-//RS                         self.task_body_propagates = true;
-//RS                         publish_try_call_carrier(inner.as_mut(), || Type::Result {
-//RS                             ok: Box::new((*ok).clone()),
-//RS                             err: Box::new((*err).clone()),
-//RS                         });
-//RS                         Some((*ok).clone())
-//RS                     }
-//RS                     // D9: a `_` hole domain already has its one E0119 at the
-//RS                     // signature. Keep the success value typed so the body
-//RS                     // reports nothing that only repeats that error.
-//RS                     Type::Result { err: ret_err, .. }
-//RS                         if matches!(ret_err.as_ref(), Type::Named(name) if name == "_") =>
-//RS                     {
-//RS                         Some((*ok).clone())
-//RS                     }
-//RS                     // D-FAILURE-FOUNDATION1: `!Never` is a proof that the
-//RS                     // caller has no reachable failure route.  A reachable
-//RS                     // fallible operand therefore cannot be propagated into
-//RS                     // it, even when a conversion happens to be registered.
-//RS                     Type::Result { err: ret_err, .. }
-//RS                         if matches!(ret_err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
-//RS                             && !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER) =>
-//RS                     {
-//RS                         // #3708: an unannotated callee may still be proven
-//RS                         // infallible by the bundle failure solve. Accept the
-//RS                         // call as `Never` and keep the diagnostic as an
-//RS                         // obligation the solve discharges or emits.
-//RS                         let pending_callee = self.inferable_failure_callee(inner.as_ref());
-//RS                         self.report_failure_domain_mismatch(
-//RS                             span,
-//RS                             inner.as_ref(),
-//RS                             err.as_ref(),
-//RS                             ret_err.as_ref(),
-//RS                         );
-//RS                         let callee = pending_callee?;
-//RS                         self.defer_failure_obligation(callee, inner.as_mut(), convert, &ok, &err)
-//RS                     }
-//RS                     // E2-M7: error types match — propagate and unwrap the Ok value.
-//RS                     // The Ok types (`ret_ok` and `ok`) do NOT need to be equal: `?`
-//RS                     // only propagates the error; the unwrapped Ok value may have any
-//RS                     // type (it is bound by the caller, not returned unchanged).
-//RS                     Type::Result { err: ret_err, .. } if *ret_err == err => {
-//RS                         self.task_body_propagates = true;
-//RS                         publish_try_call_carrier(inner.as_mut(), || Type::Result {
-//RS                             ok: Box::new((*ok).clone()),
-//RS                             err: Box::new((*err).clone()),
-//RS                         });
-//RS                         Some((*ok).clone())
-//RS                     }
-//RS                     // D-FAIL-ERROR1=A: older String-returning callees cross into
-//RS                     // the default family through one explicit Prelude conversion.
-//RS                     Type::Result { err: ret_err, .. }
-//RS                         if is_default_error(ret_err) && matches!(err.as_ref(), Type::String) =>
-//RS                     {
-//RS                         *convert = TryConvert::DefaultErr;
-//RS                         self.task_body_propagates = true;
-//RS                         publish_try_call_carrier(inner.as_mut(), || Type::Result {
-//RS                             ok: Box::new((*ok).clone()),
-//RS                             err: Box::new((*err).clone()),
-//RS                         });
-//RS                         Some((*ok).clone())
-//RS                     }
-//RS                     // D-UNIONTYPE1=A: member error widens into the return's union.
-//RS                     Type::Result { err: ret_err, .. } if ret_err.union_contains(err.as_ref()) => {
-//RS                         let members = ret_err
-//RS                             .unwrap_union()
-//RS                             .expect("union_contains implies Union");
-//RS                         *convert = TryConvert::WidenUnion {
-//RS                             enum_name: crate::AST::union_enum_name(members),
-//RS                             tag: crate::AST::union_member_tag(&err),
-//RS                         };
-//RS                         self.task_body_propagates = true;
-//RS                         publish_try_call_carrier(inner.as_mut(), || Type::Result {
-//RS                             ok: Box::new((*ok).clone()),
-//RS                             err: Box::new((*err).clone()),
-//RS                         });
-//RS                         Some((*ok).clone())
-//RS                     }
-//RS                     Type::Result { err: ret_err, .. } => {
-//RS                         let err_type_name = err.name();
-//RS                         let ret_err_name = ret_err.name();
-//RS 
-//RS                         // D-ERR-CONV: check if a declared `impl Source -> Target` conversion exists.
-//RS                         if self.trait_reg.has_error_conv(&err_type_name, &ret_err_name) {
-//RS                             let source = (*err).clone();
-//RS                             let target = (**ret_err).clone();
-//RS                             let fn_name = error_conv_fn_name(&err_type_name, &ret_err_name);
-//RS                             *convert = TryConvert::Typed {
-//RS                                 fn_name,
-//RS                                 source,
-//RS                                 target,
-//RS                             };
-//RS                             self.task_body_propagates = true;
-//RS                             publish_try_call_carrier(inner.as_mut(), || Type::Result {
-//RS                                 ok: Box::new((*ok).clone()),
-//RS                                 err: Box::new((*err).clone()),
-//RS                             });
-//RS                             return Some((*ok).clone());
-//RS                         }
-//RS 
-//RS                         if is_default_error(ret_err) {
-//RS                             let err_name = err.name();
-//RS                             // D-FAIL-CONV2=A: demand-driven family conversion onto Err.
-//RS                             if !self.no_prelude && is_core_error_family_type(&err_name) {
-//RS                                 let source = (*err).clone();
-//RS                                 let target = Type::Named(Syntax::TYPE_ERR.to_string());
-//RS                                 let fn_name = error_conv_fn_name(&err_name, Syntax::TYPE_ERR);
-//RS                                 *convert = TryConvert::Typed {
-//RS                                     fn_name,
-//RS                                     source,
-//RS                                     target,
-//RS                                 };
-//RS                                 self.task_body_propagates = true;
-//RS                                 publish_try_call_carrier(inner.as_mut(), || Type::Result {
-//RS                                     ok: Box::new((*ok).clone()),
-//RS                                     err: Box::new((*err).clone()),
-//RS                                 });
-//RS                                 return Some((*ok).clone());
-//RS                             }
-//RS                             let (what, why, fix) = if implicit_propagation {
-//RS                                 (
-//RS                                     format!(
-//RS                                         "this implicit fallible call can't convert `{}` into `{}` — no declared conversion exists",
-//RS                                         err_name,
-//RS                                         Syntax::TYPE_ERR
-//RS                                     ),
-//RS                                     format!(
-//RS                                         "ordinary fallible calls propagate automatically; `{}` can reach `{}` only through `impl {} -> {}`",
-//RS                                         err_name,
-//RS                                         Syntax::TYPE_ERR,
-//RS                                         err_name,
-//RS                                         Syntax::TYPE_ERR
-//RS                                     ),
-//RS                                     format!(
-//RS                                         "handle this call locally with `??`, add `impl {} -> {} {{ … }}`, or change the return type",
-//RS                                         err_name,
-//RS                                         Syntax::TYPE_ERR
-//RS                                     ),
-//RS                                 )
-//RS                             } else {
-//RS                                 (
-//RS                                     format!(
-//RS                                         "`?` can't convert `{}` into `{}` — no declared conversion exists",
-//RS                                         err_name,
-//RS                                         Syntax::TYPE_ERR
-//RS                                     ),
-//RS                                     format!(
-//RS                                         "`?` uses the declared conversion rail; `{}` can reach `{}` only through `impl {} -> {}`",
-//RS                                         err_name,
-//RS                                         Syntax::TYPE_ERR,
-//RS                                         err_name,
-//RS                                         Syntax::TYPE_ERR
-//RS                                     ),
-//RS                                     format!(
-//RS                                         "add `impl {} -> {} {{ … }}` before this function, or change the return type",
-//RS                                         err_name,
-//RS                                         Syntax::TYPE_ERR
-//RS                                     ),
-//RS                                 )
-//RS                             };
-//RS                             self.diags
-//RS                                 .push(Diagnostic::error("E2402", what, why, fix, Some(span)));
-//RS                             return None;
-//RS                         }
-//RS                         // E2404: no declared conversion between these two typed error types.
-//RS                         let pending_callee = self.inferable_failure_callee(inner.as_ref());
-//RS                         self.report_failure_domain_mismatch(
-//RS                             span,
-//RS                             inner.as_ref(),
-//RS                             err.as_ref(),
-//RS                             ret_err.as_ref(),
-//RS                         );
-//RS                         let callee = pending_callee?;
-//RS                         self.defer_failure_obligation(callee, inner.as_mut(), convert, &ok, &err)
-//RS                     }
-//RS                     _ => {
-//RS                         let (what, why, fix) = if implicit_propagation {
-//RS                             (
-//RS                                 "this fallible call only works inside a function that returns a fallible result"
-//RS                                     .to_string(),
-//RS                                 "ordinary fallible calls propagate their failure automatically to the caller"
-//RS                                     .to_string(),
-//RS                                 format!(
-//RS                                     "declare `{}` in the return type before `->`, or handle the result with `{}`",
-//RS                                     err.name(),
-//RS                                     Syntax::OP_FALLBACK
-//RS                                 ),
-//RS                             )
-//RS                         } else {
-//RS                             (
-//RS                                 format!(
-//RS                                     "`{}` only works inside a function that returns a fallible result",
-//RS                                     Syntax::OP_TRY_SUFFIX
-//RS                                 ),
-//RS                                 "propagation early-returns the failure to the caller".to_string(),
-//RS                                 format!(
-//RS                                     "declare the failure in the return type — `{}` before `->` — or handle the result with `{}`",
-//RS                                     err.name(),
-//RS                                     Syntax::OP_FALLBACK
-//RS                                 ),
-//RS                             )
-//RS                         };
-//RS                         let pending_callee = self.inferable_failure_callee(inner.as_ref());
-//RS                         self.diags
-//RS                             .push(Diagnostic::error("E0403", what, why, fix, Some(span)));
-//RS                         let callee = pending_callee?;
-//RS                         self.defer_failure_obligation(callee, inner.as_mut(), convert, &ok, &err)
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Type::Option(ref optional_inner) => {
-//RS                 let ret = self.ret.clone().unwrap_or(Type::Int);
-//RS                 if let Type::Option(ret_inner) = &ret {
-//RS                     if **ret_inner == **optional_inner {
-//RS                         self.task_body_propagates = true;
-//RS                         publish_try_call_carrier(inner.as_mut(), || {
-//RS                             Type::Option(optional_inner.clone())
-//RS                         });
-//RS                         return Some((**optional_inner).clone());
-//RS                     }
-//RS                 }
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0403",
-//RS                     format!(
-//RS                         "`{}` on `{}` needs a function that returns the same optional type",
-//RS                         Syntax::OP_TRY_SUFFIX,
-//RS                         inner_ty.name()
-//RS                     ),
-//RS                     format!(
-//RS                         "propagation passes `{}` back to the caller",
-//RS                         Syntax::LIT_NULL
-//RS                     ),
-//RS                     format!(
-//RS                         "declare `{}` as an optional return type before `->`, or handle it with `{}`",
-//RS                         inner_ty.name(),
-//RS                         Syntax::OP_FALLBACK
-//RS                     ),
-//RS                     Some(span),
-//RS                 ));
-//RS                 None
-//RS             }
-//RS             other => {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0403",
-//RS                     format!(
-//RS                         "`{}` only works on a fallible value, not {}",
-//RS                         Syntax::OP_TRY_SUFFIX,
-//RS                         other.show()
-//RS                     ),
-//RS                     "`?` unwraps success or returns early with the failure".to_string(),
-//RS                     format!(
-//RS                         "call something that returns `T !E` or an optional value, or remove `{}`",
-//RS                         Syntax::OP_TRY_SUFFIX
-//RS                     ),
-//RS                     Some(span),
-//RS                 ));
-//RS                 None
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-CHOOSE-FIND1=A: a finite value loop is not a fallible expression.
-//RS     /// Attach its written exhaustion route to the compiler-private result-loop
-//RS     /// carrier, then erase the surface `??` before ordinary lowering. Every
-//RS     /// execution tier therefore consumes the same result-loop AST.
-//RS     pub(crate) fn infer_value_loop_fallback(&mut self, expr: &mut Expr) -> Option<Type> {
-//RS         let span = expr.span();
-//RS         let Expr::OrFallback {
-//RS             value, fallback, ..
-//RS         } = std::mem::replace(expr, Expr::Absent(span))
-//RS         else {
-//RS             unreachable!("value-loop fallback dispatch only accepts OrFallback")
-//RS         };
-//RS         let mut value = value;
-//RS         mark_value_loop_route_attached(&mut value);
-//RS         let value_ty = match self.infer(&mut value) {
-//RS             Some(ty) => {
-//RS                 let ty = self.resolve_type(ty).erased_carrier();
-//RS                 match ty {
-//RS                     Type::Result { ok, .. } | Type::Option(ok) => ok.erased_carrier(),
-//RS                     other => other,
-//RS                 }
-//RS             }
-//RS             None => {
-//RS                 *expr = *value;
-//RS                 return None;
-//RS             }
-//RS         };
-//RS         self.reject_borrowed_param_subplace(
-//RS             value.as_mut(),
-//RS             Some(&value_ty),
-//RS             "supply an owned exhaustion-route payload",
-//RS         );
-//RS         let compute_failure_fallback =
-//RS             value_ty.is_compute_tensor_family() && self.is_core_compute_call(value.as_ref());
-//RS         let Some(label) = value_loop_route_label(&mut value) else {
-//RS             *expr = *value;
-//RS             return Some(value_ty);
-//RS         };
-//RS 
-//RS         match fallback {
-//RS             OrFallback::Value(mut fallback_expr) => {
-//RS                 let fallback_span = fallback_expr.span();
-//RS                 let fallback_ty =
-//RS                     self.infer_with_expected(&mut fallback_expr, &value_ty);
-//RS                 if let Some(fallback_ty) = fallback_ty {
-//RS                     let fallback_ty = self.widen_numeric_argument(
-//RS                         &mut fallback_expr,
-//RS                         fallback_ty,
-//RS                         &value_ty,
-//RS                         crate::AST::AccessConvention::Read,
-//RS                     );
-//RS                     let reported =
-//RS                         self.check_type_assignable(&value_ty, &fallback_ty, fallback_span);
-//RS                     if fallback_ty != value_ty && !reported {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0405",
-//RS                             format!(
-//RS                                 "the fallback is {}, but the loop value is {}",
-//RS                                 fallback_ty.show(),
-//RS                                 value_ty.show()
-//RS                             ),
-//RS                             format!(
-//RS                                 "both sides of `{}` must be the same type",
-//RS                                 Syntax::OP_FALLBACK
-//RS                             ),
-//RS                             type_fix_hint(&value_ty, &fallback_ty),
-//RS                             Some(fallback_span),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 attach_value_loop_route(
-//RS                     &mut value,
-//RS                     Stmt::BreakLabelValue(label, span, *fallback_expr, fallback_span),
-//RS                 );
-//RS             }
-//RS             OrFallback::Return(mut ret_expr, ret_span) => {
-//RS                 let ret = self.ret.clone();
-//RS                 match (&ret, ret_expr.as_mut()) {
-//RS                     (Some(ret_ty), Some(e)) => {
-//RS                         let saved = self.expected_type.clone();
-//RS                         self.expected_type = Some(ret_ty.clone());
-//RS                         let expr_ty = self.infer(e);
-//RS                         self.expected_type = saved;
-//RS                         if let Some(expr_ty) = expr_ty {
-//RS                             let expr_ty =
-//RS                                 self.widen_numeric_return(e, &expr_ty, ret_ty).unwrap_or(expr_ty);
-//RS                             // D-OPT-LIFT1=A: `?? return value` fills a `T?` slot.
-//RS                             let expr_ty =
-//RS                                 self.lift_optional_slot(ret_ty, &expr_ty, e).unwrap_or(expr_ty);
-//RS                             self.check_type_assignable(ret_ty, &expr_ty, e.span());
-//RS                         }
-//RS                     }
-//RS                     (Some(ret_ty), None) => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0405",
-//RS                             format!("`{} return` here needs a value", Syntax::OP_FALLBACK),
-//RS                             format!(
-//RS                                 "a bare `return` needs a value here because the function returns {}",
-//RS                                 ret_ty.show()
-//RS                             ),
-//RS                             format!(
-//RS                                 "give a fallback value: `{} return <value>`",
-//RS                                 Syntax::OP_FALLBACK
-//RS                             ),
-//RS                             Some(ret_span),
-//RS                         ));
-//RS                     }
-//RS                     (None, Some(e)) => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0405",
-//RS                             format!("`{} return` can't return a value here", Syntax::OP_FALLBACK),
-//RS                             "this function returns nothing, so `return` can't carry a value"
-//RS                                 .to_string(),
-//RS                             "drop the value, or add a return type before `->`".to_string(),
-//RS                             Some(e.span()),
-//RS                         ));
-//RS                     }
-//RS                     (None, None) => {}
-//RS                 }
-//RS                 attach_value_loop_route(&mut value, Stmt::Return(ret_expr.map(|e| *e), span));
-//RS             }
-//RS             OrFallback::Block {
-//RS                 span: fallback_span,
-//RS                 ..
-//RS             } => {
-//RS                 mark_value_loop_route_unattached(&mut value);
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0405",
-//RS                     "a finite value loop cannot use a multi-step `??` fallback".to_string(),
-//RS                     "the loop's exhaustion route carries one value or control action, not a fallback block".to_string(),
-//RS                     "use one fallback value, or move the loop into a named block and handle the report there".to_string(),
-//RS                     Some(fallback_span),
-//RS                 ));
-//RS             }
-//RS             OrFallback::Panic { name_span, args } => {
-//RS                 let mut call = Call {
-//RS                     name: Syntax::BUILTIN_PANIC.to_string(),
-//RS                     name_span,
-//RS                     type_args: Vec::new(),
-//RS                     args,
-//RS                     resolved_ret: None,
-//RS                     range_checked: false,
-//RS                     widen_approx: false,
-//RS                 };
-//RS                 let saved_safe_panic_context = self.autodiff_safe_panic_context;
-//RS                 self.autodiff_safe_panic_context = compute_failure_fallback;
-//RS                 self.check_panic_call(&mut call);
-//RS                 self.autodiff_safe_panic_context = saved_safe_panic_context;
-//RS                 attach_value_loop_route(&mut value, Stmt::Expr(Expr::Call(call)));
-//RS             }
-//RS             route @ (OrFallback::Break(_) | OrFallback::Continue(_)) => {
-//RS                 let (route, route_span) = match &route {
-//RS                     OrFallback::Break(span) => ("break".to_string(), *span),
-//RS                     OrFallback::Continue(span) => ("next".to_string(), *span),
-//RS                     OrFallback::Value(_)
-//RS                     | OrFallback::Block { .. }
-//RS                     | OrFallback::Return(..)
-//RS                     | OrFallback::Panic { .. }
-//RS                     | OrFallback::BreakLabel(..)
-//RS                     | OrFallback::ContinueLabel(..) => {
-//RS                         unreachable!("matched immediate loop-control fallback")
-//RS                     }
-//RS                 };
-//RS                 mark_value_loop_route_unattached(&mut value);
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0078",
-//RS                     format!(
-//RS                         "this finite value loop cannot use `{} {}` after its closing brace",
-//RS                         Syntax::OP_FALLBACK,
-//RS                         route
-//RS                     ),
-//RS                     "the route would control the loop that just closed; use a labeled loop to name the target".to_string(),
-//RS                     "write a labeled search such as `found :: loop { ... break(found, value) }`".to_string(),
-//RS                     Some(route_span),
-//RS                 ));
-//RS             }
-//RS             OrFallback::BreakLabel(name, route_span) => {
-//RS                 if self.loop_depth == 0 {
-//RS                     mark_value_loop_route_unattached(&mut value);
-//RS                     self.diags
-//RS                         .push(loop_control_outside(Syntax::KW_BREAK, route_span));
-//RS                 } else if !self.loop_labels.iter().any(|label| label == &name) {
-//RS                     mark_value_loop_route_unattached(&mut value);
-//RS                     self.diags
-//RS                         .push(crate::Sema::Diagnostics::undefined_loop_label(
-//RS                             &name,
-//RS                             &self.loop_labels,
-//RS                             route_span,
-//RS                         ));
-//RS                 } else {
-//RS                     self.check_break_without_value(Some((&name, route_span)), route_span);
-//RS                     attach_value_loop_route(&mut value, Stmt::BreakLabel(name, route_span));
-//RS                 }
-//RS             }
-//RS             OrFallback::ContinueLabel(name, route_span) => {
-//RS                 if self.loop_depth == 0 {
-//RS                     mark_value_loop_route_unattached(&mut value);
-//RS                     self.diags
-//RS                         .push(loop_control_outside(Syntax::KW_NEXT, route_span));
-//RS                 } else if !self.loop_labels.iter().any(|label| label == &name) {
-//RS                     mark_value_loop_route_unattached(&mut value);
-//RS                     self.diags
-//RS                         .push(crate::Sema::Diagnostics::undefined_loop_label(
-//RS                             &name,
-//RS                             &self.loop_labels,
-//RS                             route_span,
-//RS                         ));
-//RS                 } else {
-//RS                     attach_value_loop_route(&mut value, Stmt::ContinueLabel(name, route_span));
-//RS                 }
-//RS             }
-//RS         }
-//RS         *expr = *value;
-//RS         Some(value_ty)
-//RS     }
-//RS 
-//RS     fn is_core_compute_call(&self, expr: &Expr) -> bool {
-//RS         let Expr::MethodCall { receiver, .. } = expr.without_parens() else {
-//RS             return false;
-//RS         };
-//RS         matches!(
-//RS             receiver.as_ref().without_parens(),
-//RS             Expr::Ident(alias, _) if self.core_imports.get(alias).map(String::as_str) == Some("core.compute")
-//RS         )
-//RS     }
-//RS 
-//RS     /// A fallible unit return still has a `Result<Unit, E>` carrier in sema,
-//RS     /// but its `return` route is the ordinary bare exit. Keep the carrier for
-//RS     /// inference while removing only the value demand from return fallbacks.
-//RS     fn return_route_type(&self) -> Option<Type> {
-//RS         let ret = self.ret.clone()?;
-//RS         match &ret {
-//RS             Type::Result { ok, .. }
-//RS                 if matches!(ok.as_ref(), Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-//RS                     || self.is_unit_type(ok) =>
-//RS             {
-//RS                 None
-//RS             }
-//RS             ty if matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-//RS                 || self.is_unit_type(ty) =>
-//RS             {
-//RS                 None
-//RS             }
-//RS             _ => Some(ret),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn infer_or_fallback(
-//RS         &mut self,
-//RS         value: &mut Box<Expr>,
-//RS         fallback: &mut OrFallback,
-//RS         span: Span,
-//RS         is_option: &mut bool,
-//RS     ) -> Option<Type> {
-//RS         let suppress_auto = matches!(
-//RS             value.as_ref().without_parens(),
-//RS             Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
-//RS         );
-//RS         // A locally handled carrier must not publish callback fallibility. The
-//RS         // subject is inferred with automatic propagation suppressed so
-//RS         // `infer_or_fallback` can inspect its Result/Option, but carrier
-//RS         // inference still records the temporary route on a callback. Restore
-//RS         // the enclosing facts after inspecting the subject; propagation in the
-//RS         // fallback branch below remains visible.
-//RS         let saved_failure_carrier = self.failure_carrier.clone();
-//RS         let saved_task_body_propagates = self.task_body_propagates;
-//RS         let saved_ret = self.ret.clone();
-//RS         let mut val_ty = if suppress_auto {
-//RS             self.failure_auto_depth += 1;
-//RS             let ty = self.infer_without_auto_propagation(value);
-//RS             self.failure_auto_depth -= 1;
-//RS             ty
-//RS         } else {
-//RS             self.infer(value)
-//RS         };
-//RS         self.failure_carrier = saved_failure_carrier;
-//RS         self.task_body_propagates = saved_task_body_propagates;
-//RS         self.ret = saved_ret;
-//RS         // Collection methods with a callback have a void source return, but a
-//RS         // fallible callback gives the operation a `Result<Unit, E>` carrier.
-//RS         // Recover that carrier here so `??` checks its fallback against Unit
-//RS         // instead of letting the binding checker invent a value type.
-//RS         if val_ty.is_none() {
-//RS             let callback_error = match value.as_ref().without_parens() {
-//RS                 Expr::MethodCall {
-//RS                     receiver,
-//RS                     method,
-//RS                     args,
-//RS                     ..
-//RS                 } => {
-//RS                     let receiver_ty = match receiver.as_ref().without_parens() {
-//RS                         Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
-//RS                         _ => {
-//RS                             let mut receiver = receiver.clone();
-//RS                             self.infer_without_auto_propagation(&mut receiver)
-//RS                         }
-//RS                     };
-//RS                     if receiver_ty.is_some_and(|recv_ty| {
-//RS                         matches!(
-//RS                             crate::Collections::builtin_method_return(
-//RS                                 &recv_ty,
-//RS                                 method,
-//RS                                 args.len(),
-//RS                                 false,
-//RS                             ),
-//RS                             Some(None)
-//RS                         )
-//RS                     }) {
-//RS                         args.first()
-//RS                             .and_then(|arg| match arg.expr.without_parens() {
-//RS                                 Expr::Lambda(lambda) => {
-//RS                                     lambda.meta.fallible_carrier.as_ref().and_then(|carrier| {
-//RS                                         match carrier {
-//RS                                             Type::Result { err, .. } => Some((**err).clone()),
-//RS                                             _ => None,
-//RS                                         }
-//RS                                     })
-//RS                                 }
-//RS                                 _ => None,
-//RS                             })
-//RS                     } else {
-//RS                         None
-//RS                     }
-//RS                 }
-//RS                 _ => None,
-//RS             };
-//RS             if let Some(err) = callback_error {
-//RS                 val_ty = Some(Type::Result {
-//RS                     ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-//RS                     err: Box::new(err),
-//RS                 });
-//RS             }
-//RS         }
-//RS         let val_ty = val_ty?;
-//RS         // The parser starts this marker as `false`; classify the checked
-//RS         // carrier before fallback context decides whether `err` is ambient.
-//RS         *is_option = matches!(&val_ty, Type::Option(_));
-//RS         // D-FAILURE-FOUNDATION1=A: `??` consumes the success-side carrier
-//RS         // exactly once. A `?T !E` return is `Result<Option<T>, E>`, so its
-//RS         // fallback payload is T; the nested Option remains part of the same
-//RS         // success contract rather than leaking as `?T`.
-//RS         let mut payload = match &val_ty {
-//RS             Type::Result { ok, .. } => match ok.as_ref() {
-//RS                 Type::Option(inner) => (**inner).clone(),
-//RS                 success => success.clone(),
-//RS             },
-//RS             Type::Option(inner) => (**inner).clone(),
-//RS             other => {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0405",
-//RS                     format!(
-//RS                         "`{}` only works on a fallible value, not {}",
-//RS                         Syntax::OP_FALLBACK,
-//RS                         other.show()
-//RS                     ),
-//RS                     "the left side must be a `Result` or optional value".to_string(),
-//RS                     format!(
-//RS                         "call something that can fail, then write `... {} fallback`",
-//RS                         Syntax::OP_FALLBACK
-//RS                     ),
-//RS                     Some(span),
-//RS                 ));
-//RS                 return None;
-//RS             }
-//RS         };
-//RS         // D-NEVER2=B: `Result<Never, E>` has no successful payload. The
-//RS         // fallback is therefore the only value-producing route, so infer its
-//RS         // type without forcing it to unify with the uninhabited `Never`.
-//RS         let success_never = payload.is_never();
-//RS         self.reject_borrowed_param_subplace(
-//RS             value,
-//RS             // The owning destination is the whole Option/Result expression.
-//RS             // `payload` is only the value exposed after `??`; copying the
-//RS             // subplace as that type would change the wrapper's type metadata.
-//RS             Some(&val_ty),
-//RS             "supply an owned fallback payload",
-//RS         );
-//RS         let compute_failure_fallback =
-//RS             payload.is_compute_tensor_family() && self.is_core_compute_call(value.as_ref());
-//RS         // D-FAIL-BIND1=A: make the report a normal typed local in a fresh
-//RS         // scope while checking every fallback form. Optional fallbacks keep
-//RS         // the context marker without declaring a local, so `err` receives the
-//RS         // dedicated E0408 instead of resolving an outer binding.
-//RS         let saved_fallback_has_err = self.fallback_has_err;
-//RS         let saved_fallback_is_shape_miss = self.fallback_is_shape_miss;
-//RS         self.fallback_is_shape_miss = false;
-//RS         self.fallback_has_err = Some(!*is_option);
-//RS         let ambient_scope = !*is_option;
-//RS         if ambient_scope {
-//RS             let err_ty = match &val_ty {
-//RS                 Type::Result { err, .. } => (**err).clone(),
-//RS                 _ => unreachable!("non-result fallback cannot expose err"),
-//RS             };
-//RS             self.push_scope();
-//RS             self.declare_in_scope(
-//RS                 Syntax::AMBIENT_ERR,
-//RS                 LocalInfo {
-//RS                     def_span: span,
-//RS                     binding_sigil_span: None,
-//RS                     ty: err_ty,
-//RS                     mutable: false,
-//RS                     param_conv: None,
-//RS                     decl_loop_depth: self.loop_depth,
-//RS                     interrupt_sendable: false,
-//RS                     reactive_local: false,
-//RS                     reactive_shared: false,
-//RS                     single_use_span: None,
-//RS                     invalid: false,
-//RS                 },
-//RS             );
-//RS         }
-//RS         let success_path = self.flow.clone();
-//RS         let result = match fallback {
-//RS             OrFallback::Value(e) => {
-//RS                 // Infer in place: sema rewrites inside the fallback (index
-//RS                 // kinds, S25 distribution, field clones) must reach codegen.
-//RS                 // D-SG9: the fallback shares the success type, so a fixed-width
-//RS                 // literal fallback (`x ?? 0` where `x` is `U8?`) elaborates to it.
-//RS                 let saved = self.expected_type.clone();
-//RS                 self.expected_type = (!success_never).then(|| payload.clone());
-//RS                 let fallback_diverges = self.expr_diverges(e);
-//RS                 let ft = self.infer(e);
-//RS                 self.expected_type = saved;
-//RS                 let Some(ft) = ft else {
-//RS                     if ambient_scope {
-//RS                         self.pop_scope();
-//RS                     }
-//RS                     self.fallback_has_err = saved_fallback_has_err;
-//RS                     self.fallback_is_shape_miss = saved_fallback_is_shape_miss;
-//RS                     return None;
-//RS                 };
-//RS                 if success_never {
-//RS                     payload = ft.clone();
-//RS                 } else if ft != payload && !fallback_diverges {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0405",
-//RS                         format!(
-//RS                             "the fallback is {}, but the success value is {}",
-//RS                             ft.show(),
-//RS                             payload.show()
-//RS                         ),
-//RS                         format!(
-//RS                             "both sides of `{}` must be the same type",
-//RS                             Syntax::OP_FALLBACK
-//RS                         ),
-//RS                         type_fix_hint(&payload, &ft),
-//RS                         Some(e.span()),
-//RS                     ));
-//RS                 }
-//RS                 Some(payload)
-//RS             }
-//RS             OrFallback::Block { body, value, .. } => {
-//RS                 // A `??` fallback block runs only on the failure path. A
-//RS                 // diverging tail leaves the enclosing function/loop for real;
-//RS                 // `join_fallback_path` below joins its end with the success
-//RS                 // path, so statements after the `??` stay reachable (#2006).
-//RS                 self.check_block(body, false);
-//RS                 if let Some(value) = value {
-//RS                     let saved = self.expected_type.clone();
-//RS                     self.expected_type = (!success_never).then(|| payload.clone());
-//RS                     let value_ty = self.infer(value);
-//RS                     self.expected_type = saved;
-//RS                     if let Some(value_ty) = value_ty {
-//RS                         if success_never {
-//RS                             payload = value_ty;
-//RS                         } else if value_ty != payload {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0405",
-//RS                                 format!(
-//RS                                     "the fallback is {}, but the success value is {}",
-//RS                                     value_ty.show(),
-//RS                                     payload.show()
-//RS                                 ),
-//RS                                 format!(
-//RS                                     "both sides of `{}` must be the same type",
-//RS                                     Syntax::OP_FALLBACK
-//RS                                 ),
-//RS                                 type_fix_hint(&payload, &value_ty),
-//RS                                 Some(value.span()),
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Some(payload)
-//RS             }
-//RS             OrFallback::Return(ret_expr, ret_span) => {
-//RS                 let ret = self.return_route_type();
-//RS                 match (&ret, ret_expr) {
-//RS                     // `?? return value` in a value-returning fn — the value must match.
-//RS                     (Some(rt), Some(e)) => {
-//RS                         let saved = self.expected_type.clone();
-//RS                         self.expected_type = Some(rt.clone());
-//RS                         let et = self.infer(e);
-//RS                         self.expected_type = saved;
-//RS                         if let Some(et) = et {
-//RS                             let et = self.widen_numeric_return(e, &et, rt).unwrap_or(et);
-//RS                             let et = self.lift_optional_slot(rt, &et, e).unwrap_or(et);
-//RS                             let espan = e.span();
-//RS                             self.check_type_assignable(rt, &et, espan);
-//RS                         }
-//RS                     }
-//RS                     // Bare `?? return` in a value-returning fn — rustc would reject the
-//RS                     // emitted `return;` (E0069). Reject cleanly: the fn owes a value.
-//RS                     (Some(rt), None) => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0405",
-//RS                             format!(
-//RS                                 "`{} return` here needs a value",
-//RS                                 Syntax::OP_FALLBACK
-//RS                             ),
-//RS                             format!(
-//RS                                 "a bare `return` needs a value here because the function returns {}",
-//RS                                 rt.show()
-//RS                             ),
-//RS                             format!(
-//RS                                 "give a fallback value: `{} return <value>`",
-//RS                                 Syntax::OP_FALLBACK
-//RS                             ),
-//RS                             Some(*ret_span),
-//RS                         ));
-//RS                     }
-//RS                     // `?? return Err(e)` in a unit fn with a written failure
-//RS                     // contract (`fn f() E!`): the declared carrier is the return
-//RS                     // route, as it is for a plain `return Err(e)`. An undeclared
-//RS                     // (inferred) carrier keeps E0405 below.
-//RS                     (None, Some(e))
-//RS                         if self
-//RS                             .declared_return_type
-//RS                             .as_ref()
-//RS                             .is_some_and(|declared| declared.unwrap_result().is_some()) =>
-//RS                     {
-//RS                         let carrier = self.declared_return_type.clone();
-//RS                         let saved = self.expected_type.clone();
-//RS                         self.expected_type = carrier.clone();
-//RS                         let et = self.infer(e);
-//RS                         self.expected_type = saved;
-//RS                         if let (Some(carrier), Some(et)) = (carrier, et) {
-//RS                             let espan = e.span();
-//RS                             self.check_type_assignable(&carrier, &et, espan);
-//RS                         }
-//RS                     }
-//RS                     // `?? return value` in a unit fn — there's nothing to return.
-//RS                     (None, Some(e)) => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0405",
-//RS                             format!("`{} return` can't return a value here", Syntax::OP_FALLBACK),
-//RS                             "this function returns nothing, so `return` can't carry a value"
-//RS                                 .to_string(),
-//RS                             "drop the value, or add a return type before `->`".to_string(),
-//RS                             Some(e.span()),
-//RS                         ));
-//RS                     }
-//RS                     // Bare `?? return` in a unit fn — rustc accepts the emitted `return;`.
-//RS                     (None, None) => {}
-//RS                 }
-//RS                 Some(payload)
-//RS             }
-//RS             OrFallback::Panic { name_span, args } => {
-//RS                 let mut call = Call {
-//RS                     name: Syntax::BUILTIN_PANIC.to_string(),
-//RS                     name_span: *name_span,
-//RS                     type_args: Vec::new(),
-//RS                     args: std::mem::take(args),
-//RS                     resolved_ret: None,
-//RS                     range_checked: false,
-//RS                     widen_approx: false,
-//RS                 };
-//RS                 let saved_safe_panic_context = self.autodiff_safe_panic_context;
-//RS                 self.autodiff_safe_panic_context = compute_failure_fallback;
-//RS                 self.check_panic_call(&mut call);
-//RS                 self.autodiff_safe_panic_context = saved_safe_panic_context;
-//RS                 *args = call.args;
-//RS                 Some(payload)
-//RS             }
-//RS             // D-ORRETURN-ERG1=B: `?? break` / `?? next` — loop-only. A `?? break`
-//RS             // is a reachable loop exit, so it records its break flow exactly as
-//RS             // a statement `break` does.
-//RS             OrFallback::Break(kw_span) => {
-//RS                 if self.loop_depth == 0 {
-//RS                     self.diags
-//RS                         .push(loop_control_outside(Syntax::KW_BREAK, *kw_span));
-//RS                 } else {
-//RS                     self.check_break_without_value(None, *kw_span);
-//RS                 }
-//RS                 Some(payload)
-//RS             }
-//RS             OrFallback::Continue(kw_span) => {
-//RS                 if self.loop_depth == 0 {
-//RS                     self.diags
-//RS                         .push(loop_control_outside(Syntax::KW_NEXT, *kw_span));
-//RS                 }
-//RS                 Some(payload)
-//RS             }
-//RS             OrFallback::BreakLabel(name, span) => {
-//RS                 if self.loop_depth == 0 {
-//RS                     self.diags
-//RS                         .push(loop_control_outside(Syntax::KW_BREAK, *span));
-//RS                 } else if !self.loop_labels.iter().any(|label| label == name) {
-//RS                     self.diags
-//RS                         .push(crate::Sema::Diagnostics::undefined_loop_label(
-//RS                             name,
-//RS                             &self.loop_labels,
-//RS                             *span,
-//RS                         ));
-//RS                 } else {
-//RS                     self.check_break_without_value(Some((name, *span)), *span);
-//RS                 }
-//RS                 Some(payload)
-//RS             }
-//RS             OrFallback::ContinueLabel(name, span) => {
-//RS                 if self.loop_depth == 0 {
-//RS                     self.diags
-//RS                         .push(loop_control_outside(Syntax::KW_NEXT, *span));
-//RS                 } else if !self.loop_labels.iter().any(|label| label == name) {
-//RS                     self.diags
-//RS                         .push(crate::Sema::Diagnostics::undefined_loop_label(
-//RS                             name,
-//RS                             &self.loop_labels,
-//RS                             *span,
-//RS                         ));
-//RS                 }
-//RS                 Some(payload)
-//RS             }
-//RS         };
-//RS         self.join_fallback_path(success_path, fallback);
-//RS         if ambient_scope {
-//RS             self.pop_scope();
-//RS         }
-//RS         self.fallback_has_err = saved_fallback_has_err;
-//RS         self.fallback_is_shape_miss = saved_fallback_is_shape_miss;
-//RS         result
-//RS     }
-//RS 
-//RS     /// A `??` fallback runs only on the miss path, so the flow after the `??`
-//RS     /// joins the success path with the end of the fallback. A route that
-//RS     /// leaves (`return`, `panic`, `break`, `next`, or a block that always
-//RS     /// does) never reaches that join: a move made on it must not poison a
-//RS     /// later use of the same place.
-//RS     fn join_fallback_path(
-//RS         &mut self,
-//RS         success_path: crate::Sema::FlowFacts::FlowFacts,
-//RS         fallback: &OrFallback,
-//RS     ) {
-//RS         let mut miss_path = std::mem::take(&mut self.flow);
-//RS         if !matches!(fallback, OrFallback::Value(_) | OrFallback::Block { .. }) {
-//RS             miss_path.reachable = false;
-//RS         }
-//RS         self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(
-//RS             &success_path,
-//RS             &[success_path.clone(), miss_path],
-//RS         );
-//RS     }
-//RS 
-//RS     /// D-CHOOSE-TEST1=A: the miss route of a refutable statement binding must
-//RS     /// leave the statement. Value and block fallbacks are checked for useful
-//RS     /// follow-on diagnostics but rejected with the registered E0405.
-//RS     pub(crate) fn check_diverging_fallback(
-//RS         &mut self,
-//RS         fallback: &mut OrFallback,
-//RS         subject_ty: &Type,
-//RS         span: Span,
-//RS     ) {
-//RS         let saved_fallback_has_err = self.fallback_has_err;
-//RS         let saved_fallback_is_shape_miss = self.fallback_is_shape_miss;
-//RS         self.fallback_is_shape_miss = !matches!(subject_ty, Type::Option(_) | Type::Result { .. });
-//RS         let has_err = matches!(subject_ty, Type::Result { .. });
-//RS         self.fallback_has_err = Some(has_err);
-//RS         if has_err {
-//RS             let Type::Result { err, .. } = subject_ty else {
-//RS                 unreachable!("result fallback marker changed shape")
-//RS             };
-//RS             self.push_scope();
-//RS             self.declare_in_scope(
-//RS                 Syntax::AMBIENT_ERR,
-//RS                 LocalInfo {
-//RS                     def_span: span,
-//RS                     binding_sigil_span: None,
-//RS                     ty: (**err).clone(),
-//RS                     mutable: false,
-//RS                     param_conv: None,
-//RS                     decl_loop_depth: self.loop_depth,
-//RS                     interrupt_sendable: false,
-//RS                     reactive_local: false,
-//RS                     reactive_shared: false,
-//RS                     single_use_span: None,
-//RS                     invalid: false,
-//RS                 },
-//RS             );
-//RS         }
-//RS 
-//RS         let success_path = self.flow.clone();
-//RS         match fallback {
-//RS             OrFallback::Value(value) => {
-//RS                 self.infer(value);
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0405",
-//RS                     format!(
-//RS                         "`{}` must diverge after a refutable binding",
-//RS                         Syntax::OP_FALLBACK
-//RS                     ),
-//RS                     "a failed pattern match cannot continue without defining the captures"
-//RS                         .to_string(),
-//RS                     "use `return`, `panic(...)`, `break`, or `next` as the fallback".to_string(),
-//RS                     Some(value.span()),
-//RS                 ));
-//RS             }
-//RS             OrFallback::Block {
-//RS                 body,
-//RS                 value,
-//RS                 span: fallback_span,
-//RS             } => {
-//RS                 let diverges = value.is_none() && fallback_block_diverges(body);
-//RS                 self.check_block(body, false);
-//RS                 if let Some(value) = value {
-//RS                     self.infer(value);
-//RS                 }
-//RS                 if !diverges {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0405",
-//RS                         format!(
-//RS                             "`{}` fallback blocks cannot continue after a refutable binding",
-//RS                             Syntax::OP_FALLBACK
-//RS                         ),
-//RS                         "a refutable binding needs one direct diverging miss route".to_string(),
-//RS                         "end the block with `return`, `panic(...)`, `break`, or `next`".to_string(),
-//RS                         Some(*fallback_span),
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             OrFallback::Return(ret_expr, ret_span) => {
-//RS                 let ret = self.return_route_type();
-//RS                 match (&ret, ret_expr.as_mut()) {
-//RS                     (Some(ret_ty), Some(expr)) => {
-//RS                         let saved = self.expected_type.clone();
-//RS                         self.expected_type = Some(ret_ty.clone());
-//RS                         let expr_ty = self.infer(expr);
-//RS                         self.expected_type = saved;
-//RS                         if let Some(expr_ty) = expr_ty {
-//RS                             let expr_ty = self
-//RS                                 .widen_numeric_return(expr, &expr_ty, ret_ty)
-//RS                                 .unwrap_or(expr_ty);
-//RS                             let expr_ty = self
-//RS                                 .lift_optional_slot(ret_ty, &expr_ty, expr)
-//RS                                 .unwrap_or(expr_ty);
-//RS                             self.check_type_assignable(ret_ty, &expr_ty, expr.span());
-//RS                         }
-//RS                     }
-//RS                     (Some(ret_ty), None) => self.diags.push(Diagnostic::error(
-//RS                         "E0405",
-//RS                         format!("`{} return` here needs a value", Syntax::OP_FALLBACK),
-//RS                         format!(
-//RS                             "this function returns {}, so its return route needs a value",
-//RS                             ret_ty.show()
-//RS                         ),
-//RS                         format!("write `{} return <value>`", Syntax::OP_FALLBACK),
-//RS                         Some(*ret_span),
-//RS                     )),
-//RS                     (None, Some(expr)) => self.diags.push(Diagnostic::error(
-//RS                         "E0405",
-//RS                         format!(
-//RS                             "`{} return` cannot return a value here",
-//RS                             Syntax::OP_FALLBACK
-//RS                         ),
-//RS                         "this function returns nothing".to_string(),
-//RS                         "drop the value from the return route".to_string(),
-//RS                         Some(expr.span()),
-//RS                     )),
-//RS                     (None, None) => {}
-//RS                 }
-//RS             }
-//RS             OrFallback::Panic { name_span, args } => {
-//RS                 let mut call = Call {
-//RS                     name: Syntax::BUILTIN_PANIC.to_string(),
-//RS                     name_span: *name_span,
-//RS                     type_args: Vec::new(),
-//RS                     args: std::mem::take(args),
-//RS                     resolved_ret: None,
-//RS                     range_checked: false,
-//RS                     widen_approx: false,
-//RS                 };
-//RS                 self.check_panic_call(&mut call);
-//RS                 *args = call.args;
-//RS             }
-//RS             OrFallback::Break(route_span) => self.check_break_without_value(None, *route_span),
-//RS             OrFallback::Continue(route_span) => {
-//RS                 if self.loop_depth == 0 {
-//RS                     self.diags
-//RS                         .push(loop_control_outside(Syntax::KW_NEXT, *route_span));
-//RS                 }
-//RS             }
-//RS             OrFallback::BreakLabel(name, route_span) => {
-//RS                 if self.loop_depth == 0 {
-//RS                     self.diags
-//RS                         .push(loop_control_outside(Syntax::KW_BREAK, *route_span));
-//RS                 } else if !self.loop_labels.iter().any(|label| label == name) {
-//RS                     self.diags
-//RS                         .push(crate::Sema::Diagnostics::undefined_loop_label(
-//RS                             name,
-//RS                             &self.loop_labels,
-//RS                             *route_span,
-//RS                         ));
-//RS                 } else {
-//RS                     self.check_break_without_value(Some((name, *route_span)), *route_span);
-//RS                 }
-//RS             }
-//RS             OrFallback::ContinueLabel(name, route_span) => {
-//RS                 if self.loop_depth == 0 {
-//RS                     self.diags
-//RS                         .push(loop_control_outside(Syntax::KW_NEXT, *route_span));
-//RS                 } else if !self.loop_labels.iter().any(|label| label == name) {
-//RS                     self.diags
-//RS                         .push(crate::Sema::Diagnostics::undefined_loop_label(
-//RS                             name,
-//RS                             &self.loop_labels,
-//RS                             *route_span,
-//RS                         ));
-//RS                 }
-//RS             }
-//RS         }
-//RS         self.join_fallback_path(success_path, fallback);
-//RS 
-//RS         if has_err {
-//RS             self.pop_scope();
-//RS         }
-//RS         self.fallback_has_err = saved_fallback_has_err;
-//RS         self.fallback_is_shape_miss = saved_fallback_is_shape_miss;
-//RS     }
-//RS 
-//RS     pub(crate) fn infer_fallible_stmt(&mut self, expr: &mut Expr) -> Option<Type> {
-//RS         self.normalize_imported_core_expr(expr);
-//RS         self.normalize_prelude_expr(expr);
-//RS         // A statement may call a valueless function for its effect. `infer`
-//RS         // quite correctly rejects that same call in value position with
-//RS         // E0116; use the shared call checker directly here so statement
-//RS         // position keeps the call's real result (`Unit` for a valueless call)
-//RS         // without inventing a second call path.
-//RS         let expression_diverges = self.expr_diverges(expr);
-//RS         if let Expr::Call(call) = expr {
-//RS             self.clear_uninit_mut_args(&call.args);
-//RS             let result = match self.check_call(call, false) {
-//RS                 Some(Some(ty)) if ty.is_fallible() => self.auto_propagate_call(expr, Some(ty)),
-//RS                 Some(Some(ty)) => Some(ty),
-//RS                 Some(None) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-//RS                 None => None,
-//RS             };
-//RS             if expression_diverges {
-//RS                 self.flow.reachable = false;
-//RS             }
-//RS             return result;
-//RS         }
-//RS         self.infer(expr)
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn value_loop_requires_route(expr: &Expr) -> bool {
-//RS     matches!(
-//RS         expr,
-//RS         Expr::CallValue { callee, args, .. }
-//RS             if args.is_empty()
-//RS                 && matches!(
-//RS                     callee.as_ref(),
-//RS                     Expr::Lambda(lam)
-//RS                         if lam.meta.result_loop
-//RS                             && lam.meta.requires_exhaustion_route
-//RS                             && !lam.meta.exhaustion_route_attached
-//RS                 )
-//RS     )
-//RS }
-//RS 
-//RS fn fallback_block_diverges(body: &[Stmt]) -> bool {
-//RS     crate::Sema::Diagnostics::block_definitely_exits(body)
-//RS }
-//RS 
-//RS fn mark_value_loop_route_attached(expr: &mut Expr) {
-//RS     let Expr::CallValue { callee, args, .. } = expr else {
-//RS         return;
-//RS     };
-//RS     if !args.is_empty() {
-//RS         return;
-//RS     }
-//RS     if let Expr::Lambda(lam) = callee.as_mut() {
-//RS         lam.meta.exhaustion_route_attached = true;
-//RS     }
-//RS }
-//RS 
-//RS fn mark_value_loop_route_unattached(expr: &mut Expr) {
-//RS     let Expr::CallValue { callee, args, .. } = expr else {
-//RS         return;
-//RS     };
-//RS     if !args.is_empty() {
-//RS         return;
-//RS     }
-//RS     if let Expr::Lambda(lam) = callee.as_mut() {
-//RS         lam.meta.exhaustion_route_attached = false;
-//RS     }
-//RS }
-//RS 
-//RS fn value_loop_route_label(expr: &mut Expr) -> Option<String> {
-//RS     let Expr::CallValue { callee, args, .. } = expr else {
-//RS         return None;
-//RS     };
-//RS     if !args.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let Expr::Lambda(lam) = callee.as_mut() else {
-//RS         return None;
-//RS     };
-//RS     let LambdaBody::Block(stmts) = &mut lam.body else {
-//RS         return None;
-//RS     };
-//RS     let Some(Stmt::Loop {
-//RS         label: Some((label, _)),
-//RS         ..
-//RS     }) = stmts.first()
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     Some(label.clone())
-//RS }
-//RS 
-//RS fn attach_value_loop_route(expr: &mut Expr, route: Stmt) -> bool {
-//RS     let Expr::CallValue { callee, args, .. } = expr else {
-//RS         return false;
-//RS     };
-//RS     if !args.is_empty() {
-//RS         return false;
-//RS     }
-//RS     let Expr::Lambda(lam) = callee.as_mut() else {
-//RS         return false;
-//RS     };
-//RS     let LambdaBody::Block(stmts) = &mut lam.body else {
-//RS         return false;
-//RS     };
-//RS     let Some(Stmt::Loop { body, .. }) = stmts.first_mut() else {
-//RS         return false;
-//RS     };
-//RS     body.push(route);
-//RS     true
-//RS }
-// END-PORT-PENDING 0412 crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1-1900
+// Type inference: fallible forms (Ok/Err/try/?? fallback).
+use jet_foundation.[Diagnostic, FixApplicability, FixSafety, Span, TextEdit, Call, CallArg, AccessConvention, Expr, EnumLitArg, LambdaBody, OrFallback, Stmt, TryConvert, Type, FuncSig, FailureContract, CoreModuleExports, union_enum_name, union_member_tag, member_name, span_line_col, ast_empty_call_arg_flags]
+use jet_sema.[Checker, LocalInfo, FailureCase, FlowFacts, FAILURE_OBLIGATION_MARK, is_core_error_family_type, is_default_error, type_fix_hint, error_conv_fn_name, loop_control_outside, undefined_loop_label, block_definitely_exits]
+use jet_syntax as Syntax
+use jet_collections.[builtin_method_return]
 
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:12
+struct FailureCallProvenance {
+    callee: String,
+    definition: String,
+    contract: String,
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:18
+fn publish_try_call_carrier(inner: &Expr, carrier: () -> Type) Never! {
+    carrier_expr := &inner
+    loop carrier_expr == .Paren(paren, _) { carrier_expr = &paren }
+    if carrier_expr == {
+        .Call(call) -> {
+            if call.resolved_ret == .Val(checked_return) && !checked_return.is_fallible() { call.resolved_ret = Val(carrier()) }
+        }
+        .MethodCall -> {
+            if carrier_expr.resolved_ret == .Val(checked_return) && !checked_return.is_fallible() { carrier_expr.resolved_ret = Val(carrier()) }
+        }
+        else -> {}
+    }
+}
+
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:36
+    pub fn infer_ok(self: &Self, inner: &Expr, span: Span) -> Type? Never! {
+        expected_result := (Type, Type)?{None}
+        if self.expected_type == .Val(expected) && expected.unwrap_result() == .Val((ok_ty, err_ty)) { expected_result = Val((~ok_ty, ~err_ty)) }
+        payload :: if expected_result == .Val((ok_ty, _)) { self.infer_with_expected(&inner, ok_ty) ?? return None } else { self.infer_owning_value(&inner) ?? return None }
+        if expected_result == .Val((ok_ty, err_ty)) {
+            ok_payload :: payload == ok_ty || (if ok_ty == { .Union(members) -> members.any(|m| m == payload); else -> false })
+            if !ok_payload {
+                self.diags.push(Diagnostic.error("E0108", "this `{Syntax.LIT_OK}` holds {payload.show()}, but {ok_ty.show()} was expected", "the success value must match the result's value type", type_fix_hint(ok_ty, payload), Val(span)))
+            }
+            return Val(Type.Result(^ok_ty, ^err_ty))
+        }
+        self.diags.push(Diagnostic.error("E0404", "`{Syntax.LIT_OK}(...)` only fits where a fallible result is expected", "`{Syntax.LIT_OK}` builds the success side of a `T !E` result", "use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one", Val(span)))
+        None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:85
+    pub fn failure_union_probing(self) -> Bool Never! {
+        self.failure_union_probe.is_some() && !self.in_lambda_body
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:93
+    fn probe_failure_value(self: &Self, inner: &Expr) Never! {
+        saved_expected :: ^self.expected_type
+        self.expected_type = None
+        if inner == .EnumLit && inner.type_name.is_empty() {
+            name :: ~inner.variant
+            span :: inner.span
+            payload := [(String?, Type)]{}
+            payload.reserve(inner.args.len())
+            loop arg in &inner.args {
+                if arg == {
+                    .Positional(expr) -> {
+                        ty :: self.infer_owning_value(&expr) ?? Type.Named("_")
+                        payload.push((None, ^ty))
+                    }
+                    .Named -> {
+                        ty :: self.infer_owning_value(&arg.expr) ?? Type.Named("_")
+                        payload.push((Val(~arg.label), ^ty))
+                    }
+                }
+            }
+            self.expected_type = ^saved_expected
+            if self.failure_union_probe == .Val(probe) { probe.cases.push(FailureCase{name: ^name, payload: ^payload, span: span}) }
+            return
+        }
+        payload :: self.infer_owning_value(&inner)
+        self.expected_type = ^saved_expected
+        if self.failure_union_probe == .Val(probe) {
+            if payload == { .Val(ty) -> probe.add_member(ty); .None -> probe.general = true }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:140
+    pub fn infer_err(self: &Self, inner: &Expr, span: Span) -> Type? Never! {
+        expected_result := (Type, Type)?{None}
+        if self.expected_type == .Val(expected) && expected.unwrap_result() == .Val((ok_ty, err_ty)) { expected_result = Val((~ok_ty, ~err_ty)) }
+        if expected_result == .Val((ok_ty, err_ty)) && is_default_error(err_ty) && self.failure_union_probing() {
+            carrier :: Type.Result(~ok_ty, ~err_ty)
+            self.probe_failure_value(&inner)
+            return Val(^carrier)
+        }
+        general_target :: if expected_result == { .Val((_, err_ty)) -> is_default_error(err_ty) || err_ty.union_contains(Type.Named(Syntax.TYPE_ERR)); else -> false }
+        message_literal :: if inner.without_parens() == { .Str -> true; else -> false }
+        payload_expected := Type?{None}
+        if expected_result == .Val((_, err_ty)) { payload_expected = Val(if is_default_error(err_ty) || (general_target && message_literal) { Type.String } else { ~err_ty }) }
+        payload := if payload_expected == .Val(expected) { self.infer_with_expected(&inner, expected) ?? return None } else { self.infer_owning_value(&inner) ?? return None }
+        if expected_result == .Val((ok_ty, err_ty)) {
+            if general_target && payload == Type.String {
+                message :: ^inner
+                inner = Expr.Absent(span)
+                call :: Call{name: Syntax.LIT_ERR, name_span: span, type_args: [Type]{}, args: [CallArg]{CallArg{convention: AccessConvention.Read, span: span, expr: ^message, flags: ast_empty_call_arg_flags(), label: None, spread: false}}, resolved_ret: None, range_checked: false, widen_approx: false}
+                inner = self.default_err_value(^call, false)
+                payload = Type.Named(Syntax.TYPE_ERR)
+            }
+            ok_payload :: payload == err_ty || (if err_ty == { .Union(members) -> members.any(|m| m == payload); else -> false })
+            if !ok_payload {
+                self.diags.push(Diagnostic.error("E0108", "this `{Syntax.LIT_ERR}` holds {payload.show()}, but {err_ty.show()} was expected", "the failure value must match the result's error type", type_fix_hint(err_ty, payload), Val(span)))
+            }
+            return Val(Type.Result(^ok_ty, ^err_ty))
+        }
+        self.diags.push(Diagnostic.error("E0404", "`{Syntax.LIT_ERR}(...)` only fits where a fallible result is expected", "`{Syntax.LIT_ERR}` builds the failure side of a `T !E` result", "use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one", Val(span)))
+        None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:232
+    fn resolve_failure_function_in_module(self, module_idx: Int, name: String) -> (Int, String, FuncSig)? Never! {
+        modules :: self.modules ?? return None
+        index := module_idx
+        current := ~name
+        visited := [(Int, String):Bool]{}
+        // GATE #4499: exact tuple-key hashing/equality.
+        loop {
+            key :: (index, ~current)
+            if visited.has_key(key) -> return None
+            visited[^key] = true
+            module :: modules.get(index) ?? return None
+            if module.reexports.get(current) == .Val((real_name, real_module)) {
+                current = ~real_name
+                index = real_module
+                continue
+            }
+            semantic_name := ~current
+            if current.split_once('.') == .Val((inline_module, item)) && module.code_modules.get(inline_module) == .Val(canonical) { semantic_name = member_name(canonical, item) }
+            signature :: module.funcs.get(semantic_name) ?? return None
+            return Val((index, ^semantic_name, ~signature))
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:263
+    fn resolve_failure_function(self, name: String) -> (Int, String, FuncSig)? Never! {
+        if self.funcs.get(name) == .Val(signature) -> return Val((self.module_idx, ~name, ~signature))
+        if self.inline_module == .Val(module) && self.inline_unqualified.get((module, name)) == .Val(mangled) && self.funcs.get(mangled) == .Val(signature) -> return Val((self.module_idx, ~mangled, ~signature))
+        if self.unqualified.get(name) == .Val(mangled) && self.funcs.get(mangled) == .Val(signature) -> return Val((self.module_idx, ~mangled, ~signature))
+        if self.inline_module == .Val(module) && self.inline_unqualified_file.get((module, name)) == .Val((function, module_idx)) {
+            if self.resolve_failure_function_in_module(module_idx, function) == .Val(target) -> return Val(^target)
+        }
+        if self.unqualified_file.get(name) == .Val((function, module_idx)) {
+            if self.resolve_failure_function_in_module(module_idx, function) == .Val(target) -> return Val(^target)
+        }
+        if self.resolve_import_call_path(name) == .Val((_, module_idx, function)) {
+            if self.resolve_failure_function_in_module(module_idx, function) == .Val(target) -> return Val(^target)
+        }
+        (alias, item) :: name.split_once('.') ?? return None
+        if self.code_modules.get(alias) == .Val(canonical) {
+            mangled :: member_name(canonical, item)
+            if self.funcs.get(mangled) == .Val(signature) -> return Val((self.module_idx, ^mangled, ~signature))
+        }
+        if self.inline_reexport_inline.get((alias, item)) == .Val((_, mangled)) && self.funcs.get(mangled) == .Val(signature) -> return Val((self.module_idx, ~mangled, ~signature))
+        if self.inline_reexport_file.get((alias, item)) == .Val((function, module_idx)) -> return self.resolve_failure_function_in_module(module_idx, function)
+        None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:326
+    fn definition_location(self, module_idx: Int, span: Span) -> String? Never! {
+        modules :: self.modules ?? return None
+        module :: modules.get(module_idx) ?? return None
+        if module.module_path.is_empty() || module.source.is_empty() -> return None
+        (line, col) :: span_line_col(module.source, span.start)
+        Val("{module.module_path}:{line}:{col}")
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:335
+    fn definition_span_text(self, owner: Int, name: String) -> String Never! {
+        declaration :: self.name_ledger.declaration(owner, name) ?? return "Core or generated callable (no user source location)"
+        self.definition_location(declaration.module, declaration.span) ?? "Core or generated callable (no user source location)"
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:343
+    fn definition_fallback_text(self) -> String Never! { "Core or generated callable (no user source location)" }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:347
+    fn failure_call_provenance(self, inner: Expr) -> FailureCallProvenance Never! {
+        if inner == {
+            .Call(call) -> {
+                definition := self.definition_span_text(self.module_idx, call.name)
+                contract := "inferred failure contract"
+                if self.resolve_failure_function(call.name) == .Val((owner, name, signature)) {
+                    definition = self.definition_span_text(owner, name)
+                    contract = signature.failure_contract().source()
+                } else if call.resolved_ret == .Val(return_type) { contract = FailureContract.from_return_type(Val(return_type)).source() }
+                FailureCallProvenance{callee: ~call.name, definition: ^definition, contract: ^contract}
+            }
+            .MethodCall -> {
+                contract := "inferred failure contract"
+                definition := self.definition_fallback_text()
+                if inner.recv_type == .Val(type_name) && self.resolve_method_sig(type_name, inner.method) == .Val((owner, signature)) {
+                    contract = signature.failure_contract().source()
+                    (_, leaf) :: self.struct_type_name_parts(type_name)
+                    if self.name_ledger.declaration(owner, "{leaf}.{inner.method}") == .Val(declaration) { definition = self.definition_location(declaration.module, declaration.span) ?? self.definition_fallback_text() }
+                }
+                FailureCallProvenance{callee: "{inner.method}()", definition: ^definition, contract: ^contract}
+            }
+            else -> FailureCallProvenance{callee: "this fallible expression", definition: self.definition_fallback_text(), contract: "inferred failure contract"}
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:415
+    fn inferable_failure_callee(self, inner: Expr) -> (Int, String)? Never! {
+        target := (Int, String, FuncSig)?{None}
+        operand :: inner.without_parens()
+        if operand == {
+            .Call(call) -> target = self.resolve_failure_function(call.name)
+            .MethodCall -> {
+                if self.core_module_path_from_receiver(operand.receiver) == .Val((module, _, _)) {
+                    source :: CoreModuleExports.core_source_module(module) ?? return None
+                    if !CoreModuleExports.core_source_owns_call(module, operand.method, operand.args.len()) -> return None
+                    modules :: self.modules ?? return None
+                    source_idx := Int?{None}
+                    loop index in 0..<modules.len() { if modules[index].module_alias == source.alias { source_idx = Val(index); break } }
+                    target = self.resolve_failure_function_in_module(source_idx ?? return None, operand.method)
+                } else {
+                    if operand.receiver.without_parens() != .Ident(alias, _) -> return None
+                    target = self.resolve_failure_function("{alias}.{operand.method}")
+                }
+            }
+            else -> return None
+        }
+        (module_idx, name, signature) :: target ?? return None
+        if !signature.is_extern && signature.failure_contract().is_default() -> Val((module_idx, ^name)) else -> None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:455
+    fn defer_failure_obligation(self: &Self, callee: (Int, String), inner: &Expr, convert: &TryConvert, ok: Type, err: Type) -> Type? Never! {
+        (module_idx, name) :: callee
+        if self.diags.last_mut() == .Val(diagnostic) {
+            detail :: diagnostic.detail ?? ""
+            diagnostic.detail = Val("{FAILURE_OBLIGATION_MARK}{module_idx}:{name}\n{detail}")
+        }
+        convert = TryConvert.Never
+        publish_try_call_carrier(&inner, || Type.Result(~ok, ~err))
+        Val(~ok)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:483
+    fn failure_domain_caller_edit(self, source_name: String) -> TextEdit? Never! {
+        if self.current_return_type_span == .Val(span) {
+            success := ""
+            authored :: self.source.get(span.start..<span.end) // #4303
+            if authored == .Val(text) && Self.authored_contract_success(text) == .Val(spelling) { success = spelling } else if self.declared_return_type == .Val(return_type) && return_type.unwrap_result() == .Val((ok, _)) { success = ok.name() }
+            new_text :: if success.is_empty() { "{source_name}{Syntax.TYPE_FALLIBLE_MARK}" } else { "{success} {source_name}{Syntax.TYPE_FALLIBLE_MARK}" }
+            return Val(TextEdit{span: span, new_text: ^new_text})
+        }
+        body :: self.source.get(self.current_function_span.start..<self.current_function_span.end) ?? return None // #4303
+        body_offset :: body.find('{') ?? body.find(Syntax.OP_UNIFIED_ARROW) ?? return None
+        insertion :: self.current_function_span.start + body_offset
+        Val(TextEdit{span: Span.new(insertion, insertion), new_text: "{source_name}{Syntax.TYPE_FALLIBLE_MARK} "})
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:524
+    fn authored_contract_success(text: String) -> String? Never! {
+        trimmed := text.trim_end() // #4303
+        body := trimmed.strip_suffix(Syntax.TYPE_FALLIBLE_MARK) ?? return None // #4303
+        depth := 0
+        loop (index, ch) in body.char_indices().rev() {
+            if ch == {
+                '>' -> { prefix := body[0..<index] // #4303
+                    if !prefix.ends_with('-') { depth += 1 }
+                }
+                ')' | ']' -> depth += 1
+                '(' | '<' | '[' -> depth -= 1
+                else -> {
+                    if ch.is_whitespace() && depth == 0 { success := body[0..<index].trim() // #4303
+                        return Val(success)
+                    }
+                }
+            }
+        }
+        Val("")
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:542
+    fn failure_domain_conversion_edit(self, source_name: String, target_name: String) -> TextEdit? Never! {
+        if source_name.is_empty() || target_name.is_empty() -> return None
+        loop character in source_name.chars() { if character.is_whitespace() || character == '|' -> return None }
+        loop character in target_name.chars() { if character.is_whitespace() || character == '|' -> return None }
+        separator :: if self.source.ends_with('\n') { "\n" } else { "\n\n" }
+        Val(TextEdit{span: Span.new(self.source.len(), self.source.len()), new_text: "{separator}impl {source_name} -> {target_name} {{\n    // map each {source_name} case into {target_name}\n}}\n"})
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:569
+    fn report_failure_domain_mismatch(self: &Self, span: Span, inner: Expr, source: Type, target: Type) Never! {
+        provenance :: self.failure_call_provenance(inner)
+        callee :: provenance.callee
+        definition :: provenance.definition
+        contract :: provenance.contract
+        caller :: if self.declared_return_type == .Val(return_type) { FailureContract.from_return_type(Val(return_type)).source() } else { "no declared failure contract" }
+        source_name :: source.name()
+        target_name :: target.name()
+        diagnostic := Diagnostic.from_row("E2404", [(String, String)]{("Source", source_name), ("Target", target_name), ("callee", callee), ("definition", definition), ("contract", contract), ("caller", caller)}, Val(span)).with_detail("failure-domain:{callee}|{source_name}|{target_name}\ncallee: {callee}\ndefinition: {definition}\neffective contract: {contract}\ncaller contract: {caller}")
+        if self.failure_domain_caller_edit(source_name) == .Val(edit) { diagnostic = diagnostic.with_edit_grade(^edit, FixApplicability.Suggested, FixSafety.NeedsReview) }
+        if target_name != Syntax.TYPE_NEVER && self.failure_domain_conversion_edit(source_name, target_name) == .Val(edit) { diagnostic = diagnostic.with_alternative_edit(^edit) }
+        self.diags.push(^diagnostic)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:619
+    pub fn infer_try(self: &Self, inner: &Expr, span: Span, convert: &TryConvert, note: &Expr?) -> Type? Never! {
+        self.infer_try_with_inner_type(&inner, span, &convert, &note, None)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:629
+    pub fn infer_try_with_inner_type(self: &Self, inner: &Expr, span: Span, convert: &TryConvert, note: &Expr?, checked_inner_type: Type?) -> Type? Never! {
+        implicit_propagation :: if checked_inner_type == { .Val(ty) -> ty.is_fallible(); else -> false }
+        if note == .Val(note_expr) {
+            saved :: ~self.expected_type
+            self.expected_type = Val(Type.String)
+            note_ty :: self.infer(&note_expr)
+            self.expected_type = ^saved
+            if note_ty == .Val(ty) { _ :: self.check_type_assignable(Type.String, ty, note_expr.span()) }
+        }
+        if inner == .Call(call) && self.registry.distinct_range(call.name).is_some() { call.range_checked = true }
+        inner_ty := Type?{None}
+        if checked_inner_type == .Val(ty) { inner_ty = Val(~ty) } else {
+            self.failure_auto_depth += 1
+            inner_ty = self.infer_without_auto_propagation(&inner)
+            self.failure_auto_depth -= 1
+        }
+        ty :: inner_ty ?? return None
+        if ty == {
+            .Result(ok, err) -> {
+                ret :: self.resolve_type(self.ret ?? Type.Int)
+                if err == .Named(name) && name == Syntax.TYPE_NEVER {
+                    convert = TryConvert.Never
+                    publish_try_call_carrier(&inner, || Type.Result(~ok, ~err))
+                    return Val(~ok)
+                }
+                if ret == .Result(_, ret_err) {
+                    if is_default_error(ret_err) && self.failure_union_probing() {
+                        callee :: if is_default_error(err) { self.inferable_failure_callee(inner) } else { None }
+                        if self.failure_union_probe == .Val(probe) {
+                            if callee == .Val(edge) { probe.edges.insert(^edge) } else { probe.add_member(err) }
+                        }
+                        self.task_body_propagates = true
+                        publish_try_call_carrier(&inner, || Type.Result(~ok, ~err))
+                        return Val(~ok)
+                    }
+                    if ret_err == .Named(name) && name == "_" -> return Val(~ok)
+                    if ret_err == .Named(name) && name == Syntax.TYPE_NEVER {
+                        pending_callee :: self.inferable_failure_callee(inner)
+                        self.report_failure_domain_mismatch(span, inner, err, ret_err)
+                        return self.defer_failure_obligation(pending_callee ?? return None, &inner, &convert, ok, err)
+                    }
+                    if ret_err == err {
+                        self.task_body_propagates = true
+                        publish_try_call_carrier(&inner, || Type.Result(~ok, ~err))
+                        return Val(~ok)
+                    }
+                    if is_default_error(ret_err) && err == Type.String {
+                        convert = TryConvert.DefaultErr
+                        self.task_body_propagates = true
+                        publish_try_call_carrier(&inner, || Type.Result(~ok, ~err))
+                        return Val(~ok)
+                    }
+                    if ret_err.union_contains(err) {
+                        members :: ret_err.unwrap_union().expect("union_contains implies Union")
+                        convert = TryConvert.WidenUnion{enum_name: union_enum_name(members), tag: union_member_tag(err)}
+                        self.task_body_propagates = true
+                        publish_try_call_carrier(&inner, || Type.Result(~ok, ~err))
+                        return Val(~ok)
+                    }
+                    err_type_name :: err.name()
+                    ret_err_name :: ret_err.name()
+                    if self.trait_reg.has_error_conv(err_type_name, ret_err_name) {
+                        convert = TryConvert.Typed{fn_name: error_conv_fn_name(err_type_name, ret_err_name), source: ~err, target: ~ret_err}
+                        self.task_body_propagates = true
+                        publish_try_call_carrier(&inner, || Type.Result(~ok, ~err))
+                        return Val(~ok)
+                    }
+                    if is_default_error(ret_err) {
+                        err_name :: err.name()
+                        if !self.no_prelude && is_core_error_family_type(err_name) {
+                            convert = TryConvert.Typed{fn_name: error_conv_fn_name(err_name, Syntax.TYPE_ERR), source: ~err, target: Type.Named(Syntax.TYPE_ERR)}
+                            self.task_body_propagates = true
+                            publish_try_call_carrier(&inner, || Type.Result(~ok, ~err))
+                            return Val(~ok)
+                        }
+                        (what, why, fix) :: if implicit_propagation {
+                            ("this implicit fallible call can't convert `{err_name}` into `{Syntax.TYPE_ERR}` — no declared conversion exists", "ordinary fallible calls propagate automatically; `{err_name}` can reach `{Syntax.TYPE_ERR}` only through `impl {err_name} -> {Syntax.TYPE_ERR}`", "handle this call locally with `??`, add `impl {err_name} -> {Syntax.TYPE_ERR} {{ … }}`, or change the return type")
+                        } else {
+                            ("`?` can't convert `{err_name}` into `{Syntax.TYPE_ERR}` — no declared conversion exists", "`?` uses the declared conversion rail; `{err_name}` can reach `{Syntax.TYPE_ERR}` only through `impl {err_name} -> {Syntax.TYPE_ERR}`", "add `impl {err_name} -> {Syntax.TYPE_ERR} {{ … }}` before this function, or change the return type")
+                        }
+                        self.diags.push(Diagnostic.error("E2402", ^what, ^why, ^fix, Val(span)))
+                        return None
+                    }
+                    pending_callee :: self.inferable_failure_callee(inner)
+                    self.report_failure_domain_mismatch(span, inner, err, ret_err)
+                    return self.defer_failure_obligation(pending_callee ?? return None, &inner, &convert, ok, err)
+                }
+                (what, why, fix) :: if implicit_propagation {
+                    ("this fallible call only works inside a function that returns a fallible result", "ordinary fallible calls propagate their failure automatically to the caller", "declare `{err.name()}` in the return type before `->`, or handle the result with `{Syntax.OP_FALLBACK}`")
+                } else {
+                    ("`{Syntax.OP_TRY_SUFFIX}` only works inside a function that returns a fallible result", "propagation early-returns the failure to the caller", "declare the failure in the return type — `{err.name()}` before `->` — or handle the result with `{Syntax.OP_FALLBACK}`")
+                }
+                pending_callee :: self.inferable_failure_callee(inner)
+                self.diags.push(Diagnostic.error("E0403", ^what, ^why, ^fix, Val(span)))
+                self.defer_failure_obligation(pending_callee ?? return None, &inner, &convert, ok, err)
+            }
+            .Option(optional_inner) -> {
+                ret :: self.ret ?? Type.Int
+                if ret == .Option(ret_inner) && ret_inner == optional_inner {
+                    self.task_body_propagates = true
+                    publish_try_call_carrier(&inner, || Type.Option(~optional_inner))
+                    return Val(~optional_inner)
+                }
+                self.diags.push(Diagnostic.error("E0403", "`{Syntax.OP_TRY_SUFFIX}` on `{ty.name()}` needs a function that returns the same optional type", "propagation passes `{Syntax.LIT_NULL}` back to the caller", "declare `{ty.name()}` as an optional return type before `->`, or handle it with `{Syntax.OP_FALLBACK}`", Val(span)))
+                None
+            }
+            else -> {
+                self.diags.push(Diagnostic.error("E0403", "`{Syntax.OP_TRY_SUFFIX}` only works on a fallible value, not {ty.show()}", "`?` unwraps success or returns early with the failure", "call something that returns `T !E` or an optional value, or remove `{Syntax.OP_TRY_SUFFIX}`", Val(span)))
+                None
+            }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:966
+    pub fn infer_value_loop_fallback(self: &Self, expr: &Expr) -> Type? Never! {
+        span :: expr.span()
+        original :: ^expr
+        expr = Expr.Absent(span)
+        if original != .OrFallback -> panic("value-loop fallback dispatch only accepts OrFallback")
+        value := ^original.value
+        fallback := ^original.fallback
+        mark_value_loop_route_attached(&value)
+        checked :: self.infer(&value) ?? { expr = ^value; return None }
+        resolved :: self.resolve_type(^checked).erased_carrier()
+        value_ty :: if resolved == { .Result(ok, _) | .Option(ok) -> ok.erased_carrier(); else -> ^resolved }
+        self.reject_borrowed_param_subplace(&value, Val(value_ty), "supply an owned exhaustion-route payload")
+        compute_failure_fallback :: value_ty.is_compute_tensor_family() && self.is_core_compute_call(value)
+        label :: value_loop_route_label(&value) ?? { expr = ^value; return Val(^value_ty) }
+        if fallback == {
+            .Value(fallback_expr) -> {
+                fallback_span :: fallback_expr.span()
+                if self.infer_with_expected(&fallback_expr, value_ty) == .Val(fallback_ty) {
+                    widened :: self.widen_numeric_argument(&fallback_expr, ^fallback_ty, value_ty, AccessConvention.Read)
+                    reported :: self.check_type_assignable(value_ty, widened, fallback_span)
+                    if widened != value_ty && !reported {
+                        self.diags.push(Diagnostic.error("E0405", "the fallback is {widened.show()}, but the loop value is {value_ty.show()}", "both sides of `{Syntax.OP_FALLBACK}` must be the same type", type_fix_hint(value_ty, widened), Val(fallback_span)))
+                    }
+                }
+                _ :: attach_value_loop_route(&value, Stmt.BreakLabelValue(^label, span, ^fallback_expr, fallback_span))
+            }
+            .Return(ret_expr, ret_span) -> {
+                ret :: ~self.ret
+                if (ret, ret_expr) == {
+                    (.Val(ret_ty), .Val(e)) -> {
+                        saved :: ~self.expected_type
+                        self.expected_type = Val(~ret_ty)
+                        expr_ty :: self.infer(&e)
+                        self.expected_type = ^saved
+                        if expr_ty == .Val(ty) {
+                            widened :: self.widen_numeric_return(&e, ty, ret_ty) ?? ty
+                            lifted :: self.lift_optional_slot(ret_ty, widened, &e) ?? widened
+                            _ :: self.check_type_assignable(ret_ty, lifted, e.span())
+                        }
+                    }
+                    (.Val(ret_ty), .None) -> self.diags.push(Diagnostic.error("E0405", "`{Syntax.OP_FALLBACK} return` here needs a value", "a bare `return` needs a value here because the function returns {ret_ty.show()}", "give a fallback value: `{Syntax.OP_FALLBACK} return <value>`", Val(ret_span)))
+                    (.None, .Val(e)) -> self.diags.push(Diagnostic.error("E0405", "`{Syntax.OP_FALLBACK} return` can't return a value here", "this function returns nothing, so `return` can't carry a value", "drop the value, or add a return type before `->`", Val(e.span())))
+                    (.None, .None) -> {}
+                }
+                _ :: attach_value_loop_route(&value, Stmt.Return(^ret_expr, span))
+            }
+            .Block -> {
+                mark_value_loop_route_unattached(&value)
+                self.diags.push(Diagnostic.error("E0405", "a finite value loop cannot use a multi-step `??` fallback", "the loop's exhaustion route carries one value or control action, not a fallback block", "use one fallback value, or move the loop into a named block and handle the report there", Val(fallback.span)))
+            }
+            .Panic -> {
+                call := Call{name: Syntax.BUILTIN_PANIC, name_span: fallback.name_span, type_args: [Type]{}, args: ^fallback.args, resolved_ret: None, range_checked: false, widen_approx: false}
+                saved :: self.autodiff_safe_panic_context
+                self.autodiff_safe_panic_context = compute_failure_fallback
+                self.check_panic_call(&call)
+                self.autodiff_safe_panic_context = saved
+                _ :: attach_value_loop_route(&value, Stmt.Expr(Expr.Call(^call)))
+            }
+            .Break(route_span) | .Continue(route_span) -> {
+                route :: if fallback == { .Break -> "break"; .Continue -> "next"; else -> panic("matched immediate loop-control fallback") }
+                mark_value_loop_route_unattached(&value)
+                self.diags.push(Diagnostic.error("E0078", "this finite value loop cannot use `{Syntax.OP_FALLBACK} {route}` after its closing brace", "the route would control the loop that just closed; use a labeled loop to name the target", "write a labeled search such as `found :: loop {{ ... break(found, value) }}`", Val(route_span)))
+            }
+            .BreakLabel(name, route_span) -> {
+                if self.loop_depth == 0 {
+                    mark_value_loop_route_unattached(&value)
+                    self.diags.push(loop_control_outside(Syntax.KW_BREAK, route_span))
+                } else if !self.loop_labels.any(|label| label == name) {
+                    mark_value_loop_route_unattached(&value)
+                    self.diags.push(undefined_loop_label(name, self.loop_labels, route_span))
+                } else {
+                    self.check_break_without_value(Val((name, route_span)), route_span)
+                    _ :: attach_value_loop_route(&value, Stmt.BreakLabel(^name, route_span))
+                }
+            }
+            .ContinueLabel(name, route_span) -> {
+                if self.loop_depth == 0 {
+                    mark_value_loop_route_unattached(&value)
+                    self.diags.push(loop_control_outside(Syntax.KW_NEXT, route_span))
+                } else if !self.loop_labels.any(|label| label == name) {
+                    mark_value_loop_route_unattached(&value)
+                    self.diags.push(undefined_loop_label(name, self.loop_labels, route_span))
+                } else { _ :: attach_value_loop_route(&value, Stmt.ContinueLabel(^name, route_span)) }
+            }
+        }
+        expr = ^value
+        Val(^value_ty)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1178
+    fn is_core_compute_call(self, expr: Expr) -> Bool Never! {
+        operand :: expr.without_parens()
+        if operand != .MethodCall -> return false
+        if operand.receiver.without_parens() == .Ident(alias, _) -> self.core_imports.get(alias) == Val("core.compute") else -> false
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1191
+    fn return_route_type(self) -> Type? Never! {
+        ret :: self.ret ?? return None
+        if ret == .Result(ok, _) {
+            if (if ok == { .Named(name) -> name == Syntax.INTERNAL_UNIT_TYPE; else -> false }) || self.is_unit_type(ok) -> return None
+        }
+        if (if ret == { .Named(name) -> name == Syntax.INTERNAL_UNIT_TYPE; else -> false }) || self.is_unit_type(ret) -> return None
+        Val(~ret)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1209
+    pub fn infer_or_fallback(self: &Self, value: &Expr, fallback: &OrFallback, span: Span, is_option: &Bool) -> Type? Never! {
+        suppress_auto :: if value.without_parens() == { .Call | .MethodCall | .CallValue -> true; else -> false }
+        saved_failure_carrier :: ~self.failure_carrier
+        saved_task_body_propagates :: self.task_body_propagates
+        saved_ret :: ~self.ret
+        val_ty := Type?{None}
+        if suppress_auto {
+            self.failure_auto_depth += 1
+            val_ty = self.infer_without_auto_propagation(&value)
+            self.failure_auto_depth -= 1
+        } else { val_ty = self.infer(&value) }
+        self.failure_carrier = ^saved_failure_carrier
+        self.task_body_propagates = saved_task_body_propagates
+        self.ret = ^saved_ret
+        if val_ty.is_none() {
+            callback_error := Type?{None}
+            operand :: value.without_parens()
+            if operand == .MethodCall {
+                receiver_ty := Type?{None}
+                if operand.receiver.without_parens() == .Ident(name, _) {
+                    if self.lookup(name) == .Val(info) { receiver_ty = Val(~info.ty) }
+                } else {
+                    receiver := ~operand.receiver
+                    receiver_ty = self.infer_without_auto_propagation(&receiver)
+                }
+                if receiver_ty == .Val(recv_ty) && builtin_method_return(recv_ty, operand.method, operand.args.len(), false) == Val(None) {
+                    if operand.args.first() == .Val(arg) && arg.expr.without_parens() == .Lambda(lambda) && lambda.meta.fallible_carrier == .Val(.Result(_, err)) { callback_error = Val(~err) }
+                }
+            }
+            if callback_error == .Val(err) { val_ty = Val(Type.Result(Type.Named(Syntax.INTERNAL_UNIT_TYPE), ^err)) }
+        }
+        ty :: val_ty ?? return None
+        is_option = if ty == { .Option -> true; else -> false }
+        payload := if ty == {
+            .Result(ok, _) -> if ok == { .Option(inner) -> ~inner; else -> ~ok }
+            .Option(inner) -> ~inner
+            else -> {
+                self.diags.push(Diagnostic.error("E0405", "`{Syntax.OP_FALLBACK}` only works on a fallible value, not {ty.show()}", "the left side must be a `Result` or optional value", "call something that can fail, then write `... {Syntax.OP_FALLBACK} fallback`", Val(span)))
+                return None
+            }
+        }
+        success_never :: payload.is_never()
+        self.reject_borrowed_param_subplace(&value, Val(ty), "supply an owned fallback payload")
+        compute_failure_fallback :: payload.is_compute_tensor_family() && self.is_core_compute_call(value)
+        saved_fallback_has_err :: self.fallback_has_err
+        saved_fallback_is_shape_miss :: self.fallback_is_shape_miss
+        self.fallback_is_shape_miss = false
+        self.fallback_has_err = Val(!is_option)
+        ambient_scope :: !is_option
+        if ambient_scope {
+            if ty != .Result(_, err_ty) -> panic("non-result fallback cannot expose err")
+            self.push_scope()
+            self.declare_in_scope(Syntax.AMBIENT_ERR, LocalInfo{def_span: span, binding_sigil_span: None, ty: ~err_ty, mutable: false, param_conv: None, decl_loop_depth: self.loop_depth, interrupt_sendable: false, reactive_local: false, reactive_shared: false, single_use_span: None, invalid: false})
+        }
+        success_path :: ~self.flow
+        result :: if fallback == {
+            .Value(e) -> {
+                saved :: ~self.expected_type
+                self.expected_type = if !success_never { Val(~payload) } else { None }
+                fallback_diverges :: self.expr_diverges(e)
+                ft :: self.infer(&e)
+                self.expected_type = ^saved
+                checked :: ft ?? {
+                    if ambient_scope { self.pop_scope() }
+                    self.fallback_has_err = saved_fallback_has_err
+                    self.fallback_is_shape_miss = saved_fallback_is_shape_miss
+                    return None
+                }
+                if success_never { payload = ^checked } else if checked != payload && !fallback_diverges {
+                    self.diags.push(Diagnostic.error("E0405", "the fallback is {checked.show()}, but the success value is {payload.show()}", "both sides of `{Syntax.OP_FALLBACK}` must be the same type", type_fix_hint(payload, checked), Val(e.span())))
+                }
+                Val(~payload)
+            }
+            .Block -> {
+                self.check_block(&fallback.body, false)
+                if fallback.value == .Val(tail) {
+                    saved :: ~self.expected_type
+                    self.expected_type = if !success_never { Val(~payload) } else { None }
+                    value_ty :: self.infer(&tail)
+                    self.expected_type = ^saved
+                    if value_ty == .Val(checked) {
+                        if success_never { payload = ^checked } else if checked != payload {
+                            self.diags.push(Diagnostic.error("E0405", "the fallback is {checked.show()}, but the success value is {payload.show()}", "both sides of `{Syntax.OP_FALLBACK}` must be the same type", type_fix_hint(payload, checked), Val(tail.span())))
+                        }
+                    }
+                }
+                Val(~payload)
+            }
+            .Return(ret_expr, ret_span) -> {
+                ret :: self.return_route_type()
+                if (ret, ret_expr) == {
+                    (.Val(rt), .Val(e)) -> {
+                        saved :: ~self.expected_type
+                        self.expected_type = Val(~rt)
+                        et :: self.infer(&e)
+                        self.expected_type = ^saved
+                        if et == .Val(checked) {
+                            widened :: self.widen_numeric_return(&e, checked, rt) ?? checked
+                            lifted :: self.lift_optional_slot(rt, widened, &e) ?? widened
+                            _ :: self.check_type_assignable(rt, lifted, e.span())
+                        }
+                    }
+                    (.Val(rt), .None) -> self.diags.push(Diagnostic.error("E0405", "`{Syntax.OP_FALLBACK} return` here needs a value", "a bare `return` needs a value here because the function returns {rt.show()}", "give a fallback value: `{Syntax.OP_FALLBACK} return <value>`", Val(ret_span)))
+                    (.None, .Val(e)) -> {
+                        if self.declared_return_type == .Val(declared) && declared.unwrap_result().is_some() {
+                            carrier :: ~self.declared_return_type
+                            saved :: ~self.expected_type
+                            self.expected_type = ~carrier
+                            et :: self.infer(&e)
+                            self.expected_type = ^saved
+                            if carrier == .Val(carrier_ty) && et == .Val(checked) { _ :: self.check_type_assignable(carrier_ty, checked, e.span()) }
+                        } else {
+                            self.diags.push(Diagnostic.error("E0405", "`{Syntax.OP_FALLBACK} return` can't return a value here", "this function returns nothing, so `return` can't carry a value", "drop the value, or add a return type before `->`", Val(e.span())))
+                        }
+                    }
+                    (.None, .None) -> {}
+                }
+                Val(~payload)
+            }
+            .Panic -> {
+                call := Call{name: Syntax.BUILTIN_PANIC, name_span: fallback.name_span, type_args: [Type]{}, args: ^fallback.args, resolved_ret: None, range_checked: false, widen_approx: false}
+                fallback.args = [CallArg]{}
+                saved :: self.autodiff_safe_panic_context
+                self.autodiff_safe_panic_context = compute_failure_fallback
+                self.check_panic_call(&call)
+                self.autodiff_safe_panic_context = saved
+                fallback.args = ^call.args
+                Val(~payload)
+            }
+            .Break(kw_span) -> {
+                if self.loop_depth == 0 { self.diags.push(loop_control_outside(Syntax.KW_BREAK, kw_span)) } else { self.check_break_without_value(None, kw_span) }
+                Val(~payload)
+            }
+            .Continue(kw_span) -> {
+                if self.loop_depth == 0 { self.diags.push(loop_control_outside(Syntax.KW_NEXT, kw_span)) }
+                Val(~payload)
+            }
+            .BreakLabel(name, route_span) -> {
+                if self.loop_depth == 0 { self.diags.push(loop_control_outside(Syntax.KW_BREAK, route_span)) } else if !self.loop_labels.any(|label| label == name) { self.diags.push(undefined_loop_label(name, self.loop_labels, route_span)) } else { self.check_break_without_value(Val((name, route_span)), route_span) }
+                Val(~payload)
+            }
+            .ContinueLabel(name, route_span) -> {
+                if self.loop_depth == 0 { self.diags.push(loop_control_outside(Syntax.KW_NEXT, route_span)) } else if !self.loop_labels.any(|label| label == name) { self.diags.push(undefined_loop_label(name, self.loop_labels, route_span)) }
+                Val(~payload)
+            }
+        }
+        self.join_fallback_path(success_path, fallback)
+        if ambient_scope { self.pop_scope() }
+        self.fallback_has_err = saved_fallback_has_err
+        self.fallback_is_shape_miss = saved_fallback_is_shape_miss
+        result
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1600
+    fn join_fallback_path(self: &Self, success_path: FlowFacts, fallback: OrFallback) Never! {
+        miss_path := ^self.flow
+        self.flow = FlowFacts.default()
+        if fallback != .Value && fallback != .Block { miss_path.reachable = false }
+        self.flow = FlowFacts.merge_paths(success_path, [FlowFacts]{~success_path, ^miss_path})
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1618
+    pub fn check_diverging_fallback(self: &Self, fallback: &OrFallback, subject_ty: Type, span: Span) Never! {
+        saved_fallback_has_err :: self.fallback_has_err
+        saved_fallback_is_shape_miss :: self.fallback_is_shape_miss
+        self.fallback_is_shape_miss = if subject_ty == { .Option | .Result -> false; else -> true }
+        has_err :: if subject_ty == { .Result -> true; else -> false }
+        self.fallback_has_err = Val(has_err)
+        if has_err {
+            if subject_ty != .Result(_, err) -> panic("result fallback marker changed shape")
+            self.push_scope()
+            self.declare_in_scope(Syntax.AMBIENT_ERR, LocalInfo{def_span: span, binding_sigil_span: None, ty: ~err, mutable: false, param_conv: None, decl_loop_depth: self.loop_depth, interrupt_sendable: false, reactive_local: false, reactive_shared: false, single_use_span: None, invalid: false})
+        }
+        success_path :: ~self.flow
+        if fallback == {
+            .Value(value) -> {
+                _ :: self.infer(&value)
+                self.diags.push(Diagnostic.error("E0405", "`{Syntax.OP_FALLBACK}` must diverge after a refutable binding", "a failed pattern match cannot continue without defining the captures", "use `return`, `panic(...)`, `break`, or `next` as the fallback", Val(value.span())))
+            }
+            .Block -> {
+                diverges :: fallback.value.is_none() && fallback_block_diverges(fallback.body)
+                self.check_block(&fallback.body, false)
+                if fallback.value == .Val(value) { _ :: self.infer(&value) }
+                if !diverges { self.diags.push(Diagnostic.error("E0405", "`{Syntax.OP_FALLBACK}` fallback blocks cannot continue after a refutable binding", "a refutable binding needs one direct diverging miss route", "end the block with `return`, `panic(...)`, `break`, or `next`", Val(fallback.span))) }
+            }
+            .Return(ret_expr, ret_span) -> {
+                ret :: self.return_route_type()
+                if (ret, ret_expr) == {
+                    (.Val(ret_ty), .Val(expr)) -> {
+                        saved :: ~self.expected_type
+                        self.expected_type = Val(~ret_ty)
+                        expr_ty :: self.infer(&expr)
+                        self.expected_type = ^saved
+                        if expr_ty == .Val(checked) {
+                            widened :: self.widen_numeric_return(&expr, checked, ret_ty) ?? checked
+                            lifted :: self.lift_optional_slot(ret_ty, widened, &expr) ?? widened
+                            _ :: self.check_type_assignable(ret_ty, lifted, expr.span())
+                        }
+                    }
+                    (.Val(ret_ty), .None) -> self.diags.push(Diagnostic.error("E0405", "`{Syntax.OP_FALLBACK} return` here needs a value", "this function returns {ret_ty.show()}, so its return route needs a value", "write `{Syntax.OP_FALLBACK} return <value>`", Val(ret_span)))
+                    (.None, .Val(expr)) -> self.diags.push(Diagnostic.error("E0405", "`{Syntax.OP_FALLBACK} return` cannot return a value here", "this function returns nothing", "drop the value from the return route", Val(expr.span())))
+                    (.None, .None) -> {}
+                }
+            }
+            .Panic -> {
+                call := Call{name: Syntax.BUILTIN_PANIC, name_span: fallback.name_span, type_args: [Type]{}, args: ^fallback.args, resolved_ret: None, range_checked: false, widen_approx: false}
+                fallback.args = [CallArg]{}
+                self.check_panic_call(&call)
+                fallback.args = ^call.args
+            }
+            .Break(route_span) -> self.check_break_without_value(None, route_span)
+            .Continue(route_span) -> { if self.loop_depth == 0 { self.diags.push(loop_control_outside(Syntax.KW_NEXT, route_span)) } }
+            .BreakLabel(name, route_span) -> {
+                if self.loop_depth == 0 { self.diags.push(loop_control_outside(Syntax.KW_BREAK, route_span)) } else if !self.loop_labels.any(|label| label == name) { self.diags.push(undefined_loop_label(name, self.loop_labels, route_span)) } else { self.check_break_without_value(Val((name, route_span)), route_span) }
+            }
+            .ContinueLabel(name, route_span) -> {
+                if self.loop_depth == 0 { self.diags.push(loop_control_outside(Syntax.KW_NEXT, route_span)) } else if !self.loop_labels.any(|label| label == name) { self.diags.push(undefined_loop_label(name, self.loop_labels, route_span)) }
+            }
+        }
+        self.join_fallback_path(success_path, fallback)
+        if has_err { self.pop_scope() }
+        self.fallback_has_err = saved_fallback_has_err
+        self.fallback_is_shape_miss = saved_fallback_is_shape_miss
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1790
+    pub fn infer_fallible_stmt(self: &Self, expr: &Expr) -> Type? Never! {
+        self.normalize_imported_core_expr(&expr)
+        self.normalize_prelude_expr(&expr)
+        expression_diverges :: self.expr_diverges(expr)
+        if expr == .Call(call) {
+            self.clear_uninit_mut_args(call.args)
+            checked :: self.check_call(&call, false)
+            result :: if checked == {
+                .Val(.Val(ty)) -> if ty.is_fallible() { self.auto_propagate_call(&expr, Val(^ty)) } else { Val(^ty) }
+                .Val(.None) -> Val(Type.Named(Syntax.INTERNAL_UNIT_TYPE))
+                .None -> None
+            }
+            if expression_diverges { self.flow.reachable = false }
+            return result
+        }
+        self.infer(&expr)
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1816
+pub fn value_loop_requires_route(expr: Expr) -> Bool Never! {
+    if expr != .CallValue || !expr.args.is_empty() -> return false
+    if expr.callee == .Lambda(lam) -> lam.meta.result_loop && lam.meta.requires_exhaustion_route && !lam.meta.exhaustion_route_attached else -> false
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1831
+fn fallback_block_diverges(body: [Stmt]) -> Bool Never! { block_definitely_exits(body) }
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1835
+fn mark_value_loop_route_attached(expr: &Expr) Never! {
+    if expr != .CallValue || !expr.args.is_empty() -> return
+    if expr.callee == .Lambda(lam) { lam.meta.exhaustion_route_attached = true }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1847
+fn mark_value_loop_route_unattached(expr: &Expr) Never! {
+    if expr != .CallValue || !expr.args.is_empty() -> return
+    if expr.callee == .Lambda(lam) { lam.meta.exhaustion_route_attached = false }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1859
+fn value_loop_route_label(expr: &Expr) -> String? Never! {
+    if expr != .CallValue || !expr.args.is_empty() -> return None
+    if expr.callee != .Lambda(lam) -> return None
+    if lam.body != .Block(stmts) -> return None
+    if stmts.first() != .Val(.Loop) -> return None
+    first :: stmts.first().expect("first loop exists")
+    if first.label == .Val((label, _)) -> Val(~label) else -> None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1882
+fn attach_value_loop_route(expr: &Expr, route: Stmt) -> Bool Never! {
+    if expr != .CallValue || !expr.args.is_empty() -> return false
+    if expr.callee != .Lambda(lam) -> return false
+    if lam.body != .Block(stmts) -> return false
+    if stmts.first_mut() != .Val(first) || first != .Loop -> return false
+    first.body.push(^route)
+    true
+}

@@ -1,0 +1,38 @@
+use jet_foundation.[Expr, Span, Type, Item]
+use JetCodegen.Codegen.Context.[build_cx_items, ExternFn]
+use JetCodegen.Codegen.TIR.[LowerEnv, TExprKind]
+use JetCodegen.Codegen.TIR.Lower.Expressions.[lower_expr_inner_absent, lower_expr_inner_no_else, lower_expr_inner_str_match_lit, lower_expr_inner_bin_match_lit, lower_expr_inner_member_spread, lower_expr_inner_spread, lower_expr_inner_reduce_marker, lower_expr_inner_map_lit]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8421 (behavioral control; no inline tests)
+#Test("absent_preserves_unresolved_option_carrier") {
+    value :: lower_expr_inner_absent()
+    assert(value.ty == Type.Option(Type.Int))
+    assert(value.kind == TExprKind.Absent)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8438 (behavioral control)
+#Test("exhaustive_no_else_diverges_at_source_line") {
+    cx :: build_cx_items([Item]{}, "x\ny", "no_else.jet", None, [String:ExternFn]{}, "")
+    value :: lower_expr_inner_no_else(Span{start: 2, end: 3}, cx)
+    assert(value.ty == Type.Named("Unit"))
+    assert(if value.kind == { .Unreachable{line} -> line == 2; else -> false })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8639-8643 (behavioral control)
+#Test("syntax_only_shapes_retain_exact_violation_and_span") {
+    span :: Span{start: 7, end: 13}
+    cases :: [("StrMatchLit", lower_expr_inner_str_match_lit(span)), ("BinMatchLit", lower_expr_inner_bin_match_lit(span)),
+        ("MemberSpread", lower_expr_inner_member_spread(span)), ("Spread", lower_expr_inner_spread(span)), ("ReduceMarker", lower_expr_inner_reduce_marker(span))]
+    loop (name, value) in cases -> {
+        assert(if value.kind == { .InvariantViolation{construct, span: actual} -> construct == name && actual == span; else -> false })
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8106-8124 (behavioral control)
+#Test("empty_map_keeps_original_inferred_key_value_types") {
+    cx :: build_cx_items([Item]{}, "", "map.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("map")
+    value :: lower_expr_inner_map_lit([], cx, &env)
+    assert(value.ty == Type.Map{key: Type.String, key_span: None, value: Type.Int})
+    assert(if value.kind == { .MapLit(entries) -> entries.is_empty(); else -> false })
+}

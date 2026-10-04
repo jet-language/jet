@@ -1,0 +1,56 @@
+use jet_foundation.AST.[Expr, BinOp, Type]
+use jet_foundation.Diagnostics.Span
+use jet_foundation.Syntax
+use jet_codegen.Codegen.TIR.[TExpr, TStmt]
+use jet_codegen.Codegen.TIR.Lower.Expressions.[condition_terms, plain_expr_children, dispatch_subject_is_place, replace_dispatch_subject, tir_if_join_type, tir_expr_reaches_merge, tir_stmt_sequence_reaches_merge]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3021-3034
+#Test("expression_condition_terms_keep_source_order") {
+    span :: Span.new(0, 1)
+    cond :: Expr.Binary(.And, .Ident("a", span), .Binary(.And, .Ident("b", span), .Ident("c", span), span), span)
+    terms :: condition_terms(cond)
+    assert(terms.len() == 3)
+    assert(terms[0] == Expr.Ident("a", span))
+    assert(terms[1] == Expr.Ident("b", span))
+    assert(terms[2] == Expr.Ident("c", span))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1941-2082
+#Test("expression_plain_binary_children_are_left_then_right") {
+    span :: Span.new(0, 1)
+    expr :: Expr.Binary(.And, .Ident("left", span), .Ident("right", span), span)
+    children :: plain_expr_children(expr)
+    assert(children.len() == 2)
+    assert(children[0] == Expr.Ident("left", span))
+    assert(children[1] == Expr.Ident("right", span))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2556-2581,2723-2731
+#Test("dispatch_replacement_keeps_non_subject_operands") {
+    subject_span :: Span.new(1, 2)
+    other_span :: Span.new(3, 4)
+    replacement :: Expr.Ident("retained", subject_span)
+    original :: Expr.Binary(.Eq, .Ident("subject", subject_span), .Ident("other", other_span), Span.new(1, 4))
+    rewritten :: replace_dispatch_subject(original, subject_span, replacement)
+    assert(rewritten == Expr.Binary(.Eq, replacement, .Ident("other", other_span), Span.new(1, 4)))
+    assert(dispatch_subject_is_place(Expr.Field(.Ident("owner", subject_span), "field", other_span)))
+    assert(!dispatch_subject_is_place(Expr.Int(1, subject_span, None, None)))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3358-3370
+#Test("if_join_uses_only_else_when_then_is_dead") {
+    assert(tir_if_join_type(false, Type.Int, true, Type.String) == Type.String)
+    assert(tir_if_join_type(true, Type.Int, false, Type.String) == Type.Int)
+    assert(tir_if_join_type(true, Type.Int, true, Type.String) == Type.Int)
+    assert(tir_if_join_type(false, Type.Int, false, Type.String) == Type.Int)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3376-3381,3444-3484
+#Test("unreachable_statement_tail_cannot_make_a_branch_live") {
+    live :: TExpr{ty: Type.Named("Unit"), kind: .Unit}
+    dead :: TExpr{ty: Type.Named(Syntax.TYPE_NEVER), kind: .Unit}
+    assert(tir_expr_reaches_merge(live))
+    assert(!tir_expr_reaches_merge(dead))
+    assert(!tir_stmt_sequence_reaches_merge([TStmt.ExprStmt(dead), TStmt.ExprStmt(live)]))
+    assert(tir_stmt_sequence_reaches_merge([TStmt.ExprStmt(live)]))
+}

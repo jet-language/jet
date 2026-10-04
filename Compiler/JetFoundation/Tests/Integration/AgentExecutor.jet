@@ -1,1192 +1,170 @@
-// PORT-PENDING 0962 tests-agent-executor-module-group: tests/agent_executor.rs:1-212
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! #1180: authority-bound agent execution closeout.
-//RS //!
-//RS //! These sources go through the public Core process surface. The parity helper
-//RS //! runs each one through AOT, default `jet run`, and the forced interpreter.
-//RS 
-//RS mod common;
-//RS 
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn native_backend_available() -> bool {
-//RS     jetpack::RuntimePolicy::detect_sandbox().level == jetpack::RuntimePolicy::SandboxLevel::Strong
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS #[test]
-//RS fn agent_executor_plan_and_receipt_preserve_one_policy_across_tiers() {
-//RS     let source = r#"
-//RS use core.process as process
-//RS 
-//RS fn run() {
-//RS     policy :: process.workspace()
-//RS     spec :: process.cmd(["printf", "agent-safe"])
-//RS         .stdout(.Capture)
-//RS         .stderr(.Capture)
-//RS         .cwd("/tmp")
-//RS         .under(policy)
-//RS     if spec.plan() == {
-//RS         .Ok(plan) -> {
-//RS             receipt :: spec.run_checked() ?? panic("authority-bound run failed")
-//RS             print(plan.executable_identity == receipt.executable_identity)
-//RS             print(plan.argv == receipt.argv)
-//RS             print(plan.input_digest == receipt.input_digest)
-//RS             print(plan.policy_digest == receipt.policy_digest)
-//RS             print(plan.backend == receipt.backend)
-//RS             print(plan.authority == receipt.authority)
-//RS             print(plan.descendants == receipt.descendants)
-//RS             print(plan.limits == receipt.limits)
-//RS             print(plan.outputs[0] == receipt.outputs[0])
-//RS             print(plan.outputs[1] == receipt.outputs[1])
-//RS             print(receipt.outputs.len() == plan.outputs.len() + 1)
-//RS             print(receipt.output)
-//RS             print(receipt.redacted)
-//RS         }
-//RS         .Err(_) -> print("unsupported")
-//RS     }
-//RS }
-//RS "#;
-//RS     let expected = if native_backend_available() {
-//RS         "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nagent-safe\ntrue\n"
-//RS     } else {
-//RS         "unsupported\n"
-//RS     };
-//RS     tir_support::assert_tiers_agree("agent_executor_plan_receipt", source, expected);
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS #[test]
-//RS fn agent_executor_hostile_filesystem_examples_fail_closed_on_all_tiers() {
-//RS     let marker = std::env::temp_dir().join(format!(
-//RS         "jet-agent-executor-host-write-{}",
-//RS         std::process::id()
-//RS     ));
-//RS     let _ = std::fs::remove_file(&marker);
-//RS     let source = r#"
-//RS use core.process as process
-//RS 
-//RS fn run() {
-//RS     policy :: process.workspace()
-//RS     read_spec :: process.cmd(["sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
-//RS     if read_spec.plan() == {
-//RS         .Ok(_) -> {
-//RS             if read_spec.run_checked() == {
-//RS                 .Ok(_) -> print("host-read-blocked")
-//RS                 .Err(_) -> print("host-read-escaped")
-//RS             }
-//RS         }
-//RS         .Err(_) -> print("unsupported")
-//RS     }
-//RS 
-//RS     write_spec :: process.cmd(["sh", "-c", "if printf escaped > '__MARKER__'; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
-//RS     if write_spec.plan() == {
-//RS         .Ok(_) -> {
-//RS             if write_spec.run_checked() == {
-//RS                 .Ok(_) -> print("host-write-blocked")
-//RS                 .Err(_) -> print("host-write-escaped")
-//RS             }
-//RS         }
-//RS         .Err(_) -> print("unsupported")
-//RS     }
-//RS }
-//RS "#
-//RS     .replace("__MARKER__", &marker.to_string_lossy());
-//RS     let expected = if native_backend_available() {
-//RS         "host-read-blocked\nhost-write-blocked\n"
-//RS     } else {
-//RS         "unsupported\nunsupported\n"
-//RS     };
-//RS     tir_support::assert_tiers_agree("agent_executor_hostile_filesystem", &source, expected);
-//RS     assert!(
-//RS         !marker.exists(),
-//RS         "authority-bound process wrote outside its output grant"
-//RS     );
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS #[test]
-//RS fn agent_executor_explicit_cancellation_reaps_descendants_on_all_tiers() {
-//RS     let source = r#"
-//RS use core.process as process
-//RS 
-//RS fn run() {
-//RS     policy :: process.workspace()
-//RS     spec :: process.cmd(["sh", "-c", "while true; do sleep 1; done"])
-//RS         .stdout(.Capture)
-//RS         .stderr(.Capture)
-//RS         .cwd("/tmp")
-//RS         .under(policy)
-//RS     if spec.spawn() == {
-//RS         .Ok(child) -> {
-//RS             child.kill() ?? panic("authority-bound cancellation failed")
-//RS             receipt :: child.wait() ?? panic("cancelled child did not reap")
-//RS             print(receipt.success)
-//RS             print(receipt.timed_out)
-//RS             print(receipt.descendants)
-//RS         }
-//RS         .Err(_) -> print("unsupported")
-//RS     }
-//RS }
-//RS "#;
-//RS     let expected = if native_backend_available() {
-//RS         "false\nfalse\ncontained\n"
-//RS     } else {
-//RS         "unsupported\n"
-//RS     };
-//RS     tir_support::assert_tiers_agree("agent_executor_cancellation", source, expected);
-//RS }
-//RS 
-//RS #[cfg(target_os = "windows")]
-//RS #[test]
-//RS fn agent_executor_windows_appcontainer_plan_and_receipt_preserve_policy() {
-//RS     let source = r#"
-//RS use core.process as process
-//RS 
-//RS fn run() {
-//RS     policy :: process.workspace()
-//RS     spec :: process.cmd(["cmd.exe", "/C", "exit", "0"]).cwd("/tmp").under(policy)
-//RS     if spec.plan() == {
-//RS         .Ok(plan) -> {
-//RS             receipt :: spec.run_checked() ?? panic("Windows authority-bound run failed")
-//RS             print(plan.backend)
-//RS             print(plan.executable_identity == receipt.executable_identity)
-//RS             print(plan.argv == receipt.argv)
-//RS             print(plan.input_digest == receipt.input_digest)
-//RS             print(plan.policy_digest == receipt.policy_digest)
-//RS             print(plan.authority == receipt.authority)
-//RS             print(plan.descendants == receipt.descendants)
-//RS             print(plan.limits == receipt.limits)
-//RS             print(plan.outputs[0] == receipt.outputs[0])
-//RS             print(plan.outputs[1] == receipt.outputs[1])
-//RS             print(receipt.outputs.len() == plan.outputs.len() + 1)
-//RS             print(receipt.redacted)
-//RS         }
-//RS         .Err(_) -> print("refused")
-//RS     }
-//RS }
-//RS "#;
-//RS     tir_support::assert_tiers_agree(
-//RS         "agent_executor_windows_appcontainer_plan_receipt",
-//RS         source,
-//RS         "windows-appcontainer\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
-//RS     );
-//RS }
-//RS 
-//RS #[cfg(target_os = "windows")]
-//RS #[test]
-//RS fn agent_executor_windows_appcontainer_denies_host_read() {
-//RS     let marker = std::env::temp_dir().join(format!(
-//RS         "jet-agent-executor-windows-host-secret-{}.txt",
-//RS         std::process::id()
-//RS     ));
-//RS     std::fs::write(&marker, "host-secret").expect("write Windows host-read marker");
-//RS     let marker = marker.to_string_lossy().replace('\\', "/");
-//RS     let source = format!(
-//RS         r#"
-//RS use core.process as process
-//RS 
-//RS fn run() {{
-//RS     policy :: process.workspace()
-//RS     spec :: process.cmd(["cmd.exe", "/C", "type \"{marker}\""]).cwd("/tmp").under(policy)
-//RS     if spec.plan() == {{
-//RS         .Ok(plan) -> {{
-//RS             print(plan.backend)
-//RS             result :: spec.run_checked()
-//RS             if result == {{
-//RS                 .Ok(_) -> print("escaped")
-//RS                 .Err(_) -> print("blocked")
-//RS             }}
-//RS         }}
-//RS         .Err(_) -> print("refused")
-//RS     }}
-//RS }}
-//RS "#
-//RS     );
-//RS     tir_support::assert_tiers_agree(
-//RS         "agent_executor_windows_appcontainer_host_read",
-//RS         &source,
-//RS         "windows-appcontainer\nblocked\n",
-//RS     );
-//RS     let _ = std::fs::remove_file(marker);
-//RS }
-// END-PORT-PENDING 0962 tests/agent_executor.rs:1-212
+// Rust: tests/agent_executor.rs:1
+// Authority-bound execution through the public Core surface across hosted tiers.
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jetpack.RuntimePolicy as RuntimePolicy
+use std.[env, fs, process]
+use core.sys.target.selected_os
 
-// PORT-PENDING 0962 tests-agent-executor-module-group: tests/agent_executor_closeout.rs:1-219
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! #1180: hostile executor closeout proof.
-//RS //!
-//RS //! Keep this proof separate from the platform-specific rows in
-//RS //! `agent_executor.rs`: it owns the hostile matrix and does not compete with
-//RS //! the Windows/child-tree edits in that file.
-//RS 
-//RS mod common;
-//RS 
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS fn native_backend_available() -> bool {
-//RS     jetpack::RuntimePolicy::detect_sandbox().level == jetpack::RuntimePolicy::SandboxLevel::Strong
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn host_executable(name: &str) -> String {
-//RS     std::env::split_paths(&std::env::var_os("PATH").expect("PATH should be set"))
-//RS         .map(|directory| directory.join(name))
-//RS         .find(|candidate| candidate.is_file())
-//RS         .and_then(|candidate| std::fs::canonicalize(candidate).ok())
-//RS         .unwrap_or_else(|| std::path::PathBuf::from(format!("/bin/{name}")))
-//RS         .to_string_lossy()
-//RS         .replace('\\', "\\\\")
-//RS         .replace('"', "\\\"")
-//RS }
-//RS 
-//RS #[test]
-//RS fn agent_executor_rejects_unenforced_grants_before_spawn_on_all_tiers() {
-//RS     let marker = std::env::temp_dir().join(format!(
-//RS         "jet-agent-executor-unenforced-{}",
-//RS         std::process::id()
-//RS     ));
-//RS     let _ = std::fs::remove_file(&marker);
-//RS     let source = format!(
-//RS         r#"
-//RS use core.process as process
-//RS 
-//RS fn run() {{
-//RS     policy :: Authority.from_rights(["FS.Read:home"])
-//RS     spec :: process.cmd(["sh", "-c", "printf escaped > '{marker}'"]).cwd("/tmp").under(policy)
-//RS     if spec.plan() == {{
-//RS         .Ok(_) -> print("escaped")
-//RS         .Err(_) -> print("refused")
-//RS     }}
-//RS }}
-//RS "#,
-//RS         marker = marker.display()
-//RS     );
-//RS     tir_support::assert_tiers_agree("agent_executor_unenforced_grant", &source, "refused\n");
-//RS     assert!(!marker.exists(), "unenforced authority grant reached spawn");
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS #[test]
-//RS fn agent_executor_limits_and_secret_receipts_match_all_tiers() {
-//RS     let source = r#"
-//RS use core.process as process
-//RS 
-//RS fn run() {
-//RS     policy :: process.workspace()
-//RS 
-//RS     limited :: process.cmd(["sh", "-c", "printf 123456"])
-//RS         .stdout(.Capture)
-//RS         .stderr(.Capture)
-//RS         .output_limit(3)
-//RS         .cwd("/tmp")
-//RS         .under(policy)
-//RS     if limited.plan() == {
-//RS         .Ok(_) -> {
-//RS             if limited.run() == {
-//RS                 .Ok(_) -> print("output-escaped")
-//RS                 .Err(_) -> print("output-limit")
-//RS             }
-//RS         }
-//RS         .Err(_) -> print("unsupported")
-//RS     }
-//RS 
-//RS     timeout :: Duration.milliseconds(50) ?? panic("timeout duration")
-//RS     slow :: process.cmd(["sh", "-c", "while true; do :; done"])
-//RS         .timeout(timeout)
-//RS         .cwd("/tmp")
-//RS         .under(policy)
-//RS     if slow.plan() == {
-//RS         .Ok(_) -> {
-//RS             if slow.run() == {
-//RS                 .Ok(receipt) -> print(receipt.timed_out)
-//RS                 .Err(_) -> print("timeout-error")
-//RS             }
-//RS         }
-//RS         .Err(_) -> print("unsupported")
-//RS     }
-//RS 
-//RS     secret :: process.cmd(["sh", "-c", "printf '%s' \"$SECRET_TOKEN\""])
-//RS         .env_clear()
-//RS         .env("SECRET_TOKEN", "agent-receipt-secret")
-//RS         .cwd("/tmp")
-//RS         .under(policy)
-//RS     if secret.plan() == {
-//RS         .Ok(plan) -> {
-//RS             receipt :: secret.run() ?? panic("secret receipt")
-//RS             print(receipt.output)
-//RS             print(receipt.redacted)
-//RS             print(plan.policy_digest == receipt.policy_digest)
-//RS             print(plan.authority == receipt.authority)
-//RS         }
-//RS         .Err(_) -> print("unsupported")
-//RS     }
-//RS }
-//RS "#;
-//RS     let expected = if native_backend_available() {
-//RS         "output-limit\ntrue\n<redacted>\ntrue\ntrue\ntrue\n"
-//RS     } else {
-//RS         "unsupported\nunsupported\nunsupported\n"
-//RS     };
-//RS     tir_support::assert_tiers_agree("agent_executor_limits_receipts", source, expected);
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS #[test]
-//RS fn agent_executor_network_and_descendant_hostiles_fail_closed_on_all_tiers() {
-//RS     use std::io::Read;
-//RS     use std::net::TcpListener;
-//RS     use std::sync::atomic::{AtomicBool, Ordering};
-//RS     use std::sync::Arc;
-//RS     use std::thread;
-//RS     use std::time::{Duration, Instant};
-//RS 
-//RS     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind hostile network oracle");
-//RS     listener
-//RS         .set_nonblocking(true)
-//RS         .expect("set hostile network oracle nonblocking");
-//RS     let port = listener
-//RS         .local_addr()
-//RS         .expect("network oracle address")
-//RS         .port();
-//RS     let stop = Arc::new(AtomicBool::new(false));
-//RS     let connected = Arc::new(AtomicBool::new(false));
-//RS     let thread_stop = Arc::clone(&stop);
-//RS     let thread_connected = Arc::clone(&connected);
-//RS     let network_thread = thread::spawn(move || {
-//RS         let deadline = Instant::now() + Duration::from_secs(15);
-//RS         while !thread_stop.load(Ordering::Acquire) && Instant::now() < deadline {
-//RS             match listener.accept() {
-//RS                 Ok((mut stream, _)) => {
-//RS                     thread_connected.store(true, Ordering::Release);
-//RS                     let mut bytes = Vec::new();
-//RS                     let _ = stream.read_to_end(&mut bytes);
-//RS                 }
-//RS                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-//RS                     thread::sleep(Duration::from_millis(5));
-//RS                 }
-//RS                 Err(_) => break,
-//RS             }
-//RS         }
-//RS     });
-//RS 
-//RS     let sleep = host_executable("sleep");
-//RS     let source = format!(
-//RS         r#"
-//RS use core.process as process
-//RS 
-//RS fn run() {{
-//RS     policy :: process.workspace()
-//RS 
-//RS     network :: process.cmd(["bash", "-c", "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
-//RS     if network.plan() == {{
-//RS         .Ok(_) -> {{
-//RS             if network.run_checked() == {{
-//RS                 .Ok(_) -> print("network-blocked")
-//RS                 .Err(_) -> print("network-escaped")
-//RS             }}
-//RS         }}
-//RS         .Err(_) -> print("unsupported")
-//RS     }}
-//RS 
-//RS     descendants :: process.cmd(["sh", "-c", "({sleep} 1; printf child-leaked) & exit 0"])
-//RS         .stdout(.Capture)
-//RS         .stderr(.Capture)
-//RS         .cwd("/tmp")
-//RS         .under(policy)
-//RS     if descendants.plan() == {{
-//RS         .Ok(_) -> {{
-//RS             receipt :: descendants.run() ?? panic("descendant receipt")
-//RS             print(receipt.success)
-//RS             print(receipt.descendants)
-//RS             print(receipt.output == "")
-//RS         }}
-//RS         .Err(_) -> print("unsupported")
-//RS     }}
-//RS }}
-//RS "#,
-//RS         port = port,
-//RS         sleep = sleep
-//RS     );
-//RS     let expected = if native_backend_available() {
-//RS         "network-blocked\ntrue\ncontained\ntrue\n"
-//RS     } else {
-//RS         "unsupported\nunsupported\n"
-//RS     };
-//RS     tir_support::assert_tiers_agree("agent_executor_network_descendants", &source, expected);
-//RS     stop.store(true, Ordering::Release);
-//RS     network_thread.join().expect("network oracle thread");
-//RS     assert!(
-//RS         !connected.load(Ordering::Acquire),
-//RS         "authority-bound child reached host network"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn agent_executor_example_matches_all_hosted_tiers() {
-//RS     let expected =
-//RS         if cfg!(any(target_os = "linux", target_os = "macos")) && native_backend_available() {
-//RS             "agent-safe\ntrue\ntrue\n"
-//RS         } else {
-//RS             "unsupported\n"
-//RS         };
-//RS     tir_support::assert_example_cli_tiers_agree("io/agent_executor", expected);
-//RS }
-// END-PORT-PENDING 0962 tests/agent_executor_closeout.rs:1-219
+// Rust: tests/agent_executor.rs:12
+fn native_backend_available() -> Bool {
+    RuntimePolicy.detect_sandbox().level == RuntimePolicy.SandboxLevel.Strong
+}
 
-// PORT-PENDING 0962 tests-agent-executor-module-group: tests/architecture_advice.rs:1-162
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #2998: keep local complexity separate from bounded architecture advice.
-//RS //!
-//RS //! This fixture deliberately gives one checked consumer two call paths while
-//RS //! the ordering helpers disagree. The CLI must expose source-linked advice and
-//RS //! uncertainty, never turn equal complexity scores into an equivalence claim.
-//RS 
-//RS mod common;
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::Command;
-//RS 
-//RS const ORDERING_POLICY_SOURCE: &str = "fn optimistic_rank(after: Int) -> Int { return after + 1 }\n\
-//RS fn persisted_rank(after: Int) -> Int { return after + 2 }\n\
-//RS fn run() { print(optimistic_rank(10) == persisted_rank(10)) }\n";
-//RS 
-//RS fn run_complexity_lint(file: &Path, json: bool) -> String {
-//RS     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
-//RS     command
-//RS         .args(["lint", "--complexity"])
-//RS         .arg(file)
-//RS         .current_dir(file.parent().expect("ordering-policy fixture parent"))
-//RS         .env("NO_COLOR", "1");
-//RS     if json {
-//RS         command.arg("--json");
-//RS     }
-//RS     let output = command
-//RS         .output()
-//RS         .expect("run architecture-advice complexity lint");
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "complexity lint failed:\nstdout={}\nstderr={}",
-//RS         String::from_utf8_lossy(&output.stdout),
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     String::from_utf8(output.stdout).expect("complexity lint stdout is UTF-8")
-//RS }
-//RS 
-//RS fn assert_architecture_contract(json: &str, file: &Path) {
-//RS     assert!(
-//RS         json.contains("\"contract\":\"jet.architecture-advice/v1\""),
-//RS         "JSON must carry the versioned architecture-advice contract:\n{json}"
-//RS     );
-//RS     assert!(
-//RS         json.contains("\"architecture_advice\""),
-//RS         "JSON must expose the architecture-advice projection:\n{json}"
-//RS     );
-//RS     let source_name = file
-//RS         .file_name()
-//RS         .and_then(|name| name.to_str())
-//RS         .expect("ordering-policy fixture filename");
-//RS     let evidence_start = json
-//RS         .find("\"source_evidence\"")
-//RS         .expect("source evidence field");
-//RS     let evidence_end = json[evidence_start..]
-//RS         .find("\"affected_boundaries\"")
-//RS         .map(|offset| evidence_start + offset)
-//RS         .expect("affected boundaries after source evidence");
-//RS     let evidence = &json[evidence_start..evidence_end];
-//RS     assert!(
-//RS         evidence.contains(source_name),
-//RS         "source evidence must identify the concrete fixture source:\n{evidence}"
-//RS     );
-//RS     for evidence in [
-//RS         "\"role\":\"caller-definition\"",
-//RS         "\"role\":\"callee-definition\"",
-//RS         "\"role\":\"checked-call-site\"",
-//RS         "\"span\":{\"start\":",
-//RS     ] {
-//RS         assert!(
-//RS             json.contains(evidence),
-//RS             "JSON must carry concrete source evidence {evidence}:\n{json}"
-//RS         );
-//RS     }
-//RS     assert!(
-//RS         json.contains("\"affected_boundaries\"") && json.contains(" -> "),
-//RS         "JSON must carry a concrete module boundary:\n{json}"
-//RS     );
-//RS     assert!(
-//RS         json.contains("\"name\":\"checked_reference_resolution\",\"status\":\"passed\""),
-//RS         "checked-reference behavior must pass:\n{json}"
-//RS     );
-//RS     assert!(
-//RS         json.contains("\"name\":\"consumer_behavior\",\"status\":\"not_run\"")
-//RS             && json.contains("\"name\":\"cross_mode_agreement\",\"status\":\"unknown\""),
-//RS         "runtime uncertainty must remain explicit:\n{json}"
-//RS     );
-//RS 
-//RS     let local_start = json
-//RS         .find("\"local_complexity\"")
-//RS         .expect("local complexity field");
-//RS     let advice_start = json
-//RS         .find("\"architecture_advice\"")
-//RS         .expect("architecture advice field");
-//RS     assert!(
-//RS         local_start < advice_start,
-//RS         "local complexity and architecture advice must be separate fields:\n{json}"
-//RS     );
-//RS     let advice_end = json[advice_start..]
-//RS         .find("\"measurement\"")
-//RS         .map(|offset| advice_start + offset)
-//RS         .expect("measurement after architecture advice");
-//RS     let advice = &json[advice_start..advice_end];
-//RS     assert!(
-//RS         !advice.contains("\"score\"") && !advice.contains("equivalence"),
-//RS         "architecture advice must not present complexity as an equivalence score:\n{advice}"
-//RS     );
-//RS     assert!(
-//RS         json.contains("\"kind\":\"consumer-agreement\"")
-//RS             && json.contains("\"operator_action\":\"review_or_reject\""),
-//RS         "the candidate must remain advisory rather than an equivalence policy:\n{json}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn complexity_lint_reports_ordering_policy_advice_without_equivalence_claim() {
-//RS     let scratch = common::Scratch::new("architecture-advice-ordering-policy");
-//RS     let file: PathBuf = scratch.join("ordering_policy.jet");
-//RS     fs::write(&file, ORDERING_POLICY_SOURCE).expect("write ordering-policy fixture");
-//RS 
-//RS     let json = run_complexity_lint(&file, true);
-//RS     assert_architecture_contract(&json, &file);
-//RS     for function in ["optimistic_rank", "persisted_rank"] {
-//RS         assert!(
-//RS             json.contains(&format!("\"fn\":\"{function}\"")),
-//RS             "local complexity must retain {function}'s score row:\n{json}"
-//RS         );
-//RS     }
-//RS     assert!(
-//RS         json.contains("\"score\":0"),
-//RS         "the simple ordering helpers must retain their local complexity score:\n{json}"
-//RS     );
-//RS 
-//RS     let text = run_complexity_lint(&file, false);
-//RS     assert!(
-//RS         text.contains("architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):"),
-//RS         "text output must identify the advisory architecture surface:\n{text}"
-//RS     );
-//RS     for evidence in [
-//RS         "evidence: caller-definition",
-//RS         "evidence: callee-definition",
-//RS         "evidence: checked-call-site",
-//RS         "boundary: ",
-//RS         " -> ",
-//RS         "check: checked_reference_resolution=passed",
-//RS         "check: consumer_behavior=not_run",
-//RS         "check: cross_mode_agreement=unknown",
-//RS     ] {
-//RS         assert!(
-//RS             text.contains(evidence),
-//RS             "text output must carry architecture evidence {evidence}:\n{text}"
-//RS         );
-//RS     }
-//RS     let advice_start = text
-//RS         .find("architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):")
-//RS         .expect("text architecture advice heading");
-//RS     let advice = &text[advice_start..];
-//RS     assert!(
-//RS         !advice.contains("score") && !advice.contains("equivalence"),
-//RS         "text architecture advice must not present complexity as an equivalence score:\n{advice}"
-//RS     );
-//RS }
-// END-PORT-PENDING 0962 tests/architecture_advice.rs:1-162
+// Rust: tests/agent_executor.rs:18
+#Test("agent_executor_plan_and_receipt_preserve_one_policy_across_tiers") {
+    if selected_os() == "linux" || selected_os() == "macos" {
+        source :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["printf", "agent-safe"])
+        .stdout(.Capture).stderr(.Capture).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            receipt :: spec.run_checked() ?? panic("authority-bound run failed")
+            print(plan.executable_identity == receipt.executable_identity)
+            print(plan.argv == receipt.argv)
+            print(plan.input_digest == receipt.input_digest)
+            print(plan.policy_digest == receipt.policy_digest)
+            print(plan.backend == receipt.backend)
+            print(plan.authority == receipt.authority)
+            print(plan.descendants == receipt.descendants)
+            print(plan.limits == receipt.limits)
+            print(plan.outputs[0] == receipt.outputs[0])
+            print(plan.outputs[1] == receipt.outputs[1])
+            print(receipt.outputs.len() == plan.outputs.len() + 1)
+            print(receipt.output)
+            print(receipt.redacted)
+        }
+        .Err(_) -> print("unsupported")
+    }
+}
+"""
+        expected :: if native_backend_available() -> "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nagent-safe\ntrue\n" else -> "unsupported\n"
+        tir_support.assert_tiers_agree("agent_executor_plan_receipt", source, expected)
+    }
+}
 
-// PORT-PENDING 0962 tests-agent-executor-module-group: tests/archive.rs:1-583
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Canonical `core.archive` coverage through Jet source and all hosted tiers.
-//RS //!
-//RS //! Containers live in `core.archive`; whole-buffer stream codecs live in the
-//RS //! nested `core.archive.gzip` and `core.archive.zstd` modules. Every behavioral
-//RS //! assertion below runs through `tir_support::assert_tiers_agree` so AOT, the
-//RS //! default JIT, and forced interpretation exercise the same source API.
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::sync::atomic::{AtomicU64, Ordering};
-//RS 
-//RS static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS struct TempTree(PathBuf);
-//RS 
-//RS impl TempTree {
-//RS     fn new(prefix: &str) -> Self {
-//RS         let path = common::test_scratch_root("archive").join(format!(
-//RS             "{prefix}_{}_{}",
-//RS             std::process::id(),
-//RS             TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
-//RS         ));
-//RS         fs::create_dir_all(&path).unwrap();
-//RS         Self(path)
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for TempTree {
-//RS     fn drop(&mut self) {
-//RS         let _ = fs::remove_dir_all(&self.0);
-//RS     }
-//RS }
-//RS 
-//RS mod common;
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS #[test]
-//RS fn archive_containers_round_trip_and_reject_malformed_inputs_on_all_tiers() {
-//RS     let source = r#"
-//RS use core.archive as archive
-//RS 
-//RS fn run() {
-//RS     data :: [U8]{72, 101, 108, 108, 111}
-//RS     zip :: archive.create("hello.txt", data) ?? panic("create")
-//RS     print(zip.len() > 0)
-//RS     print((archive.zip_decompress(zip) ?? [U8]{}) == data)
-//RS     print((archive.zip_names_json(zip) ?? "") == "[\"hello.txt\"]")
-//RS 
-//RS     tar :: archive.tar_add([U8]{}, "hello.txt", data) ?? panic("tar_add")
-//RS     print((archive.tar_get(tar, "hello.txt") ?? [U8]{}) == data)
-//RS     print((archive.tar_names_json(tar) ?? "") == "[\"hello.txt\"]")
-//RS 
-//RS     print(archive.zip_decompress([U8]{1, 2, 3}) == .Err(_))
-//RS     print(archive.tar_get([U8]{1, 2, 3}, "hello.txt") == .Err(_))
-//RS     print(archive.tar_names_json([U8]{}) == .Err(_))
-//RS }
-//RS "#;
-//RS     tir_support::assert_tiers_agree(
-//RS         "archive_containers_round_trip_and_malformed",
-//RS         source,
-//RS         "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn archive_names_and_path_rejection_are_source_owned_on_all_tiers() {
-//RS     let source = r#"
-//RS use core.archive as archive
-//RS 
-//RS fn run() {
-//RS     zip_name :: "zip-name/".repeat(120) + "file.txt"
-//RS     zip :: archive.create(zip_name, [U8]{122, 105, 112}) ?? panic("create")
-//RS     print((archive.zip_names_json(zip) ?? "") == "[\"{zip_name}\"]")
-//RS     print((archive.zip_decompress(zip) ?? [U8]{}) == [U8]{122, 105, 112})
-//RS 
-//RS     tar_name :: "tar-name/".repeat(40) + "file.txt"
-//RS     tar :: archive.tar_add([U8]{}, tar_name, [U8]{116, 97, 114}) ?? panic("tar_add")
-//RS     print((archive.tar_names_json(tar) ?? "") == "[\"{tar_name}\"]")
-//RS     print((archive.tar_get(tar, tar_name) ?? [U8]{}) == [U8]{116, 97, 114})
-//RS 
-//RS     valid :: archive.tar_add([U8]{}, "keep.txt", [U8]{1}) ?? panic("tar_add")
-//RS     print(archive.tar_add(valid, "../escape", [U8]{2}) == .Err(_))
-//RS     print(archive.tar_add(valid, "/escape", [U8]{2}) == .Err(_))
-//RS     print((archive.tar_names_json(valid) ?? "") == "[\"keep.txt\"]")
-//RS     print(archive.tar_get(valid, "../escape") == .Err(_))
-//RS     print(archive.create("../escape", [U8]{2}) == .Err(_))
-//RS }
-//RS "#;
-//RS     tir_support::assert_tiers_agree(
-//RS         "archive_names_and_path_rejection",
-//RS         source,
-//RS         "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn archive_stream_codecs_round_trip_and_reject_malformed_inputs_on_all_tiers() {
-//RS     let source = r#"
-//RS use core.archive.gzip as gzip
-//RS use core.archive.zstd as zstd
-//RS 
-//RS fn run() {
-//RS     data :: [U8]{72, 101, 108, 108, 111, 32, 74, 101, 116}
-//RS 
-//RS     gz :: gzip.compress(data) ?? panic("compress")
-//RS     print(gzip.is_gzip(gz))
-//RS     print((gzip.decompress(gz) ?? [U8]{}) == data)
-//RS 
-//RS     zst :: zstd.compress(data) ?? panic("compress")
-//RS     print(zstd.is_zstd(zst))
-//RS     print((zstd.decompress(zst) ?? [U8]{}) == data)
-//RS 
-//RS     print(gzip.decompress(gz) == .Ok(_))
-//RS     print(zstd.decompress(zst) == .Ok(_))
-//RS     print(gzip.decompress([U8]{1, 2, 3}) == .Err(_))
-//RS     print(zstd.decompress([U8]{1, 2, 3}) == .Err(_))
-//RS }
-//RS "#;
-//RS     tir_support::assert_tiers_agree(
-//RS         "archive_stream_codecs_round_trip_and_malformed",
-//RS         source,
-//RS         "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
-//RS     );
-//RS }
-//RS 
-//RS fn zstd_rle_frame(output_len: usize, byte: u8) -> Vec<u8> {
-//RS     let mut frame = vec![0x28, 0xb5, 0x2f, 0xfd, 0xe0];
-//RS     frame.extend_from_slice(&(output_len as u64).to_le_bytes());
-//RS     let mut remaining = output_len;
-//RS     while remaining > 0 {
-//RS         let block_len = remaining.min(128 * 1024);
-//RS         let last = block_len == remaining;
-//RS         let header = ((block_len as u32) << 3) | (1 << 1) | u32::from(last);
-//RS         frame.extend_from_slice(&header.to_le_bytes()[..3]);
-//RS         frame.push(byte);
-//RS         remaining -= block_len;
-//RS     }
-//RS     frame
-//RS }
-//RS 
-//RS struct GzipBits {
-//RS     bytes: Vec<u8>,
-//RS     bit: u8,
-//RS }
-//RS 
-//RS impl GzipBits {
-//RS     fn write(&mut self, value: u32, bits: u8) {
-//RS         for offset in 0..bits {
-//RS             if self.bit == 0 {
-//RS                 self.bytes.push(0);
-//RS             }
-//RS             if value & (1 << offset) != 0 {
-//RS                 let last = self.bytes.len() - 1;
-//RS                 self.bytes[last] |= 1 << self.bit;
-//RS             }
-//RS             self.bit = (self.bit + 1) % 8;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn gzip_reverse_bits(mut code: u32, bits: u8) -> u32 {
-//RS     let mut reversed = 0;
-//RS     for _ in 0..bits {
-//RS         reversed = (reversed << 1) | (code & 1);
-//RS         code >>= 1;
-//RS     }
-//RS     reversed
-//RS }
-//RS 
-//RS fn gzip_fixed_code(symbol: usize) -> (u32, u8) {
-//RS     let (code, bits) = match symbol {
-//RS         0..=143 => (0x30 + symbol as u32, 8),
-//RS         144..=255 => (0x190 + (symbol - 144) as u32, 9),
-//RS         256..=279 => ((symbol - 256) as u32, 7),
-//RS         280..=287 => (0xc0 + (symbol - 280) as u32, 8),
-//RS         _ => unreachable!("fixed DEFLATE symbol"),
-//RS     };
-//RS     (gzip_reverse_bits(code, bits), bits)
-//RS }
-//RS 
-//RS fn gzip_length_code(length: usize) -> (usize, u32, u8) {
-//RS     const BASE: [usize; 29] = [
-//RS         3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83,
-//RS         99, 115, 131, 163, 195, 227, 258,
-//RS     ];
-//RS     const EXTRA: [u8; 29] = [
-//RS         0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5,
-//RS         5, 5, 0,
-//RS     ];
-//RS     for (index, (&base, &extra)) in BASE.iter().zip(EXTRA.iter()).enumerate() {
-//RS         let max = base + ((1usize << extra) - 1);
-//RS         if length <= max {
-//RS             return (257 + index, (length - base) as u32, extra);
-//RS         }
-//RS     }
-//RS     unreachable!("DEFLATE match length")
-//RS }
-//RS 
-//RS fn gzip_crc32_repeated(byte: u8, length: usize) -> u32 {
-//RS     let mut table = [0u32; 256];
-//RS     for (index, slot) in table.iter_mut().enumerate() {
-//RS         let mut crc = index as u32;
-//RS         for _ in 0..8 {
-//RS             crc = if crc & 1 != 0 {
-//RS                 (crc >> 1) ^ 0xedb8_8320
-//RS             } else {
-//RS                 crc >> 1
-//RS             };
-//RS         }
-//RS         *slot = crc;
-//RS     }
-//RS 
-//RS     let mut crc = !0u32;
-//RS     for _ in 0..length {
-//RS         crc = (crc >> 8) ^ table[((crc as u8) ^ byte) as usize];
-//RS     }
-//RS     !crc
-//RS }
-//RS 
-//RS /// A compact fixed-DEFLATE stream that expands through the shared codec cap.
-//RS fn gzip_fixed_repeat_bomb(output_len: usize, byte: u8) -> Vec<u8> {
-//RS     assert!(output_len > 0);
-//RS     let mut frame = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
-//RS     let mut bits = GzipBits {
-//RS         bytes: Vec::new(),
-//RS         bit: 0,
-//RS     };
-//RS     bits.write(1, 1); // final block
-//RS     bits.write(1, 2); // fixed Huffman block
-//RS 
-//RS     let (literal, literal_bits) = gzip_fixed_code(byte as usize);
-//RS     bits.write(literal, literal_bits);
-//RS     let mut remaining = output_len - 1;
-//RS     while remaining >= 3 {
-//RS         let length = remaining.min(258);
-//RS         let (symbol, extra, extra_bits) = gzip_length_code(length);
-//RS         let (code, code_bits) = gzip_fixed_code(symbol);
-//RS         bits.write(code, code_bits);
-//RS         bits.write(extra, extra_bits);
-//RS         bits.write(0, 5); // distance symbol 0: one byte backwards
-//RS         remaining -= length;
-//RS     }
-//RS     for _ in 0..remaining {
-//RS         bits.write(literal, literal_bits);
-//RS     }
-//RS     let (end, end_bits) = gzip_fixed_code(256);
-//RS     bits.write(end, end_bits);
-//RS     frame.extend_from_slice(&bits.bytes);
-//RS     let checksum = gzip_crc32_repeated(byte, output_len);
-//RS     frame.extend_from_slice(&checksum.to_le_bytes());
-//RS     frame.extend_from_slice(&(output_len as u32).to_le_bytes());
-//RS     frame
-//RS }
-//RS 
-//RS #[test]
-//RS fn source_compressors_reject_output_over_the_shared_budget_on_all_tiers() {
-//RS     const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
-//RS     let temp = TempTree::new("jet_archive_codec_limits");
-//RS     let gzip_path = temp.0.join("oversized.gz");
-//RS     let zstd_path = temp.0.join("oversized.zst");
-//RS     let gzip = gzip_fixed_repeat_bomb(OUTPUT_LIMIT + 1, b'x');
-//RS     let zstd = zstd_rle_frame(OUTPUT_LIMIT + 1, b'x');
-//RS     let plain_path = temp.0.join("oversized.bin");
-//RS     fs::write(&gzip_path, gzip).unwrap();
-//RS     fs::write(&zstd_path, zstd).unwrap();
-//RS     fs::write(&plain_path, vec![b'x'; OUTPUT_LIMIT + 1]).unwrap();
-//RS 
-//RS     let escape = |path: &Path| path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
-//RS     let source = r#"
-//RS use core.archive as archive
-//RS use core.archive.gzip as gzip
-//RS use core.archive.zstd as zstd
-//RS use core.files as files
-//RS 
-//RS fn run() {
-//RS     gzip_bytes :: files.read_bytes("__GZIP__") ?? panic("gzip fixture")
-//RS     print(gzip.decompress(gzip_bytes) == .Err(_))
-//RS     zstd_bytes :: files.read_bytes("__ZSTD__") ?? panic("zstd fixture")
-//RS     print(zstd.decompress(zstd_bytes) == .Err(_))
-//RS     // Encoders over the budget return a typed error, never an empty or
-//RS     // unchanged buffer.
-//RS     plain :: files.read_bytes("__PLAIN__") ?? panic("plain fixture")
-//RS     print(archive.deflate(plain) == .Err(_))
-//RS     print(archive.compress(plain) == .Err(_))
-//RS     print(archive.create("big.bin", plain) == .Err(_))
-//RS     print(archive.tar_add([U8]{}, "big.bin", plain) == .Err(_))
-//RS     print(gzip.compress(plain) == .Err(_))
-//RS     print(zstd.compress(plain) == .Err(_))
-//RS }
-//RS "#
-//RS     .replace("__GZIP__", &escape(&gzip_path))
-//RS     .replace("__ZSTD__", &escape(&zstd_path))
-//RS     .replace("__PLAIN__", &escape(&plain_path));
-//RS     tir_support::assert_tiers_agree(
-//RS         "source_compressors_output_budget",
-//RS         &source,
-//RS         "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
-//RS     );
-//RS }
-//RS 
-//RS fn push_archive_u16(output: &mut Vec<u8>, value: usize) {
-//RS     output.extend_from_slice(&(value as u16).to_le_bytes());
-//RS }
-//RS 
-//RS fn push_archive_u32(output: &mut Vec<u8>, value: usize) {
-//RS     output.extend_from_slice(&(value as u32).to_le_bytes());
-//RS }
-//RS 
-//RS fn zip_limit_bomb(
-//RS     name: &[u8],
-//RS     entry_count: usize,
-//RS     method: u16,
-//RS     compressed: &[u8],
-//RS     uncompressed_len: usize,
-//RS     checksum: u32,
-//RS ) -> Vec<u8> {
-//RS     let mut local = Vec::new();
-//RS     let mut central = Vec::new();
-//RS     for _ in 0..entry_count {
-//RS         let local_offset = local.len();
-//RS         push_archive_u32(&mut local, 0x0403_4b50);
-//RS         push_archive_u16(&mut local, 20);
-//RS         push_archive_u16(&mut local, 0);
-//RS         push_archive_u16(&mut local, method as usize);
-//RS         push_archive_u16(&mut local, 0);
-//RS         push_archive_u16(&mut local, 0);
-//RS         push_archive_u32(&mut local, checksum as usize);
-//RS         push_archive_u32(&mut local, compressed.len());
-//RS         push_archive_u32(&mut local, uncompressed_len);
-//RS         push_archive_u16(&mut local, name.len());
-//RS         push_archive_u16(&mut local, 0);
-//RS         local.extend_from_slice(name);
-//RS         local.extend_from_slice(compressed);
-//RS 
-//RS         push_archive_u32(&mut central, 0x0201_4b50);
-//RS         push_archive_u16(&mut central, 20);
-//RS         push_archive_u16(&mut central, 20);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, method as usize);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u32(&mut central, checksum as usize);
-//RS         push_archive_u32(&mut central, compressed.len());
-//RS         push_archive_u32(&mut central, uncompressed_len);
-//RS         push_archive_u16(&mut central, name.len());
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u32(&mut central, 0);
-//RS         push_archive_u32(&mut central, local_offset);
-//RS         central.extend_from_slice(name);
-//RS     }
-//RS 
-//RS     let central_offset = local.len();
-//RS     let central_size = central.len();
-//RS     let mut archive = local;
-//RS     archive.extend_from_slice(&central);
-//RS     push_archive_u32(&mut archive, 0x0605_4b50);
-//RS     push_archive_u16(&mut archive, 0);
-//RS     push_archive_u16(&mut archive, 0);
-//RS     push_archive_u16(&mut archive, entry_count);
-//RS     push_archive_u16(&mut archive, entry_count);
-//RS     push_archive_u32(&mut archive, central_size);
-//RS     push_archive_u32(&mut archive, central_offset);
-//RS     push_archive_u16(&mut archive, 0);
-//RS     archive
-//RS }
-//RS 
-//RS fn zip_entry_count_bomb() -> Vec<u8> {
-//RS     zip_limit_bomb(b"x", 4097, 0, &[], 0, 0)
-//RS }
-//RS 
-//RS fn zip_declared_output_bomb() -> Vec<u8> {
-//RS     const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
-//RS     let gzip = gzip_fixed_repeat_bomb(OUTPUT_LIMIT + 1, b'x');
-//RS     let checksum = u32::from_le_bytes([
-//RS         gzip[gzip.len() - 8],
-//RS         gzip[gzip.len() - 7],
-//RS         gzip[gzip.len() - 6],
-//RS         gzip[gzip.len() - 5],
-//RS     ]);
-//RS     zip_limit_bomb(
-//RS         b"x",
-//RS         1,
-//RS         8,
-//RS         &gzip[10..gzip.len() - 8],
-//RS         OUTPUT_LIMIT + 1,
-//RS         checksum,
-//RS     )
-//RS }
-//RS 
-//RS fn zip_materialization_bomb() -> Vec<u8> {
-//RS     const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
-//RS     const NAME_LEN: usize = 512;
-//RS     let name = vec![b'n'; NAME_LEN];
-//RS     let gzip = gzip_fixed_repeat_bomb(OUTPUT_LIMIT - NAME_LEN + 1, b'x');
-//RS     let checksum = u32::from_le_bytes([
-//RS         gzip[gzip.len() - 8],
-//RS         gzip[gzip.len() - 7],
-//RS         gzip[gzip.len() - 6],
-//RS         gzip[gzip.len() - 5],
-//RS     ]);
-//RS     zip_limit_bomb(
-//RS         &name,
-//RS         1,
-//RS         8,
-//RS         &gzip[10..gzip.len() - 8],
-//RS         OUTPUT_LIMIT - NAME_LEN + 1,
-//RS         checksum,
-//RS     )
-//RS }
-//RS 
-//RS fn zip_names_json_materialization_bomb() -> Vec<u8> {
-//RS     const ENTRY_COUNT: usize = 4096;
-//RS     const NAME_LEN: usize = 4096;
-//RS     let name = vec![1u8; NAME_LEN];
-//RS     let mut local = Vec::new();
-//RS     let mut central = Vec::new();
-//RS     for _ in 0..ENTRY_COUNT {
-//RS         let local_offset = local.len();
-//RS         push_archive_u32(&mut local, 0x0403_4b50);
-//RS         push_archive_u16(&mut local, 20);
-//RS         push_archive_u16(&mut local, 0);
-//RS         push_archive_u16(&mut local, 0);
-//RS         push_archive_u16(&mut local, 0);
-//RS         push_archive_u16(&mut local, 0);
-//RS         push_archive_u32(&mut local, 0);
-//RS         push_archive_u32(&mut local, 0);
-//RS         push_archive_u32(&mut local, 0);
-//RS         push_archive_u16(&mut local, NAME_LEN);
-//RS         push_archive_u16(&mut local, 0);
-//RS         local.extend_from_slice(&name);
-//RS 
-//RS         push_archive_u32(&mut central, 0x0201_4b50);
-//RS         push_archive_u16(&mut central, 20);
-//RS         push_archive_u16(&mut central, 20);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u32(&mut central, 0);
-//RS         push_archive_u32(&mut central, 0);
-//RS         push_archive_u32(&mut central, 0);
-//RS         push_archive_u16(&mut central, NAME_LEN);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u16(&mut central, 0);
-//RS         push_archive_u32(&mut central, 0);
-//RS         push_archive_u32(&mut central, local_offset);
-//RS         central.extend_from_slice(&name);
-//RS     }
-//RS 
-//RS     let central_offset = local.len();
-//RS     let central_size = central.len();
-//RS     let mut archive = local;
-//RS     archive.extend_from_slice(&central);
-//RS     push_archive_u32(&mut archive, 0x0605_4b50);
-//RS     push_archive_u16(&mut archive, 0);
-//RS     push_archive_u16(&mut archive, 0);
-//RS     push_archive_u16(&mut archive, ENTRY_COUNT);
-//RS     push_archive_u16(&mut archive, ENTRY_COUNT);
-//RS     push_archive_u32(&mut archive, central_size);
-//RS     push_archive_u32(&mut archive, central_offset);
-//RS     push_archive_u16(&mut archive, 0);
-//RS     archive
-//RS }
-//RS 
-//RS fn tar_bomb_octal(field: &mut [u8], value: usize) {
-//RS     field.fill(b'0');
-//RS     field[field.len() - 1] = 0;
-//RS     let digits = format!("{value:o}");
-//RS     let start = field.len() - 1 - digits.len();
-//RS     field[start..start + digits.len()].copy_from_slice(digits.as_bytes());
-//RS }
-//RS 
-//RS fn append_tar_bomb_record(output: &mut Vec<u8>, name: &[u8], payload: &[u8], kind: u8) {
-//RS     let mut header = [0u8; 512];
-//RS     header[..name.len()].copy_from_slice(name);
-//RS     tar_bomb_octal(&mut header[100..108], 0o644);
-//RS     tar_bomb_octal(&mut header[124..136], payload.len());
-//RS     header[148..156].fill(b' ');
-//RS     header[156] = kind;
-//RS     header[257..263].copy_from_slice(b"ustar\0");
-//RS     header[263..265].copy_from_slice(b"00");
-//RS     let checksum = header.iter().map(|byte| *byte as u64).sum::<u64>();
-//RS     let digits = format!("{checksum:06o}");
-//RS     header[148..154].copy_from_slice(&digits.as_bytes()[digits.len() - 6..]);
-//RS     header[154] = 0;
-//RS     output.extend_from_slice(&header);
-//RS     output.extend_from_slice(payload);
-//RS     let padded = (output.len() + 511) / 512 * 512;
-//RS     output.resize(padded, 0);
-//RS }
-//RS 
-//RS fn tar_names_json_materialization_bomb() -> Vec<u8> {
-//RS     const PAIR_COUNT: usize = 2048;
-//RS     const NAME_LEN: usize = 8192;
-//RS     let name = vec![1u8; NAME_LEN];
-//RS     let mut archive = Vec::new();
-//RS     for _ in 0..PAIR_COUNT {
-//RS         let mut long_name = name.clone();
-//RS         long_name.push(0);
-//RS         append_tar_bomb_record(&mut archive, b"././#LongLink", &long_name, b'L');
-//RS         append_tar_bomb_record(&mut archive, b"x", b"x", b'0');
-//RS     }
-//RS     archive.extend_from_slice(&[0; 1024]);
-//RS     archive
-//RS }
-//RS 
-//RS fn tar_entry_count_bomb() -> Vec<u8> {
-//RS     const TOO_MANY_ENTRIES: usize = 4097;
-//RS     let mut archive = Vec::new();
-//RS     for index in 0..TOO_MANY_ENTRIES {
-//RS         let name = format!("entry-{index}");
-//RS         append_tar_bomb_record(&mut archive, name.as_bytes(), b"x", b'0');
-//RS     }
-//RS     archive.extend_from_slice(&[0; 1024]);
-//RS     archive
-//RS }
-//RS 
-//RS #[test]
-//RS fn archive_hostile_materialization_limits_are_rejected_by_source_on_all_tiers() {
-//RS     let zip_names = zip_names_json_materialization_bomb();
-//RS     let zip_entries = zip_entry_count_bomb();
-//RS     let zip_output = zip_declared_output_bomb();
-//RS     let zip_materialization = zip_materialization_bomb();
-//RS     let tar_names = tar_names_json_materialization_bomb();
-//RS     let tar_entries = tar_entry_count_bomb();
-//RS 
-//RS     let temp = TempTree::new("jet_archive_hostile_limits");
-//RS     let zip_names_path = temp.0.join("zip_names.bin");
-//RS     let zip_entries_path = temp.0.join("zip_entries.bin");
-//RS     let zip_output_path = temp.0.join("zip_output.bin");
-//RS     let zip_materialization_path = temp.0.join("zip_materialization.bin");
-//RS     let tar_names_path = temp.0.join("tar_names.bin");
-//RS     let tar_entries_path = temp.0.join("tar_entries.bin");
-//RS     fs::write(&zip_names_path, zip_names).unwrap();
-//RS     fs::write(&zip_entries_path, zip_entries).unwrap();
-//RS     fs::write(&zip_output_path, zip_output).unwrap();
-//RS     fs::write(&zip_materialization_path, zip_materialization).unwrap();
-//RS     fs::write(&tar_names_path, tar_names).unwrap();
-//RS     fs::write(&tar_entries_path, tar_entries).unwrap();
-//RS 
-//RS     let escape = |path: &Path| path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
-//RS     let source = r#"
-//RS use core.archive as archive
-//RS use core.files as files
-//RS 
-//RS fn run() {
-//RS     zip_names :: files.read_bytes("__ZIP_NAMES__") ?? panic("zip names fixture")
-//RS     print(archive.zip_names_json(zip_names) == .Err(_))
-//RS 
-//RS     zip_entries :: files.read_bytes("__ZIP_ENTRIES__") ?? panic("zip entries fixture")
-//RS     print(archive.zip_open(zip_entries) == .Err(_))
-//RS 
-//RS     zip_output :: files.read_bytes("__ZIP_OUTPUT__") ?? panic("zip output fixture")
-//RS     print(archive.zip_decompress(zip_output) == .Err(_))
-//RS 
-//RS     zip_materialization :: files.read_bytes("__ZIP_MATERIALIZATION__") ?? panic("zip materialization fixture")
-//RS     print(archive.zip_decompress(zip_materialization) == .Err(_))
-//RS 
-//RS     tar_names :: files.read_bytes("__TAR_NAMES__") ?? panic("tar names fixture")
-//RS     print(archive.tar_names_json(tar_names) == .Err(_))
-//RS 
-//RS     tar_entries :: files.read_bytes("__TAR_ENTRIES__") ?? panic("tar entries fixture")
-//RS     print(archive.tar_get(tar_entries, "entry-0") == .Err(_))
-//RS }
-//RS "#
-//RS     .replace("__ZIP_NAMES__", &escape(&zip_names_path))
-//RS     .replace("__ZIP_ENTRIES__", &escape(&zip_entries_path))
-//RS     .replace("__ZIP_OUTPUT__", &escape(&zip_output_path))
-//RS     .replace("__ZIP_MATERIALIZATION__", &escape(&zip_materialization_path))
-//RS     .replace("__TAR_NAMES__", &escape(&tar_names_path))
-//RS     .replace("__TAR_ENTRIES__", &escape(&tar_entries_path));
-//RS     tir_support::assert_tiers_agree(
-//RS         "archive_hostile_materialization_limits",
-//RS         &source,
-//RS         "true\ntrue\ntrue\ntrue\ntrue\ntrue\n",
-//RS     );
-//RS }
-// END-PORT-PENDING 0962 tests/archive.rs:1-583
+// Rust: tests/agent_executor.rs:60
+#Test("agent_executor_hostile_filesystem_examples_fail_closed_on_all_tiers") {
+    if selected_os() == "linux" || selected_os() == "macos" {
+        marker :: env.temp_dir().join("jet-agent-executor-host-write-{process.id()}")
+        _ :: fs.remove_file(&marker)
+        source :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    read_spec :: process.cmd(["sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
+    if read_spec.plan() == {
+        .Ok(_) -> {
+            if read_spec.run_checked() == {
+                .Ok(_) -> print("host-read-blocked")
+                .Err(_) -> print("host-read-escaped")
+            }
+        }
+        .Err(_) -> print("unsupported")
+    }
+    write_spec :: process.cmd(["sh", "-c", "if printf escaped > '__MARKER__'; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
+    if write_spec.plan() == {
+        .Ok(_) -> {
+            if write_spec.run_checked() == {
+                .Ok(_) -> print("host-write-blocked")
+                .Err(_) -> print("host-write-escaped")
+            }
+        }
+        .Err(_) -> print("unsupported")
+    }
+}
+""".replace("__MARKER__", marker.to_string_lossy())
+        expected :: if native_backend_available() -> "host-read-blocked\nhost-write-blocked\n" else -> "unsupported\nunsupported\n"
+        tir_support.assert_tiers_agree("agent_executor_hostile_filesystem", source, expected)
+        assert(!marker.exists(), "authority-bound process wrote outside its output grant")
+    }
+}
 
+// Rust: tests/agent_executor.rs:109
+#Test("agent_executor_explicit_cancellation_reaps_descendants_on_all_tiers") {
+    if selected_os() == "linux" || selected_os() == "macos" {
+        source :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["sh", "-c", "while true; do sleep 1; done"])
+        .stdout(.Capture).stderr(.Capture).cwd("/tmp").under(policy)
+    if spec.spawn() == {
+        .Ok(child) -> {
+            child.kill() ?? panic("authority-bound cancellation failed")
+            receipt :: child.wait() ?? panic("cancelled child did not reap")
+            print(receipt.success)
+            print(receipt.timed_out)
+            print(receipt.descendants)
+        }
+        .Err(_) -> print("unsupported")
+    }
+}
+"""
+        expected :: if native_backend_available() -> "false\nfalse\ncontained\n" else -> "unsupported\n"
+        tir_support.assert_tiers_agree("agent_executor_cancellation", source, expected)
+    }
+}
+
+// Rust: tests/agent_executor.rs:142
+#Test("agent_executor_windows_appcontainer_plan_and_receipt_preserve_policy") {
+    if selected_os() == "windows" {
+        source :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["cmd.exe", "/C", "exit", "0"]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            receipt :: spec.run_checked() ?? panic("Windows authority-bound run failed")
+            print(plan.backend)
+            print(plan.executable_identity == receipt.executable_identity)
+            print(plan.argv == receipt.argv)
+            print(plan.input_digest == receipt.input_digest)
+            print(plan.policy_digest == receipt.policy_digest)
+            print(plan.authority == receipt.authority)
+            print(plan.descendants == receipt.descendants)
+            print(plan.limits == receipt.limits)
+            print(plan.outputs[0] == receipt.outputs[0])
+            print(plan.outputs[1] == receipt.outputs[1])
+            print(receipt.outputs.len() == plan.outputs.len() + 1)
+            print(receipt.redacted)
+        }
+        .Err(_) -> print("refused")
+    }
+}
+"""
+        tir_support.assert_tiers_agree("agent_executor_windows_appcontainer_plan_receipt", source, "windows-appcontainer\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+    }
+}
+
+// Rust: tests/agent_executor.rs:178
+#Test("agent_executor_windows_appcontainer_denies_host_read") {
+    if selected_os() == "windows" {
+        marker_path :: env.temp_dir().join("jet-agent-executor-windows-host-secret-{process.id()}.txt")
+        fs.write(&marker_path, "host-secret").expect("write Windows host-read marker")
+        marker :: marker_path.to_string_lossy().replace('\\', "/")
+        source :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["cmd.exe", "/C", "type \"__MARKER__\""]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            print(plan.backend)
+            result :: spec.run_checked()
+            if result == {
+                .Ok(_) -> print("escaped")
+                .Err(_) -> print("blocked")
+            }
+        }
+        .Err(_) -> print("refused")
+    }
+}
+""".replace("__MARKER__", marker)
+        tir_support.assert_tiers_agree("agent_executor_windows_appcontainer_host_read", source, "windows-appcontainer\nblocked\n")
+        _ :: fs.remove_file(marker)
+    }
+}

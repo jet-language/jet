@@ -1,0 +1,24 @@
+use jet_foundation.[Type, THandleOp]
+use jet_codegen.Codegen.TIR.Subset.Handles.[handle_method_op, handle_method_return_ty, core_closure_call_return_ty]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/handles.rs:160-580; no original inline tests.
+#Test("handle_dispatch_respects_arity_and_precise_runtime_operation") {
+    assert_eq(handle_method_op("MappedFile", "window", 2), Val(THandleOp.MappedFileWindow))
+    assert_eq(handle_method_op("MappedFile", "window", 1), None)
+    assert_eq(handle_method_op("RNG", "bool", 0), Val(THandleOp.RngBool))
+    assert_eq(handle_method_op("RNG", "bool", 1), Val(THandleOp.RngBoolP))
+    assert_eq(handle_method_op("TcpStream", "write_all", 2), Val(THandleOp.TcpStreamWriteAllBytesDeadline))
+    assert_eq(handle_method_op("TLSStream", "close_write", 1), Val(THandleOp.TLSStreamCloseWrite))
+    assert_eq(handle_method_op("Duration", "round", 3), Val(THandleOp.DurationRound))
+    assert_eq(handle_method_op("Duration", "round", 4), None)
+    assert_eq(handle_method_op("NotAHandle", "read", 0), None)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/handles.rs:588-764
+#Test("handle_return_types_preserve_resolved_precedence_and_nested_shapes") {
+    assert_eq(handle_method_return_ty("NotAHandle", "any", 9, Type.Int, Val(Type.Bool)), Type.Bool)
+    assert_eq(handle_method_return_ty("HistoryRNG", "below", 1, Type.Named("HistoryRNG"), None), Type.IntN{signed: false, bits: 64})
+    assert_eq(handle_method_return_ty("MIME", "params", 0, Type.Named("MIME"), None), Type.List(Type.List(Type.String)))
+    assert_eq(handle_method_return_ty("Match", "group_start", 1, Type.Named("Match"), None), Type.Option(Type.Int))
+    assert_eq(core_closure_call_return_ty("core.tasks", "spawn", Type.Int), Type.Apply{name: "Task", args: [Type]{Type.Int}})
+    assert_eq(core_closure_call_return_ty("core.mem.scope", "guard", Type.Int), Type.Named("ScopeGuard"))
+}

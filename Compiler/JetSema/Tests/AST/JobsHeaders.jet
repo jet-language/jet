@@ -41,7 +41,7 @@ fn job_headers_registration_modules(source: String, modules: [(String, String)])
 fn job_headers_checked(source: String) -> SemaGraphResult Never! {
     registration :: job_headers_registration(source)
     // The authored test package has no dependency declarations or roots.
-    policy :: SemaRegistrationPackagePolicy{package_identity: "jobs", authority_allow: None, authority_deny: None, authority_needs: [], runtime_ceiling: None, edition: "2026", dependency_names: [String:Bool]{}, dep_roots: [String:job_headers_path.OsPath]{}, dependency_allowlist: None}
+    policy :: SemaRegistrationPackagePolicy{package_identity: "jobs", authority_allow: None, authority_deny: None, authority_needs: [], runtime_ceiling: None, edition: "2026", dependency_names: [String:Bool]{}, dep_roots: [String:job_headers_path.OSPath]{}, dependency_allowlist: None}
     stage :: sema_collect_comptime_declarations(registration, [SemaRegistrationPackagePolicy]{policy}, None)
     root :: job_headers_native.canonicalize(job_headers_path.from_text(".", job_headers_path.PathPlatform.Unix)) ?? panic("cannot read original fixture working directory")
     sema_finalize_registration_graph(registration, stage, [], [], None, None, root)
@@ -247,7 +247,7 @@ fn job_headers_return(function: TFunc) -> TExpr Never! {
 }
 
 fn job_headers_finalize_retained(registration: SemaRegistrationGraph, cache: Shared<SemaIncrementalSemaCache>?) -> SemaGraphResult Never! {
-    policy :: SemaRegistrationPackagePolicy{package_identity: "jobs", authority_allow: None, authority_deny: None, authority_needs: [], runtime_ceiling: None, edition: "2026", dependency_names: [String:Bool]{}, dep_roots: [String:job_headers_path.OsPath]{}, dependency_allowlist: None}
+    policy :: SemaRegistrationPackagePolicy{package_identity: "jobs", authority_allow: None, authority_deny: None, authority_needs: [], runtime_ceiling: None, edition: "2026", dependency_names: [String:Bool]{}, dep_roots: [String:job_headers_path.OSPath]{}, dependency_allowlist: None}
     stage :: sema_collect_comptime_declarations(registration, [SemaRegistrationPackagePolicy]{policy}, None)
     root :: {
         permit :: registration.bundle.guard_read()
@@ -291,7 +291,7 @@ fn job_headers_retained_schedule(bundle: ProgramBundle, name: String) -> EverySc
     {
         permit :: warm.bundle.guard_read()
         assert_eq(job_headers_retained_schedule(permit.value, "nightly"), job_headers_job(warm_checked, "nightly").schedule)
-        assert_eq((JobRegistry.from_bundle(permit.value).find("nightly") ?? panic("bundle registry")).schedule, Val("day 03:00"))
+        assert_eq((sema_checked_job_registry(permit.value).find("nightly") ?? panic("bundle registry")).schedule, Val("day 03:00"))
     }
     permit :: cache.guard_read()
     assert(sema_incremental_cache_stats(permit.value).hits > 0)
@@ -301,10 +301,12 @@ fn job_headers_retained_schedule(bundle: ProgramBundle, name: String) -> EverySc
     registration :: job_headers_registration("#[Job, Every(\"03:00\")] fn nightly() {{}}\nfn run() {{}}\n")
     first :: job_headers_finalize_retained(registration, None)
     assert(first.complete)
-    replacement :: parse_source("#[Job, Every(\"25:00\")] fn nightly() {{}}\nfn run() {{}}\n".bytes())
+    replacement_source :: "#[Job, Every(\"25:00\")] fn nightly() {{}}\nfn run() {{}}\n"
+    replacement :: parse_source(replacement_source.bytes())
     assert_eq(replacement.diagnostics.len(), 0)
     if replacement.program.items[0] == .Func(invalid) {
         permit := registration.bundle.guard_edit()
+        permit.value.modules[permit.value.entry].source = replacement_source
         if &permit.value.modules[permit.value.entry].items[0] == .Func(function) {
             assert((function.every ?? panic("checked Every")).resolved != None)
             function.markers = invalid.markers
@@ -342,7 +344,7 @@ fn job_headers_retained_schedule(bundle: ProgramBundle, name: String) -> EverySc
     assert_eq(permit.value.modules[1].items.len(), 0)
     assert_eq(permit.value.modules[2].display, "a-library.jet")
     assert_eq(permit.value.modules[2].source, library)
-    registry :: JobRegistry.from_bundle(permit.value)
+    registry :: sema_checked_job_registry(permit.value)
     assert_eq(registry.jobs().len(), 2)
     // Discovery sorts modules without permuting the retained AST.
     assert_eq(registry.jobs()[0].name, "library_job")
@@ -386,4 +388,34 @@ module second :: generic<String>
     other := module
     other.path = job_headers_path.from_text("<corelib>-other/imports.jet", job_headers_path.PathPlatform.Unix)
     assert(!other.is_core_source())
+}
+
+#Test("every_inline_and_generic_instances_check_their_original_scoped_body") {
+    sources :: [(String, String)]{
+        ("workers", "module workers {{ #[Job, Every(\"03:00\")] fn tick() {{}} }}\nfn run() {{ workers.tick() }}\n"),
+        ("active", "module worker<T> {{ #[Job, Every(\"03:00\")] fn tick() {{}} }}\nmodule active :: worker<Int>\nfn run() {{ active.tick() }}\n"),
+    }
+    loop (scope, source) in sources {
+        registration :: job_headers_registration(source)
+        checked :: job_headers_finalize_retained(registration, None)
+        assert(checked.complete)
+        permit :: registration.bundle.guard_read()
+        found := false
+        loop item in permit.value.modules[permit.value.entry].items {
+            if item == .CodeModule(module) && module.name == scope {
+                body :: module.body ?? panic("original scoped body was discarded")
+                loop member in body {
+                    if member == .Func(function) && function.name == "tick" {
+                        assert_eq((function.every ?? panic("original scoped Every")).resolved, Val(EverySchedule.WallClockTime{hour: 3, minute: 0}))
+                        found = true
+                    }
+                }
+            }
+            if item == {
+                .GenericModule(_) | .ModuleAlias(_) -> panic("expanded templates must be erased from the retained AST")
+                else -> {}
+            }
+        }
+        assert(found, "the checked cadence must live in the actual original item scope")
+    }
 }

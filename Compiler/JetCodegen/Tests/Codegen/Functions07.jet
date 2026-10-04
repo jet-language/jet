@@ -1,0 +1,75 @@
+use jet_foundation.[Type, Span, Pattern, PatSlot, TPattern, TPatternShape, TPatternBinding, TPatternPosition, TIntegerBounds, TBinaryOp, TCostKind, TCostState, TCostFact, TFactChannel, TFactExclusivity, TFactPurity, TLetTy, TLetWrapper]
+use jet_codegen.Codegen.TIR.[integer_bounds_for_op, combine_integer_bounds, bounds_fit_inline, floor_div_i128, negate_integer_bounds, TCostReportError]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8511,8547 (behavioral control; no inline Rust tests)
+#Test("integer_bounds_floor_and_remainder_preserve_divisor_sign") {
+    numerator :: TIntegerBounds{lo: -7, hi: 7}
+    positive :: TIntegerBounds{lo: 2, hi: 3}
+    negative :: TIntegerBounds{lo: -3, hi: -2}
+    assert(integer_bounds_for_op(TBinaryOp.FloorDiv, numerator, positive) == Val(TIntegerBounds{lo: -4, hi: 3}))
+    assert(integer_bounds_for_op(TBinaryOp.FloorDiv, numerator, negative) == Val(TIntegerBounds{lo: -4, hi: 3}))
+    assert(integer_bounds_for_op(TBinaryOp.Mod, numerator, positive) == Val(TIntegerBounds{lo: 0, hi: 2}))
+    assert(integer_bounds_for_op(TBinaryOp.Rem, numerator, negative) == Val(TIntegerBounds{lo: -2, hi: 0}))
+    crossing :: TIntegerBounds{lo: -1, hi: 1}
+    assert(integer_bounds_for_op(TBinaryOp.FloorDiv, numerator, crossing) == None)
+    assert(integer_bounds_for_op(TBinaryOp.Mod, numerator, crossing) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8491,8498,8592 (behavioral control)
+#Test("integer_bounds_checked_i128_overflow_is_unproven") {
+    assert(floor_div_i128(I128{-7}, I128{3}) == Val(I128{-3}))
+    assert(floor_div_i128(I128{7}, I128{-3}) == Val(I128{-3}))
+    assert(floor_div_i128(I128{-6}, I128{3}) == Val(I128{-2}))
+    assert(floor_div_i128(I128{1}, I128{0}) == None)
+    assert(floor_div_i128(I128.MIN, I128{-1}) == None)
+    assert(negate_integer_bounds(TIntegerBounds.exact(Int{I128.MIN})) == None)
+    assert(combine_integer_bounds(TBinaryOp.Add, TIntegerBounds.exact(Int{I128.MAX}), TIntegerBounds.exact(1)) == None)
+    assert(combine_integer_bounds(TBinaryOp.Mul, TIntegerBounds.exact(Int{I128.MAX}), TIntegerBounds.exact(2)) == None)
+    // The original four-point add/sub table includes two zero candidates.
+    assert(combine_integer_bounds(TBinaryOp.Add, TIntegerBounds.exact(2), TIntegerBounds.exact(3)) == Val(TIntegerBounds{lo: 0, hi: 5}))
+    assert(combine_integer_bounds(TBinaryOp.Mul, TIntegerBounds{lo: -2, hi: 3}, TIntegerBounds{lo: -4, hi: 5}) == Val(TIntegerBounds{lo: -12, hi: 15}))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8585-8590 (behavioral control)
+#Test("inline_int_bounds_use_signed_63_bit_rail") {
+    assert(bounds_fit_inline(TIntegerBounds{lo: -4611686018427387904, hi: 4611686018427387903}))
+    assert(!bounds_fit_inline(TIntegerBounds{lo: -4611686018427387905, hi: 0}))
+    assert(!bounds_fit_inline(TIntegerBounds{lo: 0, hi: 4611686018427387904}))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7894,8112,8172 (behavioral control)
+#Test("analytical_pattern_keeps_nested_slots_span_and_first_variant") {
+    span :: Span.new(4, 17)
+    nested :: Pattern.Variant("Inner", [], true, span)
+    outer :: Pattern.Variant("Outer", [PatSlot.Nested(nested), PatSlot.Range(2, 5), PatSlot.Wildcard], true, span)
+    pattern :: TPattern.arm(Pattern.Or([outer, Pattern.Variant("Other", [], false, span)], span), None)
+    assert(pattern.variant() == Val("Outer"))
+    assert(pattern.span() == span)
+    assert(pattern.position == TPatternPosition.Arm)
+    assert(!pattern.mutable && !pattern.boxed)
+    assert(TPattern.binding(Pattern.Absent(span)).variant() == None)
+    assert(TPattern.option_binding(Pattern.Range(1, 3, span)).position == TPatternPosition.OptionBinding)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7051-7073,8386-8396 (behavioral control)
+#Test("let_wrappers_and_unknown_facts_remain_conservative") {
+    assert(TLetTy.inferred() == TLetTy.Inferred)
+    assert(TLetTy.plain(Type.Int) == TLetTy.Annotated(Type.Int, TLetWrapper.Plain))
+    assert(TLetTy.resource(Type.Int) == TLetTy.Annotated(Type.Int, TLetWrapper.Resource))
+    assert(TLetTy.automatic_root(Type.Int) == TLetTy.Annotated(Type.Int, TLetWrapper.AutomaticRoot))
+    facts :: TFactChannel.unknown()
+    assert(facts.ty == None && facts.integer_bounds == None && facts.comptime_value == None && facts.cost == None)
+    assert(facts.exclusivity == TFactExclusivity.Unknown && facts.purity == TFactPurity.Unknown)
+    assert(!facts.no_cross_iteration_deps)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8233-8269,8292,8322 (behavioral control)
+#Test("typed_cost_report_retains_failures_and_semantic_state") {
+    fact :: TCostFact.semantic(TCostKind.ExactIntSpill)
+    assert(fact.state == TCostState.SemanticRemainder)
+    assert(fact.kind.label() == "exact Int spill")
+    assert(fact.kind.operation() == "an exact Int operation may spill to bigint")
+    assert(fact.kind.fix() == "bound the operands so the result stays on the packed Int rail, or accept exact bigint cost")
+    assert(TCostReportError.Lowering("blocked").message() == "typed TIR lowering failed for cost projection: blocked")
+    assert(TCostReportError.Incomplete(["a", "b"]).message() == "cost projection is incomplete: reachable sema surface(s) omitted by typed TIR: a, b")
+}

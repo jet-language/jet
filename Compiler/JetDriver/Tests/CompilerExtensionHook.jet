@@ -1,0 +1,253 @@
+use jet_driver.CompilerExtensionHook.[post_sema_diagnostics, snapshot_from_bundle, compiler_extension_host_candidates, compiler_extension_host_path_for, run_host_process, sanitize_host_message, host_failure]
+use jet_driver.[Driver, Loader, Policy]
+use jet_sema.[CompileMode, check_bundle_with_effect_facts]
+use jet_foundation.[Severity]
+use jet_pkg_model.CompilerExtension.[pkg_extension_message_exposes_rustc, ExtensionAbility, EXTENSION_ENV_COMPILER_EXTENSION, EXTENSION_MAX_SNAPSHOT_BYTES]
+use core.files.runtime.kernel_path_components.[OSPath]
+use std.process.[Command, Stdio]
+use std.time.[Duration, SystemTime, UNIX_EPOCH]
+use std.sync.[Mutex, MutexGuard, Once]
+use std.env
+use std.fs
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:533
+// GATE #4494: native serialized process environment and real host fixture execution.
+static ENV_LOCK: Mutex<Unit> = Mutex.new(())
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:534
+fn env_lock() -> MutexGuard<Unit> Never! { ENV_LOCK.lock().unwrap_or_else(fn(poison) -> poison.into_inner()) }
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:537
+static HOST_BUILD: Once = Once.new()
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:538
+const SOURCE_X: String = "fn x() {}\n\nfn run() {\n    print(0)\n}\n\nfn dev() {\n    print(1)\n}\n"
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:540
+const SOURCE_Y: String = "fn y() {}\n\nfn run() {\n    print(0)\n}\n\nfn dev() {\n    print(1)\n}\n"
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:543
+fn fixture_wasm(name: String) -> OSPath Never! {
+    ensure_jetpack_host_built()
+    env.current_dir().expect("repository cwd").join(OSPath.from_text("crates/jet-pkg-model/fixtures/compiler_extension")).join(OSPath.from_text(name))
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:550
+fn ensure_jetpack_host_built() -> Never! {
+    HOST_BUILD.call_once(fn() -> Never! {
+        // Build the Jet-authored sibling host rather than invoking Cargo/Rust.
+        status :: Command.new("jet").args([String]{"build", "Jetpack/CLI"}).current_dir(env.current_dir().expect("repository cwd")).status().expect("start jetpack compiler-extension host build")
+        assert(status.success(), "build jetpack compiler-extension host")
+    })
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:562
+#Test("missing_sibling_never_falls_back_to_path") {
+    dir :: tempfile_dir()
+    exe :: dir.join(OSPath.from_text("debug/deps/jet-driver-test"))
+    suffix :: if core.sys.target.selected_os() == "windows" -> ".exe" else -> ""
+    candidates :: compiler_extension_host_candidates(&exe)
+    assert(candidates == [OSPath]{dir.join(OSPath.from_text("debug/deps/jetpack{suffix}")), dir.join(OSPath.from_text("debug/jetpack{suffix}"))})
+    error :: compiler_extension_host_path_for(&exe).expect_err("missing sibling must fail")
+    assert(error.message.contains("missing beside the Jet compiler"))
+    fs.remove_dir_all(dir)!
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:582
+#Test("oversized_ipc_request_is_rejected_before_spawn") {
+    command :: Command.new("this-host-must-not-run")
+    request :: [U8].filled(EXTENSION_MAX_SNAPSHOT_BYTES + 1, U8{0})
+    error :: run_host_process(^command, ^request, 1, Duration.from_millis(10)).expect_err("oversized request must fail before spawn")
+    assert(error.message.contains("snapshot exceeds IPC limit"))
+    assert(!error.message.contains("couldn't start"))
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:597
+#Test("oversized_ipc_response_is_rejected") {
+    if core.sys.target.selected_family() == "unix" {
+        command := Command.new("sh")
+        command.args([String]{"-c", "head -c 300000 /dev/zero", "compiler-extension-host"})
+        error :: run_host_process(^command, "snapshot".as_bytes().to_list(), 128, Duration.from_secs(1)).expect_err("oversized response must fail")
+        assert(error.message == "compiler-extension host response exceeds IPC limit (128 bytes)")
+    }
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:610
+#Test("timeout_kills_and_reaps_host_process") {
+    if core.sys.target.selected_family() == "unix" {
+        dir :: tempfile_dir(); pid_file :: dir.join(OSPath.from_text("host.pid"))
+        command := Command.new("sh")
+        command.arg("-c").arg("printf '%s' \"$$\" > \"$1\"; exec sleep 60").arg("compiler-extension-host").arg(pid_file)
+        error :: run_host_process(^command, "snapshot".as_bytes().to_list(), 128, Duration.from_millis(100)).expect_err("stuck host must time out")
+        assert(error.message == "compiler-extension host timed out after 100ms")
+        pid :: fs.read_to_string(pid_file).expect("host must record pid")
+        trimmed := pid.trim() // #4303
+        alive :: Command.new("kill").args([String]{"-0", trimmed.to_string()}).stdout(Stdio.null()).stderr(Stdio.null()).status().expect("probe host pid")
+        assert(!alive.success(), "timed-out host pid {pid} must be reaped")
+        fs.remove_dir_all(dir)!
+    }
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:640
+#Test("nonzero_host_stderr_is_sanitized_before_e1402") {
+    if core.sys.target.selected_family() == "unix" {
+        command := Command.new("sh")
+        command.args([String]{"-c", "printf 'rustc error[E0123] leaked\\nsecond line\\n' >&2; exit 9", "compiler-extension-host"})
+        error :: run_host_process(^command, "snapshot".as_bytes().to_list(), 128, Duration.from_secs(1)).expect_err("nonzero host must fail")
+        assert(error.message.contains("rustc error[E0123]"))
+        sanitized :: sanitize_host_message(error.message)
+        assert(sanitized == "compiler-extension failed with an internal message")
+        diagnostic :: host_failure(sanitized, None)
+        assert(diagnostic.code == "E1402")
+        assert(!pkg_extension_message_exposes_rustc(diagnostic.what))
+    }
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:661
+#Test("post_sema_custom_lint_from_driver_env") {
+    guard :: env_lock(); dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, SOURCE_X)!
+    wasm :: fixture_wasm("lint_no_x.wasm")
+    env.set_var(EXTENSION_ENV_COMPILER_EXTENSION, wasm.to_text().expect("fixture path UTF8"))
+    (diags, bundle, _) :: Driver.check_file_with_effect_facts(src_path.to_text().expect("source path UTF8"), None, false)
+    env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    assert(bundle != None, "sema must succeed; diags={diags}")
+    lint :: diags.iter().find(fn(d) -> d.code == "L1401") ?? panic("custom-lint finding must surface as L1401; diags={diags}")
+    assert(lint.what.contains("no-x"), "got {lint.what}")
+    assert(lint.what.contains("prefer y"), "got {lint.what}")
+    assert(!pkg_extension_message_exposes_rustc(lint.what)); assert(!pkg_extension_message_exposes_rustc(lint.why))
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:682
+#Test("post_sema_custom_lint_ignores_non_x_source") {
+    guard :: env_lock(); dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, SOURCE_Y)!
+    wasm :: fixture_wasm("lint_no_x.wasm")
+    env.set_var(EXTENSION_ENV_COMPILER_EXTENSION, wasm.to_text().expect("fixture path UTF8"))
+    (diags, bundle, _) :: Driver.check_file_with_effect_facts(src_path.to_text().expect("source path UTF8"), None, false)
+    env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    assert(bundle != None, "sema must succeed; diags={diags}")
+    assert(!diags.iter().any(fn(d) -> d.code == "L1401"), "non-x source must not produce no-x lint; diags={diags}")
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:700
+#Test("post_sema_crash_guest_fail_closed_e1402") {
+    guard :: env_lock(); dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, "fn run() {\n    print(1)\n}\n")!
+    wasm :: fixture_wasm("crash.wasm")
+    env.set_var(EXTENSION_ENV_COMPILER_EXTENSION, wasm.to_text().expect("fixture path UTF8"))
+    (diags, bundle, _) :: Driver.check_file_with_effect_facts(src_path.to_text().expect("source path UTF8"), None, false)
+    env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    assert(bundle != None)
+    error :: diags.iter().find(fn(d) -> d.code == "E1402").expect("crash must become E1402")
+    assert(!pkg_extension_message_exposes_rustc(error.what)); assert(!pkg_extension_message_exposes_rustc(error.why))
+    assert(!diags.iter().any(fn(d) -> d.code == "L1401"))
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:721
+#Test("sema_error_never_executes_crash_guest") {
+    guard :: env_lock(); dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, "fn run() {\n    print(missing)\n}\n")!
+    wasm :: fixture_wasm("crash.wasm")
+    env.set_var(EXTENSION_ENV_COMPILER_EXTENSION, wasm.to_text().expect("fixture path UTF8"))
+    (diags, bundle, _) :: Driver.check_file_with_effect_facts(src_path.to_text().expect("source path UTF8"), None, false)
+    env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    assert(bundle != None, "loader should return sema-invalid bundle")
+    assert(diags.len() == 1, "only Jet sema failure should surface")
+    assert(diags[0].code == "E0107", "got {diags}")
+    assert(!diags.iter().any(fn(d) -> d.code == "E1402" || d.code == "L1401"), "guest must not execute after sema failure; diags={diags}")
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:741
+#Test("snapshot_uses_solved_effects_not_invented_pure") {
+    guard :: env_lock(); env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, "fn run() {\n    print(1)\n}\n")!
+    (diags, bundle, facts) :: Driver.check_file_with_effect_facts(src_path.to_text().expect("source path UTF8"), None, false)
+    assert(!diags.iter().any(fn(d) -> d.severity == Severity.Error), "sema must succeed; diags={diags}")
+    bundle :: bundle.expect("bundle")
+    snap :: snapshot_from_bundle(&bundle, Val(&facts)).expect("snapshot")
+    assert(snap.abilities.contains(ExtensionAbility.ReadEffects), "facts present → advertise ReadEffects")
+    run :: snap.symbols.iter().find(fn(s) -> s.name == "run").expect("run symbol")
+    assert(!run.effects.iter().any(fn(e) -> e == "pure"), "must not invent effect name `pure`; got {run.effects}")
+    assert(run.effects.iter().any(fn(e) -> e == "IO" || e == "Log"), "print must solve to a real effect; got {run.effects}")
+    assert(snap.types.iter().any(fn(t) -> t.id == run.type_id && t.repr.starts_with("fn(")), "type_id must point at a real fn signature repr; types={snap.types}")
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:788
+#Test("snapshot_without_effect_facts_omits_read_effects") {
+    guard :: env_lock(); env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, "fn run() {\n    print(1)\n}\n")!
+    (diags, bundle, _) :: Driver.check_file_with_effect_facts(src_path.to_text().expect("source path UTF8"), None, false)
+    assert(!diags.iter().any(fn(d) -> d.severity == Severity.Error), "sema must succeed; diags={diags}")
+    bundle :: bundle.expect("bundle")
+    snap :: snapshot_from_bundle(&bundle, None).expect("snapshot")
+    assert(!snap.abilities.contains(ExtensionAbility.ReadEffects), "None facts must omit ReadEffects; caps={snap.abilities}")
+    loop sym in snap.symbols {
+        assert(sym.effects.is_empty(), "None facts → empty effects (no invented pure); {sym.name} got {sym.effects}")
+        assert(!sym.effects.iter().any(fn(e) -> e == "pure"), "must not invent `pure`")
+    }
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:825
+#Test("compile_opts_full_crash_guest_fail_closed_e1402") {
+    guard :: env_lock(); dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, "fn run() {\n    print(1)\n}\n")!
+    wasm :: fixture_wasm("crash.wasm")
+    env.set_var(EXTENSION_ENV_COMPILER_EXTENSION, wasm.to_text().expect("fixture path UTF8"))
+    errors :: Driver.compile_bundle_path_opts(src_path.to_text().expect("source path UTF8"), CompileMode.Run, false, Policy.GateSet.default(), false, None).expect_err("crash guest must fail closed on opts_full")
+    env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    assert(errors.iter().any(fn(d) -> d.code == "E1402"), "opts_full None-facts path must still surface E1402; got {errors}")
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:850
+#Test("compile_entry_swap_crash_guest_fail_closed_e1402") {
+    guard :: env_lock(); dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, "fn run() {\n    print(0)\n}\n\nfn dev() {\n    print(1)\n}\n")!
+    wasm :: fixture_wasm("crash.wasm")
+    env.set_var(EXTENSION_ENV_COMPILER_EXTENSION, wasm.to_text().expect("fixture path UTF8"))
+    errors :: Driver.compile_bundle_path_with_entry(src_path.to_text().expect("source path UTF8"), "dev").expect_err("crash guest must fail closed on entry-swap")
+    env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    assert(errors.iter().any(fn(d) -> d.code == "E1402"), "entry-swap None-facts path must still surface E1402; got {errors}")
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:878
+#Test("check_and_run_mode_effect_fact_snapshots_byte_identical") {
+    guard :: env_lock(); env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, SOURCE_X)!
+    path :: src_path.to_text().expect("source path UTF8")
+    bundle_check := Loader.load_entry_with_overlay(path, None, false).expect("load check")
+    (diags_c, facts_c) :: check_bundle_with_effect_facts(&bundle_check, CompileMode.Check)
+    assert(!diags_c.iter().any(fn(d) -> d.severity == Severity.Error), "Check sema must succeed; diags={diags_c}")
+    enc_check :: snapshot_from_bundle(&bundle_check, Val(&facts_c)).expect("check snapshot").encode().expect("encode check")
+    bundle_run := Loader.load_entry_with_overlay(path, None, false).expect("load run")
+    (diags_r, facts_r) :: check_bundle_with_effect_facts(&bundle_run, CompileMode.Run)
+    assert(!diags_r.iter().any(fn(d) -> d.severity == Severity.Error), "Run sema must succeed; diags={diags_r}")
+    enc_run :: snapshot_from_bundle(&bundle_run, Val(&facts_r)).expect("run snapshot").encode().expect("encode run")
+    assert(enc_check == enc_run, "Check vs Run typed snapshots must be byte-identical when both have effect facts")
+    snap :: snapshot_from_bundle(&bundle_check, Val(&facts_c))!
+    assert(snap.abilities.contains(ExtensionAbility.ReadEffects), "fact-bearing snapshots must advertise ReadEffects; caps={snap.abilities}")
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:934
+#Test("check_and_build_surface_same_l1401") {
+    guard :: env_lock(); dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, SOURCE_X)!
+    path :: src_path.to_text().expect("source path UTF8"); wasm :: fixture_wasm("lint_no_x.wasm")
+    env.set_var(EXTENSION_ENV_COMPILER_EXTENSION, wasm.to_text().expect("fixture path UTF8"))
+    (check_diags, bundle, _) :: Driver.check_file_with_effect_facts(path, None, false)
+    assert(bundle != None, "check sema must succeed; diags={check_diags}")
+    check_lint :: check_diags.iter().find(fn(d) -> d.code == "L1401") ?? panic("check must surface L1401; diags={check_diags}")
+    build_out :: Driver.compile_bundle_path_build(path, Driver.BuildRunOptions.default())
+    env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    build_out :: build_out.unwrap_or_else(fn(errors) -> panic("build must succeed with lint-only guest; errs={errors}"))
+    build_lint :: build_out.compile.lints.iter().find(fn(d) -> d.code == "L1401") ?? panic("build must surface L1401; lints={build_out.compile.lints}")
+    assert(check_lint.what == build_lint.what); assert(check_lint.why == build_lint.why)
+    assert(check_lint.what.contains("no-x")); assert(check_lint.what.contains("prefer y"))
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:983
+#Test("aot_opts_full_and_dev_entry_swap_surface_same_l1401") {
+    guard :: env_lock(); dir :: tempfile_dir(); src_path :: dir.join(OSPath.from_text("main.jet"))
+    fs.write(src_path, SOURCE_X)!
+    path :: src_path.to_text().expect("source path UTF8"); wasm :: fixture_wasm("lint_no_x.wasm")
+    env.set_var(EXTENSION_ENV_COMPILER_EXTENSION, wasm.to_text().expect("fixture path UTF8"))
+    aot :: Driver.compile_bundle_path_opts(path, CompileMode.Run, false, Policy.GateSet.default(), false, None).unwrap_or_else(fn(errors) -> panic("opts_full must succeed with lint guest; errs={errors}"))
+    aot_lint :: aot.lints.iter().find(fn(d) -> d.code == "L1401") ?? panic("opts_full must surface L1401; lints={aot.lints}")
+    dev :: Driver.compile_bundle_path_with_entry(path, "dev").unwrap_or_else(fn(errors) -> panic("entry-swap must succeed with lint guest; errs={errors}"))
+    dev_lint :: dev.lints.iter().find(fn(d) -> d.code == "L1401") ?? panic("entry-swap must surface L1401; lints={dev.lints}")
+    assert(aot_lint.what == dev_lint.what); assert(aot_lint.why == dev_lint.why)
+    negative_path :: dir.join(OSPath.from_text("negative.jet"))
+    fs.write(negative_path, SOURCE_Y)!
+    negative :: negative_path.to_text().expect("source path UTF8")
+    aot_negative :: Driver.compile_bundle_path_opts(negative, CompileMode.Run, false, Policy.GateSet.default(), false, None).expect("negative opts_full must succeed")
+    dev_negative :: Driver.compile_bundle_path_with_entry(negative, "dev").expect("negative entry-swap must succeed")
+    env.remove_var(EXTENSION_ENV_COMPILER_EXTENSION)
+    assert(!aot_negative.lints.iter().any(fn(d) -> d.code == "L1401") && !dev_negative.lints.iter().any(fn(d) -> d.code == "L1401"), "AOT/dev must both omit no-x lint for non-x facts; aot={aot_negative.lints}, dev={dev_negative.lints}")
+}
+// Rust: crates/jet-driver/src/CompilerExtensionHook.rs:1044
+fn tempfile_dir() -> OSPath Never! {
+    nanos :: SystemTime.now().duration_since(UNIX_EPOCH).expect("host time after epoch").as_nanos()
+    dir :: env.temp_dir().join(OSPath.from_text("jet-cex-hook-{std.process.id()}-{nanos}"))
+    fs.create_dir_all(dir).expect("create fixture dir")
+    dir
+}

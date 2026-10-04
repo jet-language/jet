@@ -1,0 +1,20 @@
+use jet_comptime.Comptime.Build.PlanImpl.[compiler_package_path_name, map_debug, pool_name]
+use jet_comptime.Comptime.Build.ActionsPolicy.BuildResourcePool
+
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1438
+#Test("compiler_package_path_name_preserves_ascii_and_replaces_other_scalars") {
+    assert(compiler_package_path_name("") == "package")
+    assert(compiler_package_path_name("abc-XYZ_09") == "abc-XYZ_09")
+    assert(compiler_package_path_name("a/b.é") == "a_b__")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1424
+#Test("provider_map_debug_is_sorted_and_uses_utf8_byte_lengths") {
+    values: [String:String] = ["z": "", "a": "é"]
+    assert(map_debug(&values) == "1:a:2:é1:z:0:")
+    assert(map_debug(&[:]) == "")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1431
+#Test("provider_pool_names_distinguish_custom_from_builtin") {
+    assert(pool_name(&BuildResourcePool.CPU) == "cpu")
+    assert(pool_name(&BuildResourcePool.Custom("cpu")) == "custom:cpu")
+}

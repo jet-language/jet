@@ -1,0 +1,32 @@
+use jet_sema.Tests.Integration.ComptimeImportLiveness.[check, lint_names]
+use jet_sema.Tests.Integration.ErrorFamilyConv.[diags]
+
+// Rust: crates/jet-sema/tests/comptime_import_liveness.rs:73
+#Test("comptime_qualified_import_shadowed_by_lambda_parameter_stays_unused") {
+    diagnostics :: check("use core.compiler as compiler\nSHADOWED :: prep { ((compiler: String) -> compiler.len())(\"x\") }\nfn run() {}\n")
+    assert_eq(lint_names(diagnostics), [String]{"compiler"}, "lambda parameter shadowing must not consume the import: {diagnostics:#?}")
+}
+
+// Rust: crates/jet-sema/tests/comptime_import_liveness.rs:85
+#Test("failed_comptime_qualified_import_stays_unused") {
+    diagnostics :: check("use core.compiler as compiler\nFAILED :: prep { compiler.not_a_real_call() }\nfn run() {}\n")
+    assert(lint_names(diagnostics).contains("compiler"), "failed qualified comptime resolution must not consume the import: {diagnostics:#?}")
+}
+
+// Rust: crates/jet-sema/tests/error_family_conv.rs:76
+#Test("core_encoding_error_converts_into_default_err") {
+    found :: diags("\nuse core.encoding.json as json\nfn run() {\n    data :: json.decode(\"{}\")\n    print(data)\n}\n")
+    descriptions := [String]{}
+    has_e2402 := false
+    loop d in found {
+        descriptions.push("{d.code}: {d.what}")
+        if d.code == "E2402" { has_e2402 = true }
+    }
+    assert(!has_e2402, "core EncodingError should convert into Err, got {descriptions:?}")
+}
+
+// Rust: crates/jet-sema/tests/error_family_conv.rs:97
+#Test("nominal_method_implicit_err_unwraps_in_declared_failure_context") {
+    found :: diags("\nstruct Config {}\nimpl Config {\n    fn projection(self) -> String { \"port_slot\" }\n}\nfn run() [FieldError]! {\n    config :: Config{}\n    assert(config.projection() == \"port_slot\", \"layout shape name\")\n}\n")
+    assert(found.is_empty(), "a nominal method's implicit Err must unwrap before exact equality: {found:#?}")
+}

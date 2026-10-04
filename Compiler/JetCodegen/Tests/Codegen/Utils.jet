@@ -1,0 +1,11 @@
+use jet_codegen.Codegen.Utils.[is_json_variant, is_db_value_variant, is_key_variant, escape_rust_str]
+
+// Rust: crates/jet-codegen/src/Codegen/Utils.rs:5-36 (behavioral controls; no inline Rust tests)
+#Test("utils_variant_and_escaping_controls") {
+    assert(is_json_variant("Number"))
+    assert(!is_json_variant("not_a_variant"))
+    assert(!is_db_value_variant("not_a_variant"))
+    loop name in ["Char", "Enter", "Escape", "Backspace", "Tab", "Delete", "Up", "Down", "Left", "Right", "F", "Ctrl", "Unknown"] -> assert(is_key_variant(name))
+    assert(!is_key_variant("Number"))
+    assert(escape_rust_str("a\\b\"c") == "\"a\\\\b\\\"c\"")
+}

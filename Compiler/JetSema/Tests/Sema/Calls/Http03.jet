@@ -1,0 +1,18 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:7925-7988 (behavioral control; no inline Rust tests)
+#Test("missing_trait_object_method_preserves_trait_diagnostic") {
+    diagnostics :: statements05_diagnostics("trait Show {{ fn show(self) String }}\nfn run(value: Show) {{ _ :: value.missing() }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0102" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:8287-8334 (behavioral control)
+#Test("static_methods_are_not_value_methods") {
+    diagnostics :: statements05_diagnostics("struct Box {{ fn create() Int {{ 1 }} }}\nfn run(value: Box) {{ _ :: value.create() }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0311" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:7996-8016 (behavioral control)
+#Test("primitive_missing_method_uses_receiver_diagnostic") {
+    diagnostics :: statements05_diagnostics("fn run() {{ _ :: [1, 2].no_such_method() }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0311" }))
+}

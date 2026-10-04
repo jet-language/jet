@@ -1,1730 +1,836 @@
-// PORT-PENDING 0420 crates-jet-sema-src-sema-checkerownership-slice-1811: crates/jet-sema/src/Sema/CheckerOwnership.rs:1811-3536
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(crate) fn check_call_argument_access(
-//RS         &mut self,
-//RS         arg: &crate::AST::CallArg,
-//RS         param_conv: AccessConvention,
-//RS         param_ty: &Type,
-//RS         borrowed_read: bool,
-//RS     ) {
-//RS         if arg.convention == AccessConvention::Write
-//RS             && self.reject_static_mutable_borrow(&arg.expr, arg.span)
-//RS         {
-//RS             return;
-//RS         }
-//RS         if param_conv == AccessConvention::Move && arg.convention == AccessConvention::Move {
-//RS             self.reject_partial_static_move(&arg.expr, arg.span);
-//RS             self.reject_noncanonical_move_place(
-//RS                 &arg.expr,
-//RS                 None,
-//RS                 "this consuming call",
-//RS                 arg.span,
-//RS             );
-//RS         }
-//RS         let Some(place) = self.place_from_expr(&arg.expr) else {
-//RS             let mut accesses = Vec::new();
-//RS             self.collect_evaluated_expr_accesses(
-//RS                 &arg.expr,
-//RS                 AccessWalkMode::EvaluateNow,
-//RS                 &HashSet::new(),
-//RS                 &mut accesses,
-//RS             );
-//RS             self.check_transient_accesses(accesses);
-//RS             return;
-//RS         };
-//RS         let mut projection_accesses = Vec::new();
-//RS         self.collect_call_projection_accesses(&arg.expr, &mut projection_accesses);
-//RS         self.check_transient_accesses(projection_accesses);
-//RS         let access = if arg.convention == AccessConvention::Write {
-//RS             ViewAccess::Write
-//RS         } else {
-//RS             ViewAccess::Read
-//RS         };
-//RS         self.check_call_place_access(&place, access, arg.expr.span());
-//RS         let generated = if arg.convention == AccessConvention::Write {
-//RS             Some(ViewAccess::Write)
-//RS         } else if arg.convention == AccessConvention::Read
-//RS             && param_conv == AccessConvention::Read
-//RS             && borrowed_read
-//RS             && !param_ty.is_scalar()
-//RS         {
-//RS             Some(ViewAccess::Read)
-//RS         } else {
-//RS             None
-//RS         };
-//RS         if let Some(access) = generated {
-//RS             self.record_call_place_access(place, access);
-//RS         }
-//RS     }
-//RS 
-//RS     /// Lambda bodies run later, but constructing a lambda evaluates its free
-//RS     /// captures now. Only nonescaping FnMut closures retain capture borrows.
-//RS     pub(crate) fn check_call_argument_captures(&mut self, expr: &Expr) {
-//RS         self.report_lending_view_escape(expr, "be passed to a call");
-//RS         let mut accesses = Vec::new();
-//RS         self.collect_evaluated_expr_accesses(
-//RS             expr,
-//RS             AccessWalkMode::ConstructCaptures,
-//RS             &HashSet::new(),
-//RS             &mut accesses,
-//RS         );
-//RS         for access in accesses {
-//RS             self.check_call_place_access(&access.place, access.access, access.span);
-//RS             if access.through_call {
-//RS                 self.record_call_place_access(access.place, access.access);
-//RS             } else if access.moves_owner {
-//RS                 self.mark_moved_place_exact(
-//RS                     access.place,
-//RS                     access.span,
-//RS                     "a lambda that captures it",
-//RS                 );
-//RS             }
-//RS         }
-//RS         self.record_call_result_views(expr);
-//RS     }
-//RS 
-//RS     pub(crate) fn report_lending_view_escape(&mut self, expr: &Expr, action: &str) {
-//RS         let lent = self
-//RS             .lending_view_loop_vars
-//RS             .iter()
-//RS             .find(|name| carries_lending_view(expr, name))
-//RS             .cloned();
-//RS         let Some(name) = lent else {
-//RS             return;
-//RS         };
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0212",
-//RS             format!("the lent mutable view `{name}` cannot {action}"),
-//RS             "the view is valid only while the current iteration or callback invocation is active"
-//RS                 .to_string(),
-//RS             "use the view inside that scope, and keep only owned values outside it".to_string(),
-//RS             Some(expr.span()),
-//RS         ));
-//RS     }
-//RS 
-//RS     /// Receiver evaluation is a read even before method resolution. This catches
-//RS     /// a nested receiver that overlaps an outer call's active write loan.
-//RS     pub(crate) fn check_call_receiver_evaluation(&mut self, receiver: &Expr, span: Span) {
-//RS         if let Some(place) = self.place_from_expr(receiver) {
-//RS             let mut projection_accesses = Vec::new();
-//RS             self.collect_call_projection_accesses(receiver, &mut projection_accesses);
-//RS             self.check_transient_accesses(projection_accesses);
-//RS             self.check_call_place_access(&place, ViewAccess::Read, span);
-//RS         } else {
-//RS             let mut accesses = Vec::new();
-//RS             self.collect_evaluated_expr_accesses(
-//RS                 receiver,
-//RS                 AccessWalkMode::EvaluateNow,
-//RS                 &HashSet::new(),
-//RS                 &mut accesses,
-//RS             );
-//RS             self.check_transient_accesses(accesses);
-//RS         }
-//RS     }
-//RS 
-//RS     fn is_static_move_root(&self, name: &str) -> bool {
-//RS         self.items.iter().any(|item| {
-//RS             matches!(
-//RS                 item,
-//RS                 crate::AST::Item::Const(constant)
-//RS                     if constant.name == name
-//RS                         && (constant.is_persist
-//RS                             || constant.mutable
-//RS                             || constant
-//RS                                 .attrs
-//RS                                 .iter()
-//RS                                 .any(|attr| matches!(attr, crate::AST::ConstAttr::ForceStatic)))
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     fn static_expr_root(expr: &Expr) -> Option<&str> {
-//RS         match expr {
-//RS             Expr::Deref(inner, _)
-//RS             | Expr::RawOf(inner, _)
-//RS             | Expr::Place(inner, _, _)
-//RS             | Expr::Paren(inner, _) => Self::static_expr_root(inner),
-//RS             _ => expr_root_ident(expr),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn reject_static_mutable_borrow(&mut self, expr: &Expr, span: Span) -> bool {
-//RS         let place = self.place_from_expr(expr);
-//RS         let owner = place
-//RS             .as_ref()
-//RS             .map(|place| place.owner.name.as_str())
-//RS             .or_else(|| Self::static_expr_root(expr));
-//RS         let Some(owner) = owner else {
-//RS             return false;
-//RS         };
-//RS         if !self.is_static_move_root(owner) {
-//RS             return false;
-//RS         }
-//RS         let name = place
-//RS             .as_ref()
-//RS             .map(Self::place_name)
-//RS             .unwrap_or_else(|| owner.to_string());
-//RS         let diagnostic = Diagnostic::from_row(
-//RS             "E0223",
-//RS             &[("name", name.as_str())],
-//RS             Some(span),
-//RS         );
-//RS         let duplicate = self.diags.iter().any(|previous| {
-//RS             previous.code == diagnostic.code
-//RS                 && previous.span == diagnostic.span
-//RS                 && previous.what == diagnostic.what
-//RS         });
-//RS         if !duplicate {
-//RS             self.diags.push(diagnostic);
-//RS         }
-//RS         true
-//RS     }
-//RS 
-//RS 
-//RS     /// A persistent/static aggregate has one shared storage cell. A move may
-//RS     /// take that cell as a whole, but it cannot leave the cell partially moved.
-//RS     pub(crate) fn reject_partial_static_move(&mut self, expr: &Expr, span: Span) -> bool {
-//RS         let Some(place) = self.place_from_expr(expr) else {
-//RS             return false;
-//RS         };
-//RS         if place.projections.is_empty() || !self.is_static_move_root(&place.owner.name) {
-//RS             return false;
-//RS         }
-//RS         let name = Self::place_name(&place);
-//RS         self.diags.push(Diagnostic::from_row(
-//RS             "E0222",
-//RS             &[("name", name.as_str())],
-//RS             Some(span),
-//RS         ));
-//RS         true
-//RS     }
-//RS 
-//RS     pub(crate) fn record_call_receiver_access(
-//RS         &mut self,
-//RS         receiver: &Expr,
-//RS         convention: AccessConvention,
-//RS         span: Span,
-//RS     ) {
-//RS         // D-CAP-RECEIVER1=D: the resolved convention checks the written mark.
-//RS         self.note_receiver_convention(receiver, convention);
-//RS         if convention == AccessConvention::Write
-//RS             && self.reject_static_mutable_borrow(receiver, span)
-//RS         {
-//RS             return;
-//RS         }
-//RS         if convention == AccessConvention::Move {
-//RS             self.reject_noncanonical_move_place(
-//RS                 receiver,
-//RS                 None,
-//RS                 "this consuming method",
-//RS                 span,
-//RS             );
-//RS         }
-//RS         let Some(place) = self.place_from_expr(receiver) else {
-//RS             return;
-//RS         };
-//RS         if convention == AccessConvention::Move {
-//RS             self.reject_partial_static_move(receiver, span);
-//RS         }
-//RS         let access = if convention == AccessConvention::Write {
-//RS             ViewAccess::Write
-//RS         } else {
-//RS             ViewAccess::Read
-//RS         };
-//RS         self.check_call_place_access(&place, access, span);
-//RS         if convention != AccessConvention::Move {
-//RS             self.record_call_place_access(place, access);
-//RS         }
-//RS     }
-//RS     pub(crate) fn record_call_receiver_reservation(&mut self, receiver: &Expr, span: Span) {
-//RS         self.note_receiver_convention(receiver, AccessConvention::Write);
-//RS         if self.reject_static_mutable_borrow(receiver, span) {
-//RS             return;
-//RS         }
-//RS         let Some(place) = self.place_from_expr(receiver) else {
-//RS             return;
-//RS         };
-//RS         self.check_call_place_access_kind(&place, ViewAccess::Write, true, span);
-//RS         self.record_call_place_reservation(place);
-//RS     }
-//RS 
-//RS     pub(crate) fn place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
-//RS         let mut output_path = Vec::new();
-//RS         if let Some(name) = named_view_field_path(expr, &mut output_path) {
-//RS             if let Some(fact) = self.view_fact_at_path(&name, &output_path) {
-//RS                 let mut place = fact.place.clone();
-//RS                 place.projections.extend(
-//RS                     output_path[fact.output_path.len()..]
-//RS                         .iter()
-//RS                         .cloned()
-//RS                         .map(ViewProjection::Field),
-//RS                 );
-//RS                 return Some(place);
-//RS             }
-//RS         }
-//RS         match expr {
-//RS             Expr::Ident(name, _) => (self.lookup(name).is_some() || self.consts.contains_key(name))
-//RS                 .then(|| ViewPlace {
-//RS                     owner: self.owner_id(name),
-//RS                     projections: Vec::new(),
-//RS                 }),
-//RS             Expr::Field(base, field, _) => {
-//RS                 let mut place = self.place_from_expr(base)?;
-//RS                 place.projections.push(ViewProjection::Field(field.clone()));
-//RS                 Some(place)
-//RS             }
-//RS             Expr::Index {
-//RS                 base, index, span, ..
-//RS             } => {
-//RS                 let mut place = self.place_from_expr(base)?;
-//RS                 place.projections.push(ViewProjection::Index {
-//RS                     value: const_place_int(index),
-//RS                     span: *span,
-//RS                 });
-//RS                 Some(place)
-//RS             }
-//RS             Expr::Slice {
-//RS                 base,
-//RS                 start,
-//RS                 end,
-//RS                 range,
-//RS                 span,
-//RS             } => {
-//RS                 let mut place = self.place_from_expr(base)?;
-//RS                 let (start, end) = match range.as_deref() {
-//RS                     Some(Expr::Range {
-//RS                         start,
-//RS                         end,
-//RS                         exclusive,
-//RS                         ..
-//RS                     }) => {
-//RS                         let start = const_place_int(start);
-//RS                         let mut end = const_place_int(end);
-//RS                         if *exclusive {
-//RS                             end = end.and_then(|value| value.checked_sub(1));
-//RS                         }
-//RS                         (start, end)
-//RS                     }
-//RS                     Some(_) => (None, None),
-//RS                     None => (const_place_int(start), const_place_int(end)),
-//RS                 };
-//RS                 place.projections.push(ViewProjection::Range {
-//RS                     start,
-//RS                     end,
-//RS                     span: *span,
-//RS                 });
-//RS                 Some(place)
-//RS             }
-//RS             Expr::Place(inner, _, _) | Expr::Paren(inner, _) => self.place_from_expr(inner),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Rust 2021 capture prefix and its type from the written closure
-//RS     /// expression. Indexing and slicing stop precision: fields before them are
-//RS     /// capturable, while anything after them belongs to the captured container.
-//RS     fn capture_place_info(&self, expr: &Expr) -> Option<(ViewPlace, Option<Type>, bool)> {
-//RS         match expr {
-//RS             Expr::Ident(name, _) => (self.lookup(name).is_some() || self.consts.contains_key(name))
-//RS                 .then(|| {
-//RS                     (
-//RS                         ViewPlace {
-//RS                             owner: self.owner_id(name),
-//RS                             projections: Vec::new(),
-//RS                         },
-//RS                         self.lookup(name).map(|info| info.ty.clone()),
-//RS                         false,
-//RS                     )
-//RS                 }),
-//RS             Expr::Field(base, field, _) => {
-//RS                 let (mut place, ty, stopped) = self.capture_place_info(base)?;
-//RS                 if stopped {
-//RS                     return Some((place, ty, true));
-//RS                 }
-//RS                 place.projections.push(ViewProjection::Field(field.clone()));
-//RS                 let ty = ty.and_then(|owner| self.projected_field_type(owner, field));
-//RS                 Some((place, ty, false))
-//RS             }
-//RS             Expr::Index { base, .. } | Expr::Slice { base, .. } => self
-//RS                 .capture_place_info(base)
-//RS                 .map(|(place, ty, _)| (place, ty, true)),
-//RS             Expr::Place(inner, _, _) | Expr::Paren(inner, _) => self.capture_place_info(inner),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Place Rust 2021 captures from the written closure expression. Unlike
-//RS     /// `place_from_expr`, this deliberately does not chase a View alias to its
-//RS     /// source; generated Rust captures the alias value itself.
-//RS     fn capture_place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
-//RS         self.capture_place_info(expr).map(|(place, _, _)| place)
-//RS     }
-//RS 
-//RS     pub(crate) fn is_view(&self, name: &str) -> bool {
-//RS         self.view_fact(name).is_some()
-//RS     }
-//RS 
-//RS     /// True when this frame owns `place` outright, so a loop that hands out the
-//RS     /// elements themselves may take the whole collection.
-//RS     ///
-//RS     /// A read or write parameter, anything reached through one, and any live
-//RS     /// view all name storage the caller still owns. Moving out of those is
-//RS     /// `E0507` in the generated Rust, which reaches the user as an internal
-//RS     /// compiler error rather than a diagnostic (I2). An expression with no root
-//RS     /// name is a temporary, which the loop is always free to consume.
-//RS     pub(crate) fn frame_owns_place(&self, place: &Expr) -> bool {
-//RS         let Some(root) = expr_root_ident(place) else {
-//RS             return true;
-//RS         };
-//RS         if self.is_view(root) {
-//RS             return false;
-//RS         }
-//RS         !self.lookup(root).is_some_and(|info| {
-//RS             matches!(
-//RS                 info.param_conv,
-//RS                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     /// True when a by-value loop may take `place` as the collection itself.
-//RS     ///
-//RS     /// Only a bare owned local or an rvalue is consumable. A field, index, or
-//RS     /// slice still names storage inside another value — moving elements out of
-//RS     /// that storage is `E0507`/`E0508` in the generated Rust (I2), even when the
-//RS     /// root local is owned. Infer may wrap an owning field read in `Copy` so
-//RS     /// rustc never sees a partial move; peel that wrap so the loop still sees
-//RS     /// the projection and rejects it instead of cloning a task handle.
-//RS     pub(crate) fn frame_can_consume_collection(&self, place: &Expr) -> bool {
-//RS         match place {
-//RS             Expr::Ident(..) => self.frame_owns_place(place),
-//RS             Expr::Paren(inner, _) | Expr::Copy(inner, _) => {
-//RS                 self.frame_can_consume_collection(inner)
-//RS             }
-//RS             _ if expr_root_ident(place).is_none() => true,
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn is_write_view(&self, name: &str) -> bool {
-//RS         self.view_fact(name)
-//RS             .is_some_and(|fact| fact.access == ViewAccess::Write)
-//RS     }
-//RS 
-//RS     pub(crate) fn is_edit_shared_guard(&self, name: &str) -> bool {
-//RS         self.lookup(name).is_some_and(|info| {
-//RS             matches!(
-//RS                 &info.ty,
-//RS                 Type::Tagged { marker, inner }
-//RS                     if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit))
-//RS                         && matches!(
-//RS                             inner.as_ref(),
-//RS                             Type::Apply { name, .. }
-//RS                                 if name == crate::Syntax::TYPE_SHARED_GUARD
-//RS                         )
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     pub(crate) fn is_read_shared_guard(&self, name: &str) -> bool {
-//RS         self.lookup(name).is_some_and(|info| {
-//RS             matches!(
-//RS                 &info.ty,
-//RS                 Type::Apply { name, .. }
-//RS                     if name == crate::Syntax::TYPE_SHARED_GUARD
-//RS             ) || matches!(
-//RS                 &info.ty,
-//RS                 Type::Tagged { marker, inner }
-//RS                     if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardRead))
-//RS                         && matches!(
-//RS                             inner.as_ref(),
-//RS                             Type::Apply { name, .. }
-//RS                                 if name == crate::Syntax::TYPE_SHARED_GUARD
-//RS                         )
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     pub(crate) fn validate_write_place(&mut self, expr: &Expr, span: Span) {
-//RS         if let Some(freeze_site) = self.frozen_expr_site(expr) {
-//RS             let name = expr_root_ident(expr).unwrap_or("the frozen value");
-//RS             self.report_frozen_write(name, freeze_site, "be edited", span);
-//RS             return;
-//RS         }
-//RS         if self.reject_static_mutable_borrow(expr, span) {
-//RS             return;
-//RS         }
-//RS         let Some(root) = expr_root_ident(expr).map(str::to_string) else {
-//RS             return;
-//RS         };
-//RS         if let Some(freeze_site) = self.frozen_for(&root) {
-//RS             self.report_frozen_write(&root, freeze_site, "be edited", span);
-//RS             return;
-//RS         }
-//RS         if let Some(fact) = self.view_fact(&root) {
-//RS             if fact.access == ViewAccess::Write {
-//RS                 return;
-//RS             }
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0205",
-//RS                 format!("cannot edit through `{root}` — it has read access only"),
-//RS                 "a read window may inspect its place, but it cannot change the owner".to_string(),
-//RS                 "take a write window from a mutable owner instead".to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS             return;
-//RS         }
-//RS         if self.is_global_mutable_binding(&root) {
-//RS             // Module-level mutable bindings are legal write places.
-//RS             return;
-//RS         }
-//RS         if self.consts.contains_key(&root) {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0111",
-//RS                 format!("`{root}` is a const and can never change"),
-//RS                 "a const is fixed for the whole program".to_string(),
-//RS                 format!(
-//RS                     "use a `{}` binding if it needs to change",
-//RS                     Syntax::SIGIL_BIND_MUT
-//RS                 ),
-//RS                 Some(span),
-//RS             ));
-//RS             return;
-//RS         }
-//RS         let Some(info) = self.lookup(&root).cloned() else {
-//RS             return;
-//RS         };
-//RS         if self.reject_read_shared_guard_write(expr, span) {
-//RS             return;
-//RS         }
-//RS         if info.mutable
-//RS             || info.param_conv == Some(AccessConvention::Write)
-//RS             || self.is_edit_shared_guard(&root)
-//RS         {
-//RS             return;
-//RS         }
-//RS         let (code, why, fix) = if info.param_conv.is_some() {
-//RS             (
-//RS                 "E0205",
-//RS                 "an unmarked parameter gives read access only; a write window needs the write-access marker `&`".to_string(),
-//RS                 format!(
-//RS                     "change the parameter to `{}: {}{}` with the write-access marker `&`",
-//RS                     root,
-//RS                     Syntax::SIGIL_WRITE,
-//RS                     info.ty.name()
-//RS                 ),
-//RS             )
-//RS         } else {
-//RS             (
-//RS                 "E0202",
-//RS                 "a write window can change its owner, so the owner must be mutable".to_string(),
-//RS                 format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
-//RS             )
-//RS         };
-//RS         self.diags.push(Diagnostic::error(
-//RS             code,
-//RS             format!("cannot take a write window into `{root}`"),
-//RS             why,
-//RS             fix,
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     pub(crate) fn check_expr_change(&mut self, expr: &Expr, action: &str, span: Span) {
-//RS         self.check_expr_change_with_view_exemption(expr, action, span, None);
-//RS     }
-//RS 
-//RS     fn check_expr_change_with_view_exemption(
-//RS         &mut self,
-//RS         expr: &Expr,
-//RS         action: &str,
-//RS         span: Span,
-//RS         ignored_view: Option<(&str, Span, usize)>,
-//RS     ) {
-//RS         if let Some(freeze_site) = self.frozen_expr_site(expr) {
-//RS             let name = expr_root_ident(expr).unwrap_or("the frozen value");
-//RS             self.report_frozen_write(name, freeze_site, action, span);
-//RS             return;
-//RS         }
-//RS         if self.reject_static_mutable_borrow(expr, span) {
-//RS             return;
-//RS         }
-//RS         if let Some(name) = expr_root_ident(expr) {
-//RS             if self.reject_expiring_secret_loan_change(name, action, span) {
-//RS                 return;
-//RS             }
-//RS         }
-//RS         if let Some(place) = self.place_from_expr(expr) {
-//RS             self.check_place_change_with_view_exemption(&place, action, span, ignored_view);
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn check_mutating_method_receiver(
-//RS         &mut self,
-//RS         receiver: &Expr,
-//RS         method: &str,
-//RS         span: Span,
-//RS     ) {
-//RS         self.note_receiver_convention(receiver, AccessConvention::Write);
-//RS         if self.in_lambda_body {
-//RS             if let Some(root) = expr_root_ident(receiver) {
-//RS                 self.inferred_lambda_mut_captures.insert(root.to_string());
-//RS             }
-//RS         }
-//RS         let Some(root) = expr_root_ident(receiver).map(str::to_string) else {
-//RS             self.check_expr_change(receiver, &format!("be changed by `.{method}()`"), span);
-//RS             return;
-//RS         };
-//RS         if self.is_edit_shared_guard(&root) {
-//RS             return;
-//RS         }
-//RS         if self.is_read_shared_guard(&root) {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0205",
-//RS                 format!("cannot edit through `{root}` — this `SharedGuard` has read access only"),
-//RS                 "a guard from `guard_read()` may inspect the shared value but cannot change it"
-//RS                     .to_string(),
-//RS                 "use `guard_edit()` when this scope must change the shared value".to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS             return;
-//RS         }
-//RS         self.check_expr_change(receiver, &format!("be changed by `.{method}()`"), span);
-//RS         if let Some(root) = expr_root_ident(receiver) {
-//RS             self.clear_origin(root);
-//RS         }
-//RS         if self.iter_borrowed.contains(&root) {
-//RS             self.diags.push(
-//RS                 crate::Sema::Diagnostics::collection_changed_by_method_in_loop(
-//RS                     &root, method, span,
-//RS                 ),
-//RS             );
-//RS         }
-//RS         if let Some(info) = self.lookup(&root) {
-//RS             if !info.mutable && self.frozen_for(&root).is_none() {
-//RS                 let (what, fix) = if root == Syntax::KW_SELF {
-//RS                     (
-//RS                         format!(
-//RS                             "`.{}()` edits `{}`, but this method has read access only",
-//RS                             method,
-//RS                             Syntax::KW_SELF
-//RS                         ),
-//RS                         format!(
-//RS                             "declare the enclosing method with the write-access marker `&`: `{}{}`",
-//RS                             Syntax::SIGIL_WRITE,
-//RS                             Syntax::KW_SELF
-//RS                         ),
-//RS                     )
-//RS                 } else {
-//RS                     (
-//RS                         format!(
-//RS                             "cannot write to `{}` — it does not have the write-access marker `&`; required before calling `.{}()`",
-//RS                             root, method
-//RS                         ),
-//RS                         format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
-//RS                     )
-//RS                 };
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0202",
-//RS                     what,
-//RS                     "this method edits the value it's called on; the write-access marker `&` is required"
-//RS                         .to_string(),
-//RS                     fix,
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn check_write_arg_change(&mut self, arg: &crate::AST::CallArg) {
-//RS         if arg.convention == AccessConvention::Write {
-//RS             // Passing a named write window with `&` reborrows its own
-//RS             // exclusive fact. The normal change checks still run so frozen
-//RS             // owners, scoped task loans, and other live views remain strict.
-//RS             let write_view = expr_root_ident(&arg.expr).and_then(|root| {
-//RS                 self.view_fact(root)
-//RS                     .filter(|fact| fact.access == ViewAccess::Write)
-//RS                     .map(|fact| (root.to_string(), fact.binding_span, fact.seq))
-//RS             });
-//RS             if let Some((root, binding_span, seq)) = write_view {
-//RS                 self.check_expr_change_with_view_exemption(
-//RS                     &arg.expr,
-//RS                     "be passed with write access",
-//RS                     arg.span,
-//RS                     Some((&root, binding_span, seq)),
-//RS                 );
-//RS             } else {
-//RS                 self.check_expr_change(&arg.expr, "be passed with write access", arg.span);
-//RS             }
-//RS             if let Some(root) = expr_root_ident(&arg.expr) {
-//RS                 self.clear_origin(root);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn check_lvalue_change(&mut self, target: &LValue, action: &str) {
-//RS         let through_write_view = match target {
-//RS             LValue::Index { base, .. } | LValue::Field { base, .. } => expr_root_ident(base)
-//RS                 .and_then(|name| self.view_fact(name))
-//RS                 .is_some_and(|fact| fact.access == ViewAccess::Write),
-//RS             LValue::Local { name, .. } => self.is_write_view(name),
-//RS         };
-//RS         if through_write_view {
-//RS             return;
-//RS         }
-//RS         let frozen_base = match target {
-//RS             LValue::Index { base, .. } | LValue::Field { base, .. } => Some(base.as_ref()),
-//RS             LValue::Local { .. } => None,
-//RS         };
-//RS         if let Some(base) = frozen_base {
-//RS             if let Some(freeze_site) = self.frozen_expr_site(base) {
-//RS                 let name = expr_root_ident(base).unwrap_or("the frozen value");
-//RS                 self.report_frozen_write(name, freeze_site, action, target.span());
-//RS                 return;
-//RS             }
-//RS         }
-//RS         let place = match target {
-//RS             LValue::Local { name, .. } => Some(ViewPlace {
-//RS                 owner: self.owner_id(name),
-//RS                 projections: Vec::new(),
-//RS             }),
-//RS             LValue::Index {
-//RS                 base, index, span, ..
-//RS             } => self.place_from_expr(base).map(|mut place| {
-//RS                 place.projections.push(ViewProjection::Index {
-//RS                     value: const_place_int(index),
-//RS                     span: *span,
-//RS                 });
-//RS                 place
-//RS             }),
-//RS             LValue::Field { base, field, .. } => self.place_from_expr(base).map(|mut place| {
-//RS                 place.projections.push(ViewProjection::Field(field.clone()));
-//RS                 place
-//RS             }),
-//RS         };
-//RS         if let Some(place) = place {
-//RS             self.check_place_change(&place, action, target.span());
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn validate_shared_guard_lvalue(&mut self, target: &LValue) {
-//RS         match target {
-//RS             LValue::Local { .. } => {}
-//RS             LValue::Index { base, span, .. } => {
-//RS                 self.reject_read_shared_guard_write(base, *span);
-//RS             }
-//RS             LValue::Field { base, field, span } => {
-//RS                 let target = Expr::Field(base.clone(), field.clone(), *span);
-//RS                 self.reject_read_shared_guard_write(&target, *span);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// Reject moves, replacement, and storage-changing methods while any view
-//RS     /// into the owner remains live. Exclusive-window reads of the owner are
-//RS     /// rejected by `check_place_read` (E0220); facts vanish on scope exit.
-//RS     pub(crate) fn check_owner_change(&mut self, owner: &str, action: &str, span: Span) {
-//RS         let owner_place = ViewPlace {
-//RS             owner: self.owner_id(owner),
-//RS             projections: Vec::new(),
-//RS         };
-//RS         self.check_place_change(&owner_place, action, span);
-//RS     }
-//RS 
-//RS     /// Card #1361 / I2: reject a read of a place while an exclusive window into
-//RS     /// it is live. Reading *through* that window (the pin / ViewMut binding) is
-//RS     /// the legal path; reading the owner beside it reaches rustc E0503.
-//RS     pub(crate) fn check_place_read(&mut self, expr: &Expr, span: Span) {
-//RS         let Some(place) = self.place_from_expr(expr) else {
-//RS             return;
-//RS         };
-//RS         if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(expr) {
-//RS             if self.is_write_view(root) {
-//RS                 return;
-//RS             }
-//RS         }
-//RS         // `suppress_partial_move_root_read` means this expression is only the
-//RS         // base of a deeper projection whose complete place the caller checks
-//RS         // (`adjacent.values` in `&adjacent.values[2..3]`, `Expr::Place` in
-//RS         // `CheckerInfer::expr`). An ancestor of a window always overlaps it, so
-//RS         // reporting the base would reject a provably disjoint sibling window —
-//RS         // the nested twin of the root case (`&values[3]` beside `&values[0]`),
-//RS         // which the `Expr::Ident` arm already suppresses. A window at or above
-//RS         // this place still covers the read, so that report stays: `&node.payload`
-//RS         // beside a pin on `node` is a genuine second exclusive window.
-//RS         let base_of_deeper_projection = self.suppress_partial_move_root_read;
-//RS         let Some((view, place_name, kind)) = crate::Sema::view_facts_newest_first(&self.flow.views)
-//RS             .into_iter()
-//RS             .find(|(name, fact)| {
-//RS                 self.view_is_live_now(name)
-//RS                     && fact.access == ViewAccess::Write
-//RS                     && fact.place.overlaps(&place)
-//RS                     && fact.invalidated.is_none()
-//RS                     && !(base_of_deeper_projection
-//RS                         && place.projections.len() < fact.place.projections.len())
-//RS             })
-//RS             .map(|(name, fact)| (name.to_string(), Self::place_name(&fact.place), fact.kind))
-//RS         else {
-//RS             return;
-//RS         };
-//RS         let read_name = Self::place_name(&place);
-//RS         let window = if kind == ViewKind::Pin {
-//RS             "pin"
-//RS         } else {
-//RS             "exclusive write window"
-//RS         };
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0220",
-//RS             format!("`{read_name}` cannot be read while `{view}` has a live {window} into it"),
-//RS             format!(
-//RS                 "`{view}` is an exclusive window into `{place_name}`; reading the owner beside that window would be rejected after lowering"
-//RS             ),
-//RS             format!("read or edit through `{view}` instead of `{read_name}`"),
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     fn check_place_change(&mut self, changed: &ViewPlace, action: &str, span: Span) {
-//RS         self.check_place_change_with_view_exemption(changed, action, span, None);
-//RS     }
-//RS 
-//RS     fn check_place_change_with_view_exemption(
-//RS         &mut self,
-//RS         changed: &ViewPlace,
-//RS         action: &str,
-//RS         span: Span,
-//RS         ignored_view: Option<(&str, Span, usize)>,
-//RS     ) {
-//RS         // D-CONC-FREEZE1=A: a frozen snapshot may be moved, but no operation
-//RS         // may mutate its root or any projected place.
-//RS         if action != "be moved" && !action.contains("moved") {
-//RS             if let Some(freeze_site) = self.frozen_for(&changed.owner.name) {
-//RS                 self.report_frozen_write(&changed.owner.name, freeze_site, action, span);
-//RS                 return;
-//RS             }
-//RS         }
-//RS         // A task group loan outlives the borrow binding's last lexical use: the
-//RS         // child still holds it until the group joins. Check that first — the
-//RS         // view scan below would already have let this place go.
-//RS         if self.report_scoped_loan_conflict(changed, action, span) {
-//RS             return;
-//RS         }
-//RS         // A write call through a named carrier reborrows that carrier's own
-//RS         // fact. Exempt only that exact binding fact; every other live view
-//RS         // remains visible to the change check.
-//RS         let Some((view, access, place, kind)) =
-//RS             crate::Sema::view_facts_newest_first(&self.flow.views)
-//RS                 .into_iter()
-//RS                 .find(|&(name, fact)| {
-//RS                     self.view_is_live_now(name)
-//RS                         && !ignored_view.is_some_and(
-//RS                             |(ignored_name, binding_span, seq)| {
-//RS                                 name == ignored_name
-//RS                                     && fact.binding_span == binding_span
-//RS                                     && fact.seq == seq
-//RS                             },
-//RS                         )
-//RS                         && fact.place.overlaps(changed)
-//RS                         && fact.invalidated.is_none()
-//RS                 })
-//RS                 .map(|(name, fact)| {
-//RS                     (
-//RS                         name.to_string(),
-//RS                         fact.access,
-//RS                         Self::place_name(&fact.place),
-//RS                         fact.kind,
-//RS                     )
-//RS                 })
-//RS         else {
-//RS             return;
-//RS         };
-//RS         // D-PIN1=A: a pin is not an aliasing complaint — it is a promise the
-//RS         // pinned storage keeps its address. Say that instead of E0212's view
-//RS         // wording so the fix names the pin, not "make an owned copy".
-//RS         if kind == ViewKind::Pin {
-//RS             let changed_name = Self::place_name(changed);
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0219",
-//RS                 format!("`{changed_name}` cannot {action} while it is pinned"),
-//RS                 format!(
-//RS                     "`{view}` pinned `{place}`, which promises that storage keeps its address; moving or replacing it would leave every stored address pointing at the old place"
-//RS                 ),
-//RS                 format!(
-//RS                     "finish using `{view}` before changing `{changed_name}`, or narrow the pin's scope"
-//RS                 ),
-//RS                 Some(span),
-//RS             ));
-//RS             return;
-//RS         }
-//RS         let access = if access == ViewAccess::Write {
-//RS             "exclusive mutable view"
-//RS         } else {
-//RS             "read view"
-//RS         };
-//RS         let changed_name = Self::place_name(changed);
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0212",
-//RS             format!("`{changed_name}` cannot {action} while `{view}` is still looking into it"),
-//RS             format!(
-//RS                 "`{view}` is a live {access} into `{place}`; changing or moving the owner could invalidate that view"
-//RS             ),
-//RS             format!(
-//RS                 "finish using `{view}` before changing `{changed_name}`, narrow the view's scope, or make an owned copy"
-//RS             ),
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     /// E1113: the typed row owns the frozen-write wording; the checker only
-//RS     /// supplies the source name, operation, and freeze-site provenance.
-//RS     fn report_frozen_write(&mut self, name: &str, freeze_site: Span, action: &str, span: Span) {
-//RS         let site = format!("`freeze(...)` at byte {}", freeze_site.start);
-//RS         self.diags.push(Diagnostic::from_row(
-//RS             "E1113",
-//RS             &[("name", name), ("action", action), ("freeze_site", &site)],
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     // ──────────────────────────────────────────────────────────────────────
-//RS     // D-DYNARRAY1 (ratified 2026-07-01): `View<T>` zero-copy windows
-//RS     // (`list.view(a..b)`).
-//RS     //
-//RS     // A view's Rust value is a genuine borrowed slice (`&[T]`, elided
-//RS     // lifetime — see `Context::rust_type`'s `View` arm) so it is exactly as
-//RS     // sound as an arena view. List, arena, string, buffer, and matrix windows
-//RS     // share one provenance graph; only product diagnostics and lowering flags
-//RS     // differ.
-//RS     //
-//RS     // E2305 fires when a declared view reaches another view boundary:
-//RS     // returned, rebound to another declared view, or stored in a declared view
-//RS     // field. A read-only view entering an owning destination materializes by
-//RS     // default; `copies: .Explicit` restores the explicit-copy diagnostic.
-//RS     // Crossing a task/channel boundary is instead caught by the general
-//RS     // sendability check (`SendProblemKind::ViewBorrow` on `Type::Apply {
-//RS     // name: "View", .. }`, reported as E1102) — no tracking is needed there,
-//RS     // the value's TYPE alone is enough.
-//RS     // ──────────────────────────────────────────────────────────────────────
-//RS 
-//RS     /// If `init` is `list.view(a..b)` on a plain local name, return the list's
-//RS     /// name — but only when that list is a genuine local (dies at this
-//RS     /// function's return/scope exit). A parameter or const outlives the call,
-//RS     /// so a view into it is sound without tracking (mirrors `E2301`'s
-//RS     /// param/const exemption in `view_return_local_owner`).
-//RS     pub(crate) fn view_call_sources(
-//RS         &mut self,
-//RS         init: &Expr,
-//RS     ) -> Vec<(Vec<String>, ViewPlace, ViewKind, ViewAccess)> {
-//RS         let init = init.without_parens();
-//RS         if let Expr::Copy(inner, _) = init {
-//RS             let sources = self.view_call_sources(inner);
-//RS             // A copy turns a direct read-only view into an owned value. Do not
-//RS             // reattach the old owner relation to a binding or aggregate that
-//RS             // now contains that value. Nested paths remain visible: copying a
-//RS             // struct that still contains a declared View field must preserve
-//RS             // that field's boundary fact.
-//RS             if !sources.is_empty()
-//RS                 && sources
-//RS                     .iter()
-//RS                     .all(|(path, _, _, access)| path.is_empty() && *access == ViewAccess::Read)
-//RS             {
-//RS                 return Vec::new();
-//RS             }
-//RS             return sources;
-//RS         }
-//RS         if let Expr::Try(inner, _, _, _) = init {
-//RS             return self.view_call_sources(inner);
-//RS         }
-//RS         if let Expr::Ident(name, _) = init {
-//RS             return self
-//RS                 .view_facts(name)
-//RS                 .into_iter()
-//RS                 .map(|fact| {
-//RS                     (
-//RS                         fact.output_path.clone(),
-//RS                         fact.place.clone(),
-//RS                         fact.kind,
-//RS                         fact.access,
-//RS                     )
-//RS                 })
-//RS                 .collect();
-//RS         }
-//RS         if let Expr::If {
-//RS             then_value,
-//RS             else_value,
-//RS             ..
-//RS         } = init
-//RS         {
-//RS             let mut sources = self.view_call_sources(then_value);
-//RS             sources.extend(self.view_call_sources(else_value));
-//RS             return sources;
-//RS         }
-//RS         if let Expr::OrFallback {
-//RS             value, fallback, ..
-//RS         } = init
-//RS         {
-//RS             let mut sources = self.view_call_sources(value);
-//RS             if let crate::AST::OrFallback::Value(value) = fallback {
-//RS                 sources.extend(self.view_call_sources(value));
-//RS             }
-//RS             return sources;
-//RS         }
-//RS         if let Expr::ListLit(elements, _) = init {
-//RS             let mut sources = Vec::new();
-//RS             for element in elements {
-//RS                 for (mut path, place, kind, access) in self.view_call_sources(element) {
-//RS                     path.insert(0, "[]".to_string());
-//RS                     sources.push((path, place, kind, access));
-//RS                 }
-//RS             }
-//RS             return sources;
-//RS         }
-//RS         if let Expr::TupleLit(fields, ..) = init {
-//RS             let mut sources = Vec::new();
-//RS             for (field, value) in fields {
-//RS                 for (mut path, place, kind, access) in self.view_call_sources(value) {
-//RS                     path.insert(0, field.clone());
-//RS                     sources.push((path, place, kind, access));
-//RS                 }
-//RS             }
-//RS             return sources;
-//RS         }
-//RS         if let Expr::StructLit { fields, .. } = init {
-//RS             let mut sources = Vec::new();
-//RS             for (field, _, value) in fields {
-//RS                 for (mut path, place, kind, access) in self.view_call_sources(value) {
-//RS                     path.insert(0, field.clone());
-//RS                     sources.push((path, place, kind, access));
-//RS                 }
-//RS             }
-//RS             return sources;
-//RS         }
-//RS         if let Expr::EnumLit { variant, args, .. } = init {
-//RS             let mut sources = Vec::new();
-//RS             for (index, arg) in args.iter().enumerate() {
-//RS                 let (slot, value) = match arg {
-//RS                     crate::AST::EnumLitArg::Positional(value) => (index.to_string(), value),
-//RS                     crate::AST::EnumLitArg::Named { label, expr } => (label.clone(), expr),
-//RS                 };
-//RS                 for (mut path, place, kind, access) in self.view_call_sources(value) {
-//RS                     path.insert(0, slot.clone());
-//RS                     path.insert(0, variant.clone());
-//RS                     sources.push((path, place, kind, access));
-//RS                 }
-//RS             }
-//RS             return sources;
-//RS         }
-//RS         if let Expr::Present(inner, _)
-//RS         | Expr::Ok(inner, _)
-//RS         | Expr::Err(inner, _)
-//RS         | Expr::Tainted(inner, _, _) = init
-//RS         {
-//RS             return self.view_call_sources(inner);
-//RS         }
-//RS         if let Expr::Index { base, .. } = init {
-//RS             let projected: Vec<_> = self
-//RS                 .view_call_sources(base)
-//RS                 .into_iter()
-//RS                 .filter_map(|(mut path, place, kind, access)| {
-//RS                     (path.first().map(String::as_str) == Some("[]")).then(|| {
-//RS                         path.remove(0);
-//RS                         (path, place, kind, access)
-//RS                     })
-//RS                 })
-//RS                 .collect();
-//RS             if !projected.is_empty() {
-//RS                 return projected;
-//RS             }
-//RS         }
-//RS         if let Expr::Field(base, field, _) = init {
-//RS             let projected: Vec<_> = self
-//RS                 .view_call_sources(base)
-//RS                 .into_iter()
-//RS                 .filter_map(|(mut path, place, kind, access)| {
-//RS                     (path.first() == Some(field)).then(|| {
-//RS                         path.remove(0);
-//RS                         (path, place, kind, access)
-//RS                     })
-//RS                 })
-//RS                 .collect();
-//RS             if !projected.is_empty() {
-//RS                 return projected;
-//RS             }
-//RS 
-//RS             let mut output_path = Vec::new();
-//RS             if let Some(name) = named_view_field_path(init, &mut output_path) {
-//RS                 if let Some((kind, access)) = self
-//RS                     .view_fact_at_path(&name, &output_path)
-//RS                     .map(|fact| (fact.kind, fact.access))
-//RS                 {
-//RS                     if let Some(place) = self.place_from_expr(init) {
-//RS                         return vec![(Vec::new(), place, kind, access)];
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Expr::Call(call) = init {
-//RS             if let Some(Type::Fn {
-//RS                 params,
-//RS                 ret,
-//RS                 return_view_provenance,
-//RS                 ..
-//RS             }) = self.lookup(&call.name).map(|info| info.ty.clone())
-//RS             {
-//RS                 if !ret
-//RS                     .as_deref()
-//RS                     .is_some_and(|ty| self.type_contains_view_boundary(ty))
-//RS                 {
-//RS                     return Vec::new();
-//RS                 }
-//RS                 let map = return_view_provenance.unwrap_or_else(|| {
-//RS                     ret.as_deref()
-//RS                         .map(|ret| self.conservative_callback_view_provenance(&params, ret))
-//RS                         .unwrap_or_default()
-//RS                 });
-//RS                 let mut sources = Vec::new();
-//RS                 for (output_path, provenance) in map {
-//RS                     for source in provenance.sources {
-//RS                         let crate::AST::ViewSource::Parameter(index) = source.source else {
-//RS                             continue;
-//RS                         };
-//RS                         let Some(actual) = call.args.get(index).map(|arg| &arg.expr) else {
-//RS                             continue;
-//RS                         };
-//RS                         for place in self.compose_view_source_places(
-//RS                             actual,
-//RS                             &source.projections,
-//RS                             init.span(),
-//RS                         ) {
-//RS                             let kind = self.view_kind_for_place(&place);
-//RS                             let access = if provenance.mutable {
-//RS                                 ViewAccess::Write
-//RS                             } else {
-//RS                                 ViewAccess::Read
-//RS                             };
-//RS                             sources.push((output_path.clone(), place, kind, access));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 return sources;
-//RS             }
-//RS             let Some(sig) = self.funcs.get(&call.name) else {
-//RS                 return Vec::new();
-//RS             };
-//RS             let Some(map) = sig.return_view_provenance.get() else {
-//RS                 return Vec::new();
-//RS             };
-//RS             let string_view = sig.return_type.as_ref().is_some_and(|ty| {
-//RS                 matches!(
-//RS                     ty,
-//RS                     Type::Apply { name, args }
-//RS                         if name == "View"
-//RS                             && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
-//RS                 ) || matches!(ty, Type::Named(name) if self.registry.struct_fields(name).is_some_and(|fields| {
-//RS                     fields.iter().any(|(_, _, field_ty)| matches!(
-//RS                         field_ty,
-//RS                         Type::Apply { name, args }
-//RS                             if name == "View"
-//RS                                 && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
-//RS                     ))
-//RS                 }))
-//RS             });
-//RS             let mut sources = Vec::new();
-//RS             for (output_path, provenance) in map {
-//RS                 for source in provenance.sources {
-//RS                     let crate::AST::ViewSource::Parameter(index) = source.source else {
-//RS                         continue;
-//RS                     };
-//RS                     let Some(actual) = call.args.get(index).map(|arg| &arg.expr) else {
-//RS                         continue;
-//RS                     };
-//RS                     let places =
-//RS                         self.compose_view_source_places(actual, &source.projections, init.span());
-//RS                     if places.is_empty() {
-//RS                         self.report_temporary_view_source(actual.span(), string_view);
-//RS                         continue;
-//RS                     }
-//RS                     let access = if provenance.mutable {
-//RS                         ViewAccess::Write
-//RS                     } else {
-//RS                         ViewAccess::Read
-//RS                     };
-//RS                     for place in places {
-//RS                         let kind = self.view_kind_for_place(&place);
-//RS                         sources.push((output_path.clone(), place, kind, access));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             return sources;
-//RS         }
-//RS         if let Expr::CallValue { callee, args, .. } = init {
-//RS             let Some(Type::Fn {
-//RS                 params,
-//RS                 ret,
-//RS                 return_view_provenance,
-//RS                 ..
-//RS             }) = (match callee.as_ref() {
-//RS                 Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
-//RS                 _ => None,
-//RS             })
-//RS             else {
-//RS                 return Vec::new();
-//RS             };
-//RS             if !ret
-//RS                 .as_deref()
-//RS                 .is_some_and(|ty| self.type_contains_view_boundary(ty))
-//RS             {
-//RS                 return Vec::new();
-//RS             }
-//RS             let map = return_view_provenance.unwrap_or_else(|| {
-//RS                 ret.as_deref()
-//RS                     .map(|ret| self.conservative_callback_view_provenance(&params, ret))
-//RS                     .unwrap_or_default()
-//RS             });
-//RS             let mut sources = Vec::new();
-//RS             for (output_path, provenance) in map {
-//RS                 for source in provenance.sources {
-//RS                     let crate::AST::ViewSource::Parameter(index) = source.source else {
-//RS                         continue;
-//RS                     };
-//RS                     let Some(actual) = args.get(index).map(|arg| &arg.expr) else {
-//RS                         continue;
-//RS                     };
-//RS                     for place in
-//RS                         self.compose_view_source_places(actual, &source.projections, init.span())
-//RS                     {
-//RS                         let kind = self.view_kind_for_place(&place);
-//RS                         let access = if provenance.mutable {
-//RS                             ViewAccess::Write
-//RS                         } else {
-//RS                             ViewAccess::Read
-//RS                         };
-//RS                         sources.push((output_path.clone(), place, kind, access));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             return sources;
-//RS         }
-//RS         // D-ALLOCFAIL1=A: the Ok payload of `allocator.try_alloc(value)` is
-//RS         // the same exclusive allocator view as plain `alloc(value)`. Keep the
-//RS         // owner fact on the result carrier so `Ok(value)`, `?`, and returns all
-//RS         // use the one provenance graph.
-//RS         if let Expr::MethodCall {
-//RS             receiver, method, ..
-//RS         } = init
-//RS         {
-//RS             if method == Syntax::MEM_ALLOC_TRY_ALLOC
-//RS                 && matches!(receiver.as_ref().without_parens(), Expr::Ident(name, _)
-//RS                     if self.lookup(name).is_some_and(|info| is_allocator_type(&info.ty)))
-//RS             {
-//RS                 let Expr::Ident(name, _) = receiver.as_ref().without_parens() else {
-//RS                     return Vec::new();
-//RS                 };
-//RS                 // Keep the result view rooted at allocator handle, like plain
-//RS                 // `alloc`. `place_from_expr(receiver)` follows Fixed's backing
-//RS                 // fact, which makes result carrier overlap its owner borrow.
-//RS                 return vec![(
-//RS                     Vec::new(),
-//RS                     ViewPlace {
-//RS                         owner: self.owner_id(name),
-//RS                         projections: Vec::new(),
-//RS                     },
-//RS                     ViewKind::Arena,
-//RS                     ViewAccess::Write,
-//RS                 )];
-//RS             }
-//RS         }
-//RS         if let Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } = init
-//RS         {
-//RS             if let Expr::Ident(enum_name, _) = receiver.as_ref().without_parens() {
-//RS                 if let Some(payload) = self
-//RS                     .resolve_enum_variants_cloned(enum_name)
-//RS                     .and_then(|variants| variants.get(method).cloned())
-//RS                     .map(|(_, payload)| payload)
-//RS                 {
-//RS                     let mut sources = Vec::new();
-//RS                     for (index, arg) in args.iter().enumerate() {
-//RS                         let slot = match &payload {
-//RS                             VariantPayload::Unit => continue,
-//RS                             VariantPayload::Single(_, _) => index.to_string(),
-//RS                             VariantPayload::Named(fields) => arg
-//RS                                 .label
-//RS                                 .as_ref()
-//RS                                 .map(|(label, _)| label.clone())
-//RS                                 .or_else(|| fields.get(index).map(|field| field.name.clone()))
-//RS                                 .unwrap_or_else(|| index.to_string()),
-//RS                         };
-//RS                         for (mut path, place, kind, access) in self.view_call_sources(&arg.expr) {
-//RS                             path.insert(0, slot.clone());
-//RS                             path.insert(0, method.clone());
-//RS                             sources.push((path, place, kind, access));
-//RS                         }
-//RS                     }
-//RS                     return sources;
-//RS                 }
-//RS             }
-//RS         }
-//RS         // D-PIN1=A: `mem.pin(&place)` opens the address-stability window on
-//RS         // `place`. The recorded fact IS the contract: `check_place_change`
-//RS         // rejects every move, replacement, and resize of that place while the
-//RS         // pin is live, and the fact disappears with the pin binding's scope.
-//RS         if let Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } = init
-//RS         {
-//RS             if method == Syntax::MEM_PIN
-//RS                 && matches!(receiver.as_ref().without_parens(), Expr::Ident(alias, _)
-//RS                     if self.core_imports.get(alias).is_some_and(|m| m == Syntax::CORE_MEM_MODULE))
-//RS             {
-//RS                 return args
-//RS                     .first()
-//RS                     .and_then(|arg| self.place_from_expr(&arg.expr))
-//RS                     .map(|place| vec![(Vec::new(), place, ViewKind::Pin, ViewAccess::Write)])
-//RS                     .unwrap_or_default();
-//RS             }
-//RS         }
-//RS         if let Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             method_span,
-//RS             ..
-//RS         } = init
-//RS         {
-//RS             if method == "split_write" || method == "get_disjoint_write" {
-//RS                 let Some(place) = self.place_from_expr(receiver) else {
-//RS                     return Vec::new();
-//RS                 };
-//RS                 let kind = self.view_kind_for_place(&place);
-//RS                 let source = |output_path: Vec<String>, proof_span: Span| {
-//RS                     let mut proved = place.clone();
-//RS                     proved.projections.push(ViewProjection::Fresh(proof_span));
-//RS                     (output_path, proved, kind, ViewAccess::Write)
-//RS                 };
-//RS                 if method == "split_write" {
-//RS                     let right_span = args
-//RS                         .first()
-//RS                         .map(|arg| arg.expr.span())
-//RS                         .unwrap_or_else(|| init.span());
-//RS                     return vec![
-//RS                         source(vec!["left".to_string()], *method_span),
-//RS                         source(vec!["right".to_string()], right_span),
-//RS                     ];
-//RS                 }
-//RS                 let proof_spans = args
-//RS                     .first()
-//RS                     .and_then(|arg| match &arg.expr {
-//RS                         Expr::ListLit(elements, _) => {
-//RS                             Some(elements.iter().map(Expr::span).collect::<Vec<_>>())
-//RS                         }
-//RS                         _ => None,
-//RS                     })
-//RS                     .unwrap_or_else(|| vec![init.span()]);
-//RS                 return proof_spans
-//RS                     .into_iter()
-//RS                     .map(|span| source(vec!["[]".to_string()], span))
-//RS                     .collect();
-//RS             }
-//RS         }
-//RS         if let Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             recv_type: Some(recv_type),
-//RS             resolved_ret,
-//RS             ..
-//RS         } = init
-//RS         {
-//RS             if crate::Sema::is_mapped_file_view_method(recv_type, method) {
-//RS                 let Some(kind) = resolved_ret
-//RS                     .as_ref()
-//RS                     .and_then(view_kind_from_return_type)
-//RS                 else {
-//RS                     return Vec::new();
-//RS                 };
-//RS                 let Some(place) = self.place_from_expr(receiver) else {
-//RS                     return Vec::new();
-//RS                 };
-//RS                 return vec![(Vec::new(), place, kind, ViewAccess::Read)];
-//RS             }
-//RS         }
-//RS         if let Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             recv_type: Some(recv_type),
-//RS             ..
-//RS         } = init
-//RS         {
-//RS             let Some(map) = self
-//RS                 .registry
-//RS                 .method(recv_type, method)
-//RS                 .and_then(|sig| sig.return_view_provenance.get())
-//RS                 .or_else(|| {
-//RS                     self.trait_reg
-//RS                         .traits
-//RS                         .get(recv_type)
-//RS                         .and_then(|info| info.methods.get(method))
-//RS                         .and_then(|sig| sig.return_view_provenance.get())
-//RS                 })
-//RS             else {
-//RS                 return Vec::new();
-//RS             };
-//RS             let mut sources = Vec::new();
-//RS             for (output_path, provenance) in map {
-//RS                 for source in provenance.sources {
-//RS                     let actual = match source.source {
-//RS                         crate::AST::ViewSource::Receiver => receiver.as_ref(),
-//RS                         crate::AST::ViewSource::Parameter(index) => {
-//RS                             let Some(arg) = args.get(index) else { continue };
-//RS                             &arg.expr
-//RS                         }
-//RS                         crate::AST::ViewSource::Static { .. } => continue,
-//RS                     };
-//RS                     let places =
-//RS                         self.compose_view_source_places(actual, &source.projections, init.span());
-//RS                     if places.is_empty() {
-//RS                         continue;
-//RS                     }
-//RS                     let access = if provenance.mutable {
-//RS                         ViewAccess::Write
-//RS                     } else {
-//RS                         ViewAccess::Read
-//RS                     };
-//RS                     for place in places {
-//RS                         let kind = self.view_kind_for_place(&place);
-//RS                         sources.push((output_path.clone(), place, kind, access));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             return sources;
-//RS         }
-//RS         if let Expr::Place(inner, access, _) = init {
-//RS             let Some(place) = self.place_from_expr(inner) else {
-//RS                 return Vec::new();
-//RS             };
-//RS             let kind = self.view_kind_for_place(&place);
-//RS             let access = match access {
-//RS                 crate::AST::PlaceAccess::Read => ViewAccess::Read,
-//RS                 crate::AST::PlaceAccess::Write => ViewAccess::Write,
-//RS                 // D-CAP-RECEIVER1=D: a take mark never opens a view.
-//RS                 crate::AST::PlaceAccess::Take => return Vec::new(),
-//RS             };
-//RS             return vec![(Vec::new(), place, kind, access)];
-//RS         }
-//RS         let Expr::MethodCall {
-//RS             receiver, method, ..
-//RS         } = init
-//RS         else {
-//RS             return Vec::new();
-//RS         };
-//RS         if method != Syntax::METHOD_VIEW {
-//RS             return Vec::new();
-//RS         }
-//RS         let receiver = receiver.as_ref().without_parens();
-//RS         let Some(mut place) = self.place_from_expr(receiver) else {
-//RS             return Vec::new();
-//RS         };
-//RS         let kind = match receiver {
-//RS             Expr::Ident(name, _) => self
-//RS                 .view_kind(name)
-//RS                 .unwrap_or_else(|| self.view_kind_for_place(&place)),
-//RS             _ => self.view_kind_for_place(&place),
-//RS         };
-//RS         place.projections.push(ViewProjection::Range {
-//RS             start: None,
-//RS             end: None,
-//RS             span: init.span(),
-//RS         });
-//RS         vec![(Vec::new(), place, kind, ViewAccess::Read)]
-//RS     }
-//RS 
-//RS     pub(crate) fn check_list_view_element_aliases(&mut self, elements: &[Expr], element_ty: &Type) {
-//RS         let direct_mutable = matches!(element_ty, Type::Apply { name, .. } if name == "ViewMut");
-//RS         let mut previous: Vec<(ViewPlace, ViewAccess)> = Vec::new();
-//RS         for element in elements {
-//RS             let mut sources: Vec<_> = self
-//RS                 .view_call_sources(element)
-//RS                 .into_iter()
-//RS                 .map(|(_, place, _, access)| (place, access))
-//RS                 .collect();
-//RS             if sources.is_empty() && direct_mutable {
-//RS                 if let Some(place) = self.place_from_expr(element) {
-//RS                     sources.push((place, ViewAccess::Write));
-//RS                 }
-//RS             }
-//RS             for (place, access) in sources {
-//RS                 if previous.iter().any(|(existing_place, existing_access)| {
-//RS                     (*existing_access == ViewAccess::Write || access == ViewAccess::Write)
-//RS                         && existing_place.overlaps(&place)
-//RS                 }) {
-//RS                     let place_name = Self::place_name(&place);
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0212",
-//RS                         format!("list elements create overlapping views of `{place_name}`"),
-//RS                         "list elements coexist, so an exclusive mutable view cannot overlap another element's view"
-//RS                             .to_string(),
-//RS                         "use disjoint ranges, keep only one mutable view, or store owned values"
-//RS                             .to_string(),
-//RS                         Some(element.span()),
-//RS                     ));
-//RS                 }
-//RS                 previous.push((place, access));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn report_temporary_view_source(&mut self, span: Span, string_view: bool) {
-//RS         let (code, what, why, fix) = if string_view {
-//RS             (
-//RS                 "E2307",
-//RS                 "A returned view cannot borrow from a temporary argument",
-//RS                 "The temporary owner is dropped at the end of this statement, while the returned view remains live",
-//RS                 "Store the owner in a named binding first, then pass that binding to the view-returning call",
-//RS             )
-//RS         } else {
-//RS             (
-//RS                 "E2305",
-//RS                 "a returned view cannot borrow from a temporary argument",
-//RS                 "the temporary owner is dropped at the end of this statement, while the returned view remains live",
-//RS                 "store the owner in a named binding first, then pass that binding to the view-returning call",
-//RS             )
-//RS         };
-//RS         if self
-//RS             .diags
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.code == code && diagnostic.span == Some(span))
-//RS         {
-//RS             return;
-//RS         }
-//RS         self.diags.push(Diagnostic::error(
-//RS             code,
-//RS             what.to_string(),
-//RS             why.to_string(),
-//RS             fix.to_string(),
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     /// Record `name` as a view into `owner`, declared at the current scope depth.
-//RS     pub(crate) fn record_list_view(
-//RS         &mut self,
-//RS         name: &str,
-//RS         output_path: Vec<String>,
-//RS         place: ViewPlace,
-//RS         kind: ViewKind,
-//RS         access: ViewAccess,
-//RS         span: Span,
-//RS         binding_ty: &Type,
-//RS         transfer_from: Option<&str>,
-//RS     ) {
-//RS         let enum_variants = match binding_ty {
-//RS             Type::Named(type_name)
-//RS             | Type::Apply {
-//RS                 name: type_name, ..
-//RS             } => self
-//RS                 .resolve_enum_variants_cloned(type_name)
-//RS                 .map(|variants| variants.into_keys().collect::<HashSet<_>>()),
-//RS             _ => None,
-//RS         };
-//RS         self.record_view_with_exemptions(
-//RS             name,
-//RS             output_path,
-//RS             place,
-//RS             kind,
-//RS             access,
-//RS             span,
-//RS             transfer_from,
-//RS             enum_variants.as_ref(),
-//RS         );
-//RS     }
-//RS 
-//RS     /// Transfer the hidden view relation from a matched aggregate into the
-//RS     /// names bound by that pattern. Call this only after the arm bindings have
-//RS     /// entered their lexical scope.
-//RS     pub(crate) fn record_condition_view_bindings(&mut self, condition: &Expr) {
-//RS         match condition {
-//RS             Expr::PatternTest {
-//RS                 subject, pattern, ..
-//RS             } => self.record_pattern_view_bindings(subject, pattern),
-//RS             Expr::Binary(BinOp::And, left, right, _) => {
-//RS                 self.record_condition_view_bindings(left);
-//RS                 self.record_condition_view_bindings(right);
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn record_pattern_view_bindings(&mut self, subject: &Expr, pattern: &Pattern) {
-//RS         // D-OPT-WRITE1 (#3974): each payload binding under a `&place` subject
-//RS         // is a live write window into that place. Distinct bindings get
-//RS         // disjoint slots; any other view of or write to the place overlaps.
-//RS         if let Expr::Place(inner, crate::AST::PlaceAccess::Write, _) = subject.without_parens() {
-//RS             let Some(base) = self.place_from_expr(inner) else {
-//RS                 return;
-//RS             };
-//RS             let mut names = HashSet::new();
-//RS             crate::Sema::CheckerCore::collect_window_names(pattern, &mut names);
-//RS             let mut names = names.into_iter().collect::<Vec<_>>();
-//RS             names.sort();
-//RS             for name in names {
-//RS                 let Some(binding_span) = self.lookup(&name).map(|info| info.def_span) else {
-//RS                     continue;
-//RS                 };
-//RS                 let mut place = base.clone();
-//RS                 place.projections.push(ViewProjection::Field(format!("{{{name}}}")));
-//RS                 let kind = self.view_kind_for_place(&place);
-//RS                 self.record_view(&name, Vec::new(), place, kind, ViewAccess::Write, binding_span);
-//RS             }
-//RS             return;
-//RS         }
-//RS         let sources = self.view_call_sources(subject);
-//RS         let transfer_from = sources
-//RS             .iter()
-//RS             .any(|(_, _, _, access)| *access == ViewAccess::Write)
-//RS             .then(|| match subject {
-//RS                 Expr::Ident(name, _) => Some(name.as_str()),
-//RS                 _ => None,
-//RS             })
-//RS             .flatten();
-//RS         let mut bound_slots = Vec::new();
-//RS 
-//RS         match pattern {
-//RS             Pattern::Present {
-//RS                 binding,
-//RS                 binding_span,
-//RS                 ..
-//RS             }
-//RS             | Pattern::Ok {
-//RS                 binding,
-//RS                 binding_span,
-//RS                 ..
-//RS             }
-//RS             | Pattern::Err {
-//RS                 binding,
-//RS                 binding_span,
-//RS                 ..
-//RS             } => {
-//RS                 bound_slots.push((binding.clone(), *binding_span, Vec::new()));
-//RS             }
-//RS             Pattern::Variant {
-//RS                 variant,
-//RS                 bindings: slots,
-//RS                 ..
-//RS             } => {
-//RS                 let slot_names = self.pattern_variant_slot_names(subject, variant, slots.len());
-//RS                 for (index, slot) in slots.iter().enumerate() {
-//RS                     if let crate::AST::PatSlot::Bind { name, span } = slot {
-//RS                         let slot_name = slot_names
-//RS                             .get(index)
-//RS                             .cloned()
-//RS                             .unwrap_or_else(|| index.to_string());
-//RS                         bound_slots.push((name.clone(), *span, vec![variant.clone(), slot_name]));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Pattern::Struct { fields, .. } => {
-//RS                 for field in fields {
-//RS                     if let crate::AST::StructPatField::Bind {
-//RS                         field,
-//RS                         local,
-//RS                         local_span,
-//RS                         ..
-//RS                     } = field
-//RS                     {
-//RS                         bound_slots.push((local.clone(), *local_span, vec![field.clone()]));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Pattern::Or(alternatives, _) => {
-//RS                 for alternative in alternatives {
-//RS                     self.record_pattern_view_bindings(subject, alternative);
-//RS                 }
-//RS                 return;
-//RS             }
-//RS             Pattern::Absent(_)
-//RS             | Pattern::Range { .. }
-//RS             | Pattern::StrMatch { .. }
-//RS             | Pattern::BinMatch { .. } => {}
-//RS         }
-//RS 
-//RS         for (name, span, source_prefix) in bound_slots {
-//RS             let binding_span = self.lookup(&name).map(|info| info.def_span).unwrap_or(span);
-//RS             let binding_has_view = self
-//RS                 .lookup(&name)
-//RS                 .is_some_and(|info| self.type_contains_view_boundary(&info.ty));
-//RS             if !binding_has_view {
-//RS                 continue;
-//RS             }
-//RS             let mut matched = false;
-//RS             for (path, place, kind, access) in &sources {
-//RS                 if !path.starts_with(&source_prefix) {
-//RS                     continue;
-//RS                 }
-//RS                 matched = true;
-//RS                 self.record_view_with_exemptions(
-//RS                     &name,
-//RS                     path[source_prefix.len()..].to_vec(),
-//RS                     place.clone(),
-//RS                     *kind,
-//RS                     *access,
-//RS                     binding_span,
-//RS                     transfer_from,
-//RS                     None,
-//RS                 );
-//RS             }
-//RS             if matched {
-//RS                 continue;
-//RS             }
-//RS 
-//RS             // A view-bearing aggregate parameter has no concrete owner fact
-//RS             // inside its callee. Treat the matched payload as a projection of
-//RS             // that parameter; call-site composition later reconnects the
-//RS             // abstract path to every concrete source in the argument.
-//RS             let Some(base) = self.place_from_expr(subject) else {
-//RS                 continue;
-//RS             };
-//RS             let Some(binding_ty) = self.lookup(&name).map(|info| info.ty.clone()) else {
-//RS                 continue;
-//RS             };
-//RS             for (output_path, access) in self.view_leaf_paths(&binding_ty) {
-//RS                 let mut place = base.clone();
-//RS                 for projection in source_prefix.iter().chain(output_path.iter()) {
-//RS                     place.projections.push(if projection == "[]" {
-//RS                         ViewProjection::Index { value: None, span }
-//RS                     } else {
-//RS                         ViewProjection::Field(projection.clone())
-//RS                     });
-//RS                 }
-//RS                 let kind = self.view_kind_for_place(&place);
-//RS                 self.record_view_with_exemptions(
-//RS                     &name,
-//RS                     output_path,
-//RS                     place,
-//RS                     kind,
-//RS                     access,
-//RS                     binding_span,
-//RS                     transfer_from,
-//RS                     None,
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// Every path inside `ty` that ends at a view window, with its access.
-//RS     ///
-//RS     /// Paths depend on the route taken, so the walk backtracks over its
-//RS     /// active nominals. A nominal that cannot reach any window contributes
-//RS     /// no path, so it is skipped without descending: that answer is a plain
-//RS     /// reachability fact, computed once per nominal. Without the skip, a
-//RS     /// large mutually recursive graph with no windows (a compiler's AST) is
-//RS     /// walked once per path, which is exponential.
-// END-PORT-PENDING 0420 crates/jet-sema/src/Sema/CheckerOwnership.rs:1811-3536
+// Private continuation of the canonical ownership checker.
+use jet_foundation.[AccessConvention, BinOp, CallArg, ConstAttr, Diagnostic, EnumLitArg, Expr, InternalTag, Item, LValue, OrFallback, PatSlot, Pattern, PlaceAccess, Span, StructPatField, TagMarker, Type, VariantPayload, ViewSource]
+use jet_sema.[Checker, AccessWalkMode, EvaluatedAccess, ViewAccess, ViewKind, ViewPlace, ViewProjection, carries_lending_view, const_place_int, expr_root_ident, named_view_field_path, view_facts_newest_first, view_kind_from_return_type, is_allocator_type, is_mapped_file_view_method, collection_changed_by_method_in_loop, collect_window_names]
+use jet_foundation.Syntax as Syntax
 
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1811
+    pub fn check_call_argument_access(self: &Self, arg: &CallArg, param_conv: AccessConvention, param_ty: &Type, borrowed_read: Bool) {
+        if arg.convention == AccessConvention.Write && self.reject_static_mutable_borrow(arg.expr, arg.span) -> return
+        if param_conv == AccessConvention.Move && arg.convention == AccessConvention.Move {
+            _ :: self.reject_partial_static_move(arg.expr, arg.span)
+            _ :: self.reject_noncanonical_move_place(arg.expr, None, "this consuming call", arg.span)
+        }
+        place :: self.place_from_expr(arg.expr) ?? {
+            accesses := [EvaluatedAccess]{}
+            self.collect_evaluated_expr_accesses(arg.expr, AccessWalkMode.EvaluateNow, [String:Bool]{}, &accesses)
+            self.check_transient_accesses(^accesses)
+            return
+        }
+        projection_accesses := [EvaluatedAccess]{}
+        self.collect_call_projection_accesses(arg.expr, &projection_accesses)
+        self.check_transient_accesses(^projection_accesses)
+        access :: if arg.convention == AccessConvention.Write { ViewAccess.Write } else { ViewAccess.Read }
+        self.check_call_place_access(place, access, arg.expr.span())
+        generated :: if arg.convention == AccessConvention.Write { Val(ViewAccess.Write) } else if arg.convention == AccessConvention.Read && param_conv == AccessConvention.Read && borrowed_read && !param_ty.is_scalar() { Val(ViewAccess.Read) } else { None }
+        if generated == .Val(access) -> self.record_call_place_access(^place, access)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1870
+    // Construction evaluates free captures now; only nonescaping FnMut retains borrows.
+    pub fn check_call_argument_captures(self: &Self, expr: &Expr) {
+        self.report_lending_view_escape(expr, "be passed to a call")
+        accesses := [EvaluatedAccess]{}
+        self.collect_evaluated_expr_accesses(expr, AccessWalkMode.ConstructCaptures, [String:Bool]{}, &accesses)
+        loop access in accesses {
+            self.check_call_place_access(access.place, access.access, access.span)
+            if access.through_call {
+                self.record_call_place_access(^access.place, access.access)
+            } else if access.moves_owner {
+                self.mark_moved_place_exact(^access.place, access.span, "a lambda that captures it")
+            }
+        }
+        self.record_call_result_views(expr)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1894
+    pub fn report_lending_view_escape(self: &Self, expr: &Expr, action: String) {
+        name :: self.lending_view_loop_vars.keys().find(name -> carries_lending_view(expr, name)) ?? return
+        self.diags.push(Diagnostic.error("E0212", "the lent mutable view `{name}` cannot {action}", "the view is valid only while the current iteration or callback invocation is active", "use the view inside that scope, and keep only owned values outside it", Val(expr.span())))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1915
+    // Receiver evaluation reads even before method resolution.
+    pub fn check_call_receiver_evaluation(self: &Self, receiver: &Expr, span: Span) {
+        if self.place_from_expr(receiver) == .Val(place) {
+            projection_accesses := [EvaluatedAccess]{}
+            self.collect_call_projection_accesses(receiver, &projection_accesses)
+            self.check_transient_accesses(^projection_accesses)
+            self.check_call_place_access(place, ViewAccess.Read, span)
+        } else {
+            accesses := [EvaluatedAccess]{}
+            self.collect_evaluated_expr_accesses(receiver, AccessWalkMode.EvaluateNow, [String:Bool]{}, &accesses)
+            self.check_transient_accesses(^accesses)
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1933
+    fn is_static_move_root(self: &Self, name: String) -> Bool {
+        self.items.any(item -> if item == {
+            .Const(constant) -> constant.name == name && (constant.is_persist || constant.mutable || constant.attrs.any(attr -> if attr == { .ForceStatic -> true; _ -> false }))
+            _ -> false
+        })
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1949
+    fn static_expr_root(expr: &Expr) -> String? {
+        if expr == {
+            .Deref(inner, _) | .RawOf(inner, _) | .Place(inner, _, _) | .Paren(inner, _) -> Self.static_expr_root(inner)
+            _ -> expr_root_ident(expr)
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1959
+    pub fn reject_static_mutable_borrow(self: &Self, expr: &Expr, span: Span) -> Bool {
+        place :: self.place_from_expr(expr)
+        owner :: place.map(place -> ~place.owner.name).or_else(fn() { Self.static_expr_root(expr) }) ?? return false
+        if !self.is_static_move_root(owner) -> return false
+        name :: place.map(place -> Self.place_name(place)).unwrap_or_else(fn() { ~owner })
+        diagnostic :: Diagnostic.from_row("E0223", [("name", name)], Val(span))
+        duplicate :: self.diags.any(previous -> previous.code == diagnostic.code && previous.span == diagnostic.span && previous.what == diagnostic.what)
+        if !duplicate -> self.diags.push(^diagnostic)
+        true
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1994
+    // Shared persistent/static storage can move only as a whole cell.
+    pub fn reject_partial_static_move(self: &Self, expr: &Expr, span: Span) -> Bool {
+        place :: self.place_from_expr(expr) ?? return false
+        if place.projections.is_empty() || !self.is_static_move_root(place.owner.name) -> return false
+        name :: Self.place_name(place)
+        self.diags.push(Diagnostic.from_row("E0222", [("name", name)], Val(span)))
+        true
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2010
+    pub fn record_call_receiver_access(self: &Self, receiver: &Expr, convention: AccessConvention, span: Span) {
+        // D-CAP-RECEIVER1=D: resolution checks the written mark.
+        self.note_receiver_convention(receiver, convention)
+        if convention == AccessConvention.Write && self.reject_static_mutable_borrow(receiver, span) -> return
+        if convention == AccessConvention.Move -> _ :: self.reject_noncanonical_move_place(receiver, None, "this consuming method", span)
+        place :: self.place_from_expr(receiver) ?? return
+        if convention == AccessConvention.Move -> _ :: self.reject_partial_static_move(receiver, span)
+        access :: if convention == AccessConvention.Write { ViewAccess.Write } else { ViewAccess.Read }
+        self.check_call_place_access(place, access, span)
+        if convention != AccessConvention.Move -> self.record_call_place_access(^place, access)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2047
+    pub fn record_call_receiver_reservation(self: &Self, receiver: &Expr, span: Span) {
+        self.note_receiver_convention(receiver, AccessConvention.Write)
+        if self.reject_static_mutable_borrow(receiver, span) -> return
+        place :: self.place_from_expr(receiver) ?? return
+        self.check_call_place_access_kind(place, ViewAccess.Write, true, span)
+        self.record_call_place_reservation(^place)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2059
+    pub fn place_from_expr(self: &Self, expr: &Expr) -> ViewPlace? {
+        output_path := [String]{}
+        if named_view_field_path(expr, &output_path) == .Val(name) {
+            if self.view_fact_at_path(name, output_path) == .Val(fact) {
+                place := ~fact.place
+                loop field in output_path[fact.output_path.len()..] -> place.projections.push(ViewProjection.Field(~field))
+                return Val(^place)
+            }
+        }
+        if expr == {
+            .Ident(name, _) -> {
+                if self.lookup(name) != None || self.consts.contains_key(name) { Val(ViewPlace{owner: self.owner_id(name), projections: []}) } else { None }
+            }
+            .Field(base, field, _) -> {
+                place := self.place_from_expr(base) ?? return None
+                place.projections.push(ViewProjection.Field(~field))
+                Val(^place)
+            }
+            .Index(base: base, index: index, span: span, ..) -> {
+                place := self.place_from_expr(base) ?? return None
+                place.projections.push(ViewProjection.Index(value: const_place_int(index), span: span))
+                Val(^place)
+            }
+            .Slice(base: base, start: start, end: end, range: range, span: span) -> {
+                place := self.place_from_expr(base) ?? return None
+                bounds :: if range == {
+                    .Val(.Range(start: range_start, end: range_end, exclusive: exclusive, ..)) -> {
+                        a :: const_place_int(range_start)
+                        b := const_place_int(range_end)
+                        if exclusive -> b = b.and_then(value -> value.checked_sub(1))
+                        (a, b)
+                    }
+                    .Val(_) -> (None, None)
+                    .None -> (const_place_int(start), const_place_int(end))
+                }
+                place.projections.push(ViewProjection.Range(start: bounds.0, end: bounds.1, span: span))
+                Val(^place)
+            }
+            .Place(inner, _, _) | .Paren(inner, _) -> self.place_from_expr(inner)
+            _ -> None
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2134
+    // Rust 2021 captures stop field precision at an index or slice.
+    fn capture_place_info(self: &Self, expr: &Expr) -> (ViewPlace, Type?, Bool)? {
+        if expr == {
+            .Ident(name, _) -> {
+                if self.lookup(name) != None || self.consts.contains_key(name) {
+                    Val((ViewPlace{owner: self.owner_id(name), projections: []}, self.lookup(name).map(info -> ~info.ty), false))
+                } else { None }
+            }
+            .Field(base, field, _) -> {
+                info := self.capture_place_info(base) ?? return None
+                if info.2 -> return Val((^info.0, ^info.1, true))
+                info.0.projections.push(ViewProjection.Field(~field))
+                ty :: info.1.and_then(owner -> self.projected_field_type(owner, field))
+                Val((^info.0, ^ty, false))
+            }
+            .Index(base: base, ..) | .Slice(base: base, ..) -> self.capture_place_info(base).map(info -> (info.0, info.1, true))
+            .Place(inner, _, _) | .Paren(inner, _) -> self.capture_place_info(inner)
+            _ -> None
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2167
+    // Capture the alias itself, rather than chasing its view source.
+    fn capture_place_from_expr(self: &Self, expr: &Expr) -> ViewPlace? {
+        self.capture_place_info(expr).map(info -> info.0)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2171
+    pub fn is_view(self: &Self, name: String) -> Bool { self.view_fact(name) != None }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2183
+    pub fn frame_owns_place(self: &Self, place: &Expr) -> Bool {
+        root :: expr_root_ident(place) ?? return true
+        if self.is_view(root) -> return false
+        !self.lookup(root).is_some_and(info -> info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2206
+    // Only a bare owned local or an rvalue is consumable, never projected storage.
+    pub fn frame_can_consume_collection(self: &Self, place: &Expr) -> Bool {
+        if place == {
+            .Ident(..) -> self.frame_owns_place(place)
+            .Paren(inner, _) | .Copy(inner, _) -> self.frame_can_consume_collection(inner)
+            _ -> expr_root_ident(place) == None
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2217
+    pub fn is_write_view(self: &Self, name: String) -> Bool { self.view_fact(name).is_some_and(fact -> fact.access == ViewAccess.Write) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2222
+    pub fn is_edit_shared_guard(self: &Self, name: String) -> Bool {
+        self.lookup(name).is_some_and(info -> if info.ty == {
+            .Tagged(marker: .Internal(InternalTag.SharedGuardEdit), inner: inner) -> if inner == { .Apply(name: name, ..) -> name == Syntax.TYPE_SHARED_GUARD; _ -> false }
+            _ -> false
+        })
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2237
+    pub fn is_read_shared_guard(self: &Self, name: String) -> Bool {
+        self.lookup(name).is_some_and(info -> if info.ty == {
+            .Apply(name: name, ..) -> name == Syntax.TYPE_SHARED_GUARD
+            .Tagged(marker: .Internal(InternalTag.SharedGuardRead), inner: inner) -> if inner == { .Apply(name: name, ..) -> name == Syntax.TYPE_SHARED_GUARD; _ -> false }
+            _ -> false
+        })
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2256
+    pub fn validate_write_place(self: &Self, expr: &Expr, span: Span) {
+        if self.frozen_expr_site(expr) == .Val(freeze_site) {
+            name :: expr_root_ident(expr) ?? "the frozen value"
+            self.report_frozen_write(name, freeze_site, "be edited", span)
+            return
+        }
+        if self.reject_static_mutable_borrow(expr, span) -> return
+        root :: expr_root_ident(expr) ?? return
+        if self.frozen_for(root) == .Val(freeze_site) {
+            self.report_frozen_write(root, freeze_site, "be edited", span)
+            return
+        }
+        if self.view_fact(root) == .Val(fact) {
+            if fact.access == ViewAccess.Write -> return
+            self.diags.push(Diagnostic.error("E0205", "cannot edit through `{root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead", Val(span)))
+            return
+        }
+        if self.is_global_mutable_binding(root) -> return
+        if self.consts.contains_key(root) {
+            self.diags.push(Diagnostic.error("E0111", "`{root}` is a const and can never change", "a const is fixed for the whole program", "use a `{Syntax.SIGIL_BIND_MUT}` binding if it needs to change", Val(span)))
+            return
+        }
+        info :: self.lookup(root).map(info -> ~info) ?? return
+        if self.reject_read_shared_guard_write(expr, span) -> return
+        if info.mutable || info.param_conv == Val(AccessConvention.Write) || self.is_edit_shared_guard(root) -> return
+        wording :: if info.param_conv != None {
+            ("E0205", "an unmarked parameter gives read access only; a write window needs the write-access marker `&`", "change the parameter to `{root}: {Syntax.SIGIL_WRITE}{info.ty.name()}` with the write-access marker `&`")
+        } else {
+            ("E0202", "a write window can change its owner, so the owner must be mutable", "declare `{root} {Syntax.SIGIL_BIND_MUT} ...`")
+        }
+        self.diags.push(Diagnostic.error(wording.0, "cannot take a write window into `{root}`", wording.1, wording.2, Val(span)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2341
+    pub fn check_expr_change(self: &Self, expr: &Expr, action: String, span: Span) {
+        self.check_expr_change_with_view_exemption(expr, action, span, None)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2345
+    fn check_expr_change_with_view_exemption(self: &Self, expr: &Expr, action: String, span: Span, ignored_view: (String, Span, Int)?) {
+        if self.frozen_expr_site(expr) == .Val(freeze_site) {
+            name :: expr_root_ident(expr) ?? "the frozen value"
+            self.report_frozen_write(name, freeze_site, action, span)
+            return
+        }
+        if self.reject_static_mutable_borrow(expr, span) -> return
+        if expr_root_ident(expr) == .Val(name) {
+            if self.reject_expiring_secret_loan_change(name, action, span) -> return
+        }
+        if self.place_from_expr(expr) == .Val(place) -> self.check_place_change_with_view_exemption(place, action, span, ignored_view)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2370
+    pub fn check_mutating_method_receiver(self: &Self, receiver: &Expr, method: String, span: Span) {
+        self.note_receiver_convention(receiver, AccessConvention.Write)
+        if self.in_lambda_body {
+            if expr_root_ident(receiver) == .Val(root) -> self.inferred_lambda_mut_captures.insert(~root, true)
+        }
+        root :: expr_root_ident(receiver) ?? {
+            self.check_expr_change(receiver, "be changed by `.{method}()`", span)
+            return
+        }
+        if self.is_edit_shared_guard(root) -> return
+        if self.is_read_shared_guard(root) {
+            self.diags.push(Diagnostic.error("E0205", "cannot edit through `{root}` — this `SharedGuard` has read access only", "a guard from `guard_read()` may inspect the shared value but cannot change it", "use `guard_edit()` when this scope must change the shared value", Val(span)))
+            return
+        }
+        self.check_expr_change(receiver, "be changed by `.{method}()`", span)
+        if expr_root_ident(receiver) == .Val(name) -> self.clear_origin(name)
+        if self.iter_borrowed.contains_key(root) -> self.diags.push(collection_changed_by_method_in_loop(root, method, span))
+        if self.lookup(root) == .Val(info) {
+            if !info.mutable && self.frozen_for(root) == None {
+                wording :: if root == Syntax.KW_SELF {
+                    ("`.{method}()` edits `{Syntax.KW_SELF}`, but this method has read access only", "declare the enclosing method with the write-access marker `&`: `{Syntax.SIGIL_WRITE}{Syntax.KW_SELF}`")
+                } else {
+                    ("cannot write to `{root}` — it does not have the write-access marker `&`; required before calling `.{method}()`", "declare `{root} {Syntax.SIGIL_BIND_MUT} ...`")
+                }
+                self.diags.push(Diagnostic.error("E0202", wording.0, "this method edits the value it's called on; the write-access marker `&` is required", wording.1, Val(span)))
+            }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2447
+    pub fn check_write_arg_change(self: &Self, arg: &CallArg) {
+        if arg.convention != AccessConvention.Write -> return
+        // Reborrow exactly the carrier's own fact, not another live view.
+        write_view :: expr_root_ident(arg.expr).and_then(root -> self.view_fact(root).filter(fact -> fact.access == ViewAccess.Write).map(fact -> (~root, fact.binding_span, fact.seq)))
+        if write_view == .Val(exemption) {
+            self.check_expr_change_with_view_exemption(arg.expr, "be passed with write access", arg.span, Val(exemption))
+        } else {
+            self.check_expr_change(arg.expr, "be passed with write access", arg.span)
+        }
+        if expr_root_ident(arg.expr) == .Val(root) -> self.clear_origin(root)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2473
+    pub fn check_lvalue_change(self: &Self, target: &LValue, action: String) {
+        through_write_view :: if target == {
+            .Index(base: base, ..) | .Field(base: base, ..) -> expr_root_ident(base).and_then(name -> self.view_fact(name)).is_some_and(fact -> fact.access == ViewAccess.Write)
+            .Local(name: name, ..) -> self.is_write_view(name)
+        }
+        if through_write_view -> return
+        frozen_base :: if target == {
+            .Index(base: base, ..) | .Field(base: base, ..) -> Val(base)
+            .Local(..) -> None
+        }
+        if frozen_base == .Val(base) {
+            if self.frozen_expr_site(base) == .Val(freeze_site) {
+                self.report_frozen_write(expr_root_ident(base) ?? "the frozen value", freeze_site, action, target.span())
+                return
+            }
+        }
+        place :: if target == {
+            .Local(name: name, ..) -> Val(ViewPlace{owner: self.owner_id(name), projections: []})
+            .Index(base: base, index: index, span: span, ..) -> self.place_from_expr(base).map(fn(place: ViewPlace) {
+                result := ^place
+                result.projections.push(ViewProjection.Index(value: const_place_int(index), span: span))
+                ^result
+            })
+            .Field(base: base, field: field, ..) -> self.place_from_expr(base).map(fn(place: ViewPlace) {
+                result := ^place
+                result.projections.push(ViewProjection.Field(~field))
+                ^result
+            })
+        }
+        if place == .Val(place) -> self.check_place_change(place, action, target.span())
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2518
+    pub fn validate_shared_guard_lvalue(self: &Self, target: &LValue) {
+        if target == {
+            .Local(..) -> {}
+            .Index(base: base, span: span, ..) -> _ :: self.reject_read_shared_guard_write(base, span)
+            .Field(base: base, field: field, span: span) -> {
+                expr :: Expr.Field(~base, ~field, span)
+                _ :: self.reject_read_shared_guard_write(expr, span)
+            }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2534
+    pub fn check_owner_change(self: &Self, owner: String, action: String, span: Span) {
+        owner_place :: ViewPlace{owner: self.owner_id(owner), projections: []}
+        self.check_place_change(owner_place, action, span)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2545
+    pub fn check_place_read(self: &Self, expr: &Expr, span: Span) {
+        place :: self.place_from_expr(expr) ?? return
+        if expr_root_ident(expr) == .Val(root) {
+            if self.is_write_view(root) -> return
+        }
+        // Suppress only an ancestor base of a deeper checked projection. A view
+        // at or above this place still covers the read and must be reported.
+        base_of_deeper_projection :: self.suppress_partial_move_root_read
+        conflict :: view_facts_newest_first(self.flow.views).find(entry -> {
+            name :: entry.0
+            fact :: entry.1
+            self.view_is_live_now(name) && fact.access == ViewAccess.Write && fact.place.overlaps(place) && fact.invalidated == None && !(base_of_deeper_projection && place.projections.len() < fact.place.projections.len())
+        }).map(entry -> (~entry.0, Self.place_name(entry.1.place), entry.1.kind)) ?? return
+        view :: conflict.0
+        place_name :: conflict.1
+        read_name :: Self.place_name(place)
+        window :: if conflict.2 == ViewKind.Pin { "pin" } else { "exclusive write window" }
+        self.diags.push(Diagnostic.error("E0220", "`{read_name}` cannot be read while `{view}` has a live {window} into it", "`{view}` is an exclusive window into `{place_name}`; reading the owner beside that window would be rejected after lowering", "read or edit through `{view}` instead of `{read_name}`", Val(span)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2595
+    fn check_place_change(self: &Self, changed: &ViewPlace, action: String, span: Span) {
+        self.check_place_change_with_view_exemption(changed, action, span, None)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2599
+    fn check_place_change_with_view_exemption(self: &Self, changed: &ViewPlace, action: String, span: Span, ignored_view: (String, Span, Int)?) {
+        // D-CONC-FREEZE1=A: moving is legal, mutating frozen storage is not.
+        if action != "be moved" && !action.contains("moved") {
+            if self.frozen_for(changed.owner.name) == .Val(freeze_site) {
+                self.report_frozen_write(changed.owner.name, freeze_site, action, span)
+                return
+            }
+        }
+        // A scoped task loan lasts until join, beyond lexical carrier liveness.
+        if self.report_scoped_loan_conflict(changed, action, span) -> return
+        conflict :: view_facts_newest_first(self.flow.views).find(entry -> {
+            name :: entry.0
+            fact :: entry.1
+            self.view_is_live_now(name) && !ignored_view.is_some_and(ignored -> name == ignored.0 && fact.binding_span == ignored.1 && fact.seq == ignored.2) && fact.place.overlaps(changed) && fact.invalidated == None
+        }).map(entry -> (~entry.0, entry.1.access, Self.place_name(entry.1.place), entry.1.kind)) ?? return
+        view :: conflict.0
+        place :: conflict.2
+        changed_name :: Self.place_name(changed)
+        if conflict.3 == ViewKind.Pin {
+            self.diags.push(Diagnostic.error("E0219", "`{changed_name}` cannot {action} while it is pinned", "`{view}` pinned `{place}`, which promises that storage keeps its address; moving or replacing it would leave every stored address pointing at the old place", "finish using `{view}` before changing `{changed_name}`, or narrow the pin's scope", Val(span)))
+            return
+        }
+        access :: if conflict.1 == ViewAccess.Write { "exclusive mutable view" } else { "read view" }
+        self.diags.push(Diagnostic.error("E0212", "`{changed_name}` cannot {action} while `{view}` is still looking into it", "`{view}` is a live {access} into `{place}`; changing or moving the owner could invalidate that view", "finish using `{view}` before changing `{changed_name}`, narrow the view's scope, or make an owned copy", Val(span)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2688
+    fn report_frozen_write(self: &Self, name: String, freeze_site: Span, action: String, span: Span) {
+        site :: "`freeze(...)` at byte {freeze_site.start}"
+        self.diags.push(Diagnostic.from_row("E1113", [("name", name), ("action", action), ("freeze_site", site)], Val(span)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:2722
+    // One provenance graph for list, arena, string, buffer, and matrix windows.
+    // Read-only views materialize at owning destinations unless copies is Explicit.
+    pub fn view_call_sources(self: &Self, init: &Expr) -> [([String], ViewPlace, ViewKind, ViewAccess)] {
+        init :: init.without_parens()
+        if init == .Copy(inner, _) {
+            sources :: self.view_call_sources(inner)
+            // Direct read-only copies own their value; nested declared View fields
+            // retain their boundary relation even when the aggregate is copied.
+            if !sources.is_empty() && sources.all(source -> source.0.is_empty() && source.3 == ViewAccess.Read) -> return []
+            return ^sources
+        }
+        if init == .Try(inner, _, _, _) -> return self.view_call_sources(inner)
+        if init == .Ident(name, _) -> return self.view_facts(name).map(fact -> (~fact.output_path, ~fact.place, fact.kind, fact.access)).collect()
+        if init == .If(then_value: then_value, else_value: else_value, ..) {
+            sources := self.view_call_sources(then_value)
+            sources.extend(self.view_call_sources(else_value))
+            return ^sources
+        }
+        if init == .OrFallback(value: value, fallback: fallback, ..) {
+            sources := self.view_call_sources(value)
+            if fallback == .Value(value) -> sources.extend(self.view_call_sources(value))
+            return ^sources
+        }
+        if init == .ListLit(elements, _) {
+            sources := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+            loop element in elements {
+                loop source in self.view_call_sources(element) {
+                    path := ^source.0
+                    path.insert(0, "[]")
+                    sources.push((^path, ^source.1, source.2, source.3))
+                }
+            }
+            return ^sources
+        }
+        if init == .TupleLit(fields, ..) {
+            sources := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+            loop (field, value) in fields {
+                loop source in self.view_call_sources(value) {
+                    path := ^source.0
+                    path.insert(0, ~field)
+                    sources.push((^path, ^source.1, source.2, source.3))
+                }
+            }
+            return ^sources
+        }
+        if init == .StructLit(fields: fields, ..) {
+            sources := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+            loop (field, _, value) in fields {
+                loop source in self.view_call_sources(value) {
+                    path := ^source.0
+                    path.insert(0, ~field)
+                    sources.push((^path, ^source.1, source.2, source.3))
+                }
+            }
+            return ^sources
+        }
+        if init == .EnumLit(variant: variant, args: args, ..) {
+            sources := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+            loop index in 0..<args.len() {
+                slot_value :: if args[index] == {
+                    .Positional(value) -> (index.to_string(), value)
+                    .Named(label: label, expr: expr) -> (~label, expr)
+                }
+                loop source in self.view_call_sources(slot_value.1) {
+                    path := ^source.0
+                    path.insert(0, ~slot_value.0)
+                    path.insert(0, ~variant)
+                    sources.push((^path, ^source.1, source.2, source.3))
+                }
+            }
+            return ^sources
+        }
+        if init == { .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Tainted(inner, _, _) -> return self.view_call_sources(inner); _ -> {} }
+        if init == .Index(base: base, ..) {
+            projected := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+            loop source in self.view_call_sources(base) {
+                if source.0.first() != Val("[]") -> continue
+                path := ^source.0
+                _ :: path.remove(0)
+                projected.push((^path, ^source.1, source.2, source.3))
+            }
+            if !projected.is_empty() -> return ^projected
+        }
+        if init == .Field(base, field, _) {
+            projected := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+            loop source in self.view_call_sources(base) {
+                if source.0.first() != Val(field) -> continue
+                path := ^source.0
+                _ :: path.remove(0)
+                projected.push((^path, ^source.1, source.2, source.3))
+            }
+            if !projected.is_empty() -> return ^projected
+            output_path := [String]{}
+            if named_view_field_path(init, &output_path) == .Val(name) {
+                if self.view_fact_at_path(name, output_path).map(fact -> (fact.kind, fact.access)) == .Val(fact) {
+                    if self.place_from_expr(init) == .Val(place) -> return [([], ^place, fact.0, fact.1)]
+                }
+            }
+        }
+        if init == .Call(call) {
+            if self.lookup(call.name).map(info -> ~info.ty) == .Val(.Fn(params: params, ret: ret, return_view_provenance: return_view_provenance, ..)) {
+                if !ret.is_some_and(ty -> self.type_contains_view_boundary(ty)) -> return []
+                map :: return_view_provenance.unwrap_or_else(fn() { ret.map(ret -> self.conservative_callback_view_provenance(params, ret)).unwrap_or_default() })
+                sources := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+                loop (output_path, provenance) in map {
+                    loop source in provenance.sources {
+                        if source.source != .Parameter(index) -> continue
+                        actual :: call.args.get(index).map(arg -> arg.expr) ?? continue
+                        loop place in self.compose_view_source_places(actual, source.projections, init.span()) {
+                            kind :: self.view_kind_for_place(place)
+                            access :: if provenance.mutable { ViewAccess.Write } else { ViewAccess.Read }
+                            sources.push((~output_path, ^place, kind, access))
+                        }
+                    }
+                }
+                return ^sources
+            }
+            sig :: self.funcs.get(call.name) ?? return []
+            map :: sig.return_view_provenance.get() ?? return []
+            string_view :: sig.return_type.is_some_and(ty -> if ty == {
+                .Apply(name: name, args: args) -> name == "View" && args.len() == 1 && args[0] == Type.Named("str")
+                .Named(name) -> self.registry.struct_fields(name).is_some_and(fields -> fields.any(field -> if field.2 == { .Apply(name: name, args: args) -> name == "View" && args.len() == 1 && args[0] == Type.Named("str"); _ -> false }))
+                _ -> false
+            })
+            sources := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+            loop (output_path, provenance) in map {
+                loop source in provenance.sources {
+                    if source.source != .Parameter(index) -> continue
+                    actual :: call.args.get(index).map(arg -> arg.expr) ?? continue
+                    places :: self.compose_view_source_places(actual, source.projections, init.span())
+                    if places.is_empty() {
+                        self.report_temporary_view_source(actual.span(), string_view)
+                        continue
+                    }
+                    access :: if provenance.mutable { ViewAccess.Write } else { ViewAccess.Read }
+                    loop place in places {
+                        kind :: self.view_kind_for_place(place)
+                        sources.push((~output_path, ^place, kind, access))
+                    }
+                }
+            }
+            return ^sources
+        }
+        if init == .CallValue(callee: callee, args: args, ..) {
+            callee_ty :: if callee == { .Ident(name, _) -> self.lookup(name).map(info -> ~info.ty); _ -> None }
+            if callee_ty != .Val(.Fn(params: params, ret: ret, return_view_provenance: return_view_provenance, ..)) -> return []
+            if !ret.is_some_and(ty -> self.type_contains_view_boundary(ty)) -> return []
+            map :: return_view_provenance.unwrap_or_else(fn() { ret.map(ret -> self.conservative_callback_view_provenance(params, ret)).unwrap_or_default() })
+            sources := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+            loop (output_path, provenance) in map {
+                loop source in provenance.sources {
+                    if source.source != .Parameter(index) -> continue
+                    actual :: args.get(index).map(arg -> arg.expr) ?? continue
+                    loop place in self.compose_view_source_places(actual, source.projections, init.span()) {
+                        kind :: self.view_kind_for_place(place)
+                        access :: if provenance.mutable { ViewAccess.Write } else { ViewAccess.Read }
+                        sources.push((~output_path, ^place, kind, access))
+                    }
+                }
+            }
+            return ^sources
+        }
+        // D-ALLOCFAIL1=A: try_alloc's Ok payload retains alloc's exclusive fact.
+        if init == .MethodCall(receiver: receiver, method: method, ..) {
+            if method == Syntax.MEM_ALLOC_TRY_ALLOC && receiver.without_parens() == .Ident(name, _) && self.lookup(name).is_some_and(info -> is_allocator_type(info.ty)) {
+                // Root at the handle, not Fixed's backing owner borrow.
+                return [([], ViewPlace{owner: self.owner_id(name), projections: []}, ViewKind.Arena, ViewAccess.Write)]
+            }
+        }
+        if init == .MethodCall(receiver: receiver, method: method, args: args, ..) {
+            if receiver.without_parens() == .Ident(enum_name, _) {
+                if self.resolve_enum_variants_cloned(enum_name).and_then(variants -> variants.get(method)).map(variant -> ~variant.1) == .Val(payload) {
+                    sources := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+                    loop index in 0..<args.len() {
+                        arg :: args[index]
+                        slot :: if payload == {
+                            .Unit -> continue
+                            .Single(_, _) -> index.to_string()
+                            .Named(fields) -> arg.label.map(label -> ~label.0).or_else(fn() { fields.get(index).map(field -> ~field.name) }).unwrap_or_else(fn() { index.to_string() })
+                        }
+                        loop source in self.view_call_sources(arg.expr) {
+                            path := ^source.0
+                            path.insert(0, ~slot)
+                            path.insert(0, ~method)
+                            sources.push((^path, ^source.1, source.2, source.3))
+                        }
+                    }
+                    return ^sources
+                }
+            }
+        }
+        // D-PIN1=A: record the stability contract on the pinned place.
+        if init == .MethodCall(receiver: receiver, method: method, args: args, ..) {
+            if method == Syntax.MEM_PIN && receiver.without_parens() == .Ident(alias, _) && self.core_imports.get(alias).is_some_and(module -> module == Syntax.CORE_MEM_MODULE) {
+                return args.first().and_then(arg -> self.place_from_expr(arg.expr)).map(place -> [([], place, ViewKind.Pin, ViewAccess.Write)]).unwrap_or_default()
+            }
+        }
+        if init == .MethodCall(receiver: receiver, method: method, args: args, method_span: method_span, ..) {
+            if method == "split_write" || method == "get_disjoint_write" {
+                place :: self.place_from_expr(receiver) ?? return []
+                kind :: self.view_kind_for_place(place)
+                source :: fn(output_path: [String], proof_span: Span) {
+                    proved := ~place
+                    proved.projections.push(ViewProjection.Fresh(proof_span))
+                    (output_path, ^proved, kind, ViewAccess.Write)
+                }
+                if method == "split_write" {
+                    right_span :: args.first().map(arg -> arg.expr.span()).unwrap_or_else(fn() { init.span() })
+                    return [source(["left"], method_span), source(["right"], right_span)]
+                }
+                proof_spans :: args.first().and_then(arg -> if arg.expr == { .ListLit(elements, _) -> Val(elements.map(element -> element.span()).collect()); _ -> None }).unwrap_or_else(fn() { [init.span()] })
+                return proof_spans.map(span -> source(["[]"], span)).collect()
+            }
+        }
+        if init == .MethodCall(receiver: receiver, method: method, recv_type: .Val(recv_type), resolved_ret: resolved_ret, ..) {
+            if is_mapped_file_view_method(recv_type, method) {
+                kind :: resolved_ret.and_then(view_kind_from_return_type) ?? return []
+                place :: self.place_from_expr(receiver) ?? return []
+                return [([], ^place, kind, ViewAccess.Read)]
+            }
+        }
+        if init == .MethodCall(receiver: receiver, method: method, args: args, recv_type: .Val(recv_type), ..) {
+            map :: self.registry.method(recv_type, method).and_then(sig -> sig.return_view_provenance.get()).or_else(fn() {
+                self.trait_reg.traits.get(recv_type).and_then(info -> info.methods.get(method)).and_then(sig -> sig.return_view_provenance.get())
+            }) ?? return []
+            sources := [([String], ViewPlace, ViewKind, ViewAccess)]{}
+            loop (output_path, provenance) in map {
+                loop source in provenance.sources {
+                    actual :: if source.source == {
+                        .Receiver -> receiver
+                        .Parameter(index) -> (args.get(index) ?? continue).expr
+                        .Static(..) -> continue
+                    }
+                    places :: self.compose_view_source_places(actual, source.projections, init.span())
+                    if places.is_empty() -> continue
+                    access :: if provenance.mutable { ViewAccess.Write } else { ViewAccess.Read }
+                    loop place in places {
+                        kind :: self.view_kind_for_place(place)
+                        sources.push((~output_path, ^place, kind, access))
+                    }
+                }
+            }
+            return ^sources
+        }
+        if init == .Place(inner, access, _) {
+            place :: self.place_from_expr(inner) ?? return []
+            kind :: self.view_kind_for_place(place)
+            view_access :: if access == { .Read -> ViewAccess.Read; .Write -> ViewAccess.Write; .Take -> return [] }
+            return [([], ^place, kind, view_access)]
+        }
+        if init != .MethodCall(receiver: receiver, method: method, ..) -> return []
+        if method != Syntax.METHOD_VIEW -> return []
+        receiver :: receiver.without_parens()
+        place := self.place_from_expr(receiver) ?? return []
+        kind :: if receiver == { .Ident(name, _) -> self.view_kind(name).unwrap_or_else(fn() { self.view_kind_for_place(place) }); _ -> self.view_kind_for_place(place) }
+        place.projections.push(ViewProjection.Range(start: None, end: None, span: init.span()))
+        [([], ^place, kind, ViewAccess.Read)]
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3257
+    pub fn check_list_view_element_aliases(self: &Self, elements: &[Expr], element_ty: &Type) {
+        direct_mutable :: if element_ty == { .Apply(name: name, ..) -> name == "ViewMut"; _ -> false }
+        previous := [(ViewPlace, ViewAccess)]{}
+        loop element in elements {
+            sources := self.view_call_sources(element).map(source -> (source.1, source.3)).collect()
+            if sources.is_empty() && direct_mutable {
+                if self.place_from_expr(element) == .Val(place) -> sources.push((^place, ViewAccess.Write))
+            }
+            loop (place, access) in sources {
+                if previous.any(existing -> (existing.1 == ViewAccess.Write || access == ViewAccess.Write) && existing.0.overlaps(place)) {
+                    place_name :: Self.place_name(place)
+                    self.diags.push(Diagnostic.error("E0212", "list elements create overlapping views of `{place_name}`", "list elements coexist, so an exclusive mutable view cannot overlap another element's view", "use disjoint ranges, keep only one mutable view, or store owned values", Val(element.span())))
+                }
+                previous.push((^place, access))
+            }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3292
+    fn report_temporary_view_source(self: &Self, span: Span, string_view: Bool) {
+        wording :: if string_view {
+            ("E2307", "A returned view cannot borrow from a temporary argument", "The temporary owner is dropped at the end of this statement, while the returned view remains live", "Store the owner in a named binding first, then pass that binding to the view-returning call")
+        } else {
+            ("E2305", "a returned view cannot borrow from a temporary argument", "the temporary owner is dropped at the end of this statement, while the returned view remains live", "store the owner in a named binding first, then pass that binding to the view-returning call")
+        }
+        if self.diags.any(diagnostic -> diagnostic.code == wording.0 && diagnostic.span == Val(span)) -> return
+        self.diags.push(Diagnostic.error(wording.0, wording.1, wording.2, wording.3, Val(span)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3325
+    pub fn record_list_view(self: &Self, name: String, output_path: [String], place: ViewPlace, kind: ViewKind, access: ViewAccess, span: Span, binding_ty: &Type, transfer_from: String?) {
+        enum_variants :: if binding_ty == {
+            .Named(type_name) | .Apply(name: type_name, ..) -> self.resolve_enum_variants_cloned(type_name).map(fn(variants) {
+                names := [String:Bool]{}
+                loop variant in variants.keys() -> names.insert(~variant, true)
+                ^names
+            })
+            _ -> None
+        }
+        self.record_view_with_exemptions(name, ^output_path, ^place, kind, access, span, transfer_from, enum_variants)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3360
+    pub fn record_condition_view_bindings(self: &Self, condition: &Expr) {
+        if condition == {
+            .PatternTest(subject: subject, pattern: pattern, ..) -> self.record_pattern_view_bindings(subject, pattern)
+            .Binary(BinOp.And, left, right, _) -> {
+                self.record_condition_view_bindings(left)
+                self.record_condition_view_bindings(right)
+            }
+            _ -> {}
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3373
+    pub fn record_pattern_view_bindings(self: &Self, subject: &Expr, pattern: &Pattern) {
+        // D-OPT-WRITE1: payload bindings beneath &place get disjoint slots.
+        if subject.without_parens() == .Place(inner, PlaceAccess.Write, _) {
+            base :: self.place_from_expr(inner) ?? return
+            names := [String:Bool]{}
+            collect_window_names(pattern, &names)
+            ordered := names.keys().collect()
+            ordered.sort()
+            loop name in ordered {
+                binding_span :: self.lookup(name).map(info -> info.def_span) ?? continue
+                place := ~base
+                place.projections.push(ViewProjection.Field("{{{name}}}"))
+                kind :: self.view_kind_for_place(place)
+                self.record_view(name, [], ^place, kind, ViewAccess.Write, binding_span)
+            }
+            return
+        }
+        sources :: self.view_call_sources(subject)
+        transfer_from :: if sources.any(source -> source.3 == ViewAccess.Write) {
+            if subject == { .Ident(name, _) -> Val(name); _ -> None }
+        } else { None }
+        bound_slots := [(String, Span, [String])]{}
+        if pattern == {
+            .Present(binding: binding, binding_span: binding_span, ..) | .Ok(binding: binding, binding_span: binding_span, ..) | .Err(binding: binding, binding_span: binding_span, ..) -> bound_slots.push((~binding, binding_span, []))
+            .Variant(variant: variant, bindings: slots, ..) -> {
+                slot_names :: self.pattern_variant_slot_names(subject, variant, slots.len())
+                loop index in 0..<slots.len() {
+                    if slots[index] == .Bind(name: name, span: span) {
+                        slot_name :: slot_names.get(index).map(name -> ~name).unwrap_or_else(fn() { index.to_string() })
+                        bound_slots.push((~name, span, [~variant, ^slot_name]))
+                    }
+                }
+            }
+            .Struct(fields: fields, ..) -> {
+                loop field in fields {
+                    if field == .Bind(field: field, local: local, local_span: local_span, ..) -> bound_slots.push((~local, local_span, [~field]))
+                }
+            }
+            .Or(alternatives, _) -> {
+                loop alternative in alternatives -> self.record_pattern_view_bindings(subject, alternative)
+                return
+            }
+            .Absent(_) | .Range(..) | .StrMatch(..) | .BinMatch(..) -> {}
+        }
+        loop (name, span, source_prefix) in bound_slots {
+            binding_span :: self.lookup(name).map(info -> info.def_span).unwrap_or(span)
+            binding_has_view :: self.lookup(name).is_some_and(info -> self.type_contains_view_boundary(info.ty))
+            if !binding_has_view -> continue
+            matched := false
+            loop (path, place, kind, access) in sources {
+                if !path.starts_with(source_prefix) -> continue
+                matched = true
+                self.record_view_with_exemptions(name, path[source_prefix.len()..].to_vec(), ~place, kind, access, binding_span, transfer_from, None)
+            }
+            if matched -> continue
+            // Abstract aggregate parameters compose back to concrete call sources.
+            base :: self.place_from_expr(subject) ?? continue
+            binding_ty :: self.lookup(name).map(info -> ~info.ty) ?? continue
+            loop (output_path, access) in self.view_leaf_paths(binding_ty) {
+                place := ~base
+                loop projection in source_prefix {
+                    place.projections.push(if projection == "[]" { ViewProjection.Index(value: None, span: span) } else { ViewProjection.Field(~projection) })
+                }
+                loop projection in output_path {
+                    place.projections.push(if projection == "[]" { ViewProjection.Index(value: None, span: span) } else { ViewProjection.Field(~projection) })
+                }
+                kind :: self.view_kind_for_place(place)
+                self.record_view_with_exemptions(name, ^output_path, ^place, kind, access, binding_span, transfer_from, None)
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3529-3536
+// view_leaf_paths continues in Checks04.jet: active nominals backtrack per path;
+// a cached reachability fact skips nominals that cannot reach a view boundary.

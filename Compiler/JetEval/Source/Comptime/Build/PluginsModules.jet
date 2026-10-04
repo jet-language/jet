@@ -1,842 +1,424 @@
-// PORT-PENDING 0567 crates-jet-comptime-src-comptime-build-plugins-modules: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:1-838
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::actions_policy::{ActionSpec, BuildCapability};
-//RS use super::cache_cas::ContentDigest;
-//RS use super::handles::{
-//RS     ActionHandle, GeneratedModuleHandle, GeneratedModuleId, PluginHandle, PluginId, TargetRef,
-//RS };
-//RS use super::targets::{BuildPath, TargetKind, TargetSpec};
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::fs;
-//RS use std::io::Read;
-//RS use std::path::Path;
-//RS 
-//RS pub const BUILD_PLUGIN_API_VERSION: &str = "jet.build.plugin.v1";
-//RS /// Hidden sibling-process entry point. Wasmtime stays in jetpack-bin; the
-//RS /// compiler seam only carries this bounded, typed wire contract.
-//RS pub const BUILD_PLUGIN_HOST_SUBCOMMAND: &str = "__build-plugin-v1";
-//RS pub const BUILD_PLUGIN_MAX_REQUEST_BYTES: usize = 64 * 1024;
-//RS pub const BUILD_PLUGIN_MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
-//RS pub const BUILD_PLUGIN_MAX_MANIFEST_BYTES: usize = 64 * 1024;
-//RS pub const BUILD_PLUGIN_MAX_COMPONENT_BYTES: usize = 64 * 1024 * 1024;
-//RS const BUILD_PLUGIN_MAX_WIRE_ITEMS: usize = 100_000;
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct WasmComponentPluginSpec {
-//RS     pub name: String,
-//RS     pub version: String,
-//RS     pub api_version: String,
-//RS     pub component_digest: String,
-//RS     pub requested_caps: BTreeSet<BuildCapability>,
-//RS }
-//RS 
-//RS impl WasmComponentPluginSpec {
-//RS     pub fn new(
-//RS         name: impl Into<String>,
-//RS         version: impl Into<String>,
-//RS         component_digest: impl Into<String>,
-//RS     ) -> Self {
-//RS         WasmComponentPluginSpec {
-//RS             name: name.into(),
-//RS             version: version.into(),
-//RS             api_version: BUILD_PLUGIN_API_VERSION.to_string(),
-//RS             component_digest: component_digest.into(),
-//RS             requested_caps: BTreeSet::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_api_version(mut self, api_version: impl Into<String>) -> Self {
-//RS         self.api_version = api_version.into();
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_capability(mut self, cap: BuildCapability) -> Self {
-//RS         self.requested_caps.insert(cap);
-//RS         self
-//RS     }
-//RS 
-//RS     /// Load the package manifest and component bytes as one verified unit.
-//RS     /// The manifest is intentionally a small, dependency-free format.
-//RS     pub fn load_packaged(
-//RS         manifest_path: impl AsRef<Path>,
-//RS         component_path: impl AsRef<Path>,
-//RS     ) -> Result<Self, String> {
-//RS         Self::load_packaged_with_manifest_digest(manifest_path, component_path)
-//RS             .map(|(spec, _)| spec)
-//RS     }
-//RS 
-//RS     /// Load both package files once and return the manifest identity that the
-//RS     /// sibling host must recheck before it instantiates the component.
-//RS     pub fn load_packaged_with_manifest_digest(
-//RS         manifest_path: impl AsRef<Path>,
-//RS         component_path: impl AsRef<Path>,
-//RS     ) -> Result<(Self, String), String> {
-//RS         let manifest_path = manifest_path.as_ref();
-//RS         let component_path = component_path.as_ref();
-//RS         reject_plugin_link(manifest_path, "manifest")?;
-//RS         reject_plugin_link(component_path, "component")?;
-//RS         let manifest =
-//RS             read_packaged_file_bounded(manifest_path, "manifest", BUILD_PLUGIN_MAX_MANIFEST_BYTES)?;
-//RS         let component = read_packaged_file_bounded(
-//RS             component_path,
-//RS             "component",
-//RS             BUILD_PLUGIN_MAX_COMPONENT_BYTES,
-//RS         )?;
-//RS         let spec = Self::load_packaged_bytes(&manifest, &component)?;
-//RS         let manifest_digest = ContentDigest::from_bytes(&manifest).as_str().to_string();
-//RS         Ok((spec, manifest_digest))
-//RS     }
-//RS 
-//RS     /// Validate a manifest/component byte pair without reading either path.
-//RS     /// The host uses this after reading the files so the bytes it verifies are
-//RS     /// the exact bytes it gives to Wasmtime.
-//RS     pub fn load_packaged_bytes(manifest: &[u8], component: &[u8]) -> Result<Self, String> {
-//RS         if manifest.len() > BUILD_PLUGIN_MAX_MANIFEST_BYTES {
-//RS             return Err(format!(
-//RS                 "plugin manifest exceeds {} bytes",
-//RS                 BUILD_PLUGIN_MAX_MANIFEST_BYTES
-//RS             ));
-//RS         }
-//RS         if component.len() > BUILD_PLUGIN_MAX_COMPONENT_BYTES {
-//RS             return Err(format!(
-//RS                 "plugin component exceeds {} bytes",
-//RS                 BUILD_PLUGIN_MAX_COMPONENT_BYTES
-//RS             ));
-//RS         }
-//RS         let manifest = std::str::from_utf8(manifest)
-//RS             .map_err(|_| "plugin manifest is not UTF-8".to_string())?;
-//RS         let spec = Self::from_manifest_text(manifest)?;
-//RS         let actual = ContentDigest::from_bytes(&component).as_str().to_string();
-//RS         if spec.component_digest != actual {
-//RS             return Err(format!(
-//RS                 "plugin component digest mismatch: manifest declares {}, bytes are {actual}",
-//RS                 spec.component_digest
-//RS             ));
-//RS         }
-//RS         validate_component_binary(&component)?;
-//RS         Ok(spec)
-//RS     }
-//RS 
-//RS     pub fn from_manifest_text(text: &str) -> Result<Self, String> {
-//RS         if text.len() > BUILD_PLUGIN_MAX_MANIFEST_BYTES {
-//RS             return Err(format!(
-//RS                 "plugin manifest exceeds {} bytes",
-//RS                 BUILD_PLUGIN_MAX_MANIFEST_BYTES
-//RS             ));
-//RS         }
-//RS         let mut name = None;
-//RS         let mut version = None;
-//RS         let mut api_version = None;
-//RS         let mut component_digest = None;
-//RS         let mut requested_caps = BTreeSet::new();
-//RS         let mut fields = BTreeSet::new();
-//RS         for raw_line in text.lines() {
-//RS             let line = manifest_line_without_comment(raw_line).trim();
-//RS             if line.is_empty() {
-//RS                 continue;
-//RS             }
-//RS             let (key, value) = line
-//RS                 .split_once('=')
-//RS                 .ok_or_else(|| format!("plugin manifest line {line} needs key = value"))?;
-//RS             let key = key.trim();
-//RS             let value = value.trim();
-//RS             if !fields.insert(key) {
-//RS                 return Err(format!(
-//RS                     "plugin manifest field {key} is declared more than once"
-//RS                 ));
-//RS             }
-//RS             match key {
-//RS                 "name" => name = Some(manifest_string(value, key)?),
-//RS                 "version" => version = Some(manifest_string(value, key)?),
-//RS                 "api_version" => api_version = Some(manifest_string(value, key)?),
-//RS                 "component_digest" => component_digest = Some(manifest_string(value, key)?),
-//RS                 "capabilities" => requested_caps = manifest_capabilities(value)?,
-//RS                 _ => return Err(format!("unknown plugin manifest field {key}")),
-//RS             }
-//RS         }
-//RS         let spec = WasmComponentPluginSpec {
-//RS             name: name.ok_or_else(|| "plugin manifest is missing name".to_string())?,
-//RS             version: version.ok_or_else(|| "plugin manifest is missing version".to_string())?,
-//RS             api_version: api_version
-//RS                 .ok_or_else(|| "plugin manifest is missing api_version".to_string())?,
-//RS             component_digest: ContentDigest::parse(
-//RS                 &component_digest
-//RS                     .ok_or_else(|| "plugin manifest is missing component_digest".to_string())?,
-//RS             )
-//RS             .map_err(|error| format!("invalid plugin component digest: {error}"))?
-//RS             .as_str()
-//RS             .to_string(),
-//RS             requested_caps,
-//RS         };
-//RS         if spec.api_version != BUILD_PLUGIN_API_VERSION {
-//RS             return Err(format!(
-//RS                 "unsupported build plugin API {}; expected {BUILD_PLUGIN_API_VERSION}",
-//RS                 spec.api_version
-//RS             ));
-//RS         }
-//RS         Ok(spec)
-//RS     }
-//RS }
-//RS 
-//RS fn manifest_line_without_comment(line: &str) -> &str {
-//RS     let mut quoted = false;
-//RS     let mut escaped = false;
-//RS     for (index, ch) in line.char_indices() {
-//RS         if escaped {
-//RS             escaped = false;
-//RS             continue;
-//RS         }
-//RS         match ch {
-//RS             '\\' if quoted => escaped = true,
-//RS             '"' => quoted = !quoted,
-//RS             '#' if !quoted => return &line[..index],
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     line
-//RS }
-//RS 
-//RS fn reject_plugin_link(path: &Path, label: &str) -> Result<(), String> {
-//RS     let metadata = fs::symlink_metadata(path)
-//RS         .map_err(|error| format!("could not stat plugin {label}: {error}"))?;
-//RS     if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS         return Err(format!("plugin {label} must be a regular non-symlink file"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Read a packaged plugin file only after checking its regular-file identity
-//RS /// and declared byte bound. Both the compiler loader and the sibling host use
-//RS /// this helper so a large or replaced package cannot become an unbounded read.
-//RS pub fn read_packaged_file_bounded(
-//RS     path: &Path,
-//RS     label: &str,
-//RS     limit: usize,
-//RS ) -> Result<Vec<u8>, String> {
-//RS     reject_plugin_link(path, label)?;
-//RS     let metadata =
-//RS         fs::metadata(path).map_err(|error| format!("could not stat plugin {label}: {error}"))?;
-//RS     if metadata.len() > limit as u64 {
-//RS         return Err(format!("plugin {label} exceeds {limit} bytes"));
-//RS     }
-//RS     let mut options = fs::OpenOptions::new();
-//RS     options.read(true);
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::OpenOptionsExt;
-//RS         options.custom_flags(0o400000 | 0o2000000);
-//RS     }
-//RS     let file = options
-//RS         .open(path)
-//RS         .map_err(|error| format!("could not read plugin {label}: {error}"))?;
-//RS     let opened_metadata = file
-//RS         .metadata()
-//RS         .map_err(|error| format!("could not stat plugin {label}: {error}"))?;
-//RS     if !opened_metadata.is_file() {
-//RS         return Err(format!("plugin {label} must be a regular file"));
-//RS     }
-//RS     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-//RS     file.take(limit.saturating_add(1) as u64)
-//RS         .read_to_end(&mut bytes)
-//RS         .map_err(|error| format!("could not read plugin {label}: {error}"))?;
-//RS     if bytes.len() > limit {
-//RS         return Err(format!("plugin {label} exceeds {limit} bytes"));
-//RS     }
-//RS     Ok(bytes)
-//RS }
-//RS 
-//RS /// Check the dependency-free part of the WebAssembly Component Model envelope.
-//RS /// Full instantiation stays in the runtime host; the compiler seam still must
-//RS /// reject arbitrary bytes before it records a package as a component plugin.
-//RS fn validate_component_binary(bytes: &[u8]) -> Result<(), String> {
-//RS     const MAGIC: &[u8; 4] = b"\0asm";
-//RS     const COMPONENT_VERSION: &[u8; 4] = &[0x0d, 0x00, 0x01, 0x00];
-//RS     if bytes.len() < 8 || &bytes[..4] != MAGIC || &bytes[4..8] != COMPONENT_VERSION {
-//RS         return Err(
-//RS             "plugin component is not a valid WebAssembly Component Model binary".to_string(),
-//RS         );
-//RS     }
-//RS 
-//RS     // Component sections use the same id + length framing as core Wasm. Walk
-//RS     // every section so a truncated or overflowing payload cannot pass the
-//RS     // package boundary. Unknown future section ids remain rejected until the
-//RS     // compiler knows how to classify them.
-//RS     let mut offset = 8usize;
-//RS     while offset < bytes.len() {
-//RS         let id = bytes[offset];
-//RS         offset += 1;
-//RS         if id > 13 {
-//RS             return Err(format!("plugin component uses unknown section id {id}"));
-//RS         }
-//RS         let length = read_u32_leb(bytes, &mut offset)? as usize;
-//RS         let end = offset
-//RS             .checked_add(length)
-//RS             .ok_or_else(|| "plugin component section length overflows".to_string())?;
-//RS         if end > bytes.len() {
-//RS             return Err("plugin component section is truncated".to_string());
-//RS         }
-//RS         offset = end;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn read_u32_leb(bytes: &[u8], offset: &mut usize) -> Result<u32, String> {
-//RS     let mut value = 0u32;
-//RS     for shift in (0..35).step_by(7) {
-//RS         let byte = *bytes
-//RS             .get(*offset)
-//RS             .ok_or_else(|| "plugin component section length is truncated".to_string())?;
-//RS         *offset += 1;
-//RS         if shift == 28 && byte & 0xf0 != 0 {
-//RS             return Err("plugin component section length overflows u32".to_string());
-//RS         }
-//RS         value |= u32::from(byte & 0x7f) << shift;
-//RS         if byte & 0x80 == 0 {
-//RS             return Ok(value);
-//RS         }
-//RS     }
-//RS     Err("plugin component section length uses an overlong integer".to_string())
-//RS }
-//RS 
-//RS fn manifest_string(value: &str, field: &str) -> Result<String, String> {
-//RS     let value = value.trim();
-//RS     let value = value
-//RS         .strip_prefix('"')
-//RS         .and_then(|value| value.strip_suffix('"'))
-//RS         .ok_or_else(|| format!("plugin manifest field {field} must be a quoted string"))?;
-//RS     if value.is_empty() {
-//RS         return Err(format!("plugin manifest field {field} cannot be empty"));
-//RS     }
-//RS     let mut out = String::with_capacity(value.len());
-//RS     let mut escaped = false;
-//RS     for ch in value.chars() {
-//RS         if escaped {
-//RS             match ch {
-//RS                 '"' | '\\' => out.push(ch),
-//RS                 _ => {
-//RS                     return Err(format!(
-//RS                         "plugin manifest field {field} contains an unsupported escape"
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             escaped = false;
-//RS         } else if ch == '\\' {
-//RS             escaped = true;
-//RS         } else if ch == '"' {
-//RS             return Err(format!(
-//RS                 "plugin manifest field {field} contains an unescaped quote"
-//RS             ));
-//RS         } else {
-//RS             out.push(ch);
-//RS         }
-//RS     }
-//RS     if escaped {
-//RS         return Err(format!("plugin manifest field {field} ends with an escape"));
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn manifest_capabilities(value: &str) -> Result<BTreeSet<BuildCapability>, String> {
-//RS     let value = value
-//RS         .strip_prefix('[')
-//RS         .and_then(|value| value.strip_suffix(']'))
-//RS         .ok_or_else(|| "plugin manifest abilities must be a list".to_string())?;
-//RS     let mut capabilities = BTreeSet::new();
-//RS     for item in value
-//RS         .split(',')
-//RS         .map(str::trim)
-//RS         .filter(|item| !item.is_empty())
-//RS     {
-//RS         let name = manifest_string(item, "abilities")?;
-//RS         let capability =
-//RS             BuildCapability::parse(&name).ok_or_else(|| format!("unknown build ability {name}"))?;
-//RS         capabilities.insert(capability);
-//RS     }
-//RS     Ok(capabilities)
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BuildPlugin {
-//RS     pub id: PluginId,
-//RS     pub name: String,
-//RS     pub version: String,
-//RS     pub api_version: String,
-//RS     pub component_digest: String,
-//RS     pub grants: BTreeSet<BuildCapability>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct GeneratedModuleSpec {
-//RS     pub name: String,
-//RS     pub path: BuildPath,
-//RS     pub source: String,
-//RS }
-//RS 
-//RS impl GeneratedModuleSpec {
-//RS     pub fn new(
-//RS         name: impl Into<String>,
-//RS         path: impl Into<String>,
-//RS         source: impl Into<String>,
-//RS     ) -> Self {
-//RS         GeneratedModuleSpec {
-//RS             name: name.into(),
-//RS             path: BuildPath(path.into()),
-//RS             source: source.into(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BuildGeneratedModule {
-//RS     pub id: GeneratedModuleId,
-//RS     pub name: String,
-//RS     pub path: BuildPath,
-//RS     pub source_digest: ContentDigest,
-//RS     pub source: String,
-//RS     pub plugin: Option<PluginHandle>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct PluginTargetSpec {
-//RS     pub kind: TargetKind,
-//RS     pub name: String,
-//RS     pub spec: TargetSpec,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct PluginContribution {
-//RS     pub actions: Vec<(String, ActionSpec)>,
-//RS     pub targets: Vec<PluginTargetSpec>,
-//RS     pub generated_modules: Vec<GeneratedModuleSpec>,
-//RS }
-//RS 
-//RS impl PluginContribution {
-//RS     pub fn new() -> Self {
-//RS         PluginContribution {
-//RS             actions: Vec::new(),
-//RS             targets: Vec::new(),
-//RS             generated_modules: Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_action(mut self, name: impl Into<String>, spec: ActionSpec) -> Self {
-//RS         self.actions.push((name.into(), spec));
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_target(
-//RS         mut self,
-//RS         kind: TargetKind,
-//RS         name: impl Into<String>,
-//RS         spec: TargetSpec,
-//RS     ) -> Self {
-//RS         self.targets.push(PluginTargetSpec {
-//RS             kind,
-//RS             name: name.into(),
-//RS             spec,
-//RS         });
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_generated_module(mut self, module: GeneratedModuleSpec) -> Self {
-//RS         self.generated_modules.push(module);
-//RS         self
-//RS     }
-//RS }
-//RS 
-//RS impl Default for PluginContribution {
-//RS     fn default() -> Self {
-//RS         Self::new()
-//RS     }
-//RS }
-//RS 
-//RS /// Host-facing contribution produced by a packaged component. References use
-//RS /// names because a guest cannot manufacture BuildContext handles. The context
-//RS /// resolves them against the current graph only after the complete response
-//RS /// has been decoded.
-//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
-//RS pub struct PackagedPluginContribution {
-//RS     pub actions: Vec<PackagedPluginAction>,
-//RS     pub targets: Vec<PackagedPluginTarget>,
-//RS     pub generated_modules: Vec<GeneratedModuleSpec>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct PackagedPluginAction {
-//RS     pub name: String,
-//RS     pub inputs: Vec<String>,
-//RS     pub outputs: Vec<String>,
-//RS     pub argv: Vec<String>,
-//RS     pub env: BTreeMap<String, String>,
-//RS     pub env_allowlist: BTreeSet<String>,
-//RS     pub caps: BTreeSet<String>,
-//RS     pub cache: String,
-//RS     pub kind: String,
-//RS     pub toolchain: Option<String>,
-//RS     pub probes: Vec<String>,
-//RS     pub signing_identity: Option<String>,
-//RS     pub labels: BTreeMap<String, String>,
-//RS     pub helper_versions: BTreeMap<String, String>,
-//RS     pub resource_pools: BTreeSet<String>,
-//RS     pub legacy_wrapper: Option<String>,
-//RS     pub variant_identity: Option<String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct PackagedPluginTarget {
-//RS     pub kind: String,
-//RS     pub name: String,
-//RS     pub sources: Vec<String>,
-//RS     pub inputs: Vec<String>,
-//RS     pub outputs: Vec<String>,
-//RS     pub deps: Vec<String>,
-//RS     pub actions: Vec<String>,
-//RS     pub probes: Vec<String>,
-//RS     pub toolchain: Option<String>,
-//RS     pub signing_identity: Option<String>,
-//RS     pub metadata: BTreeMap<String, String>,
-//RS }
-//RS 
-//RS pub type PackagedPluginRunner =
-//RS     fn(&Path, &Path, &WasmComponentPluginSpec, &str) -> Result<PackagedPluginContribution, String>;
-//RS 
-//RS thread_local! {
-//RS     static PACKAGED_PLUGIN_RUNNER: std::cell::Cell<Option<PackagedPluginRunner>> =
-//RS         const { std::cell::Cell::new(None) };
-//RS }
-//RS 
-//RS /// Install the production sibling-host runner for the duration of one build
-//RS /// evaluation. The previous runner is restored even when the closure returns
-//RS /// an error, so a failed or nested build cannot leak authority across sessions.
-//RS pub fn with_packaged_plugin_runner<R>(runner: PackagedPluginRunner, body: impl FnOnce() -> R) -> R {
-//RS     let previous = PACKAGED_PLUGIN_RUNNER.with(|slot| slot.replace(Some(runner)));
-//RS     struct RestoreRunner(Option<PackagedPluginRunner>);
-//RS     impl Drop for RestoreRunner {
-//RS         fn drop(&mut self) {
-//RS             PACKAGED_PLUGIN_RUNNER.with(|slot| slot.set(self.0.take()));
-//RS         }
-//RS     }
-//RS     let _restore = RestoreRunner(previous);
-//RS     body()
-//RS }
-//RS 
-//RS pub fn run_packaged_plugin(
-//RS     manifest_path: &Path,
-//RS     component_path: &Path,
-//RS     spec: &WasmComponentPluginSpec,
-//RS     manifest_digest: &str,
-//RS ) -> Result<PackagedPluginContribution, String> {
-//RS     PACKAGED_PLUGIN_RUNNER.with(|slot| {
-//RS         slot.get()
-//RS             .ok_or_else(|| "packaged build-plugin host is not installed".to_string())?(
-//RS             manifest_path,
-//RS             component_path,
-//RS             spec,
-//RS             manifest_digest,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// Request bytes are deterministic and contain no host handles or mutable
-//RS /// compiler state. Guests may inspect package identity/abilities, but the
-//RS /// host still validates every graph field on the return path.
-//RS pub fn encode_build_plugin_request(spec: &WasmComponentPluginSpec) -> Vec<u8> {
-//RS     format!(
-//RS         "version=1\nname={}\nplugin_version={}\napi_version={}\ncomponent_digest={}\ncapabilities={}\n",
-//RS         wire_scalar(&spec.name),
-//RS         wire_scalar(&spec.version),
-//RS         wire_scalar(&spec.api_version),
-//RS         wire_scalar(&spec.component_digest),
-//RS         wire_list(spec.requested_caps.iter().map(|cap| cap.flag())),
-//RS     )
-//RS     .into_bytes()
-//RS }
-//RS 
-//RS /// Decode the bounded, versioned response from the packaged component. A
-//RS /// response is either a complete graph contribution or a typed failure; no
-//RS /// partially decoded object is returned to the context.
-//RS pub fn decode_build_plugin_response(bytes: &[u8]) -> Result<PackagedPluginContribution, String> {
-//RS     if bytes.len() > BUILD_PLUGIN_MAX_RESPONSE_BYTES {
-//RS         return Err(format!(
-//RS             "build plugin response exceeds {} bytes",
-//RS             BUILD_PLUGIN_MAX_RESPONSE_BYTES
-//RS         ));
-//RS     }
-//RS     let text =
-//RS         std::str::from_utf8(bytes).map_err(|_| "build plugin response is not UTF-8".to_string())?;
-//RS     let mut version = None;
-//RS     let mut status = None;
-//RS     let mut error = None;
-//RS     let mut action_count = None;
-//RS     let mut target_count = None;
-//RS     let mut generated_count = None;
-//RS     let mut actions = Vec::new();
-//RS     let mut targets = Vec::new();
-//RS     let mut generated_modules = Vec::new();
-//RS     let mut top_level_fields = BTreeSet::new();
-//RS     for line in text.lines() {
-//RS         let top_level = [
-//RS             "version=",
-//RS             "status=",
-//RS             "error=",
-//RS             "actions=",
-//RS             "targets=",
-//RS             "generated=",
-//RS         ]
-//RS         .iter()
-//RS         .find_map(|prefix| line.strip_prefix(prefix).map(|_| *prefix));
-//RS         if let Some(field) = top_level {
-//RS             if !top_level_fields.insert(field) {
-//RS                 return Err(format!(
-//RS                     "build plugin response field {} is declared more than once",
-//RS                     field.trim_end_matches('=')
-//RS                 ));
-//RS             }
-//RS         }
-//RS         if let Some(value) = line.strip_prefix("version=") {
-//RS             version = Some(parse_wire_count(value, "version")?);
-//RS         } else if let Some(value) = line.strip_prefix("status=") {
-//RS             status = Some(value);
-//RS         } else if let Some(value) = line.strip_prefix("error=") {
-//RS             error = Some(wire_unscalar(value, "plugin error")?);
-//RS         } else if let Some(value) = line.strip_prefix("actions=") {
-//RS             action_count = Some(parse_wire_count(value, "actions")?);
-//RS         } else if let Some(value) = line.strip_prefix("targets=") {
-//RS             target_count = Some(parse_wire_count(value, "targets")?);
-//RS         } else if let Some(value) = line.strip_prefix("generated=") {
-//RS             generated_count = Some(parse_wire_count(value, "generated")?);
-//RS         } else if let Some(value) = line.strip_prefix("action\t") {
-//RS             actions.push(decode_packaged_action(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("target\t") {
-//RS             targets.push(decode_packaged_target(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("generated\t") {
-//RS             let fields = value.split('\t').collect::<Vec<_>>();
-//RS             if fields.len() != 3 {
-//RS                 return Err("generated plugin entry needs name, path, and source".to_string());
-//RS             }
-//RS             generated_modules.push(GeneratedModuleSpec::new(
-//RS                 wire_unscalar(fields[0], "generated name")?,
-//RS                 wire_unscalar(fields[1], "generated path")?,
-//RS                 wire_unscalar(fields[2], "generated source")?,
-//RS             ));
-//RS         } else if !line.trim().is_empty() {
-//RS             return Err(format!("unknown build plugin response field: {line}"));
-//RS         }
-//RS     }
-//RS     if version != Some(1) {
-//RS         return Err("unsupported build plugin response version".to_string());
-//RS     }
-//RS     if status != Some("ok") {
-//RS         return Err(error.unwrap_or_else(|| "build plugin returned a failure".to_string()));
-//RS     }
-//RS     if error.is_some() {
-//RS         return Err("build plugin success response contains an error field".to_string());
-//RS     }
-//RS     for (name, count) in [
-//RS         ("actions", action_count),
-//RS         ("targets", target_count),
-//RS         ("generated", generated_count),
-//RS     ] {
-//RS         if count.is_some_and(|count| count > BUILD_PLUGIN_MAX_WIRE_ITEMS) {
-//RS             return Err(format!(
-//RS                 "build plugin {name} count exceeds {BUILD_PLUGIN_MAX_WIRE_ITEMS}"
-//RS             ));
-//RS         }
-//RS     }
-//RS     if action_count != Some(actions.len())
-//RS         || target_count != Some(targets.len())
-//RS         || generated_count != Some(generated_modules.len())
-//RS     {
-//RS         return Err("build plugin response count does not match its entries".to_string());
-//RS     }
-//RS     Ok(PackagedPluginContribution {
-//RS         actions,
-//RS         targets,
-//RS         generated_modules,
-//RS     })
-//RS }
-//RS 
-//RS fn decode_packaged_action(value: &str) -> Result<PackagedPluginAction, String> {
-//RS     let fields = value.split('\t').collect::<Vec<_>>();
-//RS     if fields.len() != 17 {
-//RS         return Err("plugin action needs 17 fields".to_string());
-//RS     }
-//RS     Ok(PackagedPluginAction {
-//RS         name: wire_unscalar(fields[0], "action name")?,
-//RS         inputs: wire_unlist(fields[1], "action inputs")?,
-//RS         outputs: wire_unlist(fields[2], "action outputs")?,
-//RS         argv: wire_unlist(fields[3], "action argv")?,
-//RS         env: wire_unmap(fields[4], "action env")?,
-//RS         env_allowlist: wire_unlist(fields[5], "action env allowlist")?
-//RS             .into_iter()
-//RS             .collect(),
-//RS         caps: wire_unlist(fields[6], "action abilities")?
-//RS             .into_iter()
-//RS             .collect(),
-//RS         cache: wire_unscalar(fields[7], "action cache")?,
-//RS         kind: wire_unscalar(fields[8], "action kind")?,
-//RS         toolchain: wire_optional(fields[9], "action toolchain")?,
-//RS         probes: wire_unlist(fields[10], "action probes")?,
-//RS         signing_identity: wire_optional(fields[11], "action signing identity")?,
-//RS         labels: wire_unmap(fields[12], "action labels")?,
-//RS         helper_versions: wire_unmap(fields[13], "action helper versions")?,
-//RS         resource_pools: wire_unlist(fields[14], "action resource pools")?
-//RS             .into_iter()
-//RS             .collect(),
-//RS         legacy_wrapper: wire_optional(fields[15], "action legacy wrapper")?,
-//RS         variant_identity: wire_optional(fields[16], "action variant identity")?,
-//RS     })
-//RS }
-//RS 
-//RS fn decode_packaged_target(value: &str) -> Result<PackagedPluginTarget, String> {
-//RS     let fields = value.split('\t').collect::<Vec<_>>();
-//RS     if fields.len() != 11 {
-//RS         return Err("plugin target needs 11 fields".to_string());
-//RS     }
-//RS     Ok(PackagedPluginTarget {
-//RS         kind: wire_unscalar(fields[0], "target kind")?,
-//RS         name: wire_unscalar(fields[1], "target name")?,
-//RS         sources: wire_unlist(fields[2], "target sources")?,
-//RS         inputs: wire_unlist(fields[3], "target inputs")?,
-//RS         outputs: wire_unlist(fields[4], "target outputs")?,
-//RS         deps: wire_unlist(fields[5], "target dependencies")?,
-//RS         actions: wire_unlist(fields[6], "target actions")?,
-//RS         probes: wire_unlist(fields[7], "target probes")?,
-//RS         toolchain: wire_optional(fields[8], "target toolchain")?,
-//RS         signing_identity: wire_optional(fields[9], "target signing identity")?,
-//RS         metadata: wire_unmap(fields[10], "target metadata")?,
-//RS     })
-//RS }
-//RS 
-//RS fn wire_scalar(value: &str) -> String {
-//RS     hex_encode(value.as_bytes())
-//RS }
-//RS 
-//RS fn wire_unscalar(value: &str, field: &str) -> Result<String, String> {
-//RS     String::from_utf8(hex_decode(value)?).map_err(|_| format!("{field} is not UTF-8"))
-//RS }
-//RS 
-//RS fn wire_optional(value: &str, field: &str) -> Result<Option<String>, String> {
-//RS     if value.is_empty() {
-//RS         Ok(None)
-//RS     } else {
-//RS         wire_unscalar(value, field).map(Some)
-//RS     }
-//RS }
-//RS 
-//RS fn wire_list<'a>(values: impl IntoIterator<Item = &'a str>) -> String {
-//RS     let values = values.into_iter().collect::<Vec<_>>();
-//RS     let mut out = values.len().to_string();
-//RS     out.push(':');
-//RS     for value in values {
-//RS         let bytes = value.as_bytes();
-//RS         out.push_str(&bytes.len().to_string());
-//RS         out.push(':');
-//RS         out.push_str(&hex_encode(bytes));
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn wire_unlist(value: &str, field: &str) -> Result<Vec<String>, String> {
-//RS     let (count, mut rest) = value
-//RS         .split_once(':')
-//RS         .ok_or_else(|| format!("{field} list has no count"))?;
-//RS     let count = count
-//RS         .parse::<usize>()
-//RS         .map_err(|_| format!("{field} list count is invalid"))?;
-//RS     if count > BUILD_PLUGIN_MAX_WIRE_ITEMS {
-//RS         return Err(format!(
-//RS             "{field} list contains too many items (maximum {BUILD_PLUGIN_MAX_WIRE_ITEMS})"
-//RS         ));
-//RS     }
-//RS     let mut values = Vec::with_capacity(count);
-//RS     for _ in 0..count {
-//RS         let (len, next) = rest
-//RS             .split_once(':')
-//RS             .ok_or_else(|| format!("{field} list item has no length"))?;
-//RS         let len = len
-//RS             .parse::<usize>()
-//RS             .map_err(|_| format!("{field} list item length is invalid"))?;
-//RS         let encoded_len = len
-//RS             .checked_mul(2)
-//RS             .ok_or_else(|| format!("{field} list item length overflows"))?;
-//RS         if next.len() < encoded_len {
-//RS             return Err(format!("{field} list item is truncated"));
-//RS         }
-//RS         let (encoded, tail) = next.split_at(encoded_len);
-//RS         values.push(
-//RS             String::from_utf8(hex_decode(encoded)?)
-//RS                 .map_err(|_| format!("{field} list item is not UTF-8"))?,
-//RS         );
-//RS         rest = tail;
-//RS     }
-//RS     if !rest.is_empty() {
-//RS         return Err(format!("{field} list has trailing bytes"));
-//RS     }
-//RS     Ok(values)
-//RS }
-//RS 
-//RS fn wire_map(map: &BTreeMap<String, String>) -> String {
-//RS     let mut values = Vec::with_capacity(map.len() * 2);
-//RS     for (key, value) in map {
-//RS         values.push(key.as_str());
-//RS         values.push(value.as_str());
-//RS     }
-//RS     wire_list(values)
-//RS }
-//RS 
-//RS fn wire_unmap(value: &str, field: &str) -> Result<BTreeMap<String, String>, String> {
-//RS     let values = wire_unlist(value, field)?;
-//RS     if values.len() % 2 != 0 {
-//RS         return Err(format!("{field} map has an unpaired value"));
-//RS     }
-//RS     let mut map = BTreeMap::new();
-//RS     for pair in values.chunks_exact(2) {
-//RS         if map.insert(pair[0].clone(), pair[1].clone()).is_some() {
-//RS             return Err(format!("{field} map contains a duplicate key"));
-//RS         }
-//RS     }
-//RS     Ok(map)
-//RS }
-//RS 
-//RS fn parse_wire_count(value: &str, field: &str) -> Result<usize, String> {
-//RS     value
-//RS         .parse::<usize>()
-//RS         .map_err(|_| format!("{field} is not a number"))
-//RS }
-//RS 
-//RS fn hex_encode(bytes: &[u8]) -> String {
-//RS     let mut out = String::with_capacity(bytes.len() * 2);
-//RS     for byte in bytes {
-//RS         out.push_str(&format!("{byte:02x}"));
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn hex_decode(value: &str) -> Result<Vec<u8>, String> {
-//RS     if value.len() % 2 != 0 {
-//RS         return Err("plugin wire hex has odd length".to_string());
-//RS     }
-//RS     let bytes = value.as_bytes();
-//RS     let mut out = Vec::with_capacity(bytes.len() / 2);
-//RS     for pair in bytes.chunks_exact(2) {
-//RS         let high = (pair[0] as char)
-//RS             .to_digit(16)
-//RS             .ok_or_else(|| "plugin wire hex is invalid".to_string())?;
-//RS         let low = (pair[1] as char)
-//RS             .to_digit(16)
-//RS             .ok_or_else(|| "plugin wire hex is invalid".to_string())?;
-//RS         out.push(((high << 4) | low) as u8);
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct PluginApplication {
-//RS     pub plugin: PluginHandle,
-//RS     pub actions: Vec<ActionHandle>,
-//RS     pub targets: Vec<TargetRef>,
-//RS     pub generated_modules: Vec<GeneratedModuleHandle>,
-//RS }
-// END-PORT-PENDING 0567 crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:1-838
+use jet_comptime.Comptime.Build.ActionsPolicy.[ActionSpec, BuildCapability]
+use jet_comptime.Comptime.Build.CacheCas.ContentDigest
+use jet_comptime.Comptime.Build.Handles.[ActionHandle, GeneratedModuleHandle, GeneratedModuleId, PluginHandle, PluginId, TargetRef]
+use jet_comptime.Comptime.Build.Targets.[BuildPath, TargetKind, TargetSpec]
+use std.collections.BTreeSet
+use std.fs
+use std.cell.Cell
+use std.thread.ThreadLocal
+use core.sys.target.selected_family
 
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:12
+pub BUILD_PLUGIN_API_VERSION :: "jet.build.plugin.v1"
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:15
+pub BUILD_PLUGIN_HOST_SUBCOMMAND :: "__build-plugin-v1"
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:16
+pub BUILD_PLUGIN_MAX_REQUEST_BYTES :: 64 * 1024
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:17
+pub BUILD_PLUGIN_MAX_RESPONSE_BYTES :: 4 * 1024 * 1024
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:18
+pub BUILD_PLUGIN_MAX_MANIFEST_BYTES :: 64 * 1024
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:19
+pub BUILD_PLUGIN_MAX_COMPONENT_BYTES :: 64 * 1024 * 1024
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:20
+BUILD_PLUGIN_MAX_WIRE_ITEMS :: 100_000
+
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:23
+#Derive(Debug, Clone, Eq)
+pub struct WasmComponentPluginSpec {
+    pub name: String, pub version: String, pub api_version: String,
+    pub component_digest: String, pub requested_caps: BTreeSet<BuildCapability>,
+}
+impl WasmComponentPluginSpec {
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:32
+    pub fn new(name: String, version: String, component_digest: String) -> WasmComponentPluginSpec {
+        WasmComponentPluginSpec{name: ^name, version: ^version, api_version: BUILD_PLUGIN_API_VERSION.to_string(), component_digest: ^component_digest, requested_caps: BTreeSet<BuildCapability>.new()}
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:46
+    pub fn with_api_version(self, api_version: String) -> WasmComponentPluginSpec { self.api_version = ^api_version; ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:51
+    pub fn with_capability(self, cap: BuildCapability) -> WasmComponentPluginSpec { _ :: self.requested_caps.insert(cap); ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:58
+    pub fn load_packaged(manifest_path: OSPath, component_path: OSPath) -> WasmComponentPluginSpec Err! {
+        WasmComponentPluginSpec.load_packaged_with_manifest_digest(manifest_path, component_path)!.0
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:68
+    pub fn load_packaged_with_manifest_digest(manifest_path: OSPath, component_path: OSPath) -> (WasmComponentPluginSpec, String) Err! {
+        reject_plugin_link(manifest_path, "manifest")!
+        reject_plugin_link(component_path, "component")!
+        manifest :: read_packaged_file_bounded(manifest_path, "manifest", BUILD_PLUGIN_MAX_MANIFEST_BYTES)!
+        component :: read_packaged_file_bounded(component_path, "component", BUILD_PLUGIN_MAX_COMPONENT_BYTES)!
+        spec :: WasmComponentPluginSpec.load_packaged_bytes(manifest, component)!
+        manifest_digest :: ContentDigest.from_bytes(manifest).as_str().to_string()
+        (^spec, ^manifest_digest)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:91
+    pub fn load_packaged_bytes(manifest: [U8], component: [U8]) -> WasmComponentPluginSpec Err! {
+        if manifest.len() > BUILD_PLUGIN_MAX_MANIFEST_BYTES -> fail "plugin manifest exceeds {BUILD_PLUGIN_MAX_MANIFEST_BYTES} bytes"
+        if component.len() > BUILD_PLUGIN_MAX_COMPONENT_BYTES -> fail "plugin component exceeds {BUILD_PLUGIN_MAX_COMPONENT_BYTES} bytes"
+        manifest_text :: String.from_utf8(manifest) catch _ { fail "plugin manifest is not UTF-8" }
+        spec :: WasmComponentPluginSpec.from_manifest_text(manifest_text)!
+        actual :: ContentDigest.from_bytes(component).as_str().to_string()
+        if spec.component_digest != actual -> fail "plugin component digest mismatch: manifest declares {spec.component_digest}, bytes are {actual}"
+        validate_component_binary(component)!
+        ^spec
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:118
+    pub fn from_manifest_text(text: String) -> WasmComponentPluginSpec Err! {
+        if text.len() > BUILD_PLUGIN_MAX_MANIFEST_BYTES -> fail "plugin manifest exceeds {BUILD_PLUGIN_MAX_MANIFEST_BYTES} bytes"
+        name := None as String?
+        version := None as String?
+        api_version := None as String?
+        component_digest := None as String?
+        requested_caps := BTreeSet<BuildCapability>.new()
+        fields := BTreeSet<String>.new()
+        loop raw_line in text.lines() {
+            line := manifest_line_without_comment(raw_line).trim() // #4303
+            if line.is_empty() -> continue
+            (raw_key, raw_value) :: line.split_once('=') ?? fail "plugin manifest line {line} needs key = value"
+            key := raw_key.trim() // #4303
+            value := raw_value.trim() // #4303
+            if !fields.insert(key) -> fail "plugin manifest field {key} is declared more than once"
+            if key == {
+                "name" -> name = Some(manifest_string(value, key)!)
+                "version" -> version = Some(manifest_string(value, key)!)
+                "api_version" -> api_version = Some(manifest_string(value, key)!)
+                "component_digest" -> component_digest = Some(manifest_string(value, key)!)
+                "capabilities" -> requested_caps = manifest_capabilities(value)!
+                else -> fail "unknown plugin manifest field {key}"
+            }
+        }
+        name :: name ?? fail "plugin manifest is missing name"
+        version :: version ?? fail "plugin manifest is missing version"
+        api_version :: api_version ?? fail "plugin manifest is missing api_version"
+        declared_digest :: component_digest ?? fail "plugin manifest is missing component_digest"
+        digest :: ContentDigest.parse(declared_digest) catch error { fail "invalid plugin component digest: {error}" }
+        spec :: WasmComponentPluginSpec{name: ^name, version: ^version, api_version: ^api_version, component_digest: digest.as_str().to_string(), requested_caps: ^requested_caps}
+        if spec.api_version != BUILD_PLUGIN_API_VERSION -> fail "unsupported build plugin API {spec.api_version}; expected {BUILD_PLUGIN_API_VERSION}"
+        ^spec
+    }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:179
+fn manifest_line_without_comment(line: String) -> String {
+    quoted := false
+    escaped := false
+    loop (index, ch) in line.char_indices() {
+        if escaped { escaped = false; continue }
+        if ch == {
+            '\\' if quoted -> escaped = true
+            '"' -> quoted = !quoted
+            '#' if !quoted -> return line[..index]
+            else -> {}
+        }
+    }
+    line
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:197
+fn reject_plugin_link(path: OSPath, label: String) -> Unit Err! {
+    // GATE #4494/#4409: native lstat with its original IO error detail.
+    metadata :: fs.symlink_metadata(path) catch error { fail "could not stat plugin {label}: {error}" }
+    if metadata.file_type().is_symlink() || !metadata.is_file() -> fail "plugin {label} must be a regular non-symlink file"
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:209
+pub fn read_packaged_file_bounded(path: OSPath, label: String, limit: USize) -> [U8] Err! {
+    reject_plugin_link(path, label)!
+    metadata :: fs.metadata(path) catch error { fail "could not stat plugin {label}: {error}" }
+    if metadata.len() > U64.from(limit) -> fail "plugin {label} exceeds {limit} bytes"
+    // GATE #4494: descriptor-backed open/read/metadata and scope-close.
+    options := fs.OpenOptions.new()
+    _ :: options.read(true)
+    // GATE #4483: original cfg(unix) dispatch on selected target family.
+    if selected_family() == "unix" -> _ :: options.custom_flags(0o400000 | 0o2000000)
+    file :: options.open(path) catch error { fail "could not read plugin {label}: {error}" }
+    defer -> file.close()
+    opened_metadata :: file.metadata() catch error { fail "could not stat plugin {label}: {error}" }
+    if !opened_metadata.is_file() -> fail "plugin {label} must be a regular file"
+    bytes := [U8].with_capacity(USize.from(metadata.len()))
+    file.take(U64.from(limit.saturating_add(1))).read_to_end(&bytes) catch error { fail "could not read plugin {label}: {error}" }
+    if bytes.len() > limit -> fail "plugin {label} exceeds {limit} bytes"
+    ^bytes
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:249
+fn validate_component_binary(bytes: [U8]) -> Unit Err! {
+    // Rust byte NUL is a byte value, not a Jet text escape.
+    MAGIC :: [U8]{0, 0x61, 0x73, 0x6d}
+    COMPONENT_VERSION :: [U8]{0x0d, 0x00, 0x01, 0x00}
+    if bytes.len() < 8 || bytes[..4] != MAGIC || bytes[4..8] != COMPONENT_VERSION -> fail "plugin component is not a valid WebAssembly Component Model binary"
+    offset := 8 as USize
+    loop offset < bytes.len() {
+        id :: bytes[offset]
+        offset += 1
+        if id > 13 -> fail "plugin component uses unknown section id {id}"
+        length :: USize.from(read_u32_leb(bytes, &offset)!)
+        end :: offset.checked_add(length) ?? fail "plugin component section length overflows"
+        if end > bytes.len() -> fail "plugin component section is truncated"
+        offset = end
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:281
+fn read_u32_leb(bytes: [U8], offset: &USize) -> U32 Err! {
+    value := 0 as U32
+    loop shift in (0..35).step_by(7) {
+        byte :: bytes.get(offset) ?? fail "plugin component section length is truncated"
+        offset += 1
+        if shift == 28 && byte & 0xf0 != 0 -> fail "plugin component section length overflows u32"
+        value |= U32.from(byte & 0x7f) << shift
+        if byte & 0x80 == 0 -> return value
+    }
+    fail "plugin component section length uses an overlong integer"
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:299
+fn manifest_string(value: String, field: String) -> String Err! {
+    trimmed := value.trim() // #4303
+    value := trimmed.strip_prefix('"').and_then(fn(value) { value.strip_suffix('"') }) ?? fail "plugin manifest field {field} must be a quoted string" // #4303
+    if value.is_empty() -> fail "plugin manifest field {field} cannot be empty"
+    out := String.with_capacity(value.len())
+    escaped := false
+    loop ch in value.chars() {
+        if escaped {
+            if ch == { '"', '\\' -> out.push(ch); else -> fail "plugin manifest field {field} contains an unsupported escape" }
+            escaped = false
+        } else if ch == '\\' -> escaped = true
+        else if ch == '"' -> fail "plugin manifest field {field} contains an unescaped quote"
+        else -> out.push(ch)
+    }
+    if escaped -> fail "plugin manifest field {field} ends with an escape"
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:337
+fn manifest_capabilities(value: String) -> BTreeSet<BuildCapability> Err! {
+    value := value.strip_prefix('[').and_then(fn(value) { value.strip_suffix(']') }) ?? fail "plugin manifest abilities must be a list" // #4303
+    // GATE #4499: capability enum order and equality.
+    capabilities := BTreeSet<BuildCapability>.new()
+    loop raw_item in value.split(',') {
+        item := raw_item.trim() // #4303
+        if item.is_empty() -> continue
+        name :: manifest_string(item, "abilities")!
+        capability :: BuildCapability.parse(name) ?? fail "unknown build ability {name}"
+        _ :: capabilities.insert(capability)
+    }
+    ^capabilities
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:357
+#Derive(Debug, Clone, Eq)
+pub struct BuildPlugin {
+    pub id: PluginId, pub name: String, pub version: String, pub api_version: String,
+    pub component_digest: String, pub grants: BTreeSet<BuildCapability>,
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:367
+#Derive(Debug, Clone, Eq)
+pub struct GeneratedModuleSpec { pub name: String, pub path: BuildPath, pub source: String }
+impl GeneratedModuleSpec {
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:374
+    pub fn new(name: String, path: String, source: String) -> GeneratedModuleSpec { GeneratedModuleSpec{name: ^name, path: BuildPath(path), source: ^source} }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:388
+#Derive(Debug, Clone, Eq)
+pub struct BuildGeneratedModule {
+    pub id: GeneratedModuleId, pub name: String, pub path: BuildPath, pub source_digest: ContentDigest,
+    pub source: String, pub plugin: PluginHandle?,
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:398
+#Derive(Debug, Clone, Eq)
+pub struct PluginTargetSpec { pub kind: TargetKind, pub name: String, pub spec: TargetSpec }
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:405
+#Derive(Debug, Clone, Eq)
+pub struct PluginContribution { pub actions: [(String, ActionSpec)], pub targets: [PluginTargetSpec], pub generated_modules: [GeneratedModuleSpec] }
+impl PluginContribution {
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:412
+    pub fn new() -> PluginContribution { PluginContribution{actions: [], targets: [], generated_modules: []} }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:420
+    pub fn with_action(self, name: String, spec: ActionSpec) -> PluginContribution { self.actions.push((^name, ^spec)); ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:425
+    pub fn with_target(self, kind: TargetKind, name: String, spec: TargetSpec) -> PluginContribution { self.targets.push(PluginTargetSpec{kind: kind, name: ^name, spec: ^spec}); ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:439
+    pub fn with_generated_module(self, module: GeneratedModuleSpec) -> PluginContribution { self.generated_modules.push(^module); ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:446
+    pub fn default() -> PluginContribution { PluginContribution.new() }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:457
+#Derive(Debug, Clone, Eq, Default)
+pub struct PackagedPluginContribution { pub actions: [PackagedPluginAction], pub targets: [PackagedPluginTarget], pub generated_modules: [GeneratedModuleSpec] }
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:464
+#Derive(Debug, Clone, Eq)
+pub struct PackagedPluginAction {
+    pub name: String, pub inputs: [String], pub outputs: [String], pub argv: [String],
+    pub env: [String: String], pub env_allowlist: BTreeSet<String>, pub caps: BTreeSet<String>,
+    pub cache: String, pub kind: String, pub toolchain: String?, pub probes: [String],
+    pub signing_identity: String?, pub labels: [String: String], pub helper_versions: [String: String],
+    pub resource_pools: BTreeSet<String>, pub legacy_wrapper: String?, pub variant_identity: String?,
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:485
+#Derive(Debug, Clone, Eq)
+pub struct PackagedPluginTarget {
+    pub kind: String, pub name: String, pub sources: [String], pub inputs: [String], pub outputs: [String],
+    pub deps: [String], pub actions: [String], pub probes: [String], pub toolchain: String?,
+    pub signing_identity: String?, pub metadata: [String: String],
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:498
+pub type PackagedPluginRunner = fn(OSPath, OSPath, WasmComponentPluginSpec, String) -> PackagedPluginContribution Err!
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:501
+// GATE #4494: real per-thread callback slot, never a process-global replacement.
+PACKAGED_PLUGIN_RUNNER :: ThreadLocal<Cell<PackagedPluginRunner?>>.new(fn() { Cell.new(None) })
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:509
+pub fn with_packaged_plugin_runner<R>(runner: PackagedPluginRunner, body: fn() -> R) -> R {
+    previous :: PACKAGED_PLUGIN_RUNNER.with(fn(slot) { slot.replace(Some(runner)) })
+    // Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:513
+    // Scope exit restores the slot on every unwind/error path, including nesting.
+    defer -> PACKAGED_PLUGIN_RUNNER.with(fn(slot) { slot.set(previous) })
+    body()
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:521
+pub fn run_packaged_plugin(manifest_path: OSPath, component_path: OSPath, spec: WasmComponentPluginSpec, manifest_digest: String) -> PackagedPluginContribution Err! {
+    PACKAGED_PLUGIN_RUNNER.with(fn(slot) {
+        runner :: slot.get() ?? fail "packaged build-plugin host is not installed"
+        runner(manifest_path, component_path, spec, manifest_digest)!
+    })!
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:541
+pub fn encode_build_plugin_request(spec: WasmComponentPluginSpec) -> [U8] {
+    caps :: spec.requested_caps.iter().map(fn(cap) { cap.flag() }).collect()
+    "version=1\nname={wire_scalar(spec.name)}\nplugin_version={wire_scalar(spec.version)}\napi_version={wire_scalar(spec.api_version)}\ncomponent_digest={wire_scalar(spec.component_digest)}\ncapabilities={wire_list(caps)}\n".into_bytes()
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:556
+pub fn decode_build_plugin_response(bytes: [U8]) -> PackagedPluginContribution Err! {
+    if bytes.len() > BUILD_PLUGIN_MAX_RESPONSE_BYTES -> fail "build plugin response exceeds {BUILD_PLUGIN_MAX_RESPONSE_BYTES} bytes"
+    text :: String.from_utf8(bytes) catch _ { fail "build plugin response is not UTF-8" }
+    version := None as USize?
+    status := None as String?
+    error := None as String?
+    action_count := None as USize?
+    target_count := None as USize?
+    generated_count := None as USize?
+    actions := [PackagedPluginAction]{}
+    targets := [PackagedPluginTarget]{}
+    generated_modules := [GeneratedModuleSpec]{}
+    top_level_fields := BTreeSet<String>.new()
+    loop line in text.lines() {
+        top_level :: ["version=", "status=", "error=", "actions=", "targets=", "generated="].iter().find(fn(prefix) { line.starts_with(prefix) })
+        if top_level == Some(field) {
+            if !top_level_fields.insert(field) -> fail "build plugin response field {field.trim_end_matches('=')} is declared more than once"
+        }
+        if line.strip_prefix("version=") == Some(value) -> version = Some(parse_wire_count(value, "version")!)
+        else if line.strip_prefix("status=") == Some(value) -> status = Some(value)
+        else if line.strip_prefix("error=") == Some(value) -> error = Some(wire_unscalar(value, "plugin error")!)
+        else if line.strip_prefix("actions=") == Some(value) -> action_count = Some(parse_wire_count(value, "actions")!)
+        else if line.strip_prefix("targets=") == Some(value) -> target_count = Some(parse_wire_count(value, "targets")!)
+        else if line.strip_prefix("generated=") == Some(value) -> generated_count = Some(parse_wire_count(value, "generated")!)
+        else if line.strip_prefix("action\t") == Some(value) -> actions.push(decode_packaged_action(value)!)
+        else if line.strip_prefix("target\t") == Some(value) -> targets.push(decode_packaged_target(value)!)
+        else if line.strip_prefix("generated\t") == Some(value) {
+            fields :: value.split('\t').collect()
+            if fields.len() != 3 -> fail "generated plugin entry needs name, path, and source"
+            generated_modules.push(GeneratedModuleSpec.new(wire_unscalar(fields[0], "generated name")!, wire_unscalar(fields[1], "generated path")!, wire_unscalar(fields[2], "generated source")!))
+        } else if !line.trim().is_empty() -> fail "unknown build plugin response field: {line}"
+    }
+    if version != Some(1) -> fail "unsupported build plugin response version"
+    if status != Some("ok") -> fail (error ?? "build plugin returned a failure")
+    if error != None -> fail "build plugin success response contains an error field"
+    loop (name, count) in [("actions", action_count), ("targets", target_count), ("generated", generated_count)] {
+        if count == Some(count) {
+            if count > BUILD_PLUGIN_MAX_WIRE_ITEMS -> fail "build plugin {name} count exceeds {BUILD_PLUGIN_MAX_WIRE_ITEMS}"
+        }
+    }
+    if action_count != Some(actions.len()) || target_count != Some(targets.len()) || generated_count != Some(generated_modules.len()) -> fail "build plugin response count does not match its entries"
+    PackagedPluginContribution{actions: ^actions, targets: ^targets, generated_modules: ^generated_modules}
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:657
+fn decode_packaged_action(value: String) -> PackagedPluginAction Err! {
+    fields :: value.split('\t').collect()
+    if fields.len() != 17 -> fail "plugin action needs 17 fields"
+    PackagedPluginAction{name: wire_unscalar(fields[0], "action name")!, inputs: wire_unlist(fields[1], "action inputs")!, outputs: wire_unlist(fields[2], "action outputs")!, argv: wire_unlist(fields[3], "action argv")!,
+        env: wire_unmap(fields[4], "action env")!, env_allowlist: wire_unlist(fields[5], "action env allowlist")!.iter().collect(),
+        caps: wire_unlist(fields[6], "action abilities")!.iter().collect(), cache: wire_unscalar(fields[7], "action cache")!, kind: wire_unscalar(fields[8], "action kind")!,
+        toolchain: wire_optional(fields[9], "action toolchain")!, probes: wire_unlist(fields[10], "action probes")!, signing_identity: wire_optional(fields[11], "action signing identity")!,
+        labels: wire_unmap(fields[12], "action labels")!, helper_versions: wire_unmap(fields[13], "action helper versions")!, resource_pools: wire_unlist(fields[14], "action resource pools")!.iter().collect(),
+        legacy_wrapper: wire_optional(fields[15], "action legacy wrapper")!, variant_identity: wire_optional(fields[16], "action variant identity")!}
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:689
+fn decode_packaged_target(value: String) -> PackagedPluginTarget Err! {
+    fields :: value.split('\t').collect()
+    if fields.len() != 11 -> fail "plugin target needs 11 fields"
+    PackagedPluginTarget{kind: wire_unscalar(fields[0], "target kind")!, name: wire_unscalar(fields[1], "target name")!, sources: wire_unlist(fields[2], "target sources")!, inputs: wire_unlist(fields[3], "target inputs")!,
+        outputs: wire_unlist(fields[4], "target outputs")!, deps: wire_unlist(fields[5], "target dependencies")!, actions: wire_unlist(fields[6], "target actions")!, probes: wire_unlist(fields[7], "target probes")!,
+        toolchain: wire_optional(fields[8], "target toolchain")!, signing_identity: wire_optional(fields[9], "target signing identity")!, metadata: wire_unmap(fields[10], "target metadata")!}
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:709
+fn wire_scalar(value: String) -> String { hex_encode(value.as_bytes()) }
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:713
+fn wire_unscalar(value: String, field: String) -> String Err! { String.from_utf8(hex_decode(value)!) catch _ { fail "{field} is not UTF-8" } }
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:717
+fn wire_optional(value: String, field: String) -> String? Err! { if value.is_empty() -> None else -> Some(wire_unscalar(value, field)!) }
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:725
+fn wire_list(values: [String]) -> String {
+    out := "{values.len()}:"
+    loop value in values {
+        bytes :: value.as_bytes()
+        out += "{bytes.len()}:"
+        out += hex_encode(bytes)
+    }
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:738
+fn wire_unlist(value: String, field: String) -> [String] Err! {
+    (count_text, initial_rest) :: value.split_once(':') ?? fail "{field} list has no count"
+    count :: count_text.parse<USize>() catch _ { fail "{field} list count is invalid" }
+    if count > BUILD_PLUGIN_MAX_WIRE_ITEMS -> fail "{field} list contains too many items (maximum {BUILD_PLUGIN_MAX_WIRE_ITEMS})"
+    rest := initial_rest // #4303
+    values := [String].with_capacity(count)
+    loop _ in 0..count {
+        (len_text, next) :: rest.split_once(':') ?? fail "{field} list item has no length"
+        len :: len_text.parse<USize>() catch _ { fail "{field} list item length is invalid" }
+        encoded_len :: len.checked_mul(2) ?? fail "{field} list item length overflows"
+        if next.len() < encoded_len -> fail "{field} list item is truncated"
+        (encoded, tail) :: next.split_at(encoded_len)
+        decoded :: String.from_utf8(hex_decode(encoded)!) catch _ { fail "{field} list item is not UTF-8" }
+        values.push(^decoded)
+        rest = tail
+    }
+    if !rest.is_empty() -> fail "{field} list has trailing bytes"
+    ^values
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:777
+fn wire_map(map: [String: String]) -> String {
+    values := [String].with_capacity(map.len() * 2)
+    keys := map.keys().collect()
+    keys.sort()
+    loop key in keys { values.push(key); values.push(map[key]) }
+    wire_list(values)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:786
+fn wire_unmap(value: String, field: String) -> [String: String] Err! {
+    values :: wire_unlist(value, field)!
+    if values.len() % 2 != 0 -> fail "{field} map has an unpaired value"
+    map := [String: String]{:}
+    loop pair in values.chunks_exact(2) {
+        if map.contains_key(pair[0]) -> fail "{field} map contains a duplicate key"
+        map[pair[0]] = pair[1]
+    }
+    ^map
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:800
+fn parse_wire_count(value: String, field: String) -> USize Err! { value.parse<USize>() catch _ { fail "{field} is not a number" } }
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:806
+fn hex_encode(bytes: [U8]) -> String {
+    out := String.with_capacity(bytes.len() * 2)
+    loop byte in bytes -> out += "{byte:02x}"
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:814
+fn hex_decode(value: String) -> [U8] Err! {
+    if value.len() % 2 != 0 -> fail "plugin wire hex has odd length"
+    bytes :: value.as_bytes()
+    out := [U8].with_capacity(bytes.len() / 2)
+    loop pair in bytes.chunks_exact(2) {
+        high :: Char.from(pair[0]).to_digit(16) ?? fail "plugin wire hex is invalid"
+        low :: Char.from(pair[1]).to_digit(16) ?? fail "plugin wire hex is invalid"
+        out.push(((high << 4) | low) as U8)
+    }
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:834
+#Derive(Debug, Clone, Eq)
+pub struct PluginApplication { pub plugin: PluginHandle, pub actions: [ActionHandle], pub targets: [TargetRef], pub generated_modules: [GeneratedModuleHandle] }

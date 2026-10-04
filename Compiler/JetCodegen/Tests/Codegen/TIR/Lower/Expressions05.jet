@@ -1,0 +1,36 @@
+use jet_foundation.AST.[Expr, Type, Item]
+use jet_foundation.Diagnostics.[Span]
+use jet_codegen.Codegen.Context.[build_cx_items, ExternFn]
+use jet_codegen.Codegen.TIR.[LowerEnv, TExprKind, TStructExtra]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:7060-7101 (behavioral control)
+#Test("struct_http_request_retains_checked_extra_field_fact") {
+    cx :: build_cx_items([Item]{}, "", "struct.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("struct")
+    span := Span.new(0, 1)
+    source := Expr.StructLit{type_name: "HTTPRequest", type_args: [], import_ns: None, as_trait: None, fields: [], inferred: false, span: span}
+    lowered := lower_expr_inner_struct_literal(source, cx, &env)
+    assert(lowered.ty == Type.Named("HTTPRequest"))
+    assert(if lowered.kind == { .StructLit(fields, extra, as_trait) -> fields.is_empty() && extra == Val(TStructExtra.HTTPRequestParams) && as_trait == None else -> false })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:7124-7161,7274-7363 (behavioral control)
+#Test("struct_plain_and_generic_heads_keep_their_type_arguments") {
+    cx :: build_cx_items([Item]{}, "", "struct.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("struct")
+    span := Span.new(0, 1)
+    plain := Expr.StructLit{type_name: "TextWidth", type_args: [], import_ns: None, as_trait: None, fields: [], inferred: false, span: span}
+    plain_value := lower_expr_inner_struct_literal(plain, cx, &env)
+    assert(plain_value.ty == Type.Named("TextWidth"))
+    assert(if plain_value.kind == { .StructLit(fields, extra, as_trait) -> fields.is_empty() && extra == None && as_trait == None else -> false })
+    generic := Expr.StructLit{type_name: "Record", type_args: [Type]{Type.Int}, import_ns: None, as_trait: None, fields: [], inferred: false, span: span}
+    generic_value := lower_expr_inner_struct_literal(generic, cx, &env)
+    assert(generic_value.ty == Type.Apply{name: "Record", args: [Type]{Type.Int}})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:5677-7366 (slice dispatch control)
+#Test("expression_slice_does_not_claim_a_sibling_literal_arm") {
+    cx :: build_cx_items([Item]{}, "", "slice.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("slice")
+    assert(lower_expr_inner_5677_7366(Expr.Bool(true, Span.new(0, 1)), cx, &env) == None)
+}

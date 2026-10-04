@@ -1,0 +1,24 @@
+use jet_comptime.Comptime.Build.ExecutionRuntime.[RemoteAttemptFailure, BuildExecutionError, report_json_string, rebuild_status_reason]
+use jet_comptime.Comptime.Build.CacheCas.[ActionCacheStatus, CacheMissReason, CacheHitReason]
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:42
+#Test("remote_attempt_failure_preserves_retry_class") {
+    terminal := RemoteAttemptFailure.terminal(BuildExecutionError.SandboxUnavailable)
+    retryable := RemoteAttemptFailure.retryable(BuildExecutionError.SandboxUnavailable)
+    converted := RemoteAttemptFailure.from(BuildExecutionError.SandboxUnavailable)
+    assert(!terminal.retryable)
+    assert(retryable.retryable)
+    assert(!converted.retryable)
+    assert(terminal.error is .SandboxUnavailable)
+    assert(retryable.error is .SandboxUnavailable)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:157
+#Test("action_failure_json_string_preserves_escaping") {
+    assert(report_json_string("a\"b\nc\\d") == "\"a\\\"b\\nc\\\\d\"")
+    assert(report_json_string("") == "\"\"")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1675
+#Test("rebuild_status_preserves_miss_and_normalizes_hit") {
+    assert(rebuild_status_reason(ActionCacheStatus.Miss(CacheMissReason.FrontEndIncomplete)) == CacheMissReason.FrontEndIncomplete)
+    assert(rebuild_status_reason(ActionCacheStatus.Hit(CacheHitReason.LocalActionRecordMatched)) == CacheMissReason.NoLocalActionRecord)
+}

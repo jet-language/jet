@@ -1,0 +1,44 @@
+use jet_comptime.Comptime.EmailAdapter.[address_value, address_from_value, attachment_value, attachment_from_value, limits_safe_value, limits_from_value, mailer_value, mailer_handle, evaluate, evaluate_method]
+use jet_codegen.Prelude.CoreLib.Email.jet_email
+use jet_foundation.AST.CtValue
+use jet_foundation.Diagnostics.Span
+
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:161
+#Test("email_address_marshalling_preserves_display_and_mailbox") {
+    span := Span { start: 0, end: 0 }
+    input := jet_email.Address { display: Val("Name"), mailbox: "name@example.com" }
+    decoded := address_from_value(&address_value(&input), span)?
+    assert(decoded.display == input.display)
+    assert(decoded.mailbox == input.mailbox)
+    no_display := jet_email.Address { display: None, mailbox: "name@example.com" }
+    assert(address_from_value(&address_value(&no_display), span)?.display == None)
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:205
+#Test("email_attachment_marshalling_preserves_binary_bytes") {
+    span := Span { start: 0, end: 0 }
+    input := jet_email.Attachment { filename: "data.bin", mime: "application/octet-stream", bytes: [0, 255, 128] }
+    decoded := attachment_from_value(&attachment_value(&input), span)?
+    assert(decoded.filename == input.filename)
+    assert(decoded.mime == input.mime)
+    assert(decoded.bytes == input.bytes)
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:503
+#Test("email_safe_limits_marshalling_preserves_every_limit") {
+    span := Span { start: 0, end: 0 }
+    decoded := limits_from_value(&limits_safe_value(), span)?
+    expected := jet_email.Limits.safe()
+    assert(decoded.max_reply_line_bytes == expected.max_reply_line_bytes)
+    assert(decoded.max_reply_lines == expected.max_reply_lines)
+    assert(decoded.max_capabilities == expected.max_capabilities)
+    assert(decoded.max_recipients == expected.max_recipients)
+    assert(decoded.max_message_bytes == expected.max_message_bytes)
+    assert(decoded.max_auth_challenge_bytes == expected.max_auth_challenge_bytes)
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:638
+#Test("email_mailer_handles_are_one_based_and_dispatch_remains_unclaimed") {
+    span := Span { start: 0, end: 0 }
+    assert(mailer_handle(&mailer_value(0)) == Val(0))
+    assert(mailer_handle(&CtValue.Struct { type_name: "Mailer", fields: [("handle", CtValue.Int(0))] }) == None)
+    assert(evaluate("not-email", &[], span) == None)
+    assert(evaluate_method(&CtValue.Unit, "send", &[], span) == None)
+}

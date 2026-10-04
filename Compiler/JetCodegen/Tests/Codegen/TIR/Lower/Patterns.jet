@@ -1,0 +1,21 @@
+use jet_codegen.AST.[BinOp, Type]
+use jet_codegen.Codegen.TIR.[TExpr, TExprKind]
+use jet_codegen.Codegen.TIR.Lower.Patterns.bool_and_chain
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/patterns.rs:347
+#Test("bool_and_chain_empty_is_true") {
+    result :: bool_and_chain([])
+    assert_eq(result.ty, Type.Bool)
+    assert_eq(result.kind, TExprKind.BoolLit(true))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/patterns.rs:347
+#Test("bool_and_chain_preserves_left_to_right_order") {
+    first :: TExpr{ty: Type.Bool, kind: TExprKind.BoolLit(false)}
+    second :: TExpr{ty: Type.Bool, kind: TExprKind.BoolLit(true)}
+    third :: TExpr{ty: Type.Bool, kind: TExprKind.BoolLit(false)}
+    result :: bool_and_chain([first.clone(), second.clone(), third.clone()])
+    expected :: TExpr{ty: Type.Bool, kind: TExprKind.Binary{op: BinOp.And, overflow: false, line: 0, lhs: first,
+        rhs: TExpr{ty: Type.Bool, kind: TExprKind.Binary{op: BinOp.And, overflow: false, line: 0, lhs: second, rhs: third}}}}
+    assert_eq(result, expected)
+}

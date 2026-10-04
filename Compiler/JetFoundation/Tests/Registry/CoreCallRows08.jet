@@ -1,0 +1,83 @@
+use jet_foundation.[Expr, Type, AccessConvention, CallArg, StrPart, Span]
+use jet_foundation.CompilerStack.[run_on_compiler_stack]
+use jet_foundation.CoreModuleExports.[core_source_module, core_source_owns]
+use jet_lexer.[lex]
+use jet_parser.[parse]
+use JetCodegen.Codegen.Context.[build_cx, CoreSourceFunctionSignature]
+use JetCodegen.Codegen.TIR.[LowerEnv, TExpr, TExprKind, TCallArg, TModuleCallForm]
+use JetCodegen.Codegen.TIR.Lower.MethodCalls.[lower_core_source_call, checked_core_source_call_signature, demand_core_source_generic_function]
+use jet_syntax as Syntax
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:13535
+#Test("imported_core_source_call_uses_checked_module_member_identity") {
+    run_on_compiler_stack(fn() {
+        source_text :: "fn run() {}"
+        (tokens, diagnostics) :: lex(source_text)
+        assert(diagnostics.is_empty(), "lex errors: {diagnostics:?}")
+        program :: parse(tokens).expect("parse failed")
+        cx := build_cx(program, source_text, "caller.jet")
+        cx.module_alias = "caller"
+        module :: "core.http.client"
+        method :: "request"
+        source_module :: core_source_module(module).expect("HTTP client source module")
+        assert(core_source_owns(module, method), "the source module must own the checked request wrapper")
+        &cx.core_source_modules.insert(module, source_module.alias)
+        checked_module_identity :: "source-package::Core/http/client.jet"
+        &cx.core_source_sigs.insert((module, method), CoreSourceFunctionSignature{module_identity: checked_module_identity, type_params: [],
+            params: [(AccessConvention.Move, Type.String), (AccessConvention.Move, Type.String)], return_type: Val(Type.Named("HTTPRequest"))})
+        span :: Span{start: 0, end: 0}
+        string_arg :: fn(text: String) -> CallArg {
+            CallArg{convention: AccessConvention.Move, expr: Expr.Str([StrPart.Lit(text)], span), span: span, flags: Default.default(), label: None, spread: false}
+        }
+        args :: [string_arg("GET"), string_arg("http://example.test")]
+        env := LowerEnv.new("run")
+        resolved_return :: Type.Named("HTTPRequest")
+        lowered :: lower_core_source_call(span, module, method, [], Val(resolved_return), args, cx, &env).expect("owned Core source calls use the source-module route")
+        if lowered.kind == .ModuleCall{form: TModuleCallForm.Qualified{rust_mod, rust_fn}, ..} -> {
+            assert("{rust_mod}::{rust_fn}" == "source-package::Core/http/client.jet::request", "MIR resolves imported Core calls by their sema-qualified function key")
+        } else -> panic("expected the checked Core source module call")
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:13610
+#Test("checked_source_callback_parameter_uses_effective_failure_carrier") {
+    run_on_compiler_stack(fn() {
+        source_text :: "fn run() {}"
+        (tokens, diagnostics) :: lex(source_text)
+        assert(diagnostics.is_empty(), "lex errors: {diagnostics:?}")
+        program :: parse(tokens).expect("parse failed")
+        cx :: build_cx(program, source_text, "caller.jet")
+        callback :: Type.Fn{params: [], ret: Val(Type.String), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+        signature :: CoreSourceFunctionSignature{module_identity: "source-package::Core/web/query.jet", type_params: [], params: [(AccessConvention.Move, callback)], return_type: None}
+        params :: checked_core_source_call_signature(cx, signature, [])
+        if params[0].1 == .Fn{ret: Val(ret), ..} -> {
+            if ret == .Result(ok, err) -> {
+                assert(ok == Type.String)
+                assert(err == Type.Named(Syntax.TYPE_ERR), "callback error ABI must preserve the checked Jet error domain")
+            } else -> panic("checked Core callback return must use the shared failure carrier")
+        } else -> panic("checked Core callback parameter must remain a function type")
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:13652
+#Test("checked_source_generic_call_records_canonical_concrete_instance") {
+    run_on_compiler_stack(fn() {
+        source_text :: "fn run() {}"
+        (tokens, diagnostics) :: lex(source_text)
+        assert(diagnostics.is_empty(), "lex errors: {diagnostics:?}")
+        program :: parse(tokens).expect("parse failed")
+        cx :: build_cx(program, source_text, "caller.jet")
+        owner :: "source-package::Core/data/data.jet"
+        signature :: CoreSourceFunctionSignature{module_identity: owner, type_params: ["T"],
+            params: [(AccessConvention.Move, Type.String), (AccessConvention.Move, Type.List(Type.String)), (AccessConvention.Move, Type.String), (AccessConvention.Move, Type.Named("DataLimits"))],
+            return_type: Val(Type.Apply("DataLoader", [Type.Named("T")]))}
+        argument :: fn(ty: Type) -> TCallArg {
+            TCallArg{value: TExpr{ty: ty, kind: TExprKind.DefaultLit}, template_items: None, borrow: false, mut_borrow: false, clone: false, arc_clone: false,
+                fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None}
+        }
+        args :: [argument(Type.String), argument(Type.List(Type.String)), argument(Type.String), argument(Type.Named("DataLimits"))]
+        instance :: demand_core_source_generic_function(cx, "database", signature, args, [Type.String]).expect("checked generic arguments produce a concrete source instance")
+        assert(instance == "database__generic__String")
+        assert(cx.jit_core_source_generic_calls.borrow().get((owner, "database")) == Val([[Type.String]]), "the demand retains its canonical checked source owner")
+    })
+}

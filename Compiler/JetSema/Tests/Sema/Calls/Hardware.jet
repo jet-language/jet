@@ -1,0 +1,13 @@
+use jet_foundation.[Expr, Span]
+use JetSema.Sema.Calls.Hardware.[checker_hardware_path]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:8396-8423 (same-module behavioral controls; no inline Rust tests)
+#Test("hardware_path_requires_a_board_import_root") {
+    span :: Span.new(0, 1)
+    path :: Expr.Field(Expr.Paren(Expr.Ident("board", span), span), "register", span)
+    imports :: [String:String]{"board": "board.sample", "io": "core.io"}
+    assert(checker_hardware_path(path, imports) == Val([String]{"board", "register"}))
+    assert(checker_hardware_path(Expr.Field(Expr.Ident("io", span), "register", span), imports) == None)
+    assert(checker_hardware_path(Expr.Ident("unknown", span), imports) == None)
+    assert(checker_hardware_path(Expr.Int(1, span, None, None), imports) == None)
+}

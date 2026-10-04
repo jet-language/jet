@@ -1,1791 +1,722 @@
-// PORT-PENDING 0486 crates-jet-codegen-src-codegen-tir-lower-method-calls-slice-1793: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1793-3579
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn lower_core_string_source_call(
-//RS     receiver: &Expr,
-//RS     method_span: Span,
-//RS     method: &str,
-//RS     type_args: &[Type],
-//RS     args: &[crate::AST::CallArg],
-//RS     recv_type: &Option<String>,
-//RS     resolved_ret: Option<&Type>,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS     lowered_receiver: Option<TExpr>,
-//RS ) -> Option<TExpr> {
-//RS     if recv_type.as_deref() != Some(crate::Syntax::TYPE_STRING)
-//RS         || !cx
-//RS             .core_source_sigs
-//RS             .contains_key(&(
-//RS                 jet_foundation::CoreSourceParts::CORE_TEXT_STRING_MODULE.to_string(),
-//RS                 method.to_string(),
-//RS             ))
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let module = jet_foundation::CoreSourceParts::CORE_TEXT_STRING_MODULE;
-//RS     if !cx.core_source_modules.contains_key(module) {
-//RS         return Some(invariant_method_expr(
-//RS             method_span,
-//RS             "private String source module is not loaded",
-//RS         ));
-//RS     }
-//RS     let Some(source_signature) = cx
-//RS         .core_source_sigs
-//RS         .get(&(module.to_string(), method.to_string()))
-//RS     else {
-//RS         return Some(invariant_method_expr(
-//RS             method_span,
-//RS             "private String source method has no loaded signature",
-//RS         ));
-//RS     };
-//RS     let Some((receiver_convention, receiver_ty)) = source_signature.params.first() else {
-//RS         return Some(invariant_method_expr(
-//RS             method_span,
-//RS             "source String method has no receiver parameter",
-//RS         ));
-//RS     };
-//RS     if !matches!(receiver_ty, Type::String) {
-//RS         return Some(invariant_method_expr(
-//RS             method_span,
-//RS             "source String method receiver is not canonical String",
-//RS         ));
-//RS     }
-//RS     let receiver = lowered_receiver.unwrap_or_else(|| lower_expr(receiver, cx, env));
-//RS     let mut receiver_arg = TCallArg {
-//RS         value: receiver,
-//RS         template_items: None,
-//RS         borrow: false,
-//RS         mut_borrow: false,
-//RS         clone: false,
-//RS         arc_clone: false,
-//RS         fn_coerce: None,
-//RS         widen_to_vec: false,
-//RS         widen_to_union: None,
-//RS         box_as_trait: None,
-//RS     };
-//RS     if *receiver_convention == AccessConvention::Read && !receiver_ty.is_scalar() {
-//RS         receiver_arg.borrow = true;
-//RS     } else if *receiver_convention == AccessConvention::Write {
-//RS         receiver_arg.mut_borrow = true;
-//RS     }
-//RS     let mut lowered_args = vec![receiver_arg];
-//RS     lowered_args.extend(lower_module_args(
-//RS         args,
-//RS         source_signature.params.get(1..),
-//RS         env,
-//RS         cx,
-//RS     ));
-//RS     let Some(ty) = resolved_ret.cloned() else {
-//RS         return Some(invariant_method_expr(
-//RS             method_span,
-//RS             "source String method has no resolved return type",
-//RS         ));
-//RS     };
-//RS     let target_return = match module_call_target_return(cx, Some(&ty)) {
-//RS         Ok(target_return) => Some(target_return),
-//RS         Err(error) => return Some(invariant_method_expr(method_span, error)),
-//RS     };
-//RS     Some(TExpr {
-//RS         ty,
-//RS         kind: TExprKind::ModuleCall {
-//RS             form: core_source_module_target(source_signature, method),
-//RS             target_return,
-//RS             type_args: type_args.to_vec(),
-//RS             args: lowered_args,
-//RS         },
-//RS     })
-//RS }
-//RS 
-//RS /// A prelude/host static-call owner whose path is prefixed by the generated
-//RS /// crate root (`{root}jet_std::…`).
-//RS fn reduce_op_name(expr: &Expr) -> Option<String> {
-//RS     match expr {
-//RS         Expr::ReduceMarker(name, _) => Some(name.clone()),
-//RS         Expr::EnumLit {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS             ..
-//RS         } if (type_name.is_empty() || type_name == crate::Syntax::TYPE_REDUCE_OP)
-//RS             && args.is_empty() =>
-//RS         {
-//RS             Some(variant.clone())
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn rooted_owner(path: impl Into<String>) -> TStaticOwner {
-//RS     TStaticOwner::Prelude {
-//RS         rooted: true,
-//RS         path: path.into(),
-//RS         generics: Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS /// The same, with resolved generic arguments the emitter spells.
-//RS fn rooted_generic_owner(path: impl Into<String>, generics: Vec<TPreludeArg>) -> TStaticOwner {
-//RS     TStaticOwner::Prelude {
-//RS         rooted: true,
-//RS         path: path.into(),
-//RS         generics,
-//RS     }
-//RS }
-//RS 
-//RS /// The same, with resolved generic arguments the emitter spells.
-//RS fn host_generic_owner(path: impl Into<String>, generics: Vec<TPreludeArg>) -> TStaticOwner {
-//RS     TStaticOwner::Prelude {
-//RS         rooted: false,
-//RS         path: path.into(),
-//RS         generics,
-//RS     }
-//RS }
-//RS 
-//RS /// A String rvalue with no view provenance can transfer its buffer directly to
-//RS /// `Vec<u8>`. Places stay on the borrowing helper so the source remains usable.
-//RS fn string_bytes_receiver_is_owned(receiver: &TExpr, cx: &Cx) -> bool {
-//RS     if !matches!(&receiver.ty, Type::String) {
-//RS         return false;
-//RS     }
-//RS     match &receiver.kind {
-//RS         TExprKind::StrLit(_)
-//RS         | TExprKind::Clone(..)
-//RS         | TExprKind::ExplicitCopy(_)
-//RS         | TExprKind::MaterializeView(_) => true,
-//RS         TExprKind::Call { name, .. } => {
-//RS             let Some(Type::Fn {
-//RS                 return_view_provenance,
-//RS                 ..
-//RS             }) = cx.fn_types.get(name)
-//RS             else {
-//RS                 return false;
-//RS             };
-//RS             !return_view_provenance
-//RS                 .as_ref()
-//RS                 .is_some_and(|provenance| !provenance.is_empty())
-//RS         }
-//RS         TExprKind::BuiltinMethod { op, .. } => !matches!(
-//RS             op,
-//RS             TBuiltinOp::TrimView | TBuiltinOp::AfterView | TBuiltinOp::BeforeView
-//RS         ),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn builtin_arg_takes_ownership(op: &TBuiltinOp, index: usize) -> bool {
-//RS     match op {
-//RS         TBuiltinOp::Push
-//RS         | TBuiltinOp::TryPush
-//RS         | TBuiltinOp::TryStringPush
-//RS         | TBuiltinOp::Intersperse
-//RS         | TBuiltinOp::SetInsert
-//RS         | TBuiltinOp::SortedSetInsert
-//RS         | TBuiltinOp::BagAdd
-//RS         | TBuiltinOp::DequePushFront
-//RS         | TBuiltinOp::DequePushBack => index == 0,
-//RS         TBuiltinOp::InsertMap
-//RS         | TBuiltinOp::TryInsertMap
-//RS         | TBuiltinOp::AddNewMap
-//RS         | TBuiltinOp::MapSetDefault
-//RS         | TBuiltinOp::InsertList => index == 1,
-//RS         TBuiltinOp::LruPut | TBuiltinOp::LruAddNew => index < 2,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS fn builtin_arg_is_place(expr: &Expr) -> bool {
-//RS     matches!(
-//RS         expr.without_parens(),
-//RS         Expr::Ident(..) | Expr::Field(..) | Expr::Index { .. }
-//RS     )
-//RS }
-//RS 
-//RS fn lower_builtin_arg(
-//RS     arg: &crate::AST::CallArg,
-//RS     expected: Option<&Type>,
-//RS     owns_value: bool,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS ) -> TExpr {
-//RS     let mut value = if owns_value {
-//RS         lower_owned_expr(&arg.expr, cx, env)
-//RS     } else {
-//RS         lower_expr(&arg.expr, cx, env)
-//RS     };
-//RS     if let Some(expected) = expected {
-//RS         if matches!(expected, Type::List(_) | Type::FixedList { .. })
-//RS             && crate::Generics::free_type_params(expected).is_empty()
-//RS         {
-//RS             value = preserve_typed_list_shape(value, expected, cx);
-//RS         }
-//RS         // `None` carries only the `Int` placeholder; the collection's
-//RS         // element slot (`[T?].push(None)`) names its option type.
-//RS         if matches!(value.kind, TExprKind::Absent)
-//RS             && matches!(expected, Type::Option(_))
-//RS             && crate::Generics::free_type_params(expected).is_empty()
-//RS         {
-//RS             value.ty = expected.clone();
-//RS         }
-//RS     }
-//RS 
-//RS     // Builtins store values directly in Rust collections, unlike ordinary call
-//RS     // arguments whose `TCallArg` carries the implicit-clone bit to emission.
-//RS     // Preserve Jet's read-by-value argument semantics at this plain-argument
-//RS     // boundary: places are copied before a storing builtin consumes them. An
-//RS     // argument the builtin only reads is never copied here: emission borrows
-//RS     // it where the kernel borrows and copies it only where the kernel owns it.
-//RS     let resource_take = matches!(&value.kind, TExprKind::ResourceTake(_));
-//RS     let already_owned = matches!(
-//RS         &value.kind,
-//RS         TExprKind::Clone(..)
-//RS             | TExprKind::ExplicitCopy(_)
-//RS             | TExprKind::MaterializeView(_)
-//RS             | TExprKind::ResourceTake(_)
-//RS     );
-//RS     if owns_value
-//RS         && !resource_take
-//RS         && !already_owned
-//RS         && (arg.flags.implicit_clone || builtin_arg_is_place(&arg.expr))
-//RS         && !value.ty.is_scalar()
-//RS     {
-//RS         let ty = value.ty.clone();
-//RS         env.note_clone(&ty);
-//RS         value = TExpr {
-//RS             ty,
-//RS             kind: TExprKind::Clone(Box::new(value), jet_foundation::MIR::MirCopyFact::Materialize),
-//RS         };
-//RS     }
-//RS     value
-//RS }
-//RS 
-//RS fn core_widen_to_vec(module: &str, method: &str, args: &[TExpr]) -> Vec<bool> {
-//RS     if module == "core.term"
-//RS         && method == "progress"
-//RS         && matches!(
-//RS             args.first().map(|arg| &arg.ty),
-//RS             Some(Type::FixedList { .. })
-//RS         )
-//RS     {
-//RS         return std::iter::once(true)
-//RS             .chain(std::iter::repeat(false).take(args.len().saturating_sub(1)))
-//RS             .collect();
-//RS     }
-//RS     let params = crate::Sema::core_fixed_sig(module, method)
-//RS         .map(|(params, _)| params)
-//RS         .unwrap_or_default();
-//RS     args.iter()
-//RS         .enumerate()
-//RS         .map(|(index, arg)| {
-//RS             matches!(
-//RS                 (&arg.ty, params.get(index).map(|(_, ty)| ty)),
-//RS                 (Type::FixedList { elem: actual, .. }, Some(Type::List(want)))
-//RS                     if fixed_list_elem_compatible(actual, want)
-//RS             )
-//RS         })
-//RS         .collect()
-//RS }
-//RS fn normalize_http_cors_policy_args(args: &mut Vec<TExpr>) {
-//RS     if args.first().is_none() {
-//RS         return;
-//RS     }
-//RS     let list_ty = Type::List(Box::new(Type::String));
-//RS     let empty_list = || TExpr {
-//RS         ty: list_ty.clone(),
-//RS         kind: TExprKind::ListLit(Vec::new()),
-//RS     };
-//RS     let origins = args[0].clone();
-//RS     let (origins_mode, origins_value) = match &origins.kind {
-//RS         TExprKind::EnumLit {
-//RS             variant,
-//RS             payload: TEnumPayload::Unit,
-//RS             ..
-//RS         } if variant == "Any" => (
-//RS             TExpr {
-//RS                 ty: Type::Int,
-//RS                 kind: TExprKind::IntLit(0, None),
-//RS             },
-//RS             empty_list(),
-//RS         ),
-//RS         TExprKind::EnumLit {
-//RS             variant,
-//RS             payload: TEnumPayload::Positional(values),
-//RS             ..
-//RS         } if variant == "List" && values.len() == 1 => (
-//RS             TExpr {
-//RS                 ty: Type::Int,
-//RS                 kind: TExprKind::IntLit(1, None),
-//RS             },
-//RS             values[0].value.clone(),
-//RS         ),
-//RS         _ => (
-//RS             TExpr {
-//RS                 ty: Type::Int,
-//RS                 kind: TExprKind::IntLit(1, None),
-//RS             },
-//RS             origins,
-//RS         ),
-//RS     };
-//RS     let methods = args.get(1).cloned().unwrap_or_else(|| empty_list());
-//RS     let headers = args.get(2).cloned().unwrap_or_else(|| empty_list());
-//RS     let credentials = args.get(3).cloned().unwrap_or(TExpr {
-//RS         ty: Type::Bool,
-//RS         kind: TExprKind::BoolLit(false),
-//RS     });
-//RS     let max_age = args.get(4).cloned().unwrap_or(TExpr {
-//RS         ty: Type::Int,
-//RS         kind: TExprKind::IntLit(86_400, None),
-//RS     });
-//RS     *args = vec![
-//RS         origins_mode,
-//RS         origins_value,
-//RS         methods,
-//RS         headers,
-//RS         credentials,
-//RS         TExpr {
-//RS             ty: Type::Int,
-//RS             kind: TExprKind::IntLit(1, None),
-//RS         },
-//RS         max_age,
-//RS     ];
-//RS }
-//RS fn normalize_http_static_files_args(args: &mut Vec<TExpr>) {
-//RS     while args.len() < 6 {
-//RS         args.push(TExpr {
-//RS             ty: Type::Option(Box::new(Type::Bool)),
-//RS             kind: TExprKind::Absent,
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS fn vault_instance_helper(kind: &str, method: &str) -> Option<&'static str> {
-//RS     match (kind, method) {
-//RS         ("WrappedVaultKey", "bytes") => Some("__vault_wrapped_bytes"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn lower_data_schema_call(
-//RS     receiver: &Expr,
-//RS     method: &str,
-//RS     method_span: Span,
-//RS     args: &[crate::AST::CallArg],
-//RS     resolved_ret: Option<&Type>,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS ) -> Option<TExpr> {
-//RS     let Some(Type::List(column)) = resolved_ret else {
-//RS         return None;
-//RS     };
-//RS     if column.base_name() != Some("DataColumn") {
-//RS         return None;
-//RS     }
-//RS     let target = core_module_path_from_receiver(receiver, cx, env)
-//RS         .map(|module| (module, method.to_string()))
-//RS         .or_else(|| match receiver {
-//RS             Expr::Ident(alias, _) if !env.locals.contains_key(alias) => cx
-//RS                 .inline_reexport_core
-//RS                 .get(&(alias.clone(), method.to_string()))
-//RS                 .cloned(),
-//RS             _ => None,
-//RS         })?;
-//RS     if target.0 != "core.data" || target.1 != "schema" {
-//RS         return None;
-//RS     }
-//RS     let [arg] = args else {
-//RS         return Some(invariant_method_expr(
-//RS             method_span,
-//RS             "data.schema without one checked list argument",
-//RS         ));
-//RS     };
-//RS     let input = lower_expr(&arg.expr, cx, env);
-//RS     let elem = match &input.ty {
-//RS         Type::List(elem) | Type::FixedList { elem, .. } => elem.as_ref(),
-//RS         _ => {
-//RS             return Some(invariant_method_expr(
-//RS                 method_span,
-//RS                 "data.schema without a checked row type",
-//RS             ));
-//RS         }
-//RS     };
-//RS     let row = |name: &str| {
-//RS         Some((
-//RS             cx.struct_type_param_order
-//RS                 .get(name)
-//RS                 .cloned()
-//RS                 .unwrap_or_default(),
-//RS             cx.struct_fields.get(name)?.clone(),
-//RS         ))
-//RS     };
-//RS     let Some(columns) = crate::Comptime::DataPipeline::schema_columns_for_type(elem, true, &row)
-//RS     else {
-//RS         return Some(invariant_method_expr(
-//RS             method_span,
-//RS             "data.schema without resolved row type arguments",
-//RS         ));
-//RS     };
-//RS     // Schema is checked type metadata, including when the list is empty.
-//RS     // Keep argument effects, but do not copy a stored list just to inspect its type.
-//RS     let input = if matches!(
-//RS         &input.kind,
-//RS         TExprKind::Local(_) | TExprKind::Field { .. } | TExprKind::Index { .. }
-//RS     ) {
-//RS         TExpr {
-//RS             ty: input.ty.clone(),
-//RS             kind: TExprKind::Borrow {
-//RS                 place: Box::new(input),
-//RS                 mutable: false,
-//RS             },
-//RS         }
-//RS     } else {
-//RS         input
-//RS     };
-//RS     let ty = Type::List(column.clone());
-//RS     Some(TExpr {
-//RS         ty: ty.clone(),
-//RS         kind: TExprKind::InlineBlock(vec![
-//RS             TStmt::ExprStmt(input),
-//RS             TStmt::ExprStmt(TExpr {
-//RS                 ty,
-//RS                 kind: TExprKind::CtLit(crate::AST::CtValue::List(columns)),
-//RS             }),
-//RS         ]),
-//RS     })
-//RS }
-//RS 
-//RS /// Lower the vault key-wrap carrier's byte view without retaining the full
-//RS /// dispatcher frame while the receiver itself is lowered.
-//RS fn lower_vault_instance_fast(
-//RS     receiver: &Expr,
-//RS     method: &str,
-//RS     method_span: Span,
-//RS     recv_type: &Option<String>,
-//RS     resolved_ret: Option<&Type>,
-//RS     lowered_receiver: &mut Option<TExpr>,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS ) -> Option<TExpr> {
-//RS     if static_call_type_name_lower(receiver, env).is_some() {
-//RS         return None;
-//RS     }
-//RS     if matches!(receiver, Expr::Ident(name, _) if env.is_gc(name)) {
-//RS         return None;
-//RS     }
-//RS     let kind = recv_type.as_deref()?.rsplit('.').next()?;
-//RS     let helper = vault_instance_helper(kind, method)?;
-//RS     let recv = lowered_receiver
-//RS         .take()
-//RS         .unwrap_or_else(|| lower_expr(receiver, cx, env));
-//RS     let args = vec![recv];
-//RS     let widen_to_vec = core_widen_to_vec("core.crypto", helper, &args);
-//RS     let ty = match resolved_ret.cloned() {
-//RS         Some(ty) => ty,
-//RS         None => {
-//RS             return Some(invariant_method_expr(
-//RS                 method_span,
-//RS                 "crypto instance call without a resolved return type",
-//RS             ));
-//RS         }
-//RS     };
-//RS     let record = match checked_core_record("core.crypto", helper, args.len(), method_span) {
-//RS         Ok(record) => record,
-//RS         Err(expr) => return Some(expr),
-//RS     };
-//RS     Some(TExpr {
-//RS         ty: ty.clone(),
-//RS         kind: TExprKind::CoreCall {
-//RS             record,
-//RS             args,
-//RS             source_span: method_span,
-//RS             type_args: Vec::new(),
-//RS             widen_to_vec,
-//RS             data_plan: None,
-//RS             fallibility: TFailureCarrier::from_checked_type(&ty),
-//RS         },
-//RS     })
-//RS }
-//RS 
-//RS /// D-SERDE2=A / I9: project a codec owner onto its canonical bundle identity.
-//RS ///
-//RS /// A codec instance is keyed by the OWNER TYPE — `cx.rust_type` for AOT, the JIT
-//RS /// program's function table for the resident tier, and `serde_codec` for the TIR
-//RS /// evaluator all spell it `Owner::encode` / `Owner::decode`. Every imported
-//RS /// nominal in TIR is spelled by its canonical identity: `register_imported_struct_shapes`
-//RS /// registers it that way, and the struct-literal head resolves `alias.Type` through
-//RS /// `foreign_type_identity` (it ICEs rather than keep the alias spelling). A LOCAL
-//RS /// struct's declared field type is the one place the source spelling survives —
-//RS /// `struct ImportedEnvelope { badge: library.Badge }` stores `library.Badge`
-//RS /// verbatim — so a field read reaches this node under a spelling no codec is
-//RS /// keyed by, and the evaluator refuses it with E0956 while AOT emits fine.
-//RS /// Resolve it here, through the one resolver that splits an alias off a qualified
-//RS /// name, so one type demands exactly one codec in every tier. `cx.rust_type`
-//RS /// renders both spellings to the same Rust path (`Context.rs` foreign-identity arm
-//RS /// and dotted-alias arm), so AOT emit is unchanged.
-//RS ///
-//RS /// A bare name is left alone unless the declaring context has already recorded
-//RS /// its canonical module identity. Imported generated codecs are lowered under
-//RS /// that identity, while their checked method bodies still carry source-local
-//RS /// field spellings (for example `Expr` inside `Dual`). Resolve that local
-//RS /// spelling before emitting a codec demand; core codec owners have no local
-//RS /// identity and therefore keep the existing builtin path.
-//RS fn canonical_codec_owner(ty: &Type, cx: &Cx) -> Type {
-//RS     let Type::Named(name) = ty else {
-//RS         return ty.clone();
-//RS     };
-//RS     if let Some(identity) = cx.local_type_identities.get(name) {
-//RS         return Type::Named(identity.clone());
-//RS     }
-//RS     if !name.contains('.') {
-//RS         return ty.clone();
-//RS     }
-//RS     match cx.imported_type_metadata_name(name) {
-//RS         Some(identity) if identity != *name => Type::Named(identity),
-//RS         _ => ty.clone(),
-//RS     }
-//RS }
-//RS 
-//RS /// Return the nominal identity used by the checked method target rows. Entry
-//RS /// locals keep their source leaf; imported and canonical receivers use the
-//RS /// NameLedger identity already shared by field/type lowering. An imported
-//RS /// nominal also has a leaf row in `local_type_identities`, so only a leaf the
-//RS /// entry itself declares maps back: Core `URL`'s canonical receiver must keep
-//RS /// its identity, or the call names a bare `URL::method` no module declares.
-//RS fn canonical_method_target_owner(cx: &Cx, name: &str) -> String {
-//RS     if cx.jit_local_call_prefix.is_none() {
-//RS         if cx.local_type_names.contains(name) {
-//RS             return name.to_string();
-//RS         }
-//RS         if let Some((leaf, _)) = cx.local_type_identities.iter().find(|(leaf, identity)| {
-//RS             identity.as_str() == name && cx.local_type_names.contains(leaf.as_str())
-//RS         }) {
-//RS             return leaf.clone();
-//RS         }
-//RS     }
-//RS     crate::Codegen::TIR::canonical_enum_owner(cx, name)
-//RS }
-//RS 
-//RS fn canonicalize_method_receiver_type(ty: &mut Type, owner: &str) {
-//RS     match ty {
-//RS         Type::Named(name) | Type::Apply { name, .. } => *name = owner.to_string(),
-//RS         Type::Tagged { inner, .. } => canonicalize_method_receiver_type(inner, owner),
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS /// Return the checked Prelude codec owner for the closed builtin set. Qualified
-//RS /// imports are canonicalized before this helper runs; arbitrary dotted user
-//RS /// names must never become builtin codecs by leaf-name coincidence.
-//RS pub(crate) fn builtin_codec_name(ty: &Type) -> Option<&str> {
-//RS     match ty.without_user_tags() {
-//RS         Type::Named(name)
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration" | "Decimal"
-//RS             ) =>
-//RS         {
-//RS             Some(name.as_str())
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn generic_method_instance_leaf(owner: &Type, method: &str, type_args: &[Type]) -> String {
-//RS     let key = crate::Codegen::TIR::generic_method_instance_key(owner, method, type_args);
-//RS     key.rsplit_once("::")
-//RS         .expect("generic method key includes an owner separator")
-//RS         .1
-//RS         .to_string()
-//RS }
-//RS 
-//RS fn lower_serde_encode_node(mut recv: TExpr, cx: &Cx) -> TExpr {
-//RS     recv.ty = canonical_codec_owner(&recv.ty, cx);
-//RS     if matches!(&recv.ty, Type::Apply { .. }) {
-//RS         cx.jit_method_calls.borrow_mut().insert(
-//RS             crate::Codegen::TIR::generic_method_instance_key(&recv.ty, "encode", &[]),
-//RS             (recv.ty.clone(), "encode".to_string(), Vec::new()),
-//RS         );
-//RS     }
-//RS     TExpr {
-//RS         ty: Type::Named(Syntax::TYPE_DATA.to_string()),
-//RS         kind: TExprKind::HandleMethod {
-//RS             recv: Box::new(recv),
-//RS             op: THandleOp::SerdeEncode,
-//RS             args: Vec::new(),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn lower_datatree_decode_node(
-//RS     recv: TExpr,
-//RS     target: Type,
-//RS     resolved_ret: Option<&Type>,
-//RS     _method_span: Span,
-//RS     cx: &Cx,
-//RS ) -> TExpr {
-//RS     let target = canonical_codec_owner(&target, cx);
-//RS     if matches!(&target, Type::Apply { .. }) {
-//RS         cx.jit_method_calls.borrow_mut().insert(
-//RS             crate::Codegen::TIR::generic_method_instance_key(&target, "decode", &[]),
-//RS             (target.clone(), "decode".to_string(), Vec::new()),
-//RS         );
-//RS     }
-//RS     // Compiler-generated Codable bodies are lowered before sema writes
-//RS     // `resolved_ret`. The explicit target type argument is the same checked
-//RS     // fact; synthesize the Result carrier so fragment eval does not refuse.
-//RS     let ty = match resolved_ret.cloned() {
-//RS         Some(ty) => ty,
-//RS         None => Type::Result {
-//RS             ok: Box::new(target.clone()),
-//RS             err: Box::new(Type::Named(Syntax::TYPE_ENCODING_ERROR.to_string())),
-//RS         },
-//RS     };
-//RS     TExpr {
-//RS         ty,
-//RS         kind: TExprKind::HandleMethod {
-//RS             recv: Box::new(recv),
-//RS             op: THandleOp::DataTreeDecode(target),
-//RS             args: Vec::new(),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn zip_family_mode(method: &str) -> crate::Codegen::TIR::TZipMode {
-//RS     match method {
-//RS         "zip_short" => crate::Codegen::TIR::TZipMode::Short,
-//RS         "zip_pad" => crate::Codegen::TIR::TZipMode::Pad,
-//RS         _ => crate::Codegen::TIR::TZipMode::Strict,
-//RS     }
-//RS }
-//RS 
-//RS fn zip_tuple_fields(ty: &Type) -> Option<Vec<(String, Type)>> {
-//RS     let inner = match ty {
-//RS         Type::List(inner) => inner.as_ref(),
-//RS         Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => &args[0],
-//RS         _ => return None,
-//RS     };
-//RS     match inner {
-//RS         Type::Tuple(fields) => Some(
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|(name, ty)| (name.clone(), (**ty).clone()))
-//RS                 .collect(),
-//RS         ),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn zip_sequence_type(ty: &Type) -> bool {
-//RS     match ty {
-//RS         Type::Tagged { inner, .. } => zip_sequence_type(inner),
-//RS         Type::List(_) | Type::FixedList { .. } => true,
-//RS         Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => true,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn zip_field_name(index: usize, label: Option<&str>) -> String {
-//RS     label.map_or_else(
-//RS         || {
-//RS             ["a", "b", "c", "d", "e", "f"]
-//RS                 .get(index)
-//RS                 .map_or_else(|| format!("column_{index}"), |name| (*name).to_string())
-//RS         },
-//RS         str::to_string,
-//RS     )
-//RS }
-//RS 
-//RS /// Build one typed zip-family TIR node. The emitter composes this node's
-//RS /// inputs through the shared binary Prelude primitives; the node itself still
-//RS /// carries the complete variadic contract.
-//RS pub(crate) fn lower_zip_family(
-//RS     receiver: TExpr,
-//RS     inputs: Vec<TExpr>,
-//RS     fills: Vec<TExpr>,
-//RS     fields: Vec<String>,
-//RS     method: &str,
-//RS     method_span: Span,
-//RS     resolved_ret: Option<&Type>,
-//RS ) -> TExpr {
-//RS     let Some(ret) = resolved_ret.cloned() else {
-//RS         return invariant_method_expr(method_span, "zip call without a resolved return type");
-//RS     };
-//RS     let input_count = inputs.len() + 1;
-//RS     if input_count == 1 {
-//RS         if crate::Collections::is_iter_type(&receiver.ty) {
-//RS             return receiver;
-//RS         }
-//RS         return TExpr {
-//RS             ty: ret,
-//RS             kind: TExprKind::BuiltinMethod {
-//RS                 recv: Box::new(receiver),
-//RS                 op: TBuiltinOp::ListLazy,
-//RS                 args: Vec::new(),
-//RS             },
-//RS         };
-//RS     }
-//RS     let Some(tuple_fields) = zip_tuple_fields(&ret) else {
-//RS         return invariant_method_expr(method_span, "zip call without a checked tuple return shape");
-//RS     };
-//RS     let field_types = tuple_fields.iter().map(|(_, ty)| ty.clone()).collect();
-//RS     let fill_mode = if method != "zip_pad" {
-//RS         crate::Codegen::TIR::TZipFillMode::DefaultNone
-//RS     } else if fills.len() == 1 {
-//RS         if matches!(fills[0].ty, Type::Tuple(_)) {
-//RS             crate::Codegen::TIR::TZipFillMode::Columns
-//RS         } else {
-//RS             crate::Codegen::TIR::TZipFillMode::Common
-//RS         }
-//RS     } else {
-//RS         crate::Codegen::TIR::TZipFillMode::DefaultNone
-//RS     };
-//RS     TExpr {
-//RS         ty: ret,
-//RS         kind: TExprKind::BuiltinMethod {
-//RS             recv: Box::new(receiver),
-//RS             op: TBuiltinOp::Zip {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&tuple_fields),
-//RS                 mode: zip_family_mode(method),
-//RS                 fields,
-//RS                 flatten: false,
-//RS                 input_count,
-//RS                 fill_mode,
-//RS                 field_types,
-//RS             },
-//RS             args: inputs.into_iter().chain(fills).collect(),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn lower_empty_zip_family(
-//RS     resolved_ret: &Type,
-//RS     _method: &str,
-//RS     _method_span: Span,
-//RS ) -> TExpr {
-//RS     TExpr {
-//RS         ty: resolved_ret.clone(),
-//RS         kind: TExprKind::BuiltinMethod {
-//RS             recv: Box::new(TExpr {
-//RS                 ty: Type::List(Box::new(unit_type())),
-//RS                 kind: TExprKind::ListLit(Vec::new()),
-//RS             }),
-//RS             op: TBuiltinOp::ListLazy,
-//RS             args: Vec::new(),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn wrap_list_as_iter(receiver: TExpr) -> TExpr {
-//RS     let element = match receiver.ty.without_user_tags() {
-//RS         Type::List(element) | Type::FixedList { elem: element, .. } => (**element).clone(),
-//RS         _ => return receiver,
-//RS     };
-//RS     TExpr {
-//RS         ty: crate::Collections::iter_ty(element),
-//RS         kind: TExprKind::BuiltinMethod {
-//RS             recv: Box::new(receiver),
-//RS             op: TBuiltinOp::ListLazy,
-//RS             args: Vec::new(),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS /// c109 Phase 6: lower a method call. The gate proved it is the synthetic `.clone()`
-//RS /// or a user instance method on a covered type; resolve every dispatch fact here.
-//RS pub(crate) fn lower_method_call(
-//RS     receiver: &Expr,
-//RS     method: &str,
-//RS     method_span: Span,
-//RS     owner_type_args: &[Type],
-//RS     type_args: &[Type],
-//RS     args: &[crate::AST::CallArg],
-//RS     recv_type: &Option<String>,
-//RS     operator_rhs: Option<&Type>,
-//RS     resolved_ret: Option<&Type>,
-//RS     checked_widen: bool,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS     lowered_receiver: Option<TExpr>,
-//RS ) -> TExpr {
-//RS     lower_method_call_with_sig(
-//RS         receiver,
-//RS         method,
-//RS         method_span,
-//RS         owner_type_args,
-//RS         type_args,
-//RS         args,
-//RS         recv_type,
-//RS         operator_rhs,
-//RS         resolved_ret,
-//RS         checked_widen,
-//RS         cx,
-//RS         env,
-//RS         lowered_receiver,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS pub(crate) fn lower_method_call_with_sig(
-//RS     receiver: &Expr,
-//RS     method: &str,
-//RS     method_span: Span,
-//RS     owner_type_args: &[Type],
-//RS     type_args: &[Type],
-//RS     args: &[crate::AST::CallArg],
-//RS     recv_type: &Option<String>,
-//RS     operator_rhs: Option<&Type>,
-//RS     resolved_ret: Option<&Type>,
-//RS     checked_widen: bool,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS     lowered_receiver: Option<TExpr>,
-//RS     instantiated_sig: Option<&[(AccessConvention, Type)]>,
-//RS ) -> TExpr {
-//RS     // D-MEMO1=A: sema has already proved `name.cache()` is the memoized
-//RS     // function's statistics projection. Keep it as a named TIR call so AOT,
-//RS     // JIT, and interpreter adapters all enter the same Prelude-backed store.
-//RS     if method == Syntax::METHOD_MEMO_CACHE
-//RS         && args.is_empty()
-//RS         && matches!(resolved_ret, Some(Type::Named(name)) if name == Syntax::TYPE_MEMO_STATS)
-//RS     {
-//RS         if let Expr::Ident(name, _) = receiver {
-//RS             return TExpr {
-//RS                 ty: Type::Named(Syntax::TYPE_MEMO_STATS.to_string()),
-//RS                 kind: TExprKind::HostCall(Box::new(THostCall::MemoStats { name: name.clone() })),
-//RS             };
-//RS         }
-//RS     }
-//RS     if let Some(lowered) =
-//RS         lower_data_schema_call(receiver, method, method_span, args, resolved_ret, cx, env)
-//RS     {
-//RS         return lowered;
-//RS     }
-//RS     let mut lowered_receiver = lowered_receiver;
-//RS     if let Some(lowered) = lower_vault_instance_fast(
-//RS         receiver,
-//RS         method,
-//RS         method_span,
-//RS         recv_type,
-//RS         resolved_ret,
-//RS         &mut lowered_receiver,
-//RS         cx,
-//RS         env,
-//RS     ) {
-//RS         return lowered;
-//RS     }
-//RS     lower_method_call_impl(
-//RS         receiver,
-//RS         method,
-//RS         method_span,
-//RS         owner_type_args,
-//RS         type_args,
-//RS         args,
-//RS         recv_type,
-//RS         operator_rhs,
-//RS         resolved_ret,
-//RS         checked_widen,
-//RS         cx,
-//RS         env,
-//RS         lowered_receiver,
-//RS         instantiated_sig,
-//RS     )
-//RS }
-//RS 
-//RS /// D-TYPE2-SPELL1: sema marks `Int(lo..hi)`'s descriptor call with the
-//RS /// structural range it resolved. The descriptor has no runtime value; only
-//RS /// the destination-owned conversion argument reaches TIR.
-//RS fn inline_range_receiver(receiver: &Expr) -> Option<(i64, i64)> {
-//RS     let Expr::Call(call) = receiver else {
-//RS         return None;
-//RS     };
-//RS     match call.resolved_ret.as_ref() {
-//RS         Some(Type::InlineRange { lo, hi, .. }) => Some((*lo, *hi)),
-//RS         Some(Type::Result { ok, .. }) => match ok.as_ref() {
-//RS             Type::InlineRange { lo, hi, .. } => Some((*lo, *hi)),
-//RS             _ => None,
-//RS         },
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn route_strip_parens(mut expr: &Expr) -> &Expr {
-//RS     while let Expr::Paren(inner, _) = expr {
-//RS         expr = inner;
-//RS     }
-//RS     expr
-//RS }
-//RS fn route_handler_param_names(handler_expr: &Expr, cx: &Cx) -> Option<Vec<String>> {
-//RS     match route_strip_parens(handler_expr) {
-//RS         Expr::Lambda(lambda) => Some(
-//RS             lambda
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|param| param.name.clone())
-//RS                 .collect(),
-//RS         ),
-//RS         Expr::Ident(name, _) => cx
-//RS             .fn_param_names
-//RS             .get(name)
-//RS             .map(|params| params.iter().map(|param_name| param_name.clone()).collect()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn route_static_string(expr: &Expr, cx: &Cx) -> Option<String> {
-//RS     match route_strip_parens(expr) {
-//RS         Expr::Str(parts, _) => {
-//RS             let mut value = String::new();
-//RS             for part in parts {
-//RS                 let StrPart::Lit(text) = part else {
-//RS                     return None;
-//RS                 };
-//RS                 value.push_str(text);
-//RS             }
-//RS             Some(value)
-//RS         }
-//RS         Expr::Ident(name, _) => match cx.const_values.get(name) {
-//RS             Some(crate::AST::CtValue::Str(value)) => Some(value.clone()),
-//RS             _ => None,
-//RS         },
-//RS         Expr::ComptimeName {
-//RS             value: Some(crate::AST::CtValue::Str(value)),
-//RS             ..
-//RS         } => Some(value.clone()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn route_schema_type(
-//RS     ty: &Type,
-//RS     cx: &Cx,
-//RS     active: &mut HashSet<String>,
-//RS ) -> Option<jet_foundation::MIR::MirHttpSchema> {
-//RS     use jet_foundation::MIR::MirHttpSchema;
-//RS     match ty {
-//RS         Type::Int | Type::IntN { .. } => Some(MirHttpSchema::Integer),
-//RS         Type::Float | Type::Float32 => Some(MirHttpSchema::Number),
-//RS         Type::Bool => Some(MirHttpSchema::Boolean),
-//RS         Type::String | Type::Char => Some(MirHttpSchema::String),
-//RS         Type::List(item) | Type::FixedList { elem: item, .. } => Some(MirHttpSchema::Array(
-//RS             Box::new(route_schema_type(item, cx, active)?),
-//RS         )),
-//RS         Type::Map { .. } => Some(MirHttpSchema::Object {
-//RS             properties: Vec::new(),
-//RS             additional_properties: true,
-//RS         }),
-//RS         Type::Shared(inner)
-//RS         | Type::InlineRange { base: inner, .. }
-//RS         | Type::Quantity { base: inner, .. }
-//RS         | Type::Tagged { inner, .. } => route_schema_type(inner, cx, active),
-//RS         Type::Option(inner) => Some(MirHttpSchema::Nullable(Box::new(route_schema_type(
-//RS             inner, cx, active,
-//RS         )?))),
-//RS         Type::Result { ok, .. } => route_schema_type(ok, cx, active),
-//RS         Type::Tuple(fields) => {
-//RS             let mut properties = Vec::with_capacity(fields.len());
-//RS             for (name, field_ty) in fields {
-//RS                 properties.push(jet_foundation::MIR::MirHttpPropertyFact {
-//RS                     name: name.clone(),
-//RS                     schema: route_schema_type(field_ty, cx, active)?,
-//RS                     required: true,
-//RS                 });
-//RS             }
-//RS             Some(MirHttpSchema::Object {
-//RS                 properties,
-//RS                 additional_properties: false,
-//RS             })
-//RS         }
-//RS         Type::Union(items) => Some(MirHttpSchema::OneOf(
-//RS             items
-//RS                 .iter()
-//RS                 .map(|item| route_schema_type(item, cx, active))
-//RS                 .collect::<Option<Vec<_>>>()?,
-//RS         )),
-//RS         Type::Named(name) | Type::Apply { name, .. } => match name.as_str() {
-//RS             "Any" | "JSON" => Some(MirHttpSchema::Any),
-//RS             "Null" | "Unit" => Some(MirHttpSchema::Null),
-//RS             "String" => Some(MirHttpSchema::String),
-//RS             "Bool" => Some(MirHttpSchema::Boolean),
-//RS             "Int" | "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32" | "U64"
-//RS             | "U128" => Some(MirHttpSchema::Integer),
-//RS             "Float" | "F32" | "F64" => Some(MirHttpSchema::Number),
-//RS             _ if !cx.codable_types.contains(name) => None,
-//RS             _ if !active.insert(name.clone()) => None,
-//RS             _ => {
-//RS                 let fields = cx.reflection_fields.get(name)?;
-//RS                 let mut properties = Vec::with_capacity(fields.len());
-//RS                 for field in fields.iter().filter(|field| field.is_pub) {
-//RS                     properties.push(jet_foundation::MIR::MirHttpPropertyFact {
-//RS                         name: field.name.clone(),
-//RS                         schema: route_schema_type(&field.ty, cx, active)?,
-//RS                         required: !matches!(field.ty, Type::Option(_)),
-//RS                     });
-//RS                 }
-//RS                 active.remove(name);
-//RS                 Some(MirHttpSchema::Object {
-//RS                     properties,
-//RS                     additional_properties: false,
-//RS                 })
-//RS             }
-//RS         },
-//RS         Type::TraitObject(_) | Type::Fn { .. } | Type::Measure(_) => None,
-//RS     }
-//RS }
-//RS 
-//RS fn route_schema_expr(
-//RS     expr: &Expr,
-//RS     cx: &Cx,
-//RS     locals: &std::collections::HashMap<String, Type>,
-//RS ) -> Option<jet_foundation::MIR::MirHttpSchema> {
-//RS     use jet_foundation::MIR::MirHttpSchema;
-//RS     match route_strip_parens(expr) {
-//RS         Expr::Str(_, _) | Expr::Char(_, _) => Some(MirHttpSchema::String),
-//RS         Expr::Int(..) => Some(MirHttpSchema::Integer),
-//RS         Expr::Float(..) => Some(MirHttpSchema::Number),
-//RS         Expr::Bool(_, _) => Some(MirHttpSchema::Boolean),
-//RS         Expr::Unit(_) => Some(MirHttpSchema::Null),
-//RS         Expr::ListLit(items, _) => {
-//RS             let first = items.first()?;
-//RS             Some(MirHttpSchema::Array(Box::new(route_schema_expr(
-//RS                 first, cx, locals,
-//RS             )?)))
-//RS         }
-//RS         Expr::StructLit { type_name, .. } => {
-//RS             let mut active = HashSet::new();
-//RS             route_schema_type(&Type::Named(type_name.clone()), cx, &mut active)
-//RS         }
-//RS         Expr::TupleLit(_, _, Some(ty)) => {
-//RS             let mut active = HashSet::new();
-//RS             route_schema_type(ty, cx, &mut active)
-//RS         }
-//RS         Expr::TypedLit { head: Some(ty), .. } => {
-//RS             let mut active = HashSet::new();
-//RS             route_schema_type(ty, cx, &mut active)
-//RS         }
-//RS         Expr::Ident(name, _) => {
-//RS             let ty = locals.get(name)?;
-//RS             let mut active = HashSet::new();
-//RS             route_schema_type(ty, cx, &mut active)
-//RS         }
-//RS         Expr::Call(call) => {
-//RS             let ty = call.resolved_ret.as_ref()?;
-//RS             let mut active = HashSet::new();
-//RS             route_schema_type(ty, cx, &mut active)
-//RS         }
-//RS         Expr::MethodCall {
-//RS             resolved_ret: Some(ty),
-//RS             ..
-//RS         } => {
-//RS             let mut active = HashSet::new();
-//RS             route_schema_type(ty, cx, &mut active)
-//RS         }
-//RS         Expr::Ok(value, _) | Expr::Try(value, _, _, _) => route_schema_expr(value, cx, locals),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn route_status(expr: &Expr, cx: &Cx) -> Option<i64> {
-//RS     match route_strip_parens(expr) {
-//RS         Expr::Int(value, ..) => Some(*value),
-//RS         Expr::Ident(name, _) => match cx.const_values.get(name) {
-//RS             Some(crate::AST::CtValue::Int(value)) => Some(*value),
-//RS             _ => None,
-//RS         },
-//RS         Expr::ComptimeName {
-//RS             value: Some(crate::AST::CtValue::Int(value)),
-//RS             ..
-//RS         } => Some(*value),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn route_response_constructor(
-//RS     name: &str,
-//RS     args: &[crate::AST::CallArg],
-//RS     cx: &Cx,
-//RS     locals: &std::collections::HashMap<String, Type>,
-//RS ) -> Option<Vec<jet_foundation::MIR::MirHttpResponseFact>> {
-//RS     if !matches!(name, "response" | "json" | "empty_response") || args.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let status = route_status(&args[0].expr, cx)?;
-//RS     if !(100..=599).contains(&status) {
-//RS         return None;
-//RS     }
-//RS     let (schema, content_type) = match name {
-//RS         "response" if args.len() == 2 => {
-//RS             (Some(route_schema_expr(&args[1].expr, cx, locals)?), None)
-//RS         }
-//RS         "json" if args.len() == 2 => (
-//RS             Some(route_schema_expr(&args[1].expr, cx, locals)?),
-//RS             Some("application/json".to_string()),
-//RS         ),
-//RS         "empty_response" if args.len() == 1 => (None, None),
-//RS         _ => return None,
-//RS     };
-//RS     Some(vec![jet_foundation::MIR::MirHttpResponseFact {
-//RS         status,
-//RS         description: "HTTP response".to_string(),
-//RS         schema,
-//RS         content_type,
-//RS     }])
-//RS }
-//RS 
-//RS fn route_response_expr(
-//RS     expr: &Expr,
-//RS     cx: &Cx,
-//RS     locals: &std::collections::HashMap<String, Type>,
-//RS     response_aliases: &std::collections::HashMap<
-//RS         String,
-//RS         Vec<jet_foundation::MIR::MirHttpResponseFact>,
-//RS     >,
-//RS ) -> Option<Vec<jet_foundation::MIR::MirHttpResponseFact>> {
-//RS     match route_strip_parens(expr) {
-//RS         Expr::Ok(value, _) | Expr::Try(value, _, _, _) => {
-//RS             route_response_expr(value, cx, locals, response_aliases)
-//RS         }
-//RS         Expr::If {
-//RS             then_value,
-//RS             else_value,
-//RS             ..
-//RS         } => {
-//RS             let mut responses = route_response_expr(then_value, cx, locals, response_aliases)?;
-//RS             responses.extend(route_response_expr(
-//RS                 else_value,
-//RS                 cx,
-//RS                 locals,
-//RS                 response_aliases,
-//RS             )?);
-//RS             Some(responses)
-//RS         }
-//RS         Expr::Ident(name, _) => response_aliases.get(name).cloned(),
-//RS         Expr::Call(call) => {
-//RS             let name = call.name.rsplit('.').next().unwrap_or(call.name.as_str());
-//RS             route_response_constructor(name, &call.args, cx, locals)
-//RS         }
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             resolved_ret,
-//RS             ..
-//RS         } => {
-//RS             // Core aliases remain MethodCall nodes after sema.  Their checked
-//RS             // return fact is the authority that this is an endpoint response;
-//RS             // only then recover the constructor payload from its checked args.
-//RS             // A source-owned constructor declares `-> HTTPResponse Never!`,
-//RS             // whose proven-unreachable failure rail is still a response.
-//RS             let returns_http_response = match resolved_ret.as_ref() {
-//RS                 Some(Type::Named(name)) => name == "HTTPResponse",
-//RS                 Some(Type::Result { ok, err }) => {
-//RS                     err.is_never() && matches!(ok.as_ref(), Type::Named(name) if name == "HTTPResponse")
-//RS                 }
-//RS                 _ => false,
-//RS             };
-//RS             if returns_http_response
-//RS                 && matches!(method.as_str(), "response" | "json" | "empty_response")
-//RS             {
-//RS                 return route_response_constructor(method, args, cx, locals);
-//RS             }
-//RS             // Checked response adapters (for example `.header(...)`) preserve
-//RS             // the response contract carried by their receiver.
-//RS             if returns_http_response {
-//RS                 return route_response_expr(receiver, cx, locals, response_aliases);
-//RS             }
-//RS             None
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn route_collect_returns(
-//RS     body: &[Stmt],
-//RS     cx: &Cx,
-//RS     locals: &mut std::collections::HashMap<String, Type>,
-//RS     response_aliases: &mut std::collections::HashMap<
-//RS         String,
-//RS         Vec<jet_foundation::MIR::MirHttpResponseFact>,
-//RS     >,
-//RS     responses: &mut Vec<jet_foundation::MIR::MirHttpResponseFact>,
-//RS     allow_opaque_responses: bool,
-//RS ) -> bool {
-//RS     let mut valid = true;
-//RS     for stmt in body {
-//RS         match stmt {
-//RS             Stmt::Val(binding) => {
-//RS                 if !binding.name.is_empty() {
-//RS                     // A later binding shadows any response alias with the same
-//RS                     // name, even when its initializer is not a response.
-//RS                     response_aliases.remove(&binding.name);
-//RS                     if let Some(found) =
-//RS                         route_response_expr(&binding.init, cx, locals, response_aliases)
-//RS                     {
-//RS                         response_aliases.insert(binding.name.clone(), found);
-//RS                     }
-//RS                 }
-//RS                 if let Some(ty) = &binding.ty {
-//RS                     // Sema already checked local expressions. Keep their types
-//RS                     // available for payload aliases, but do not reject unrelated
-//RS                     // locals while reconstructing the endpoint contract.
-//RS                     if !binding.name.is_empty() {
-//RS                         locals.insert(binding.name.clone(), ty.clone());
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Stmt::Return(Some(value), _) => {
-//RS                 let Some(found) = route_response_expr(value, cx, locals, response_aliases) else {
-//RS                     if !allow_opaque_responses {
-//RS                         valid = false;
-//RS                     }
-//RS                     continue;
-//RS                 };
-//RS                 responses.extend(found);
-//RS             }
-//RS             Stmt::Return(None, _) => valid = false,
-//RS             Stmt::While { body, .. }
-//RS             | Stmt::For { body, .. }
-//RS             | Stmt::Loop { body, .. }
-//RS             | Stmt::Unsafe { body, .. }
-//RS             | Stmt::Impure { body, .. }
-//RS             | Stmt::Reactive { body, .. }
-//RS             | Stmt::Shield { body, .. }
-//RS             | Stmt::Switched { body, .. }
-//RS             | Stmt::Region { body, .. }
-//RS             | Stmt::Policy { body, .. }
-//RS             | Stmt::TaskGroup { body, .. }
-//RS             | Stmt::Layout { body, .. }
-//RS             | Stmt::AuthorityScope { body, .. }
-//RS             | Stmt::ComptimeBlock { body, .. }
-//RS             | Stmt::ContextBlock { body, .. }
-//RS             | Stmt::Live { body, .. }
-//RS             | Stmt::AssumeDet { body, .. }
-//RS             | Stmt::Transact { body, .. }
-//RS             | Stmt::ScopeMember { body, .. } => {
-//RS                 valid &= route_collect_returns(
-//RS                     body,
-//RS                     cx,
-//RS                     locals,
-//RS                     response_aliases,
-//RS                     responses,
-//RS                     allow_opaque_responses,
-//RS                 );
-//RS             }
-//RS             Stmt::Switch {
-//RS                 arms, else_body, ..
-//RS             }
-//RS             | Stmt::ComptimeSwitch {
-//RS                 arms, else_body, ..
-//RS             } => {
-//RS                 for arm in arms {
-//RS                     valid &= route_collect_returns(
-//RS                         &arm.body,
-//RS                         cx,
-//RS                         locals,
-//RS                         response_aliases,
-//RS                         responses,
-//RS                         allow_opaque_responses,
-//RS                     );
-//RS                 }
-//RS                 if let Some(body) = else_body {
-//RS                     valid &= route_collect_returns(
-//RS                         body,
-//RS                         cx,
-//RS                         locals,
-//RS                         response_aliases,
-//RS                         responses,
-//RS                         allow_opaque_responses,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             Stmt::CountedLoop { body, step, .. } => {
-//RS                 valid &= route_collect_returns(
-//RS                     body,
-//RS                     cx,
-//RS                     locals,
-//RS                     response_aliases,
-//RS                     responses,
-//RS                     allow_opaque_responses,
-//RS                 );
-//RS                 if let Some(step) = step {
-//RS                     valid &= route_collect_returns(
-//RS                         std::slice::from_ref(step.as_ref()),
-//RS                         cx,
-//RS                         locals,
-//RS                         response_aliases,
-//RS                         responses,
-//RS                         allow_opaque_responses,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             Stmt::ComptimeIf {
-//RS                 then_body,
-//RS                 else_body,
-//RS                 ..
-//RS             } => {
-//RS                 valid &= route_collect_returns(
-//RS                     then_body,
-//RS                     cx,
-//RS                     locals,
-//RS                     response_aliases,
-//RS                     responses,
-//RS                     allow_opaque_responses,
-//RS                 );
-//RS                 if let Some(body) = else_body {
-//RS                     valid &= route_collect_returns(
-//RS                         body,
-//RS                         cx,
-//RS                         locals,
-//RS                         response_aliases,
-//RS                         responses,
-//RS                         allow_opaque_responses,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     valid
-//RS }
-//RS 
-//RS fn route_json_type_from_body(body: &LambdaBody) -> Option<Type> {
-//RS     let mut found = None;
-//RS     let mut visit = |expr: &Expr| {
-//RS         if found.is_some() {
-//RS             return;
-//RS         }
-//RS         if let Expr::MethodCall {
-//RS             method,
-//RS             recv_type,
-//RS             type_args,
-//RS             ..
-//RS         } = expr
-//RS         {
-//RS             if method == "json"
-//RS                 && recv_type.as_deref() == Some("HTTPRequest")
-//RS                 && type_args.len() == 1
-//RS             {
-//RS                 found = Some(type_args[0].clone());
-//RS             }
-//RS         }
-//RS     };
-//RS     match body {
-//RS         LambdaBody::Expr(expr) => expr.for_each_expr(&mut visit),
-//RS         LambdaBody::Block(stmts) => {
-//RS             for stmt in stmts {
-//RS                 stmt.for_each_expr(&mut visit);
-//RS             }
-//RS         }
-//RS     }
-//RS     found
-//RS }
-//RS 
-//RS fn route_handler_contract(
-//RS     method: jet_foundation::MIR::MirHttpMethod,
-//RS     path_expr: &Expr,
-//RS     handler_expr: &Expr,
-//RS     cx: &Cx,
-//RS     line: usize,
-//RS     is_mux: bool,
-//RS ) -> Option<String> {
-//RS     let pattern = route_static_string(path_expr, cx)?;
-//RS     Syntax::validate_http_route_pattern(&pattern).ok()?;
-//RS     let mut path = String::new();
-//RS     let mut parameters = Vec::new();
-//RS     if pattern == "/" {
-//RS         path.push('/');
-//RS     } else {
-//RS         for segment in pattern.split('/').skip(1) {
-//RS             path.push('/');
-//RS             if let Some(name) = segment.strip_prefix(':') {
-//RS                 path.push('{');
-//RS                 path.push_str(name);
-//RS                 path.push('}');
-//RS                 parameters.push(jet_foundation::MIR::MirHttpParameterFact {
-//RS                     name: name.to_string(),
-//RS                     location: jet_foundation::MIR::MirHttpParameterLocation::Path,
-//RS                     required: true,
-//RS                     catch_all: false,
-//RS                     schema: jet_foundation::MIR::MirHttpSchema::String,
-//RS                 });
-//RS             } else if let Some(name) = segment.strip_prefix('*') {
-//RS                 path.push('{');
-//RS                 path.push_str(name);
-//RS                 path.push('}');
-//RS                 parameters.push(jet_foundation::MIR::MirHttpParameterFact {
-//RS                     name: name.to_string(),
-//RS                     location: jet_foundation::MIR::MirHttpParameterLocation::Path,
-//RS                     required: true,
-//RS                     catch_all: true,
-//RS                     schema: jet_foundation::MIR::MirHttpSchema::String,
-//RS                 });
-//RS             } else {
-//RS                 path.push_str(segment);
-//RS             }
-//RS         }
-//RS     }
-//RS     let handler = route_strip_parens(handler_expr);
-//RS     let (body, param_types) = match handler {
-//RS         Expr::Lambda(lambda) => {
-//RS             let params = lambda
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|param| param.ty.clone())
-//RS                 .collect::<Option<Vec<_>>>()?;
-//RS             (
-//RS                 match &lambda.body {
-//RS                     LambdaBody::Expr(expr) => LambdaBody::Expr(expr.clone()),
-//RS                     LambdaBody::Block(stmts) => LambdaBody::Block(stmts.clone()),
-//RS                 },
-//RS                 params,
-//RS             )
-//RS         }
-//RS         Expr::Ident(name, _) => {
-//RS             let body = LambdaBody::Block(cx.fn_bodies.get(name)?.clone());
-//RS             let params = cx
-//RS                 .sigs
-//RS                 .get(name)?
-//RS                 .iter()
-//RS                 .map(|(_, ty)| ty.clone())
-//RS                 .collect::<Vec<_>>();
-//RS             (body, params)
-//RS         }
-//RS         _ => return None,
-//RS     };
-//RS     let mut locals = std::collections::HashMap::new();
-//RS     let mut response_aliases = std::collections::HashMap::new();
-//RS     let mut handler_param_names = Vec::with_capacity(param_types.len());
-//RS     if let Expr::Ident(name, _) = handler {
-//RS         if let Some(param_names) = cx.fn_param_names.get(name) {
-//RS             for (param_name, ty) in param_names.iter().zip(param_types.iter()) {
-//RS                 handler_param_names.push((param_name.clone(), ty.clone()));
-//RS                 locals.insert(param_name.clone(), ty.clone());
-//RS             }
-//RS         }
-//RS     } else if let Expr::Lambda(lambda) = handler {
-//RS         for (param, ty) in lambda.params.iter().zip(param_types.iter()) {
-//RS             handler_param_names.push((param.name.clone(), ty.clone()));
-//RS             locals.insert(param.name.clone(), ty.clone());
-//RS         }
-//RS     }
-//RS     if handler_param_names.len() != param_types.len()
-//RS         || handler_param_names.iter().any(|(name, _)| name.is_empty())
-//RS         || handler_param_names
-//RS             .iter()
-//RS             .map(|(name, _)| name)
-//RS             .collect::<HashSet<_>>()
-//RS             .len()
-//RS             != handler_param_names.len()
-//RS     {
-//RS         return None;
-//RS     }
-//RS     if handler_param_names
-//RS         .iter()
-//RS         .filter(|(_, ty)| matches!(ty, Type::Named(name) if name == "HTTPRequest"))
-//RS         .count()
-//RS         > 1
-//RS     {
-//RS         return None;
-//RS     }
-//RS     if !is_mux {
-//RS         for parameter in &mut parameters {
-//RS             if parameter.location != jet_foundation::MIR::MirHttpParameterLocation::Path {
-//RS                 continue;
-//RS             }
-//RS             let matches = handler_param_names
-//RS                 .iter()
-//RS                 .filter(|(name, ty)| {
-//RS                     name == &parameter.name
-//RS                         && !matches!(ty, Type::Named(request) if request == "HTTPRequest")
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS             if matches.len() != 1 {
-//RS                 return None;
-//RS             }
-//RS             let mut active = HashSet::new();
-//RS             parameter.schema = route_schema_type(&matches[0].1, cx, &mut active)?;
-//RS         }
-//RS     }
-//RS     let path_names = parameters
-//RS         .iter()
-//RS         .filter(|parameter| {
-//RS             parameter.location == jet_foundation::MIR::MirHttpParameterLocation::Path
-//RS         })
-//RS         .map(|parameter| parameter.name.clone())
-//RS         .collect::<HashSet<_>>();
-//RS     if matches!(
-//RS         method,
-//RS         jet_foundation::MIR::MirHttpMethod::Get | jet_foundation::MIR::MirHttpMethod::Head
-//RS     ) {
-//RS         for (name, ty) in &handler_param_names {
-//RS             if path_names.contains(name)
-//RS                 || matches!(ty, Type::Named(request) if request == "HTTPRequest")
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let mut active = HashSet::new();
-//RS             parameters.push(jet_foundation::MIR::MirHttpParameterFact {
-//RS                 name: name.clone(),
-//RS                 location: jet_foundation::MIR::MirHttpParameterLocation::Query,
-//RS                 required: !matches!(ty, Type::Option(_)),
-//RS                 catch_all: false,
-//RS                 schema: route_schema_type(ty, cx, &mut active)?,
-//RS             });
-//RS         }
-//RS     } else if handler_param_names.iter().any(|(name, ty)| {
-//RS         !path_names.contains(name)
-//RS             && !matches!(ty, Type::Named(request) if request == "HTTPRequest")
-//RS     }) {
-//RS         return None;
-//RS     }
-//RS     let body_schema = match route_json_type_from_body(&body) {
-//RS         Some(ty) => {
-//RS             let mut active = HashSet::new();
-//RS             Some(route_schema_type(&ty, cx, &mut active)?)
-//RS         }
-//RS         None => None,
-//RS     };
-//RS     if let Some(jet_foundation::MIR::MirHttpSchema::Object { properties, .. }) =
-//RS         body_schema.as_ref()
-//RS     {
-//RS         if properties.iter().any(|property| {
-//RS             parameters
-//RS                 .iter()
-//RS                 .any(|parameter| parameter.name == property.name)
-//RS         }) {
-//RS             return None;
-//RS         }
-//RS     }
-//RS     let request_body = body_schema.map(|schema| jet_foundation::MIR::MirHttpRequestBodyFact {
-//RS         required: true,
-//RS         content_type: "application/json".to_string(),
-//RS         schema,
-//RS     });
-//RS     let mut responses = Vec::new();
-//RS     let valid = match &body {
-//RS         LambdaBody::Expr(expr) => match route_response_expr(expr, cx, &locals, &response_aliases) {
-//RS             Some(found) => {
-//RS                 responses.extend(found);
-//RS                 true
-//RS             }
-//RS             None => is_mux,
-//RS         },
-//RS         LambdaBody::Block(stmts) => route_collect_returns(
-//RS             stmts,
-//RS             cx,
-//RS             &mut locals,
-//RS             &mut response_aliases,
-//RS             &mut responses,
-//RS             is_mux,
-//RS         ),
-//RS     };
-//RS     if !valid || (!is_mux && responses.is_empty()) {
-//RS         return None;
-//RS     }
-//RS     responses.sort_by_key(|response| response.status);
-//RS     responses.dedup();
-//RS     let operation_id = jet_foundation::MIR::MirHttpRouteFacts::operation_id(method, &path);
-//RS     Some(
-//RS         jet_foundation::MIR::MirHttpRouteFacts {
-//RS             method,
-//RS             pattern,
-//RS             path,
-//RS             operation_id,
-//RS             summary: None,
-//RS             parameters,
-//RS             request_body,
-//RS             responses,
-//RS             security: Vec::new(),
-//RS             provenance: format!("{}:{}", cx.file, line),
-//RS         }
-//RS         .to_wire(),
-//RS     )
-//RS }
-//RS 
-//RS fn hardware_method_op(
-//RS     receiver: &Expr,
-//RS     method: &str,
-//RS     args: &[crate::AST::CallArg],
-//RS     recv_type: &Option<String>,
-//RS     cx: &Cx,
-//RS     env: &LowerEnv,
-//RS ) -> Result<Option<THardwareCall>, String> {
-//RS     let Some(profile_id) = cx.hardware_profile_id.clone().filter(|id| !id.is_empty()) else {
-//RS         return Ok(None);
-//RS     };
-//RS     let Some(profile) = cx.hardware_profile.as_ref() else {
-//RS         return Err("checked hardware profile facts are missing".to_string());
-//RS     };
-//RS     let path = hardware_expr_path(receiver);
-//RS     let is_board_receiver = path.first().is_some_and(|root| {
-//RS         cx.core_imports
-//RS             .get(root)
-//RS             .is_some_and(|profile| profile.starts_with("board."))
-//RS     });
-//RS     if is_board_receiver && path.len() >= 3 {
-//RS         let block = profile
-//RS             .register_blocks
-//RS             .iter()
-//RS             .find(|block| block.name.eq_ignore_ascii_case(&path[1]))
-//RS             .ok_or_else(|| {
-//RS                 format!(
-//RS                     "checked hardware register block fact is missing for `{}`",
-//RS                     path[1]
-//RS                 )
-//RS             })?;
-//RS         let register = block
-//RS             .registers
-//RS             .iter()
-//RS             .find(|register| register.name.eq_ignore_ascii_case(&path[2]))
-//RS             .ok_or_else(|| {
-//RS                 format!(
-//RS                     "checked hardware register fact is missing for `{}.{}`",
-//RS                     block.name, path[2]
-//RS                 )
-//RS             })?;
-//RS         let block_name = block.name.clone();
-//RS         let register_name = register.name.clone();
-//RS         return Ok(match method {
-//RS             "read" => Some(THardwareCall::RegisterRead {
-//RS                 profile_id,
-//RS                 block: block_name,
-//RS                 register: register_name,
-//RS                 width: register.width,
-//RS             }),
-//RS             "write" | "set" | "clear" => Some(THardwareCall::RegisterWrite {
-//RS                 profile_id,
-//RS                 block: block_name,
-//RS                 register: register_name,
-//RS                 width: register.width,
-//RS             }),
-//RS             _ => None,
-//RS         });
-//RS     }
-//RS     if method == "start"
-//RS         && matches!(receiver, Expr::Ident(name, _) if name == "dma")
-//RS         && args.len() >= 2
-//RS     {
-//RS         let channel_path = hardware_expr_path(&args[0].expr);
-//RS         if channel_path.len() >= 3
-//RS             && channel_path.first().is_some_and(|root| {
-//RS                 cx.core_imports
-//RS                     .get(root)
-//RS                     .is_some_and(|profile| profile.starts_with("board."))
-//RS             })
-//RS         {
-//RS             let channel_key = format!(
-//RS                 "{}_{}",
-//RS                 channel_path[1].to_ascii_uppercase(),
-//RS                 channel_path[2].to_ascii_uppercase()
-//RS             );
-//RS             let channel = profile
-//RS                 .dma_channels
-//RS                 .iter()
-//RS                 .find(|fact| fact.name.eq_ignore_ascii_case(&channel_key))
-//RS                 .map(|fact| fact.name.clone())
-//RS                 .ok_or_else(|| {
-//RS                     format!("checked hardware DMA channel fact is missing for `{channel_key}`")
-//RS                 })?;
-//RS             return Ok(Some(THardwareCall::DmaStart {
-//RS                 profile_id,
-//RS                 channel,
-//RS                 buffer_ty: Type::Named("__JetDmaBuffer".to_string()),
-//RS             }));
-//RS         }
-//RS     }
-//RS     if method == "wait" && recv_type.as_deref() == Some("__JetDmaTransfer") {
-//RS         let receiver_name = match receiver {
-//RS             Expr::Ident(name, _) => name,
-//RS             _ => {
-//RS                 return Err(
-//RS                     "checked hardware DMA wait receiver has no transfer binding".to_string()
-//RS                 );
-//RS             }
-//RS         };
-//RS         let channel = env.dma_transfer_channel(receiver_name).ok_or_else(|| {
-//RS             "checked hardware DMA wait has no channel fact for its transfer binding".to_string()
-//RS         })?;
-//RS         let channel = profile
-//RS             .dma_channels
-//RS             .iter()
-//RS             .find(|fact| fact.name.eq_ignore_ascii_case(channel))
-//RS             .map(|fact| fact.name.clone())
-//RS             .ok_or_else(|| {
-//RS                 format!("checked hardware DMA channel fact is missing for `{channel}`")
-//RS             })?;
-//RS         return Ok(Some(THardwareCall::DmaWait {
-//RS             profile_id,
-//RS             channel,
-//RS             buffer_ty: Type::Named("__JetDmaBuffer".to_string()),
-//RS         }));
-//RS     }
-//RS     Ok(None)
-//RS }
-//RS 
-//RS fn hardware_expr_path(expr: &Expr) -> Vec<String> {
-//RS     match expr {
-//RS         Expr::Ident(name, _) => vec![name.clone()],
-//RS         Expr::Field(base, member, _) => {
-//RS             let mut path = hardware_expr_path(base);
-//RS             path.push(member.clone());
-//RS             path
-//RS         }
-//RS         Expr::Paren(inner, _) => hardware_expr_path(inner),
-//RS         _ => Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_app_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-//RS     let value = lower_expr(expr, cx, env);
-//RS     if matches!(
-//RS         &value.kind,
-//RS         TExprKind::FnValue {
-//RS             kind: TFnValueKind::Send { .. },
-//RS         }
-//RS     ) {
-//RS         return value;
-//RS     }
-//RS     let ty = value.ty.clone();
-//RS     TExpr {
-//RS         ty,
-//RS         kind: TExprKind::FnValue {
-//RS             kind: TFnValueKind::Send {
-//RS                 value: Box::new(value),
-//RS             },
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn lower_http_middleware_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-//RS     let value = match route_strip_parens(expr) {
-//RS         Expr::Lambda(lam) => {
-//RS             let middleware_ty = Type::Fn {
-//RS                 params: vec![Type::Named("HTTPHandler".to_string())],
-//RS                 ret: Some(Box::new(Type::Named("HTTPHandler".to_string()))),
-//RS                 effect_bound: None,
-//RS                 return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             };
-//RS             let lowered = lower_lambda_expecting_callable(lam, cx, env, &middleware_ty);
-//RS             TExpr {
-//RS                 ty: middleware_ty,
-//RS                 kind: TExprKind::Lambda(Box::new(lowered)),
-//RS             }
-//RS         }
-//RS         _ => lower_expr(expr, cx, env),
-//RS     };
-//RS     if matches!(
-//RS         &value.kind,
-//RS         TExprKind::FnValue {
-//RS             kind: TFnValueKind::Send { .. },
-//RS         }
-//RS     ) || !matches!(&value.ty, Type::Fn { .. })
-//RS     {
-//RS         return value;
-//RS     }
-//RS     force_thread_callback_value(value, cx)
-//RS }
-//RS 
-//RS /// Lower a checked App route/boundary/loader/server-function handler.  Named
-//RS /// handlers become the send-safe borrow callback (`Fn(&A, &B) -> R`) so the
-//RS /// one runtime adapter per arity decodes each typed input; sema has already
-//RS /// rejected every non-named handler (E2810).
-// END-PORT-PENDING 0486 crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1793-3579
+// Private continuation of Codegen.TIR.lower.method_calls, published by integration.
+use jet_foundation.AST.[Expr, Type, CallArg, AccessConvention, StrPart, Stmt, LambdaBody, CtValue]
+use jet_foundation.Diagnostics.[Span]
+use jet_foundation.Syntax as Syntax
+use jet_foundation.CoreSourceParts.[CORE_TEXT_STRING_MODULE]
+use jet_foundation.MIR.[MirCopyFact, MirHttpSchema, MirHttpPropertyFact, MirHttpResponseFact, MirHttpParameterFact, MirHttpParameterLocation, MirHttpRequestBodyFact, MirHttpRouteFacts, MirHttpMethod]
+use jet_codegen.Codegen.Context.[Cx]
+use jet_codegen.Codegen.TIR.*
+use jet_codegen.Codegen.TIR.lower.*
+use jet_codegen.Codegen.Tuples.[tuple_struct_name]
+use jet_sema.Collections.[is_iter_type, iter_ty]
+use jet_sema.Generics.[free_type_params]
+use jet_sema.Sema.[core_fixed_sig]
+use jet_sema.Comptime.DataPipeline.[schema_columns_for_type]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1793
+fn lower_core_string_source_call(receiver: Expr, method_span: Span, method: String, type_args: [Type], args: [CallArg], recv_type: String?, resolved_ret: Type?, cx: Cx, env: &LowerEnv, lowered_receiver: TExpr?) -> TExpr? Never! {
+    // GATE #4499: canonical tuple module/method map keys.
+    if recv_type != Val(Syntax.TYPE_STRING) || !cx.core_source_sigs.contains_key((CORE_TEXT_STRING_MODULE, method)) -> return None
+    module :: CORE_TEXT_STRING_MODULE
+    if !cx.core_source_modules.contains_key(module) -> return Val(invariant_method_expr(method_span, "private String source module is not loaded"))
+    source_signature :: cx.core_source_sigs.get((module, method)) ?? return Val(invariant_method_expr(method_span, "private String source method has no loaded signature"))
+    (receiver_convention, receiver_ty) :: source_signature.params.first() ?? return Val(invariant_method_expr(method_span, "source String method has no receiver parameter"))
+    if receiver_ty != .String -> return Val(invariant_method_expr(method_span, "source String method receiver is not canonical String"))
+    recv :: lowered_receiver ?? lower_expr(receiver, cx, &env)
+    receiver_arg := TCallArg{value: ^recv, template_items: None, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None}
+    if receiver_convention == .Read && !receiver_ty.is_scalar() -> receiver_arg.borrow = true
+    else if receiver_convention == .Write -> receiver_arg.mut_borrow = true
+    lowered_args := [^receiver_arg]
+    lowered_args.extend(lower_module_args(args, source_signature.params.get(1..), &env, cx))
+    ty :: resolved_ret ?? return Val(invariant_method_expr(method_span, "source String method has no resolved return type"))
+    target_return :: if module_call_target_return(cx, Val(ty)) == { .Ok(target) -> Val(target), .Err(error) -> return Val(invariant_method_expr(method_span, error)) }
+    Val(TExpr{ty: ~ty, kind: TExprKind.ModuleCall(form: core_source_module_target(source_signature, method), target_return: ^target_return, type_args: ~type_args, args: ^lowered_args)})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1891
+fn reduce_op_name(expr: Expr) -> String? Never! {
+    if expr == {
+        .ReduceMarker(name, _) -> Val(~name)
+        .EnumLit(type_name: type_name, variant: variant, args: args, ..) -> if (type_name.is_empty() || type_name == Syntax.TYPE_REDUCE_OP) && args.is_empty() -> Val(~variant) else -> None
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1908
+fn rooted_owner(path: String) -> TStaticOwner Never! { TStaticOwner.Prelude(rooted: true, path: ~path, generics: []) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1917
+fn rooted_generic_owner(path: String, generics: ^[TPreludeArg]) -> TStaticOwner Never! { TStaticOwner.Prelude(rooted: true, path: ~path, generics: ^generics) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1926
+fn host_generic_owner(path: String, generics: ^[TPreludeArg]) -> TStaticOwner Never! { TStaticOwner.Prelude(rooted: false, path: ~path, generics: ^generics) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1936
+fn string_bytes_receiver_is_owned(receiver: TExpr, cx: Cx) -> Bool Never! {
+    if receiver.ty != .String -> return false
+    if receiver.kind == {
+        .StrLit(_) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) -> true
+        .Call(name: name, ..) -> {
+            callable :: cx.fn_types.get(name) ?? return false
+            if callable == { .Fn(return_view_provenance: provenance, ..) -> !provenance.is_some_and(views -> !views.is_empty()), else -> false }
+        }
+        .BuiltinMethod(op: op, ..) -> op != .TrimView && op != .AfterView && op != .BeforeView
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1965
+fn builtin_arg_takes_ownership(op: TBuiltinOp, index: Int) -> Bool Never! {
+    if op == {
+        .Push | .TryPush | .TryStringPush | .Intersperse | .SetInsert | .SortedSetInsert | .BagAdd | .DequePushFront | .DequePushBack -> index == 0
+        .InsertMap | .TryInsertMap | .AddNewMap | .MapSetDefault | .InsertList -> index == 1
+        .LruPut | .LruAddNew -> index < 2
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1985
+fn builtin_arg_is_place(expr: Expr) -> Bool Never! {
+    if expr.without_parens() == { .Ident(_, _) | .Field(_, _, _) | .Index(..) -> true, else -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1992
+fn lower_builtin_arg(arg: CallArg, expected: Type?, owns_value: Bool, cx: Cx, env: &LowerEnv) -> TExpr Never! {
+    value := if owns_value -> lower_owned_expr(arg.expr, cx, &env) else -> lower_expr(arg.expr, cx, &env)
+    if expected == .Val(want) {
+        is_list :: if want == { .List(_) | .FixedList(..) -> true, else -> false }
+        if is_list && free_type_params(want).is_empty() -> value = preserve_typed_list_shape(^value, want, cx)
+        if value.kind == .Absent && free_type_params(want).is_empty() {
+            if want == { .Option(_) -> value.ty = ~want, else -> {} }
+        }
+    }
+    resource_take :: if value.kind == { .ResourceTake(_) -> true, else -> false }
+    already_owned :: if value.kind == { .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .ResourceTake(_) -> true, else -> false }
+    if owns_value && !resource_take && !already_owned && (arg.flags.implicit_clone || builtin_arg_is_place(arg.expr)) && !value.ty.is_scalar() {
+        ty :: ~value.ty
+        env.note_clone(ty)
+        value = TExpr{ty: ^ty, kind: TExprKind.Clone(^value, MirCopyFact.Materialize)}
+    }
+    ^value
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2050
+fn core_widen_to_vec(module: String, method: String, args: [TExpr]) -> [Bool] Never! {
+    if module == "core.term" && method == "progress" && args.first().is_some_and(arg -> if arg.ty == { .FixedList(..) -> true, else -> false }) {
+        return (0..args.len()).map(index -> index == 0).to_list()
+    }
+    params :: core_fixed_sig(module, method).map((params, _) -> params) ?? []
+    args.enumerate().map((index, arg) -> {
+        want :: params.get(index) ?? return false
+        if (arg.ty, want.1) == { (.FixedList(elem: actual, ..), .List(want)) -> fixed_list_elem_compatible(actual, want), else -> false }
+    }).to_list()
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2076
+fn normalize_http_cors_policy_args(args: &[TExpr]) -> Unit Never! {
+    if args.is_empty() -> return
+    list_ty :: Type.List(Type.String)
+    empty_list :: fn() { TExpr{ty: ~list_ty, kind: TExprKind.ListLit([])} }
+    origins :: ~args[0]
+    (origins_mode, origins_value) :: if origins.kind == {
+        .EnumLit(variant: variant, payload: .Unit, ..) if variant == "Any" -> (TExpr{ty: .Int, kind: .IntLit(0, None)}, empty_list())
+        .EnumLit(variant: variant, payload: .Positional(values), ..) if variant == "List" && values.len() == 1 -> (TExpr{ty: .Int, kind: .IntLit(1, None)}, ~values[0].value)
+        else -> (TExpr{ty: .Int, kind: .IntLit(1, None)}, ^origins)
+    }
+    methods :: args.get(1).map(value -> ~value) ?? empty_list()
+    headers :: args.get(2).map(value -> ~value) ?? empty_list()
+    credentials :: args.get(3).map(value -> ~value) ?? TExpr{ty: .Bool, kind: .BoolLit(false)}
+    max_age :: args.get(4).map(value -> ~value) ?? TExpr{ty: .Int, kind: .IntLit(86400, None)}
+    args = [^origins_mode, ^origins_value, ^methods, ^headers, ^credentials, TExpr{ty: .Int, kind: .IntLit(1, None)}, ^max_age]
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2140
+fn normalize_http_static_files_args(args: &[TExpr]) -> Unit Never! {
+    loop while args.len() < 6 -> args.push(TExpr{ty: Type.Option(Type.Bool), kind: .Absent})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2149
+fn vault_instance_helper(kind: String, method: String) -> String? Never! {
+    if (kind, method) == { ("WrappedVaultKey", "bytes") -> Val("__vault_wrapped_bytes"), else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2156
+fn lower_data_schema_call(receiver: Expr, method: String, method_span: Span, args: [CallArg], resolved_ret: Type?, cx: Cx, env: &LowerEnv) -> TExpr? Never! {
+    ret :: resolved_ret ?? return None
+    column :: if ret == { .List(column) -> column, else -> return None }
+    if column.base_name() != Val("DataColumn") -> return None
+    target :: core_module_path_from_receiver(receiver, cx, env).map(module -> (module, ~method)).or_else(fn() {
+        if receiver == {
+            .Ident(alias, _) if !env.locals.contains_key(alias) -> cx.inline_reexport_core.get((alias, method)).map(row -> ~row)
+            else -> None
+        }
+    }) ?? return None
+    if target.0 != "core.data" || target.1 != "schema" -> return None
+    if args.len() != 1 -> return Val(invariant_method_expr(method_span, "data.schema without one checked list argument"))
+    input := lower_expr(args[0].expr, cx, &env)
+    elem :: if input.ty == { .List(elem) | .FixedList(elem: elem, ..) -> elem, else -> return Val(invariant_method_expr(method_span, "data.schema without a checked row type")) }
+    row :: fn(name: String) {
+        fields :: cx.struct_fields.get(name) ?? return None
+        Val((cx.struct_type_param_order.get(name).map(order -> ~order) ?? [], ~fields))
+    }
+    columns :: schema_columns_for_type(elem, true, row) ?? return Val(invariant_method_expr(method_span, "data.schema without resolved row type arguments"))
+    // Retain effects without copying a stored list to inspect checked type metadata.
+    is_place :: if input.kind == { .Local(_) | .Field(..) | .Index(..) -> true, else -> false }
+    if is_place -> input = TExpr{ty: ~input.ty, kind: TExprKind.Borrow(place: ^input, mutable: false)}
+    ty :: Type.List(~column)
+    Val(TExpr{ty: ~ty, kind: TExprKind.InlineBlock([TStmt.ExprStmt(^input), TStmt.ExprStmt(TExpr{ty: ^ty, kind: TExprKind.CtLit(CtValue.List(^columns))})])})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2246
+fn lower_vault_instance_fast(receiver: Expr, method: String, method_span: Span, recv_type: String?, resolved_ret: Type?, lowered_receiver: &TExpr?, cx: Cx, env: &LowerEnv) -> TExpr? Never! {
+    if static_call_type_name_lower(receiver, env) != None -> return None
+    if receiver == { .Ident(name, _) if env.is_gc(name) -> return None, else -> {} }
+    recv_name :: recv_type ?? return None
+    kind :: recv_name.rsplit(".").next() ?? return None
+    helper :: vault_instance_helper(kind, method) ?? return None
+    recv :: lowered_receiver.take() ?? lower_expr(receiver, cx, &env)
+    args :: [^recv]
+    widen_to_vec :: core_widen_to_vec("core.crypto", helper, args)
+    ty :: resolved_ret ?? return Val(invariant_method_expr(method_span, "crypto instance call without a resolved return type"))
+    record :: if checked_core_record("core.crypto", helper, args.len(), method_span) == { .Ok(record) -> record, .Err(expr) -> return Val(expr) }
+    Val(TExpr{ty: ~ty, kind: TExprKind.CoreCall(record: record, args: ^args, source_span: method_span, type_args: [], widen_to_vec: ^widen_to_vec, data_plan: None, fallibility: TFailureCarrier.from_checked_type(ty))})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2319
+fn canonical_codec_owner(ty: Type, cx: Cx) -> Type Never! {
+    name :: if ty == { .Named(name) -> name, else -> return ~ty }
+    if cx.local_type_identities.get(name) == .Val(identity) -> return Type.Named(~identity)
+    if !name.contains(".") -> return ~ty
+    if cx.imported_type_metadata_name(name) == {
+        .Val(identity) if identity != name -> Type.Named(^identity)
+        else -> ~ty
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2341
+fn canonical_method_target_owner(cx: Cx, name: String) -> String Never! {
+    if cx.jit_local_call_prefix == None {
+        if cx.local_type_names.contains(name) -> return ~name
+        // Preserve BTreeMap first-match order.
+        leaves :: cx.local_type_identities.keys().sorted()
+        loop leaf in leaves {
+            if cx.local_type_identities[leaf] == name && cx.local_type_names.contains(leaf) -> return ~leaf
+        }
+    }
+    canonical_enum_owner(cx, name)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2355
+fn canonicalize_method_receiver_type(ty: &Type, owner: String) -> Unit Never! {
+    if ty == {
+        .Named(name) | .Apply(name: name, ..) -> name = ~owner
+        .Tagged(inner: inner, ..) -> canonicalize_method_receiver_type(&inner, owner)
+        else -> {}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2366
+pub fn builtin_codec_name(ty: Type) -> String? Never! {
+    if ty.without_user_tags() == {
+        .Named(name) if name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" || name == "Decimal" -> Val(name)
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2380
+fn generic_method_instance_leaf(owner: Type, method: String, type_args: [Type]) -> String Never! {
+    key :: generic_method_instance_key(owner, method, type_args)
+    pair :: key.rsplit_once("::") ?? panic("generic method key includes an owner separator")
+    ~pair.1
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2388
+fn lower_serde_encode_node(recv: ^TExpr, cx: Cx) -> TExpr Never! {
+    recv.ty = canonical_codec_owner(recv.ty, cx)
+    if recv.ty == {
+        .Apply(..) -> cx.jit_method_calls.borrow_mut().insert(generic_method_instance_key(recv.ty, "encode", []), (~recv.ty, "encode", []))
+        else -> {}
+    }
+    TExpr{ty: Type.Named(Syntax.TYPE_DATA), kind: TExprKind.HandleMethod(recv: ^recv, op: THandleOp.SerdeEncode, args: [])}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2406
+fn lower_datatree_decode_node(recv: ^TExpr, target: Type, resolved_ret: Type?, method_span: Span, cx: Cx) -> TExpr Never! {
+    owner :: canonical_codec_owner(target, cx)
+    if owner == {
+        .Apply(..) -> cx.jit_method_calls.borrow_mut().insert(generic_method_instance_key(owner, "decode", []), (~owner, "decode", []))
+        else -> {}
+    }
+    // Generated Codable bodies precede sema resolved-ret writeback.
+    ty :: resolved_ret.map(ty -> ~ty) ?? Type.Result(ok: ~owner, err: Type.Named(Syntax.TYPE_ENCODING_ERROR))
+    TExpr{ty: ^ty, kind: TExprKind.HandleMethod(recv: ^recv, op: THandleOp.DataTreeDecode(^owner), args: [])}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2440
+fn zip_family_mode(method: String) -> TZipMode Never! {
+    if method == { "zip_short" -> .Short, "zip_pad" -> .Pad, else -> .Strict }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2448
+fn zip_tuple_fields(ty: Type) -> [(String, Type)]? Never! {
+    inner :: if ty == {
+        .List(inner) -> inner
+        .Apply(name: name, args: args) if name == Syntax.TYPE_ITER && args.len() == 1 -> args[0]
+        else -> return None
+    }
+    if inner == { .Tuple(fields) -> Val(fields.map((name, ty) -> (~name, ~ty))), else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2465
+fn zip_sequence_type(ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(inner: inner, ..) -> zip_sequence_type(inner)
+        .List(_) | .FixedList(..) -> true
+        .Apply(name: name, args: args) if name == Syntax.TYPE_ITER && args.len() == 1 -> true
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2474
+fn zip_field_name(index: Int, label: String?) -> String Never! {
+    label.map(name -> ~name) ?? (["a", "b", "c", "d", "e", "f"].get(index).map(name -> ~name) ?? "column_{index}")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2488
+pub fn lower_zip_family(receiver: ^TExpr, inputs: ^[TExpr], fills: ^[TExpr], fields: ^[String], method: String, method_span: Span, resolved_ret: Type?) -> TExpr Never! {
+    ret :: resolved_ret ?? return invariant_method_expr(method_span, "zip call without a resolved return type")
+    input_count :: inputs.len() + 1
+    if input_count == 1 {
+        if is_iter_type(receiver.ty) -> return ^receiver
+        return TExpr{ty: ~ret, kind: TExprKind.BuiltinMethod(recv: ^receiver, op: .ListLazy, args: [])}
+    }
+    tuple_fields :: zip_tuple_fields(ret) ?? return invariant_method_expr(method_span, "zip call without a checked tuple return shape")
+    field_types :: tuple_fields.map((_, ty) -> ~ty)
+    fill_mode :: if method != "zip_pad" -> TZipFillMode.DefaultNone else if fills.len() == 1 -> if fills[0].ty == { .Tuple(_) -> TZipFillMode.Columns, else -> TZipFillMode.Common } else -> TZipFillMode.DefaultNone
+    inputs.extend(^fills)
+    TExpr{ty: ~ret, kind: TExprKind.BuiltinMethod(recv: ^receiver, op: TBuiltinOp.Zip(tuple_struct: tuple_struct_name(tuple_fields), mode: zip_family_mode(method), fields: ^fields, flatten: false, input_count: input_count, fill_mode: fill_mode, field_types: ^field_types), args: ^inputs)}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2547
+pub fn lower_empty_zip_family(resolved_ret: Type, method: String, method_span: Span) -> TExpr Never! {
+    TExpr{ty: ~resolved_ret, kind: TExprKind.BuiltinMethod(recv: TExpr{ty: Type.List(unit_type()), kind: TExprKind.ListLit([])}, op: .ListLazy, args: [])}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2565
+fn wrap_list_as_iter(receiver: ^TExpr) -> TExpr Never! {
+    element :: if receiver.ty.without_user_tags() == { .List(element) | .FixedList(elem: element, ..) -> ~element, else -> return ^receiver }
+    TExpr{ty: iter_ty(^element), kind: TExprKind.BuiltinMethod(recv: ^receiver, op: .ListLazy, args: [])}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2582
+pub fn lower_method_call(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: String?, operator_rhs: Type?, resolved_ret: Type?, checked_widen: Bool, cx: Cx, env: &LowerEnv, lowered_receiver: TExpr?) -> TExpr Never! {
+    lower_method_call_with_sig(receiver, method, method_span, owner_type_args, type_args, args, recv_type, operator_rhs, resolved_ret, checked_widen, cx, &env, lowered_receiver, None)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2615
+pub fn lower_method_call_with_sig(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: String?, operator_rhs: Type?, resolved_ret: Type?, checked_widen: Bool, cx: Cx, env: &LowerEnv, lowered_receiver: TExpr?, instantiated_sig: [(AccessConvention, Type)]?) -> TExpr Never! {
+    // Checked memo projection shares the canonical named store across tiers.
+    if method == Syntax.METHOD_MEMO_CACHE && args.is_empty() && resolved_ret.is_some_and(ty -> if ty == { .Named(name) -> name == Syntax.TYPE_MEMO_STATS, else -> false }) {
+        if receiver == { .Ident(name, _) -> return TExpr{ty: Type.Named(Syntax.TYPE_MEMO_STATS), kind: TExprKind.HostCall(THostCall.MemoStats(name: ~name))}, else -> {} }
+    }
+    if lower_data_schema_call(receiver, method, method_span, args, resolved_ret, cx, &env) == .Val(lowered) -> return ^lowered
+    recv := lowered_receiver
+    if lower_vault_instance_fast(receiver, method, method_span, recv_type, resolved_ret, &recv, cx, &env) == .Val(lowered) -> return ^lowered
+    lower_method_call_impl(receiver, method, method_span, owner_type_args, type_args, args, recv_type, operator_rhs, resolved_ret, checked_widen, cx, &env, ^recv, instantiated_sig)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2684
+fn inline_range_receiver(receiver: Expr) -> (I64, I64)? Never! {
+    call :: if receiver == { .Call(call) -> call, else -> return None }
+    ty :: call.resolved_ret ?? return None
+    if ty == {
+        .InlineRange(lo: lo, hi: hi, ..) -> Val((lo, hi))
+        .Result(ok: ok, ..) -> if ok == { .InlineRange(lo: lo, hi: hi, ..) -> Val((lo, hi)), else -> None }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2698
+fn route_strip_parens(expr: Expr) -> &Expr Never! {
+    current := &expr
+    loop {
+        if current == { .Paren(inner, _) -> current = &inner, else -> return current }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2704
+fn route_handler_param_names(handler_expr: Expr, cx: Cx) -> [String]? Never! {
+    if route_strip_parens(handler_expr) == {
+        .Lambda(lambda) -> Val(lambda.params.map(param -> ~param.name))
+        .Ident(name, _) -> cx.fn_param_names.get(name).map(params -> params.map(name -> ~name))
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2721
+fn route_static_string(expr: Expr, cx: Cx) -> String? Never! {
+    if route_strip_parens(expr) == {
+        .Str(parts, _) -> {
+            value := ""
+            loop part in parts {
+                if part == { .Lit(text) -> value += text, else -> return None }
+            }
+            Val(^value)
+        }
+        .Ident(name, _) -> if cx.const_values.get(name) == { .Val(.Str(value)) -> Val(~value), else -> None }
+        .ComptimeName(value: .Val(.Str(value)), ..) -> Val(~value)
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2745
+fn route_schema_type(ty: Type, cx: Cx, active: &[String: Bool]) -> MirHttpSchema? Never! {
+    if ty == {
+        .Int | .IntN(..) -> Val(.Integer)
+        .Float | .Float32 -> Val(.Number)
+        .Bool -> Val(.Boolean)
+        .String | .Char -> Val(.String)
+        .List(item) | .FixedList(elem: item, ..) -> Val(.Array(route_schema_type(item, cx, &active) ?? return None))
+        .Map(..) -> Val(.Object(properties: [], additional_properties: true))
+        .Shared(inner) | .InlineRange(base: inner, ..) | .Quantity(base: inner, ..) | .Tagged(inner: inner, ..) -> route_schema_type(inner, cx, &active)
+        .Option(inner) -> Val(.Nullable(route_schema_type(inner, cx, &active) ?? return None))
+        .Result(ok: ok, ..) -> route_schema_type(ok, cx, &active)
+        .Tuple(fields) -> {
+            properties := [MirHttpPropertyFact]{}
+            properties.reserve(fields.len())
+            loop (name, field_ty) in fields -> properties.push(MirHttpPropertyFact{name: ~name, schema: route_schema_type(field_ty, cx, &active) ?? return None, required: true})
+            Val(.Object(properties: ^properties, additional_properties: false))
+        }
+        .Union(items) -> {
+            schemas := [MirHttpSchema]{}
+            loop item in items -> schemas.push(route_schema_type(item, cx, &active) ?? return None)
+            Val(.OneOf(^schemas))
+        }
+        .Named(name) | .Apply(name: name, ..) -> {
+            if name == {
+                "Any" | "JSON" -> return Val(.Any)
+                "Null" | "Unit" -> return Val(.Null)
+                "String" -> return Val(.String)
+                "Bool" -> return Val(.Boolean)
+                "Int" | "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32" | "U64" | "U128" -> return Val(.Integer)
+                "Float" | "F32" | "F64" -> return Val(.Number)
+                else -> {}
+            }
+            if !cx.codable_types.contains(name) || active.contains_key(name) -> return None
+            active[name] = true
+            fields :: cx.reflection_fields.get(name) ?? return None
+            properties := [MirHttpPropertyFact]{}
+            properties.reserve(fields.len())
+            loop field in fields {
+                if !field.is_pub -> continue
+                required :: if field.ty == { .Option(_) -> false, else -> true }
+                properties.push(MirHttpPropertyFact{name: ~field.name, schema: route_schema_type(field.ty, cx, &active) ?? return None, required: required})
+            }
+            _ :: active.remove(name)
+            Val(.Object(properties: ^properties, additional_properties: false))
+        }
+        .TraitObject(_) | .Fn(..) | .Measure(_) -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2822
+fn route_schema_expr(expr: Expr, cx: Cx, locals: [String: Type]) -> MirHttpSchema? Never! {
+    active := [String: Bool]{}
+    if route_strip_parens(expr) == {
+        .Str(_, _) | .Char(_, _) -> Val(.String)
+        .Int(..) -> Val(.Integer)
+        .Float(..) -> Val(.Number)
+        .Bool(_, _) -> Val(.Boolean)
+        .Unit(_) -> Val(.Null)
+        .ListLit(items, _) -> Val(.Array(route_schema_expr(items.first() ?? return None, cx, locals) ?? return None))
+        .StructLit(type_name: name, ..) -> route_schema_type(Type.Named(name), cx, &active)
+        .TupleLit(_, _, .Val(ty)) | .TypedLit(head: .Val(ty), ..) -> route_schema_type(ty, cx, &active)
+        .Ident(name, _) -> route_schema_type(locals.get(name) ?? return None, cx, &active)
+        .Call(call) -> route_schema_type(call.resolved_ret ?? return None, cx, &active)
+        .MethodCall(resolved_ret: .Val(ty), ..) -> route_schema_type(ty, cx, &active)
+        .Ok(value, _) | .Try(value, _, _, _) -> route_schema_expr(value, cx, locals)
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2874
+fn route_status(expr: Expr, cx: Cx) -> I64? Never! {
+    if route_strip_parens(expr) == {
+        .Int(value, ..) -> Val(value)
+        .Ident(name, _) -> if cx.const_values.get(name) == { .Val(.Int(value)) -> Val(value), else -> None }
+        .ComptimeName(value: .Val(.Int(value)), ..) -> Val(value)
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2889
+fn route_response_constructor(name: String, args: [CallArg], cx: Cx, locals: [String: Type]) -> [MirHttpResponseFact]? Never! {
+    if (name != "response" && name != "json" && name != "empty_response") || args.is_empty() -> return None
+    status :: route_status(args[0].expr, cx) ?? return None
+    if status < 100 || status > 599 -> return None
+    (schema, content_type) :: if name == {
+        "response" if args.len() == 2 -> (Val(route_schema_expr(args[1].expr, cx, locals) ?? return None), None)
+        "json" if args.len() == 2 -> (Val(route_schema_expr(args[1].expr, cx, locals) ?? return None), Val("application/json"))
+        "empty_response" if args.len() == 1 -> (None, None)
+        else -> return None
+    }
+    Val([MirHttpResponseFact{status: status, description: "HTTP response", schema: ^schema, content_type: ^content_type}])
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2921
+fn route_response_expr(expr: Expr, cx: Cx, locals: [String: Type], response_aliases: [String: [MirHttpResponseFact]]) -> [MirHttpResponseFact]? Never! {
+    if route_strip_parens(expr) == {
+        .Ok(value, _) | .Try(value, _, _, _) -> route_response_expr(value, cx, locals, response_aliases)
+        .If(then_value: yes, else_value: no, ..) -> {
+            responses := route_response_expr(yes, cx, locals, response_aliases) ?? return None
+            responses.extend(route_response_expr(no, cx, locals, response_aliases) ?? return None)
+            Val(^responses)
+        }
+        .Ident(name, _) -> response_aliases.get(name).map(rows -> ~rows)
+        .Call(call) -> route_response_constructor(call.name.rsplit(".").next() ?? call.name, call.args, cx, locals)
+        .MethodCall(receiver: receiver, method: method, args: args, resolved_ret: ret, ..) -> {
+            returns_http_response :: if ret == {
+                .Val(.Named(name)) -> name == "HTTPResponse"
+                .Val(.Result(ok: ok, err: error)) -> error.is_never() && if ok == { .Named(name) -> name == "HTTPResponse", else -> false }
+                else -> false
+            }
+            if returns_http_response && (method == "response" || method == "json" || method == "empty_response") -> return route_response_constructor(method, args, cx, locals)
+            // Checked adapters preserve the contract of their response receiver.
+            if returns_http_response -> return route_response_expr(receiver, cx, locals, response_aliases)
+            None
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2988
+fn route_collect_returns(body: [Stmt], cx: Cx, locals: &[String: Type], response_aliases: &[String: [MirHttpResponseFact]], responses: &[MirHttpResponseFact], allow_opaque_responses: Bool) -> Bool Never! {
+    valid := true
+    loop stmt in body {
+        if stmt == {
+            .Val(binding) -> {
+                if !binding.name.is_empty() {
+                    // Any later binding shadows a prior response alias.
+                    _ :: response_aliases.remove(binding.name)
+                    if route_response_expr(binding.init, cx, locals, response_aliases) == .Val(found) -> response_aliases[binding.name] = ^found
+                }
+                if binding.ty == .Val(ty) {
+                    if !binding.name.is_empty() -> locals[binding.name] = ~ty
+                }
+            }
+            .Return(.Val(value), _) -> {
+                found :: route_response_expr(value, cx, locals, response_aliases) ?? {
+                    if !allow_opaque_responses -> valid = false
+                    continue
+                }
+                responses.extend(^found)
+            }
+            .Return(.None, _) -> valid = false
+            .While(body: nested, ..) | .For(body: nested, ..) | .Loop(body: nested, ..)
+            | .Unsafe(body: nested, ..) | .Impure(body: nested, ..) | .Reactive(body: nested, ..)
+            | .Shield(body: nested, ..) | .Switched(body: nested, ..) | .Region(body: nested, ..)
+            | .Policy(body: nested, ..) | .TaskGroup(body: nested, ..) | .Layout(body: nested, ..)
+            | .AuthorityScope(body: nested, ..) | .ComptimeBlock(body: nested, ..)
+            | .ContextBlock(body: nested, ..) | .Live(body: nested, ..) | .AssumeDet(body: nested, ..)
+            | .Transact(body: nested, ..) | .ScopeMember(body: nested, ..) -> {
+                child_valid :: route_collect_returns(nested, cx, &locals, &response_aliases, &responses, allow_opaque_responses)
+                valid = valid && child_valid
+            }
+            .Switch(arms: arms, else_body: otherwise, ..) | .ComptimeSwitch(arms: arms, else_body: otherwise, ..) -> {
+                loop arm in arms {
+                    child_valid :: route_collect_returns(arm.body, cx, &locals, &response_aliases, &responses, allow_opaque_responses)
+                    valid = valid && child_valid
+                }
+                if otherwise == .Val(nested) {
+                    child_valid :: route_collect_returns(nested, cx, &locals, &response_aliases, &responses, allow_opaque_responses)
+                    valid = valid && child_valid
+                }
+            }
+            .CountedLoop(body: nested, step: step, ..) -> {
+                child_valid :: route_collect_returns(nested, cx, &locals, &response_aliases, &responses, allow_opaque_responses)
+                valid = valid && child_valid
+                if step == .Val(statement) {
+                    step_valid :: route_collect_returns([statement], cx, &locals, &response_aliases, &responses, allow_opaque_responses)
+                    valid = valid && step_valid
+                }
+            }
+            .ComptimeIf(then_body: yes, else_body: no, ..) -> {
+                child_valid :: route_collect_returns(yes, cx, &locals, &response_aliases, &responses, allow_opaque_responses)
+                valid = valid && child_valid
+                if no == .Val(nested) {
+                    child_valid :: route_collect_returns(nested, cx, &locals, &response_aliases, &responses, allow_opaque_responses)
+                    valid = valid && child_valid
+                }
+            }
+            else -> {}
+        }
+    }
+    valid
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:3137
+fn route_json_type_from_body(body: LambdaBody) -> Type? Never! {
+    found := Type?{None}
+    visit := fn(expr: Expr) {
+        if found != None -> return
+        if expr == {
+            .MethodCall(method: method, recv_type: recv_type, type_args: type_args, ..) -> {
+                if method == "json" && recv_type == Val("HTTPRequest") && type_args.len() == 1 -> found = Val(~type_args[0])
+            }
+            else -> {}
+        }
+    }
+    if body == {
+        .Expr(expr) -> expr.for_each_expr(&visit)
+        .Block(stmts) -> { loop stmt in stmts -> stmt.for_each_expr(&visit) }
+    }
+    ^found
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:3169
+fn route_handler_contract(method: MirHttpMethod, path_expr: Expr, handler_expr: Expr, cx: Cx, line: Int, is_mux: Bool) -> String? Never! {
+    pattern :: route_static_string(path_expr, cx) ?? return None
+    _ :: Syntax.validate_http_route_pattern(pattern) ?? return None
+    path := ""
+    parameters := [MirHttpParameterFact]{}
+    if pattern == "/" -> path.push('/')
+    else {
+        loop segment in pattern.split("/").skip(1) {
+            path.push('/')
+            if segment.strip_prefix(":") == .Val(name) {
+                path += "{{{name}}}"
+                parameters.push(MirHttpParameterFact{name: ~name, location: .Path, required: true, catch_all: false, schema: .String})
+            } else if segment.strip_prefix("*") == .Val(name) {
+                path += "{{{name}}}"
+                parameters.push(MirHttpParameterFact{name: ~name, location: .Path, required: true, catch_all: true, schema: .String})
+            } else -> path += segment
+        }
+    }
+    handler :: route_strip_parens(handler_expr)
+    (body, param_types) :: if handler == {
+        .Lambda(lambda) -> {
+            params := [Type]{}
+            loop param in lambda.params -> params.push(~(param.ty ?? return None))
+            (~lambda.body, ^params)
+        }
+        .Ident(name, _) -> {
+            statements :: cx.fn_bodies.get(name) ?? return None
+            signature :: cx.sigs.get(name) ?? return None
+            (LambdaBody.Block(~statements), signature.map((_, ty) -> ~ty))
+        }
+        else -> return None
+    }
+    locals := [String: Type]{}
+    response_aliases := [String: [MirHttpResponseFact]]{}
+    handler_param_names := [(String, Type)]{}
+    handler_param_names.reserve(param_types.len())
+    if handler == {
+        .Ident(name, _) -> {
+            if cx.fn_param_names.get(name) == .Val(names) {
+                loop (param_name, ty) in names.zip(param_types) {
+                    handler_param_names.push((~param_name, ~ty))
+                    locals[param_name] = ~ty
+                }
+            }
+        }
+        .Lambda(lambda) -> {
+            loop (param, ty) in lambda.params.zip(param_types) {
+                handler_param_names.push((~param.name, ~ty))
+                locals[param.name] = ~ty
+            }
+        }
+        else -> {}
+    }
+    if handler_param_names.len() != param_types.len() -> return None
+    names := [String: Bool]{}
+    request_count := 0
+    loop (name, ty) in handler_param_names {
+        if name.is_empty() || names.contains_key(name) -> return None
+        names[name] = true
+        if ty == { .Named("HTTPRequest") -> request_count += 1, else -> {} }
+    }
+    if request_count > 1 -> return None
+    if !is_mux {
+        // Unique name validation above makes this index equivalent to unique matching.
+        loop parameter in &parameters {
+            if parameter.location != .Path -> continue
+            ty :: locals.get(parameter.name) ?? return None
+            if ty == { .Named("HTTPRequest") -> return None, else -> {} }
+            active := [String: Bool]{}
+            parameter.schema = route_schema_type(ty, cx, &active) ?? return None
+        }
+    }
+    path_names := [String: Bool]{}
+    loop parameter in parameters {
+        if parameter.location == .Path -> path_names[parameter.name] = true
+    }
+    if method == .Get || method == .Head {
+        loop (name, ty) in handler_param_names {
+            is_request :: if ty == { .Named("HTTPRequest") -> true, else -> false }
+            if path_names.contains_key(name) || is_request -> continue
+            active := [String: Bool]{}
+            required :: if ty == { .Option(_) -> false, else -> true }
+            parameters.push(MirHttpParameterFact{name: ~name, location: .Query, required: required, catch_all: false, schema: route_schema_type(ty, cx, &active) ?? return None})
+        }
+    } else {
+        loop (name, ty) in handler_param_names {
+            is_request :: if ty == { .Named("HTTPRequest") -> true, else -> false }
+            if !path_names.contains_key(name) && !is_request -> return None
+        }
+    }
+    body_schema :: if route_json_type_from_body(body) == {
+        .Val(ty) -> {
+            active := [String: Bool]{}
+            Val(route_schema_type(ty, cx, &active) ?? return None)
+        }
+        .None -> None
+    }
+    if body_schema == .Val(.Object(properties: properties, ..)) {
+        parameter_names := [String: Bool]{}
+        loop parameter in parameters -> parameter_names[parameter.name] = true
+        if properties.any(property -> parameter_names.contains_key(property.name)) -> return None
+    }
+    request_body :: body_schema.map(schema -> MirHttpRequestBodyFact{required: true, content_type: "application/json", schema: ^schema})
+    responses := [MirHttpResponseFact]{}
+    valid :: if body == {
+        .Expr(expr) -> if route_response_expr(expr, cx, locals, response_aliases) == {
+            .Val(found) -> { responses.extend(^found); true }
+            .None -> is_mux
+        }
+        .Block(stmts) -> route_collect_returns(stmts, cx, &locals, &response_aliases, &responses, is_mux)
+    }
+    if !valid || (!is_mux && responses.is_empty()) -> return None
+    responses.sort_by(response -> response.status)
+    // Adjacent full-value equality, not status-only de-duplication.
+    responses.dedup()
+    operation_id :: MirHttpRouteFacts.operation_id(method, path)
+    Val(MirHttpRouteFacts{method: method, pattern: ^pattern, path: ^path, operation_id: ^operation_id, summary: None, parameters: ^parameters, request_body: ^request_body, responses: ^responses, security: [], provenance: "{cx.file}:{line}"}.to_wire())
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:3391
+fn hardware_method_op(receiver: Expr, method: String, args: [CallArg], recv_type: String?, cx: Cx, env: LowerEnv) -> THardwareCall? Err! {
+    profile_id :: cx.hardware_profile_id.filter(id -> !id.is_empty()) ?? return None
+    profile :: cx.hardware_profile ?? return err("checked hardware profile facts are missing")
+    path :: hardware_expr_path(receiver)
+    is_board_receiver :: path.first().is_some_and(root -> cx.core_imports.get(root).is_some_and(profile -> profile.starts_with("board.")))
+    if is_board_receiver && path.len() >= 3 {
+        block :: profile.register_blocks.find(block -> block.name.eq_ignore_ascii_case(path[1])) ?? return err("checked hardware register block fact is missing for `{path[1]}`")
+        register :: block.registers.find(register -> register.name.eq_ignore_ascii_case(path[2])) ?? return err("checked hardware register fact is missing for `{block.name}.{path[2]}`")
+        return if method == {
+            "read" -> Val(THardwareCall.RegisterRead(profile_id: ~profile_id, block: ~block.name, register: ~register.name, width: register.width))
+            "write" | "set" | "clear" -> Val(THardwareCall.RegisterWrite(profile_id: ~profile_id, block: ~block.name, register: ~register.name, width: register.width))
+            else -> None
+        }
+    }
+    is_dma :: if receiver == { .Ident("dma", _) -> true, else -> false }
+    if method == "start" && is_dma && args.len() >= 2 {
+        channel_path :: hardware_expr_path(args[0].expr)
+        if channel_path.len() >= 3 && channel_path.first().is_some_and(root -> cx.core_imports.get(root).is_some_and(profile -> profile.starts_with("board."))) {
+            channel_key :: "{channel_path[1].to_ascii_uppercase()}_{channel_path[2].to_ascii_uppercase()}"
+            channel :: profile.dma_channels.find(fact -> fact.name.eq_ignore_ascii_case(channel_key)) ?? return err("checked hardware DMA channel fact is missing for `{channel_key}`")
+            return Val(THardwareCall.DmaStart(profile_id: ~profile_id, channel: ~channel.name, buffer_ty: Type.Named("__JetDmaBuffer")))
+        }
+    }
+    if method == "wait" && recv_type == Val("__JetDmaTransfer") {
+        receiver_name :: if receiver == { .Ident(name, _) -> name, else -> return err("checked hardware DMA wait receiver has no transfer binding") }
+        channel_name :: env.dma_transfer_channel(receiver_name) ?? return err("checked hardware DMA wait has no channel fact for its transfer binding")
+        channel :: profile.dma_channels.find(fact -> fact.name.eq_ignore_ascii_case(channel_name)) ?? return err("checked hardware DMA channel fact is missing for `{channel_name}`")
+        return Val(THardwareCall.DmaWait(profile_id: ~profile_id, channel: ~channel.name, buffer_ty: Type.Named("__JetDmaBuffer")))
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:3511
+fn hardware_expr_path(expr: Expr) -> [String] Never! {
+    if expr == {
+        .Ident(name, _) -> [~name]
+        .Field(base, member, _) -> {
+            path := hardware_expr_path(base)
+            path.push(~member)
+            ^path
+        }
+        .Paren(inner, _) -> hardware_expr_path(inner)
+        else -> []
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:3524
+fn lower_app_callback(expr: Expr, cx: Cx, env: &LowerEnv) -> TExpr Never! {
+    value :: lower_expr(expr, cx, &env)
+    if value.kind == { .FnValue(kind: .Send(..)) -> return ^value, else -> {} }
+    ty :: ~value.ty
+    TExpr{ty: ^ty, kind: TExprKind.FnValue(kind: TFnValueKind.Send(value: ^value))}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:3545
+fn lower_http_middleware_callback(expr: Expr, cx: Cx, env: &LowerEnv) -> TExpr Never! {
+    value :: if route_strip_parens(expr) == {
+        .Lambda(lam) -> {
+            middleware_ty :: Type.Fn(params: [Type.Named("HTTPHandler")], ret: Val(Type.Named("HTTPHandler")), effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None)
+            lowered :: lower_lambda_expecting_callable(lam, cx, &env, middleware_ty)
+            TExpr{ty: ^middleware_ty, kind: TExprKind.Lambda(^lowered)}
+        }
+        else -> lower_expr(expr, cx, &env)
+    }
+    if value.kind == { .FnValue(kind: .Send(..)) -> return ^value, else -> {} }
+    if value.ty == { .Fn(..) -> {}, else -> return ^value }
+    force_thread_callback_value(^value, cx)
+}
 

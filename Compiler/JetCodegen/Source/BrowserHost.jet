@@ -1,743 +1,370 @@
-// PORT-PENDING 0453 crates-jet-codegen-src-browserhost: crates/jet-codegen/src/BrowserHost.rs:1-739
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Tier-0 adapter for the canonical generated Browser runtime (#772).
-//RS //!
-//RS //! The included files are also emitted verbatim for AOT. This module adds only
-//RS //! the CtValue handle table needed by the structured TIR evaluator.
-//RS #![allow(dead_code)]
-//RS 
-//RS use crate::Comptime::CtValue;
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::Type;
-//RS use std::cell::{Cell, RefCell};
-//RS use std::collections::HashMap;
-//RS 
-//RS trait JetShow {
-//RS     fn jet_show(&self) -> String;
-//RS }
-//RS 
-//RS trait JetDebug {
-//RS     fn jet_debug(&self) -> String;
-//RS }
-//RS 
-//RS /// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
-//RS trait JetDisplay {
-//RS     fn jet_display(&self) -> String;
-//RS }
-//RS 
-//RS fn jet_deadline_remaining_ms() -> Option<i64> {
-//RS     None
-//RS }
-//RS 
-//RS mod jet_std {
-//RS     pub use jet_foundation::DataTree::DataTree;
-//RS     pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
-//RS 
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub struct JSONError {
-//RS         pub line: i64,
-//RS         pub message: String,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub enum JSON {
-//RS         Null,
-//RS         Boolean(bool),
-//RS         Number(f64),
-//RS         Integer(i64),
-//RS         ExactInteger(String),
-//RS         Text(String),
-//RS         Array(Vec<JSON>),
-//RS         Object(std::collections::BTreeMap<String, JSON>),
-//RS     }
-//RS 
-//RS     include!("Prelude/CoreLib/JetStd/EncodingTypes.rs");
-//RS     include!("Prelude/CoreLib/JetStd/JSONCodec.rs");
-//RS }
-//RS 
-//RS include!("../../jet-foundation/src/LiveLifecycle.rs");
-//RS // WsClient registers one canonical live-query transport sink. Keep the
-//RS // BrowserHost inclusion order identical to generated AOT: the transport
-//RS // adapter sees the shared Prelude registry, not a browser-only duplicate.
-//RS include!("Prelude/CoreLib/Top/LiveQuery.rs");
-//RS include!("Prelude/CoreLib/Top/WsClient.rs");
-//RS include!("Prelude/CoreLib/Top/Browser.rs");
-//RS 
-//RS #[derive(Clone)]
-//RS enum BrowserHostValue {
-//RS     Browser(JetBrowser),
-//RS     Context(JetBrowserContext),
-//RS     Page(JetBrowserPage),
-//RS     Frame(JetBrowserFrame),
-//RS     Locator(JetBrowserLocator),
-//RS     Intercept(JetBrowserIntercept),
-//RS     Protocol(JetBrowserProtocol),
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static VALUES: RefCell<HashMap<i64, BrowserHostValue>> = RefCell::new(HashMap::new());
-//RS     static NEXT_VALUE: Cell<i64> = const { Cell::new(1) };
-//RS }
-//RS 
-//RS fn browser_error(error: JetBrowserError) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "BrowserError".to_string(),
-//RS         fields: vec![("kind".to_string(), CtValue::Str(error.kind.to_string()))],
-//RS     }
-//RS }
-//RS 
-//RS fn result<T>(value: Result<T, JetBrowserError>, map: impl FnOnce(T) -> CtValue) -> CtValue {
-//RS     match value {
-//RS         Ok(value) => CtValue::Present(Box::new(map(value))),
-//RS         Err(error) => CtValue::failed(Box::new(browser_error(error))),
-//RS     }
-//RS }
-//RS 
-//RS fn store(type_name: &str, value: BrowserHostValue) -> CtValue {
-//RS     let id = NEXT_VALUE.with(|next| {
-//RS         let id = next.get();
-//RS         next.set(id + 1);
-//RS         id
-//RS     });
-//RS     VALUES.with(|values| {
-//RS         values.borrow_mut().insert(id, value);
-//RS     });
-//RS     CtValue::Struct {
-//RS         type_name: type_name.to_string(),
-//RS         fields: vec![("__browser_host_id".to_string(), CtValue::Int(id))],
-//RS     }
-//RS }
-//RS 
-//RS fn handle_id(value: &CtValue, type_name: &str, span: Span) -> Result<i64, Diagnostic> {
-//RS     let CtValue::Struct {
-//RS         type_name: actual,
-//RS         fields,
-//RS     } = value
-//RS     else {
-//RS         return Err(host_error(type_name, span));
-//RS     };
-//RS     if actual != type_name {
-//RS         return Err(host_error(type_name, span));
-//RS     }
-//RS     fields
-//RS         .iter()
-//RS         .find_map(|(name, value)| match (name.as_str(), value) {
-//RS             ("__browser_host_id", CtValue::Int(id)) => Some(*id),
-//RS             _ => None,
-//RS         })
-//RS         .ok_or_else(|| host_error(type_name, span))
-//RS }
-//RS 
-//RS fn field<'a>(value: &'a CtValue, type_name: &str, name: &str) -> Option<&'a CtValue> {
-//RS     match value {
-//RS         CtValue::Struct {
-//RS             type_name: actual,
-//RS             fields,
-//RS         } if actual == type_name => fields
-//RS             .iter()
-//RS             .find_map(|(field, value)| (field == name).then_some(value)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn host_error(what: &str, span: Span) -> Diagnostic {
-//RS     crate::Sema::Diagnostics::browser_tier0_unsupported(what, span)
-//RS }
-//RS 
-//RS fn int_arg(args: &[CtValue], index: usize, span: Span) -> Result<i64, Diagnostic> {
-//RS     match args.get(index) {
-//RS         Some(CtValue::Int(value)) => Ok(*value),
-//RS         _ => Err(host_error("Int argument", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn event_ct(event: JetBrowserEvent) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "BrowserEvent".to_string(),
-//RS         fields: vec![
-//RS             ("method".to_string(), CtValue::Str(event.method)),
-//RS             ("request_id".to_string(), CtValue::Str(event.request_id)),
-//RS             (
-//RS                 "request_method".to_string(),
-//RS                 CtValue::Str(event.request_method),
-//RS             ),
-//RS             ("url_hash".to_string(), CtValue::Str(event.url_hash)),
-//RS             ("is_blocked".to_string(), CtValue::Bool(event.is_blocked)),
-//RS             ("status_code".to_string(), CtValue::Int(event.status_code)),
-//RS             ("download_id".to_string(), CtValue::Str(event.download_id)),
-//RS             (
-//RS                 "suggested_filename_hash".to_string(),
-//RS                 CtValue::Str(event.suggested_filename_hash),
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn string_arg(args: &[CtValue], index: usize, span: Span) -> Result<String, Diagnostic> {
-//RS     match args.get(index) {
-//RS         Some(CtValue::Str(value)) => Ok(value.clone()),
-//RS         _ => Err(host_error("String argument", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn timeout_value(value: &CtValue, span: Span) -> Result<JetBrowserTimeout, Diagnostic> {
-//RS     match field(value, "BrowserTimeout", "milliseconds") {
-//RS         Some(CtValue::Int(milliseconds)) => Ok(JetBrowserTimeout {
-//RS             milliseconds: *milliseconds,
-//RS         }),
-//RS         _ => Err(host_error("timeout", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn profile_value(value: &CtValue, span: Span) -> Result<JetBrowserProfile, Diagnostic> {
-//RS     match (
-//RS         field(value, "BrowserProfile", "name"),
-//RS         field(value, "BrowserProfile", "version"),
-//RS     ) {
-//RS         (Some(CtValue::Str(name)), Some(CtValue::Str(version))) => Ok(JetBrowserProfile {
-//RS             name: name.clone(),
-//RS             version: version.clone(),
-//RS         }),
-//RS         _ => Err(host_error("profile", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn profile_ct(value: JetBrowserProfile) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "BrowserProfile".to_string(),
-//RS         fields: vec![
-//RS             ("name".to_string(), CtValue::Str(value.name)),
-//RS             ("version".to_string(), CtValue::Str(value.version)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn timeout_ct(value: JetBrowserTimeout) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "BrowserTimeout".to_string(),
-//RS         fields: vec![("milliseconds".to_string(), CtValue::Int(value.milliseconds))],
-//RS     }
-//RS }
-//RS 
-//RS fn locked_ct(value: JetBrowserLocked) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "BrowserLocked".to_string(),
-//RS         fields: vec![
-//RS             ("engine".to_string(), CtValue::Str(value.engine)),
-//RS             ("version".to_string(), CtValue::Str(value.version)),
-//RS             ("binary".to_string(), CtValue::Str(value.binary)),
-//RS             ("protocol".to_string(), CtValue::Str(value.protocol)),
-//RS             ("size".to_string(), CtValue::Int(value.size)),
-//RS             ("output_hash".to_string(), CtValue::Str(value.output_hash)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn locked_value(value: &CtValue, span: Span) -> Result<JetBrowserLocked, Diagnostic> {
-//RS     match (
-//RS         field(value, "BrowserLocked", "engine"),
-//RS         field(value, "BrowserLocked", "version"),
-//RS         field(value, "BrowserLocked", "binary"),
-//RS         field(value, "BrowserLocked", "protocol"),
-//RS         field(value, "BrowserLocked", "size"),
-//RS         field(value, "BrowserLocked", "output_hash"),
-//RS     ) {
-//RS         (
-//RS             Some(CtValue::Str(engine)),
-//RS             Some(CtValue::Str(version)),
-//RS             Some(CtValue::Str(binary)),
-//RS             Some(CtValue::Str(protocol)),
-//RS             Some(CtValue::Int(size)),
-//RS             Some(CtValue::Str(output_hash)),
-//RS         ) => Ok(JetBrowserLocked {
-//RS             engine: engine.clone(),
-//RS             version: version.clone(),
-//RS             binary: binary.clone(),
-//RS             protocol: protocol.clone(),
-//RS             size: *size,
-//RS             output_hash: output_hash.clone(),
-//RS         }),
-//RS         _ => Err(host_error("locked", span)),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn eval_core_call(
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     Ok(match method {
-//RS         "profile" => result(
-//RS             jet_browser_profile(&string_arg(&args, 0, span)?),
-//RS             profile_ct,
-//RS         ),
-//RS         "timeout" => {
-//RS             let milliseconds = match args.first() {
-//RS                 Some(CtValue::Int(value)) => *value,
-//RS                 _ => return Err(host_error("timeout argument", span)),
-//RS             };
-//RS             result(jet_browser_timeout(milliseconds), timeout_ct)
-//RS         }
-//RS         "locked" => result(jet_browser_locked(&string_arg(&args, 0, span)?), locked_ct),
-//RS         "connect" => result(
-//RS             jet_browser_connect(&string_arg(&args, 0, span)?),
-//RS             |browser| store("Browser", BrowserHostValue::Browser(browser)),
-//RS         ),
-//RS         "connect_profile" => {
-//RS             let endpoint = string_arg(&args, 0, span)?;
-//RS             let profile = profile_value(
-//RS                 args.get(1).ok_or_else(|| host_error("profile", span))?,
-//RS                 span,
-//RS             )?;
-//RS             let timeout = timeout_value(
-//RS                 args.get(2).ok_or_else(|| host_error("timeout", span))?,
-//RS                 span,
-//RS             )?;
-//RS             result(
-//RS                 jet_browser_connect_profile(&endpoint, &profile, timeout),
-//RS                 |browser| store("Browser", BrowserHostValue::Browser(browser)),
-//RS             )
-//RS         }
-//RS         _ => return Err(host_error(method, span)),
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn eval_method(
-//RS     kind: &str,
-//RS     method: &str,
-//RS     recv: &CtValue,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let id = handle_id(recv, kind, span)?;
-//RS     let value = VALUES
-//RS         .with(|values| values.borrow().get(&id).cloned())
-//RS         .ok_or_else(|| host_error(kind, span))?;
-//RS     Ok(match (&value, method) {
-//RS         (BrowserHostValue::Browser(browser), "abilities") => {
-//RS             let caps = jet_browser_abilities(browser);
-//RS             CtValue::Struct {
-//RS                 type_name: "BrowserAbilities".to_string(),
-//RS                 fields: vec![
-//RS                     ("bidi".to_string(), CtValue::Bool(caps.bidi)),
-//RS                     ("cdp".to_string(), CtValue::Bool(caps.cdp)),
-//RS                     ("profile".to_string(), CtValue::Str(caps.profile)),
-//RS                 ],
-//RS             }
-//RS         }
-//RS         (BrowserHostValue::Browser(browser), "context") => {
-//RS             result(jet_browser_context(browser), |context| {
-//RS                 store("BrowserContext", BrowserHostValue::Context(context))
-//RS             })
-//RS         }
-//RS         (BrowserHostValue::Browser(browser), "subscribe") => result(
-//RS             jet_browser_subscribe(browser, &string_arg(args, 0, span)?),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Browser(browser), "next_event") => result(
-//RS             jet_browser_next_event(
-//RS                 browser,
-//RS                 timeout_value(
-//RS                     args.first().ok_or_else(|| host_error("timeout", span))?,
-//RS                     span,
-//RS                 )?,
-//RS             ),
-//RS             event_ct,
-//RS         ),
-//RS         (BrowserHostValue::Browser(browser), "add_intercept") => result(
-//RS             jet_browser_add_intercept(browser, &string_arg(args, 0, span)?),
-//RS             |intercept| store("BrowserIntercept", BrowserHostValue::Intercept(intercept)),
-//RS         ),
-//RS         (BrowserHostValue::Browser(browser), "add_intercept_url") => result(
-//RS             jet_browser_add_intercept_url(
-//RS                 browser,
-//RS                 &string_arg(args, 0, span)?,
-//RS                 &string_arg(args, 1, span)?,
-//RS             ),
-//RS             |intercept| store("BrowserIntercept", BrowserHostValue::Intercept(intercept)),
-//RS         ),
-//RS         (BrowserHostValue::Browser(browser), "continue_request") => result(
-//RS             jet_browser_continue_request(browser, &string_arg(args, 0, span)?),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Browser(browser), "fail_request") => result(
-//RS             jet_browser_fail_request(browser, &string_arg(args, 0, span)?),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Browser(browser), "fulfill_request") => result(
-//RS             jet_browser_fulfill_request(
-//RS                 browser,
-//RS                 &string_arg(args, 0, span)?,
-//RS                 int_arg(args, 1, span)?,
-//RS                 &string_arg(args, 2, span)?,
-//RS             ),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Browser(browser), "allow_downloads") => result(
-//RS             jet_browser_allow_downloads(browser, &string_arg(args, 0, span)?),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Browser(browser), "protocol") => result(
-//RS             jet_browser_protocol(browser, &string_arg(args, 0, span)?),
-//RS             |protocol| store("BrowserProtocol", BrowserHostValue::Protocol(protocol)),
-//RS         ),
-//RS         (BrowserHostValue::Browser(browser), "trace") => {
-//RS             let trace = jet_browser_trace(browser);
-//RS             CtValue::Struct {
-//RS                 type_name: "BrowserTrace".to_string(),
-//RS                 fields: vec![(
-//RS                     "entries".to_string(),
-//RS                     CtValue::List(trace.entries.into_iter().map(CtValue::Str).collect()),
-//RS                 )],
-//RS             }
-//RS         }
-//RS         (BrowserHostValue::Browser(browser), "privacy") => {
-//RS             let privacy = jet_browser_privacy(browser);
-//RS             CtValue::Struct {
-//RS                 type_name: "BrowserPrivacy".to_string(),
-//RS                 fields: vec![
-//RS                     (
-//RS                         "isolated_profiles".to_string(),
-//RS                         CtValue::Bool(privacy.isolated_profiles),
-//RS                     ),
-//RS                     (
-//RS                         "redact_receipts".to_string(),
-//RS                         CtValue::Bool(privacy.redact_receipts),
-//RS                     ),
-//RS                     (
-//RS                         "shared_profiles".to_string(),
-//RS                         CtValue::Bool(privacy.shared_profiles),
-//RS                     ),
-//RS                 ],
-//RS             }
-//RS         }
-//RS         (BrowserHostValue::Browser(browser), "receipt") => {
-//RS             let receipt = jet_browser_receipt(browser);
-//RS             CtValue::Struct {
-//RS                 type_name: "BrowserReceipt".to_string(),
-//RS                 fields: vec![
-//RS                     (
-//RS                         "entries".to_string(),
-//RS                         CtValue::List(receipt.entries.into_iter().map(CtValue::Str).collect()),
-//RS                     ),
-//RS                     ("isolated".to_string(), CtValue::Bool(receipt.isolated)),
-//RS                     ("cleaned".to_string(), CtValue::Bool(receipt.cleaned)),
-//RS                 ],
-//RS             }
-//RS         }
-//RS         (BrowserHostValue::Browser(browser), "close") => {
-//RS             result(jet_browser_close(browser), |_| CtValue::Unit)
-//RS         }
-//RS         (BrowserHostValue::Context(context), "page") => {
-//RS             result(jet_browser_context_page(context), |page| {
-//RS                 store("BrowserPage", BrowserHostValue::Page(page))
-//RS             })
-//RS         }
-//RS         (BrowserHostValue::Context(context), "tab") => {
-//RS             result(jet_browser_context_tab(context), |page| {
-//RS                 store("BrowserPage", BrowserHostValue::Page(page))
-//RS             })
-//RS         }
-//RS         (BrowserHostValue::Context(context), "close") => {
-//RS             result(jet_browser_context_close(context), |_| CtValue::Unit)
-//RS         }
-//RS         (BrowserHostValue::Context(context), "isolated") => {
-//RS             CtValue::Bool(jet_browser_context_isolated(context))
-//RS         }
-//RS         (BrowserHostValue::Context(context), "user_hash") => {
-//RS             CtValue::Str(jet_browser_context_user_hash(context))
-//RS         }
-//RS         (BrowserHostValue::Page(page), "goto") => result(
-//RS             jet_browser_page_goto(page, &string_arg(args, 0, span)?),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "get_by_role") => store(
-//RS             "BrowserLocator",
-//RS             BrowserHostValue::Locator(jet_browser_page_get_by_role(
-//RS                 page,
-//RS                 &string_arg(args, 0, span)?,
-//RS                 &string_arg(args, 1, span)?,
-//RS             )),
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "get_by_text") => store(
-//RS             "BrowserLocator",
-//RS             BrowserHostValue::Locator(jet_browser_page_get_by_text(
-//RS                 page,
-//RS                 &string_arg(args, 0, span)?,
-//RS             )),
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "get_by_label") => store(
-//RS             "BrowserLocator",
-//RS             BrowserHostValue::Locator(jet_browser_page_get_by_label(
-//RS                 page,
-//RS                 &string_arg(args, 0, span)?,
-//RS             )),
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "get_by_placeholder") => store(
-//RS             "BrowserLocator",
-//RS             BrowserHostValue::Locator(jet_browser_page_get_by_placeholder(
-//RS                 page,
-//RS                 &string_arg(args, 0, span)?,
-//RS             )),
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "get_by_test_id") => store(
-//RS             "BrowserLocator",
-//RS             BrowserHostValue::Locator(jet_browser_page_get_by_test_id(
-//RS                 page,
-//RS                 &string_arg(args, 0, span)?,
-//RS             )),
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "get_by_css") => store(
-//RS             "BrowserLocator",
-//RS             BrowserHostValue::Locator(jet_browser_page_get_by_css(
-//RS                 page,
-//RS                 &string_arg(args, 0, span)?,
-//RS             )),
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "main_frame") => {
-//RS             result(jet_browser_page_main_frame(page), |frame| {
-//RS                 store("BrowserFrame", BrowserHostValue::Frame(frame))
-//RS             })
-//RS         }
-//RS         (BrowserHostValue::Page(page), "frames") => {
-//RS             result(jet_browser_page_frames(page), |frames| {
-//RS                 CtValue::List(
-//RS                     frames
-//RS                         .into_iter()
-//RS                         .map(|frame| store("BrowserFrame", BrowserHostValue::Frame(frame)))
-//RS                         .collect(),
-//RS                 )
-//RS             })
-//RS         }
-//RS         (BrowserHostValue::Page(page), "close") => {
-//RS             result(jet_browser_page_close(page), |_| CtValue::Unit)
-//RS         }
-//RS         (BrowserHostValue::Page(page), "screenshot") => {
-//RS             result(jet_browser_page_screenshot(page), CtValue::Str)
-//RS         }
-//RS         (BrowserHostValue::Page(page), "pdf") => result(jet_browser_page_pdf(page), CtValue::Str),
-//RS         (BrowserHostValue::Page(page), "set_cookie") => result(
-//RS             jet_browser_page_set_cookie(
-//RS                 page,
-//RS                 &string_arg(args, 0, span)?,
-//RS                 &string_arg(args, 1, span)?,
-//RS                 &string_arg(args, 2, span)?,
-//RS             ),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "cookie") => result(
-//RS             jet_browser_page_cookie(page, &string_arg(args, 0, span)?),
-//RS             |value| match value {
-//RS                 Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
-//RS                 None => CtValue::absent(Type::String),
-//RS             },
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "clear_cookies") => {
-//RS             result(jet_browser_page_clear_cookies(page), |_| CtValue::Unit)
-//RS         }
-//RS         (BrowserHostValue::Page(page), "storage_get") => result(
-//RS             jet_browser_page_storage_get(
-//RS                 page,
-//RS                 &string_arg(args, 0, span)?,
-//RS                 &string_arg(args, 1, span)?,
-//RS             ),
-//RS             |value| match value {
-//RS                 Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
-//RS                 None => CtValue::absent(Type::String),
-//RS             },
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "storage_set") => result(
-//RS             jet_browser_page_storage_set(
-//RS                 page,
-//RS                 &string_arg(args, 0, span)?,
-//RS                 &string_arg(args, 1, span)?,
-//RS                 &string_arg(args, 2, span)?,
-//RS             ),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Page(page), "storage_clear") => result(
-//RS             jet_browser_page_storage_clear(page, &string_arg(args, 0, span)?),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Frame(frame), "close") => {
-//RS             result(jet_browser_frame_close(frame), |_| CtValue::Unit)
-//RS         }
-//RS         (BrowserHostValue::Locator(locator), "wait") => result(
-//RS             jet_browser_locator_wait(
-//RS                 locator,
-//RS                 timeout_value(
-//RS                     args.first().ok_or_else(|| host_error("timeout", span))?,
-//RS                     span,
-//RS                 )?,
-//RS             ),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Locator(locator), "wait_gone") => result(
-//RS             jet_browser_locator_wait_gone(
-//RS                 locator,
-//RS                 timeout_value(
-//RS                     args.first().ok_or_else(|| host_error("timeout", span))?,
-//RS                     span,
-//RS                 )?,
-//RS             ),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Locator(locator), "click") => {
-//RS             result(jet_browser_locator_click(locator), |_| CtValue::Unit)
-//RS         }
-//RS         (BrowserHostValue::Locator(locator), "hover") => {
-//RS             result(jet_browser_locator_hover(locator), |_| CtValue::Unit)
-//RS         }
-//RS         (BrowserHostValue::Locator(locator), "fill") => result(
-//RS             jet_browser_locator_fill(locator, &string_arg(args, 0, span)?),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Locator(locator), "press") => result(
-//RS             jet_browser_locator_press(locator, &string_arg(args, 0, span)?),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Locator(locator), "set_files") => result(
-//RS             jet_browser_locator_set_files(locator, &string_arg(args, 0, span)?),
-//RS             |_| CtValue::Unit,
-//RS         ),
-//RS         (BrowserHostValue::Intercept(intercept), "remove") => {
-//RS             result(jet_browser_intercept_remove(intercept), |_| CtValue::Unit)
-//RS         }
-//RS         (BrowserHostValue::Protocol(protocol), "send") => result(
-//RS             jet_browser_protocol_send(
-//RS                 protocol,
-//RS                 &string_arg(args, 0, span)?,
-//RS                 &string_arg(args, 1, span)?,
-//RS             ),
-//RS             CtValue::Str,
-//RS         ),
-//RS         _ => return Err(host_error(method, span)),
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn eval_value_method(
-//RS     kind: &str,
-//RS     method: &str,
-//RS     recv: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<Option<CtValue>, Diagnostic> {
-//RS     let value = match (kind, method) {
-//RS         ("BrowserEvent", "kind") => field(recv, kind, "method").cloned(),
-//RS         (
-//RS             "BrowserEvent",
-//RS             "request_id"
-//RS             | "request_method"
-//RS             | "url_hash"
-//RS             | "download_id"
-//RS             | "suggested_filename_hash",
-//RS         ) => field(recv, kind, method).cloned(),
-//RS         ("BrowserEvent", "is_blocked") => field(recv, kind, "is_blocked").cloned(),
-//RS         ("BrowserEvent", "status_code") => field(recv, kind, "status_code").cloned(),
-//RS         ("BrowserAbilities", "bidi" | "cdp" | "profile") => field(recv, kind, method).cloned(),
-//RS         ("BrowserTrace", "entry_count") => field(recv, kind, "entries").and_then(|value| {
-//RS             if let CtValue::List(entries) = value {
-//RS                 Some(CtValue::Int(entries.len() as i64))
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         }),
-//RS         ("BrowserTrace", "summary") => field(recv, kind, "entries").and_then(|value| {
-//RS             if let CtValue::List(entries) = value {
-//RS                 Some(CtValue::Str(
-//RS                     entries
-//RS                         .iter()
-//RS                         .filter_map(|entry| match entry {
-//RS                             CtValue::Str(entry) => Some(entry.as_str()),
-//RS                             _ => None,
-//RS                         })
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(","),
-//RS                 ))
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         }),
-//RS         ("BrowserTrace", "redacted") => field(recv, kind, "entries").and_then(|value| {
-//RS             let CtValue::List(entries) = value else {
-//RS                 return None;
-//RS             };
-//RS             let entries = entries
-//RS                 .iter()
-//RS                 .map(|entry| match entry {
-//RS                     CtValue::Str(entry) => Some(entry.clone()),
-//RS                     _ => None,
-//RS                 })
-//RS                 .collect::<Option<Vec<_>>>()?;
-//RS             Some(CtValue::Bool(jet_browser_trace_redacted(
-//RS                 &JetBrowserTrace { entries },
-//RS             )))
-//RS         }),
-//RS         ("BrowserReceipt", "entry_count") => field(recv, kind, "entries").and_then(|value| {
-//RS             if let CtValue::List(entries) = value {
-//RS                 Some(CtValue::Int(entries.len() as i64))
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         }),
-//RS         ("BrowserReceipt", "summary") => field(recv, kind, "entries").and_then(|value| {
-//RS             if let CtValue::List(entries) = value {
-//RS                 Some(CtValue::Str(
-//RS                     entries
-//RS                         .iter()
-//RS                         .filter_map(|entry| match entry {
-//RS                             CtValue::Str(entry) => Some(entry.as_str()),
-//RS                             _ => None,
-//RS                         })
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(","),
-//RS                 ))
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         }),
-//RS         ("BrowserReceipt", "redacted") => field(recv, kind, "entries").and_then(|value| {
-//RS             let CtValue::List(entries) = value else {
-//RS                 return None;
-//RS             };
-//RS             let entries = entries
-//RS                 .iter()
-//RS                 .map(|entry| match entry {
-//RS                     CtValue::Str(entry) => Some(entry.clone()),
-//RS                     _ => None,
-//RS                 })
-//RS                 .collect::<Option<Vec<_>>>()?;
-//RS             Some(CtValue::Bool(jet_browser_receipt_redacted(
-//RS                 &JetBrowserReceipt {
-//RS                     entries,
-//RS                     isolated: true,
-//RS                     cleaned: false,
-//RS                 },
-//RS             )))
-//RS         }),
-//RS         ("BrowserReceipt", "isolated" | "cleaned") => field(recv, kind, method).cloned(),
-//RS         ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles") => {
-//RS             field(recv, kind, method).cloned()
-//RS         }
-//RS         ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => {
-//RS             field(recv, kind, method).cloned()
-//RS         }
-//RS         ("BrowserLocked", "verify") => {
-//RS             let locked = locked_value(recv, span)?;
-//RS             Some(result(jet_browser_locked_verify(&locked), |_| {
-//RS                 CtValue::Unit
-//RS             }))
-//RS         }
-//RS         _ => None,
-//RS     };
-//RS     if value.is_none() {
-//RS         return Err(host_error(method, span));
-//RS     }
-//RS     Ok(value)
-//RS }
-//RS 
-//RS pub(crate) fn clear() {
-//RS     VALUES.with(|values| values.borrow_mut().clear());
-//RS     NEXT_VALUE.with(|next| next.set(1));
-//RS }
-// END-PORT-PENDING 0453 crates/jet-codegen/src/BrowserHost.rs:1-739
+// Tier-0 adapter for the canonical generated Browser runtime (#772).
+// The runtime is shared with AOT; this module only owns CtValue handles.
+use jet_comptime.Comptime.[CtValue]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.AST.[Type]
+use jet_sema.Sema.Diagnostics.[browser_tier0_unsupported]
+use std.cell.[Cell, RefCell]
+use std.thread.[ThreadLocal]
+// Rust: crates/jet-codegen/src/BrowserHost.rs:13
+trait JetShow {
+    fn jet_show(self) -> String Never!
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:17
+trait JetDebug {
+    fn jet_debug(self) -> String Never!
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:22
+// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
+trait JetDisplay {
+    fn jet_display(self) -> String Never!
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:26
+fn jet_deadline_remaining_ms() -> Int? Never! { None }
 
+// Rust: crates/jet-codegen/src/BrowserHost.rs:30
+mod jet_std {
+    use jet_foundation.DataTree.[DataTree]
+    use jet_foundation.Outcome.[JetAbsent, JetOutcome]
+    // Rust: crates/jet-codegen/src/BrowserHost.rs:34
+    struct JSONError {
+        pub line: Int
+        pub message: String
+    }
+    // Rust: crates/jet-codegen/src/BrowserHost.rs:40
+    enum JSON {
+        Null
+        Boolean(Bool)
+        Number(Float)
+        Integer(Int)
+        ExactInteger(String)
+        Text(String)
+        Array([JSON])
+        Object([String: JSON])
+    }
+    // Rust: crates/jet-codegen/src/BrowserHost.rs:52
+    use jet_codegen.Prelude.CoreLib.JetStd.EncodingTypes.*
+    // Rust: crates/jet-codegen/src/BrowserHost.rs:53
+    use jet_codegen.Prelude.CoreLib.JetStd.JSONCodec.*
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:56
+use jet_foundation.LiveLifecycle.*
+// Rust: crates/jet-codegen/src/BrowserHost.rs:60
+// Preserve AOT inclusion order and its shared live-query transport registry.
+use jet_codegen.Prelude.CoreLib.Top.LiveQuery.*
+// Rust: crates/jet-codegen/src/BrowserHost.rs:61
+use jet_codegen.Prelude.CoreLib.Top.WsClient.*
+// Rust: crates/jet-codegen/src/BrowserHost.rs:62
+use jet_codegen.Prelude.CoreLib.Top.Browser.*
+
+// Rust: crates/jet-codegen/src/BrowserHost.rs:65
+ enum BrowserHostValue {
+    Browser(JetBrowser)
+    Context(JetBrowserContext)
+    Page(JetBrowserPage)
+    Frame(JetBrowserFrame)
+    Locator(JetBrowserLocator)
+    Intercept(JetBrowserIntercept)
+    Protocol(JetBrowserProtocol)
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:75
+// GATE #4494: real per-thread cells; never process-global handle state.
+VALUES :: ThreadLocal.new(fn() { RefCell.new([Int: BrowserHostValue]{}) })
+NEXT_VALUE :: ThreadLocal.new(fn() { Cell.new(1) })
+
+// Rust: crates/jet-codegen/src/BrowserHost.rs:80
+fn browser_error(error: JetBrowserError) -> CtValue Never! {
+    CtValue.Struct(type_name: "BrowserError", fields: [("kind", CtValue.Str(error.kind.to_string()))])
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:87
+fn result<T>(value: T JetBrowserError!, map: fn(T) -> CtValue) -> CtValue Never! {
+    if value == {
+        .Ok(value) -> CtValue.Present(map(^value))
+        .Err(error) -> CtValue.failed(browser_error(error))
+    }
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:94
+fn store(type_name: String, value: BrowserHostValue) -> CtValue Never! {
+    id :: NEXT_VALUE.with(fn(next) {
+        id :: next.get()
+        next.set(id + 1)
+        id
+    })
+    VALUES.with(fn(values) { values.borrow_mut().insert(id, ^value) })
+    CtValue.Struct(type_name: type_name, fields: [("__browser_host_id", CtValue.Int(id))])
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:109
+fn handle_id(value: &CtValue, type_name: String, span: Span) -> Int Diagnostic! {
+    if value == {
+        .Struct(actual, fields) -> {
+            if actual != type_name -> return Err(host_error(type_name, span))
+            loop (name, field_value) in fields {
+                if name == "__browser_host_id" {
+                    if field_value == { .Int(id) -> return Ok(id) else -> {} }
+                }
+            }
+            Err(host_error(type_name, span))
+        }
+        else -> Err(host_error(type_name, span))
+    }
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:129
+fn field(value: &CtValue, type_name: String, name: String) -> &CtValue? Never! {
+    if value == {
+        .Struct(actual, fields) -> {
+            if actual != type_name -> return None
+            loop (field_name, field_value) in fields {
+                if field_name == name -> return Val(&field_value)
+            }
+            None
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:141
+fn host_error(what: String, span: Span) -> Diagnostic Never! {
+    browser_tier0_unsupported(what, span)
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:145
+fn int_arg(args: &[CtValue], index: USize, span: Span) -> Int Diagnostic! {
+    if args.get(index) == {
+        .Val(.Int(value)) -> Ok(value)
+        else -> Err(host_error("Int argument", span))
+    }
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:152
+fn event_ct(event: JetBrowserEvent) -> CtValue Never! {
+    CtValue.Struct(type_name: "BrowserEvent", fields: [
+        ("method", CtValue.Str(^event.method)),
+        ("request_id", CtValue.Str(^event.request_id)),
+        ("request_method", CtValue.Str(^event.request_method)),
+        ("url_hash", CtValue.Str(^event.url_hash)),
+        ("is_blocked", CtValue.Bool(event.is_blocked)),
+        ("status_code", CtValue.Int(event.status_code)),
+        ("download_id", CtValue.Str(^event.download_id)),
+        ("suggested_filename_hash", CtValue.Str(^event.suggested_filename_hash))
+    ])
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:174
+fn string_arg(args: &[CtValue], index: USize, span: Span) -> String Diagnostic! {
+    if args.get(index) == {
+        .Val(.Str(value)) -> Ok(value.clone())
+        else -> Err(host_error("String argument", span))
+    }
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:181
+fn timeout_value(value: &CtValue, span: Span) -> JetBrowserTimeout Diagnostic! {
+    if field(value, "BrowserTimeout", "milliseconds") == {
+        .Val(.Int(milliseconds)) -> Ok(JetBrowserTimeout{milliseconds: milliseconds})
+        else -> Err(host_error("timeout", span))
+    }
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:190
+fn profile_value(value: &CtValue, span: Span) -> JetBrowserProfile Diagnostic! {
+    if (field(value, "BrowserProfile", "name"), field(value, "BrowserProfile", "version")) == {
+        (.Val(.Str(name)), .Val(.Str(version))) -> Ok(JetBrowserProfile{name: name.clone(), version: version.clone()})
+        else -> Err(host_error("profile", span))
+    }
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:203
+fn profile_ct(value: JetBrowserProfile) -> CtValue Never! {
+    CtValue.Struct(type_name: "BrowserProfile", fields: [("name", CtValue.Str(^value.name)), ("version", CtValue.Str(^value.version))])
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:213
+fn timeout_ct(value: JetBrowserTimeout) -> CtValue Never! {
+    CtValue.Struct(type_name: "BrowserTimeout", fields: [("milliseconds", CtValue.Int(value.milliseconds))])
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:220
+fn locked_ct(value: JetBrowserLocked) -> CtValue Never! {
+    CtValue.Struct(type_name: "BrowserLocked", fields: [
+        ("engine", CtValue.Str(^value.engine)), ("version", CtValue.Str(^value.version)),
+        ("binary", CtValue.Str(^value.binary)), ("protocol", CtValue.Str(^value.protocol)),
+        ("size", CtValue.Int(value.size)), ("output_hash", CtValue.Str(^value.output_hash))
+    ])
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:234
+fn locked_value(value: &CtValue, span: Span) -> JetBrowserLocked Diagnostic! {
+    if (field(value, "BrowserLocked", "engine"), field(value, "BrowserLocked", "version"),
+        field(value, "BrowserLocked", "binary"), field(value, "BrowserLocked", "protocol"),
+        field(value, "BrowserLocked", "size"), field(value, "BrowserLocked", "output_hash")) == {
+        (.Val(.Str(engine)), .Val(.Str(version)), .Val(.Str(binary)), .Val(.Str(protocol)), .Val(.Int(size)), .Val(.Str(output_hash))) ->
+            Ok(JetBrowserLocked{engine: engine.clone(), version: version.clone(), binary: binary.clone(),
+                protocol: protocol.clone(), size: size, output_hash: output_hash.clone()})
+        else -> Err(host_error("locked", span))
+    }
+}
+
+// Rust: crates/jet-codegen/src/BrowserHost.rs:262
+pub fn eval_core_call(method: String, args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    value :: if method == {
+        "profile" -> result(jet_browser_profile(&string_arg(&args, 0, span)?), profile_ct)
+        "timeout" -> {
+            milliseconds :: if args.first() == {
+                .Val(.Int(value)) -> value
+                else -> return Err(host_error("timeout argument", span))
+            }
+            result(jet_browser_timeout(milliseconds), timeout_ct)
+        }
+        "locked" -> result(jet_browser_locked(&string_arg(&args, 0, span)?), locked_ct)
+        "connect" -> result(jet_browser_connect(&string_arg(&args, 0, span)?), fn(browser) { store("Browser", BrowserHostValue.Browser(^browser)) })
+        "connect_profile" -> {
+            endpoint :: string_arg(&args, 0, span)?
+            profile :: profile_value(args.get(1) ?? return Err(host_error("profile", span)), span)?
+            timeout :: timeout_value(args.get(2) ?? return Err(host_error("timeout", span)), span)?
+            result(jet_browser_connect_profile(&endpoint, &profile, timeout), fn(browser) { store("Browser", BrowserHostValue.Browser(^browser)) })
+        }
+        else -> return Err(host_error(method, span))
+    }
+    Ok(^value)
+}
+
+// Rust: crates/jet-codegen/src/BrowserHost.rs:303
+pub fn eval_method(kind: String, method: String, recv: &CtValue, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    id :: handle_id(recv, kind, span)?
+    value :: VALUES.with(fn(values) { values.borrow().get(id).cloned() }) ?? return Err(host_error(kind, span))
+    output :: if (&value, method) == {
+        (.Browser(browser), "abilities") -> {
+            caps :: jet_browser_abilities(browser)
+            CtValue.Struct(type_name: "BrowserAbilities", fields: [("bidi", CtValue.Bool(caps.bidi)), ("cdp", CtValue.Bool(caps.cdp)), ("profile", CtValue.Str(^caps.profile))])
+        }
+        (.Browser(browser), "context") -> result(jet_browser_context(browser), fn(context) { store("BrowserContext", BrowserHostValue.Context(^context)) })
+        (.Browser(browser), "subscribe") -> result(jet_browser_subscribe(browser, &string_arg(args, 0, span)?), fn(_) { CtValue.Unit })
+        (.Browser(browser), "next_event") -> result(jet_browser_next_event(browser, timeout_value(args.first() ?? return Err(host_error("timeout", span)), span)?), event_ct)
+        (.Browser(browser), "add_intercept") -> result(jet_browser_add_intercept(browser, &string_arg(args, 0, span)?), fn(intercept) { store("BrowserIntercept", BrowserHostValue.Intercept(^intercept)) })
+        (.Browser(browser), "add_intercept_url") -> result(jet_browser_add_intercept_url(browser, &string_arg(args, 0, span)?, &string_arg(args, 1, span)?), fn(intercept) { store("BrowserIntercept", BrowserHostValue.Intercept(^intercept)) })
+        (.Browser(browser), "continue_request") -> result(jet_browser_continue_request(browser, &string_arg(args, 0, span)?), fn(_) { CtValue.Unit })
+        (.Browser(browser), "fail_request") -> result(jet_browser_fail_request(browser, &string_arg(args, 0, span)?), fn(_) { CtValue.Unit })
+        (.Browser(browser), "fulfill_request") -> result(jet_browser_fulfill_request(browser, &string_arg(args, 0, span)?, int_arg(args, 1, span)?, &string_arg(args, 2, span)?), fn(_) { CtValue.Unit })
+        (.Browser(browser), "allow_downloads") -> result(jet_browser_allow_downloads(browser, &string_arg(args, 0, span)?), fn(_) { CtValue.Unit })
+        (.Browser(browser), "protocol") -> result(jet_browser_protocol(browser, &string_arg(args, 0, span)?), fn(protocol) { store("BrowserProtocol", BrowserHostValue.Protocol(^protocol)) })
+        (.Browser(browser), "trace") -> {
+            trace :: jet_browser_trace(browser)
+            CtValue.Struct(type_name: "BrowserTrace", fields: [("entries", CtValue.List(trace.entries.into_iter().map(fn(entry) { CtValue.Str(^entry) }).collect()))])
+        }
+        (.Browser(browser), "privacy") -> {
+            privacy :: jet_browser_privacy(browser)
+            CtValue.Struct(type_name: "BrowserPrivacy", fields: [
+                ("isolated_profiles", CtValue.Bool(privacy.isolated_profiles)),
+                ("redact_receipts", CtValue.Bool(privacy.redact_receipts)),
+                ("shared_profiles", CtValue.Bool(privacy.shared_profiles))])
+        }
+        (.Browser(browser), "receipt") -> {
+            receipt :: jet_browser_receipt(browser)
+            CtValue.Struct(type_name: "BrowserReceipt", fields: [
+                ("entries", CtValue.List(receipt.entries.into_iter().map(fn(entry) { CtValue.Str(^entry) }).collect())),
+                ("isolated", CtValue.Bool(receipt.isolated)), ("cleaned", CtValue.Bool(receipt.cleaned))])
+        }
+        (.Browser(browser), "close") -> result(jet_browser_close(browser), fn(_) { CtValue.Unit })
+        (.Context(context), "page") -> result(jet_browser_context_page(context), fn(page) { store("BrowserPage", BrowserHostValue.Page(^page)) })
+        (.Context(context), "tab") -> result(jet_browser_context_tab(context), fn(page) { store("BrowserPage", BrowserHostValue.Page(^page)) })
+        (.Context(context), "close") -> result(jet_browser_context_close(context), fn(_) { CtValue.Unit })
+        (.Context(context), "isolated") -> CtValue.Bool(jet_browser_context_isolated(context))
+        (.Context(context), "user_hash") -> CtValue.Str(jet_browser_context_user_hash(context))
+        (.Page(page), "goto") -> result(jet_browser_page_goto(page, &string_arg(args, 0, span)?), fn(_) { CtValue.Unit })
+        (.Page(page), "get_by_role") -> store("BrowserLocator", BrowserHostValue.Locator(jet_browser_page_get_by_role(page, &string_arg(args, 0, span)?, &string_arg(args, 1, span)?)))
+        (.Page(page), "get_by_text") -> store("BrowserLocator", BrowserHostValue.Locator(jet_browser_page_get_by_text(page, &string_arg(args, 0, span)?)))
+        (.Page(page), "get_by_label") -> store("BrowserLocator", BrowserHostValue.Locator(jet_browser_page_get_by_label(page, &string_arg(args, 0, span)?)))
+        (.Page(page), "get_by_placeholder") -> store("BrowserLocator", BrowserHostValue.Locator(jet_browser_page_get_by_placeholder(page, &string_arg(args, 0, span)?)))
+        (.Page(page), "get_by_test_id") -> store("BrowserLocator", BrowserHostValue.Locator(jet_browser_page_get_by_test_id(page, &string_arg(args, 0, span)?)))
+        (.Page(page), "get_by_css") -> store("BrowserLocator", BrowserHostValue.Locator(jet_browser_page_get_by_css(page, &string_arg(args, 0, span)?)))
+        (.Page(page), "main_frame") -> result(jet_browser_page_main_frame(page), fn(frame) { store("BrowserFrame", BrowserHostValue.Frame(^frame)) })
+        (.Page(page), "frames") -> result(jet_browser_page_frames(page), fn(frames) { CtValue.List(frames.into_iter().map(fn(frame) { store("BrowserFrame", BrowserHostValue.Frame(^frame)) }).collect()) })
+        (.Page(page), "close") -> result(jet_browser_page_close(page), fn(_) { CtValue.Unit })
+        (.Page(page), "screenshot") -> result(jet_browser_page_screenshot(page), fn(text) { CtValue.Str(^text) })
+        (.Page(page), "pdf") -> result(jet_browser_page_pdf(page), fn(text) { CtValue.Str(^text) })
+        (.Page(page), "set_cookie") -> result(jet_browser_page_set_cookie(page, &string_arg(args, 0, span)?, &string_arg(args, 1, span)?, &string_arg(args, 2, span)?), fn(_) { CtValue.Unit })
+        (.Page(page), "cookie") -> result(jet_browser_page_cookie(page, &string_arg(args, 0, span)?), fn(value) {
+            if value == { .Val(text) -> CtValue.Present(CtValue.Str(^text)) else -> CtValue.absent(Type.String) }
+        })
+        (.Page(page), "clear_cookies") -> result(jet_browser_page_clear_cookies(page), fn(_) { CtValue.Unit })
+        (.Page(page), "storage_get") -> result(jet_browser_page_storage_get(page, &string_arg(args, 0, span)?, &string_arg(args, 1, span)?), fn(value) {
+            if value == { .Val(text) -> CtValue.Present(CtValue.Str(^text)) else -> CtValue.absent(Type.String) }
+        })
+        (.Page(page), "storage_set") -> result(jet_browser_page_storage_set(page, &string_arg(args, 0, span)?, &string_arg(args, 1, span)?, &string_arg(args, 2, span)?), fn(_) { CtValue.Unit })
+        (.Page(page), "storage_clear") -> result(jet_browser_page_storage_clear(page, &string_arg(args, 0, span)?), fn(_) { CtValue.Unit })
+        (.Frame(frame), "close") -> result(jet_browser_frame_close(frame), fn(_) { CtValue.Unit })
+        (.Locator(locator), "wait") -> result(jet_browser_locator_wait(locator, timeout_value(args.first() ?? return Err(host_error("timeout", span)), span)?), fn(_) { CtValue.Unit })
+        (.Locator(locator), "wait_gone") -> result(jet_browser_locator_wait_gone(locator, timeout_value(args.first() ?? return Err(host_error("timeout", span)), span)?), fn(_) { CtValue.Unit })
+        (.Locator(locator), "click") -> result(jet_browser_locator_click(locator), fn(_) { CtValue.Unit })
+        (.Locator(locator), "hover") -> result(jet_browser_locator_hover(locator), fn(_) { CtValue.Unit })
+        (.Locator(locator), "fill") -> result(jet_browser_locator_fill(locator, &string_arg(args, 0, span)?), fn(_) { CtValue.Unit })
+        (.Locator(locator), "press") -> result(jet_browser_locator_press(locator, &string_arg(args, 0, span)?), fn(_) { CtValue.Unit })
+        (.Locator(locator), "set_files") -> result(jet_browser_locator_set_files(locator, &string_arg(args, 0, span)?), fn(_) { CtValue.Unit })
+        (.Intercept(intercept), "remove") -> result(jet_browser_intercept_remove(intercept), fn(_) { CtValue.Unit })
+        (.Protocol(protocol), "send") -> result(jet_browser_protocol_send(protocol, &string_arg(args, 0, span)?, &string_arg(args, 1, span)?), fn(text) { CtValue.Str(^text) })
+        else -> return Err(host_error(method, span))
+    }
+    Ok(^output)
+}
+
+// Rust: crates/jet-codegen/src/BrowserHost.rs:616
+pub fn eval_value_method(kind: String, method: String, recv: &CtValue, span: Span) -> CtValue? Diagnostic! {
+    value :: if (kind, method) == {
+        ("BrowserEvent", "kind") -> field(recv, kind, "method").cloned()
+        ("BrowserEvent", "request_id" | "request_method" | "url_hash" | "download_id" | "suggested_filename_hash") -> field(recv, kind, method).cloned()
+        ("BrowserEvent", "is_blocked") -> field(recv, kind, "is_blocked").cloned()
+        ("BrowserEvent", "status_code") -> field(recv, kind, "status_code").cloned()
+        ("BrowserAbilities", "bidi" | "cdp" | "profile") -> field(recv, kind, method).cloned()
+        ("BrowserTrace", "entry_count") -> field(recv, kind, "entries").and_then(fn(value) {
+            if value == { .List(entries) -> Val(CtValue.Int(entries.len() as Int)) else -> None }
+        })
+        ("BrowserTrace", "summary") -> field(recv, kind, "entries").and_then(fn(value) {
+            if value == {
+                .List(entries) -> Val(CtValue.Str(entries.iter().filter_map(fn(entry) {
+                    if entry == { .Str(text) -> Val(text.as_str()) else -> None }
+                }).collect().join(",")))
+                else -> None
+            }
+        })
+        ("BrowserTrace", "redacted") -> field(recv, kind, "entries").and_then(fn(value) {
+            if value == {
+                .List(entries) -> {
+                    texts := [String]{}
+                    loop entry in entries {
+                        if entry == { .Str(text) -> texts.push(text.clone()) else -> return None }
+                    }
+                    Val(CtValue.Bool(jet_browser_trace_redacted(&JetBrowserTrace{entries: ^texts})))
+                }
+                else -> None
+            }
+        })
+        ("BrowserReceipt", "entry_count") -> field(recv, kind, "entries").and_then(fn(value) {
+            if value == { .List(entries) -> Val(CtValue.Int(entries.len() as Int)) else -> None }
+        })
+        ("BrowserReceipt", "summary") -> field(recv, kind, "entries").and_then(fn(value) {
+            if value == {
+                .List(entries) -> Val(CtValue.Str(entries.iter().filter_map(fn(entry) {
+                    if entry == { .Str(text) -> Val(text.as_str()) else -> None }
+                }).collect().join(",")))
+                else -> None
+            }
+        })
+        ("BrowserReceipt", "redacted") -> field(recv, kind, "entries").and_then(fn(value) {
+            if value == {
+                .List(entries) -> {
+                    texts := [String]{}
+                    loop entry in entries {
+                        if entry == { .Str(text) -> texts.push(text.clone()) else -> return None }
+                    }
+                    Val(CtValue.Bool(jet_browser_receipt_redacted(&JetBrowserReceipt{entries: ^texts, isolated: true, cleaned: false})))
+                }
+                else -> None
+            }
+        })
+        ("BrowserReceipt", "isolated" | "cleaned") -> field(recv, kind, method).cloned()
+        ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles") -> field(recv, kind, method).cloned()
+        ("BrowserLocked", "engine" | "version" | "binary" | "protocol") -> field(recv, kind, method).cloned()
+        ("BrowserLocked", "verify") -> {
+            locked :: locked_value(recv, span)?
+            Val(result(jet_browser_locked_verify(&locked), fn(_) { CtValue.Unit }))
+        }
+        else -> None
+    }
+    if value == None -> return Err(host_error(method, span))
+    Ok(^value)
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:736
+pub fn clear() -> Unit Never! {
+    VALUES.with(fn(values) { values.borrow_mut().clear() })
+    NEXT_VALUE.with(fn(next) { next.set(1) })
+}

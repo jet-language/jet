@@ -1,0 +1,33 @@
+use JetBootstrap.EntryCodec.[BootstrapEntryHostTypeShape, BootstrapEntryHostTypeNode, bootstrap_entry_validate_shape, bootstrap_entry_shape_node_type, bootstrap_entry_shape_type_matches]
+use jet_foundation.MIR.[MirType, MirTypeKind, MirMeasure]
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:553
+#Test("entry_shape_preserves_optional_element_type") {
+    integer := MirType.from_kind(MirTypeKind.Int)
+    shape := BootstrapEntryHostTypeShape { root: 1, nodes: [BootstrapEntryHostTypeNode.Scalar(integer), BootstrapEntryHostTypeNode.Option(0)] }
+    bootstrap_entry_validate_shape(shape)?
+    actual := bootstrap_entry_shape_node_type(shape, shape.root, 0)?
+    assert(actual.same_checked_type(MirType.from_kind(MirTypeKind.Option(integer))))
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:681
+#Test("entry_shape_validates_unreachable_node_references") {
+    shape := BootstrapEntryHostTypeShape { root: 0, nodes: [BootstrapEntryHostTypeNode.Scalar(MirType.from_kind(MirTypeKind.Int)), BootstrapEntryHostTypeNode.List(99)] }
+    mut rejected := false
+    try { bootstrap_entry_validate_shape(shape)? } catch(error) {
+        assert(error.to_string() == "compiler-entry host type shape has an invalid node reference")
+        rejected = true
+    }
+    assert(rejected)
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:681
+#Test("entry_shape_rejects_missing_root_before_graph_walk") {
+    shape := BootstrapEntryHostTypeShape { root: 0, nodes: [] }
+    mut rejected := false
+    try { bootstrap_entry_validate_shape(shape)? } catch(error) {
+        assert(error.to_string() == "compiler-entry host type shape has no valid root node")
+        rejected = true
+    }
+    assert(rejected)
+}

@@ -1,0 +1,62 @@
+use jet_codegen.Codegen.TIR.*
+use jet_codegen.Codegen.TIR.lower.method_calls.*
+use jet_foundation.AST.[Type]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:1965
+#Test("builtin_storage_argument_ownership_roles") {
+    assert(builtin_arg_takes_ownership(TBuiltinOp.Push, 0))
+    assert(!builtin_arg_takes_ownership(TBuiltinOp.Push, 1))
+    assert(!builtin_arg_takes_ownership(TBuiltinOp.InsertMap, 0))
+    assert(builtin_arg_takes_ownership(TBuiltinOp.InsertMap, 1))
+    assert(builtin_arg_takes_ownership(TBuiltinOp.LruPut, 0))
+    assert(builtin_arg_takes_ownership(TBuiltinOp.LruPut, 1))
+    assert(!builtin_arg_takes_ownership(TBuiltinOp.LruPut, 2))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2076
+#Test("cors_policy_normalizes_any_and_default_slots") {
+    args := [TExpr]{TExpr{ty: Type.Named("HTTPOrigins"), kind: TExprKind.EnumLit(enum_type: "HTTPOrigins", variant: "Any", payload: TEnumPayload.Unit)}}
+    normalize_http_cors_policy_args(&args)
+    assert(args.len() == 7)
+    assert(args[0].kind == TExprKind.IntLit(0, None))
+    assert(args[1].ty == Type.List(Type.String))
+    if args[1].kind == { .ListLit(values) -> assert(values.is_empty()), else -> panic("Any origins must become an empty checked string list") }
+    assert(args[4].kind == TExprKind.BoolLit(false))
+    assert(args[5].kind == TExprKind.IntLit(1, None))
+    assert(args[6].kind == TExprKind.IntLit(86400, None))
+    empty := [TExpr]{}
+    normalize_http_cors_policy_args(&empty)
+    assert(empty.is_empty())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2140
+#Test("static_files_missing_slots_are_absent_bools") {
+    args := [TExpr]{TExpr{ty: Type.String, kind: TExprKind.StrLit("public")}}
+    normalize_http_static_files_args(&args)
+    assert(args.len() == 6)
+    loop index in 1..6 {
+        assert(args[index].ty == Type.Option(Type.Bool))
+        assert(args[index].kind == TExprKind.Absent)
+    }
+    normalize_http_static_files_args(&args)
+    assert(args.len() == 6)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2366
+#Test("codec_builtin_names_do_not_match_imported_leafs") {
+    assert(builtin_codec_name(Type.Named("Date")) == Val("Date"))
+    assert(builtin_codec_name(Type.Named("Decimal")) == Val("Decimal"))
+    assert(builtin_codec_name(Type.Named("library.Date")) == None)
+    assert(builtin_codec_name(Type.String) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:2440,2474
+#Test("zip_modes_and_column_names_preserve_contract") {
+    assert(zip_family_mode("zip_short") == TZipMode.Short)
+    assert(zip_family_mode("zip_pad") == TZipMode.Pad)
+    assert(zip_family_mode("zip") == TZipMode.Strict)
+    assert(zip_field_name(0, None) == "a")
+    assert(zip_field_name(5, None) == "f")
+    assert(zip_field_name(6, None) == "column_6")
+    assert(zip_field_name(9, Val("named")) == "named")
+}

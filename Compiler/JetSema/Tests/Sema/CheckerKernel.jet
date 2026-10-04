@@ -1,0 +1,39 @@
+use jet_foundation.[Type, Span, DIAGNOSTIC_ERROR]
+use JetSema.Sema.CheckerKernel.[is_auto_vectorizable_scalar, is_auto_scalar, kernel_failure]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:895-904 (behavioral control; no inline Rust tests)
+#Test("automatic_vectorization_requires_float_lanes_but_guards_admit_integer_boolean") {
+    assert(is_auto_vectorizable_scalar(Type.Float))
+    assert(is_auto_vectorizable_scalar(Type.Float32))
+    assert(!is_auto_vectorizable_scalar(Type.Int))
+    assert(!is_auto_vectorizable_scalar(Type.Bool))
+    assert(is_auto_scalar(Type.Int))
+    assert(is_auto_scalar(Type.Bool))
+    assert(is_auto_scalar(Type.IntN{signed: false, bits: 8}))
+    assert(!is_auto_scalar(Type.String))
+    assert(!is_auto_scalar(Type.List(Type.Float)))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:906-914 (behavioral control)
+#Test("kernel_refusal_retains_exact_obligation_and_source_span") {
+    span :: Span.new(4, 12)
+    diagnostic :: kernel_failure("statically proved bounds", span)
+    assert(diagnostic.code == "E1102")
+    assert(diagnostic.what == "`#Kernel(.parallel)` cannot cross its worker boundary: sema cannot prove statically proved bounds")
+    assert(diagnostic.span == Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:676-803 (behavioral control)
+#Test("kernel_accepts_closed_straight_line_scalar_expression") {
+    diagnostics :: statements05_diagnostics("#Kernel(.parallel)\nfn kernel_value(x: Float) Float -> x + 1.0\n")
+    assert(!diagnostics.any(d -> d.severity == DIAGNOSTIC_ERROR), "{diagnostics:?}")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:781-803 (behavioral control)
+#Test("kernel_rejects_mutable_local_before_accepting_marker") {
+    diagnostics :: statements05_diagnostics("#Kernel(.parallel)\nfn kernel_value(x: Float) Float {{ result := x; return result }}\n")
+    assert(diagnostics.any(d -> d.code == "E1102" && d.what.contains("immutable scalar locals")), "{diagnostics:?}")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerKernel.rs:814-892 (behavioral control)
+#Test("kernel_unproved_index_has_bounds_obligation") {
+    diagnostics :: statements05_diagnostics("#Kernel(.parallel)\nfn kernel_value(values: [Float], index: Int) Float -> values[index]\n")
+    assert(diagnostics.any(d -> d.code == "E1102" && d.what.contains("statically proved bounds")), "{diagnostics:?}")
+}

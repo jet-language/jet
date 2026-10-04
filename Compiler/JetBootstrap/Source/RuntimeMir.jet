@@ -1,214 +1,95 @@
-// PORT-PENDING 0548 compiler-bootstrap-host-runtimemir: Compiler/Bootstrap/Host/RuntimeMir.rs:1-210
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Private Source-MIR -> Cranelift bridge for the generated compiler Runner.
-//RS //
-//RS // This file is included only in the generated private compiler artifact.  The
-//RS // generated Host supplies the typed source-carrier decoder; this module owns
-//RS // the backend boundary, artifact/entry identity checks, Source resource
-//RS // activation, and nested Source deopt callback lifetime.  It never parses
-//RS // source text, re-lowers TIR, or invokes the Rust MIR evaluator.
-//RS 
-//RS use jet_foundation::JitBackend::RunOutcome;
-//RS use jet_foundation::MIR::{
-//RS     MirArtifactId, MirExecutionIdentity, MirFunctionId, MirProgram, MirRuntimeValue,
-//RS };
-//RS use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
-//RS use jet_jit::SourceResources::SourceResourceSession;
-//RS use jet_jit::{SourceDeoptReply, SourceDeoptRequest};
-//RS 
-//RS /// The decoded MIR and physical resource lease are retained so a Source
-//RS /// deopt callback can keep the exact program identity, schema, and owner arena
-//RS /// alive until the logical evaluator session has retired it.
-//RS // The resource session intentionally has no Debug projection: its physical
-//RS // owners are opaque and remain inside the invocation arena.
-//RS pub(crate) struct SourceMirExecution {
-//RS     /// Typed native or Source-terminal outcome; this seam never renders or
-//RS     /// concatenates output from the two tiers.
-//RS     pub(crate) outcome: RunOutcome,
-//RS     /// Exact recursive terminal value returned by Source or a supported native
-//RS     /// scalar/Unit entry. Unsupported native return metadata is routed Source.
-//RS     pub(crate) value: Option<MirRuntimeValue>,
-//RS     pub(crate) soft_stop: bool,
-//RS     /// Cumulative output snapshot; callers must consume this path once.
-//RS     pub(crate) stdout: String,
-//RS     pub(crate) stderr: String,
-//RS     /// Receipt of the tier that actually consumed the checked entry.
-//RS     pub(crate) tier: jet_jit::SourceExecutionTier,
-//RS     pub(crate) program: MirProgram,
-//RS     pub(crate) identity: MirExecutionIdentity,
-//RS     pub(crate) artifact: MirArtifactId,
-//RS     pub(crate) entry_function: MirFunctionId,
-//RS     /// Keeps the physical Source arena root alive until the generated Runner
-//RS     /// explicitly retires this execution's logical evaluator state.
-//RS     pub(crate) resources: SourceResourceSession,
-//RS     /// Logical Source/Eval session guard retained through value adoption and
-//RS     /// explicit cleanup/queue drain by the generated Runner.
-//RS     pub(crate) source_session: Option<Box<dyn jet_jit::SourceExecutionGuard>>,
-//RS }
-//RS /// Failure before a backend result exists. A Cranelift runtime diagnostic is
-//RS /// deliberately kept in `SourceMirExecution::outcome`, not collapsed into
-//RS /// this carrier/identity error rail.
-//RS #[derive(Debug)]
-//RS pub(crate) enum SourceMirExecutionError {
-//RS     Carrier(String),
-//RS     Identity(String),
-//RS     Resource(String),
-//RS     Backend(String),
-//RS     Retirement(jet_jit::SourceExecutionRetirementError),
-//RS }
-//RS 
-//RS impl SourceMirExecution {
-//RS     /// Retire the logical Source/Eval graph only after the Runner has decoded
-//RS     /// and adopted the returned value. Physical resource lookup stays active
-//RS     /// while cleanup drains callback roots and transfers; cleanup's final
-//RS     /// outcome/value replace the pre-retirement projections when present.
-//RS     pub(crate) fn retire_source_session(
-//RS         self,
-//RS     ) -> Result<jet_jit::SourceExecutionRetirement, SourceMirExecutionError> {
-//RS         let SourceMirExecution {
-//RS             outcome,
-//RS             value,
-//RS             soft_stop,
-//RS             stdout,
-//RS             stderr,
-//RS             resources,
-//RS             source_session,
-//RS             ..
-//RS         } = self;
-//RS         jet_jit::retire_source_entry(
-//RS             resources,
-//RS             source_session,
-//RS             jet_jit::SourceExecutionRetirement {
-//RS                 outcome: Some(outcome),
-//RS                 value,
-//RS                 soft_stop,
-//RS                 stdout,
-//RS                 stderr,
-//RS                 completions: Vec::new(),
-//RS             },
-//RS         )
-//RS         .map_err(SourceMirExecutionError::Retirement)
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS impl std::fmt::Display for SourceMirExecutionError {
-//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         match self {
-//RS             Self::Carrier(message) => write!(formatter, "Source MIR carrier conversion failed: {message}"),
-//RS             Self::Identity(message) => write!(formatter, "Source MIR execution identity failed: {message}"),
-//RS             Self::Resource(message) => write!(formatter, "Source resource activation failed: {message}"),
-//RS             Self::Backend(message) => write!(formatter, "Source MIR backend handoff failed: {message}"),
-//RS             Self::Retirement(error) => write!(formatter, "{error}"),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for SourceMirExecutionError {}
-//RS 
-//RS /// Invoke the already-decoded canonical MIR through the permitted Cranelift
-//RS /// backend.  The caller must provide the physical invocation session retained
-//RS /// by generated Native/Runner glue; this function activates it explicitly and
-//RS /// restores any outer activation on both return and unwind.
-//RS /// Generic tier execution and explicit resource/session retirement live in the
-//RS /// transport-neutral `jet_jit` seam; this wrapper retains checked identity and
-//RS /// decoded-program metadata for generated Runner glue.
-//RS ///
-//RS /// `resume` is Source-owned typed evaluator logic. Entry requests carry the
-//RS /// checked identity, parameter facts, and recursively typed canonical values;
-//RS /// existing-frame requests carry only exact ABI words and must join them to
-//RS /// their invocation-local Source machine state. It returns one checked ABI
-//RS /// word and may publish a typed terminal `RunOutcome`. It is never a Rust
-//RS /// MIREval callback. The callback is owned by the nested JIT scope, so nested
-//RS /// Source/JIT invocations select the innermost handler without a session-ID
-//RS /// registry.
-//RS pub(crate) fn execute_decoded_source_mir<Resume>(
-//RS     program: MirProgram,
-//RS     artifact: MirArtifactId,
-//RS     entry_function: MirFunctionId,
-//RS     resources: &SourceResourceSession,
-//RS     entry_values: Vec<MirRuntimeValue>,
-//RS     policy: ReleaseDevtoolsPolicy,
-//RS     resume: Resume,
-//RS ) -> Result<SourceMirExecution, SourceMirExecutionError>
-//RS where
-//RS     Resume: Fn(&mut SourceDeoptRequest) -> Result<SourceDeoptReply, String> + 'static,
-//RS {
-//RS     let identity = program
-//RS         .execution_identity(Some(artifact))
-//RS         .map_err(|error| SourceMirExecutionError::Identity(error.to_string()))?;
-//RS     let native_run = jet_jit::execute_source_entry(
-//RS         &program,
-//RS         artifact,
-//RS         entry_function,
-//RS         resources.clone(),
-//RS         entry_values,
-//RS         &policy,
-//RS         resume,
-//RS     )
-//RS     .map_err(|error| match error {
-//RS         jet_jit::SourceDeoptError::Resource(message) => SourceMirExecutionError::Resource(message),
-//RS         error => SourceMirExecutionError::Backend(error.to_string()),
-//RS     })?;
-//RS     let jet_jit::SourceEntryExecution {
-//RS         outcome: native_outcome,
-//RS         value: native_value,
-//RS         soft_stop: native_soft_stop,
-//RS         stdout: native_stdout,
-//RS         stderr: native_stderr,
-//RS         tier: native_tier,
-//RS         resources: execution_resources,
-//RS         session: source_session,
-//RS     } = native_run;
-//RS     Ok(SourceMirExecution {
-//RS         outcome: native_outcome,
-//RS         value: native_value,
-//RS         soft_stop: native_soft_stop,
-//RS         stdout: native_stdout,
-//RS         stderr: native_stderr,
-//RS         tier: native_tier,
-//RS         program,
-//RS         identity,
-//RS         artifact,
-//RS         entry_function,
-//RS         resources: execution_resources,
-//RS         source_session,
-//RS     })
-//RS }
-//RS 
-//RS /// Decode the generated Source MIR carrier with its exact binding metadata,
-//RS /// then execute the decoded program through the backend. The decoder is the
-//RS /// generated typed MIR codec; no textual or legacy reader is accepted. The
-//RS /// recursive entry values are moved into the invocation/deopt request.
-//RS pub(crate) fn execute_source_mir<SourceProgram, Decode, Resume>(
-//RS     source_program: &SourceProgram,
-//RS     artifact: MirArtifactId,
-//RS     entry_function: MirFunctionId,
-//RS     bindings: &crate::BootstrapBindingDescriptor,
-//RS     resources: &SourceResourceSession,
-//RS     entry_values: Vec<MirRuntimeValue>,
-//RS     policy: ReleaseDevtoolsPolicy,
-//RS     decode: Decode,
-//RS     resume: Resume,
-//RS ) -> Result<SourceMirExecution, SourceMirExecutionError>
-//RS where
-//RS     Decode: FnOnce(
-//RS         &SourceProgram,
-//RS         &crate::BootstrapBindingDescriptor,
-//RS     ) -> Result<MirProgram, String>,
-//RS     Resume: Fn(&mut SourceDeoptRequest) -> Result<SourceDeoptReply, String> + 'static,
-//RS {
-//RS     let program = decode(source_program, bindings).map_err(SourceMirExecutionError::Carrier)?;
-//RS     execute_decoded_source_mir(
-//RS         program,
-//RS         artifact,
-//RS         entry_function,
-//RS         resources,
-//RS         entry_values,
-//RS         policy,
-//RS         resume,
-//RS     )
-//RS }
-//RS 
-// END-PORT-PENDING 0548 Compiler/Bootstrap/Host/RuntimeMir.rs:1-210
+// Private generated Runner boundary: typed carrier/identity/resource ownership only.
+use jet_foundation.JitBackend.RunOutcome
+use jet_foundation.MIR.[MirArtifactId, MirExecutionIdentity, MirFunctionId, MirProgram, MirRuntimeValue]
+use jet_pkg_model.Package.ReleaseDevtoolsPolicy
+use jet_jit.SourceResources.SourceResourceSession
+use jet_jit.[SourceDeoptRequest, SourceDeoptReply, SourceExecutionTier, SourceExecutionGuard, SourceExecutionRetirement, SourceExecutionRetirementError, SourceDeoptError, execute_source_entry, retire_source_entry]
+use jet_bootstrap.BootstrapBindingDescriptor
 
+// Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:22
+struct SourceMirExecution {
+    pub outcome: RunOutcome
+    pub value: MirRuntimeValue?
+    pub soft_stop: Bool
+    pub stdout: String
+    pub stderr: String
+    pub tier: SourceExecutionTier
+    pub program: MirProgram
+    pub identity: MirExecutionIdentity
+    pub artifact: MirArtifactId
+    pub entry_function: MirFunctionId
+    // Physical arena root remains alive until explicit logical retirement.
+    pub resources: SourceResourceSession
+    pub source_session: Box<dyn SourceExecutionGuard>?
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:50
+#Error
+enum SourceMirExecutionError {
+    Carrier(String)
+    Identity(String)
+    Resource(String)
+    Backend(String)
+    Retirement(SourceExecutionRetirementError)
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:58
+impl SourceMirExecution {
+    // Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:63
+    fn retire_source_session(self: SourceMirExecution) -> SourceExecutionRetirement SourceMirExecutionError! {
+        // Consume all projections without copying the program or arena.
+        execution :: ^self
+        retire_source_entry(^execution.resources, ^execution.source_session,
+            SourceExecutionRetirement(outcome: Val(^execution.outcome), value: ^execution.value,
+                soft_stop: execution.soft_stop, stdout: ^execution.stdout, stderr: ^execution.stderr,
+                completions: [])
+        ).map_err(fn(error) { SourceMirExecutionError.Retirement(^error) })
+    }
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:93
+impl std.fmt.Display for SourceMirExecutionError {
+    // Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:94
+    fn fmt(self: &SourceMirExecutionError, formatter: &std.fmt.Formatter) -> Unit std.fmt.Error! {
+        if self == {
+            .Carrier(message) -> formatter.write_str("Source MIR carrier conversion failed: {message}")
+            .Identity(message) -> formatter.write_str("Source MIR execution identity failed: {message}")
+            .Resource(message) -> formatter.write_str("Source resource activation failed: {message}")
+            .Backend(message) -> formatter.write_str("Source MIR backend handoff failed: {message}")
+            .Retirement(error) -> formatter.write_str("{error}")
+        }
+    }
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:105
+impl std.error.Error for SourceMirExecutionError {}
+
+// Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:123
+fn execute_decoded_source_mir<Resume: Fn(&SourceDeoptRequest) -> SourceDeoptReply Err!>(
+    program: MirProgram, artifact: MirArtifactId, entry_function: MirFunctionId,
+    resources: &SourceResourceSession, entry_values: [MirRuntimeValue],
+    policy: ReleaseDevtoolsPolicy, resume: Resume
+) -> SourceMirExecution SourceMirExecutionError! {
+    identity :: program.execution_identity(Val(artifact)).map_err(fn(error) {
+        SourceMirExecutionError.Identity(error.to_string())
+    })?
+    // GATE #4494: real invocation arena activation and nested native callback lifetime;
+    // canonical transport seam owns cleanup on both return and unwind.
+    native_run :: execute_source_entry(&program, artifact, entry_function, resources.clone(),
+        ^entry_values, &policy, ^resume).map_err(fn(error) {
+        if error == {
+            .Resource(message) -> SourceMirExecutionError.Resource(^message)
+            other -> SourceMirExecutionError.Backend(other.to_string())
+        }
+    })?
+    return SourceMirExecution(outcome: ^native_run.outcome, value: ^native_run.value,
+        soft_stop: native_run.soft_stop, stdout: ^native_run.stdout, stderr: ^native_run.stderr,
+        tier: native_run.tier, program: ^program, identity: ^identity, artifact: artifact,
+        entry_function: entry_function, resources: ^native_run.resources,
+        source_session: ^native_run.session)
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:181
+fn execute_source_mir<SourceProgram, Decode: FnOnce(&SourceProgram, &BootstrapBindingDescriptor) -> MirProgram Err!, Resume: Fn(&SourceDeoptRequest) -> SourceDeoptReply Err!>(
+    source_program: &SourceProgram, artifact: MirArtifactId, entry_function: MirFunctionId,
+    bindings: &BootstrapBindingDescriptor, resources: &SourceResourceSession,
+    entry_values: [MirRuntimeValue], policy: ReleaseDevtoolsPolicy, decode: Decode, resume: Resume
+) -> SourceMirExecution SourceMirExecutionError! {
+    program :: decode(source_program, bindings).map_err(fn(error) { SourceMirExecutionError.Carrier(^error) })?
+    execute_decoded_source_mir(^program, artifact, entry_function, resources, ^entry_values, ^policy, ^resume)
+}

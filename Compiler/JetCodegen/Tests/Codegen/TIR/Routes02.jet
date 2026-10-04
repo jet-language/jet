@@ -1,0 +1,35 @@
+use jet_foundation.AST.Type
+use jet_foundation.Effects.Effect
+use jet_foundation.MIR.[MirSymbol, MirPreludeAbi]
+use jet_codegen.Codegen.TIR.[THandleOp, TFailureCarrier, TRoutePlan]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:2441-2449 (behavioral control; no inline Rust test)
+#Test("tcp_deadline_read_route_preserves_borrow_mask_and_net_effect") {
+    carrier :: TFailureCarrier.Infallible
+    plan :: THandleOp.TcpStreamReadBytesDeadline.route_plan(Type.Named("TcpStream"), carrier)!
+    assert(if plan == {
+        .Prelude(route) -> route.member == "tcp_stream.read_bytes_deadline" && route.symbol == MirSymbol.Prelude("jet_net_tcp_read_bytes_deadline") && route.signature.arity == 3 && route.signature.max_arity == 3 && route.signature.borrow_mask == [true, false, true] && route.effect == Val(Effect.Net) && route.fallibility == carrier && route.abi == MirPreludeAbi.Value
+        else -> false
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:2900-2908 (behavioral control)
+#Test("args_subcommand_route_moves_builder_and_child_but_borrows_labels") {
+    carrier :: TFailureCarrier.Infallible
+    plan :: THandleOp.ArgsSpecSubcommand.route_plan(Type.Named("ArgsSpec"), carrier)!
+    assert(if plan == {
+        .Prelude(route) -> route.member == "args.subcommand" && route.symbol == MirSymbol.Prelude("jet_args_subcommand") && route.signature.arity == 4 && route.signature.borrow_mask == [false, true, true, false] && route.effect == Val(Effect.Env) && route.fallibility == carrier
+        else -> false
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:3035-3051,3052-3081 (behavioral control)
+#Test("expiring_validity_and_unknown_websocket_methods_remain_structural") {
+    carrier :: TFailureCarrier.Infallible
+    validity :: THandleOp.ExpiringMethod{method: "is_valid"}.route_plan(Type.Named("ExpiringValue"), carrier)!
+    assert(validity == TRoutePlan.Primitive)
+    structural :: THandleOp.HTTPServerMethod{kind: "WsConn", method: "checked_structural"}.route_plan(Type.Named("WsConn"), carrier)!
+    assert(structural == TRoutePlan.Primitive)
+    close :: THandleOp.HTTPServerMethod{kind: "WsConn", method: "close"}.route_plan(Type.Named("WsConn"), carrier)!
+    assert(if close == { .Prelude(route) -> route.symbol == MirSymbol.Prelude("jet_ws_close") && route.signature.borrow_mask == [true, false, true] && route.effect == Val(Effect.Net) else -> false })
+}

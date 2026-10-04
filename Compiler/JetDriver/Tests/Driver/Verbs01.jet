@@ -1,0 +1,31 @@
+// Rust: Compiler/Bootstrap/Host/DiagnosticCodec.rs:6
+// The reference has no inline tests. These controls exercise the source emitter.
+#Test("diagnostic_codec_appends_complete_binding_template") {
+    out := "prefix"
+    append_diagnostic_codec(&out)
+    assert(out.starts_with("prefix\nfn __jet_bootstrap_int_i64("))
+    assert(out.ends_with("    Ok(reports)\n}}\n"))
+    assert(out.contains("@f.Diagnostic.nearest_granting_scope@"))
+    assert(out.contains("@f.JetDriverCompileResult.generated_source_files@"))
+    assert(out.contains("format!(\"{{label}} is negative\")"))
+    assert(out.contains("format!(\"{{}}/{{display}}\", root.canonical_path)"))
+    assert(!out.contains("{{{{"))
+    once :: out
+    append_diagnostic_codec(&out)
+    assert_eq(out, once + once.strip_prefix("prefix").unwrap())
+}
+
+// Rust: Compiler/Bootstrap/Host/DiagnosticCodec.rs:626
+#Test("diagnostic_codec_preserves_exact_source_and_channel_validation") {
+    out := ""
+    append_diagnostic_codec(&out)
+    assert(out.contains("value.start.checked_sub(aggregate_offset)"))
+    assert(out.contains("!source.is_char_boundary(start) || !source.is_char_boundary(end)"))
+    assert(out.contains("diagnostic origin path `{{}}` collides between generated and authorized disk sources"))
+    assert(out.contains("compiler-generated diagnostics cannot propose edits to source files"))
+    assert(out.contains("safe diagnostic edit `{{}}` has a non-auto-applicable safety grade"))
+    assert(out.contains("__jet_bootstrap_validate_diagnostic_channel(&native, row)?;"))
+    assert(out.contains("what: diagnostic.@f.Diagnostic.what@.clone(),"))
+    assert(out.contains("origin: None,"))
+    assert(out.contains("column: 0,"))
+}

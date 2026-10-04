@@ -1,0 +1,117 @@
+use jet_comptime.Comptime.Methods.Dispatch.[eval_build_time_io, eval_build_embed, eval_locked_find]
+use jet_foundation.AST.[CtValue, ComptimeInput]
+use jet_foundation.Diagnostics.Span
+use jet_foundation.Syntax
+use std.[fs, env, process]
+use std.os.unix.fs.symlink
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/dispatch.rs:1834
+#Test("embed_file_bytes_and_build_embed_reject_symlink_escape") {
+    if core.sys.target.selected_family() == "unix" {
+        // GATE #4494: real native filesystem fixture; #4483 selected-target Unix arm.
+        root := env.temp_dir().join("jet-comptime-embed-symlink-{process.id()}")
+        _ :: fs.remove_dir_all(&root)
+        fs.create_dir_all(&root).unwrap()
+        outside := root.with_file_name("jet-comptime-embed-outside-{process.id()}")
+        fs.write(&outside, "must not be embedded").unwrap()
+        symlink(&outside, root.join("payload.txt")).unwrap()
+        span := Span.new(0, 1)
+        for builtin in [Syntax.BUILTIN_EMBED_FILE, Syntax.BUILTIN_EMBED_BYTES] {
+            assert(eval_build_time_io(builtin, &root, Val("payload.txt"), None, span).is_err(), "{builtin} must reject a symlink escape")
+        }
+        args := [CtValue.Str("payload.txt")]
+        assert(eval_build_embed(&args, &root, None, span).is_err())
+        assert_eq(fs.read_to_string(&outside).unwrap(), "must not be embedded")
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_file(&outside)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/dispatch.rs:1869
+#Test("embed_forms_reject_symlinked_ancestor_without_recording_input") {
+    if core.sys.target.selected_family() == "unix" {
+        // GATE #4494: real native symlink fixture.
+        root := env.temp_dir().join("jet-comptime-embed-ancestor-{process.id()}")
+        outside := root.with_file_name("jet-comptime-embed-ancestor-outside-{process.id()}")
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_dir_all(&outside)
+        fs.create_dir_all(&root).unwrap()
+        fs.create_dir_all(&outside).unwrap()
+        fs.write(outside.join("payload.txt"), "must not be embedded").unwrap()
+        symlink(&outside, root.join("nested")).unwrap()
+        span := Span.new(0, 1)
+        for builtin in [Syntax.BUILTIN_EMBED_FILE, Syntax.BUILTIN_EMBED_BYTES] {
+            inputs: [ComptimeInput] = []
+            assert(eval_build_time_io(builtin, &root, Val("nested/payload.txt"), Val(&inputs), span).is_err(), "{builtin} must reject a symlinked ancestor")
+            assert(inputs.is_empty(), "{builtin} must not record outside input")
+        }
+        args := [CtValue.Str("nested/payload.txt")]
+        inputs: [ComptimeInput] = []
+        assert(eval_build_embed(&args, &root, Val(&inputs), span).is_err())
+        assert(inputs.is_empty(), "b.embed must not record outside input")
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_dir_all(&outside)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/dispatch.rs:1917
+#Test("embed_forms_reject_hardlinked_input_without_hashing_it") {
+    if core.sys.target.selected_family() == "unix" {
+        // GATE #4494: real native hard-link fixture.
+        root := env.temp_dir().join("jet-comptime-embed-hardlink-{process.id()}")
+        outside := root.with_file_name("jet-comptime-embed-hardlink-outside-{process.id()}")
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_file(&outside)
+        fs.create_dir_all(&root).unwrap()
+        fs.write(&outside, "must not be embedded").unwrap()
+        fs.hard_link(&outside, root.join("payload.txt")).unwrap()
+        span := Span.new(0, 1)
+        for builtin in [Syntax.BUILTIN_EMBED_FILE, Syntax.BUILTIN_EMBED_BYTES] {
+            inputs: [ComptimeInput] = []
+            assert(eval_build_time_io(builtin, &root, Val("payload.txt"), Val(&inputs), span).is_err(), "{builtin} must reject a multiply linked input")
+            assert(inputs.is_empty(), "{builtin} must not hash a hard link")
+        }
+        args := [CtValue.Str("payload.txt")]
+        inputs: [ComptimeInput] = []
+        assert(eval_build_embed(&args, &root, Val(&inputs), span).is_err())
+        assert(inputs.is_empty(), "b.embed must not hash a hard link")
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_file(&outside)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/dispatch.rs:1956
+#Test("find_rejects_symlinked_root_before_traversal") {
+    if core.sys.target.selected_family() == "unix" {
+        // GATE #4494: real native filesystem fixture.
+        root := env.temp_dir().join("jet-comptime-find-symlink-root-{process.id()}")
+        outside := root.with_file_name("jet-comptime-find-symlink-outside-{process.id()}")
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_dir_all(&outside)
+        fs.create_dir_all(&root).unwrap()
+        fs.create_dir_all(&outside).unwrap()
+        fs.write(outside.join("secret.txt"), "must not be read").unwrap()
+        symlink(&outside, root.join("link")).unwrap()
+        result := eval_locked_find(&root, "link/**", None, Span.new(0, 1))
+        assert(result.is_err(), "find must reject a symlinked traversal root")
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_dir_all(&outside)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/dispatch.rs:1986
+#Test("find_rejects_glob_reads_through_symlinked_root") {
+    if core.sys.target.selected_family() == "unix" {
+        // GATE #4494: real native filesystem fixture.
+        root := env.temp_dir().join("jet-comptime-find-glob-symlink-{process.id()}")
+        outside := root.with_file_name("jet-comptime-find-glob-outside-{process.id()}")
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_dir_all(&outside)
+        fs.create_dir_all(&root).unwrap()
+        fs.create_dir_all(&outside).unwrap()
+        fs.write(outside.join("secret.txt"), "must not be read").unwrap()
+        symlink(&outside, root.join("link")).unwrap()
+        inputs: [ComptimeInput] = []
+        result := eval_locked_find(&root, "link\\**\\*.txt", Val(&inputs), Span.new(0, 1))
+        assert(result.is_err(), "find must refuse the hostile matched read")
+        assert(inputs.is_empty(), "refused find must record no outside input")
+        _ :: fs.remove_dir_all(&root)
+        _ :: fs.remove_dir_all(&outside)
+    }
+}

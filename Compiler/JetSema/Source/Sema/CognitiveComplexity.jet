@@ -1,219 +1,146 @@
-// PORT-PENDING 0425 crates-jet-sema-src-sema-checkervalidate-module-group: crates/jet-sema/src/Sema/CognitiveComplexity.rs:1-215
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Deterministic cognitive-complexity scoring for `jet lint --complexity`.
-//RS //!
-//RS //! Score rule:
-//RS //! - branch, loop, or dispatch arm-set: `1 + enclosing-structure-depth`;
-//RS //! - a mixed `&&`/`||` sequence: `+1`;
-//RS //! - direct recursion: `+1` per function;
-//RS //! - lambda bodies increase enclosing-structure depth, but add no score.
-//RS 
-//RS use crate::Diagnostics::Span;
-//RS use crate::AST::{BinOp, Expr, Func, Item, LambdaBody, Program, Stmt};
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub struct CognitiveComplexityReport {
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     pub score: u32,
-//RS }
-//RS 
-//RS pub fn cognitive_complexity_reports(program: &Program) -> Vec<CognitiveComplexityReport> {
-//RS     let mut functions = Vec::new();
-//RS     collect_items(&program.items, &mut functions);
-//RS     let mut reports: Vec<_> = functions
-//RS         .into_iter()
-//RS         .map(|function| CognitiveComplexityReport {
-//RS             name: function.name.clone(),
-//RS             span: function.span,
-//RS             score: cognitive_complexity(function),
-//RS         })
-//RS         .collect();
-//RS     reports.sort_by(|left, right| {
-//RS         right
-//RS             .score
-//RS             .cmp(&left.score)
-//RS             .then_with(|| left.span.start.cmp(&right.span.start))
-//RS             .then_with(|| left.name.cmp(&right.name))
-//RS     });
-//RS     reports
-//RS }
-//RS 
-//RS fn collect_items<'a>(items: &'a [Item], functions: &mut Vec<&'a Func>) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) => functions.push(function),
-//RS             Item::Impl(implementation) => functions.extend(&implementation.methods),
-//RS             Item::Struct(definition) => {
-//RS                 functions.extend(&definition.methods);
-//RS                 for implementation in &definition.trait_impls {
-//RS                     functions.extend(&implementation.methods);
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 functions.extend(&definition.methods);
-//RS                 for implementation in &definition.trait_impls {
-//RS                     functions.extend(&implementation.methods);
-//RS                 }
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     collect_items(body, functions);
-//RS                 }
-//RS             }
-//RS             Item::GenericModule(module) => collect_items(&module.body, functions),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn cognitive_complexity(function: &Func) -> u32 {
-//RS     let mut body = function.body.clone();
-//RS     let mut controls = Vec::new();
-//RS     let mut nesting = Vec::new();
-//RS     let mut mixed_boolean_sequences = 0;
-//RS     let mut recursive = false;
-//RS 
-//RS     for statement in &mut body {
-//RS         visit_statement_shapes(statement, &mut controls, &mut nesting);
-//RS         statement.for_each_expr_mut(|expression| match expression {
-//RS             Expr::If { span, .. } => {
-//RS                 controls.push(*span);
-//RS                 nesting.push(*span);
-//RS             }
-//RS             Expr::Lambda(lambda) => {
-//RS                 nesting.push(lambda.span);
-//RS                 if let LambdaBody::Block(body) = &lambda.body {
-//RS                     for statement in body {
-//RS                         visit_statement_shapes(statement, &mut controls, &mut nesting);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Expr::Call(call) if call.name == function.name => recursive = true,
-//RS             Expr::Binary(BinOp::And | BinOp::Or, ..) if is_mixed_boolean_sequence(expression) => {
-//RS                 mixed_boolean_sequences += 1;
-//RS             }
-//RS             _ => {}
-//RS         });
-//RS     }
-//RS 
-//RS     let structure_score: u32 = controls
-//RS         .iter()
-//RS         .map(|inner| {
-//RS             1 + nesting
-//RS                 .iter()
-//RS                 .filter(|outer| contains(**outer, *inner))
-//RS                 .count() as u32
-//RS         })
-//RS         .sum();
-//RS     structure_score + mixed_boolean_sequences + if recursive { 1 } else { 0 }
-//RS }
-//RS 
-//RS fn contains(outer: Span, inner: Span) -> bool {
-//RS     outer.start < inner.start && inner.end < outer.end
-//RS }
-//RS 
-//RS fn is_mixed_boolean_sequence(expression: &Expr) -> bool {
-//RS     let mut has_and = false;
-//RS     let mut has_or = false;
-//RS     collect_boolean_operators(expression, &mut has_and, &mut has_or);
-//RS     has_and && has_or
-//RS }
-//RS 
-//RS fn collect_boolean_operators(expression: &Expr, has_and: &mut bool, has_or: &mut bool) {
-//RS     match expression {
-//RS         Expr::Binary(BinOp::And, left, right, _) => {
-//RS             *has_and = true;
-//RS             collect_boolean_operators(left, has_and, has_or);
-//RS             collect_boolean_operators(right, has_and, has_or);
-//RS         }
-//RS         Expr::Binary(BinOp::Or, left, right, _) => {
-//RS             *has_or = true;
-//RS             collect_boolean_operators(left, has_and, has_or);
-//RS             collect_boolean_operators(right, has_and, has_or);
-//RS         }
-//RS         Expr::Paren(inner, _) => collect_boolean_operators(inner, has_and, has_or),
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn visit_statement_shapes(statement: &Stmt, controls: &mut Vec<Span>, nesting: &mut Vec<Span>) {
-//RS     fn visit_body(body: &[Stmt], controls: &mut Vec<Span>, nesting: &mut Vec<Span>) {
-//RS         for statement in body {
-//RS             visit_statement_shapes(statement, controls, nesting);
-//RS         }
-//RS     }
-//RS 
-//RS     match statement {
-//RS         Stmt::While { body, span, .. }
-//RS         | Stmt::For { body, span, .. }
-//RS         | Stmt::Loop { body, span, .. } => {
-//RS             controls.push(*span);
-//RS             nesting.push(*span);
-//RS             visit_body(body, controls, nesting);
-//RS         }
-//RS         Stmt::CountedLoop {
-//RS             body, step, span, ..
-//RS         } => {
-//RS             controls.push(*span);
-//RS             nesting.push(*span);
-//RS             if let Some(step) = step {
-//RS                 visit_statement_shapes(step, controls, nesting);
-//RS             }
-//RS             visit_body(body, controls, nesting);
-//RS         }
-//RS         Stmt::Switch {
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS             ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS             ..
-//RS         } => {
-//RS             controls.push(*span);
-//RS             nesting.push(*span);
-//RS             for arm in arms {
-//RS                 visit_body(&arm.body, controls, nesting);
-//RS             }
-//RS             if let Some(body) = else_body {
-//RS                 visit_body(body, controls, nesting);
-//RS             }
-//RS         }
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             span,
-//RS             ..
-//RS         } => {
-//RS             controls.push(*span);
-//RS             nesting.push(*span);
-//RS             visit_body(then_body, controls, nesting);
-//RS             if let Some(body) = else_body {
-//RS                 visit_body(body, controls, nesting);
-//RS             }
-//RS         }
-//RS         Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::ScopeMember { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::AssumeDet { body, .. } => visit_body(body, controls, nesting),
-//RS         _ => {}
-//RS     }
-//RS }
-// END-PORT-PENDING 0425 crates/jet-sema/src/Sema/CognitiveComplexity.rs:1-215
+// Rust: crates/jet-sema/src/Sema/CognitiveComplexity.rs:1
+// Deterministic scoring: controls add 1 + enclosing depth, mixed boolean
+// sequences add one, direct recursion adds one; lambdas only add depth.
+use jet_sema.Diagnostics.[Span]
+use jet_sema.AST.[BinOp, Expr, Func, Item, LambdaBody, Program, Stmt]
 
+// Rust: crates/jet-sema/src/Sema/CognitiveComplexity.rs:13
+pub struct CognitiveComplexityReport {
+    name: String
+    span: Span
+    score: U32
+}
+
+// Rust: crates/jet-sema/src/Sema/CognitiveComplexity.rs:19
+pub fn cognitive_complexity_reports(program: Program) -> [CognitiveComplexityReport] Never! {
+    functions := [&Func]{}
+    collect_items(program.items, &functions)
+    reports := [CognitiveComplexityReport]{}
+    loop function in functions {
+        reports.push(CognitiveComplexityReport{name: function.name.clone(), span: function.span, score: cognitive_complexity(function)})
+    }
+    reports.sort_by(fn(left: CognitiveComplexityReport, right: CognitiveComplexityReport) {
+        right.score.cmp(left.score).then_with(fn() { left.span.start.cmp(right.span.start) }).then_with(fn() { left.name.cmp(right.name) })
+    })
+    reports
+}
+
+// Rust: crates/jet-sema/src/Sema/CognitiveComplexity.rs:40
+fn collect_items(items: [Item], functions: &[&Func]) Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> functions.push(&function)
+            .Impl(implementation) -> { loop method in implementation.methods { functions.push(&method) } }
+            .Struct(definition) -> {
+                loop method in definition.methods { functions.push(&method) }
+                loop implementation in definition.trait_impls { loop method in implementation.methods { functions.push(&method) } }
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods { functions.push(&method) }
+                loop implementation in definition.trait_impls { loop method in implementation.methods { functions.push(&method) } }
+            }
+            .CodeModule(module) -> { if module.body == .Val(body) { collect_items(body, functions) } }
+            .GenericModule(module) -> collect_items(module.body, functions)
+            _ -> {}
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CognitiveComplexity.rs:68
+fn cognitive_complexity(function: Func) -> U32 Never! {
+    body := function.body.clone()
+    controls := [Span]{}
+    nesting := [Span]{}
+    mixed_boolean_sequences := 0 as U32
+    recursive := false
+    loop &statement in body {
+        visit_statement_shapes(statement, &controls, &nesting)
+        statement.for_each_expr_mut(fn(expression: &Expr) Never! {
+            if expression == {
+                .If(.., span) -> { controls.push(span); nesting.push(span) }
+                .Lambda(lambda) -> {
+                    nesting.push(lambda.span)
+                    if lambda.body == .Block(body) {
+                        loop statement in body { visit_statement_shapes(statement, &controls, &nesting) }
+                    }
+                }
+                .Call(call) -> { if call.name == function.name { recursive = true } }
+                .Binary(.And, ..) | .Binary(.Or, ..) -> {
+                    if is_mixed_boolean_sequence(expression) { mixed_boolean_sequences += 1 }
+                }
+                _ -> {}
+            }
+        })
+    }
+    structure_score := 0 as U32
+    loop inner in controls {
+        structure_score += 1
+        loop outer in nesting { if contains(outer, inner) { structure_score += 1 } }
+    }
+    structure_score + mixed_boolean_sequences + (if recursive -> 1 else -> 0)
+}
+
+// Rust: crates/jet-sema/src/Sema/CognitiveComplexity.rs:110
+fn contains(outer: Span, inner: Span) -> Bool { outer.start < inner.start && inner.end < outer.end }
+
+// Rust: crates/jet-sema/src/Sema/CognitiveComplexity.rs:114
+fn is_mixed_boolean_sequence(expression: Expr) -> Bool Never! {
+    has_and := false
+    has_or := false
+    collect_boolean_operators(expression, &has_and, &has_or)
+    has_and && has_or
+}
+
+// Rust: crates/jet-sema/src/Sema/CognitiveComplexity.rs:121
+fn collect_boolean_operators(expression: Expr, has_and: &Bool, has_or: &Bool) Never! {
+    if expression == {
+        .Binary(.And, left, right, _) -> {
+            has_and = true
+            collect_boolean_operators(left, has_and, has_or)
+            collect_boolean_operators(right, has_and, has_or)
+        }
+        .Binary(.Or, left, right, _) -> {
+            has_or = true
+            collect_boolean_operators(left, has_and, has_or)
+            collect_boolean_operators(right, has_and, has_or)
+        }
+        .Paren(inner, _) -> collect_boolean_operators(inner, has_and, has_or)
+        _ -> {}
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CognitiveComplexity.rs:138
+fn visit_statement_shapes(statement: Stmt, controls: &[Span], nesting: &[Span]) Never! {
+    // Rust: crates/jet-sema/src/Sema/CognitiveComplexity.rs:139
+    fn visit_body(body: [Stmt], controls: &[Span], nesting: &[Span]) Never! {
+        loop statement in body { visit_statement_shapes(statement, controls, nesting) }
+    }
+    if statement == {
+        .While{body, span, ..} | .For{body, span, ..} | .Loop{body, span, ..} -> {
+            controls.push(span); nesting.push(span)
+            visit_body(body, controls, nesting)
+        }
+        .CountedLoop{body, step, span, ..} -> {
+            controls.push(span); nesting.push(span)
+            if step == .Val(step) { visit_statement_shapes(step, controls, nesting) }
+            visit_body(body, controls, nesting)
+        }
+        .Switch{arms, else_body, span, ..} | .ComptimeSwitch{arms, else_body, span, ..} -> {
+            controls.push(span); nesting.push(span)
+            loop arm in arms { visit_body(arm.body, controls, nesting) }
+            if else_body == .Val(body) { visit_body(body, controls, nesting) }
+        }
+        .ComptimeIf{then_body, else_body, span, ..} -> {
+            controls.push(span); nesting.push(span)
+            visit_body(then_body, controls, nesting)
+            if else_body == .Val(body) { visit_body(body, controls, nesting) }
+        }
+        .Unsafe{body, ..} | .Impure{body, ..} | .Reactive{body, ..}
+        | .Shield{body, ..} | .Switched{body, ..} | .Region{body, ..}
+        | .Policy{body, ..} | .TaskGroup{body, ..} | .Layout{body, ..}
+        | .AuthorityScope{body, ..} | .ComptimeBlock{body, ..} | .Live{body, ..}
+        | .Transact{body, ..} | .ScopeMember{body, ..} | .ContextBlock{body, ..}
+        | .AssumeDet{body, ..} -> visit_body(body, controls, nesting)
+        _ -> {}
+    }
+}

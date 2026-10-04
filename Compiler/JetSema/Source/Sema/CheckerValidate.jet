@@ -1,691 +1,292 @@
-// PORT-PENDING 0425 crates-jet-sema-src-sema-checkervalidate-module-group: crates/jet-sema/src/Sema/CheckerValidate.rs:1-687
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-VALIDATE1 (ratified 2026-07-12, card #506): `validate { … }` in-body
-//RS //! block. See Docs/spec/syntax-decisions.md for the full ratified law.
-//RS //!
-//RS //! Runs pre-registration, same timing as
-//RS //! `CheckerFieldPolicy::process_computed_fields` (D-FIELDPOL1): for each
-//RS //! struct with a non-empty `validate_block`,
-//RS //!   1. check every rule statement's shape — it must be exactly
-//RS //!      `check(cond, at: field, "msg")` (E0353); `field` must name a real
-//RS //!      field of the struct (E0354);
-//RS //!   2. rewrite bare `Ident`s in `cond`/`msg` that name a sibling field to
-//RS //!      `value.<field>` — reuses `CheckerFieldPolicy::rewrite_field_refs`,
-//RS //!      the exact substitution D-FIELDPOL1 computed fields use for
-//RS //!      `self.<field>`, with the receiver renamed to `value`;
-//RS //!   3. synthesize `fn validate(value: Self) -> Self ![FieldError] { … }`
-//RS //!      as a plain (non-trait) `impl Type { }` block appended to the
-//RS //!      module, `is_pure: true` — the existing `pure fn` purity pass
-//RS //!      (S60/E3401) then enforces "a rule may reference only fields and
-//RS //!      pure calls" over the whole synthesized body for free, no separate
-//RS //!      purity pass needed.
-//RS //!
-//RS //! The in-body block + `Type.validate(value)` standalone entry point are
-//RS //! wired. Typed decoding and validation share the owner-ratified accumulated
-//RS //! `[FieldError]` result contract.
-//RS 
-//RS use super::*;
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::Syntax;
-//RS use crate::AST::{
-//RS     AccessConvention, Binding, CallArg, CallArgFlags, Expr, Field, Func, ImplDef, Item, Param,
-//RS     Stmt, StrPart, StructDef, SwitchArm, Type, TypeParam,
-//RS };
-//RS use std::collections::HashSet;
-//RS 
-//RS /// Entry point, called once per module before registration (same timing as
-//RS /// `process_computed_fields`/`inject_patchable_types`).
-//RS pub(crate) fn process_validate_blocks(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
-//RS     let needs_over = contains_validate_over(items);
-//RS     let mut generated = Vec::new();
-//RS     for item in items.iter() {
-//RS         let Item::Struct(s) = item else { continue };
-//RS         if s.validate_block.is_empty() {
-//RS             continue;
-//RS         }
-//RS         if let Some(imp) = synthesize_validate_impl(s, diags) {
-//RS             generated.push(Item::Impl(imp));
-//RS         }
-//RS     }
-//RS     if needs_over {
-//RS         let span = first_item_span(items).unwrap_or_else(|| Span::new(0, 0));
-//RS         generated.push(Item::Struct(build_validate_builder_struct(span)));
-//RS         generated.push(Item::Impl(build_validate_builder_impl(span)));
-//RS     }
-//RS     items.extend(generated);
-//RS }
-//RS 
-//RS fn first_item_span(items: &[Item]) -> Option<Span> {
-//RS     items.iter().find_map(|item| match item {
-//RS         Item::Func(f) => Some(f.span),
-//RS         Item::Struct(s) => Some(s.span),
-//RS         Item::Enum(e) => Some(e.span),
-//RS         Item::Impl(i) => Some(i.span),
-//RS         Item::CodeModule(m) => Some(m.name_span),
-//RS         Item::Test(t) => Some(t.span),
-//RS         _ => None,
-//RS     })
-//RS }
-//RS 
-//RS fn contains_validate_over(items: &mut [Item]) -> bool {
-//RS     fn body_contains(body: &mut [Stmt]) -> bool {
-//RS         let mut found = false;
-//RS         for stmt in body {
-//RS             stmt.for_each_expr_mut(|expr| {
-//RS                 if matches!(
-//RS                     expr,
-//RS                     Expr::MethodCall {
-//RS                         receiver,
-//RS                         method,
-//RS                         ..
-//RS                     } if method == "over"
-//RS                         && matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::TYPE_VALIDATE)
-//RS                 ) {
-//RS                     found = true;
-//RS                 }
-//RS             });
-//RS         }
-//RS         found
-//RS     }
-//RS 
-//RS     fn item_contains(item: &mut Item) -> bool {
-//RS         match item {
-//RS             Item::Func(f) => body_contains(&mut f.body),
-//RS             Item::Struct(s) => {
-//RS                 s.methods.iter_mut().any(|f| body_contains(&mut f.body))
-//RS                     || s.trait_impls
-//RS                         .iter_mut()
-//RS                         .any(|i| i.methods.iter_mut().any(|f| body_contains(&mut f.body)))
-//RS             }
-//RS             Item::Enum(e) => {
-//RS                 e.methods.iter_mut().any(|f| body_contains(&mut f.body))
-//RS                     || e.trait_impls
-//RS                         .iter_mut()
-//RS                         .any(|i| i.methods.iter_mut().any(|f| body_contains(&mut f.body)))
-//RS             }
-//RS             Item::Impl(i) => i.methods.iter_mut().any(|f| body_contains(&mut f.body)),
-//RS             Item::Test(t) => body_contains(&mut t.body),
-//RS             Item::CodeModule(m) => m
-//RS                 .body
-//RS                 .as_mut()
-//RS                 .is_some_and(|body| contains_validate_over(body)),
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     items.iter_mut().any(item_contains)
-//RS }
-//RS 
-//RS /// One accepted `check(cond, at: field, "msg")` rule.
-//RS struct ValidateRule {
-//RS     cond: Expr,
-//RS     field: String,
-//RS     msg: Expr,
-//RS }
-//RS 
-//RS fn synthesize_validate_impl(s: &StructDef, diags: &mut Vec<Diagnostic>) -> Option<ImplDef> {
-//RS     let field_names: HashSet<String> = s.fields.iter().map(|f| f.name.clone()).collect();
-//RS     let mut rules = Vec::new();
-//RS     let mut all_ok = true;
-//RS     for stmt in &s.validate_block {
-//RS         match extract_check_rule(stmt, &field_names) {
-//RS             Ok(rule) => rules.push(rule),
-//RS             Err(d) => {
-//RS                 diags.push(d);
-//RS                 all_ok = false;
-//RS             }
-//RS         }
-//RS     }
-//RS     if !all_ok {
-//RS         // Diagnostics already registered; don't synthesize a function whose
-//RS         // body sema never finished validating (I2: nothing malformed reaches
-//RS         // codegen).
-//RS         return None;
-//RS     }
-//RS     let span = s.validate_span.unwrap_or(s.name_span);
-//RS     Some(build_validate_impl(s, &rules, span))
-//RS }
-//RS 
-//RS fn extract_check_rule(
-//RS     stmt: &Stmt,
-//RS     field_names: &HashSet<String>,
-//RS ) -> Result<ValidateRule, Diagnostic> {
-//RS     let bad_shape = |span: Span| e0353_bad_validate_rule(span);
-//RS     let Stmt::Expr(Expr::Call(call)) = stmt else {
-//RS         return Err(bad_shape(stmt.span()));
-//RS     };
-//RS     if call.name != Syntax::VALIDATE_CHECK_FN {
-//RS         return Err(bad_shape(call.name_span));
-//RS     }
-//RS     if call.args.len() != 3 {
-//RS         return Err(bad_shape(call.name_span));
-//RS     }
-//RS     let cond_arg = &call.args[0];
-//RS     let at_arg = &call.args[1];
-//RS     let msg_arg = &call.args[2];
-//RS     if cond_arg.label.is_some() {
-//RS         return Err(bad_shape(cond_arg.span));
-//RS     }
-//RS     let Some((label, _)) = &at_arg.label else {
-//RS         return Err(bad_shape(at_arg.span));
-//RS     };
-//RS     if label != "at" {
-//RS         return Err(bad_shape(at_arg.span));
-//RS     }
-//RS     if msg_arg.label.is_some() {
-//RS         return Err(bad_shape(msg_arg.span));
-//RS     }
-//RS     let Expr::Ident(field_name, field_span) = &at_arg.expr else {
-//RS         return Err(bad_shape(at_arg.span));
-//RS     };
-//RS     if !field_names.contains(field_name.as_str()) {
-//RS         return Err(e0354_unknown_validate_field(field_name, *field_span));
-//RS     }
-//RS     Ok(ValidateRule {
-//RS         cond: cond_arg.expr.clone(),
-//RS         field: field_name.clone(),
-//RS         msg: msg_arg.expr.clone(),
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn e0353_bad_validate_rule(span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0353",
-//RS         "a `validate` rule must be `check(condition, at: field, \"message\")`".to_string(),
-//RS         "D-VALIDATE1: every statement in a `validate { … }` block is a `check` call — the first argument is the rule's condition, `at:` names the field the failure is reported against, and the last argument is the message text".to_string(),
-//RS         "write: check(<condition>, at: <field>, \"<message>\")".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS pub(crate) fn e0354_unknown_validate_field(name: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0354",
-//RS         format!("`at: {name}` doesn't name a field on this struct"),
-//RS         "D-VALIDATE1: `check(…, at: field, …)`'s `at:` argument must be a bare field name declared on the same struct — it's how the reported `FieldError.path` is chosen".to_string(),
-//RS         "fix the field name, or add the field to the struct".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS fn ident(name: &str, span: Span) -> Expr {
-//RS     Expr::Ident(name.to_string(), span)
-//RS }
-//RS 
-//RS fn str_lit(text: &str, span: Span) -> Expr {
-//RS     Expr::Str(vec![StrPart::Lit(text.to_string())], span)
-//RS }
-//RS 
-//RS fn call_arg(expr: Expr, span: Span) -> CallArg {
-//RS     CallArg {
-//RS         convention: AccessConvention::Read,
-//RS         expr,
-//RS         span,
-//RS         flags: CallArgFlags::default(),
-//RS         label: None,
-//RS         spread: false,
-//RS     }
-//RS }
-//RS 
-//RS fn method_call(receiver: Expr, method: &str, args: Vec<CallArg>, span: Span) -> Expr {
-//RS     Expr::MethodCall {
-//RS         receiver: Box::new(receiver),
-//RS         method: method.to_string(),
-//RS         method_span: span,
-//RS         owner_type_args: Vec::new(),
-//RS         type_args: Vec::new(),
-//RS         args,
-//RS         recv_type: None,
-//RS         resolved_ret: None,
-//RS         operator_rhs: None,
-//RS         checked_widen: false,
-//RS     }
-//RS }
-//RS 
-//RS const ERRORS_VAR: &str = "__errors";
-//RS const VALUE_VAR: &str = "value";
-//RS 
-//RS /// `fn validate(value: Self) -> Self ![FieldError] { … }`.
-//RS fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> ImplDef {
-//RS     let field_names: HashSet<String> = s.fields.iter().map(|f| f.name.clone()).collect();
-//RS 
-//RS     let errors_binding = Stmt::Val(Binding {
-//RS         mutable: true,
-//RS         markers: Vec::new(),
-//RS         reactive_upgrade: false,
-//RS         meta: None,
-//RS         name: ERRORS_VAR.to_string(),
-//RS         name_span: span,
-//RS         sigil_span: None,
-//RS         pattern: None,
-//RS         ty: Some(Type::List(Box::new(field_error_ty()))),
-//RS         ty_span: Some(span),
-//RS         init: Expr::ListLit(Vec::new(), span),
-//RS         is_comptime: false,
-//RS         ct: None,
-//RS         uninit: false,
-//RS         arena_view: false,
-//RS         string_view: false,
-//RS         gc_promotion: None,
-//RS         gc_transferred: false,
-//RS     });
-//RS 
-//RS     let mut body = vec![errors_binding];
-//RS     for rule in rules {
-//RS         let mut cond = rule.cond.clone();
-//RS         rewrite_field_refs(&mut cond, &field_names, VALUE_VAR);
-//RS         let mut msg = rule.msg.clone();
-//RS         rewrite_field_refs(&mut msg, &field_names, VALUE_VAR);
-//RS 
-//RS         let field_error_lit = Expr::StructLit {
-//RS             type_name: "FieldError".to_string(),
-//RS             type_args: Vec::new(),
-//RS             import_ns: None,
-//RS             as_trait: None,
-//RS             fields: vec![
-//RS                 ("path".to_string(), span, str_lit(&rule.field, span)),
-//RS                 ("reason".to_string(), span, msg),
-//RS             ],
-//RS             inferred: false,
-//RS             span,
-//RS         };
-//RS         let push_stmt = Stmt::Expr(method_call(
-//RS             ident(ERRORS_VAR, span),
-//RS             "push",
-//RS             vec![call_arg(field_error_lit, span)],
-//RS             span,
-//RS         ));
-//RS         let not_cond = Expr::Unary(crate::AST::UnOp::Not, Box::new(cond), span);
-//RS         body.push(Stmt::Switch {
-//RS             subject: Expr::Bool(true, span),
-//RS             arms: vec![SwitchArm {
-//RS                 span: not_cond.span(),
-//RS                 cond: not_cond,
-//RS                 body: vec![push_stmt],
-//RS             }],
-//RS             else_body: None,
-//RS             span,
-//RS         });
-//RS     }
-//RS 
-//RS     let has_errors = Expr::Unary(
-//RS         crate::AST::UnOp::Not,
-//RS         Box::new(method_call(
-//RS             ident(ERRORS_VAR, span),
-//RS             "is_empty",
-//RS             Vec::new(),
-//RS             span,
-//RS         )),
-//RS         span,
-//RS     );
-//RS     let return_err = Stmt::Return(
-//RS         Some(Expr::Err(Box::new(ident(ERRORS_VAR, span)), span)),
-//RS         span,
-//RS     );
-//RS     body.push(Stmt::Switch {
-//RS         subject: Expr::Bool(true, span),
-//RS         arms: vec![SwitchArm {
-//RS             span: has_errors.span(),
-//RS             cond: has_errors,
-//RS             body: vec![return_err],
-//RS         }],
-//RS         else_body: None,
-//RS         span,
-//RS     });
-//RS     body.push(Stmt::Return(
-//RS         Some(Expr::Ok(
-//RS             Box::new(Expr::Copy(Box::new(ident(VALUE_VAR, span)), span)),
-//RS             span,
-//RS         )),
-//RS         span,
-//RS     ));
-//RS 
-//RS     let value_param = Param {
-//RS         // D-VALIDATE1: `Type.validate(value)` reads `value` (no `^` at the
-//RS         // call site, matching the ratified spelling) and hands back an
-//RS         // owned copy on success (`return Ok(copy value)`).
-//RS         convention: AccessConvention::Read,
-//RS         root: false,
-//RS         name: VALUE_VAR.to_string(),
-//RS         name_span: span,
-//RS         ty: Type::Named(s.name.clone()),
-//RS         ty_span: span,
-//RS         default: None,
-//RS         variadic: false,
-//RS         variadic_bound_list: None,
-//RS         declared_view_from_names: None,
-//RS         public_label: None,
-//RS         zone: crate::AST::ParamZone::Either,
-//RS     };
-//RS 
-//RS     let validate_func = Func {
-//RS         span,
-//RS         is_comptime: false,
-//RS         is_pub: s.is_pub,
-//RS         is_package_pub: s.is_package_pub,
-//RS         external_type: None,
-//RS         name: "validate".to_string(),
-//RS         name_span: span,
-//RS         meta: None,
-//RS         type_params: Vec::new(),
-//RS         head_pattern: None,
-//RS         params: vec![value_param],
-//RS         return_type: Some(Type::Result {
-//RS             ok: Box::new(Type::Named(s.name.clone())),
-//RS             err: Box::new(Type::List(Box::new(field_error_ty()))),
-//RS         }),
-//RS         return_type_span: Some(span),
-//RS         return_view_provenance: None,
-//RS         declared_return_view_provenance: None,
-//RS         gc_return: false,
-//RS         diverges: false,
-//RS         gc_scope: false,
-//RS         is_unsafe: false,
-//RS         unsafe_reason: None,
-//RS         unsafe_span: None,
-//RS         // S60/E3401: enforces D-VALIDATE1's "cond/msg reference only fields
-//RS         // and pure calls" for the whole synthesized body, no separate pass.
-//RS         is_pure: true,
-//RS         is_reactive: false,
-//RS         reactive_upgrades: Vec::new(),
-//RS         is_replayable: false,
-//RS         replayable_span: None,
-//RS         is_job: false,
-//RS         job_span: None,
-//RS         every: None,
-//RS         job_metadata: None,
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         maturity: None,
-//RS         maturity_span: None,
-//RS         kernel: None,
-//RS         is_inline: false,
-//RS         is_inline_always: false,
-//RS         inline_span: None,
-//RS         is_sanitizer: false,
-//RS         scrub_tag: None,
-//RS         declared_effects: None,
-//RS         effect_via: None,
-//RS         state_requires: None,
-//RS         state_transition: None,
-//RS         web_marker: None,
-//RS         pre: Vec::new(),
-//RS         post: Vec::new(),
-//RS         inline_foreign: None,
-//RS         undo: None,
-//RS         markers: Vec::new(),
-//RS         compiler_generated: false,
-//RS         body,
-//RS     };
-//RS 
-//RS     ImplDef {
-//RS         span,
-//RS         type_name: s.name.clone(),
-//RS         type_span: s.name_span,
-//RS         trait_name: None,
-//RS         trait_span: None,
-//RS         operator_rhs: None,
-//RS         operator_marker: None,
-//RS         methods: vec![validate_func],
-//RS         delegation_field: None,
-//RS         assoc_type_impls: Vec::new(),
-//RS         is_generated_serde: false,
-//RS         os_target: None,
-//RS     }
-//RS }
-//RS 
-//RS fn generated_field(name: &str, ty: Type, span: Span) -> Field {
-//RS     Field {
-//RS         is_pub: false,
-//RS         is_package_pub: false,
-//RS         name: name.to_string(),
-//RS         name_span: span,
-//RS         ty,
-//RS         ty_span: span,
-//RS         serde_markers: Vec::new(),
-//RS         redact: false,
-//RS         computed: None,
-//RS         default: None,
-//RS         default_ct: None,
-//RS     }
-//RS }
-//RS 
-//RS fn generated_param(name: &str, convention: AccessConvention, ty: Type, span: Span) -> Param {
-//RS     Param {
-//RS         convention,
-//RS         root: false,
-//RS         name: name.to_string(),
-//RS         name_span: span,
-//RS         ty,
-//RS         ty_span: span,
-//RS         default: None,
-//RS         variadic: false,
-//RS         variadic_bound_list: None,
-//RS         declared_view_from_names: None,
-//RS         public_label: None,
-//RS         zone: crate::AST::ParamZone::Either,
-//RS     }
-//RS }
-//RS 
-//RS fn generated_method(
-//RS     name: &str,
-//RS     params: Vec<Param>,
-//RS     return_type: Type,
-//RS     body: Vec<Stmt>,
-//RS     span: Span,
-//RS ) -> Func {
-//RS     let mut function = Func::implicit_run(body, span);
-//RS     function.name = name.to_string();
-//RS     function.name_span = span;
-//RS     function.params = params;
-//RS     function.return_type = Some(return_type);
-//RS     function.return_type_span = Some(span);
-//RS     function.compiler_generated = true;
-//RS     function
-//RS }
-//RS 
-//RS fn builder_type() -> Type {
-//RS     Type::Apply {
-//RS         name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
-//RS         args: vec![Type::Named("T".to_string())],
-//RS     }
-//RS }
-//RS 
-//RS fn builder_field(base: &str, field: &str, span: Span) -> Expr {
-//RS     Expr::Field(Box::new(ident(base, span)), field.to_string(), span)
-//RS }
-//RS 
-//RS fn build_validate_builder_struct(span: Span) -> StructDef {
-//RS     StructDef {
-//RS         span,
-//RS         is_pub: false,
-//RS         is_package_pub: false,
-//RS         name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
-//RS         name_span: span,
-//RS         type_params: vec![TypeParam {
-//RS             name: "T".to_string(),
-//RS             name_span: span,
-//RS             bounds: Vec::new(),
-//RS             prep: None,
-//RS         }],
-//RS         fields: vec![
-//RS             generated_field("value", Type::Named("T".to_string()), span),
-//RS             generated_field("errors", Type::List(Box::new(field_error_ty())), span),
-//RS         ],
-//RS         state: None,
-//RS         methods: Vec::new(),
-//RS         cli_bindings: Vec::new(),
-//RS         trait_impls: Vec::new(),
-//RS         derives: Vec::new(),
-//RS         auto_derive_default: false,
-//RS         is_published_schema: false,
-//RS         published_schema_span: None,
-//RS         is_single_use: false,
-//RS         single_use_span: None,
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         layout: None,
-//RS         layout_span: None,
-//RS         serde_markers: Vec::new(),
-//RS         type_markers: Vec::new(),
-//RS         validate_block: Vec::new(),
-//RS         validate_span: None,
-//RS     }
-//RS }
-//RS 
-//RS fn build_validate_builder_impl(span: Span) -> ImplDef {
-//RS     let self_param = generated_param(
-//RS         Syntax::KW_SELF,
-//RS         AccessConvention::Move,
-//RS         Type::Named(String::new()),
-//RS         span,
-//RS     );
-//RS     let condition_param = generated_param("condition", AccessConvention::Read, Type::Bool, span);
-//RS     let at_param = generated_param("at", AccessConvention::Read, Type::String, span);
-//RS     let reason_param = generated_param("reason", AccessConvention::Read, Type::String, span);
-//RS 
-//RS     let error = Expr::StructLit {
-//RS         type_name: "FieldError".to_string(),
-//RS         type_args: Vec::new(),
-//RS         import_ns: None,
-//RS         as_trait: None,
-//RS         fields: vec![
-//RS             ("path".to_string(), span, ident("at", span)),
-//RS             ("reason".to_string(), span, ident("reason", span)),
-//RS         ],
-//RS         inferred: false,
-//RS         span,
-//RS     };
-//RS     let errors_binding = Binding {
-//RS         mutable: true,
-//RS         markers: Vec::new(),
-//RS         reactive_upgrade: false,
-//RS         meta: None,
-//RS         name: ERRORS_VAR.to_string(),
-//RS         name_span: span,
-//RS         sigil_span: None,
-//RS         pattern: None,
-//RS         ty: Some(Type::List(Box::new(field_error_ty()))),
-//RS         ty_span: Some(span),
-//RS         init: Expr::Copy(Box::new(builder_field("self", "errors", span)), span),
-//RS         is_comptime: false,
-//RS         ct: None,
-//RS         uninit: false,
-//RS         arena_view: false,
-//RS         string_view: false,
-//RS         gc_promotion: None,
-//RS         gc_transferred: false,
-//RS     };
-//RS     let append_error = Stmt::Expr(method_call(
-//RS         ident(ERRORS_VAR, span),
-//RS         "push",
-//RS         vec![call_arg(error, span)],
-//RS         span,
-//RS     ));
-//RS     let rebuilt = Expr::StructLit {
-//RS         type_name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
-//RS         type_args: vec![Type::Named("T".to_string())],
-//RS         import_ns: None,
-//RS         as_trait: None,
-//RS         fields: vec![
-//RS             (
-//RS                 "value".to_string(),
-//RS                 span,
-//RS                 builder_field("self", "value", span),
-//RS             ),
-//RS             ("errors".to_string(), span, ident(ERRORS_VAR, span)),
-//RS         ],
-//RS         inferred: false,
-//RS         span,
-//RS     };
-//RS     let check_body = vec![
-//RS         Stmt::Switch {
-//RS             subject: Expr::Bool(true, span),
-//RS             arms: vec![SwitchArm {
-//RS                 span,
-//RS                 cond: Expr::Unary(
-//RS                     crate::AST::UnOp::Not,
-//RS                     Box::new(ident("condition", span)),
-//RS                     span,
-//RS                 ),
-//RS                 body: vec![
-//RS                     Stmt::Val(errors_binding),
-//RS                     append_error,
-//RS                     Stmt::Return(Some(rebuilt), span),
-//RS                 ],
-//RS             }],
-//RS             else_body: None,
-//RS             span,
-//RS         },
-//RS         Stmt::Return(Some(ident(Syntax::KW_SELF, span)), span),
-//RS     ];
-//RS 
-//RS     let check = generated_method(
-//RS         "check",
-//RS         vec![self_param.clone(), condition_param, at_param, reason_param],
-//RS         builder_type(),
-//RS         check_body,
-//RS         span,
-//RS     );
-//RS     let has_errors = Expr::Unary(
-//RS         crate::AST::UnOp::Not,
-//RS         Box::new(method_call(
-//RS             builder_field(Syntax::KW_SELF, "errors", span),
-//RS             "is_empty",
-//RS             Vec::new(),
-//RS             span,
-//RS         )),
-//RS         span,
-//RS     );
-//RS     let finish = generated_method(
-//RS         "finish",
-//RS         vec![self_param],
-//RS         Type::Result {
-//RS             ok: Box::new(Type::Named("T".to_string())),
-//RS             err: Box::new(Type::List(Box::new(field_error_ty()))),
-//RS         },
-//RS         vec![
-//RS             Stmt::Switch {
-//RS                 subject: Expr::Bool(true, span),
-//RS                 arms: vec![SwitchArm {
-//RS                     span,
-//RS                     cond: has_errors,
-//RS                     body: vec![Stmt::Return(
-//RS                         Some(Expr::Err(
-//RS                             Box::new(builder_field(Syntax::KW_SELF, "errors", span)),
-//RS                             span,
-//RS                         )),
-//RS                         span,
-//RS                     )],
-//RS                 }],
-//RS                 else_body: None,
-//RS                 span,
-//RS             },
-//RS             Stmt::Return(
-//RS                 Some(Expr::Ok(
-//RS                     Box::new(builder_field(Syntax::KW_SELF, "value", span)),
-//RS                     span,
-//RS                 )),
-//RS                 span,
-//RS             ),
-//RS         ],
-//RS         span,
-//RS     );
-//RS 
-//RS     ImplDef {
-//RS         span,
-//RS         type_name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
-//RS         type_span: span,
-//RS         trait_name: None,
-//RS         operator_marker: None,
-//RS         operator_rhs: None,
-//RS         trait_span: None,
-//RS         methods: vec![check, finish],
-//RS         delegation_field: None,
-//RS         assoc_type_impls: Vec::new(),
-//RS         is_generated_serde: false,
-//RS         os_target: None,
-//RS     }
-//RS }
-// END-PORT-PENDING 0425 crates/jet-sema/src/Sema/CheckerValidate.rs:1-687
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:1
+// D-VALIDATE1: before registration, validate rule shapes and sibling fields,
+// rewrite field references onto value, then synthesize a pure validate method.
+// Its ordinary purity pass enforces that conditions/messages only use pure calls.
+use jet_sema.Sema.[field_error_ty]
+use jet_sema.Sema.CheckerFieldPolicy.[rewrite_field_refs]
+use jet_sema.Diagnostics.[Diagnostic, Span]
+use jet_sema.Syntax as Syntax
+use jet_sema.AST.[AccessConvention, Binding, CallArg, CallArgFlags, Expr, Field, Func, ImplDef, Item, Param, ParamZone, Stmt, StrPart, StructDef, SwitchArm, Type, TypeParam, UnOp]
+use std.collections.[HashSet]
 
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:36
+pub fn process_validate_blocks(items: &[Item], diags: &[Diagnostic]) Never! {
+    needs_over :: contains_validate_over(items)
+    generated := [Item]{}
+    loop item in items {
+        if item == .Struct(s) {
+            if s.validate_block.is_empty() -> continue
+            if synthesize_validate_impl(s, diags) == .Val(imp) { generated.push(Item.Impl(imp)) }
+        }
+    }
+    if needs_over {
+        span :: first_item_span(items).unwrap_or_else(fn() { Span.new(0, 0) })
+        generated.push(Item.Struct(build_validate_builder_struct(span)))
+        generated.push(Item.Impl(build_validate_builder_impl(span)))
+    }
+    items.extend(^generated)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:56
+fn first_item_span(items: [Item]) -> Span? {
+    loop item in items {
+        if item == {
+            .Func(f) -> return Val(f.span)
+            .Struct(s) -> return Val(s.span)
+            .Enum(e) -> return Val(e.span)
+            .Impl(i) -> return Val(i.span)
+            .CodeModule(m) -> return Val(m.name_span)
+            .Test(t) -> return Val(t.span)
+            _ -> {}
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:68
+fn contains_validate_over(items: &[Item]) -> Bool Never! {
+    // Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:69
+    fn body_contains(body: &[Stmt]) -> Bool Never! {
+        found := false
+        loop &stmt in body {
+            stmt.for_each_expr_mut(fn(expr: &Expr) Never! {
+                if expr == .MethodCall{receiver, method, ..} {
+                    if method == "over" && receiver == .Ident(Syntax.TYPE_VALIDATE, _) { found = true }
+                }
+            })
+        }
+        found
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:89
+    fn item_contains(item: &Item) -> Bool Never! {
+        if item == {
+            .Func(f) -> return body_contains(&f.body)
+            .Struct(s) -> {
+                loop &f in s.methods { if body_contains(&f.body) -> return true }
+                loop &i in s.trait_impls { loop &f in i.methods { if body_contains(&f.body) -> return true } }
+            }
+            .Enum(e) -> {
+                loop &f in e.methods { if body_contains(&f.body) -> return true }
+                loop &i in e.trait_impls { loop &f in i.methods { if body_contains(&f.body) -> return true } }
+            }
+            .Impl(i) -> { loop &f in i.methods { if body_contains(&f.body) -> return true } }
+            .Test(t) -> return body_contains(&t.body)
+            .CodeModule(m) -> { if m.body == .Val(body) { return contains_validate_over(&body) } }
+            _ -> {}
+        }
+        false
+    }
+    loop &item in items { if item_contains(&item) -> return true }
+    false
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:118
+struct ValidateRule { cond: Expr; field: String; msg: Expr }
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:124
+fn synthesize_validate_impl(s: StructDef, diags: &[Diagnostic]) -> ImplDef? Never! {
+    field_names := HashSet[String].new()
+    loop f in s.fields { _ :: field_names.insert(f.name.clone()) }
+    rules := [ValidateRule]{}
+    all_ok := true
+    loop stmt in s.validate_block {
+        if extract_check_rule(stmt, field_names) == {
+            .Ok(rule) -> rules.push(^rule)
+            .Err(d) -> { diags.push(^d); all_ok = false }
+        }
+    }
+    // Malformed rule bodies never reach codegen.
+    if !all_ok -> return None
+    span :: s.validate_span.unwrap_or(s.name_span)
+    Val(build_validate_impl(s, rules, span))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:147
+fn extract_check_rule(stmt: Stmt, field_names: HashSet[String]) -> ValidateRule Diagnostic! {
+    if stmt == .Expr(.Call(call)) {
+        if call.name != Syntax.VALIDATE_CHECK_FN -> return Err(e0353_bad_validate_rule(call.name_span))
+        if call.args.len() != 3 -> return Err(e0353_bad_validate_rule(call.name_span))
+        cond_arg :: call.args[0]
+        at_arg :: call.args[1]
+        msg_arg :: call.args[2]
+        if cond_arg.label.is_some() -> return Err(e0353_bad_validate_rule(cond_arg.span))
+        if at_arg.label == .Val((label, _)) {
+            if label != "at" -> return Err(e0353_bad_validate_rule(at_arg.span))
+        } else -> return Err(e0353_bad_validate_rule(at_arg.span))
+        if msg_arg.label.is_some() -> return Err(e0353_bad_validate_rule(msg_arg.span))
+        if at_arg.expr == .Ident(field_name, field_span) {
+            if !field_names.contains(field_name) -> return Err(e0354_unknown_validate_field(field_name, field_span))
+            return Ok(ValidateRule{cond: cond_arg.expr.clone(), field: field_name.clone(), msg: msg_arg.expr.clone()})
+        }
+        return Err(e0353_bad_validate_rule(at_arg.span))
+    }
+    Err(e0353_bad_validate_rule(stmt.span()))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:189
+pub fn e0353_bad_validate_rule(span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0353",
+        "a `validate` rule must be `check(condition, at: field, \"message\")`",
+        "D-VALIDATE1: every statement in a `validate { … }` block is a `check` call — the first argument is the rule's condition, `at:` names the field the failure is reported against, and the last argument is the message text",
+        "write: check(<condition>, at: <field>, \"<message>\")", Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:199
+pub fn e0354_unknown_validate_field(name: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0354", "`at: {name}` doesn't name a field on this struct",
+        "D-VALIDATE1: `check(…, at: field, …)`'s `at:` argument must be a bare field name declared on the same struct — it's how the reported `FieldError.path` is chosen",
+        "fix the field name, or add the field to the struct", Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:209
+fn ident(name: String, span: Span) -> Expr { Expr.Ident(name.to_string(), span) }
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:213
+fn str_lit(text: String, span: Span) -> Expr { Expr.Str([StrPart]{StrPart.Lit(text.to_string())}, span) }
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:217
+fn call_arg(expr: Expr, span: Span) -> CallArg {
+    CallArg{convention: .Read, expr: ^expr, span: span, flags: CallArgFlags.default(), label: None, spread: false}
+}
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:228
+fn method_call(receiver: Expr, method: String, args: [CallArg], span: Span) -> Expr {
+    Expr.MethodCall{receiver: ^receiver, method: method.to_string(), method_span: span,
+        owner_type_args: [], type_args: [], args: ^args, recv_type: None, resolved_ret: None,
+        operator_rhs: None, checked_widen: false}
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:243
+const ERRORS_VAR: String = "__errors"
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:244
+const VALUE_VAR: String = "value"
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:247
+fn build_validate_impl(s: StructDef, rules: [ValidateRule], span: Span) -> ImplDef Never! {
+    field_names := HashSet[String].new()
+    loop f in s.fields { _ :: field_names.insert(f.name.clone()) }
+    errors_binding :: Stmt.Val(Binding{
+        mutable: true, markers: [], reactive_upgrade: false, meta: None,
+        name: ERRORS_VAR.to_string(), name_span: span, sigil_span: None, pattern: None,
+        ty: Val(Type.List(field_error_ty())), ty_span: Val(span), init: Expr.ListLit([], span),
+        is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false,
+        gc_promotion: None, gc_transferred: false})
+    body := [Stmt]{errors_binding}
+    loop rule in rules {
+        cond := rule.cond.clone()
+        rewrite_field_refs(&cond, field_names, VALUE_VAR)
+        msg := rule.msg.clone()
+        rewrite_field_refs(&msg, field_names, VALUE_VAR)
+        field_error_lit :: Expr.StructLit{
+            type_name: "FieldError", type_args: [], import_ns: None, as_trait: None,
+            fields: [(String, Span, Expr)]{("path", span, str_lit(rule.field, span)), ("reason", span, ^msg)},
+            inferred: false, span: span}
+        push_stmt :: Stmt.Expr(method_call(ident(ERRORS_VAR, span), "push", [CallArg]{call_arg(field_error_lit, span)}, span))
+        not_cond :: Expr.Unary(.Not, ^cond, span)
+        body.push(Stmt.Switch{subject: Expr.Bool(true, span),
+            arms: [SwitchArm]{SwitchArm{span: not_cond.span(), cond: ^not_cond, body: [Stmt]{push_stmt}}}, else_body: None, span: span})
+    }
+    has_errors :: Expr.Unary(.Not, method_call(ident(ERRORS_VAR, span), "is_empty", [], span), span)
+    return_err :: Stmt.Return(Val(Expr.Err(ident(ERRORS_VAR, span), span)), span)
+    body.push(Stmt.Switch{subject: Expr.Bool(true, span),
+        arms: [SwitchArm]{SwitchArm{span: has_errors.span(), cond: has_errors, body: [Stmt]{return_err}}}, else_body: None, span: span})
+    body.push(Stmt.Return(Val(Expr.Ok(Expr.Copy(ident(VALUE_VAR, span), span), span)), span))
+    // Read at the call site, return an owned copy on success.
+    value_param :: Param{convention: .Read, root: false, name: VALUE_VAR.to_string(), name_span: span,
+        ty: Type.Named(s.name.clone()), ty_span: span, default: None, variadic: false,
+        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: .Either}
+    validate_func :: Func{
+        span: span, is_comptime: false, is_pub: s.is_pub, is_package_pub: s.is_package_pub,
+        external_type: None, name: "validate", name_span: span, meta: None,
+        type_params: [], head_pattern: None, params: [Param]{value_param},
+        return_type: Val(Type.Result{ok: Type.Named(s.name.clone()), err: Type.List(field_error_ty())}),
+        return_type_span: Val(span), return_view_provenance: None, declared_return_view_provenance: None,
+        gc_return: false, diverges: false, gc_scope: false, is_unsafe: false,
+        unsafe_reason: None, unsafe_span: None,
+        // S60/E3401 checks purity across the whole synthesized rule body.
+        is_pure: true, is_reactive: false, reactive_upgrades: [], is_replayable: false,
+        replayable_span: None, is_job: false, job_span: None, every: None, job_metadata: None,
+        is_must_use: false, must_use_span: None, maturity: None, maturity_span: None,
+        kernel: None, is_inline: false, is_inline_always: false, inline_span: None,
+        is_sanitizer: false, scrub_tag: None, declared_effects: None, effect_via: None,
+        state_requires: None, state_transition: None, web_marker: None, pre: [], post: [],
+        inline_foreign: None, undo: None, markers: [], compiler_generated: false, body: ^body}
+    ImplDef{span: span, type_name: s.name.clone(), type_span: s.name_span,
+        trait_name: None, trait_span: None, operator_rhs: None, operator_marker: None,
+        methods: [Func]{validate_func}, delegation_field: None, assoc_type_impls: [],
+        is_generated_serde: false, os_target: None}
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:435
+fn generated_field(name: String, ty: Type, span: Span) -> Field {
+    Field{is_pub: false, is_package_pub: false, name: name.to_string(), name_span: span,
+        ty: ^ty, ty_span: span, serde_markers: [], redact: false, computed: None, default: None, default_ct: None}
+}
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:451
+fn generated_param(name: String, convention: AccessConvention, ty: Type, span: Span) -> Param {
+    Param{convention: convention, root: false, name: name.to_string(), name_span: span,
+        ty: ^ty, ty_span: span, default: None, variadic: false, variadic_bound_list: None,
+        declared_view_from_names: None, public_label: None, zone: .Either}
+}
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:468
+fn generated_method(name: String, params: [Param], return_type: Type, body: [Stmt], span: Span) -> Func Never! {
+    function := Func.implicit_run(^body, span)
+    function.name = name.to_string()
+    function.name_span = span
+    function.params = ^params
+    function.return_type = Val(^return_type)
+    function.return_type_span = Val(span)
+    function.compiler_generated = true
+    function
+}
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:485
+fn builder_type() -> Type {
+    Type.Apply{name: Syntax.TYPE_VALIDATE_BUILDER.to_string(), args: [Type]{Type.Named("T")}}
+}
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:492
+fn builder_field(base: String, field: String, span: Span) -> Expr {
+    Expr.Field(ident(base, span), field.to_string(), span)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:496
+fn build_validate_builder_struct(span: Span) -> StructDef {
+    StructDef{span: span, is_pub: false, is_package_pub: false,
+        name: Syntax.TYPE_VALIDATE_BUILDER.to_string(), name_span: span,
+        type_params: [TypeParam]{TypeParam{name: "T", name_span: span, bounds: [], prep: None}},
+        fields: [Field]{generated_field("value", Type.Named("T"), span), generated_field("errors", Type.List(field_error_ty()), span)},
+        state: None, methods: [], cli_bindings: [], trait_impls: [], derives: [],
+        auto_derive_default: false, is_published_schema: false, published_schema_span: None,
+        is_single_use: false, single_use_span: None, is_must_use: false, must_use_span: None,
+        layout: None, layout_span: None, serde_markers: [], type_markers: [], validate_block: [], validate_span: None}
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerValidate.rs:534
+fn build_validate_builder_impl(span: Span) -> ImplDef Never! {
+    self_param :: generated_param(Syntax.KW_SELF, .Move, Type.Named(""), span)
+    condition_param :: generated_param("condition", .Read, Type.Bool, span)
+    at_param :: generated_param("at", .Read, Type.String, span)
+    reason_param :: generated_param("reason", .Read, Type.String, span)
+    error :: Expr.StructLit{type_name: "FieldError", type_args: [], import_ns: None, as_trait: None,
+        fields: [(String, Span, Expr)]{("path", span, ident("at", span)), ("reason", span, ident("reason", span))}, inferred: false, span: span}
+    errors_binding :: Binding{mutable: true, markers: [], reactive_upgrade: false, meta: None,
+        name: ERRORS_VAR.to_string(), name_span: span, sigil_span: None, pattern: None,
+        ty: Val(Type.List(field_error_ty())), ty_span: Val(span),
+        init: Expr.Copy(builder_field("self", "errors", span), span), is_comptime: false, ct: None,
+        uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}
+    append_error :: Stmt.Expr(method_call(ident(ERRORS_VAR, span), "push", [CallArg]{call_arg(error, span)}, span))
+    rebuilt :: Expr.StructLit{type_name: Syntax.TYPE_VALIDATE_BUILDER.to_string(), type_args: [Type]{Type.Named("T")},
+        import_ns: None, as_trait: None,
+        fields: [(String, Span, Expr)]{("value", span, builder_field("self", "value", span)), ("errors", span, ident(ERRORS_VAR, span))},
+        inferred: false, span: span}
+    check_body :: [Stmt]{
+        Stmt.Switch{subject: Expr.Bool(true, span), arms: [SwitchArm]{SwitchArm{span: span,
+            cond: Expr.Unary(.Not, ident("condition", span), span),
+            body: [Stmt]{Stmt.Val(errors_binding), append_error, Stmt.Return(Val(rebuilt), span)}}}, else_body: None, span: span},
+        Stmt.Return(Val(ident(Syntax.KW_SELF, span)), span)}
+    check :: generated_method("check", [Param]{self_param.clone(), condition_param, at_param, reason_param}, builder_type(), check_body, span)
+    has_errors :: Expr.Unary(.Not, method_call(builder_field(Syntax.KW_SELF, "errors", span), "is_empty", [], span), span)
+    finish :: generated_method("finish", [Param]{self_param},
+        Type.Result{ok: Type.Named("T"), err: Type.List(field_error_ty())},
+        [Stmt]{Stmt.Switch{subject: Expr.Bool(true, span), arms: [SwitchArm]{SwitchArm{span: span, cond: has_errors,
+            body: [Stmt]{Stmt.Return(Val(Expr.Err(builder_field(Syntax.KW_SELF, "errors", span), span)), span)}}}, else_body: None, span: span},
+            Stmt.Return(Val(Expr.Ok(builder_field(Syntax.KW_SELF, "value", span), span)), span)}, span)
+    ImplDef{span: span, type_name: Syntax.TYPE_VALIDATE_BUILDER.to_string(), type_span: span,
+        trait_name: None, operator_marker: None, operator_rhs: None, trait_span: None,
+        methods: [Func]{check, finish}, delegation_field: None, assoc_type_impls: [], is_generated_serde: false, os_target: None}
+}

@@ -1,0 +1,33 @@
+use jet_foundation.[Type, TagMarker]
+use jet_codegen.Codegen.TIR.tir_to_mir_expr.fmt_exact_int
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:3482 (behavioral control; no inline Rust tests)
+#Test("core_decimal_and_grouped_formats_admit_all_exact_integer_widths") {
+    assert(fmt_exact_int(Type.Int))
+    assert(fmt_exact_int(Type.Named("Int")))
+    loop width in [8, 16, 32, 64, 128] {
+        assert(fmt_exact_int(Type.IntN(true, width)))
+        assert(fmt_exact_int(Type.IntN(false, width)))
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:3482
+#Test("core_exact_integer_format_retains_tagged_and_ranged_source_types") {
+    range :: Type.InlineRange(Type.Int, 0, 7)
+    assert(fmt_exact_int(range))
+    assert(fmt_exact_int(Type.Tagged(TagMarker.User("Positive"), range)))
+    assert(fmt_exact_int(Type.InlineRange(Type.IntN(false, 8), 0, 7)))
+    assert(fmt_exact_int(Type.Tagged(TagMarker.User("Money"), Type.Named("Int"))))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:3482
+#Test("core_exact_integer_format_does_not_route_nonintegers_through_int_abi") {
+    assert(!fmt_exact_int(Type.Float))
+    assert(!fmt_exact_int(Type.Float32))
+    assert(!fmt_exact_int(Type.String))
+    assert(!fmt_exact_int(Type.Bool))
+    assert(!fmt_exact_int(Type.Named("Decimal")))
+    assert(!fmt_exact_int(Type.Option(Type.Int)))
+    assert(!fmt_exact_int(Type.List(Type.Int)))
+    assert(!fmt_exact_int(Type.Tagged(TagMarker.User("Seconds"), Type.Float)))
+}

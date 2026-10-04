@@ -1,0 +1,28 @@
+use jet_foundation.AST.[CtValue, Type]
+use jet_foundation.Registry
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:156
+#Test("layout_bytes_preserve_absence_and_checked_i64_boundary") {
+    assert_eq(optional_layout_byte(None), CtValue.absent(Type.Int))
+    assert_eq(optional_layout_byte(Val(9223372036854775807)), CtValue.Present(CtValue.Int(9223372036854775807)))
+    assert_eq(optional_layout_byte(Val(9223372036854775808)), CtValue.absent(Type.Int))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:1475
+#Test("state_ref_keeps_nominal_owner_name_and_canonical_path") {
+    value := build_state_ref("Connection", "Open")
+    assert_eq(reflected_struct_field(&value, "owner"), Val(&CtValue.Str("Connection")))
+    assert_eq(reflected_struct_field(&value, "name"), Val(&CtValue.Str("Open")))
+    assert_eq(reflected_struct_field(&value, "path"), Val(&CtValue.Str("Connection.State.Open")))
+    assert_eq(state_path("Connection", "_"), "_")
+    assert_eq(state_path("Connection", "Other.State.Open"), "Other.State.Open")
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:797
+#Test("fact_projection_rejects_kind_mismatch_and_absent_detail") {
+    absent := fact_value("Sendability", "sendability", [], None, None)
+    assert(reflected_fact_value_detail(&absent, Registry.FactRead.Sendability).is_none())
+    present := fact_value_with_detail("Sendability", "sendability", [], build_sendability_info(true), "sendability")
+    assert_eq(reflected_fact_value_detail(&present, Registry.FactRead.Sendability), Val(&build_sendability_info(true)))
+    assert(reflected_fact_value_detail(&present, Registry.FactRead.Movedness).is_none())
+}

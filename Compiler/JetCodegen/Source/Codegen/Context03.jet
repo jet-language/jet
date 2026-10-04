@@ -1,1546 +1,596 @@
-// PORT-PENDING 0456 crates-jet-codegen-src-codegen-context-slice-3741: crates/jet-codegen/src/Codegen/Context.rs:3741-5282
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(crate) fn rust_fn_trait(
-//RS         &self,
-//RS         params: &[Type],
-//RS         ret: Option<&Type>,
-//RS         return_view_provenance: Option<&crate::AST::ViewProvenanceMap>,
-//RS     ) -> String {
-//RS         let thread_safe = params.len() == 1
-//RS             && matches!(&params[0], Type::Named(name) if name == "HTTPHandler")
-//RS             && matches!(ret, Some(Type::Named(name)) if name == "HTTPHandler");
-//RS         let has_view_return = ret.is_some_and(|ty| self.type_contains_view(ty));
-//RS         let owner_params: HashSet<usize> = return_view_provenance
-//RS             .map(|map| {
-//RS                 map.values()
-//RS                     .flat_map(|provenance| provenance.sources.iter())
-//RS                     .filter_map(|source| match source.source {
-//RS                         crate::AST::ViewSource::Parameter(index) => Some(index),
-//RS                         _ => None,
-//RS                     })
-//RS                     .collect()
-//RS             })
-//RS             .unwrap_or_else(|| {
-//RS                 has_view_return
-//RS                     .then(|| {
-//RS                         params
-//RS                             .iter()
-//RS                             .enumerate()
-//RS                             .filter_map(|(index, ty)| (!ty.is_scalar()).then_some(index))
-//RS                             .collect()
-//RS                     })
-//RS                     .unwrap_or_default()
-//RS             });
-//RS         let mut independent_lifetimes = Vec::new();
-//RS         // HRTB binder must not reuse the enclosing function's `'__jet___view`
-//RS         // (E0496 shadow when a view-returning fn takes a view-returning callback).
-//RS         let fn_view = jet_format!("'{jet_prefix}fn_view");
-//RS         let ps = params
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, p)| {
-//RS                 if thread_safe {
-//RS                     self.rust_type(p)
-//RS                 } else {
-//RS                     let rust = rust_param_type(self, AccessConvention::Read, p);
-//RS                     if owner_params.contains(&index) {
-//RS                         if let Some(rest) = rust.strip_prefix("&mut ") {
-//RS                             format!("&{fn_view} mut {rest}")
-//RS                         } else if let Some(rest) = rust.strip_prefix('&') {
-//RS                             format!("&{fn_view} {rest}")
-//RS                         } else {
-//RS                             rust
-//RS                         }
-//RS                     } else if has_view_return {
-//RS                         let lifetime = jet_format!("'{jet_prefix}arg{index}");
-//RS                         if let Some(rest) = rust.strip_prefix("&mut ") {
-//RS                             independent_lifetimes.push(lifetime.clone());
-//RS                             format!("&{lifetime} mut {rest}")
-//RS                         } else if let Some(rest) = rust.strip_prefix('&') {
-//RS                             independent_lifetimes.push(lifetime.clone());
-//RS                             format!("&{lifetime} {rest}")
-//RS                         } else {
-//RS                             rust
-//RS                         }
-//RS                     } else {
-//RS                         rust
-//RS                     }
-//RS                 }
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         let r = ret
-//RS             .map(|t| {
-//RS                 if has_view_return {
-//RS                     self.rust_type_with_view_lifetime(t)
-//RS                         .replace(&jet_format!("'{jet_prefix}view"), &fn_view)
-//RS                 } else {
-//RS                     self.rust_type(t)
-//RS                 }
-//RS             })
-//RS             .unwrap_or_else(|| "()".to_string());
-//RS         // Every source-facing function value uses one owned, cloneable slot.
-//RS         // `RefCell` is only borrowed to take/restore the callback around a
-//RS         // call (see `emit_tir_fn_value_call`); user code never runs while the
-//RS         // slot borrow is live. The inner `FnMut` is therefore an ABI detail,
-//RS         // not a second source-level closure kind: S47 already gives every
-//RS         // escaping closure owned mutable captures.
-//RS         let trait_name = "FnMut";
-//RS         if thread_safe {
-//RS             format!("std::sync::Arc<dyn Fn({ps}) -> {r} + Send + Sync>")
-//RS         } else if has_view_return {
-//RS             let lifetimes = std::iter::once(fn_view.clone())
-//RS                 .chain(independent_lifetimes)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             format!(
-//RS                 "std::rc::Rc<std::cell::RefCell<Option<Box<dyn for<{lifetimes}> {trait_name}({ps}) -> {r}>>>>"
-//RS             )
-//RS         } else {
-//RS             format!("std::rc::Rc<std::cell::RefCell<Option<Box<dyn {trait_name}({ps}) -> {r}>>>>")
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) -> String {
-//RS     if let Type::Tagged { marker, inner } = ty {
-//RS         if matches!(
-//RS             marker,
-//RS             crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi)
-//RS         ) {
-//RS             if let Type::Fn { params, ret, .. } = inner.as_ref() {
-//RS                 let params = params
-//RS                     .iter()
-//RS                     .map(|param| cx.rust_type(param))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ");
-//RS                 let ret = ret
-//RS                     .as_deref()
-//RS                     .map(|ret| format!(" -> {}", cx.rust_type(ret)))
-//RS                     .unwrap_or_default();
-//RS                 return format!("extern \"C\" fn({params}){ret}");
-//RS             }
-//RS         }
-//RS     }
-//RS     let base = cx.rust_type(ty);
-//RS     if matches!(ty, Type::Named(n) if cx.trait_names.contains(n))
-//RS         || matches!(ty, Type::TraitObject(_))
-//RS     {
-//RS         return match convention {
-//RS             AccessConvention::Read => {
-//RS                 format!("&{base}")
-//RS             }
-//RS             AccessConvention::Write => format!("&mut {base}"),
-//RS             AccessConvention::Move => base,
-//RS         };
-//RS     }
-//RS     // Type parameters obey the same explicit access convention as concrete
-//RS     // types. D-NETIO-CONTRACT2 relies on `&stream: T` becoming `&mut T`;
-//RS     // forcing every generic parameter by value would move non-cloneable handles.
-//RS     if matches!(ty, Type::Named(n) if Generics::is_type_var_name(n)
-//RS         || cx.current_type_params.borrow().contains(n.as_str()))
-//RS     {
-//RS         return match convention {
-//RS             AccessConvention::Read => {
-//RS                 format!("&{base}")
-//RS             }
-//RS             AccessConvention::Write => format!("&mut {base}"),
-//RS             AccessConvention::Move => base,
-//RS         };
-//RS     }
-//RS     match convention {
-//RS         AccessConvention::Read if ty.is_scalar() => base,
-//RS         AccessConvention::Read => format!("&{}", base),
-//RS         AccessConvention::Write => format!("&mut {}", base),
-//RS         AccessConvention::Move => base,
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS pub(crate) fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
-//RS     let extern_funcs = extern_func_map(&prog.items, None, &[]);
-//RS     build_cx_items(&prog.items, src, file, None, &extern_funcs, "")
-//RS }
-//RS 
-//RS fn extern_func_map(
-//RS     items: &[Item],
-//RS     owner: Option<&str>,
-//RS     handles: &[FfiHandleFact],
-//RS ) -> HashMap<String, ExternFn> {
-//RS     fn collect(
-//RS         items: &[Item],
-//RS         owner: Option<&str>,
-//RS         handles: &[FfiHandleFact],
-//RS         map: &mut HashMap<String, ExternFn>,
-//RS     ) {
-//RS         for item in items {
-//RS             if let Item::ExternRust(block) = item {
-//RS                 for ef in &block.functions {
-//RS                     map.insert(
-//RS                         ef.name.clone(),
-//RS                         ExternFn {
-//RS                             wrapper: format!("jet_ffi_{}", ef.name),
-//RS                             c_abi: false,
-//RS                             component: None,
-//RS                         },
-//RS                     );
-//RS                 }
-//RS             } else if let Item::Func(func) = item {
-//RS                 if crate::Sema::guest_import_function_signature(func).is_some()
-//RS                     && crate::Sema::guest_import_bridge_compatible(func)
-//RS                 {
-//RS                     let wrapper = owner
-//RS                         .map(|owner| crate::Sema::guest_import_wrapper_name(owner, &func.name))
-//RS                         .unwrap_or_else(|| format!("jet_ffi_{}", func.name));
-//RS                     map.insert(
-//RS                         func.name.clone(),
-//RS                         ExternFn {
-//RS                             wrapper,
-//RS                             c_abi: true,
-//RS                             component: None,
-//RS                         },
-//RS                     );
-//RS                 } else if func.inline_foreign.is_some() {
-//RS                     map.insert(
-//RS                         func.name.clone(),
-//RS                         ExternFn {
-//RS                             wrapper: format!("jet_ffi_{}", func.name),
-//RS                             c_abi: false,
-//RS                             component: None,
-//RS                         },
-//RS                     );
-//RS                 }
-//RS             } else if let Item::CModule(module) = item {
-//RS                 for function in module
-//RS                     .functions
-//RS                     .iter()
-//RS                     .filter(|function| function.hidden_c_bridge_compatible_with_handles(handles))
-//RS                 {
-//RS                     map.insert(
-//RS                         function.name.clone(),
-//RS                         ExternFn {
-//RS                             wrapper: format!("jet_ffi_{}", function.name),
-//RS                             c_abi: true,
-//RS                             component: Some(module.lib.clone()),
-//RS                         },
-//RS                     );
-//RS                 }
-//RS             } else if let Item::CodeModule(module) = item {
-//RS                 if let Some(body) = &module.body {
-//RS                     collect(body, owner, handles, map);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut map = HashMap::new();
-//RS     collect(items, owner, handles, &mut map);
-//RS     map
-//RS }
-//RS 
-//RS fn foreign_undo_map(items: &[Item]) -> HashMap<String, String> {
-//RS     fn collect(items: &[Item], map: &mut HashMap<String, String>, prefix: Option<&str>) {
-//RS         for item in items {
-//RS             match item {
-//RS                 Item::ExternRust(block) => {
-//RS                     for ef in &block.functions {
-//RS                         if let Some((inverse, _)) = &ef.undo {
-//RS                             map.insert(
-//RS                                 prefix
-//RS                                     .map(|p| format!("{p}::{}", ef.name))
-//RS                                     .unwrap_or_else(|| ef.name.clone()),
-//RS                                 inverse.clone(),
-//RS                             );
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Item::CModule(module) => {
-//RS                     for ef in &module.functions {
-//RS                         if let Some((inverse, _)) = &ef.undo {
-//RS                             map.insert(
-//RS                                 prefix
-//RS                                     .map(|p| format!("{p}::{}", ef.name))
-//RS                                     .unwrap_or_else(|| ef.name.clone()),
-//RS                                 inverse.clone(),
-//RS                             );
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Item::Func(func) => {
-//RS                     if let Some((inverse, _)) = &func.undo {
-//RS                         map.insert(
-//RS                             prefix
-//RS                                 .map(|p| format!("{p}::{}", func.name))
-//RS                                 .unwrap_or_else(|| func.name.clone()),
-//RS                             inverse.clone(),
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 Item::CodeModule(module) => {
-//RS                     if let Some(body) = &module.body {
-//RS                         collect(body, map, Some(&module.name));
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut map = HashMap::new();
-//RS     collect(items, &mut map, None);
-//RS     map
-//RS }
-//RS 
-//RS pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, ExternFn> {
-//RS     let mut map = HashMap::new();
-//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
-//RS         let module_funcs = extern_func_map(
-//RS             &module.items,
-//RS             Some(&module.alias),
-//RS             &bundle.cffi.handle_facts,
-//RS         );
-//RS         for (name, wrapper) in module_funcs {
-//RS             map.insert(name.clone(), wrapper.clone());
-//RS             map.insert(format!("{}::{name}", mangle(&module.alias)), wrapper);
-//RS         }
-//RS         if module.display.starts_with("cpp.") {
-//RS             for item in &module.items {
-//RS                 if let Item::Impl(def) = item {
-//RS                     for method in def.methods.iter().filter(|method| {
-//RS                         bundle
-//RS                             .name_ledger
-//RS                             .exported(module_idx, &format!("{}{}", def.type_name, method.name))
-//RS                     }) {
-//RS                         map.insert(
-//RS                             foreign_binding_method_key(&def.type_name, &method.name),
-//RS                             ExternFn {
-//RS                                 wrapper: String::new(),
-//RS                                 c_abi: false,
-//RS                                 component: None,
-//RS                             },
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     map
-//RS }
-//RS 
-//RS pub(crate) fn bundle_foreign_undos(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> HashMap<String, String> {
-//RS     let mut map = HashMap::new();
-//RS     for module in &bundle.modules {
-//RS         let module_undos = foreign_undo_map(&module.items);
-//RS         let module_prefix = mangle(&module.alias);
-//RS         for (binding, inverse) in module_undos {
-//RS             // Bundle facts are keyed by the defining foreign binding, never by
-//RS             // a bare spelling that another module can silently overwrite.
-//RS             map.insert(format!("{module_prefix}::{binding}"), inverse);
-//RS         }
-//RS     }
-//RS     // Bare calls resolve only within the module currently being lowered.
-//RS     map.extend(foreign_undo_map(&bundle.modules[module_idx].items));
-//RS     map
-//RS }
-//RS 
-//RS pub(crate) fn foreign_binding_method_key(owner: &str, method: &str) -> String {
-//RS     jet_foundation::Names::mangle_path(&format!("foreign_method__{owner}__{method}"))
-//RS }
-//RS 
-//RS /// Add local and imported unit-family facts under the names used by this module.
-//RS pub(crate) fn register_bundle_unit_metadata(
-//RS     cx: &mut Cx,
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) {
-//RS     let mut imported = Vec::new();
-//RS     for import in &bundle.modules[module_idx].imports {
-//RS         if bundle
-//RS             .name_ledger
-//RS             .effective_alias(module_idx, &import.import_alias())
-//RS             .is_none()
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let Some(target) = bundle.name_ledger.import_target(module_idx, import.span) else {
-//RS             continue;
-//RS         };
-//RS         let qualifier = bundle
-//RS             .name_ledger
-//RS             .module_identity(target)
-//RS             .expect("name ledger must contain every loaded module");
-//RS         imported.push((target, Some(qualifier)));
-//RS     }
-//RS     for (target, _) in crate::Codegen::Imports::selective_nominal_targets(bundle, module_idx) {
-//RS         if imported.iter().all(|(existing, _)| *existing != target) {
-//RS             let qualifier = bundle
-//RS                 .name_ledger
-//RS                 .module_identity(target)
-//RS                 .expect("name ledger must contain every loaded module");
-//RS             imported.push((target, Some(qualifier)));
-//RS         }
-//RS     }
-//RS     for (_, target) in bundle.modules[module_idx]
-//RS         .imports
-//RS         .iter()
-//RS         .flat_map(|import| super::Imports::foreign_list_targets(bundle, module_idx, import))
-//RS     {
-//RS         if imported.iter().all(|(existing, _)| *existing != target) {
-//RS             let qualifier = bundle
-//RS                 .name_ledger
-//RS                 .module_identity(target)
-//RS                 .expect("name ledger must contain every loaded module");
-//RS             imported.push((target, Some(qualifier)));
-//RS         }
-//RS     }
-//RS     for (target, qualifier) in std::iter::once((module_idx, None)).chain(imported) {
-//RS         let module = &bundle.modules[target];
-//RS         for item in &module.items {
-//RS             if let Item::Distinct(definition) = item {
-//RS                 if qualifier.is_some()
-//RS                     && !bundle
-//RS                         .name_ledger
-//RS                         .visible(module_idx, target, &definition.name)
-//RS                 {
-//RS                     continue;
-//RS                 }
-//RS                 let name = qualifier.as_ref().map_or_else(
-//RS                     || definition.name.clone(),
-//RS                     |qualifier| format!("{qualifier}::{}", definition.name),
-//RS                 );
-//RS                 let base = qualifier.as_ref().map_or_else(
-//RS                     || definition.base.clone(),
-//RS                     |_| {
-//RS                         super::Imports::qualify_imported_call_type(
-//RS                             bundle,
-//RS                             target,
-//RS                             "",
-//RS                             &definition.base,
-//RS                         )
-//RS                     },
-//RS                 );
-//RS                 cx.type_names.insert(name.clone());
-//RS                 cx.distinct_types.insert(
-//RS                     name,
-//RS                     (
-//RS                         base,
-//RS                         definition
-//RS                             .derives
-//RS                             .iter()
-//RS                             .any(|(derive, _)| derive == crate::Syntax::MARKER_NUMERIC),
-//RS                     ),
-//RS                 );
-//RS                 continue;
-//RS             }
-//RS             if let Item::UnitFamily(family) = item {
-//RS                 let dimension = family.resolved_dimension.clone();
-//RS                 for member in family.distinct_defs() {
-//RS                     if qualifier.is_some()
-//RS                         && !bundle.name_ledger.visible(module_idx, target, &member.name)
-//RS                     {
-//RS                         continue;
-//RS                     }
-//RS                     let name = qualifier.as_ref().map_or_else(
-//RS                         || member.name.clone(),
-//RS                         |qualifier| format!("{qualifier}::{}", member.name),
-//RS                     );
-//RS                     cx.type_names.insert(name.clone());
-//RS                     cx.distinct_types.insert(
-//RS                         name.clone(),
-//RS                         (
-//RS                             qualifier.as_ref().map_or_else(
-//RS                                 || member.base.clone(),
-//RS                                 |_| {
-//RS                                     super::Imports::qualify_imported_call_type(
-//RS                                         bundle,
-//RS                                         target,
-//RS                                         "",
-//RS                                         &member.base,
-//RS                                     )
-//RS                                 },
-//RS                             ),
-//RS                             member
-//RS                                 .derives
-//RS                                 .iter()
-//RS                                 .any(|(derive, _)| derive == crate::Syntax::MARKER_NUMERIC),
-//RS                         ),
-//RS                     );
-//RS                     let kind = member
-//RS                         .quantity
-//RS                         .map(|(_, kind)| kind)
-//RS                         .unwrap_or(crate::AST::QuantityKind::Linear);
-//RS                     let Some(source) = unit_family_member_for_type(family, &member.name, kind)
-//RS                     else {
-//RS                         continue;
-//RS                     };
-//RS                     cx.unit_labels
-//RS                         .insert(name.clone(), unit_label(family, source));
-//RS                     if family.base.is_some() || dimension.is_some() {
-//RS                         cx.unit_facts
-//RS                             .insert(name, unit_fact(family, source, dimension.clone(), kind));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Some(qualifier) = &qualifier {
-//RS             for item in &module.items {
-//RS                 let Item::Impl(implementation) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 let qualified = format!("{qualifier}::{}", implementation.type_name);
-//RS                 if implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
-//RS                     && cx.unit_labels.contains_key(&qualified)
-//RS                 {
-//RS                     cx.display_types.insert(qualified);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// The one checked namespace identity for a loaded module: the name ledger's
-//RS /// `package::path`, or the loader display path for a module the ledger does
-//RS /// not know.  Every TIR/MIR module key (module rows, function owners, type
-//RS /// owners, item order) must derive from this same string.
-//RS pub(crate) fn module_identity(bundle: &ProgramBundle, module_idx: usize) -> String {
-//RS     bundle
-//RS         .name_ledger
-//RS         .module_identity(module_idx)
-//RS         .or_else(|| {
-//RS             bundle
-//RS                 .modules
-//RS                 .get(module_idx)
-//RS                 .map(|module| module.display.clone())
-//RS         })
-//RS         .unwrap_or_default()
-//RS }
-//RS 
-//RS fn qualified_constant_key(module: &str, name: &str) -> String {
-//RS     if module.is_empty() {
-//RS         name.to_string()
-//RS     } else {
-//RS         format!("{module}::{name}")
-//RS     }
-//RS }
-//RS 
-//RS /// Mirror the bundle-level import maps `emit_bundle` fills before lowering.
-//RS /// `build_cx_items` alone leaves `core_imports` empty; without this, JIT
-//RS /// lowering mis-gates `use core.tasks as tasks` channel calls.
-//RS pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
-//RS     use super::Imports::{
-//RS         core_import_map, core_source_sig_map, foreign_type_map, import_mod_map, import_ret_map,
-//RS         import_sig_map, inline_core_import_maps, inline_foreign_import_maps,
-//RS         inline_foreign_import_signature_maps, inline_foreign_reexport_maps,
-//RS         inline_foreign_reexport_signature_maps, inline_import_maps, reexport_call_map,
-//RS         register_foreign_enum_variants, unqualified_import_maps,
-//RS         update_cloneability_with_foreign_types,
-//RS     };
-//RS     cx.import_mods = import_mod_map(bundle, module_idx);
-//RS     cx.module_alias = bundle.modules[module_idx].alias.clone();
-//RS     cx.module_identity = module_identity(bundle, module_idx);
-//RS     // Match `qualified_key` used when constructing `TirConstantDef.key`.
-//RS     let module = cx.module_identity.clone();
-//RS     cx.const_ref_keys = cx
-//RS         .const_types
-//RS         .keys()
-//RS         .map(|name| {
-//RS             (
-//RS                 name.clone(),
-//RS                 qualified_constant_key(&module, name),
-//RS             )
-//RS         })
-//RS         .collect();
-//RS     cx.const_ref_types = cx.const_types.clone();
-//RS     let source_path = bundle.name_ledger.module_path(module_idx);
-//RS     cx.checked_const_ref_sites = bundle
-//RS         .name_ledger
-//RS         .references()
-//RS         .iter()
-//RS         .filter_map(|((source, start, end), reference)| {
-//RS             if Some(source.as_str()) != source_path || reference.kind != "const" {
-//RS                 return None;
-//RS             }
-//RS             let target_module = (0..bundle.modules.len()).find(|target_idx| {
-//RS                 bundle.name_ledger.module_path(*target_idx)
-//RS                     == Some(reference.module_path.as_str())
-//RS             })?;
-//RS             let declaration = bundle.name_ledger.declarations().find(|declaration| {
-//RS                 declaration.module == target_module
-//RS                     && declaration.span == reference.def_span
-//RS                     && declaration.kind == "const"
-//RS             })?;
-//RS             let ty = bundle.modules[target_module]
-//RS                 .items
-//RS                 .iter()
-//RS                 .find_map(|item| match item {
-//RS                     Item::Const(candidate) if candidate.name == declaration.name => {
-//RS                         super::TIR::source_constant_type(candidate)
-//RS                     }
-//RS                     _ => None,
-//RS                 })?;
-//RS             Some((
-//RS                 (*start, *end),
-//RS                 (
-//RS                     qualified_constant_key(
-//RS                         &module_identity(bundle, target_module),
-//RS                         &declaration.name,
-//RS                     ),
-//RS                     ty,
-//RS                 ),
-//RS             ))
-//RS         })
-//RS         .collect();
-//RS     for alias in bundle.name_ledger.aliases() {
-//RS         if alias.module != module_idx || cx.const_ref_keys.contains_key(&alias.name) {
-//RS             continue;
-//RS         }
-//RS         let Some(target_module) = alias.target_module else {
-//RS             continue;
-//RS         };
-//RS         let Some(target) = bundle.modules.get(target_module) else {
-//RS             continue;
-//RS         };
-//RS         let Some(target_name) = alias
-//RS             .target
-//RS             .strip_prefix(&target.alias)
-//RS             .and_then(|path| path.strip_prefix('.'))
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         let Some(definition) = bundle.name_ledger.declaration(target_module, target_name) else {
-//RS             continue;
-//RS         };
-//RS         if definition.kind != "const" {
-//RS             continue;
-//RS         }
-//RS         let key = qualified_constant_key(
-//RS             &module_identity(bundle, target_module),
-//RS             &definition.name,
-//RS         );
-//RS         cx.const_ref_keys.insert(alias.name.clone(), key);
-//RS         if let Some(ty) = target.items.iter().find_map(|item| match item {
-//RS             Item::Const(candidate) if candidate.name == definition.name => {
-//RS                 super::TIR::source_constant_type(candidate)
-//RS             }
-//RS             _ => None,
-//RS         }) {
-//RS             cx.const_ref_types.insert(alias.name.clone(), ty);
-//RS         }
-//RS     }
-//RS     // Bundle construction assigns the module identity after `build_cx_items`;
-//RS     cx.devtools_registry = bundle.devtools_registry.clone();
-//RS     if let Some(module) = bundle.name_ledger.module(module_idx) {
-//RS         cx.devtools_package = module.package.clone();
-//RS         cx.devtools_module = module.path.clone();
-//RS     } else {
-//RS         cx.devtools_package.clear();
-//RS         cx.devtools_module.clear();
-//RS     }
-//RS     cx.policy_declarations = bundle.modules[module_idx].policy_declarations.clone();
-//RS     populate_cx_module_facts(cx, bundle, module_idx);
-//RS     cx.opaque_handles = bundle
-//RS         .cffi
-//RS         .handle_facts
-//RS         .iter()
-//RS         .map(|fact| fact.jet_name.clone())
-//RS         .collect();
-//RS     cx.core_source_modules = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .filter_map(|module| {
-//RS             jet_foundation::CoreModuleExports::core_source_module_by_alias(&module.alias)
-//RS                 .map(|source| (source.module.to_string(), source.alias.to_string()))
-//RS         })
-//RS         .collect();
-//RS     if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-//RS         jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-//RS     ) {
-//RS         if bundle
-//RS             .modules
-//RS             .iter()
-//RS             .any(|module| module.alias == part.source.alias)
-//RS         {
-//RS             cx.core_source_modules.insert(
-//RS                 part.source.module.to_string(),
-//RS                 part.source.alias.to_string(),
-//RS             );
-//RS         }
-//RS     }
-//RS     cx.core_source_sigs = core_source_sig_map(bundle);
-//RS     cx.foreign_types = foreign_type_map(bundle, module_idx);
-//RS     crate::Codegen::TIR::register_imported_struct_shapes(cx, bundle, module_idx);
-//RS     update_cloneability_with_foreign_types(cx, &bundle.modules[module_idx].items);
-//RS     register_foreign_enum_variants(cx, bundle, module_idx);
-//RS     cx.reexport_calls = reexport_call_map(bundle, module_idx);
-//RS     cx.import_sigs = import_sig_map(bundle, module_idx);
-//RS     cx.import_rets = import_ret_map(bundle, module_idx);
-//RS     cx.core_imports = core_import_map(bundle, module_idx);
-//RS     register_bundle_reflect_paths(cx, bundle, module_idx);
-//RS     register_core_close_types(cx, bundle);
-//RS     register_core_import_surfaces(cx);
-//RS     cx.used_core = bundle.used_core.clone();
-//RS     cx.foreign_undos = bundle_foreign_undos(bundle, module_idx);
-//RS     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-//RS     register_bundle_unit_metadata(cx, bundle, module_idx);
-//RS     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
-//RS     cx.unqualified_inline = uinline;
-//RS     cx.unqualified_file = ufile;
-//RS     let (inline, file, names, reexports) = inline_import_maps(bundle, module_idx);
-//RS     cx.inline_unqualified = inline;
-//RS     cx.inline_unqualified_file = file;
-//RS     cx.inline_import_names = names;
-//RS     cx.inline_reexport_inline = reexports;
-//RS     let (inline_core, reexport_core) = inline_core_import_maps(bundle, module_idx);
-//RS     cx.inline_core_imports = inline_core;
-//RS     cx.inline_reexport_core = reexport_core;
-//RS     cx.inline_foreign_imports = inline_foreign_import_maps(bundle, module_idx);
-//RS     let (inline_foreign_sigs, inline_foreign_rets) =
-//RS         inline_foreign_import_signature_maps(bundle, module_idx);
-//RS     cx.inline_foreign_sigs = inline_foreign_sigs;
-//RS     cx.inline_foreign_rets = inline_foreign_rets;
-//RS     cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, module_idx);
-//RS     // Keep the preview identity on the same canonical target/build facts as
-//RS     // artifact caching.  A readable tuple here would silently omit provider,
-//RS     // closure, linker, dependency, or runtime-layer changes.
-//RS     let mut preview_identity = b"jet-ui-preview-build-v1\0".to_vec();
-//RS     bundle
-//RS         .build_facts
-//RS         .append_artifact_identity_bytes(&mut preview_identity);
-//RS     for value in [
-//RS         bundle.build_facts.profile.as_str(),
-//RS         bundle.build_facts.stamp.toolchain.as_str(),
-//RS         if bundle.build_facts.stamp.dirty {
-//RS             "dirty"
-//RS         } else {
-//RS             "clean"
-//RS         },
-//RS         bundle.build_facts.package_name.as_str(),
-//RS         bundle.build_facts.package_version.as_str(),
-//RS     ] {
-//RS         preview_identity.extend_from_slice(&(value.len() as u64).to_le_bytes());
-//RS         preview_identity.extend_from_slice(value.as_bytes());
-//RS     }
-//RS     cx.preview_build_id = format!(
-//RS         "sha256-{}",
-//RS         jet_foundation::SHA256::sha256_hex(&preview_identity)
-//RS     );
-//RS     cx.preview_revision = bundle
-//RS         .build_facts
-//RS         .stamp
-//RS         .git
-//RS         .clone()
-//RS         .filter(|value| !value.is_empty())
-//RS         .or_else(|| {
-//RS             (!bundle.build_facts.stamp.at.is_empty()).then(|| bundle.build_facts.stamp.at.clone())
-//RS         })
-//RS         .unwrap_or_else(|| {
-//RS             format!(
-//RS                 "{}:{}",
-//RS                 bundle.build_facts.package_name, bundle.build_facts.package_version
-//RS             )
-//RS         });
-//RS     let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
-//RS         inline_foreign_reexport_signature_maps(bundle, module_idx);
-//RS     cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
-//RS     cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-//RS     cx.package_edition = bundle.edition.clone();
-//RS     cx.hardware_profile = crate::Sema::target_hardware_profile(bundle);
-//RS     cx.hardware_profile_id = crate::Sema::target_hardware_profile_id(bundle);
-//RS }
-//RS 
-//RS /// Carry authoritative module ownership, imported callable metadata, and
-//RS /// package-only guarantee facts into one codegen context. The name ledger owns
-//RS /// declarations because loaded dependency items may also be present in a
-//RS /// module's merged item list. Dependency ownership uses sema's longest-root rule.
-//RS pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
-//RS     cx.direct_c_functions = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .flat_map(|module| {
-//RS             module.items.iter().filter_map(|item| {
-//RS                 let Item::CModule(c_module) = item else {
-//RS                     return None;
-//RS                 };
-//RS                 Some(
-//RS                     c_module
-//RS                         .functions
-//RS                         .iter()
-//RS                         .map(|function| format!("{}::{}", mangle(&module.alias), function.name)),
-//RS                 )
-//RS             })
-//RS         })
-//RS         .flatten()
-//RS         .collect();
-//RS     cx.foreign_call_keys.clear();
-//RS     for (foreign_module_idx, foreign_module) in bundle.modules.iter().enumerate() {
-//RS         let identity = module_identity(bundle, foreign_module_idx);
-//RS         let rust_module = mangle(&foreign_module.alias);
-//RS         for item in &foreign_module.items {
-//RS             match item {
-//RS                 Item::CModule(c_module) => {
-//RS                     for function in &c_module.functions {
-//RS                         let key = format!("{identity}::{}", function.name);
-//RS                         cx.foreign_call_keys
-//RS                             .insert(format!("{rust_module}::{}", function.name), key.clone());
-//RS                         if foreign_module_idx == module_idx {
-//RS                             cx.foreign_call_keys.insert(function.name.clone(), key);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Item::ExternRust(block) => {
-//RS                     for function in &block.functions {
-//RS                         let key = format!("{identity}::{}", function.rust_path);
-//RS                         cx.foreign_call_keys
-//RS                             .insert(format!("{rust_module}::{}", function.name), key.clone());
-//RS                         if foreign_module_idx == module_idx {
-//RS                             cx.foreign_call_keys.insert(function.name.clone(), key);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Item::Func(function)
-//RS                     if crate::Sema::guest_import_function_signature(function).is_some() =>
-//RS                 {
-//RS                     let wrapper = crate::Sema::guest_import_wrapper_name(
-//RS                         &foreign_module.alias,
-//RS                         &function.name,
-//RS                     );
-//RS                     cx.foreign_call_keys
-//RS                         .insert(format!("{rust_module}::{}", function.name), wrapper.clone());
-//RS                     if foreign_module_idx == module_idx {
-//RS                         cx.foreign_call_keys.insert(function.name.clone(), wrapper);
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     cx.local_type_names
-//RS         .retain(|name| bundle.name_ledger.declaration(module_idx, name).is_some());
-//RS     register_imported_methods(cx, bundle, module_idx);
-//RS     cx.package_hardened = bundle.package_guarantees.harden;
-//RS     let Some(module) = bundle.modules.get(module_idx) else {
-//RS         cx.dependency_fenced = false;
-//RS         return;
-//RS     };
-//RS     let dependency = bundle
-//RS         .dep_roots
-//RS         .iter()
-//RS         .filter(|(_, root)| module.path.starts_with(root))
-//RS         .max_by(|(left_name, left_root), (right_name, right_root)| {
-//RS             left_root
-//RS                 .components()
-//RS                 .count()
-//RS                 .cmp(&right_root.components().count())
-//RS                 .then_with(|| left_name.cmp(right_name))
-//RS         })
-//RS         .map(|(name, _)| name);
-//RS     cx.dependency_fenced = dependency.is_some_and(|name| {
-//RS         bundle.package_guarantees.harden || bundle.package_guarantees.contain.contains(name)
-//RS     });
-//RS }
-//RS 
-//RS pub(crate) fn register_bundle_reflect_paths(
-//RS     cx: &mut Cx,
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) {
-//RS     let paths = bundle.name_ledger.canonical_paths(module_idx);
-//RS     for (name, path) in &paths {
-//RS         cx.reflect_paths.insert(name.clone(), path.clone());
-//RS     }
-//RS }
-//RS 
-//RS fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
-//RS     let mut imported: Vec<usize> = bundle.modules[module_idx]
-//RS         .imports
-//RS         .iter()
-//RS         .filter_map(|import| {
-//RS             // `use core.crypto as crypto` binds the source-owned Core module,
-//RS             // whose inherent statics (`crypto.Hasher.new()`) are ordinary
-//RS             // imported methods keyed by the declaring module's nominal.
-//RS             if let Some(core_module) = import.core_module_path() {
-//RS                 return super::Imports::core_source_target(bundle, &core_module)
-//RS                     .map(|(_, target)| target);
-//RS             }
-//RS             bundle
-//RS                 .name_ledger
-//RS                 .effective_alias(module_idx, &import.import_alias())?;
-//RS             bundle.name_ledger.import_target(module_idx, import.span)
-//RS         })
-//RS         .collect();
-//RS     imported.extend(
-//RS         crate::Codegen::Imports::selective_nominal_targets(bundle, module_idx)
-//RS             .into_iter()
-//RS             .map(|(target, _)| target),
-//RS     );
-//RS     imported.sort_unstable();
-//RS     imported.dedup();
-//RS     imported.extend(
-//RS         bundle.modules[module_idx]
-//RS             .imports
-//RS             .iter()
-//RS             .flat_map(|import| {
-//RS                 super::Imports::foreign_list_targets(bundle, module_idx, import)
-//RS                     .into_iter()
-//RS                     .map(|(_, target)| target)
-//RS             }),
-//RS     );
-//RS     imported.sort_unstable();
-//RS     imported.dedup();
-//RS     for target in imported {
-//RS         let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
-//RS         for item in &bundle.modules[target].items {
-//RS             let (owner, methods): (&str, Vec<(&Func, Option<&str>, bool, Option<&Type>)>) =
-//RS                 match item {
-//RS                     Item::Struct(definition) => {
-//RS                         let mut methods = definition
-//RS                             .methods
-//RS                             .iter()
-//RS                             .map(|method| (method, None, false, None))
-//RS                             .collect::<Vec<_>>();
-//RS                         methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
-//RS                             implementation.methods.iter().map(|method| {
-//RS                                 (
-//RS                                     method,
-//RS                                     Some(implementation.trait_name.as_str()),
-//RS                                     implementation.compiler_generated,
-//RS                                     implementation.operator_rhs.as_ref(),
-//RS                                 )
-//RS                             })
-//RS                         }));
-//RS                         (&definition.name, methods)
-//RS                     }
-//RS                     Item::Enum(definition) => {
-//RS                         let mut methods = definition
-//RS                             .methods
-//RS                             .iter()
-//RS                             .map(|method| (method, None, false, None))
-//RS                             .collect::<Vec<_>>();
-//RS                         methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
-//RS                             implementation.methods.iter().map(|method| {
-//RS                                 (
-//RS                                     method,
-//RS                                     Some(implementation.trait_name.as_str()),
-//RS                                     implementation.compiler_generated,
-//RS                                     implementation.operator_rhs.as_ref(),
-//RS                                 )
-//RS                             })
-//RS                         }));
-//RS                         (&definition.name, methods)
-//RS                     }
-//RS                     Item::Impl(definition) => (
-//RS                         &definition.type_name,
-//RS                         definition
-//RS                             .methods
-//RS                             .iter()
-//RS                             .map(|method| {
-//RS                                 (
-//RS                                     method,
-//RS                                     definition.trait_name.as_deref(),
-//RS                                     false,
-//RS                                     definition.operator_rhs.as_ref(),
-//RS                                 )
-//RS                             })
-//RS                             .collect(),
-//RS                     ),
-//RS                     _ => continue,
-//RS                 };
-//RS             let owner_identity = bundle
-//RS                 .name_ledger
-//RS                 .nominal_identity(target, owner)
-//RS                 .expect("name ledger must contain every loaded module");
-//RS             let owner_visible = bundle.name_ledger.visible(module_idx, target, owner);
-//RS             for (method, trait_name, import_trait, operator_rhs) in methods {
-//RS                 let method_visible = bundle.name_ledger.visible(
-//RS                     module_idx,
-//RS                     target,
-//RS                     &format!("{owner}.{}", method.name),
-//RS                 );
-//RS                 if !method_visible && !(trait_name.is_some() && owner_visible) {
-//RS                     continue;
-//RS                 }
-//RS                 let key = (owner_identity.clone(), method.name.clone());
-//RS                 if let Some(trait_name) = trait_name {
-//RS                     cx.trait_methods.insert(key.clone());
-//RS                     cx.trait_method_traits
-//RS                         .insert(key.clone(), trait_name.to_string());
-//RS                     if import_trait {
-//RS                         cx.imported_traits
-//RS                             .insert((rust_mod.clone(), trait_name.to_string()));
-//RS                     }
-//RS                 }
-//RS                 if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF) {
-//RS                     cx.method_self_convs
-//RS                         .entry(key.clone())
-//RS                         .or_insert(self_param.convention);
-//RS                 }
-//RS                 let imported_sig = method_sig_params(method)
-//RS                     .into_iter()
-//RS                     .map(|(convention, ty)| {
-//RS                         (
-//RS                             convention,
-//RS                             super::Imports::qualify_imported_call_type(bundle, target, "", &ty),
-//RS                         )
-//RS                     })
-//RS                     .collect::<Vec<_>>();
-//RS                 cx.method_sigs
-//RS                     .entry(key.clone())
-//RS                     .or_insert_with(|| imported_sig.clone());
-//RS                 cx.contract_sigs
-//RS                     .entry(format!("{}::{}", owner, method.name))
-//RS                     .or_insert_with(|| (method.pre.clone(), method.post.clone()));
-//RS                 cx.fn_param_names
-//RS                     .entry(format!("{}::{}", owner, method.name))
-//RS                     .or_insert_with(|| {
-//RS                         method
-//RS                             .params
-//RS                             .iter()
-//RS                             .map(|param| param.name.clone())
-//RS                             .collect()
-//RS                     });
-//RS                 let imported_ret = method
-//RS                     .return_type
-//RS                     .as_ref()
-//RS                     .map(|ty| super::Imports::qualify_imported_call_type(bundle, target, "", ty));
-//RS                 let imported_operator_rhs = operator_rhs
-//RS                     .map(|rhs| super::Imports::qualify_imported_call_type(bundle, target, "", rhs));
-//RS                 cx.method_rets
-//RS                     .entry(key)
-//RS                     .or_insert_with(|| imported_ret.clone());
-//RS                 if let Some(trait_name) = trait_name {
-//RS                     register_operator_method(
-//RS                         cx,
-//RS                         &owner_identity,
-//RS                         &method.name,
-//RS                         trait_name,
-//RS                         imported_operator_rhs.as_ref(),
-//RS                         imported_sig,
-//RS                         imported_ret,
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn register_core_close_types(cx: &mut Cx, bundle: &ProgramBundle) {
-//RS     for (module, names) in [
-//RS         ("core.files", &["FileReader", "FileWriter", "FileLock", "TempDir", "TempFile"][..]),
-//RS         ("core.net", &["TcpStream", "TCPStream", "UnixStream", "TLSStream"][..]),
-//RS         (Syntax::CORE_MEM_MODULE, &["Arena", "Bump", "Pool", "Fixed"][..]),
-//RS         ("core.db", &["DBConnection", "DBScope", "DBPool", "DBLease"][..]),
-//RS     ] {
-//RS         if !cx.core_imports.values().any(|import| import == module) {
-//RS             continue;
-//RS         }
-//RS         cx.close_types.extend(names.iter().map(|name| (*name).to_string()));
-//RS         if let Some(source) = jet_foundation::CoreModuleExports::core_source_module(module) {
-//RS             if let Some((index, _)) = bundle.modules.iter().enumerate()
-//RS                 .find(|(_, loaded)| loaded.alias == source.alias)
-//RS             {
-//RS                 cx.close_types.extend(names.iter().filter_map(|name| {
-//RS                     bundle.name_ledger.nominal_identity(index, name)
-//RS                 }));
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Populate value-shape tables that depend on bundle-resolved Core imports.
-//RS pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
-//RS     if cx
-//RS         .core_imports
-//RS         .values()
-//RS         .any(|module| module == "core.service")
-//RS     {
-//RS         let zero = Span::new(0, 0);
-//RS         let variants = [
-//RS             "Pending",
-//RS             "Accepted",
-//RS             "Delivering",
-//RS             "Delivered",
-//RS             "DeadLettered",
-//RS             "Cancelled",
-//RS         ]
-//RS         .into_iter()
-//RS         .map(|name| (name.to_string(), VariantPayload::Unit))
-//RS         .collect::<Vec<_>>();
-//RS         for (variant, _) in &variants {
-//RS             cx.variant_owner
-//RS                 .insert(variant.clone(), "DeliveryState".to_string());
-//RS         }
-//RS         cx.enum_variants
-//RS             .insert("DeliveryState".to_string(), variants);
-//RS         for name in ["Delivery", "DeliveryReceipt", "DeliveryEvent"] {
-//RS             cx.cloneable.insert(name.to_string());
-//RS         }
-//RS         let workflow_outcomes = vec![
-//RS             ("Finished".to_string(), VariantPayload::Unit),
-//RS             (
-//RS                 "Panicked".to_string(),
-//RS                 VariantPayload::Single(Type::String, zero),
-//RS             ),
-//RS             ("Cancelled".to_string(), VariantPayload::Unit),
-//RS             ("DeadlineBlown".to_string(), VariantPayload::Unit),
-//RS         ];
-//RS         for (variant, _) in &workflow_outcomes {
-//RS             cx.variant_owner
-//RS                 .insert(variant.clone(), "TaskOutcome".to_string());
-//RS         }
-//RS         cx.enum_variants
-//RS             .insert("TaskOutcome".to_string(), workflow_outcomes);
-//RS         cx.cloneable.insert("TaskOutcome".to_string());
-//RS         let workflow_statuses = ["Running", "Paused", "CancelRequested"]
-//RS             .into_iter()
-//RS             .map(|variant| (variant.to_string(), VariantPayload::Unit))
-//RS             .collect::<Vec<_>>();
-//RS         for (variant, _) in &workflow_statuses {
-//RS             cx.variant_owner
-//RS                 .insert(variant.clone(), "TaskStatus".to_string());
-//RS         }
-//RS         cx.enum_variants
-//RS             .insert("TaskStatus".to_string(), workflow_statuses);
-//RS         cx.cloneable.insert("TaskStatus".to_string());
-//RS         let error_variants = [
-//RS             "Full",
-//RS             "Ambiguous",
-//RS             "Unknown",
-//RS             "NotStarted",
-//RS             "Policy",
-//RS             "Unavailable",
-//RS             "Partitioned",
-//RS             "Revoked",
-//RS             "Stale",
-//RS             "Expired",
-//RS         ]
-//RS         .into_iter()
-//RS         .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero)))
-//RS         .collect::<Vec<_>>();
-//RS         for (variant, _) in &error_variants {
-//RS             cx.variant_owner
-//RS                 .insert(variant.clone(), "ServiceError".to_string());
-//RS         }
-//RS         cx.enum_variants
-//RS             .insert("ServiceError".to_string(), error_variants);
-//RS         cx.cloneable.insert("ServiceError".to_string());
-//RS     }
-//RS     if cx.core_imports.values().any(|module| module == "core.auth") {
-//RS         let zero = Span::new(0, 0);
-//RS         let field = |name: &str, ty: Type| VariantField {
-//RS             name: name.to_string(),
-//RS             name_span: zero,
-//RS             ty,
-//RS             ty_span: zero,
-//RS         };
-//RS         let mut variants = vec![
-//RS             ("InvalidSignature".to_string(), VariantPayload::Unit),
-//RS             ("WeakKey".to_string(), VariantPayload::Unit),
-//RS             ("TokenExpired".to_string(), VariantPayload::Unit),
-//RS         ];
-//RS         variants.extend(
-//RS             [
-//RS                 "MalformedToken",
-//RS                 "UnsupportedToken",
-//RS                 "MissingClaim",
-//RS                 "DecodeError",
-//RS             ]
-//RS             .into_iter()
-//RS             .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero))),
-//RS         );
-//RS         variants.push((
-//RS             "WrongAudience".to_string(),
-//RS             VariantPayload::Named(vec![
-//RS                 field("expected", Type::String),
-//RS                 field("actual", Type::String),
-//RS             ]),
-//RS         ));
-//RS         variants.push((
-//RS             "WrongIssuer".to_string(),
-//RS             VariantPayload::Named(vec![
-//RS                 field("expected", Type::String),
-//RS                 field("actual", Type::Option(Box::new(Type::String))),
-//RS             ]),
-//RS         ));
-//RS         // Keep the existing discriminants stable; append the new unit
-//RS         // variant to the canonical AuthError surface.
-//RS         variants.push(("TokenNotYetValid".to_string(), VariantPayload::Unit));
-//RS         for (variant, _) in &variants {
-//RS             cx.variant_owner
-//RS                 .insert(variant.clone(), "AuthError".to_string());
-//RS         }
-//RS         cx.enum_variants.insert("AuthError".to_string(), variants);
-//RS         cx.cloneable.insert("AuthError".to_string());
-//RS     }
-//RS     if cx
-//RS         .core_imports
-//RS         .values()
-//RS         .any(|module| module == "core.net.tls")
-//RS     {
-//RS         let zero = Span::new(0, 0);
-//RS         let versions = vec![
-//RS             ("TLS12".to_string(), VariantPayload::Unit),
-//RS             ("TLS13".to_string(), VariantPayload::Unit),
-//RS         ];
-//RS         for (variant, _) in &versions {
-//RS             cx.variant_owner
-//RS                 .insert(variant.clone(), "TLSVersion".to_string());
-//RS         }
-//RS         cx.enum_variants.insert("TLSVersion".to_string(), versions);
-//RS         cx.cloneable.insert("TLSVersion".to_string());
-//RS         let roots = Type::Named("TLSRootCertificates".to_string());
-//RS         let trust = vec![
-//RS             ("System".to_string(), VariantPayload::Unit),
-//RS             (
-//RS                 "SystemPlus".to_string(),
-//RS                 VariantPayload::Single(roots.clone(), zero),
-//RS             ),
-//RS             (
-//RS                 "CustomOnly".to_string(),
-//RS                 VariantPayload::Single(roots, zero),
-//RS             ),
-//RS         ];
-//RS         for (variant, _) in &trust {
-//RS             cx.variant_owner
-//RS                 .insert(variant.clone(), "TLSClientTrust".to_string());
-//RS         }
-//RS         cx.enum_variants.insert("TLSClientTrust".to_string(), trust);
-//RS         cx.cloneable.insert("TLSClientTrust".to_string());
-//RS     }
-//RS     // D-DX-LOADERS1: `DataLoaderKind` is a native Prelude enum whose checked
-//RS     // source patterns still need the same owner/tag facts as user enums.
-//RS     if cx.core_imports.values().any(|module| module == "core.data") {
-//RS         let variants = ["File", "URL", "Database", "Value"]
-//RS             .into_iter()
-//RS             .map(|variant| (variant.to_string(), VariantPayload::Unit))
-//RS             .collect::<Vec<_>>();
-//RS         for (variant, _) in &variants {
-//RS             cx.variant_owner
-//RS                 .insert(variant.clone(), "DataLoaderKind".to_string());
-//RS         }
-//RS         cx.enum_variants
-//RS             .insert("DataLoaderKind".to_string(), variants);
-//RS         cx.cloneable.insert("DataLoaderKind".to_string());
-//RS     }
-//RS     // stdlib-api-laws D4 (#2055): `core.watcher` hands back typed `WatchEvent`
-//RS     // domain/kind values, so the two closed enums must be registered like the
-//RS     // TLS pair above — matching `.File`/`.Created` has to stay on the same
-//RS     // typed-IR path as any other covered enum instead of missing the subset.
-//RS     if cx
-//RS         .core_imports
-//RS         .values()
-//RS         .any(|module| module == Syntax::WATCHER_MODULE)
-//RS     {
-//RS         let watch_enums: [(&str, &[&str]); 2] = [
-//RS             ("WatchDomain", &["File", "Process", "Port"]),
-//RS             (
-//RS                 "WatchKind",
-//RS                 &["Created", "Modified", "Removed", "Error", "Exited", "Ready"],
-//RS             ),
-//RS         ];
-//RS         for (name, variants) in watch_enums {
-//RS             for variant in variants {
-//RS                 cx.variant_owner
-//RS                     .insert((*variant).to_string(), name.to_string());
-//RS             }
-//RS             cx.enum_variants.insert(
-//RS                 name.to_string(),
-//RS                 variants
-//RS                     .iter()
-//RS                     .map(|variant| ((*variant).to_string(), VariantPayload::Unit))
-//RS                     .collect(),
-//RS             );
-//RS             cx.cloneable.insert(name.to_string());
-//RS         }
-//RS     }
-//RS     if !cx
-//RS         .core_imports
-//RS         .values()
-//RS         .any(|module| module == Syntax::CORE_EMAIL_MODULE)
-//RS         && cx.core_source_modules.get(Syntax::CORE_EMAIL_MODULE) != Some(&cx.module_alias)
-//RS     {
-//RS         return;
-//RS     }
-//RS     let zero = Span::new(0, 0);
-//RS     for (name, variants) in [
-//RS         (
-//RS             "SMTPSecurity",
-//RS             vec![
-//RS                 ("StartTLS".to_string(), VariantPayload::Unit),
-//RS                 ("TLS".to_string(), VariantPayload::Unit),
-//RS             ],
-//RS         ),
-//RS         (
-//RS             "RecipientPolicy",
-//RS             vec![
-//RS                 ("RequireAll".to_string(), VariantPayload::Unit),
-//RS                 ("DeliverAccepted".to_string(), VariantPayload::Unit),
-//RS             ],
-//RS         ),
-//RS         (
-//RS             "SMTPAuth",
-//RS             vec![
-//RS                 ("None".to_string(), VariantPayload::Unit),
-//RS                 (
-//RS                     "Password".to_string(),
-//RS                     VariantPayload::Named(vec![
-//RS                         VariantField {
-//RS                             name: "username".to_string(),
-//RS                             name_span: zero,
-//RS                             ty: Type::String,
-//RS                             ty_span: zero,
-//RS                         },
-//RS                         VariantField {
-//RS                             name: "password".to_string(),
-//RS                             name_span: zero,
-//RS                             ty: Type::Named("Secret".to_string()),
-//RS                             ty_span: zero,
-//RS                         },
-//RS                     ]),
-//RS                 ),
-//RS             ],
-//RS         ),
-//RS         (
-//RS             "TLSTrust",
-//RS             vec![
-//RS                 ("System".to_string(), VariantPayload::Unit),
-//RS                 (
-//RS                     "SystemPlusCa".to_string(),
-//RS                     VariantPayload::Named(vec![VariantField {
-//RS                         name: "pem".to_string(),
-//RS                         name_span: zero,
-//RS                         ty: Type::List(Box::new(Type::IntN {
-//RS                             signed: false,
-//RS                             bits: 8,
-//RS                         })),
-//RS                         ty_span: zero,
-//RS                     }]),
-//RS                 ),
-//RS             ],
-//RS         ),
-//RS     ] {
-//RS         for (variant, _) in &variants {
-//RS             cx.variant_owner.insert(variant.clone(), name.to_string());
-//RS         }
-//RS         cx.enum_variants.insert(name.to_string(), variants);
-//RS         cx.cloneable.insert(name.to_string());
-//RS     }
-//RS     let error_fields = || {
-//RS         [
-//RS             ("operation", Type::String),
-//RS             ("server", Type::Option(Box::new(Type::String))),
-//RS             ("code", Type::Option(Box::new(Type::Int))),
-//RS             ("reason", Type::String),
-//RS         ]
-//RS         .into_iter()
-//RS         .map(|(field, ty)| VariantField {
-//RS             name: field.to_string(),
-//RS             name_span: zero,
-//RS             ty,
-//RS             ty_span: zero,
-//RS         })
-//RS         .collect()
-//RS     };
-//RS     let errors = [
-//RS         "Configuration",
-//RS         "DNS",
-//RS         "Connect",
-//RS         "TLS",
-//RS         "Auth",
-//RS         "Protocol",
-//RS         "Rejected",
-//RS         "Transient",
-//RS         "TimedOut",
-//RS         "Cancelled",
-//RS         "DeliveryUnknown",
-//RS     ]
-//RS     .into_iter()
-//RS     .map(|variant| (variant.to_string(), VariantPayload::Named(error_fields())))
-//RS     .collect::<Vec<_>>();
-//RS     for (variant, _) in &errors {
-//RS         cx.variant_owner
-//RS             .insert(variant.clone(), "EmailError".to_string());
-//RS     }
-//RS     cx.enum_variants.insert("EmailError".to_string(), errors);
-//RS     cx.cloneable.insert("EmailError".to_string());
-//RS     cx.struct_fields.insert(
-//RS         "Envelope".to_string(),
-//RS         vec![
-//RS             ("from".to_string(), Type::Named("Address".to_string())),
-//RS             (
-//RS                 "recipients".to_string(),
-//RS                 Type::List(Box::new(Type::Named("Address".to_string()))),
-//RS             ),
-//RS         ],
-//RS     );
-//RS     cx.struct_fields.insert(
-//RS         "RecipientReport".to_string(),
-//RS         vec![
-//RS             ("address".to_string(), Type::Named("Address".to_string())),
-//RS             ("accepted".to_string(), Type::Bool),
-//RS             ("code".to_string(), Type::Int),
-//RS             ("message".to_string(), Type::String),
-//RS         ],
-//RS     );
-//RS     cx.struct_fields.insert(
-//RS         "SendReport".to_string(),
-//RS         vec![
-//RS             ("server".to_string(), Type::String),
-//RS             (
-//RS                 "accepted".to_string(),
-//RS                 Type::List(Box::new(Type::Named("RecipientReport".to_string()))),
-//RS             ),
-//RS             (
-//RS                 "rejected".to_string(),
-//RS                 Type::List(Box::new(Type::Named("RecipientReport".to_string()))),
-//RS             ),
-//RS             ("response_code".to_string(), Type::Int),
-//RS             ("response".to_string(), Type::String),
-//RS             ("accepted_at".to_string(), Type::String),
-//RS         ],
-//RS     );
-//RS     cx.struct_fields.insert(
-//RS         "Limits".to_string(),
-//RS         vec![
-//RS             ("max_reply_line_bytes".to_string(), Type::Int),
-//RS             ("max_reply_lines".to_string(), Type::Int),
-//RS             ("max_capabilities".to_string(), Type::Int),
-//RS             ("max_recipients".to_string(), Type::Int),
-//RS             ("max_message_bytes".to_string(), Type::Int),
-//RS             ("max_auth_challenge_bytes".to_string(), Type::Int),
-//RS         ],
-//RS     );
-//RS     cx.struct_fields.insert(
-//RS         "SMTPConfig".to_string(),
-//RS         vec![
-//RS             ("host".to_string(), Type::String),
-//RS             ("port".to_string(), Type::Int),
-//RS             (
-//RS                 "security".to_string(),
-//RS                 Type::Named("SMTPSecurity".to_string()),
-//RS             ),
-//RS             ("auth".to_string(), Type::Named("SMTPAuth".to_string())),
-//RS             (
-//RS                 "recipient_policy".to_string(),
-//RS                 Type::Named("RecipientPolicy".to_string()),
-//RS             ),
-//RS             ("trust".to_string(), Type::Named("TLSTrust".to_string())),
-//RS             ("limits".to_string(), Type::Named("Limits".to_string())),
-//RS             (
-//RS                 "dkim".to_string(),
-//RS                 Type::Option(Box::new(Type::Named("DKIMConfig".to_string()))),
-//RS             ),
-//RS         ],
-//RS     );
-//RS     cx.struct_fields.insert(
-//RS         "DKIMConfig".to_string(),
-//RS         vec![
-//RS             ("domain".to_string(), Type::String),
-//RS             ("selector".to_string(), Type::String),
-//RS             ("private_key".to_string(), Type::Named("Secret".to_string())),
-//RS             (
-//RS                 "signed_headers".to_string(),
-//RS                 Type::List(Box::new(Type::String)),
-//RS             ),
-//RS         ],
-//RS     );
-//RS     cx.cloneable.extend([
-//RS         "Envelope".to_string(),
-//RS         "RecipientReport".to_string(),
-//RS         "SendReport".to_string(),
-//RS         "Limits".to_string(),
-//RS     ]);
-//RS }
-//RS 
-//RS pub(crate) fn memo_facts_for_struct(
-//RS     structure: &StructDef,
-//RS ) -> (HashMap<String, Type>, HashMap<String, HashSet<String>>) {
-//RS     let computed: HashSet<String> = structure
-//RS         .fields
-//RS         .iter()
-//RS         .filter(|field| field.computed.is_some())
-//RS         .map(|field| field.name.clone())
-//RS         .collect();
-//RS     let mut direct = HashMap::<String, HashSet<String>>::new();
-//RS     for field in &structure.fields {
-//RS         let Some(expression) = field.computed.as_deref() else {
-//RS             continue;
-//RS         };
-//RS         let mut expression = expression.clone();
-//RS         let mut dependencies = HashSet::new();
-//RS         expression.for_each_expr_mut(|node| {
-//RS             if let Expr::Field(receiver, name, _) = node {
-//RS                 if matches!(receiver.as_ref(), Expr::Ident(value, _) if value == Syntax::KW_SELF) {
-//RS                     dependencies.insert(name.clone());
-//RS                 }
-//RS             }
-//RS         });
-//RS         direct.insert(field.name.clone(), dependencies);
-//RS     }
-//RS     fn depends_on(
-//RS         field: &str,
-//RS         source: &str,
-//RS         direct: &HashMap<String, HashSet<String>>,
-//RS         computed: &HashSet<String>,
-//RS         visiting: &mut HashSet<String>,
-//RS     ) -> bool {
-//RS         if !visiting.insert(field.to_string()) {
-//RS             return false;
-//RS         }
-//RS         let result = direct.get(field).is_some_and(|dependencies| {
-//RS             dependencies.iter().any(|dependency| {
-//RS                 dependency == source
-//RS                     || computed.contains(dependency)
-//RS                         && depends_on(dependency, source, direct, computed, visiting)
-//RS             })
-//RS         });
-//RS         // Visited stays marked: this is reachability, so a revisit adds nothing (and unmarking made the walk exponential).
-//RS         result
-//RS     }
-//RS 
-//RS     let memo_fields = structure
-//RS         .fields
-//RS         .iter()
-//RS         .filter(|field| {
-//RS             field.computed.is_some()
-//RS                 && field
-//RS                     .serde_markers
-//RS                     .iter()
-//RS                     .any(|marker| marker.name == Syntax::MARKER_MEMO)
-//RS         })
-//RS         .map(|field| (field.name.clone(), field.ty.clone()))
-//RS         .collect::<HashMap<_, _>>();
-//RS     let mut dependencies = HashMap::<String, HashSet<String>>::new();
-//RS     for source in structure
-//RS         .fields
-//RS         .iter()
-//RS         .filter(|field| field.computed.is_none())
-//RS         .map(|field| field.name.as_str())
-//RS     {
-//RS         for memo in memo_fields.keys() {
-//RS             if depends_on(memo, source, &direct, &computed, &mut HashSet::new()) {
-//RS                 dependencies
-//RS                     .entry(source.to_string())
-//RS                     .or_default()
-//RS                     .insert(memo.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     (memo_fields, dependencies)
-//RS }
-//RS 
-//RS fn receipt_schema_digest(type_name: &str, fields: &[(String, Type)]) -> String {
-//RS     let mut schema = String::new();
-//RS     schema.push_str(type_name);
-//RS     schema.push('\0');
-//RS     for (name, ty) in fields {
-//RS         schema.push_str(name);
-//RS         schema.push(':');
-//RS         schema.push_str(&ty.name());
-//RS         schema.push(';');
-//RS     }
-//RS     jet_foundation::SHA256::sha256_hex(schema.as_bytes())
-//RS }
-//RS 
-// END-PORT-PENDING 0456 crates/jet-codegen/src/Codegen/Context.rs:3741-5282
-
+// Context continuation; Rust codegen type spelling and checked bundle facts.
+use jet_foundation.[AccessConvention, Type, ViewProvenanceMap, ViewSource, TagMarker, InternalTag, Program, Item, Func, FfiHandleFact, ProgramBundle, StructDef, Expr, Span, VariantField, VariantPayload, QuantityKind, TEXT_NUL, mangle, mangle_path]
+use jet_foundation.Syntax as Syntax
+use jet_sema.Generics as Generics
+use jet_sema.Sema as Sema
+use jet_codegen.Codegen.Context.[Cx, ExternFn, build_cx_items, unit_family_member_for_type, unit_label, unit_fact, method_sig_params, register_operator_method]
+use jet_codegen.Codegen.[generated_prefix]
+use jet_codegen.Codegen.Imports as Imports
+use jet_codegen.Codegen.TIR as TIR
+use jet_foundation.CoreModuleExports as CoreModuleExports
+use jet_foundation.CoreSourceParts as CoreSourceParts
+use jet_foundation.SHA256.[sha256_hex]
+impl Cx {
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:3741
+    pub fn rust_fn_trait(self, params: [Type], ret: Type?, return_view_provenance: ViewProvenanceMap?) -> String Never! {
+        thread_safe :: params.len() == 1 && params[0] == Type.Named("HTTPHandler") && ret == Val(Type.Named("HTTPHandler"))
+        has_view_return :: ret.map(fn(ty) { self.type_contains_view(ty) }) ?? false
+        owner_params := [Int:Bool]{}
+        if return_view_provenance == .Val(map) {
+            loop provenance in map.values() {
+                loop source in provenance.sources {
+                    if source.source == .Parameter(index) -> owner_params[index] = true
+                }
+            }
+        } else if has_view_return {
+            loop (index, ty) in params.enumerate() { if !ty.is_scalar() -> owner_params[index] = true }
+        }
+        independent_lifetimes := [String]{}
+        fn_view :: "'{generated_prefix()}fn_view"
+        pieces := [String]{}
+        loop (index, p) in params.enumerate() {
+            if thread_safe { &pieces.push(self.rust_type(p)); next }
+            rust :: rust_param_type(self, AccessConvention.Read, p)
+            if owner_params.contains(index) {
+                if rust.strip_prefix("&mut ") == .Val(rest) -> &pieces.push("&{fn_view} mut {rest}")
+                else if rust.strip_prefix('&') == .Val(rest) -> &pieces.push("&{fn_view} {rest}")
+                else -> &pieces.push(rust)
+            } else if has_view_return {
+                lifetime :: "'{generated_prefix()}arg{index}"
+                if rust.strip_prefix("&mut ") == .Val(rest) { &independent_lifetimes.push(lifetime); &pieces.push("&{lifetime} mut {rest}") }
+                else if rust.strip_prefix('&') == .Val(rest) { &independent_lifetimes.push(lifetime); &pieces.push("&{lifetime} {rest}") }
+                else -> &pieces.push(rust)
+            } else -> &pieces.push(rust)
+        }
+        ps :: pieces.join(", ")
+        r :: ret.map(fn(t) { if has_view_return -> self.rust_type_with_view_lifetime(t).replace("'{generated_prefix()}view", fn_view) else -> self.rust_type(t) }) ?? "()"
+        trait_name :: "FnMut"
+        if thread_safe -> return "std::sync::Arc<dyn Fn({ps}) -> {r} + Send + Sync>"
+        if has_view_return {
+            lifetimes := [fn_view]
+            &lifetimes.extend(^independent_lifetimes)
+            return "std::rc::Rc<std::cell::RefCell<Option<Box<dyn for<{lifetimes.join(", ")}> {trait_name}({ps}) -> {r}>>>>"
+        }
+        "std::rc::Rc<std::cell::RefCell<Option<Box<dyn {trait_name}({ps}) -> {r}>>>>"
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:3843
+pub fn rust_param_type(cx: Cx, convention: AccessConvention, ty: Type) -> String Never! {
+    if ty == .Tagged{marker: .Internal(.CppCallbackAbi), inner} {
+        if inner == .Fn{params, ret, ..} {
+            ps :: (loop param in params -> cx.rust_type(param)).join(", ")
+            r :: ret.map(fn(ret) { " -> {cx.rust_type(ret)}" }) ?? ""
+            return "extern \"C\" fn({ps}){r}"
+        }
+    }
+    base :: cx.rust_type(ty)
+    trait_type :: if ty == { .Named(n) -> cx.trait_names.contains(n); .TraitObject(_) -> true; else -> false }
+    type_param :: if ty == { .Named(n) -> Generics.is_type_var_name(n) || cx.current_type_params.borrow().contains(n); else -> false }
+    if trait_type || type_param {
+        return if convention == { .Read -> "&{base}"; .Write -> "&mut {base}"; .Move -> base }
+    }
+    if convention == { .Read -> if ty.is_scalar() -> base else -> "&{base}"; .Write -> "&mut {base}"; .Move -> base }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:3898
+pub fn build_cx(prog: Program, src: String, file: String) -> Cx Never! {
+    extern_funcs :: extern_func_map(prog.items, None, [])
+    build_cx_items(prog.items, src, file, None, extern_funcs, "")
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:3903
+fn extern_func_map(items: [Item], owner: String?, handles: [FfiHandleFact]) -> [String:ExternFn] Never! {
+    map := [String:ExternFn]{}
+    collect_extern_funcs(items, owner, handles, &map)
+    map
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:3908
+fn collect_extern_funcs(items: [Item], owner: String?, handles: [FfiHandleFact], map: &[String:ExternFn]) Never! {
+    loop item in items {
+        if item == {
+            .ExternRust(block) -> { loop ef in block.functions -> map[ef.name] = ExternFn{wrapper: "jet_ffi_{ef.name}", c_abi: false, component: None} }
+            .Func(func) -> {
+                if Sema.guest_import_function_signature(func) != None && Sema.guest_import_bridge_compatible(func) {
+                    wrapper :: owner.map(fn(owner) { Sema.guest_import_wrapper_name(owner, func.name) }) ?? "jet_ffi_{func.name}"
+                    map[func.name] = ExternFn{wrapper: wrapper, c_abi: true, component: None}
+                } else if func.inline_foreign != None -> map[func.name] = ExternFn{wrapper: "jet_ffi_{func.name}", c_abi: false, component: None}
+            }
+            .CModule(module) -> {
+                loop function in module.functions {
+                    if function.hidden_c_bridge_compatible_with_handles(handles) -> map[function.name] = ExternFn{wrapper: "jet_ffi_{function.name}", c_abi: true, component: Val(module.lib)}
+                }
+            }
+            .CodeModule(module) -> { if module.body == .Val(body) -> collect_extern_funcs(body, owner, handles, &map) }
+            else -> {}
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:3978
+fn foreign_undo_map(items: [Item]) -> [String:String] Never! {
+    map := [String:String]{}
+    collect_foreign_undos(items, &map, None)
+    map
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:3979
+fn collect_foreign_undos(items: [Item], map: &[String:String], prefix: String?) Never! {
+    loop item in items {
+        if item == {
+            .ExternRust(block) -> {
+                loop ef in block.functions {
+                    if ef.undo == .Val((inverse, _)) -> map[prefix.map(fn(p) { "{p}::{ef.name}" }) ?? ef.name] = inverse
+                }
+            }
+            .CModule(module) -> {
+                loop ef in module.functions {
+                    if ef.undo == .Val((inverse, _)) -> map[prefix.map(fn(p) { "{p}::{ef.name}" }) ?? ef.name] = inverse
+                }
+            }
+            .Func(func) -> {
+                if func.undo == .Val((inverse, _)) -> map[prefix.map(fn(p) { "{p}::{func.name}" }) ?? func.name] = inverse
+            }
+            .CodeModule(module) -> { if module.body == .Val(body) -> collect_foreign_undos(body, &map, Val(module.name)) }
+            else -> {}
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4030
+pub fn bundle_extern_funcs(bundle: ProgramBundle) -> [String:ExternFn] Never! {
+    map := [String:ExternFn]{}
+    loop (module_idx, module) in bundle.modules.enumerate() {
+        module_funcs :: extern_func_map(module.items, Val(module.alias), bundle.cffi.handle_facts)
+        loop (name, wrapper) in module_funcs {
+            map[name] = wrapper
+            map["{mangle(module.alias)}::{name}"] = wrapper
+        }
+        if module.display.starts_with("cpp.") {
+            loop item in module.items {
+                if item == .Impl(definition) {
+                    loop method in definition.methods {
+                        if bundle.name_ledger.exported(module_idx, "{definition.type_name}{method.name}") -> map[foreign_binding_method_key(definition.type_name, method.name)] = ExternFn{wrapper: "", c_abi: false, component: None}
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4066
+pub fn bundle_foreign_undos(bundle: ProgramBundle, module_idx: Int) -> [String:String] Never! {
+    map := [String:String]{}
+    loop module in bundle.modules {
+        module_prefix :: mangle(module.alias)
+        loop (binding, inverse) in foreign_undo_map(module.items) -> map["{module_prefix}::{binding}"] = inverse
+    }
+    loop (binding, inverse) in foreign_undo_map(bundle.modules[module_idx].items) -> map[binding] = inverse
+    map
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4085
+pub fn foreign_binding_method_key(owner: String, method: String) -> String Never! { mangle_path("foreign_method__{owner}__{method}") }
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4090
+pub fn register_bundle_unit_metadata(cx: &Cx, bundle: ProgramBundle, module_idx: Int) Never! {
+    imported := [(Int, String?)]{}
+    seen := [Int:Bool]{}
+    loop import in bundle.modules[module_idx].imports {
+        if bundle.name_ledger.effective_alias(module_idx, import.import_alias()) == None -> next
+        target :: bundle.name_ledger.import_target(module_idx, import.span) ?? next
+        qualifier :: bundle.name_ledger.module_identity(target).expect("name ledger must contain every loaded module")
+        &imported.push((target, Val(qualifier)))
+        seen[target] = true
+    }
+    loop (target, _) in Imports.selective_nominal_targets(bundle, module_idx) {
+        if seen.contains(target) -> next
+        seen[target] = true
+        &imported.push((target, Val(bundle.name_ledger.module_identity(target).expect("name ledger must contain every loaded module"))))
+    }
+    loop import in bundle.modules[module_idx].imports {
+        loop (_, target) in Imports.foreign_list_targets(bundle, module_idx, import) {
+            if seen.contains(target) -> next
+            seen[target] = true
+            &imported.push((target, Val(bundle.name_ledger.module_identity(target).expect("name ledger must contain every loaded module"))))
+        }
+    }
+    targets := [(module_idx, String?{None})]
+    &targets.extend(^imported)
+    loop (target, qualifier) in targets {
+        module :: bundle.modules[target]
+        loop item in module.items {
+            if item == .Distinct(definition) {
+                if qualifier != None && !bundle.name_ledger.visible(module_idx, target, definition.name) -> next
+                name :: qualifier.map(fn(q) { "{q}::{definition.name}" }) ?? definition.name
+                base :: if qualifier != None -> Imports.qualify_imported_call_type(bundle, target, "", definition.base) else -> definition.base
+                &cx.type_names.insert(name)
+                cx.distinct_types[name] = (base, definition.derives.any(fn(row) { row.0 == Syntax.MARKER_NUMERIC }))
+                next
+            }
+            if item == .UnitFamily(family) {
+                dimension :: family.resolved_dimension
+                loop member in family.distinct_defs() {
+                    if qualifier != None && !bundle.name_ledger.visible(module_idx, target, member.name) -> next
+                    name :: qualifier.map(fn(q) { "{q}::{member.name}" }) ?? member.name
+                    &cx.type_names.insert(name)
+                    base :: if qualifier != None -> Imports.qualify_imported_call_type(bundle, target, "", member.base) else -> member.base
+                    cx.distinct_types[name] = (base, member.derives.any(fn(row) { row.0 == Syntax.MARKER_NUMERIC }))
+                    kind :: member.quantity.map(fn(row) { row.1 }) ?? QuantityKind.Linear
+                    source :: unit_family_member_for_type(family, member.name, kind) ?? next
+                    cx.unit_labels[name] = unit_label(family, source)
+                    if family.base != None || dimension != None -> cx.unit_facts[name] = unit_fact(family, source, dimension, kind)
+                }
+            }
+        }
+        if qualifier == .Val(q) {
+            loop item in module.items {
+                if item == .Impl(implementation) {
+                    qualified :: "{q}::{implementation.type_name}"
+                    if implementation.trait_name == Val(Syntax.TRAIT_DISPLAY) && cx.unit_labels.contains(qualified) -> &cx.display_types.insert(qualified)
+                }
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4244
+pub fn module_identity(bundle: ProgramBundle, module_idx: Int) -> String Never! {
+    bundle.name_ledger.module_identity(module_idx) ?? bundle.modules.get(module_idx).map(fn(module) { module.display }) ?? ""
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4257
+fn qualified_constant_key(module: String, name: String) -> String Never! { if module.is_empty() -> name else -> "{module}::{name}" }
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4268
+pub fn populate_cx_from_bundle(cx: &Cx, bundle: ProgramBundle, module_idx: Int) Never! {
+    cx.import_mods = Imports.import_mod_map(bundle, module_idx)
+    cx.module_alias = bundle.modules[module_idx].alias
+    cx.module_identity = module_identity(bundle, module_idx)
+    module :: cx.module_identity
+    cx.const_ref_keys = [:]
+    loop name in cx.const_types.keys() -> cx.const_ref_keys[name] = qualified_constant_key(module, name)
+    cx.const_ref_types = ~cx.const_types
+    source_path :: bundle.name_ledger.module_path(module_idx)
+    cx.checked_const_ref_sites = [:]
+    // GATE #4499: checked reference span and declaration tuple keys retain structural equality.
+    loop ((source, start, end), reference) in bundle.name_ledger.references() {
+        if Val(source) != source_path || reference.kind != "const" -> next
+        target_module :: (0..<bundle.modules.len()).find(fn(target_idx) { bundle.name_ledger.module_path(target_idx) == Val(reference.module_path) }) ?? next
+        declaration :: bundle.name_ledger.declarations().find(fn(declaration) { declaration.module == target_module && declaration.span == reference.def_span && declaration.kind == "const" }) ?? next
+        ty :: bundle.modules[target_module].items.find_map(fn(item) { if item == { .Const(candidate) -> if candidate.name == declaration.name -> TIR.source_constant_type(candidate) else -> None; else -> None } }) ?? next
+        cx.checked_const_ref_sites[(start, end)] = (qualified_constant_key(module_identity(bundle, target_module), declaration.name), ty)
+    }
+    loop alias in bundle.name_ledger.aliases() {
+        if alias.module != module_idx || cx.const_ref_keys.contains(alias.name) -> next
+        target_module :: alias.target_module ?? next
+        target :: bundle.modules.get(target_module) ?? next
+        path :: alias.target.strip_prefix(target.alias) ?? next
+        target_name :: path.strip_prefix('.') ?? next
+        definition :: bundle.name_ledger.declaration(target_module, target_name) ?? next
+        if definition.kind != "const" -> next
+        cx.const_ref_keys[alias.name] = qualified_constant_key(module_identity(bundle, target_module), definition.name)
+        if target.items.find_map(fn(item) { if item == { .Const(candidate) -> if candidate.name == definition.name -> TIR.source_constant_type(candidate) else -> None; else -> None } }) == .Val(ty) -> cx.const_ref_types[alias.name] = ty
+    }
+    cx.devtools_registry = ~bundle.devtools_registry
+    if bundle.name_ledger.module(module_idx) == .Val(module) { cx.devtools_package = module.package; cx.devtools_module = module.path }
+    else { cx.devtools_package = ""; cx.devtools_module = "" }
+    cx.policy_declarations = ~bundle.modules[module_idx].policy_declarations
+    populate_cx_module_facts(&cx, bundle, module_idx)
+    &cx.opaque_handles.clear()
+    loop fact in bundle.cffi.handle_facts -> &cx.opaque_handles.insert(fact.jet_name)
+    cx.core_source_modules = [:]
+    loop module in bundle.modules {
+        if CoreModuleExports.core_source_module_by_alias(module.alias) == .Val(source) -> cx.core_source_modules[source.module] = source.alias
+    }
+    if CoreSourceParts.core_private_source_part(CoreSourceParts.CORE_TEXT_STRING_OWNER) == .Val(part) {
+        if bundle.modules.any(fn(module) { module.alias == part.source.alias }) -> cx.core_source_modules[part.source.module] = part.source.alias
+    }
+    cx.core_source_sigs = Imports.core_source_sig_map(bundle)
+    cx.foreign_types = Imports.foreign_type_map(bundle, module_idx)
+    TIR.register_imported_struct_shapes(&cx, bundle, module_idx)
+    Imports.update_cloneability_with_foreign_types(&cx, bundle.modules[module_idx].items)
+    Imports.register_foreign_enum_variants(&cx, bundle, module_idx)
+    cx.reexport_calls = Imports.reexport_call_map(bundle, module_idx)
+    cx.import_sigs = Imports.import_sig_map(bundle, module_idx)
+    cx.import_rets = Imports.import_ret_map(bundle, module_idx)
+    cx.core_imports = Imports.core_import_map(bundle, module_idx)
+    register_bundle_reflect_paths(&cx, bundle, module_idx)
+    register_core_close_types(&cx, bundle)
+    register_core_import_surfaces(&cx)
+    cx.used_core = ~bundle.used_core
+    cx.foreign_undos = bundle_foreign_undos(bundle, module_idx)
+    cx.ffi_callback_fns = ~bundle.ffi_callback_fns
+    register_bundle_unit_metadata(&cx, bundle, module_idx)
+    (uinline, ufile) :: Imports.unqualified_import_maps(bundle, module_idx)
+    cx.unqualified_inline = uinline; cx.unqualified_file = ufile
+    (inline, file, names, reexports) :: Imports.inline_import_maps(bundle, module_idx)
+    cx.inline_unqualified = inline; cx.inline_unqualified_file = file; cx.inline_import_names = names; cx.inline_reexport_inline = reexports
+    (inline_core, reexport_core) :: Imports.inline_core_import_maps(bundle, module_idx)
+    cx.inline_core_imports = inline_core; cx.inline_reexport_core = reexport_core
+    cx.inline_foreign_imports = Imports.inline_foreign_import_maps(bundle, module_idx)
+    (inline_foreign_sigs, inline_foreign_rets) :: Imports.inline_foreign_import_signature_maps(bundle, module_idx)
+    cx.inline_foreign_sigs = inline_foreign_sigs; cx.inline_foreign_rets = inline_foreign_rets
+    cx.inline_reexport_foreign = Imports.inline_foreign_reexport_maps(bundle, module_idx)
+    preview_identity := "jet-ui-preview-build-v1{TEXT_NUL}".bytes().to_array()
+    bundle.build_facts.append_artifact_identity_bytes(&preview_identity)
+    loop value in [bundle.build_facts.profile, bundle.build_facts.stamp.toolchain, if bundle.build_facts.stamp.dirty -> "dirty" else -> "clean", bundle.build_facts.package_name, bundle.build_facts.package_version] {
+        &preview_identity.extend(U64{value.len()}.to_le_bytes())
+        &preview_identity.extend(value.bytes())
+    }
+    cx.preview_build_id = "sha256-{sha256_hex(preview_identity)}"
+    cx.preview_revision = bundle.build_facts.stamp.git.filter(fn(value) { !value.is_empty() }) ?? (if !bundle.build_facts.stamp.at.is_empty() -> bundle.build_facts.stamp.at else -> "{bundle.build_facts.package_name}:{bundle.build_facts.package_version}")
+    (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) :: Imports.inline_foreign_reexport_signature_maps(bundle, module_idx)
+    cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs; cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets
+    cx.package_edition = bundle.edition
+    cx.hardware_profile = Sema.target_hardware_profile(bundle)
+    cx.hardware_profile_id = Sema.target_hardware_profile_id(bundle)
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4494
+pub fn populate_cx_module_facts(cx: &Cx, bundle: ProgramBundle, module_idx: Int) Never! {
+    &cx.direct_c_functions.clear()
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item == .CModule(c_module) { loop function in c_module.functions -> &cx.direct_c_functions.insert("{mangle(module.alias)}::{function.name}") }
+        }
+    }
+    &cx.foreign_call_keys.clear()
+    loop (foreign_module_idx, foreign_module) in bundle.modules.enumerate() {
+        identity :: module_identity(bundle, foreign_module_idx)
+        rust_module :: mangle(foreign_module.alias)
+        loop item in foreign_module.items {
+            if item == {
+                .CModule(c_module) -> {
+                    loop function in c_module.functions {
+                        key :: "{identity}::{function.name}"
+                        cx.foreign_call_keys["{rust_module}::{function.name}"] = key
+                        if foreign_module_idx == module_idx -> cx.foreign_call_keys[function.name] = key
+                    }
+                }
+                .ExternRust(block) -> {
+                    loop function in block.functions {
+                        key :: "{identity}::{function.rust_path}"
+                        cx.foreign_call_keys["{rust_module}::{function.name}"] = key
+                        if foreign_module_idx == module_idx -> cx.foreign_call_keys[function.name] = key
+                    }
+                }
+                .Func(function) -> {
+                    if Sema.guest_import_function_signature(function) != None {
+                        wrapper :: Sema.guest_import_wrapper_name(foreign_module.alias, function.name)
+                        cx.foreign_call_keys["{rust_module}::{function.name}"] = wrapper
+                        if foreign_module_idx == module_idx -> cx.foreign_call_keys[function.name] = wrapper
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    &cx.local_type_names.retain(fn(name) { bundle.name_ledger.declaration(module_idx, name) != None })
+    register_imported_methods(&cx, bundle, module_idx)
+    cx.package_hardened = bundle.package_guarantees.harden
+    module :: bundle.modules.get(module_idx) ?? { cx.dependency_fenced = false; return }
+    dependency := String?{None}
+    best_depth := -1
+    loop (name, root) in bundle.dep_roots {
+        if !module.path.starts_with(root) -> next
+        depth :: root.components().count()
+        if depth > best_depth || (depth == best_depth && name > (dependency ?? "")) { best_depth = depth; dependency = Val(name) }
+    }
+    cx.dependency_fenced = dependency.map(fn(name) { bundle.package_guarantees.harden || bundle.package_guarantees.contain.contains(name) }) ?? false
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4581
+pub fn register_bundle_reflect_paths(cx: &Cx, bundle: ProgramBundle, module_idx: Int) Never! {
+    loop (name, path) in bundle.name_ledger.canonical_paths(module_idx) -> cx.reflect_paths[name] = path
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4592
+fn register_imported_methods(cx: &Cx, bundle: ProgramBundle, module_idx: Int) Never! {
+    imported := [Int:Bool]{}
+    loop import in bundle.modules[module_idx].imports {
+        if import.core_module_path() == .Val(core_module) {
+            if Imports.core_source_target(bundle, core_module) == .Val((_, target)) -> imported[target] = true
+            next
+        }
+        if bundle.name_ledger.effective_alias(module_idx, import.import_alias()) == None -> next
+        if bundle.name_ledger.import_target(module_idx, import.span) == .Val(target) -> imported[target] = true
+    }
+    loop (target, _) in Imports.selective_nominal_targets(bundle, module_idx) -> imported[target] = true
+    loop import in bundle.modules[module_idx].imports {
+        loop (_, target) in Imports.foreign_list_targets(bundle, module_idx, import) -> imported[target] = true
+    }
+    targets := imported.keys().to_array()
+    &targets.sort()
+    loop target in targets {
+        rust_mod :: mangle(bundle.modules[target].alias)
+        loop item in bundle.modules[target].items {
+            owner := ""
+            methods := [(Func, String?, Bool, Type?)]{}
+            if item == {
+                .Struct(definition) -> {
+                    owner = definition.name
+                    loop method in definition.methods -> &methods.push((method, None, false, None))
+                    loop implementation in definition.trait_impls {
+                        loop method in implementation.methods -> &methods.push((method, Val(implementation.trait_name), implementation.compiler_generated, implementation.operator_rhs))
+                    }
+                }
+                .Enum(definition) -> {
+                    owner = definition.name
+                    loop method in definition.methods -> &methods.push((method, None, false, None))
+                    loop implementation in definition.trait_impls {
+                        loop method in implementation.methods -> &methods.push((method, Val(implementation.trait_name), implementation.compiler_generated, implementation.operator_rhs))
+                    }
+                }
+                .Impl(definition) -> {
+                    owner = definition.type_name
+                    loop method in definition.methods -> &methods.push((method, definition.trait_name, false, definition.operator_rhs))
+                }
+                else -> next
+            }
+            owner_identity :: bundle.name_ledger.nominal_identity(target, owner).expect("name ledger must contain every loaded module")
+            owner_visible :: bundle.name_ledger.visible(module_idx, target, owner)
+            loop (method, trait_name, import_trait, operator_rhs) in methods {
+                method_visible :: bundle.name_ledger.visible(module_idx, target, "{owner}.{method.name}")
+                if !method_visible && !(trait_name != None && owner_visible) -> next
+                // GATE #4499: method keys are exact nominal/method tuples.
+                key :: (owner_identity, method.name)
+                if trait_name == .Val(trait_name) {
+                    &cx.trait_methods.insert(key)
+                    cx.trait_method_traits[key] = trait_name
+                    if import_trait -> &cx.imported_traits.insert((rust_mod, trait_name))
+                }
+                if method.params.find(fn(p) { p.name == Syntax.KW_SELF }) == .Val(self_param) {
+                    if !cx.method_self_convs.contains(key) -> cx.method_self_convs[key] = self_param.convention
+                }
+                imported_sig :: loop (convention, ty) in method_sig_params(method) -> (convention, Imports.qualify_imported_call_type(bundle, target, "", ty))
+                if !cx.method_sigs.contains(key) -> cx.method_sigs[key] = imported_sig
+                contract_key :: "{owner}::{method.name}"
+                if !cx.contract_sigs.contains(contract_key) -> cx.contract_sigs[contract_key] = (~method.pre, ~method.post)
+                if !cx.fn_param_names.contains(contract_key) -> cx.fn_param_names[contract_key] = loop param in method.params -> param.name
+                imported_ret :: method.return_type.map(fn(ty) { Imports.qualify_imported_call_type(bundle, target, "", ty) })
+                imported_operator_rhs :: operator_rhs.map(fn(rhs) { Imports.qualify_imported_call_type(bundle, target, "", rhs) })
+                if !cx.method_rets.contains(key) -> cx.method_rets[key] = imported_ret
+                if trait_name == .Val(trait_name) -> register_operator_method(&cx, owner_identity, method.name, trait_name, imported_operator_rhs, imported_sig, imported_ret)
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4765
+fn register_core_close_types(cx: &Cx, bundle: ProgramBundle) Never! {
+    loop (module, names) in [("core.files", ["FileReader", "FileWriter", "FileLock", "TempDir", "TempFile"]), ("core.net", ["TcpStream", "TCPStream", "UnixStream", "TLSStream"]), (Syntax.CORE_MEM_MODULE, ["Arena", "Bump", "Pool", "Fixed"]), ("core.db", ["DBConnection", "DBScope", "DBPool", "DBLease"])] {
+        if !cx.core_imports.values().any(fn(import) { import == module }) -> next
+        loop name in names -> &cx.close_types.insert(name)
+        if CoreModuleExports.core_source_module(module) == .Val(source) {
+            if bundle.modules.enumerate().find(fn(row) { row.1.alias == source.alias }) == .Val((index, _)) {
+                loop name in names { if bundle.name_ledger.nominal_identity(index, name) == .Val(identity) -> &cx.close_types.insert(identity) }
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4789
+pub fn register_core_import_surfaces(cx: &Cx) Never! {
+    if cx.core_imports.values().any(fn(module) { module == "core.service" }) {
+        zero :: Span.new(0, 0)
+        variants :: loop name in ["Pending", "Accepted", "Delivering", "Delivered", "DeadLettered", "Cancelled"] -> (name, VariantPayload.Unit)
+        loop (variant, _) in variants -> cx.variant_owner[variant] = "DeliveryState"
+        cx.enum_variants["DeliveryState"] = variants
+        loop name in ["Delivery", "DeliveryReceipt", "DeliveryEvent"] -> &cx.cloneable.insert(name)
+        workflow_outcomes :: [("Finished", VariantPayload.Unit), ("Panicked", VariantPayload.Single(Type.String, zero)), ("Cancelled", VariantPayload.Unit), ("DeadlineBlown", VariantPayload.Unit)]
+        loop (variant, _) in workflow_outcomes -> cx.variant_owner[variant] = "TaskOutcome"
+        cx.enum_variants["TaskOutcome"] = workflow_outcomes
+        &cx.cloneable.insert("TaskOutcome")
+        workflow_statuses :: loop variant in ["Running", "Paused", "CancelRequested"] -> (variant, VariantPayload.Unit)
+        loop (variant, _) in workflow_statuses -> cx.variant_owner[variant] = "TaskStatus"
+        cx.enum_variants["TaskStatus"] = workflow_statuses
+        &cx.cloneable.insert("TaskStatus")
+        error_variants :: loop name in ["Full", "Ambiguous", "Unknown", "NotStarted", "Policy", "Unavailable", "Partitioned", "Revoked", "Stale", "Expired"] -> (name, VariantPayload.Single(Type.String, zero))
+        loop (variant, _) in error_variants -> cx.variant_owner[variant] = "ServiceError"
+        cx.enum_variants["ServiceError"] = error_variants
+        &cx.cloneable.insert("ServiceError")
+    }
+    if cx.core_imports.values().any(fn(module) { module == "core.auth" }) {
+        zero :: Span.new(0, 0)
+        field :: fn(name: String, ty: Type) -> VariantField Never! { VariantField{name: name, name_span: zero, ty: ty, ty_span: zero} }
+        variants := [("InvalidSignature", VariantPayload.Unit), ("WeakKey", VariantPayload.Unit), ("TokenExpired", VariantPayload.Unit)]
+        loop name in ["MalformedToken", "UnsupportedToken", "MissingClaim", "DecodeError"] -> &variants.push((name, VariantPayload.Single(Type.String, zero)))
+        &variants.push(("WrongAudience", VariantPayload.Named([field("expected", Type.String), field("actual", Type.String)])))
+        &variants.push(("WrongIssuer", VariantPayload.Named([field("expected", Type.String), field("actual", Type.Option(Type.String))])))
+        &variants.push(("TokenNotYetValid", VariantPayload.Unit))
+        loop (variant, _) in variants -> cx.variant_owner[variant] = "AuthError"
+        cx.enum_variants["AuthError"] = variants
+        &cx.cloneable.insert("AuthError")
+    }
+    if cx.core_imports.values().any(fn(module) { module == "core.net.tls" }) {
+        zero :: Span.new(0, 0)
+        versions :: [("TLS12", VariantPayload.Unit), ("TLS13", VariantPayload.Unit)]
+        loop (variant, _) in versions -> cx.variant_owner[variant] = "TLSVersion"
+        cx.enum_variants["TLSVersion"] = versions
+        &cx.cloneable.insert("TLSVersion")
+        roots :: Type.Named("TLSRootCertificates")
+        trust :: [("System", VariantPayload.Unit), ("SystemPlus", VariantPayload.Single(roots, zero)), ("CustomOnly", VariantPayload.Single(roots, zero))]
+        loop (variant, _) in trust -> cx.variant_owner[variant] = "TLSClientTrust"
+        cx.enum_variants["TLSClientTrust"] = trust
+        &cx.cloneable.insert("TLSClientTrust")
+    }
+    if cx.core_imports.values().any(fn(module) { module == "core.data" }) {
+        variants :: loop variant in ["File", "URL", "Database", "Value"] -> (variant, VariantPayload.Unit)
+        loop (variant, _) in variants -> cx.variant_owner[variant] = "DataLoaderKind"
+        cx.enum_variants["DataLoaderKind"] = variants
+        &cx.cloneable.insert("DataLoaderKind")
+    }
+    if cx.core_imports.values().any(fn(module) { module == Syntax.WATCHER_MODULE }) {
+        loop (name, variants) in [("WatchDomain", ["File", "Process", "Port"]), ("WatchKind", ["Created", "Modified", "Removed", "Error", "Exited", "Ready"])] {
+            loop variant in variants -> cx.variant_owner[variant] = name
+            cx.enum_variants[name] = loop variant in variants -> (variant, VariantPayload.Unit)
+            &cx.cloneable.insert(name)
+        }
+    }
+    if !cx.core_imports.values().any(fn(module) { module == Syntax.CORE_EMAIL_MODULE }) && cx.core_source_modules.get(Syntax.CORE_EMAIL_MODULE) != Val(cx.module_alias) -> return
+    zero :: Span.new(0, 0)
+    loop (name, variants) in [
+        ("SMTPSecurity", [("StartTLS", VariantPayload.Unit), ("TLS", VariantPayload.Unit)]),
+        ("RecipientPolicy", [("RequireAll", VariantPayload.Unit), ("DeliverAccepted", VariantPayload.Unit)]),
+        ("SMTPAuth", [("None", VariantPayload.Unit), ("Password", VariantPayload.Named([
+            VariantField{name: "username", name_span: zero, ty: Type.String, ty_span: zero},
+            VariantField{name: "password", name_span: zero, ty: Type.Named("Secret"), ty_span: zero}
+        ]))]),
+        ("TLSTrust", [("System", VariantPayload.Unit), ("SystemPlusCa", VariantPayload.Named([
+            VariantField{name: "pem", name_span: zero, ty: Type.List(Type.IntN{signed: false, bits: 8}), ty_span: zero}
+        ]))])
+    ] {
+        loop (variant, _) in variants -> cx.variant_owner[variant] = name
+        cx.enum_variants[name] = variants
+        &cx.cloneable.insert(name)
+    }
+    error_fields :: fn() -> [VariantField] Never! {
+        loop (field, ty) in [("operation", Type.String), ("server", Type.Option(Type.String)), ("code", Type.Option(Type.Int)), ("reason", Type.String)] -> VariantField{name: field, name_span: zero, ty: ty, ty_span: zero}
+    }
+    errors :: loop variant in ["Configuration", "DNS", "Connect", "TLS", "Auth", "Protocol", "Rejected", "Transient", "TimedOut", "Cancelled", "DeliveryUnknown"] -> (variant, VariantPayload.Named(error_fields()))
+    loop (variant, _) in errors -> cx.variant_owner[variant] = "EmailError"
+    cx.enum_variants["EmailError"] = errors
+    &cx.cloneable.insert("EmailError")
+    cx.struct_fields["Envelope"] = [("from", Type.Named("Address")), ("recipients", Type.List(Type.Named("Address")))]
+    cx.struct_fields["RecipientReport"] = [("address", Type.Named("Address")), ("accepted", Type.Bool), ("code", Type.Int), ("message", Type.String)]
+    cx.struct_fields["SendReport"] = [("server", Type.String), ("accepted", Type.List(Type.Named("RecipientReport"))), ("rejected", Type.List(Type.Named("RecipientReport"))), ("response_code", Type.Int), ("response", Type.String), ("accepted_at", Type.String)]
+    cx.struct_fields["Limits"] = [("max_reply_line_bytes", Type.Int), ("max_reply_lines", Type.Int), ("max_capabilities", Type.Int), ("max_recipients", Type.Int), ("max_message_bytes", Type.Int), ("max_auth_challenge_bytes", Type.Int)]
+    cx.struct_fields["SMTPConfig"] = [("host", Type.String), ("port", Type.Int), ("security", Type.Named("SMTPSecurity")), ("auth", Type.Named("SMTPAuth")), ("recipient_policy", Type.Named("RecipientPolicy")), ("trust", Type.Named("TLSTrust")), ("limits", Type.Named("Limits")), ("dkim", Type.Option(Type.Named("DKIMConfig")))]
+    cx.struct_fields["DKIMConfig"] = [("domain", Type.String), ("selector", Type.String), ("private_key", Type.Named("Secret")), ("signed_headers", Type.List(Type.String))]
+    loop name in ["Envelope", "RecipientReport", "SendReport", "Limits"] -> &cx.cloneable.insert(name)
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:5193
+pub fn memo_facts_for_struct(structure: StructDef) -> ([String:Type], [String:[String:Bool]]) Never! {
+    computed := [String:Bool]{}
+    loop field in structure.fields { if field.computed != None -> computed[field.name] = true }
+    direct := [String:[String:Bool]]{}
+    loop field in structure.fields {
+        expression :: field.computed ?? next
+        dependencies := [String:Bool]{}
+        expression.for_each_expr(fn(node) {
+            if node == .Field(receiver, name, _) {
+                if receiver == .Ident(value, _) && value == Syntax.KW_SELF -> dependencies[name] = true
+            }
+        })
+        direct[field.name] = dependencies
+    }
+    memo_fields := [String:Type]{}
+    loop field in structure.fields {
+        if field.computed != None && field.serde_markers.any(fn(marker) { marker.name == Syntax.MARKER_MEMO }) -> memo_fields[field.name] = field.ty
+    }
+    dependencies := [String:[String:Bool]]{}
+    loop field in structure.fields {
+        if field.computed != None -> next
+        source :: field.name
+        loop memo in memo_fields.keys() {
+            visiting := [String:Bool]{}
+            if depends_on(memo, source, direct, computed, &visiting) {
+                if !dependencies.contains(source) -> dependencies[source] = [:]
+                dependencies[source][memo] = true
+            }
+        }
+    }
+    (memo_fields, dependencies)
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:5218
+fn depends_on(field: String, source: String, direct: [String:[String:Bool]], computed: [String:Bool], visiting: &[String:Bool]) -> Bool Never! {
+    if visiting.contains(field) -> return false
+    visiting[field] = true
+    dependencies :: direct.get(field) ?? return false
+    loop dependency in dependencies.keys() {
+        if dependency == source || (computed.contains(dependency) && depends_on(dependency, source, direct, computed, &visiting)) -> return true
+    }
+    // Keep visited marked: reachability revisits add nothing.
+    false
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:5270
+fn receipt_schema_digest(type_name: String, fields: [(String, Type)]) -> String Never! {
+    schema := "{type_name}{TEXT_NUL}"
+    loop (name, ty) in fields -> &schema.push_str("{name}:{ty.name()};")
+    sha256_hex(schema.bytes())
+}

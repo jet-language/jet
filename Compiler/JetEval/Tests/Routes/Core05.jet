@@ -1,0 +1,19 @@
+use jet_foundation.AST.[CtValue, Type]
+use jet_foundation.Diagnostics.Span
+use jet_comptime.Comptime.Methods.CoreCalls.PlainCalls.[apply_duration_in, apply_core_call_without_ambient, apply_core_pure_call]
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:2
+#Test("duration_in_rejects_wrong_arity") {
+    error := apply_duration_in(&[], Span.default()).unwrap_err()
+    assert(error.what.contains("core.handle.duration.in expects a Duration and a DurationUnit"))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:33
+#Test("pure_call_declines_unregistered_row") {
+    assert(apply_core_pure_call("unknown.module", "unknown_method", &[], Span.default()).is_none())
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:178
+#Test("plain_keep_preserves_value") {
+    value := CtValue.List([CtValue.Int(3), CtValue.Str("kept")])
+    result := apply_core_call_without_ambient("core.prelude", "keep", [value.clone()], Span.default(), false).unwrap()
+    assert_eq(result, value)
+}

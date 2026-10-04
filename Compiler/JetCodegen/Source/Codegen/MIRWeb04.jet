@@ -1,1876 +1,1151 @@
-// PORT-PENDING 0464 crates-jet-codegen-src-codegen-mirweb-slice-5241: crates/jet-codegen/src/Codegen/MIRWeb.rs:5241-7112
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn js_call_expression(
-//RS     program: &MirProgram,
-//RS     caller: &MirFunction,
-//RS     callee: &MirCallee,
-//RS     args: &[jet_foundation::MIR::MirCallArg],
-//RS     type_args: &[MirType],
-//RS     history_provenance: &HistoryProvenance,
-//RS ) -> Result<String, MirWebError> {
-//RS     validate_type_args(program, type_args)?;
-//RS     match callee {
-//RS         MirCallee::User(id) => {
-//RS             let Some(function) = program.functions.iter().find(|function| function.id == *id) else {
-//RS                 return Err(MirWebError::MissingUserFunction { function: id.0 });
-//RS             };
-//RS             let values = js_call_values(program, caller, args, !is_wasm_export(function))?;
-//RS             if is_wasm_export(function) {
-//RS                 return js_wasm_export_call(function, caller, args, &values);
-//RS             }
-//RS             if !function.target_applicability.web || !function_in_bucket(function, WebBucket::JS) {
-//RS                 return Err(MirWebError::MissingUserFunction { function: id.0 });
-//RS             }
-//RS             let call = format!("jet_fn_{}([], [{}])", id.0, values.join(", "));
-//RS             Ok(if function.generator.is_none() && web_function_is_async(program, *id) {
-//RS                 format!("await {call}")
-//RS             } else {
-//RS                 call
-//RS             })
-//RS         }
-//RS         MirCallee::Associated { function: id, owner } => {
-//RS             validate_type_args(program, std::slice::from_ref(owner))?;
-//RS             let Some(function) = program.functions.iter().find(|function| function.id == *id) else {
-//RS                 return Err(MirWebError::MissingUserFunction { function: id.0 });
-//RS             };
-//RS             let values = js_call_values(program, caller, args, !is_wasm_export(function))?;
-//RS             if is_wasm_export(function) {
-//RS                 return js_wasm_export_call(function, caller, args, &values);
-//RS             }
-//RS             if !function.target_applicability.web || !function_in_bucket(function, WebBucket::JS) {
-//RS                 return Err(MirWebError::MissingUserFunction { function: id.0 });
-//RS             }
-//RS             match &function.form {
-//RS                 MirFunctionForm::Method {
-//RS                     owner: declared_owner,
-//RS                     self_access: None,
-//RS                 } if declared_owner.same_checked_type(owner) => {}
-//RS                 MirFunctionForm::TraitMethod {
-//RS                     owner: declared_owner,
-//RS                     self_access: None,
-//RS                     trait_ref,
-//RS                     ..
-//RS                 } if declared_owner.same_checked_type(owner)
-//RS                     && program.traits.iter().any(|row| row.id == trait_ref.id) => {}
-//RS                 MirFunctionForm::Method { .. } | MirFunctionForm::TraitMethod { .. } => {
-//RS                     return Err(MirWebError::InvalidMir {
-//RS                         message: format!(
-//RS                             "MIR associated call {} does not target a declared static method",
-//RS                             id.0
-//RS                         ),
-//RS                     });
-//RS                 }
-//RS                 MirFunctionForm::TopLevel => {
-//RS                     return Err(MirWebError::InvalidMir {
-//RS                         message: format!(
-//RS                             "MIR associated call {} does not target an inherent or trait method",
-//RS                             id.0
-//RS                         ),
-//RS                     });
-//RS                 }
-//RS             }
-//RS             let call = format!("jet_fn_{}([], [{}])", id.0, values.join(", "));
-//RS             Ok(if function.generator.is_none() && web_function_is_async(program, *id) {
-//RS                 format!("await {call}")
-//RS             } else {
-//RS                 call
-//RS             })
-//RS         }
-//RS         MirCallee::Method { function: id, owner } => {
-//RS             validate_type_args(program, std::slice::from_ref(owner))?;
-//RS             let Some(function) = program.functions.iter().find(|function| function.id == *id) else {
-//RS                 return Err(MirWebError::MissingUserFunction { function: id.0 });
-//RS             };
-//RS             let values = js_call_values(program, caller, args, !is_wasm_export(function))?;
-//RS             if is_wasm_export(function) {
-//RS                 return js_wasm_export_call(function, caller, args, &values);
-//RS             }
-//RS             if !function.target_applicability.web || !function_in_bucket(function, WebBucket::JS) {
-//RS                 return Err(MirWebError::MissingUserFunction { function: id.0 });
-//RS             }
-//RS             let expected_access = match &function.form {
-//RS                 MirFunctionForm::Method {
-//RS                     owner: declared_owner,
-//RS                     self_access: Some(access),
-//RS                 } if declared_owner.same_checked_type(owner) => *access,
-//RS                 MirFunctionForm::TraitMethod {
-//RS                     owner: declared_owner,
-//RS                     self_access: Some(access),
-//RS                     trait_ref,
-//RS                     ..
-//RS                 } if declared_owner.same_checked_type(owner)
-//RS                     && program.traits.iter().any(|row| row.id == trait_ref.id) => *access,
-//RS                 MirFunctionForm::Method { .. } | MirFunctionForm::TraitMethod { .. } => {
-//RS                     return Err(MirWebError::InvalidMir {
-//RS                         message: format!(
-//RS                             "MIR method call {} owner/access disagrees with its declaration",
-//RS                             id.0
-//RS                         ),
-//RS                     });
-//RS                 }
-//RS                 MirFunctionForm::TopLevel => {
-//RS                     return Err(MirWebError::InvalidMir {
-//RS                         message: format!(
-//RS                             "MIR method call {} does not target an inherent or trait method",
-//RS                             id.0
-//RS                         ),
-//RS                     });
-//RS                 }
-//RS             };
-//RS             let Some(receiver) = args.first() else {
-//RS                 return Err(MirWebError::InvalidMir {
-//RS                     message: format!("MIR method call {} has no receiver argument", id.0),
-//RS                 });
-//RS             };
-//RS             if receiver.access != expected_access {
-//RS                 return Err(MirWebError::InvalidMir {
-//RS                     message: format!(
-//RS                         "MIR method call {} receiver access {:?} disagrees with declaration {:?}",
-//RS                         id.0, receiver.access, expected_access
-//RS                     ),
-//RS                 });
-//RS             }
-//RS             let call = format!("jet_fn_{}([], [{}])", id.0, values.join(", "));
-//RS             Ok(if function.generator.is_none() && web_function_is_async(program, *id) {
-//RS                 format!("await {call}")
-//RS             } else {
-//RS                 call
-//RS             })
-//RS         }
-//RS         MirCallee::TraitMethod { method, trait_ref, receiver: _receiver } => {
-//RS             let values = js_call_values(program, caller, args, true)?;
-//RS             let Some(receiver_value) = values.first() else {
-//RS                 return Err(MirWebError::InvalidMir {
-//RS                     message: format!("MIR trait method call {} has no receiver argument", method.0),
-//RS                 });
-//RS             };
-//RS             let (targets, default) = web_trait_method_targets(program, *method, trait_ref)?;
-//RS             let mut receiver_args = values.clone();
-//RS             receiver_args[0] = "__jet_receiver".to_string();
-//RS             let rendered_args = receiver_args.join(", ");
-//RS             let mut dispatch = if let Some(default_id) = default {
-//RS                 let Some(function) = program.functions.iter().find(|function| function.id == default_id) else {
-//RS                     return Err(MirWebError::MissingUserFunction { function: default_id.0 });
-//RS                 };
-//RS                 if !function.target_applicability.web || !function_in_bucket(function, WebBucket::JS) {
-//RS                     return Err(MirWebError::MissingUserFunction { function: default_id.0 });
-//RS                 }
-//RS                 format!("jet_fn_{}([], [{}])", default_id.0, rendered_args)
-//RS             } else {
-//RS                 format!(
-//RS                     "(() => {{ throw new Error({}) }})()",
-//RS                     js_string(&format!("no implementation for trait method {}", method.0))
-//RS                 )
-//RS             };
-//RS             let mut is_async = default
-//RS                 .and_then(|id| program.functions.iter().find(|function| function.id == id))
-//RS                 .is_some_and(|function| {
-//RS                     function.generator.is_none() && web_function_is_async(program, function.id)
-//RS                 });
-//RS             for (type_id, function_id) in targets.iter().rev() {
-//RS                 let Some(function) = program.functions.iter().find(|function| function.id == *function_id) else {
-//RS                     return Err(MirWebError::MissingUserFunction { function: function_id.0 });
-//RS                 };
-//RS                 if !function.target_applicability.web || !function_in_bucket(function, WebBucket::JS) {
-//RS                     return Err(MirWebError::MissingUserFunction { function: function_id.0 });
-//RS                 }
-//RS                 is_async |= function.generator.is_none() && web_function_is_async(program, *function_id);
-//RS                 let call = format!("jet_fn_{}([], [{}])", function_id.0, rendered_args);
-//RS                 dispatch = format!(
-//RS                     "__jet_receiver?.__jet_type === {} ? {} : {}",
-//RS                     js_string(&type_id.0.to_string()),
-//RS                     call,
-//RS                     dispatch
-//RS                 );
-//RS             }
-//RS             let expression = format!("((__jet_receiver) => ({}))({})", dispatch, receiver_value);
-//RS             Ok(if caller.generator.is_none() && is_async {
-//RS                 format!("await ({expression})")
-//RS             } else {
-//RS                 expression
-//RS             })
-//RS         }
-//RS 
-//RS         MirCallee::Core(id) => {
-//RS             let expression = js_core_call_expression(
-//RS                 program,
-//RS                 caller,
-//RS                 *id,
-//RS                 None,
-//RS                 args,
-//RS                 type_args,
-//RS                 history_provenance,
-//RS             )?;
-//RS             Ok(expression)
-//RS         }
-//RS         MirCallee::Prelude(id) => {
-//RS             let values = js_call_values(program, caller, args, false)?;
-//RS             js_prelude_call_expression(program, *id, &values)
-//RS         }
-//RS         MirCallee::Foreign(id) => {
-//RS             let Some(foreign) = program.foreign.iter().find(|foreign| foreign.id == *id) else {
-//RS                 return Err(MirWebError::InvalidMir {
-//RS                     message: format!("MIR foreign function {} is missing", id.0),
-//RS                 });
-//RS             };
-//RS             let abi = foreign_abi_name(&foreign.foreign_abi);
-//RS             Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "MIR Web JS-partition call references foreign row {} at {:?} \
-//RS                      (symbol `{}` path `{}` ABI `{}` language {:?} applicability \
-//RS                      rust_aot={} cranelift={} interpreter={} web={}); no checked JavaScript linkage exists",
-//RS                     foreign.id.0,
-//RS                     foreign.span,
-//RS                     foreign.symbol,
-//RS                     foreign.path,
-//RS                     abi,
-//RS                     foreign.foreign_language,
-//RS                     foreign.target_applicability.rust_aot,
-//RS                     foreign.target_applicability.cranelift,
-//RS                     foreign.target_applicability.interpreter,
-//RS                     foreign.target_applicability.web,
-//RS                 ),
-//RS             })
-//RS         }
-//RS         MirCallee::Indirect(id) => Ok(format!(
-//RS             "__jet_values.get({})({})",
-//RS             id.0,
-//RS             js_call_values(program, caller, args, true)?.join(", ")
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn js_closure_expression(
-//RS     program: &MirProgram,
-//RS     enclosing: &MirFunction,
-//RS     function_id: jet_foundation::MIR::MirFunctionId,
-//RS     captures: &[MirCaptureOperand],
-//RS     history_provenance: &HistoryProvenance,
-//RS ) -> Result<String, MirWebError> {
-//RS     let Some(function) = program.functions.iter().find(|function| function.id == function_id) else {
-//RS         return Err(MirWebError::MissingUserFunction { function: function_id.0 });
-//RS     };
-//RS     if !function.target_applicability.web || !function_in_bucket(function, WebBucket::JS) {
-//RS         return Err(MirWebError::MissingUserFunction { function: function_id.0 });
-//RS     }
-//RS     if function.capture_params.len() != captures.len() {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "MIR closure for function {} has {} captures, expected {}",
-//RS                 function_id.0,
-//RS                 captures.len(),
-//RS                 function.capture_params.len()
-//RS             ),
-//RS         });
-//RS     }
-//RS     validate_capture_params(program, function)?;
-//RS     let values = captures
-//RS         .iter()
-//RS         .zip(&function.capture_params)
-//RS         .enumerate()
-//RS         .map(|(slot, (operand, capture))| {
-//RS             match (operand, capture.access) {
-//RS                 (MirCaptureOperand::Value(value), MirAccess::Move) => {
-//RS                     Ok(js_move_value_expression(*value))
-//RS                 }
-//RS                 (MirCaptureOperand::Value(value), MirAccess::Read | MirAccess::Write)
-//RS                     if matches!(capture.ownership.mode, MirOwnershipMode::Owned) =>
-//RS                 {
-//RS                     Ok(format!("{{ value: {} }}", js_move_value_expression(*value)))
-//RS                 }
-//RS                 (MirCaptureOperand::Place(place), MirAccess::Read | MirAccess::Write) => {
-//RS                     js_place_cell_expression(program, enclosing, *place)
-//RS                 }
-//RS                 (MirCaptureOperand::Value(_), access) => Err(MirWebError::InvalidMir {
-//RS                     message: format!(
-//RS                         "MIR closure capture slot {} passes a value for {:?} access",
-//RS                         slot, access
-//RS                     ),
-//RS                 }),
-//RS                 (MirCaptureOperand::Place(_), MirAccess::Move) => Err(MirWebError::InvalidMir {
-//RS                     message: format!(
-//RS                         "MIR closure capture slot {} passes a place for Move access",
-//RS                         slot
-//RS                     ),
-//RS                 }),
-//RS             }
-//RS         })
-//RS         .collect::<Result<Vec<_>, MirWebError>>()?
-//RS         .join(", ");
-//RS     let mut schemas = BTreeMap::new();
-//RS     let mut capture_values = Vec::new();
-//RS     for capture in &function.capture_params {
-//RS         let schema = js_history_capture_schema(program, &capture.ty, &BTreeMap::new(), &mut schemas);
-//RS         let slot = capture.slot;
-//RS         let value = match capture.access {
-//RS             MirAccess::Read | MirAccess::Write => format!("captured[{slot}].value"),
-//RS             MirAccess::Move => format!("captured[{slot}]"),
-//RS         };
-//RS         capture_values.push(format!(
-//RS             "jet_testing_history_web_capture({value}, {}, types, active)",
-//RS             js_string(&schema),
-//RS         ));
-//RS     }
-//RS     let schemas = schemas.iter().map(|(key, schema)| {
-//RS         format!("[{}, {schema}]", js_string(key))
-//RS     }).collect::<Vec<_>>().join(", ");
-//RS     // The selected artifact binds the checked function table. This is the
-//RS     // function actually instantiated here, never a guessed factory return.
-//RS     let identity = sha256_hex(format!(
-//RS         "{}:function:{}", history_provenance.source, function_id.0
-//RS     ).as_bytes());
-//RS     Ok(format!(
-//RS         "((captured, types) => jet_testing_history_web_callable((...args) => jet_fn_{}(captured, args), {}, active => [{}]))([{}], new Map([{}]))",
-//RS         function_id.0, js_string(&identity), capture_values.join(", "), values, schemas
-//RS     ))
-//RS }
-//RS 
-//RS fn js_prelude_call_expression(
-//RS     program: &MirProgram,
-//RS     id: MirPreludeCallId,
-//RS     args: &[String],
-//RS ) -> Result<String, MirWebError> {
-//RS     let Some(row) = program.prelude_calls.iter().find(|call| call.id == id) else {
-//RS         return Err(MirWebError::MissingPreludeCall { call: id.0 });
-//RS     };
-//RS     if matches!(
-//RS         &row.symbol,
-//RS         MirSymbol::Prelude(name) if name == "jet_transaction_commit"
-//RS     ) {
-//RS         let Some(transaction) = args.first() else {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: "Web transaction commit is missing its handle".to_string(),
-//RS             });
-//RS         };
-//RS         return Ok(format!("await ({transaction}).commit()"));
-//RS     }
-//RS     let symbol = js_symbol_expression(&row.symbol)?;
-//RS     Ok(format!("{symbol}({})", args.join(", ")))
-//RS }
-//RS 
-//RS fn web_data_symbol_name(name: &str) -> bool {
-//RS     matches!(
-//RS         name,
-//RS         "jet_data_count"
-//RS             | "jet_data_query"
-//RS             | "jet_data_track"
-//RS             | "jet_data_query_tracked"
-//RS             | "jet_data_track_insert"
-//RS             | "jet_data_track_replace"
-//RS             | "jet_data_track_remove"
-//RS             | "jet_data_load"
-//RS             | "jet_data_loader_load"
-//RS             | "jet_data_loader_load_default"
-//RS             | "jet_data_loader_file"
-//RS             | "jet_data_loader_file_member"
-//RS             | "jet_data_loader_url"
-//RS             | "jet_data_loader_database"
-//RS             | "jet_data_loader_value"
-//RS             | "jet_data_loader_snapshot"
-//RS             | "jet_data_loader_bind"
-//RS             | "jet_data_loader_bind_text"
-//RS             | "jet_data_loader_cancel"
-//RS             | "jet_data_loader_offline"
-//RS             | "jet_data_loader_invalidate"
-//RS             | "jet_data_loader_needs_refresh"
-//RS             | "jet_data_loader_ready"
-//RS             | "jet_data_loader_status"
-//RS             | "jet_data_loader_source_identity"
-//RS             | "jet_data_loader_authority_of"
-//RS             | "jet_data_snapshot_reusable"
-//RS             | "jet_data_loader_stream"
-//RS             | "jet_data_stream_next"
-//RS             | "jet_data_stream_collect"
-//RS             | "jet_data_stream_cancel"
-//RS             | "jet_data_query_plan"
-//RS             | "jet_data_query_collect"
-//RS             | "jet_data_query_sort_by"
-//RS             | "jet_data_left_join_checked_default"
-//RS             | "jet_data_inner_join_checked_default"
-//RS             | "jet_data_query_filter"
-//RS             | "jet_data_query_map"
-//RS             | "jet_data_query_min"
-//RS             | "jet_data_query_max"
-//RS             | "jet_data_query_inner_join"
-//RS             | "jet_data_query_left_join"
-//RS             | "jet_data_query_group_by"
-//RS             | "jet_data_query_watch"
-//RS             | "jet_data_watch_get"
-//RS             | "jet_data_watch_status"
-//RS             | "jet_data_watch_cancel"
-//RS             | "jet_data_group_count_query"
-//RS             | "jet_data_group_sum_query"
-//RS             | "jet_data_group_mean_query"
-//RS             | "jet_data_status"
-//RS             | "jet_data_require_bridge"
-//RS             | "jet_data_csv_reader"
-//RS             | "jet_data_json_reader"
-//RS     ) || name.starts_with("jet_data.loader.")
-//RS }
-//RS 
-//RS fn js_data_call_expression(
-//RS     program: &MirProgram,
-//RS     symbol: &MirSymbol,
-//RS     values: &[String],
-//RS     type_args: &[MirType],
-//RS ) -> Result<String, MirWebError> {
-//RS     let name = match symbol {
-//RS         MirSymbol::Prelude(name) => name,
-//RS         MirSymbol::Runtime(_) => {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: "Web data bridge requires a Prelude symbol".to_string(),
-//RS             })
-//RS         }
-//RS     };
-//RS     if !web_data_symbol_name(name) {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!("MIR Web data symbol {name:?} has no data bridge binding"),
-//RS         });
-//RS     }
-//RS     let local = js_symbol_expression(symbol)?;
-//RS     let descriptors = type_args
-//RS         .iter()
-//RS         .map(|ty| js_string(&type_descriptor(ty)))
-//RS         .collect::<Vec<_>>()
-//RS         .join(", ");
-//RS     let mut args = values.join(", ");
-//RS     if !args.is_empty() {
-//RS         args.push_str(", ");
-//RS     }
-//RS     args.push('[');
-//RS     args.push_str(&descriptors);
-//RS     args.push(']');
-//RS     let _ = program;
-//RS     Ok(format!("{local}({args})"))
-//RS }
-//RS 
-//RS 
-//RS fn js_world_effect_guard(
-//RS     core: &jet_foundation::MIR::MirCoreCall,
-//RS ) -> Option<String> {
-//RS     let effect = core.effect?;
-//RS     let controlled = match effect {
-//RS         jet_foundation::Authority::Effect::Time => {
-//RS             core.module == "core.time" && core.member != "start"
-//RS         }
-//RS         jet_foundation::Authority::Effect::Rand => core.module != "core.crypto.random",
-//RS         _ => false,
-//RS     };
-//RS     if controlled {
-//RS         None
-//RS     } else {
-//RS         Some(format!(
-//RS             "jet_world_reject_uncontrolled_effect({})",
-//RS             js_string(effect.name())
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS fn js_guard_core_expression(
-//RS     core: &jet_foundation::MIR::MirCoreCall,
-//RS     expression: String,
-//RS ) -> String {
-//RS     match js_world_effect_guard(core) {
-//RS         Some(guard) => format!("({guard}, {expression})"),
-//RS         None => expression,
-//RS     }
-//RS }
-//RS 
-//RS fn js_history_absent_schema(schemas: &mut BTreeMap<String, String>) -> String {
-//RS     let key = "jet.absent".to_string();
-//RS     schemas
-//RS         .entry(key.clone())
-//RS         .or_insert_with(|| format!("{{ type: {}, kind: \"absent\" }}", js_string(&key)));
-//RS     key
-//RS }
-//RS 
-//RS // Schemas describe checked types only. Values are read from the selected
-//RS // closure's live environment by TestingHistory.js at campaign invocation.
-//RS fn js_history_capture_schema(
-//RS     program: &MirProgram,
-//RS     ty: &MirType,
-//RS     bindings: &BTreeMap<String, String>,
-//RS     schemas: &mut BTreeMap<String, String>,
-//RS ) -> String {
-//RS     if let MirTypeKind::Apply { name, args } = ty.kind() {
-//RS         if args.is_empty() {
-//RS             if let Some(schema) = bindings.get(&name.name) {
-//RS                 return schema.clone();
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut key = type_descriptor(ty);
-//RS     if let MirTypeKind::Tagged { marker, .. } = ty.kind() {
-//RS         key.push_str(&format!(";tag={marker}"));
-//RS     }
-//RS     if !bindings.is_empty() {
-//RS         key.push_str(&format!(";bindings={}", bindings.iter().map(|(name, value)| {
-//RS             format!("{}:{name}{}:{value}", name.len(), value.len())
-//RS         }).collect::<String>()));
-//RS     }
-//RS     if schemas.contains_key(&key) {
-//RS         return key;
-//RS     }
-//RS     // Reserve recursive nominal types before following their field types.
-//RS     schemas.insert(key.clone(), "{ kind: \"opaque\" }".to_string());
-//RS     let child = |ty: &MirType, schemas: &mut BTreeMap<String, String>| {
-//RS         js_string(&js_history_capture_schema(program, ty, bindings, schemas))
-//RS     };
-//RS     let shape = if program.handles.iter().any(|handle| {
-//RS         handle.ty.same_checked_type(ty)
-//RS             || handle.ty.nominal_name() == ty.nominal_name() && ty.nominal_name().is_some()
-//RS     }) {
-//RS         "kind: \"opaque\"".to_string()
-//RS     } else if ty.is_unit() {
-//RS         "kind: \"unit\"".to_string()
-//RS     } else {
-//RS         match ty.kind() {
-//RS             MirTypeKind::Int | MirTypeKind::IntN { .. } => "kind: \"integer\"".to_string(),
-//RS             MirTypeKind::Float | MirTypeKind::Float32 => "kind: \"float\"".to_string(),
-//RS             MirTypeKind::Bool => "kind: \"boolean\"".to_string(),
-//RS             MirTypeKind::String | MirTypeKind::Char => "kind: \"text\"".to_string(),
-//RS             MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => "kind: \"callable\"".to_string(),
-//RS             MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
-//RS                 format!("kind: \"list\", item: {}", child(inner, schemas))
-//RS             }
-//RS             MirTypeKind::Map { key, value } => format!(
-//RS                 "kind: \"map\", key: {}, value: {}", child(key, schemas), child(value, schemas)
-//RS             ),
-//RS             MirTypeKind::Option(inner) => {
-//RS                 let absent = js_history_absent_schema(schemas);
-//RS                 format!(
-//RS                     "kind: \"enum\", clean: true, variants: [[\"Err\", [{}]], [\"Ok\", [{}]]]",
-//RS                     js_string(&absent),
-//RS                     child(inner, schemas),
-//RS                 )
-//RS             }
-//RS             MirTypeKind::Result { ok, err } => format!(
-//RS                 "kind: \"enum\", variants: [[\"Ok\", [{}]], [\"Err\", [{}]]]",
-//RS                 child(ok, schemas), child(err, schemas)
-//RS             ),
-//RS             MirTypeKind::Shared(inner) => format!("kind: \"shared\", inner: {}", child(inner, schemas)),
-//RS             MirTypeKind::InlineRange { base, .. } | MirTypeKind::Quantity { base, .. } => {
-//RS                 format!("kind: \"transparent\", inner: {}", child(base, schemas))
-//RS             }
-//RS             MirTypeKind::Tagged { marker, inner } => {
-//RS                 let marker = marker.to_string();
-//RS                 if marker == "expiring_secret.loan" || marker == "core.crypto"
-//RS                     || marker.rsplit("::").next() == Some("Secret")
-//RS                 {
-//RS                     "kind: \"opaque\"".to_string()
-//RS                 } else {
-//RS                     format!("kind: \"transparent\", inner: {}", child(inner, schemas))
-//RS                 }
-//RS             }
-//RS             MirTypeKind::Tuple(fields) => format!(
-//RS                 "kind: \"record\", fields: [{}]",
-//RS                 fields.iter().map(|(name, ty)| {
-//RS                     format!("[{}, {}]", js_string(name), child(ty, schemas))
-//RS                 }).collect::<Vec<_>>().join(", ")
-//RS             ),
-//RS             MirTypeKind::Apply { .. } | MirTypeKind::Union(_) => {
-//RS                 let (nominal, args) = match ty.kind() {
-//RS                     MirTypeKind::Apply { name, args } => (Some(name), args.as_slice()),
-//RS                     _ => (None, &[][..]),
-//RS                 };
-//RS                 let leaf = nominal.map(|name| name.name.rsplit("::").next().unwrap_or(&name.name))
-//RS                     .unwrap_or("");
-//RS                 match leaf {
-//RS                     "Secret" | "ExpiringSecret" | "HistoryRNG" | "Ptr" => "kind: \"opaque\"".to_string(),
-//RS                     "Bytes" => "kind: \"bytes\"".to_string(),
-//RS                     "BigInt" => "kind: \"integer\"".to_string(),
-//RS                     "DataTree" => "kind: \"data\"".to_string(),
-//RS                     _ => {
-//RS                         let definition = program.types.iter().find(|row| Some(row.id) == ty.identity)
-//RS                             .or_else(|| nominal.and_then(|name| program.types.iter().find(|row| row.id == name.id)));
-//RS                         if let Some(definition) = definition {
-//RS                             let mut field_bindings = bindings.clone();
-//RS                             for (parameter, argument) in definition.generic_params.iter().zip(args) {
-//RS                                 field_bindings.insert(parameter.name.clone(),
-//RS                                     js_history_capture_schema(program, argument, bindings, schemas));
-//RS                             }
-//RS                             let field_type = |ty: &MirType, schemas: &mut BTreeMap<String, String>| {
-//RS                                 js_string(&js_history_capture_schema(program, ty, &field_bindings, schemas))
-//RS                             };
-//RS                             match &definition.kind {
-//RS                                 MirTypeDefKind::Struct { fields, .. } if !fields.iter().any(|field| field.skip) => format!(
-//RS                                     "kind: \"record\", fields: [{}]",
-//RS                                     fields.iter().filter(|field| !field.computed).map(|field| {
-//RS                                         format!("[{}, {}]", js_string(&field.name), field_type(&field.ty, schemas))
-//RS                                     }).collect::<Vec<_>>().join(", ")
-//RS                                 ),
-//RS                                 MirTypeDefKind::Enum { variants, .. } => format!(
-//RS                                     "kind: \"enum\", variants: [{}]",
-//RS                                     variants.iter().map(|variant| {
-//RS                                         let fields = match &variant.payload {
-//RS                                             MirVariantPayload::Unit => Vec::new(),
-//RS                                             MirVariantPayload::Single(ty) => vec![field_type(ty, schemas)],
-//RS                                             MirVariantPayload::Named(fields) => fields.iter().map(|field| {
-//RS                                                 if field.skip { "null".to_string() } else { field_type(&field.ty, schemas) }
-//RS                                             }).collect(),
-//RS                                         };
-//RS                                         format!("[{}, [{}]]", js_string(&variant.name), fields.join(", "))
-//RS                                     }).collect::<Vec<_>>().join(", ")
-//RS                                 ),
-//RS                                 MirTypeDefKind::Distinct { base, .. } | MirTypeDefKind::Alias { target: base } => {
-//RS                                     format!("kind: \"transparent\", inner: {}", field_type(base, schemas))
-//RS                                 }
-//RS                                 _ => "kind: \"opaque\"".to_string(),
-//RS                             }
-//RS                         } else {
-//RS                             "kind: \"opaque\"".to_string()
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => "kind: \"opaque\"".to_string(),
-//RS         }
-//RS     };
-//RS     schemas.insert(key.clone(), format!("{{ type: {}, {shape} }}", js_string(&key)));
-//RS     key
-//RS }
-//RS 
-//RS fn emit_js_copy_type_facts(out: &mut String, program: &MirProgram) {
-//RS     let mut schemas = BTreeMap::new();
-//RS     for ty in &program.type_instances {
-//RS         js_history_capture_schema(program, ty, &BTreeMap::new(), &mut schemas);
-//RS     }
-//RS     for function in &program.functions {
-//RS         js_history_capture_schema(program, &function.return_type, &BTreeMap::new(), &mut schemas);
-//RS         for param in &function.params {
-//RS             js_history_capture_schema(program, &param.ty, &BTreeMap::new(), &mut schemas);
-//RS         }
-//RS         for capture in &function.capture_params {
-//RS             js_history_capture_schema(program, &capture.ty, &BTreeMap::new(), &mut schemas);
-//RS         }
-//RS         for (_, ty, _, _) in &function.values {
-//RS             js_history_capture_schema(program, ty, &BTreeMap::new(), &mut schemas);
-//RS         }
-//RS         for place in &function.places {
-//RS             js_history_capture_schema(program, &place.ty, &BTreeMap::new(), &mut schemas);
-//RS         }
-//RS     }
-//RS     for handle in &program.handles {
-//RS         js_history_capture_schema(program, &handle.ty, &BTreeMap::new(), &mut schemas);
-//RS     }
-//RS     out.push_str("const __jet_copy_type_facts = new Map([\n");
-//RS     for (key, schema) in schemas {
-//RS         writeln!(out, "  [{}, {}],", js_string(&key), schema).unwrap();
-//RS     }
-//RS     out.push_str("]);\n");
-//RS }
-//RS 
-//RS 
-//RS fn js_copy_expression(program: &MirProgram, ty: &MirType, expression: String) -> String {
-//RS     let key = js_copy_type_key(program, ty);
-//RS     format!(
-//RS         "jet_copy_value({}, {}, __jet_copy_type_facts)",
-//RS         expression,
-//RS         js_string(&key),
-//RS     )
-//RS }
-//RS 
-//RS fn js_copy_type_key(program: &MirProgram, ty: &MirType) -> String {
-//RS     let mut schemas = BTreeMap::new();
-//RS     js_history_capture_schema(program, ty, &BTreeMap::new(), &mut schemas)
-//RS }
-//RS 
-//RS fn js_core_call_expression(
-//RS     program: &MirProgram,
-//RS     caller: &MirFunction,
-//RS     id: jet_foundation::MIR::MirCoreCallId,
-//RS     route: Option<MirPreludeCallId>,
-//RS     args: &[jet_foundation::MIR::MirCallArg],
-//RS     type_args: &[MirType],
-//RS     history_provenance: &HistoryProvenance,
-//RS ) -> Result<String, MirWebError> {
-//RS     let Some(core) = program.core_calls.iter().find(|call| call.id == id) else {
-//RS         return Err(MirWebError::MissingCoreCall { call: id.0 });
-//RS     };
-//RS     validate_type_args(program, type_args)?;
-//RS     let values = js_call_values(program, caller, args, false)?;
-//RS     if core.module == "core.testing" && core.member == "histories" {
-//RS         if type_args.len() != 1 {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: "MIR testing.histories requires exactly one checked Command type argument"
-//RS                     .to_string(),
-//RS             });
-//RS         }
-//RS         if values.len() != 6 {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "MIR testing.histories has {} runtime arguments; expected six",
-//RS                     values.len()
-//RS                 ),
-//RS             });
-//RS         }
-//RS         let symbol = match &core.symbol {
-//RS             jet_foundation::Syntax::CoreCallSymbol::Prelude(name) => {
-//RS                 js_symbol_expression(&MirSymbol::Prelude((*name).to_string()))?
-//RS             }
-//RS             jet_foundation::Syntax::CoreCallSymbol::Rust(name) => {
-//RS                 js_symbol_expression(&MirSymbol::Runtime((*name).to_string()))?
-//RS             }
-//RS         };
-//RS         let command_descriptor = js_string(&type_descriptor(&type_args[0]));
-//RS         let provenance_descriptor = format!(
-//RS             "{{ source: {}, tool: {}, target: {} }}",
-//RS             js_string(&history_provenance.source),
-//RS             js_string(&history_provenance.tool),
-//RS             js_string(&history_provenance.target),
-//RS         );
-//RS         let descriptor = format!(
-//RS             "{{ command_type: {command_descriptor}, provenance: {provenance_descriptor} }}"
-//RS         );
-//RS         let expression = format!(
-//RS             "{symbol}({}, {descriptor})",
-//RS             values.join(", ")
-//RS         );
-//RS         return Ok(js_guard_core_expression(core, expression));
-//RS     }
-//RS     if let Some(route) = route {
-//RS         if let Some(row) = program.prelude_calls.iter().find(|call| call.id == route) {
-//RS             if let MirSymbol::Prelude(name) = &row.symbol {
-//RS                 if web_data_symbol_name(name) {
-//RS                     return js_data_call_expression(program, &row.symbol, &values, type_args);
-//RS                 }
-//RS             }
-//RS         }
-//RS         let expression = js_prelude_call_expression(program, route, &values)?;
-//RS         return Ok(js_guard_core_expression(core, expression));
-//RS     }
-//RS     if let jet_foundation::Syntax::CoreCallSymbol::Prelude(name) = &core.symbol {
-//RS         let symbol = MirSymbol::Prelude((*name).to_string());
-//RS         if web_data_symbol_name(name) {
-//RS             return js_data_call_expression(program, &symbol, &values, type_args);
-//RS         }
-//RS     }
-//RS     let symbol = match &core.symbol {
-//RS         jet_foundation::Syntax::CoreCallSymbol::Prelude(name) => {
-//RS             js_symbol_expression(&MirSymbol::Prelude((*name).to_string()))?
-//RS         }
-//RS         jet_foundation::Syntax::CoreCallSymbol::Rust(name) => {
-//RS             js_symbol_expression(&MirSymbol::Runtime((*name).to_string()))?
-//RS         }
-//RS     };
-//RS     Ok(js_guard_core_expression(
-//RS         core,
-//RS         format!("{symbol}({})", values.join(", ")),
-//RS     ))
-//RS }
-//RS 
-//RS // Runtime symbols are not JavaScript property lookups.  This closed table is
-//RS // the Web linkage boundary: every accepted target is a local identifier or an
-//RS // explicit imported expression (such as `jetDom.webStreamCommit`), while a new
-//RS // or target-inapplicable symbol fails emission instead of becoming ambient
-//RS // runtime dispatch.
-//RS // Namespaced Prelude symbols are admitted only when the canonical Web kernel
-//RS // has an explicit local alias.  The App builder uses the same rule: its
-//RS // checked chain is recorded by the browser adapter, while `jet_app_graph`
-//RS // remains the compiler-owned route authority.
-//RS const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[
-//RS     ("jet_transaction_on_commit", "jet_transaction_on_commit"),
-//RS     ("jet_transaction_on_rollback", "jet_transaction_on_rollback"),
-//RS     ("jet_data_track", "jet_data_track"),
-//RS     ("jet_data_query_tracked", "jet_data_query_tracked"),
-//RS     ("jet_data_track_insert", "jet_data_track_insert"),
-//RS     ("jet_data_track_replace", "jet_data_track_replace"),
-//RS     ("jet_data_track_remove", "jet_data_track_remove"),
-//RS     ("jet_data_count", "jet_data_count"),
-//RS     ("jet_data_query", "jet_data_query"),
-//RS     ("jet_data_load", "jet_data_loader_load"),
-//RS     ("jet_data_loader_load", "jet_data_loader_load"),
-//RS     ("jet_data_loader_load_default", "jet_data_loader_load_default"),
-//RS     ("jet_data_loader_file", "jet_data_loader_file"),
-//RS     ("jet_data_loader_file_member", "jet_data_loader_file_member"),
-//RS     ("jet_data_loader_url", "jet_data_loader_url"),
-//RS     ("jet_data_loader_database", "jet_data_loader_database"),
-//RS     ("jet_data_loader_value", "jet_data_loader_value"),
-//RS     ("jet_data_loader_snapshot", "jet_data_loader_snapshot"),
-//RS     ("jet_data_loader_bind", "jet_data_loader_bind"),
-//RS     ("jet_data_loader_bind_text", "jet_data_loader_bind_text"),
-//RS     ("jet_data_loader_cancel", "jet_data_loader_cancel"),
-//RS     ("jet_data_loader_offline", "jet_data_loader_offline"),
-//RS     ("jet_data_loader_invalidate", "jet_data_loader_invalidate"),
-//RS     ("jet_data_loader_needs_refresh", "jet_data_loader_needs_refresh"),
-//RS     ("jet_data_loader_ready", "jet_data_loader_ready"),
-//RS     ("jet_data_loader_status", "jet_data_loader_status"),
-//RS     ("jet_data_loader_source_identity", "jet_data_loader_source_identity"),
-//RS     ("jet_data_loader_authority_of", "jet_data_loader_authority_of"),
-//RS     ("jet_data_snapshot_reusable", "jet_data_snapshot_reusable"),
-//RS     ("jet_data_loader_stream", "jet_data_loader_stream"),
-//RS     ("jet_data_stream_next", "jet_data_stream_next"),
-//RS     ("jet_data_stream_collect", "jet_data_stream_collect"),
-//RS     ("jet_data_stream_cancel", "jet_data_stream_cancel"),
-//RS     ("jet_data_query_plan", "jet_data_query_plan"),
-//RS     ("jet_data_query_collect", "jet_data_query_collect"),
-//RS     ("jet_data_query_sort_by", "jet_data_query_sort_by"),
-//RS     ("jet_data_left_join_checked_default", "jet_data_left_join"),
-//RS     ("jet_data_inner_join_checked_default", "jet_data_inner_join"),
-//RS     ("jet_data_query_filter", "jet_data_query_filter"),
-//RS     ("jet_data_query_map", "jet_data_query_map"),
-//RS     ("jet_data_query_min", "jet_data_query_min"),
-//RS     ("jet_data_query_max", "jet_data_query_max"),
-//RS     ("jet_data_query_inner_join", "jet_data_query_inner_join"),
-//RS     ("jet_data_query_left_join", "jet_data_query_left_join"),
-//RS     ("jet_data_query_group_by", "jet_data_query_group_by"),
-//RS     ("jet_data_query_watch", "jet_data_query_watch"),
-//RS     ("jet_data_watch_get", "jet_data_watch_get"),
-//RS     ("jet_data_watch_status", "jet_data_watch_status"),
-//RS     ("jet_data_watch_cancel", "jet_data_watch_cancel"),
-//RS     ("jet_data_group_count_query", "jet_data_group_count_query"),
-//RS     ("jet_data_group_sum_query", "jet_data_group_sum_query"),
-//RS     ("jet_data_group_mean_query", "jet_data_group_mean_query"),
-//RS     ("jet_data_status", "jet_data_status"),
-//RS     ("jet_data_require_bridge", "jet_data_require_bridge"),
-//RS     ("jet_data_csv_reader", "jet_data_csv_reader"),
-//RS     ("jet_data_json_reader", "jet_data_json_reader"),
-//RS     ("jet_fmt_display", "jet_display"),
-//RS     ("jet_fmt_debug", "jet_debug"),
-//RS     ("jet_text_pattern_match", "jet_text_pattern_match"),
-//RS     ("jet_binary_pattern_match", "jet_binary_pattern_match"),
-//RS     ("jet_cursor_over", "jet_cursor_over"),
-//RS     ("jet_cursor_take_until", "jet_cursor_take_until"),
-//RS     ("jet_cursor_skip_ws", "jet_cursor_skip_ws"),
-//RS     ("jet_cursor_take_pattern", "jet_cursor_take_pattern"),
-//RS     ("jet_term_write_stdout_line", "jetDom.print"),
-//RS     ("jet_std::jet_typed_url_literal", "jet_typed_url_literal"),
-//RS     ("jet_std::jet_int_abs", "jet_int_abs"),
-//RS     ("jet_std::jet_int_add", "jet_int_add"),
-//RS     ("jet_std::jet_int_sub", "jet_int_sub"),
-//RS     ("jet_std::jet_int_mul", "jet_int_mul"),
-//RS     ("jet_std_math_abs_f64", "jet_std_math_abs_f64"),
-//RS     ("jet_std_math_abs_f32", "jet_std_math_abs_f32"),
-//RS     ("jet_std::jet_int_checked_widen", "jet_int_checked_widen"),
-//RS     ("jet_std::jet_int_try_from", "jet_int_try_from"),
-//RS     ("jet_std::jet_int_try_from_checked", "jet_int_try_from_checked"),
-//RS     ("jet_std::jet_int_checked_fixed", "jet_int_checked_fixed"),
-//RS     ("jet_std::channel", "jet_channel_new"),
-//RS     ("jet_std::channel_bounded", "jet_channel_bounded"),
-//RS     ("jet_std::JetReceiver::receive", "jet_channel_receive"),
-//RS     ("jet_std::JetReceiver::try_receive", "jet_channel_try_receive"),
-//RS     ("jet_std::JetReceiver::is_timer", "jet_channel_is_timer"),
-//RS     ("jet_std::JetReceiver::is_interval", "jet_channel_is_interval"),
-//RS     ("jet_std::JetReceiver::is_cancelled", "jet_channel_is_cancelled"),
-//RS     ("jet_std::JetReceiver::is_ready", "jet_channel_is_ready"),
-//RS     ("jet_std::JetReceiver::delay_ms", "jet_channel_delay_ms"),
-//RS     ("jet_std::JetReceiver::close", "jet_channel_close"),
-//RS     ("jet_std::jet_select_wait_tagged", "jet_scheduler_select"),
-//RS     ("jet_std::jet_select_try_wait_tagged", "jet_scheduler_try_select"),
-//RS     ("jet_std::JetShared::new", "jet_shared_new"),
-//RS     ("jet_std::JetMeasurement::new", "jet_measurement_new"),
-//RS     ("jet_std::JetMeasurement::value", "jet_measurement_value"),
-//RS     ("jet_std::JetMeasurement::uncertainty", "jet_measurement_uncertainty"),
-//RS     ("jet_std::JetMeasurement::add", "jet_measurement_add"),
-//RS     ("jet_std::JetMeasurement::sub", "jet_measurement_sub"),
-//RS     ("jet_std::JetMeasurement::mul", "jet_measurement_mul"),
-//RS     ("jet_std::JetMeasurement::div", "jet_measurement_div"),
-//RS     ("jet_std::JetMeasurement::sqrt", "jet_measurement_sqrt"),
-//RS     // Web adapters for the canonical reactive/UI Prelude routes.  The
-//RS     // generated app imports these from the one DOM runtime rather than
-//RS     // allowing namespaced Prelude symbols to become ambient JavaScript.
-//RS     ("jet_std::JetSignal::new", "jetDom.makeSignal"),
-//RS     ("jet_std::JetSignal::get", "jetDom.signalGet"),
-//RS     ("jet_std::JetSignal::set", "jetDom.signalSet"),
-//RS     ("jet_ui_reactive_render", "jetDom.reactiveRender"),
-//RS     ("jet_ui_null", "jetDom.createBackend"),
-//RS     ("JetNullBackend::mount_node", "jetDom.mount"),
-//RS     ("JetNullBackend::paint_commands", "jetDom.commands"),
-//RS     ("::jet_std::JetShared::new", "jet_shared_new"),
-//RS     ("JetUiShortcut::cmd", "jet_ui_shortcut_cmd"),
-//RS     ("::JetUiShortcut::cmd", "jet_ui_shortcut_cmd"),
-//RS     ("jet_std::JetUiShortcut::cmd", "jet_ui_shortcut_cmd"),
-//RS     ("jet_app", "jetDom.jetApp"),
-//RS     ("jet_app_route", "jetDom.jetAppRoute"),
-//RS     ("jet_app_page", "jetDom.jetAppPage"),
-//RS     ("jet_app_layout", "jetDom.jetAppLayout"),
-//RS     ("jet_app_loader", "jetDom.jetAppLoader"),
-//RS     ("jet_app_loader_preload", "jetDom.jetAppLoaderPreload"),
-//RS     ("jet_app_pending", "jetDom.jetAppPending"),
-//RS     ("jet_app_not_found", "jetDom.jetAppNotFound"),
-//RS     ("jet_app_error", "jetDom.jetAppError"),
-//RS     ("jet_app_action", "jetDom.jetAppAction"),
-//RS     ("jet_app_form", "jetDom.jetAppForm"),
-//RS     ("jet_app_data", "jetDom.jetAppData"),
-//RS     ("jet_app_mount", "jetDom.jetAppMount"),
-//RS     ("jet_app_mount_with_effect", "jetDom.jetAppMountWithEffect"),
-//RS     ("jet_app_mount_with_policy", "jetDom.jetAppMountWithPolicy"),
-//RS     ("jet_app_routes", "jetDom.jetAppRoutes"),
-//RS     ("jet_app_security", "jetDom.jetAppSecurity"),
-//RS     ("jet_app_assets", "jetDom.jetAppAssets"),
-//RS     ("jet_app_split", "jetDom.jetAppSplit"),
-//RS     ("jet_app_code_split", "jetDom.jetAppCodeSplit"),
-//RS     ("jet_app_cache", "jetDom.jetAppCache"),
-//RS     ("jet_app_a11y", "jetDom.jetAppA11y"),
-//RS     ("jet_app_adapter", "jetDom.jetAppAdapter"),
-//RS     ("jet_app_csr", "jetDom.jetAppCsr"),
-//RS     ("jet_app_ssr", "jetDom.jetAppSsr"),
-//RS     ("jet_app_ssg", "jetDom.jetAppSsg"),
-//RS     ("jet_app_stream", "jetDom.jetAppStream"),
-//RS     ("jet_app_streaming", "jetDom.jetAppStreaming"),
-//RS     ("jet_app_island", "jetDom.jetAppIsland"),
-//RS     ("jet_app_hydration_dev", "jetDom.jetAppHydrationDev"),
-//RS     ("jet_app_hydration_release", "jetDom.jetAppHydrationRelease"),
-//RS     ("jet_app_facts_json", "jetDom.jetAppFactsJson"),
-//RS     ("jet_app_serve", "jetDom.jetAppServe"),
-//RS     ("jet_app_serve_with_port", "jetDom.jetAppServeWithPort"),
-//RS     ("jet_app_serve_on", "jetDom.jetAppServeOn"),
-//RS     ("jet_testing_histories", "jet_testing_histories"),
-//RS     ("jet_testing_status", "jet_testing_status"),
-//RS     ("jet_testing_assert_equal", "jet_testing_assert_equal"),
-//RS     ("jet_testing_world", "jet_testing_world"),
-//RS     ("jet_world_now", "jet_world_now"),
-//RS     ("jet_world_advance", "jet_world_advance"),
-//RS     ("jet_world_wait_idle", "jet_world_wait_idle"),
-//RS     ("jet_world_history", "jet_world_history"),
-//RS ];
-//RS 
-//RS const WEB_RUNTIME_LINKS: &[(&str, &str)] = &[
-//RS     ("jet_web_error_wire", "jet_web_error_wire"),
-//RS     ("jet_journey_reset", "jet_journey_reset"),
-//RS     ("jet_journey_origin", "jet_journey_origin"),
-//RS     ("jet_journey_frame_text", "jet_journey_frame_text"),
-//RS     ("jet_err_from_message", "jet_err_from_message"),
-//RS     ("jet_err_with_context_frame", "jet_err_with_context_frame"),
-//RS     ("jet_entry_error_exit_jet", "jet_entry_error_exit_jet"),
-//RS     ("jet_web_result_value", "jet_web_result_value"),
-//RS     ("jet_web_edge_error", "jet_web_edge_error"),
-//RS     ("jet_web_edge_result", "jet_web_edge_result"),
-//RS     ("jet_web_default_error", "jet_web_default_error"),
-//RS     ("jet_web_error_from_conversion", "jet_web_error_from_conversion"),
-//RS     ("jet_web_try", "jet_web_try"),
-//RS     ("jet_list_bounds_message", "jet_list_bounds_message"),
-//RS     ("jet_missing_map_key_message", "jet_missing_map_key_message"),
-//RS     ("jet_list_get", "jet_list_get"),
-//RS     ("jet_map_get", "jet_map_get"),
-//RS     ("jet_web_runtime_context", "jet_web_runtime_context"),
-//RS     ("jet_web_stream_register", "jetDom.webStreamRegister"),
-//RS     ("jet_web_stream_begin", "jetDom.webStreamBegin"),
-//RS     ("jet_web_stream_chunk", "jetDom.webStreamChunk"),
-//RS     ("jet_web_stream_commit", "jetDom.webStreamCommit"),
-//RS     ("jet_web_stream_fail", "jetDom.webStreamFail"),
-//RS     ("jet_web_stream_cancel", "jetDom.webStreamCancel"),
-//RS     ("jet_web_stream_rollback", "jetDom.webStreamRollback"),
-//RS     (
-//RS         "jet_web_stream_hydration_start",
-//RS         "jetDom.webStreamHydrationStart",
-//RS     ),
-//RS     (
-//RS         "jet_web_stream_hydration_complete",
-//RS         "jetDom.webStreamHydrationComplete",
-//RS     ),
-//RS     ("jet_web_stream_receipt", "jetDom.webStreamReceipt"),
-//RS     ("jet_web_stream_projection", "jetDom.webStreamProjection"),
-//RS     ("jet_web_runtime_context_frame", "jet_web_runtime_context_frame"),
-//RS     ("jet_runtime_stop_report", "jet_runtime_stop_report"),
-//RS     ("jet_runtime_stop", "jet_runtime_stop"),
-//RS     ("jet_web_wasm_host_error", "jet_web_wasm_host_error"),
-//RS     ("jet_stack_overflow_message", "jet_stack_overflow_message"),
-//RS     ("jet_stack_enter", "jet_stack_enter"),
-//RS     ("jet_stack_leave", "jet_stack_leave"),
-//RS     ("jet_todo_stop", "jet_todo_stop"),
-//RS     ("jet_contract_check", "jet_contract_check"),
-//RS     ("jet_contract_fail", "jet_contract_fail"),
-//RS     ("jet_keep", "jet_keep"),
-//RS     ("jet_task_spawn", "jet_task_spawn"),
-//RS     ("jet_task_join", "jet_task_join"),
-//RS     ("jet_task_detach", "jet_task_detach"),
-//RS     ("jet_task_group_body_failed", "jet_task_group_body_failed"),
-//RS     ("jet_task_all", "jet_task_all"),
-//RS     ("jet_task_all_named", "jet_task_all_named"),
-//RS     ("jet_std::JetTask::join", "jet_task_join"),
-//RS     ("jet_std::jet_task_join_result", "jet_task_join_result"),
-//RS     ("jet_std::JetEventScope::new", "jet_event_scope_new"),
-//RS     ("jet_std::JetHook::new", "jet_event_hook_new"),
-//RS     ("jet_std::JetDecisionHook::new", "jet_event_decision_hook_new"),
-//RS     ("jet_std::JetEventPolicy::sync", "jet_event_policy_sync"),
-//RS     ("jet_std::JetEvent::new", "jet_event_new"),
-//RS     ("jet_std::JetEvent::with_policy", "jet_event_with_policy"),
-//RS     ("jet_std::JetAsyncEvent::new", "jet_async_event_new"),
-//RS     ("jet_std::JetEvent::on", "jet_event_on"),
-//RS     ("jet_std::JetEvent::once", "jet_event_once"),
-//RS     ("jet_std::JetEvent::on_priority", "jet_event_on_priority"),
-//RS     ("jet_std::JetEvent::emit", "jet_event_emit"),
-//RS     ("jet_std::JetEvent::listener_count", "jet_event_listener_count"),
-//RS     ("jet_std::JetEvent::trace", "jet_event_trace"),
-//RS     ("jet_std::JetAsyncEvent::on", "jet_async_event_on"),
-//RS     ("jet_std::JetAsyncEvent::once", "jet_async_event_once"),
-//RS     ("jet_std::JetAsyncEvent::on_priority", "jet_async_event_on_priority"),
-//RS     ("jet_std::JetAsyncEvent::emit_async", "jet_async_event_emit"),
-//RS     ("jet_std::JetAsyncEvent::emit_async_result", "jet_async_event_emit"),
-//RS     ("jet_std::JetAsyncEvent::close", "jet_async_event_close"),
-//RS     ("jet_std::JetAsyncEvent::listener_count", "jet_async_event_listener_count"),
-//RS     ("jet_std::JetAsyncEvent::queued_count", "jet_async_event_queued_count"),
-//RS     ("jet_std::JetAsyncEvent::running_count", "jet_async_event_running_count"),
-//RS     ("jet_std::JetAsyncEvent::blocked_count", "jet_async_event_blocked_count"),
-//RS     ("jet_std::JetHook::on", "jet_hook_on"),
-//RS     ("jet_std::JetHook::once", "jet_hook_once"),
-//RS     ("jet_std::JetHook::on_priority", "jet_hook_on_priority"),
-//RS     ("jet_std::JetHook::run", "jet_hook_run"),
-//RS     ("jet_std::JetHook::listener_count", "jet_hook_listener_count"),
-//RS     ("jet_std::JetHook::trace", "jet_hook_trace"),
-//RS     ("jet_std::JetDecisionHook::on", "jet_decision_hook_on"),
-//RS     ("jet_std::JetDecisionHook::once", "jet_decision_hook_once"),
-//RS     ("jet_std::JetDecisionHook::on_priority", "jet_decision_hook_on_priority"),
-//RS     ("jet_std::JetDecisionHook::run", "jet_decision_hook_run"),
-//RS     ("jet_std::JetDecisionHook::listener_count", "jet_decision_hook_listener_count"),
-//RS     ("jet_std::JetSubscription::unsubscribe", "jet_subscription_unsubscribe"),
-//RS     ("jet_std::JetSubscription::active", "jet_subscription_active"),
-//RS     ("jet_std::JetEventScope::cancel", "jet_event_scope_cancel"),
-//RS     ("jet_std::JetEventScope::active_count", "jet_event_scope_active_count"),
-//RS     ("jet_std::JetEventTrace::summary", "jet_event_trace_summary"),
-//RS     ("jet_std::JetEventTrace::delivered", "jet_event_trace_delivered"),
-//RS     ("jet_std::JetEventTrace::queued", "jet_event_trace_queued"),
-//RS     ("jet_std::JetEventTrace::dropped", "jet_event_trace_dropped"),
-//RS     ("jet_std::JetDispatchReport::state", "jet_dispatch_report_state"),
-//RS     ("jet_std::JetDispatchReport::accepted", "jet_dispatch_report_accepted"),
-//RS     ("jet_std::JetDispatchReport::delivered_handlers", "jet_dispatch_report_delivered_handlers"),
-//RS     ("jet_std::JetDispatchReport::failures", "jet_dispatch_report_failures"),
-//RS     ("jet_std::JetDispatchReport::trace", "jet_dispatch_report_trace"),
-//RS     ("jet_channel_send", "jet_channel_send"),
-//RS     ("jet_channel_receive", "jet_channel_receive"),
-//RS     ("jet_channel_try_receive", "jet_channel_try_receive"),
-//RS     ("jet_channel_is_timer", "jet_channel_is_timer"),
-//RS     ("jet_channel_is_interval", "jet_channel_is_interval"),
-//RS     ("jet_channel_is_cancelled", "jet_channel_is_cancelled"),
-//RS     ("jet_channel_is_ready", "jet_channel_is_ready"),
-//RS     ("jet_channel_delay_ms", "jet_channel_delay_ms"),
-//RS     ("jet_channel_close", "jet_channel_close"),
-//RS     ("jet_scheduler_select", "jet_scheduler_select"),
-//RS     ("jet_scheduler_try_select", "jet_scheduler_try_select"),
-//RS     ("jet_option_lift2", "jet_option_lift2"),
-//RS     ("jet_fixed_list_index", "jet_fixed_list_index"),
-//RS     ("jet_list_map", "jet_list_map"),
-//RS     ("jet_list_filter", "jet_list_filter"),
-//RS     ("jet_iter_map", "jet_iter_map"),
-//RS     ("jet_iter_filter", "jet_iter_filter"),
-//RS     ("jet_list_try_map", "jet_list_try_map"),
-//RS     ("jet_list_try_filter", "jet_list_try_filter"),
-//RS     ("jet_list_pop_kernel", "jet_list_pop_kernel"),
-//RS     ("jet_list_remove_value", "jet_list_remove_value"),
-//RS     ("jet_list_remove_slot", "jet_list_remove_slot"),
-//RS     ("jet_map_pop_kernel", "jet_map_pop_kernel"),
-//RS     ("jet_map_pop_first", "jet_map_pop_first"),
-//RS     ("jet_list_take", "jet_list_take"),
-//RS     ("jet_list_skip", "jet_list_skip"),
-//RS     ("jet_iter_lazy", "jet_iter_lazy"),
-//RS     ("jet_iter_from_vec", "jet_iter_from_vec"),
-//RS     ("jet_iter_to_list", "jet_iter_to_list"),
-//RS     ("jet_iter_collect", "jet_iter_collect"),
-//RS     ("jet_iter_take", "jet_iter_take"),
-//RS     ("jet_iter_skip", "jet_iter_skip"),
-//RS     ("jet_iter_empty", "jet_iter_empty"),
-//RS     ("jet_iter_some", "jet_iter_some"),
-//RS     ("jet_iter_indexes", "jet_iter_indexes"),
-//RS     ("jet_iter_zip", "jet_iter_zip"),
-//RS     ("jet_iter_zip_strict", "jet_iter_zip_strict"),
-//RS     ("jet_iter_zip_pad", "jet_iter_zip_pad"),
-//RS     ("jet_iter_step_by", "jet_iter_step_by"),
-//RS     ("jet_iter_dedup", "jet_iter_dedup"),
-//RS     ("jet_iter_chunks", "jet_iter_chunks"),
-//RS     ("jet_iter_windows", "jet_iter_windows"),
-//RS     ("jet_iter_flatten", "jet_iter_flatten"),
-//RS     ("jet_list_flatten", "jet_list_flatten"),
-//RS     ("jet_iter_intersperse", "jet_iter_intersperse"),
-//RS     ("jet_iter_repeat", "jet_iter_repeat"),
-//RS     ("jet_iter_cycle", "jet_iter_cycle"),
-//RS     ("jet_iter_drop_last", "jet_iter_drop_last"),
-//RS     ("jet_iter_shuffle", "jet_iter_shuffle"),
-//RS     ("jet_iter_is_sorted", "jet_iter_is_sorted"),
-//RS     ("jet_iter_last_index_of", "jet_iter_last_index_of"),
-//RS     ("jet_iter_average_int", "jet_iter_average_int"),
-//RS     ("jet_iter_average_float", "jet_iter_average_float"),
-//RS     ("jet_iter_compare", "jet_iter_compare"),
-//RS     ("jet_iter_split", "jet_iter_split"),
-//RS     ("jet_iter_zip_family", "jet_iter_zip_family"),
-//RS     ("jet_list_try_collect", "jet_list_try_collect"),
-//RS     ("jet_iter_first", "jet_iter_first"),
-//RS     ("jet_iter_next", "jet_iter_next"),
-//RS     ("jet_string_concat", "jet_string_concat"),
-//RS     ("jet_view_copy", "jet_view_copy"),
-//RS     ("jet_string_view_copy", "jet_string_view_copy"),
-//RS     ("jet_float_display", "jet_float_display"),
-//RS     ("jet_show", "jet_show"),
-//RS     ("jet_fmt_decimal", "jet_fmt_decimal"),
-//RS     ("jet_fmt_quantity", "jet_fmt_quantity"),
-//RS     ("jet_fmt_fixed_even", "jet_fmt_fixed_even"),
-//RS     ("jet_fmt_grouped", "jet_fmt_grouped"),
-//RS     ("jet_fmt_decimal_int", "jet_fmt_decimal_int"),
-//RS     ("jet_fmt_grouped_int", "jet_fmt_grouped_int"),
-//RS     ("jet_group_decimal", "jet_group_decimal"),
-//RS     ("jet_display", "jet_display"),
-//RS     ("jet_debug", "jet_debug"),
-//RS     ("jet_fmt_pretty", "jet_fmt_pretty"),
-//RS     ("jet_gc_root", "jet_gc_root"),
-//RS     ("jet_gc_apply", "jet_gc_apply"),
-//RS     ("jet_gc_read", "jet_gc_read"),
-//RS     ("jet_gc_edit_clear", "jet_gc_edit_clear"),
-//RS     ("jet_gc_edit_pop", "jet_gc_edit_pop"),
-//RS     ("jet_gc_edit_remove_index", "jet_gc_edit_remove_index"),
-//RS     ("jet_gc_edit_insert_index", "jet_gc_edit_insert_index"),
-//RS     ("jet_gc_edit_prepend", "jet_gc_edit_prepend"),
-//RS     ("jet_gc_edit_additive", "jet_gc_edit_additive"),
-//RS     ("jet_gc_edit_plain", "jet_gc_edit_plain"),
-//RS     ("jet_gc_edit_edge_slot", "jet_gc_edit_edge_slot"),
-//RS     ("jet_typed_sql_raw", "jet_typed_sql_raw"),
-//RS     ("jet_typed_sql_interpolate", "jet_typed_sql_interpolate"),
-//RS     ("jet_typed_sql_template", "jet_typed_sql_template"),
-//RS     ("jet_typed_sql_params", "jet_typed_sql_params"),
-//RS     ("jet_typed_html_raw", "jet_typed_html_raw"),
-//RS     ("jet_typed_html_text", "jet_typed_html_text"),
-//RS     ("jet_typed_html_escape", "jet_typed_html_escape"),
-//RS     ("jet_typed_html_interpolate", "jet_typed_html_interpolate"),
-//RS     ("jet_typed_sh_raw", "jet_typed_sh_raw"),
-//RS     ("jet_typed_sh_interpolate", "jet_typed_sh_interpolate"),
-//RS     ("jet_typed_path_component", "jet_typed_path_component"),
-//RS     ("jet_typed_path_interpolate", "jet_typed_path_interpolate"),
-//RS     ("jet_typed_path_literal", "jet_typed_path_literal"),
-//RS     ("jet_typed_datetime_interpolate", "jet_typed_datetime_interpolate"),
-//RS     ("jet_typed_datetime_literal", "jet_typed_datetime_literal"),
-//RS     ("jet_typed_url_literal", "jet_typed_url_literal"),
-//RS     ("jet_expiring_now", "jet_expiring_now"),
-//RS     ("jet_expiring_new", "jet_expiring_new"),
-//RS     ("jet_expiring_secret_new", "jet_expiring_secret_new"),
-//RS     ("jet_expiring_get", "jet_expiring_get"),
-//RS     ("jet_expiring_secret_with", "jet_expiring_secret_with"),
-//RS     ("jet_fraction_value", "jet_fraction_value"),
-//RS     ("jet_fraction_from_parts", "jet_fraction_from_parts"),
-//RS     ("jet_fraction_add", "jet_fraction_add"),
-//RS     ("jet_fraction_sub", "jet_fraction_sub"),
-//RS     ("jet_fraction_mul", "jet_fraction_mul"),
-//RS     ("jet_fraction_div", "jet_fraction_div"),
-//RS     ("jet_fraction_equal", "jet_fraction_equal"),
-//RS     ("jet_fraction_numerator", "jet_fraction_numerator"),
-//RS     ("jet_fraction_denominator", "jet_fraction_denominator"),
-//RS     ("jet_fraction_to_float", "jet_fraction_to_float"),
-//RS     ("jet_fraction_is_zero", "jet_fraction_is_zero"),
-//RS     ("jet_fraction_to_string", "jet_fraction_to_string"),
-//RS     ("jet_complex_value", "jet_complex_value"),
-//RS     ("jet_complex_from_parts", "jet_complex_from_parts"),
-//RS     ("jet_complex_add", "jet_complex_add"),
-//RS     ("jet_complex_sub", "jet_complex_sub"),
-//RS     ("jet_complex_mul", "jet_complex_mul"),
-//RS     ("jet_complex_div", "jet_complex_div"),
-//RS     ("jet_complex_abs", "jet_complex_abs"),
-//RS     ("jet_measurement_kernel_new", "jet_measurement_kernel_new"),
-//RS     ("jet_measurement_kernel_from_relative", "jet_measurement_kernel_from_relative"),
-//RS     ("jet_measurement_kernel_add", "jet_measurement_kernel_add"),
-//RS     ("jet_measurement_kernel_sub", "jet_measurement_kernel_sub"),
-//RS     ("jet_measurement_kernel_mul", "jet_measurement_kernel_mul"),
-//RS     ("jet_measurement_kernel_div", "jet_measurement_kernel_div"),
-//RS     ("jet_measurement_kernel_sqrt", "jet_measurement_kernel_sqrt"),
-//RS     ("jet_measurement_kernel_show", "jet_measurement_kernel_show"),
-//RS     ("jet_measurement_new", "jet_measurement_new"),
-//RS     ("jet_measurement_value", "jet_measurement_value"),
-//RS     ("jet_measurement_uncertainty", "jet_measurement_uncertainty"),
-//RS     ("jet_measurement_add", "jet_measurement_add"),
-//RS     ("jet_measurement_sub", "jet_measurement_sub"),
-//RS     ("jet_measurement_mul", "jet_measurement_mul"),
-//RS     ("jet_measurement_div", "jet_measurement_div"),
-//RS     ("jet_measurement_sqrt", "jet_measurement_sqrt"),
-//RS     ("jet_measurement_show", "jet_measurement_show"),
-//RS     ("jet_shared_new", "jet_shared_new"),
-//RS     ("jet_shared_get", "jet_shared_get"),
-//RS     ("jet_shared_set", "jet_shared_set"),
-//RS     ("jet_shared_replace", "jet_shared_replace"),
-//RS     ("jet_shared_read", "jet_shared_read"),
-//RS     ("jet_shared_edit", "jet_shared_edit"),
-//RS     ("jet_shared_capture", "jet_shared_capture"),
-//RS     ("jet_shared_capture_with", "jet_shared_capture_with"),
-//RS     ("jet_shared_capture_txn_plain", "jet_shared_capture_txn_plain"),
-//RS     ("jet_shared_capture_txn", "jet_shared_capture_txn"),
-//RS     ("jet_shared_try_replace", "jet_shared_try_replace"),
-//RS     ("jet_shared_snapshot_value", "jet_shared_snapshot_value"),
-//RS     ("jet_shared_guard_read", "jet_shared_guard_read"),
-//RS     ("jet_shared_guard_edit", "jet_shared_guard_edit"),
-//RS     ("jet_shared_guard_map", "jet_shared_guard_map"),
-//RS     ("jet_shared_guard_split", "jet_shared_guard_split"),
-//RS     ("jet_stm_begin", "jet_stm_begin"),
-//RS     ("jet_shared_read_txn", "jet_shared_read_txn"),
-//RS     ("jet_shared_edit_txn", "jet_shared_edit_txn"),
-//RS     ("jet_stm_commit", "jet_stm_commit"),
-//RS     ("jet_shared_strong_count", "jet_shared_strong_count"),
-//RS     ("jet_shared_same", "jet_shared_same"),
-//RS     ("jet_shared_downgrade", "jet_shared_downgrade"),
-//RS     ("jet_shared_weak_upgrade", "jet_shared_weak_upgrade"),
-//RS     ("jet_cell_new", "jet_cell_new"),
-//RS     ("jet_cell_get", "jet_cell_get"),
-//RS     ("jet_cell_set", "jet_cell_set"),
-//RS     ("jet_cell_replace", "jet_cell_replace"),
-//RS     ("jet_cell_read", "jet_cell_read"),
-//RS     ("jet_cell_edit", "jet_cell_edit"),
-//RS     ("jet_cell_get_or_set", "jet_cell_get_or_set"),
-//RS     ("jet_cell_guard_read", "jet_cell_guard_read"),
-//RS     ("jet_cell_guard_edit", "jet_cell_guard_edit"),
-//RS     ("jet_cell_guard_map", "jet_cell_guard_map"),
-//RS     ("jet_cell_guard_split", "jet_cell_guard_split"),
-//RS     ("jet_cell_read_guard_get", "jet_cell_read_guard_get"),
-//RS     ("jet_cell_read_guard_read", "jet_cell_read_guard_read"),
-//RS     ("jet_cell_edit_guard_get", "jet_cell_edit_guard_get"),
-//RS     ("jet_cell_edit_guard_set", "jet_cell_edit_guard_set"),
-//RS     ("jet_cell_edit_guard_read", "jet_cell_edit_guard_read"),
-//RS     ("jet_cell_edit_guard_edit", "jet_cell_edit_guard_edit"),
-//RS     ("jet_std::JetPool::new", "jet_pool_new"),
-//RS     ("jet_std::JetPool::add", "jet_pool_add"),
-//RS     ("jet_std::JetPool::remove", "jet_pool_remove"),
-//RS     ("jet_std::JetPool::ids", "jet_pool_ids"),
-//RS     ("jet_pool_get", "jet_pool_get"),
-//RS     ("jet_pool_get_mut", "jet_pool_get_mut"),
-//RS     ("jet_pool_set", "jet_pool_set"),
-//RS     ("jet_authority_covers", "jet_authority_covers"),
-//RS     ("jet_authority_workspace", "jet_authority_workspace"),
-//RS     ("jet_authority_from_rights", "jet_authority_from_rights"),
-//RS     ("jet_authority_with", "jet_authority_with"),
-//RS     ("jet_authority_without", "jet_authority_without"),
-//RS     ("jet_inline_range_from_int", "jet_inline_range_from_int"),
-//RS     ("jet_compute_web_ok", "jet_compute_web_ok"),
-//RS     ("jet_compute_web_err", "jet_compute_web_err"),
-//RS     ("jet_compute_web_fail", "jet_compute_web_fail"),
-//RS     ("jet_compute_web_num", "jet_compute_web_num"),
-//RS     ("jet_compute_web_float", "jet_compute_web_float"),
-//RS     ("jet_compute_web_shape", "jet_compute_web_shape"),
-//RS     ("jet_compute_web_numel", "jet_compute_web_numel"),
-//RS     ("jet_compute_web_placement", "jet_compute_web_placement"),
-//RS     ("jet_compute_web_tensor", "jet_compute_web_tensor"),
-//RS     ("jet_compute_web_device_show", "jet_compute_web_device_show"),
-//RS     ("jet_compute_web_device", "jet_compute_web_device"),
-//RS     ("jet_compute_web_same_device", "jet_compute_web_same_device"),
-//RS     ("jet_compute_webgpu_device", "jet_compute_webgpu_device"),
-//RS     ("jet_compute_webgpu_buffer", "jet_compute_webgpu_buffer"),
-//RS     ("jet_compute_webgpu_params", "jet_compute_webgpu_params"),
-//RS     ("jet_compute_webgpu_pipeline", "jet_compute_webgpu_pipeline"),
-//RS     ("jet_compute_webgpu_dispatch", "jet_compute_webgpu_dispatch"),
-//RS     ("jet_compute_webgpu_read", "jet_compute_webgpu_read"),
-//RS     ("jet_compute_web_values", "jet_compute_web_values"),
-//RS     ("jet_compute_web_buffer", "jet_compute_web_buffer"),
-//RS     ("jet_compute_web_unary_shader", "jet_compute_web_unary_shader"),
-//RS     ("jet_compute_web_binary_shader", "jet_compute_web_binary_shader"),
-//RS     ("jet_compute_web_f32_values", "jet_compute_web_f32_values"),
-//RS     ("jet_compute_web_gpu_unary", "jet_compute_web_gpu_unary"),
-//RS     ("jet_compute_web_gpu_binary", "jet_compute_web_gpu_binary"),
-//RS     ("jet_compute_web_gpu_matmul", "jet_compute_web_gpu_matmul"),
-//RS     ("jet_compute_web_broadcast_shape", "jet_compute_web_broadcast_shape"),
-//RS     ("jet_compute_web_broadcast_values", "jet_compute_web_broadcast_values"),
-//RS     ("jet_compute_web_binary", "jet_compute_web_binary"),
-//RS     ("jet_compute_web_unary", "jet_compute_web_unary"),
-//RS     ("jet_compute_web_matmul", "jet_compute_web_matmul"),
-//RS     ("jet_compute_web_upload", "jet_compute_web_upload"),
-//RS     ("jet_compute_web_transfer", "jet_compute_web_transfer"),
-//RS     ("jet_std_time_sleep_duration_ns", "jet_std_time_sleep_duration_ns"),
-//RS     ("jet_time_sleep_until", "jet_time_sleep_until"),
-//RS     ("jet_rt_callback", "jet_rt_callback"),
-//RS     ("jet_rt_next_deadline", "jet_rt_next_deadline"),
-//RS     ("jet_rt_receipt", "jet_rt_receipt"),
-//RS     ("jet_rt_cancel", "jet_rt_cancel"),
-//RS     ("jet_rt_is_cancelled", "jet_rt_is_cancelled"),
-//RS     ("jet_compute_web_sum", "jet_compute_web_sum"),
-//RS     ("jet_compute_web_mse", "jet_compute_web_mse"),
-//RS     ("jet_compute_web_sgd", "jet_compute_web_sgd"),
-//RS     ("jet_compute_web_set", "jet_compute_web_set"),
-//RS     ("jet_compute_web_shape_result", "jet_compute_web_shape_result"),
-//RS     ("jet_compute_web_call", "jet_compute_web_call"),
-//RS     ("jet_time_monotonic_now_ns", "jet_time_monotonic_now_ns"),
-//RS     ("jet_time_floor_div", "jet_time_floor_div"),
-//RS     ("jet_time_mod", "jet_time_mod"),
-//RS     ("jet_time_clamp_i64", "jet_time_clamp_i64"),
-//RS     ("jet_time_checked_i64", "jet_time_checked_i64"),
-//RS     ("jet_time_saturating_add_i64", "jet_time_saturating_add_i64"),
-//RS     ("jet_time_saturating_mul_i64", "jet_time_saturating_mul_i64"),
-//RS     ("jet_time_saturating_negated_i64", "jet_time_saturating_negated_i64"),
-//RS     ("jet_time_saturating_abs_i64", "jet_time_saturating_abs_i64"),
-//RS     ("jet_time_pad", "jet_time_pad"),
-//RS     ("jet_time_year_string", "jet_time_year_string"),
-//RS     ("jet_time_is_leap", "jet_time_is_leap"),
-//RS     ("jet_time_days_in_month", "jet_time_days_in_month"),
-//RS     ("jet_time_date", "jet_time_date"),
-//RS     ("jet_time_day_number", "jet_time_day_number"),
-//RS     ("jet_time_date_from_day_number", "jet_time_date_from_day_number"),
-//RS     ("jet_time_add_days", "jet_time_add_days"),
-//RS     ("jet_time_add_months", "jet_time_add_months"),
-//RS     ("jet_time_date_parse", "jet_time_date_parse"),
-//RS     ("jet_time_weekday", "jet_time_weekday"),
-//RS     ("jet_time_iso_weekday", "jet_time_iso_weekday"),
-//RS     ("jet_time_iso_week_year", "jet_time_iso_week_year"),
-//RS     ("jet_time_iso_week", "jet_time_iso_week"),
-//RS     ("jet_time_from_iso_week", "jet_time_from_iso_week"),
-//RS     ("jet_time_parse_iso_week_date", "jet_time_parse_iso_week_date"),
-//RS     ("jet_time_time", "jet_time_time"),
-//RS     ("jet_time_parse_time", "jet_time_parse_time"),
-//RS     ("jet_time_time_seconds", "jet_time_time_seconds"),
-//RS     ("jet_time_time_nanoseconds", "jet_time_time_nanoseconds"),
-//RS     ("jet_time_time_from_nanoseconds", "jet_time_time_from_nanoseconds"),
-//RS     ("jet_time_date_time_from_ns", "jet_time_date_time_from_ns"),
-//RS     ("jet_time_date_time_from_ms", "jet_time_date_time_from_ms"),
-//RS     ("jet_time_date_time_from_seconds", "jet_time_date_time_from_seconds"),
-//RS     ("jet_time_date_time_from_microseconds", "jet_time_date_time_from_microseconds"),
-//RS     ("jet_time_date_time_from_nanoseconds", "jet_time_date_time_from_nanoseconds"),
-//RS     ("jet_time_date_time_total_ns", "jet_time_date_time_total_ns"),
-//RS     ("jet_time_date_time_date", "jet_time_date_time_date"),
-//RS     ("jet_time_date_time_time", "jet_time_date_time_time"),
-//RS     ("jet_time_date_time_add_duration", "jet_time_date_time_add_duration"),
-//RS     ("jet_time_local_epoch_seconds", "jet_time_local_epoch_seconds"),
-//RS     ("jet_time_parse_offset", "jet_time_parse_offset"),
-//RS     ("jet_time_offset_string", "jet_time_offset_string"),
-//RS     ("jet_time_parse_rfc3339", "jet_time_parse_rfc3339"),
-//RS     ("jet_time_date_string", "jet_time_date_string"),
-//RS     ("jet_time_time_string", "jet_time_time_string"),
-//RS     ("jet_time_date_time_format_rfc3339", "jet_time_date_time_format_rfc3339"),
-//RS     ("jet_time_period", "jet_time_period"),
-//RS     ("jet_time_period_add", "jet_time_period_add"),
-//RS     ("jet_time_period_negated", "jet_time_period_negated"),
-//RS     ("jet_time_period_abs", "jet_time_period_abs"),
-//RS     ("jet_time_period_month_delta", "jet_time_period_month_delta"),
-//RS     ("jet_time_period_add_to_date", "jet_time_period_add_to_date"),
-//RS     ("jet_time_period_add_to_datetime", "jet_time_period_add_to_datetime"),
-//RS     ("jet_time_period_total_in", "jet_time_period_total_in"),
-//RS     ("jet_time_unit_ns", "jet_time_unit_ns"),
-//RS     ("jet_time_round_quotient", "jet_time_round_quotient"),
-//RS     ("jet_time_round_ns", "jet_time_round_ns"),
-//RS     ("jet_time_duration_abs", "jet_time_duration_abs"),
-//RS     ("jet_time_duration_negated", "jet_time_duration_negated"),
-//RS     ("jet_time_duration_sign", "jet_time_duration_sign"),
-//RS     ("jet_time_duration_total_in", "jet_time_duration_total_in"),
-//RS     ("jet_time_duration_round", "jet_time_duration_round"),
-//RS     ("jet_time_ok", "jet_time_ok"),
-//RS     ("jet_time_err", "jet_time_err"),
-//RS     ("jet_time_result", "jet_time_result"),
-//RS     ("jet_time_text_result", "jet_time_text_result"),
-//RS     ("jet_time_range_result", "jet_time_range_result"),
-//RS     ("jet_time_some", "jet_time_some"),
-//RS     ("jet_time_none", "jet_time_none"),
-//RS     ("jet_time_tzif_u32", "jet_time_tzif_u32"),
-//RS     ("jet_time_tzif_i64", "jet_time_tzif_i64"),
-//RS     ("jet_time_tzif_counts", "jet_time_tzif_counts"),
-//RS     ("jet_time_tzif_block_size", "jet_time_tzif_block_size"),
-//RS     ("jet_time_parse_tzif", "jet_time_parse_tzif"),
-//RS     ("jet_time_zone", "jet_time_zone"),
-//RS     ("jet_time_zone_info_at_utc", "jet_time_zone_info_at_utc"),
-//RS     ("jet_time_zone_local_parts", "jet_time_zone_local_parts"),
-//RS     ("jet_time_zone_local_to_utc", "jet_time_zone_local_to_utc"),
-//RS     ("jet_time_zone_local_to_utc_offset", "jet_time_zone_local_to_utc_offset"),
-//RS     ("jet_time_zone_start_of_day", "jet_time_zone_start_of_day"),
-//RS     ("jet_time_zone_hours_in_day", "jet_time_zone_hours_in_day"),
-//RS     ("jet_time_zone_transition", "jet_time_zone_transition"),
-//RS     ("jet_time_zoned_from_local", "jet_time_zoned_from_local"),
-//RS     ("jet_time_zoned_date", "jet_time_zoned_date"),
-//RS     ("jet_time_zoned_time", "jet_time_zoned_time"),
-//RS     ("jet_time_replace", "jet_time_replace"),
-//RS     ("jet_time_format", "jet_time_format"),
-//RS     ("jet_time_format_checked", "jet_time_format_checked"),
-//RS     ("jet_time_method", "jet_time_method"),
-//RS     ("jet_time_core", "jet_time_core"),
-//RS     ("jet_time_add", "jet_time_add"),
-//RS     ("jet_time_sub", "jet_time_sub"),
-//RS ];
-//RS fn web_runtime_link(name: &str) -> Option<&'static str> {
-//RS     WEB_RUNTIME_LINKS
-//RS         .iter()
-//RS         .find_map(|(source, local)| (*source == name).then_some(*local))
-//RS }
-//RS fn js_symbol_expression(symbol: &MirSymbol) -> Result<String, MirWebError> {
-//RS     match symbol {
-//RS         MirSymbol::Prelude(name) => {
-//RS             if let Some(local) = WEB_PRELUDE_LINKS
-//RS                 .iter()
-//RS                 .find_map(|(source, local)| (*source == name).then_some(*local))
-//RS             {
-//RS                 return Ok(local.to_string());
-//RS             }
-//RS             if name.bytes().enumerate().all(|(index, byte)| {
-//RS                 if index == 0 {
-//RS                     byte.is_ascii_alphabetic() || byte == b'_' || byte == b'$'
-//RS                 } else {
-//RS                     byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$'
-//RS                 }
-//RS             }) {
-//RS                 return Ok(name.clone());
-//RS             }
-//RS             Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "MIR Prelude symbol {name:?} has no direct local Web binding"
-//RS                 ),
-//RS             })
-//RS         }
-//RS         MirSymbol::Runtime(name) => web_runtime_link(name)
-//RS             .map(str::to_string)
-//RS             .ok_or_else(|| MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "MIR Web runtime symbol {name:?} has no binding in the Web JS runtime module"
-//RS                 ),
-//RS             }),
-//RS     }
-//RS }
-//RS fn emit_js_terminator(
-//RS     out: &mut String,
-//RS     function: &MirFunction,
-//RS     block: &MirBasicBlock,
-//RS ) -> Result<(), MirWebError> {
-//RS     match &block.terminator {
-//RS         MirTerminator::Jump { target } => writeln!(
-//RS             out,
-//RS             "        __jet_pred = __jet_block; __jet_block = {}; continue;",
-//RS             target.0
-//RS         )
-//RS         .unwrap(),
-//RS         MirTerminator::Branch { condition, then_target, else_target } => writeln!(
-//RS             out,
-//RS             "        __jet_pred = __jet_block; __jet_block = Boolean(__jet_values.get({})) ? {} : {}; continue;",
-//RS             condition.0,
-//RS             then_target.0,
-//RS             else_target.0
-//RS         )
-//RS         .unwrap(),
-//RS         MirTerminator::Switch { subject, arms, otherwise } => {
-//RS             write!(
-//RS                 out,
-//RS                 "        __jet_pred = __jet_block; const __jet_subject = __jet_values.get({}); __jet_block = ",
-//RS                 subject.0
-//RS             )
-//RS             .unwrap();
-//RS             for arm in arms {
-//RS                 write!(
-//RS                     out,
-//RS                     "__jet_subject === __jet_values.get({}) ? {} : ",
-//RS                     arm.condition.0, arm.target.0
-//RS                 )
-//RS                 .unwrap();
-//RS             }
-//RS             writeln!(out, "{}; continue;", otherwise.0).unwrap();
-//RS         }
-//RS         MirTerminator::Return { value } => match value {
-//RS             Some(value) => {
-//RS                 let returned = js_return_expression(function, *value);
-//RS                 writeln!(out, "        return {returned};").unwrap();
-//RS             }
-//RS             None => out.push_str("        return undefined;\n"),
-//RS         },
-//RS         // Web generators end at the consumer's `return()`; the MIR cancel edge
-//RS         // has no JS counterpart here.
-//RS         MirTerminator::Yield { value, resume, .. } => {
-//RS             let Some(generator) = &function.generator else {
-//RS                 return Err(MirWebError::InvalidMir {
-//RS                     message: format!(
-//RS                         "MIR function {} has a Yield terminator without generator facts",
-//RS                         function.id.0
-//RS                     ),
-//RS                 });
-//RS             };
-//RS             let Some((_, value_ty, _, _)) = function.values.iter().find(|(id, _, _, _)| id == value) else {
-//RS                 return Err(MirWebError::InvalidMir {
-//RS                     message: format!("MIR yield value {} is missing from value declarations", value.0),
-//RS                 });
-//RS             };
-//RS             if value_ty != &generator.item {
-//RS                 return Err(MirWebError::InvalidMir {
-//RS                     message: format!("MIR generator {} yields a value with the wrong type", function.id.0),
-//RS                 });
-//RS             }
-//RS             writeln!(
-//RS                 out,
-//RS                 "        yield __jet_values.get({}); __jet_pred = __jet_block; __jet_block = {}; continue;",
-//RS                 value.0, resume.0
-//RS             )
-//RS             .unwrap();
-//RS         }
-//RS         MirTerminator::Break { target, value } => {
-//RS             if let Some(value) = value {
-//RS                 writeln!(out, "        __jet_break_value = __jet_values.get({});", value.0).unwrap();
-//RS             }
-//RS             writeln!(
-//RS                 out,
-//RS                 "        __jet_pred = __jet_block; __jet_block = {}; continue;",
-//RS                 target.0
-//RS             )
-//RS             .unwrap();
-//RS         }
-//RS         MirTerminator::Continue { target } => writeln!(
-//RS             out,
-//RS             "        __jet_pred = __jet_block; __jet_block = {}; continue;",
-//RS             target.0
-//RS         )
-//RS         .unwrap(),
-//RS         MirTerminator::Unreachable { reason } => {
-//RS             writeln!(out, "        throw new Error({});", js_string(reason)).unwrap();
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn js_return_expression(function: &MirFunction, value: jet_foundation::MIR::MirValueId) -> String {
-//RS     let value = format!("__jet_values.get({})", value.0);
-//RS     if matches!(function.return_type.kind(), MirTypeKind::Option(_)) {
-//RS         format!("jet_clean_option({value})")
-//RS     } else {
-//RS         value
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn js_optional_string(value: Option<&str>) -> String {
-//RS     value.map(js_string).unwrap_or_else(|| "null".to_string())
-//RS }
-//RS 
-//RS fn js_route_field(field: &jet_foundation::App::AppRouteField) -> String {
-//RS     let default = field
-//RS         .default
-//RS         .as_deref()
-//RS         .map(js_string)
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     format!(
-//RS         "Object.freeze({{ name: {}, ty: {}, codec: {}, required: {}, default: {} }})",
-//RS         js_string(&field.name),
-//RS         js_string(&field.ty),
-//RS         js_string(&field.codec),
-//RS         field.required,
-//RS         default,
-//RS     )
-//RS }
-//RS 
-//RS fn js_route_fields(fields: &[jet_foundation::App::AppRouteField]) -> String {
-//RS     let fields = fields.iter().map(js_route_field).collect::<Vec<_>>().join(", ");
-//RS     format!("Object.freeze([{}])", fields)
-//RS }
-//RS 
-//RS fn js_route_loader(loader: Option<&jet_foundation::App::AppRouteLoader>) -> String {
-//RS     let Some(loader) = loader else {
-//RS         return "null".to_string();
-//RS     };
-//RS     format!(
-//RS         "Object.freeze({{ handler: {}, data_type: {}, dependency: {}, preload: {}, cache_identity: {} }})",
-//RS         js_string(&loader.handler),
-//RS         js_string(&loader.data_type),
-//RS         js_string(&loader.dependency),
-//RS         loader.preload,
-//RS         js_string(&loader.cache_identity),
-//RS     )
-//RS }
-//RS 
-//RS fn js_route_boundaries(boundaries: &jet_foundation::App::AppRouteBoundaries) -> String {
-//RS     format!(
-//RS         "Object.freeze({{ pending: {}, not_found: {}, error: {} }})",
-//RS         js_optional_string(boundaries.pending.as_deref()),
-//RS         js_optional_string(boundaries.not_found.as_deref()),
-//RS         js_optional_string(boundaries.error.as_deref()),
-//RS     )
-//RS }
-//RS 
-//RS fn js_route_island(island: Option<&jet_foundation::App::AppIslandFact>) -> String {
-//RS     let Some(island) = island else {
-//RS         return "null".to_string();
-//RS     };
-//RS     let captures = island
-//RS         .resume_payload
-//RS         .captures
-//RS         .iter()
-//RS         .map(|capture| {
-//RS             format!(
-//RS                 "Object.freeze({{ name: {}, ty: {}, serializable: {} }})",
-//RS                 js_string(&capture.name),
-//RS                 js_string(&capture.ty),
-//RS                 capture.serializable
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(", ");
-//RS     format!(
-//RS         "Object.freeze({{ identity: {}, hydration_trigger: {}, resume_payload: Object.freeze({{ captures: Object.freeze([{}]), serializable: {} }}) }})",
-//RS         js_string(&island.identity),
-//RS         js_string(island.hydration_trigger.as_str()),
-//RS         captures,
-//RS         island.resume_payload.serializable
-//RS     )
-//RS }
-//RS 
-//RS fn js_route_render_facts(facts: &jet_foundation::App::AppRenderFacts) -> String {
-//RS     format!(
-//RS         "Object.freeze({{ mode: {}, reason: Object.freeze({}), effects: Object.freeze({}), interactive: {}, loader: {}, form: {}, cache: {}, override_mode: {}, pending_boundary_id: {}, island: {} }})",
-//RS         js_string(facts.mode.as_str()),
-//RS         json_string_list(&facts.reason),
-//RS         json_string_list(&facts.effects),
-//RS         facts.interactive,
-//RS         js_optional_string(facts.loader.as_deref()),
-//RS         js_optional_string(facts.form.as_deref()),
-//RS         js_string(facts.cache.as_str()),
-//RS         facts
-//RS             .override_mode
-//RS             .map(|mode| js_string(mode.as_str()))
-//RS             .unwrap_or_else(|| "null".to_string()),
-//RS         facts
-//RS             .pending_boundary_id
-//RS             .map(|id| id.get().to_string())
-//RS             .unwrap_or_else(|| "null".to_string()),
-//RS         js_route_island(facts.island.as_ref())
-//RS     )
-//RS }
-//RS 
-//RS fn js_route_projection(route: &jet_foundation::App::AppRoute) -> String {
-//RS     format!(
-//RS         "Object.freeze({{ path: {}, handler: {}, provenance: {}, route_identity: {}, path_params: {}, search_params: {}, search_codec: {}, loader: {}, boundaries: {}, precedence: {}, render_facts: {} }})",
-//RS         js_string(&route.path),
-//RS         js_string(&route.handler),
-//RS         js_string(&route.provenance),
-//RS         js_string(&route.route_identity),
-//RS         js_route_fields(&route.path_params),
-//RS         js_route_fields(&route.search_params),
-//RS         js_string(&route.search_codec),
-//RS         js_route_loader(route.loader.as_ref()),
-//RS         js_route_boundaries(&route.boundaries),
-//RS         js_string(&route.precedence),
-//RS         js_route_render_facts(&route.render_facts),
-//RS     )
-//RS }
-//RS fn js_action_projection(action: &jet_foundation::App::AppAction) -> String {
-//RS     format!(
-//RS         "Object.freeze({{ name: {}, handler: {}, kind: {}, preload: {}, input: {}, output: {}, error: {}, endpoint: {}, method: {}, csrf: {}, effects: {}, middleware: {}, provenance: {} }})",
-//RS         js_string(&action.name),
-//RS         js_string(&action.handler),
-//RS         js_string(&action.kind),
-//RS         action.preload,
-//RS         js_string(&action.input_type),
-//RS         js_string(&action.output_type),
-//RS         js_string(&action.error_type),
-//RS         js_string(&action.endpoint),
-//RS         js_string(&action.method),
-//RS         js_string(&action.csrf),
-//RS         json_string_list(&action.effects),
-//RS         json_string_list(&action.middleware),
-//RS         js_string(&action.provenance),
-//RS     )
-//RS }
-//RS 
-//RS 
-//RS fn emit_js_routes(out: &mut String, program: &MirProgram) {
-//RS     match &program.facts.web_app {
-//RS         Some(graph) => {
-//RS             // The emitted route/action projections are views of the one
-//RS             // sema-owned graph.  Keep the complete graph available to the
-//RS             // browser bootstrap so it can pass the checked contracts to the
-//RS             // canonical router/server-function kernels.
-//RS             out.push_str("export const jet_app_graph = Object.freeze(");
-//RS             out.push_str(&graph.to_json());
-//RS             out.push_str(");\n");
-//RS             out.push_str("export const jet_routes = Object.freeze({\n");
-//RS             for route in &graph.routes {
-//RS                 writeln!(
-//RS                     out,
-//RS                     "  {}: {},",
-//RS                     js_string(&route.path),
-//RS                     js_route_projection(route),
-//RS                 )
-//RS                 .unwrap();
-//RS             }
-//RS             out.push_str("});\n");
-//RS             out.push_str("export const jet_actions = Object.freeze([\n");
-//RS             for action in &graph.actions {
-//RS                 writeln!(out, "  {},", js_action_projection(action)).unwrap();
-//RS             }
-//RS             out.push_str("]);\n");
-//RS         }
-//RS         None => {
-//RS             out.push_str("export const jet_app_graph = null;\n");
-//RS             out.push_str("export const jet_routes = Object.freeze({});\n");
-//RS             out.push_str("export const jet_actions = Object.freeze([]);\n");
-//RS         }
-//RS     }
-//RS     out.push_str("globalThis.__jetAppGraph = jet_app_graph;\n");
-//RS     out.push_str(
-//RS         "\n// The browser adapter consumes this checked graph and delegates route\n\
-//RS          // matching/data production to the native server graph.\n\
-//RS          export const jet_web_app = jetDom.createWebApp({ graph: jet_app_graph, routes: jet_routes, actions: jet_actions });\n\
-//RS          export function jet_bootstrap_web(options = {}) {\n\
-//RS            return jetDom.bootstrapWebApp(jet_web_app, options);\n\
-//RS          }\n\
-//RS          export const jet_web_bootstrap = jet_bootstrap_web;\n\
-//RS          if (typeof document !== \"undefined\" && jet_app_graph !== null\n\
-//RS              && !globalThis.__jetWebDisableAutoBootstrap\n\
-//RS              && document.getElementById(\"jet-route-data\")) {\n\
-//RS            queueMicrotask(() => {\n\
-//RS              if (!globalThis.__jetWebApp) jet_bootstrap_web();\n\
-//RS            });\n\
-//RS          }\n",
-//RS     );
-//RS }
-//RS 
-//RS 
-//RS fn manifest_partitions(
-//RS     functions: &[&MirFunction],
-//RS ) -> Result<BTreeMap<String, WebBucket>, MirWebError> {
-//RS     let mut partitions = BTreeMap::new();
-//RS     for function in functions {
-//RS         if !function.target_applicability.web {
-//RS             continue;
-//RS         }
-//RS         let Some(bucket) = function.web_bucket else {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "manifest function {} is Web-applicable but has no checked Web bucket",
-//RS                     function.id.0
-//RS                 ),
-//RS             });
-//RS         };
-//RS         if partitions.insert(function.key.clone(), bucket).is_some() {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "manifest contains duplicate Web function key `{}`",
-//RS                     function.key
-//RS                 ),
-//RS             });
-//RS         }
-//RS     }
-//RS     Ok(partitions)
-//RS }
-//RS 
-//RS fn emit_manifest(
-//RS     program: &MirProgram,
-//RS     target: &MirWebTarget,
-//RS     functions: &[&MirFunction],
-//RS     artifact: &MirArtifactPlan,
-//RS     entry: jet_foundation::MIR::MirFunctionId,
-//RS     artifact_identity: &str,
-//RS ) -> Result<String, MirWebError> {
-//RS     let mut out = String::from("{\n");
-//RS     out.push_str("  \"schema\": \"mir-web-v1\",\n");
-//RS     let partitions = manifest_partitions(functions)?;
-//RS     out.push_str("  \"status\": \"m2\",\n");
-//RS     out.push_str("  \"partitions\": {\n");
-//RS     for (index, (key, bucket)) in partitions.iter().enumerate() {
-//RS         if index != 0 {
-//RS             out.push_str(",\n");
-//RS         }
-//RS         write!(
-//RS             out,
-//RS             "    {}: {}",
-//RS             json_string(key),
-//RS             optional_web_bucket(Some(*bucket))
-//RS         )
-//RS         .unwrap();
-//RS     }
-//RS     out.push_str("\n  },\n");
-//RS     writeln!(out, "  \"package\": {},", json_string(&program.package_identity)).unwrap();
-//RS     writeln!(
-//RS         out,
-//RS         "  \"target\": {{ \"triple\": {}, \"pointer_size\": {}, \"pointer_alignment\": {} }},",
-//RS         json_string(&target.layout.triple),
-//RS         target.layout.pointer_size,
-//RS         target.layout.pointer_alignment
-//RS     )
-//RS     .unwrap();
-//RS     writeln!(out, "  \"artifact_id\": {},", artifact.id.0).unwrap();
-//RS     writeln!(out, "  \"entry\": {},", entry.0).unwrap();
-//RS     out.push_str("  \"functions\": [\n");
-//RS     let mut sorted_functions = functions.to_vec();
-//RS     sorted_functions.sort_by_key(|function| function.id);
-//RS     for (index, function) in sorted_functions.iter().enumerate() {
-//RS         if index != 0 {
-//RS             out.push_str(",\n");
-//RS         }
-//RS         let generic_params = json_generic_params(&function.generic_params, program)?;
-//RS         write!(
-//RS             out,
-//RS             "    {{ \"id\": {}, \"key\": {}, \"module\": {}, \"name\": {}, \"kind\": {}, \"visibility\": {}, \"web_bucket\": {}, \"web_marker\": {}, \"target_applicability\": {{ \"web\": {} }}, \"wasm_export\": {}, \"generic_params\": {}, \"web_param_reconstructions\": {} }}",
-//RS             function.id.0,
-//RS             json_string(&function.key),
-//RS             json_string(&function.module),
-//RS             json_string(&function.name),
-//RS             json_string(function_kind_descriptor(function.kind)),
-//RS             json_string(visibility_descriptor(function.visibility)),
-//RS             optional_web_bucket(function.web_bucket),
-//RS             optional_web_marker(function.web_marker),
-//RS             function.target_applicability.web,
-//RS             is_wasm_export(function),
-//RS             generic_params,
-//RS             json_reconstructions(&function.web_param_reconstructions)
-//RS         )
-//RS         .unwrap();
-//RS     }
-//RS     out.push_str("\n  ],\n  \"core_calls\": [\n");
-//RS     let mut core_calls = program.core_calls.iter().collect::<Vec<_>>();
-//RS     core_calls.sort_by_key(|call| call.id);
-//RS     for (index, call) in core_calls.iter().enumerate() {
-//RS         if index != 0 {
-//RS             out.push_str(",\n");
-//RS         }
-//RS         write!(
-//RS             out,
-//RS             "    {{ \"id\": {}, \"key\": {}, \"symbol\": {}, \"arity\": {}, \"max_arity\": {}, \"fallibility\": {}, \"effect\": {}, \"pure_route\": {}, \"interpreter_route\": {} }}",
-//RS             call.id.0,
-//RS             json_string(&call.key),
-//RS             json_string(core_symbol(call.symbol)),
-//RS             call.arity,
-//RS             call.max_arity,
-//RS             json_string(core_call_fallibility_descriptor(call.fallibility)),
-//RS             optional_effect_descriptor(call.effect.as_ref()),
-//RS             json_string(core_call_pure_route_descriptor(call.pure_route)),
-//RS             json_string(&core_call_interpreter_route_descriptor(call.interpreter_route))
-//RS         )
-//RS         .unwrap();
-//RS     }
-//RS     out.push_str("\n  ],\n  \"prelude_calls\": [\n");
-//RS     let mut prelude_calls = program.prelude_calls.iter().collect::<Vec<_>>();
-//RS     prelude_calls.sort_by_key(|call| call.id);
-//RS     for (index, call) in prelude_calls.iter().enumerate() {
-//RS         if index != 0 {
-//RS             out.push_str(",\n");
-//RS         }
-//RS         write!(
-//RS             out,
-//RS             "    {{ \"id\": {}, \"module\": {}, \"member\": {}, \"family\": {}, \"symbol\": {}, \"abi\": {}, \"arity\": {}, \"max_arity\": {} }}",
-//RS             call.id.0,
-//RS             json_string(&call.module),
-//RS             json_string(&call.member),
-//RS             json_string(prelude_family_descriptor(call.family)),
-//RS             json_string(call.symbol.name()),
-//RS             json_string(prelude_abi_descriptor(call.abi)),
-//RS             call.signature.arity,
-//RS             call.signature.max_arity
-//RS         )
-//RS         .unwrap();
-//RS     }
-//RS     out.push_str("\n  ],\n  \"types\": [\n");
-//RS     for (index, type_def) in program.types.iter().enumerate() {
-//RS         if index != 0 {
-//RS             out.push_str(",\n");
-//RS         }
-//RS         let generic_params = json_generic_params(&type_def.generic_params, program)?;
-//RS         write!(
-//RS             out,
-//RS             "    {{ \"id\": {}, \"key\": {}, \"name\": {}, \"kind\": {}, \"generic_params\": {} }}",
-//RS             type_def.id.0,
-//RS             json_string(&type_def.key),
-//RS             json_string(&type_def.name),
-//RS             json_string(&type_def_kind_descriptor(&type_def.kind)),
-//RS             generic_params
-//RS         )
-//RS         .unwrap();
-//RS     }
-//RS     out.push_str("\n  ],\n  \"modules\": ");
-//RS     out.push_str(&json_modules(program));
-//RS     out.push_str(",\n  \"imports\": ");
-//RS     out.push_str(&json_imports(program));
-//RS     out.push_str(",\n  \"traits\": ");
-//RS     out.push_str(&json_traits(program));
-//RS     out.push_str(",\n  \"impls\": ");
-//RS     out.push_str(&json_impls(program));
-//RS     out.push_str(",\n  \"constants\": ");
-//RS     out.push_str(&json_constants(program));
-//RS     out.push_str(",\n  \"jobs\": ");
-//RS     out.push_str(&json_jobs(program));
-//RS     out.push_str(",\n  \"harnesses\": ");
-//RS     out.push_str(&json_harnesses(program));
-//RS     out.push_str(",\n  \"artifacts\": ");
-//RS     out.push_str(&json_artifacts(program, artifact.id, artifact_identity)?);
-//RS     out.push_str(",\n  \"artifact\": ");
-//RS     out.push_str(&json_artifact(artifact, program, artifact_identity)?);
-//RS     out.push_str(",\n  \"entry_spec\": ");
-//RS     out.push_str(&json_entry_spec(artifact.entry.as_ref(), program)?);
-//RS     out.push_str(",\n  \"app\": ");
-//RS     match &program.facts.web_app {
-//RS         Some(graph) => out.push_str(&graph.to_json()),
-//RS         None => out.push_str("null"),
-//RS     }
-//RS     out.push_str("\n}\n");
-//RS     Ok(out)
-//RS }
-//RS 
-// END-PORT-PENDING 0464 crates/jet-codegen/src/Codegen/MIRWeb.rs:5241-7112
+use jet_foundation.[AppAction, AppIslandFact, AppRenderFacts, AppRoute, AppRouteBoundaries, AppRouteField, AppRouteLoader, CoreCallSymbol, Effect, HistoryProvenance, MirAccess, MirArtifactPlan, MirBasicBlock, MirCallArg, MirCallee, MirCaptureOperand, MirCoreCall, MirCoreCallId, MirFunction, MirFunctionForm, MirFunctionId, MirOwnershipMode, MirPreludeCallId, MirProgram, MirSymbol, MirTerminator, MirType, MirTypeDefKind, MirTypeKind, MirValueId, MirVariantPayload, WebBucket, sha256_hex]
 
+// Private extension of Codegen.MIRWeb: helpers and error/target carriers are
+// supplied by its preceding/following packet fragments, not a second backend.
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5241
+fn js_call_expression(program: MirProgram, caller: MirFunction, callee: MirCallee, args: [MirCallArg], type_args: [MirType], history_provenance: HistoryProvenance) -> String MirWebError! {
+    validate_type_args(program, type_args)!
+    if callee == {
+        .User(id) -> {
+            function :: program.functions.find(fn(f) -> f.id == id) ?? fail MirWebError.MissingUserFunction{function: id.0}
+            values :: js_call_values(program, caller, args, !is_wasm_export(function))!
+            if is_wasm_export(function) -> return js_wasm_export_call(function, caller, args, values)!
+            if !function.target_applicability.web || !function_in_bucket(function, WebBucket.JS) -> fail MirWebError.MissingUserFunction{function: id.0}
+            call :: "jet_fn_{id.0}([], [{values.join(", ")}])"
+            if function.generator == None && web_function_is_async(program, id) -> "await {call}" else -> call
+        }
+        .Associated(id, owner) -> {
+            validate_type_args(program, [owner])!
+            function :: program.functions.find(fn(f) -> f.id == id) ?? fail MirWebError.MissingUserFunction{function: id.0}
+            values :: js_call_values(program, caller, args, !is_wasm_export(function))!
+            if is_wasm_export(function) -> return js_wasm_export_call(function, caller, args, values)!
+            if !function.target_applicability.web || !function_in_bucket(function, WebBucket.JS) -> fail MirWebError.MissingUserFunction{function: id.0}
+            valid := false
+            if function.form == {
+                .Method(declared_owner, self_access) -> valid = self_access == None && declared_owner.same_checked_type(owner)
+                .TraitMethod(declared_owner, self_access, trait_ref, _) -> valid = self_access == None && declared_owner.same_checked_type(owner) && program.traits.any(fn(row) -> row.id == trait_ref.id)
+                .TopLevel -> fail MirWebError.InvalidMir{message: "MIR associated call {id.0} does not target an inherent or trait method"}
+            }
+            if !valid -> fail MirWebError.InvalidMir{message: "MIR associated call {id.0} does not target a declared static method"}
+            call :: "jet_fn_{id.0}([], [{values.join(", ")}])"
+            if function.generator == None && web_function_is_async(program, id) -> "await {call}" else -> call
+        }
+        .Method(id, owner) -> {
+            validate_type_args(program, [owner])!
+            function :: program.functions.find(fn(f) -> f.id == id) ?? fail MirWebError.MissingUserFunction{function: id.0}
+            values :: js_call_values(program, caller, args, !is_wasm_export(function))!
+            if is_wasm_export(function) -> return js_wasm_export_call(function, caller, args, values)!
+            if !function.target_applicability.web || !function_in_bucket(function, WebBucket.JS) -> fail MirWebError.MissingUserFunction{function: id.0}
+            expected_access := None as MirAccess?
+            if function.form == {
+                .Method(declared_owner, access) -> { if declared_owner.same_checked_type(owner) -> expected_access = access }
+                .TraitMethod(declared_owner, access, trait_ref, _) -> { if declared_owner.same_checked_type(owner) && program.traits.any(fn(row) -> row.id == trait_ref.id) -> expected_access = access }
+                .TopLevel -> fail MirWebError.InvalidMir{message: "MIR method call {id.0} does not target an inherent or trait method"}
+            }
+            access :: expected_access ?? fail MirWebError.InvalidMir{message: "MIR method call {id.0} owner/access disagrees with its declaration"}
+            receiver :: args.first() ?? fail MirWebError.InvalidMir{message: "MIR method call {id.0} has no receiver argument"}
+            if receiver.access != access -> fail MirWebError.InvalidMir{message: "MIR method call {id.0} receiver access {receiver.access:?} disagrees with declaration {access:?}"}
+            call :: "jet_fn_{id.0}([], [{values.join(", ")}])"
+            if function.generator == None && web_function_is_async(program, id) -> "await {call}" else -> call
+        }
+        .TraitMethod(method, trait_ref, _) -> {
+            values :: js_call_values(program, caller, args, true)!
+            receiver_value :: values.first() ?? fail MirWebError.InvalidMir{message: "MIR trait method call {method.0} has no receiver argument"}
+            (targets, default) :: web_trait_method_targets(program, method, trait_ref)!
+            receiver_args := values
+            receiver_args[0] = "__jet_receiver"
+            rendered_args :: receiver_args.join(", ")
+            dispatch := ""
+            is_async := false
+            if default_id :: default {
+                function :: program.functions.find(fn(f) -> f.id == default_id) ?? fail MirWebError.MissingUserFunction{function: default_id.0}
+                if !function.target_applicability.web || !function_in_bucket(function, WebBucket.JS) -> fail MirWebError.MissingUserFunction{function: default_id.0}
+                dispatch = "jet_fn_{default_id.0}([], [{rendered_args}])"
+                is_async = function.generator == None && web_function_is_async(program, function.id)
+            } else {
+                message :: js_string("no implementation for trait method {method.0}")
+                dispatch = "(() => {{ throw new Error({message}) }})()"
+            }
+            loop (type_id, function_id) in targets.iter().rev() {
+                function :: program.functions.find(fn(f) -> f.id == function_id) ?? fail MirWebError.MissingUserFunction{function: function_id.0}
+                if !function.target_applicability.web || !function_in_bucket(function, WebBucket.JS) -> fail MirWebError.MissingUserFunction{function: function_id.0}
+                is_async = is_async || (function.generator == None && web_function_is_async(program, function_id))
+                call :: "jet_fn_{function_id.0}([], [{rendered_args}])"
+                dispatch = "__jet_receiver?.__jet_type === {js_string(type_id.0.to_string())} ? {call} : {dispatch}"
+            }
+            expression :: "((__jet_receiver) => ({dispatch}))({receiver_value})"
+            if caller.generator == None && is_async -> "await ({expression})" else -> expression
+        }
+        .Core(id) -> js_core_call_expression(program, caller, id, None, args, type_args, history_provenance)!
+        .Prelude(id) -> {
+            values :: js_call_values(program, caller, args, false)!
+            js_prelude_call_expression(program, id, values)!
+        }
+        .Foreign(id) -> {
+            foreign :: program.foreign.find(fn(f) -> f.id == id) ?? fail MirWebError.InvalidMir{message: "MIR foreign function {id.0} is missing"}
+            abi :: foreign_abi_name(foreign.foreign_abi)
+            fail MirWebError.InvalidMir{message: "MIR Web JS-partition call references foreign row {foreign.id.0} at {foreign.span:?} (symbol `{foreign.symbol}` path `{foreign.path}` ABI `{abi}` language {foreign.foreign_language:?} applicability rust_aot={foreign.target_applicability.rust_aot} cranelift={foreign.target_applicability.cranelift} interpreter={foreign.target_applicability.interpreter} web={foreign.target_applicability.web}); no checked JavaScript linkage exists"}
+        }
+        .Indirect(id) -> {
+            values :: js_call_values(program, caller, args, true)!
+            "__jet_values.get({id.0})({values.join(", ")})"
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5481
+fn js_closure_expression(program: MirProgram, enclosing: MirFunction, function_id: MirFunctionId, captures: [MirCaptureOperand], history_provenance: HistoryProvenance) -> String MirWebError! {
+    function :: program.functions.find(fn(f) -> f.id == function_id) ?? fail MirWebError.MissingUserFunction{function: function_id.0}
+    if !function.target_applicability.web || !function_in_bucket(function, WebBucket.JS) -> fail MirWebError.MissingUserFunction{function: function_id.0}
+    if function.capture_params.len() != captures.len() -> fail MirWebError.InvalidMir{message: "MIR closure for function {function_id.0} has {captures.len()} captures, expected {function.capture_params.len()}"}
+    validate_capture_params(program, function)!
+    values := [String]{}
+    loop (slot, operand) in captures {
+        capture :: function.capture_params[slot]
+        value :: if operand == {
+            .Value(value) -> {
+                if capture.access == MirAccess.Move {
+                    js_move_value_expression(value)
+                } else if capture.ownership.mode == MirOwnershipMode.Owned {
+                    "{{ value: {js_move_value_expression(value)} }}"
+                } else {
+                    fail MirWebError.InvalidMir{message: "MIR closure capture slot {slot} passes a value for {capture.access:?} access"}
+                }
+            }
+            .Place(place) -> {
+                if capture.access == MirAccess.Move -> fail MirWebError.InvalidMir{message: "MIR closure capture slot {slot} passes a place for Move access"}
+                js_place_cell_expression(program, enclosing, place)!
+            }
+        }
+        &values.push(value)
+    }
+    schemas := [String:String]{}
+    capture_values := [String]{}
+    loop capture in function.capture_params {
+        schema :: js_history_capture_schema(program, capture.ty, [:], &schemas)
+        slot :: capture.slot
+        value :: if capture.access == MirAccess.Move -> "captured[{slot}]" else -> "captured[{slot}].value"
+        &capture_values.push("jet_testing_history_web_capture({value}, {js_string(schema)}, types, active)")
+    }
+    schema_keys := schemas.keys().collect()
+    &schema_keys.sort()
+    rendered_schemas :: (loop key in schema_keys -> "[{js_string(key)}, {schemas[key]}]").join(", ")
+    identity :: sha256_hex("{history_provenance.source}:function:{function_id.0}".bytes())
+    "((captured, types) => jet_testing_history_web_callable((...args) => jet_fn_{function_id.0}(captured, args), {js_string(identity)}, active => [{capture_values.join(", ")}]))([{values.join(", ")}], new Map([{rendered_schemas}]))"
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5566
+fn js_prelude_call_expression(program: MirProgram, id: MirPreludeCallId, args: [String]) -> String MirWebError! {
+    row :: program.prelude_calls.find(fn(call) -> call.id == id) ?? fail MirWebError.MissingPreludeCall{call: id.0}
+    if row.symbol == .Prelude(name) && name == "jet_transaction_commit" {
+        transaction :: args.first() ?? fail MirWebError.InvalidMir{message: "Web transaction commit is missing its handle"}
+        return "await ({transaction}).commit()"
+    }
+    symbol :: js_symbol_expression(row.symbol)!
+    "{symbol}({args.join(", ")})"
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5589
+fn web_data_symbol_name(name: String) -> Bool Never! {
+    if name == {
+        "jet_data_count" | "jet_data_query" | "jet_data_track" | "jet_data_query_tracked"
+        | "jet_data_track_insert" | "jet_data_track_replace" | "jet_data_track_remove"
+        | "jet_data_load" | "jet_data_loader_load" | "jet_data_loader_load_default"
+        | "jet_data_loader_file" | "jet_data_loader_file_member" | "jet_data_loader_url"
+        | "jet_data_loader_database" | "jet_data_loader_value" | "jet_data_loader_snapshot"
+        | "jet_data_loader_bind" | "jet_data_loader_bind_text" | "jet_data_loader_cancel"
+        | "jet_data_loader_offline" | "jet_data_loader_invalidate" | "jet_data_loader_needs_refresh"
+        | "jet_data_loader_ready" | "jet_data_loader_status" | "jet_data_loader_source_identity"
+        | "jet_data_loader_authority_of" | "jet_data_snapshot_reusable" | "jet_data_loader_stream"
+        | "jet_data_stream_next" | "jet_data_stream_collect" | "jet_data_stream_cancel"
+        | "jet_data_query_plan" | "jet_data_query_collect" | "jet_data_query_sort_by"
+        | "jet_data_left_join_checked_default" | "jet_data_inner_join_checked_default"
+        | "jet_data_query_filter" | "jet_data_query_map" | "jet_data_query_min" | "jet_data_query_max"
+        | "jet_data_query_inner_join" | "jet_data_query_left_join" | "jet_data_query_group_by"
+        | "jet_data_query_watch" | "jet_data_watch_get" | "jet_data_watch_status" | "jet_data_watch_cancel"
+        | "jet_data_group_count_query" | "jet_data_group_sum_query" | "jet_data_group_mean_query"
+        | "jet_data_status" | "jet_data_require_bridge" | "jet_data_csv_reader" | "jet_data_json_reader" -> true
+        else -> name.starts_with("jet_data.loader.")
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5649
+fn js_data_call_expression(program: MirProgram, symbol: MirSymbol, values: [String], type_args: [MirType]) -> String MirWebError! {
+    name :: if symbol == {
+        .Prelude(name) -> name
+        .Runtime(_) -> fail MirWebError.InvalidMir{message: "Web data bridge requires a Prelude symbol"}
+    }
+    if !web_data_symbol_name(name) -> fail MirWebError.InvalidMir{message: "MIR Web data symbol {name:?} has no data bridge binding"}
+    local :: js_symbol_expression(symbol)!
+    descriptors :: (loop ty in type_args -> js_string(type_descriptor(ty))).join(", ")
+    args := values.join(", ")
+    if !args.is_empty() -> &args.push_str(", ")
+    &args.push_str("[{descriptors}]")
+    _ :: program
+    "{local}({args})"
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5686
+fn js_world_effect_guard(core: MirCoreCall) -> String? Never! {
+    effect :: core.effect ?? return None
+    controlled :: if effect == {
+        .Time -> core.module == "core.time" && core.member != "start"
+        .Rand -> core.module != "core.crypto.random"
+        else -> false
+    }
+    if controlled -> None else -> Val("jet_world_reject_uncontrolled_effect({js_string(effect.name())})")
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5707
+fn js_guard_core_expression(core: MirCoreCall, expression: String) -> String Never! {
+    if guard :: js_world_effect_guard(core) -> "({guard}, {expression})" else -> expression
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5717
+fn js_history_absent_schema(schemas: &[String:String]) -> String Never! {
+    key :: "jet.absent"
+    if !schemas.contains_key(key) -> schemas[key] = "{{ type: {js_string(key)}, kind: \"absent\" }}"
+    key
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5727
+fn js_history_capture_schema(program: MirProgram, ty: MirType, bindings: [String:String], schemas: &[String:String]) -> String Never! {
+    if ty.kind() == .Apply(name, args) && args.is_empty() {
+        if schema :: bindings.get(name.name) -> return schema
+    }
+    key := type_descriptor(ty)
+    if ty.kind() == .Tagged(marker, _) -> &key.push_str(";tag={marker}")
+    if !bindings.is_empty() {
+        keys := bindings.keys().collect()
+        &keys.sort()
+        &key.push_str(";bindings=")
+        loop name in keys { value :: bindings[name]; &key.push_str("{name.len()}:{name}{value.len()}:{value}") }
+    }
+    if schemas.contains_key(key) -> return key
+    schemas[key] = "{{ kind: \"opaque\" }}"
+    child :: fn(child_ty: MirType, nested_schemas: &[String:String]) -> String Never! { js_string(js_history_capture_schema(program, child_ty, bindings, &nested_schemas)) }
+    is_handle :: program.handles.any(fn(handle) -> handle.ty.same_checked_type(ty) || (handle.ty.nominal_name() == ty.nominal_name() && ty.nominal_name() != None))
+    shape := "kind: \"opaque\""
+    if is_handle {
+        shape = "kind: \"opaque\""
+    } else if ty.is_unit() {
+        shape = "kind: \"unit\""
+    } else {
+        if ty.kind() == {
+            .Int | .IntN(_, _) -> shape = "kind: \"integer\""
+            .Float | .Float32 -> shape = "kind: \"float\""
+            .Bool -> shape = "kind: \"boolean\""
+            .String | .Char -> shape = "kind: \"text\""
+            .Fn(_) | .SendFn(_, _) -> shape = "kind: \"callable\""
+            .List(inner) | .FixedList(inner, _) -> shape = "kind: \"list\", item: {child(inner, &schemas)}"
+            .Map(map_key, value) -> shape = "kind: \"map\", key: {child(map_key, &schemas)}, value: {child(value, &schemas)}"
+            .Option(inner) -> {
+                absent :: js_history_absent_schema(&schemas)
+                shape = "kind: \"enum\", clean: true, variants: [[\"Err\", [{js_string(absent)}]], [\"Ok\", [{child(inner, &schemas)}]]]"
+            }
+            .Result(ok, err) -> shape = "kind: \"enum\", variants: [[\"Ok\", [{child(ok, &schemas)}]], [\"Err\", [{child(err, &schemas)}]]]"
+            .Shared(inner) -> shape = "kind: \"shared\", inner: {child(inner, &schemas)}"
+            .InlineRange(base, _, _) | .Quantity(_, base, _, _) -> shape = "kind: \"transparent\", inner: {child(base, &schemas)}"
+            .Tagged(marker, inner) -> {
+                marker_text :: marker.to_string()
+                if marker_text == "expiring_secret.loan" || marker_text == "core.crypto" || marker_text.rsplit("::").next() == Val("Secret") -> shape = "kind: \"opaque\"" else -> shape = "kind: \"transparent\", inner: {child(inner, &schemas)}"
+            }
+            .Tuple(fields) -> {
+                rendered := [String]{}
+                loop (name, field_ty) in fields -> &rendered.push("[{js_string(name)}, {child(field_ty, &schemas)}]")
+                shape = "kind: \"record\", fields: [{rendered.join(", ")}]"
+            }
+            .Apply(_, _) | .Union(_) -> {
+                nominal := None
+                args := [MirType]{}
+                if ty.kind() == .Apply(name, arguments) { nominal = Val(name); args = arguments }
+                leaf :: if name :: nominal -> name.name.rsplit("::").next() ?? name.name else -> ""
+                if leaf == {
+                    "Secret" | "ExpiringSecret" | "HistoryRNG" | "Ptr" -> shape = "kind: \"opaque\""
+                    "Bytes" -> shape = "kind: \"bytes\""
+                    "BigInt" -> shape = "kind: \"integer\""
+                    "DataTree" -> shape = "kind: \"data\""
+                    else -> {
+                        definition_option := program.types.find(fn(row) -> Val(row.id) == ty.identity)
+                        if definition_option == None {
+                            if name :: nominal -> definition_option = program.types.find(fn(row) -> row.id == name.id)
+                        }
+                        if definition :: definition_option {
+                            field_bindings := bindings
+                            loop (index, parameter) in definition.generic_params {
+                                if index >= args.len() -> break
+                                field_bindings[parameter.name] = js_history_capture_schema(program, args[index], bindings, &schemas)
+                            }
+                            field_type :: fn(field_ty: MirType, nested_schemas: &[String:String]) -> String Never! { js_string(js_history_capture_schema(program, field_ty, field_bindings, &nested_schemas)) }
+                            if definition.kind == {
+                                .Struct(fields, _) -> {
+                                    if !fields.any(fn(field) -> field.skip) {
+                                        rendered := [String]{}
+                                        loop field in fields { if !field.computed -> &rendered.push("[{js_string(field.name)}, {field_type(field.ty, &schemas)}]") }
+                                        shape = "kind: \"record\", fields: [{rendered.join(", ")}]"
+                                    }
+                                }
+                                .Enum(variants, _) -> {
+                                    rendered := [String]{}
+                                    loop variant in variants {
+                                        fields := [String]{}
+                                        if variant.payload == {
+                                            .Unit -> {}
+                                            .Single(payload_ty) -> &fields.push(field_type(payload_ty, &schemas))
+                                            .Named(payload_fields) -> loop field in payload_fields -> &fields.push(if field.skip -> "null" else -> field_type(field.ty, &schemas))
+                                        }
+                                        &rendered.push("[{js_string(variant.name)}, [{fields.join(", ")}]]")
+                                    }
+                                    shape = "kind: \"enum\", variants: [{rendered.join(", ")}]"
+                                }
+                                .Distinct(base, _) | .Alias(base) -> shape = "kind: \"transparent\", inner: {field_type(base, &schemas)}"
+                                else -> {}
+                            }
+                        }
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    schemas[key] = "{{ type: {js_string(key)}, {shape} }}"
+    key
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5871
+fn emit_js_copy_type_facts(out: &String, program: MirProgram) Never! {
+    schemas := [String:String]{}
+    loop ty in program.type_instances -> _ :: js_history_capture_schema(program, ty, [:], &schemas)
+    loop function in program.functions {
+        _ :: js_history_capture_schema(program, function.return_type, [:], &schemas)
+        loop param in function.params -> _ :: js_history_capture_schema(program, param.ty, [:], &schemas)
+        loop capture in function.capture_params -> _ :: js_history_capture_schema(program, capture.ty, [:], &schemas)
+        loop (_, ty, _, _) in function.values -> _ :: js_history_capture_schema(program, ty, [:], &schemas)
+        loop place in function.places -> _ :: js_history_capture_schema(program, place.ty, [:], &schemas)
+    }
+    loop handle in program.handles -> _ :: js_history_capture_schema(program, handle.ty, [:], &schemas)
+    &out.push_str("const __jet_copy_type_facts = new Map([\n")
+    keys := schemas.keys().collect()
+    &keys.sort()
+    loop key in keys -> &out.push_str("  [{js_string(key)}, {schemas[key]}],\n")
+    &out.push_str("]);\n")
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5902
+fn js_copy_expression(program: MirProgram, ty: MirType, expression: String) -> String Never! {
+    key :: js_copy_type_key(program, ty)
+    "jet_copy_value({expression}, {js_string(key)}, __jet_copy_type_facts)"
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5911
+fn js_copy_type_key(program: MirProgram, ty: MirType) -> String Never! {
+    schemas := [String:String]{}
+    js_history_capture_schema(program, ty, [:], &schemas)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:5916
+fn js_core_call_expression(program: MirProgram, caller: MirFunction, id: MirCoreCallId, route: MirPreludeCallId?, args: [MirCallArg], type_args: [MirType], history_provenance: HistoryProvenance) -> String MirWebError! {
+    core :: program.core_calls.find(fn(call) -> call.id == id) ?? fail MirWebError.MissingCoreCall{call: id.0}
+    validate_type_args(program, type_args)!
+    values :: js_call_values(program, caller, args, false)!
+    if core.module == "core.testing" && core.member == "histories" {
+        if type_args.len() != 1 -> fail MirWebError.InvalidMir{message: "MIR testing.histories requires exactly one checked Command type argument"}
+        if values.len() != 6 -> fail MirWebError.InvalidMir{message: "MIR testing.histories has {values.len()} runtime arguments; expected six"}
+        symbol :: if core.symbol == {
+            .Prelude(name) -> js_symbol_expression(MirSymbol.Prelude(name))!
+            .Rust(name) -> js_symbol_expression(MirSymbol.Runtime(name))!
+        }
+        command_descriptor :: js_string(type_descriptor(type_args[0]))
+        provenance_descriptor :: "{{ source: {js_string(history_provenance.source)}, tool: {js_string(history_provenance.tool)}, target: {js_string(history_provenance.target)} }}"
+        descriptor :: "{{ command_type: {command_descriptor}, provenance: {provenance_descriptor} }}"
+        expression :: "{symbol}({values.join(", ")}, {descriptor})"
+        return js_guard_core_expression(core, expression)
+    }
+    if selected_route :: route {
+        if row :: program.prelude_calls.find(fn(call) -> call.id == selected_route) {
+            if row.symbol == .Prelude(name) && web_data_symbol_name(name) -> return js_data_call_expression(program, row.symbol, values, type_args)!
+        }
+        expression :: js_prelude_call_expression(program, selected_route, values)!
+        return js_guard_core_expression(core, expression)
+    }
+    if core.symbol == .Prelude(name) && web_data_symbol_name(name) -> return js_data_call_expression(program, MirSymbol.Prelude(name), values, type_args)!
+    symbol :: if core.symbol == {
+        .Prelude(name) -> js_symbol_expression(MirSymbol.Prelude(name))!
+        .Rust(name) -> js_symbol_expression(MirSymbol.Runtime(name))!
+    }
+    js_guard_core_expression(core, "{symbol}({values.join(", ")})")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6009
+// Closed checked Web linkage, not ambient JavaScript property lookup.
+WEB_PRELUDE_LINKS :: [(String, String)]{
+    ("jet_transaction_on_commit", "jet_transaction_on_commit"),
+    ("jet_transaction_on_rollback", "jet_transaction_on_rollback"),
+    ("jet_data_track", "jet_data_track"),
+    ("jet_data_query_tracked", "jet_data_query_tracked"),
+    ("jet_data_track_insert", "jet_data_track_insert"),
+    ("jet_data_track_replace", "jet_data_track_replace"),
+    ("jet_data_track_remove", "jet_data_track_remove"),
+    ("jet_data_count", "jet_data_count"),
+    ("jet_data_query", "jet_data_query"),
+    ("jet_data_load", "jet_data_loader_load"),
+    ("jet_data_loader_load", "jet_data_loader_load"),
+    ("jet_data_loader_load_default", "jet_data_loader_load_default"),
+    ("jet_data_loader_file", "jet_data_loader_file"),
+    ("jet_data_loader_file_member", "jet_data_loader_file_member"),
+    ("jet_data_loader_url", "jet_data_loader_url"),
+    ("jet_data_loader_database", "jet_data_loader_database"),
+    ("jet_data_loader_value", "jet_data_loader_value"),
+    ("jet_data_loader_snapshot", "jet_data_loader_snapshot"),
+    ("jet_data_loader_bind", "jet_data_loader_bind"),
+    ("jet_data_loader_bind_text", "jet_data_loader_bind_text"),
+    ("jet_data_loader_cancel", "jet_data_loader_cancel"),
+    ("jet_data_loader_offline", "jet_data_loader_offline"),
+    ("jet_data_loader_invalidate", "jet_data_loader_invalidate"),
+    ("jet_data_loader_needs_refresh", "jet_data_loader_needs_refresh"),
+    ("jet_data_loader_ready", "jet_data_loader_ready"),
+    ("jet_data_loader_status", "jet_data_loader_status"),
+    ("jet_data_loader_source_identity", "jet_data_loader_source_identity"),
+    ("jet_data_loader_authority_of", "jet_data_loader_authority_of"),
+    ("jet_data_snapshot_reusable", "jet_data_snapshot_reusable"),
+    ("jet_data_loader_stream", "jet_data_loader_stream"),
+    ("jet_data_stream_next", "jet_data_stream_next"),
+    ("jet_data_stream_collect", "jet_data_stream_collect"),
+    ("jet_data_stream_cancel", "jet_data_stream_cancel"),
+    ("jet_data_query_plan", "jet_data_query_plan"),
+    ("jet_data_query_collect", "jet_data_query_collect"),
+    ("jet_data_query_sort_by", "jet_data_query_sort_by"),
+    ("jet_data_left_join_checked_default", "jet_data_left_join"),
+    ("jet_data_inner_join_checked_default", "jet_data_inner_join"),
+    ("jet_data_query_filter", "jet_data_query_filter"),
+    ("jet_data_query_map", "jet_data_query_map"),
+    ("jet_data_query_min", "jet_data_query_min"),
+    ("jet_data_query_max", "jet_data_query_max"),
+    ("jet_data_query_inner_join", "jet_data_query_inner_join"),
+    ("jet_data_query_left_join", "jet_data_query_left_join"),
+    ("jet_data_query_group_by", "jet_data_query_group_by"),
+    ("jet_data_query_watch", "jet_data_query_watch"),
+    ("jet_data_watch_get", "jet_data_watch_get"),
+    ("jet_data_watch_status", "jet_data_watch_status"),
+    ("jet_data_watch_cancel", "jet_data_watch_cancel"),
+    ("jet_data_group_count_query", "jet_data_group_count_query"),
+    ("jet_data_group_sum_query", "jet_data_group_sum_query"),
+    ("jet_data_group_mean_query", "jet_data_group_mean_query"),
+    ("jet_data_status", "jet_data_status"),
+    ("jet_data_require_bridge", "jet_data_require_bridge"),
+    ("jet_data_csv_reader", "jet_data_csv_reader"),
+    ("jet_data_json_reader", "jet_data_json_reader"),
+    ("jet_fmt_display", "jet_display"),
+    ("jet_fmt_debug", "jet_debug"),
+    ("jet_text_pattern_match", "jet_text_pattern_match"),
+    ("jet_binary_pattern_match", "jet_binary_pattern_match"),
+    ("jet_cursor_over", "jet_cursor_over"),
+    ("jet_cursor_take_until", "jet_cursor_take_until"),
+    ("jet_cursor_skip_ws", "jet_cursor_skip_ws"),
+    ("jet_cursor_take_pattern", "jet_cursor_take_pattern"),
+    ("jet_term_write_stdout_line", "jetDom.print"),
+    ("jet_std::jet_typed_url_literal", "jet_typed_url_literal"),
+    ("jet_std::jet_int_abs", "jet_int_abs"),
+    ("jet_std::jet_int_add", "jet_int_add"),
+    ("jet_std::jet_int_sub", "jet_int_sub"),
+    ("jet_std::jet_int_mul", "jet_int_mul"),
+    ("jet_std_math_abs_f64", "jet_std_math_abs_f64"),
+    ("jet_std_math_abs_f32", "jet_std_math_abs_f32"),
+    ("jet_std::jet_int_checked_widen", "jet_int_checked_widen"),
+    ("jet_std::jet_int_try_from", "jet_int_try_from"),
+    ("jet_std::jet_int_try_from_checked", "jet_int_try_from_checked"),
+    ("jet_std::jet_int_checked_fixed", "jet_int_checked_fixed"),
+    ("jet_std::channel", "jet_channel_new"),
+    ("jet_std::channel_bounded", "jet_channel_bounded"),
+    ("jet_std::JetReceiver::receive", "jet_channel_receive"),
+    ("jet_std::JetReceiver::try_receive", "jet_channel_try_receive"),
+    ("jet_std::JetReceiver::is_timer", "jet_channel_is_timer"),
+    ("jet_std::JetReceiver::is_interval", "jet_channel_is_interval"),
+    ("jet_std::JetReceiver::is_cancelled", "jet_channel_is_cancelled"),
+    ("jet_std::JetReceiver::is_ready", "jet_channel_is_ready"),
+    ("jet_std::JetReceiver::delay_ms", "jet_channel_delay_ms"),
+    ("jet_std::JetReceiver::close", "jet_channel_close"),
+    ("jet_std::jet_select_wait_tagged", "jet_scheduler_select"),
+    ("jet_std::jet_select_try_wait_tagged", "jet_scheduler_try_select"),
+    ("jet_std::JetShared::new", "jet_shared_new"),
+    ("jet_std::JetMeasurement::new", "jet_measurement_new"),
+    ("jet_std::JetMeasurement::value", "jet_measurement_value"),
+    ("jet_std::JetMeasurement::uncertainty", "jet_measurement_uncertainty"),
+    ("jet_std::JetMeasurement::add", "jet_measurement_add"),
+    ("jet_std::JetMeasurement::sub", "jet_measurement_sub"),
+    ("jet_std::JetMeasurement::mul", "jet_measurement_mul"),
+    ("jet_std::JetMeasurement::div", "jet_measurement_div"),
+    ("jet_std::JetMeasurement::sqrt", "jet_measurement_sqrt"),
+    ("jet_std::JetSignal::new", "jetDom.makeSignal"),
+    ("jet_std::JetSignal::get", "jetDom.signalGet"),
+    ("jet_std::JetSignal::set", "jetDom.signalSet"),
+    ("jet_ui_reactive_render", "jetDom.reactiveRender"),
+    ("jet_ui_null", "jetDom.createBackend"),
+    ("JetNullBackend::mount_node", "jetDom.mount"),
+    ("JetNullBackend::paint_commands", "jetDom.commands"),
+    ("::jet_std::JetShared::new", "jet_shared_new"),
+    ("JetUiShortcut::cmd", "jet_ui_shortcut_cmd"),
+    ("::JetUiShortcut::cmd", "jet_ui_shortcut_cmd"),
+    ("jet_std::JetUiShortcut::cmd", "jet_ui_shortcut_cmd"),
+    ("jet_app", "jetDom.jetApp"),
+    ("jet_app_route", "jetDom.jetAppRoute"),
+    ("jet_app_page", "jetDom.jetAppPage"),
+    ("jet_app_layout", "jetDom.jetAppLayout"),
+    ("jet_app_loader", "jetDom.jetAppLoader"),
+    ("jet_app_loader_preload", "jetDom.jetAppLoaderPreload"),
+    ("jet_app_pending", "jetDom.jetAppPending"),
+    ("jet_app_not_found", "jetDom.jetAppNotFound"),
+    ("jet_app_error", "jetDom.jetAppError"),
+    ("jet_app_action", "jetDom.jetAppAction"),
+    ("jet_app_form", "jetDom.jetAppForm"),
+    ("jet_app_data", "jetDom.jetAppData"),
+    ("jet_app_mount", "jetDom.jetAppMount"),
+    ("jet_app_mount_with_effect", "jetDom.jetAppMountWithEffect"),
+    ("jet_app_mount_with_policy", "jetDom.jetAppMountWithPolicy"),
+    ("jet_app_routes", "jetDom.jetAppRoutes"),
+    ("jet_app_security", "jetDom.jetAppSecurity"),
+    ("jet_app_assets", "jetDom.jetAppAssets"),
+    ("jet_app_split", "jetDom.jetAppSplit"),
+    ("jet_app_code_split", "jetDom.jetAppCodeSplit"),
+    ("jet_app_cache", "jetDom.jetAppCache"),
+    ("jet_app_a11y", "jetDom.jetAppA11y"),
+    ("jet_app_adapter", "jetDom.jetAppAdapter"),
+    ("jet_app_csr", "jetDom.jetAppCsr"),
+    ("jet_app_ssr", "jetDom.jetAppSsr"),
+    ("jet_app_ssg", "jetDom.jetAppSsg"),
+    ("jet_app_stream", "jetDom.jetAppStream"),
+    ("jet_app_streaming", "jetDom.jetAppStreaming"),
+    ("jet_app_island", "jetDom.jetAppIsland"),
+    ("jet_app_hydration_dev", "jetDom.jetAppHydrationDev"),
+    ("jet_app_hydration_release", "jetDom.jetAppHydrationRelease"),
+    ("jet_app_facts_json", "jetDom.jetAppFactsJson"),
+    ("jet_app_serve", "jetDom.jetAppServe"),
+    ("jet_app_serve_with_port", "jetDom.jetAppServeWithPort"),
+    ("jet_app_serve_on", "jetDom.jetAppServeOn"),
+    ("jet_testing_histories", "jet_testing_histories"),
+    ("jet_testing_status", "jet_testing_status"),
+    ("jet_testing_assert_equal", "jet_testing_assert_equal"),
+    ("jet_testing_world", "jet_testing_world"),
+    ("jet_world_now", "jet_world_now"),
+    ("jet_world_advance", "jet_world_advance"),
+    ("jet_world_wait_idle", "jet_world_wait_idle"),
+    ("jet_world_history", "jet_world_history"),
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6166
+WEB_RUNTIME_LINKS :: [(String, String)]{
+    ("jet_web_error_wire", "jet_web_error_wire"),
+    ("jet_journey_reset", "jet_journey_reset"),
+    ("jet_journey_origin", "jet_journey_origin"),
+    ("jet_journey_frame_text", "jet_journey_frame_text"),
+    ("jet_err_from_message", "jet_err_from_message"),
+    ("jet_err_with_context_frame", "jet_err_with_context_frame"),
+    ("jet_entry_error_exit_jet", "jet_entry_error_exit_jet"),
+    ("jet_web_result_value", "jet_web_result_value"),
+    ("jet_web_edge_error", "jet_web_edge_error"),
+    ("jet_web_edge_result", "jet_web_edge_result"),
+    ("jet_web_default_error", "jet_web_default_error"),
+    ("jet_web_error_from_conversion", "jet_web_error_from_conversion"),
+    ("jet_web_try", "jet_web_try"),
+    ("jet_list_bounds_message", "jet_list_bounds_message"),
+    ("jet_missing_map_key_message", "jet_missing_map_key_message"),
+    ("jet_list_get", "jet_list_get"),
+    ("jet_map_get", "jet_map_get"),
+    ("jet_web_runtime_context", "jet_web_runtime_context"),
+    ("jet_web_stream_register", "jetDom.webStreamRegister"),
+    ("jet_web_stream_begin", "jetDom.webStreamBegin"),
+    ("jet_web_stream_chunk", "jetDom.webStreamChunk"),
+    ("jet_web_stream_commit", "jetDom.webStreamCommit"),
+    ("jet_web_stream_fail", "jetDom.webStreamFail"),
+    ("jet_web_stream_cancel", "jetDom.webStreamCancel"),
+    ("jet_web_stream_rollback", "jetDom.webStreamRollback"),
+    ("jet_web_stream_hydration_start", "jetDom.webStreamHydrationStart"),
+    ("jet_web_stream_hydration_complete", "jetDom.webStreamHydrationComplete"),
+    ("jet_web_stream_receipt", "jetDom.webStreamReceipt"),
+    ("jet_web_stream_projection", "jetDom.webStreamProjection"),
+    ("jet_web_runtime_context_frame", "jet_web_runtime_context_frame"),
+    ("jet_runtime_stop_report", "jet_runtime_stop_report"),
+    ("jet_runtime_stop", "jet_runtime_stop"),
+    ("jet_web_wasm_host_error", "jet_web_wasm_host_error"),
+    ("jet_stack_overflow_message", "jet_stack_overflow_message"),
+    ("jet_stack_enter", "jet_stack_enter"),
+    ("jet_stack_leave", "jet_stack_leave"),
+    ("jet_todo_stop", "jet_todo_stop"),
+    ("jet_contract_check", "jet_contract_check"),
+    ("jet_contract_fail", "jet_contract_fail"),
+    ("jet_keep", "jet_keep"),
+    ("jet_task_spawn", "jet_task_spawn"),
+    ("jet_task_join", "jet_task_join"),
+    ("jet_task_detach", "jet_task_detach"),
+    ("jet_task_group_body_failed", "jet_task_group_body_failed"),
+    ("jet_task_all", "jet_task_all"),
+    ("jet_task_all_named", "jet_task_all_named"),
+    ("jet_std::JetTask::join", "jet_task_join"),
+    ("jet_std::jet_task_join_result", "jet_task_join_result"),
+    ("jet_std::JetEventScope::new", "jet_event_scope_new"),
+    ("jet_std::JetHook::new", "jet_event_hook_new"),
+    ("jet_std::JetDecisionHook::new", "jet_event_decision_hook_new"),
+    ("jet_std::JetEventPolicy::sync", "jet_event_policy_sync"),
+    ("jet_std::JetEvent::new", "jet_event_new"),
+    ("jet_std::JetEvent::with_policy", "jet_event_with_policy"),
+    ("jet_std::JetAsyncEvent::new", "jet_async_event_new"),
+    ("jet_std::JetEvent::on", "jet_event_on"),
+    ("jet_std::JetEvent::once", "jet_event_once"),
+    ("jet_std::JetEvent::on_priority", "jet_event_on_priority"),
+    ("jet_std::JetEvent::emit", "jet_event_emit"),
+    ("jet_std::JetEvent::listener_count", "jet_event_listener_count"),
+    ("jet_std::JetEvent::trace", "jet_event_trace"),
+    ("jet_std::JetAsyncEvent::on", "jet_async_event_on"),
+    ("jet_std::JetAsyncEvent::once", "jet_async_event_once"),
+    ("jet_std::JetAsyncEvent::on_priority", "jet_async_event_on_priority"),
+    ("jet_std::JetAsyncEvent::emit_async", "jet_async_event_emit"),
+    ("jet_std::JetAsyncEvent::emit_async_result", "jet_async_event_emit"),
+    ("jet_std::JetAsyncEvent::close", "jet_async_event_close"),
+    ("jet_std::JetAsyncEvent::listener_count", "jet_async_event_listener_count"),
+    ("jet_std::JetAsyncEvent::queued_count", "jet_async_event_queued_count"),
+    ("jet_std::JetAsyncEvent::running_count", "jet_async_event_running_count"),
+    ("jet_std::JetAsyncEvent::blocked_count", "jet_async_event_blocked_count"),
+    ("jet_std::JetHook::on", "jet_hook_on"),
+    ("jet_std::JetHook::once", "jet_hook_once"),
+    ("jet_std::JetHook::on_priority", "jet_hook_on_priority"),
+    ("jet_std::JetHook::run", "jet_hook_run"),
+    ("jet_std::JetHook::listener_count", "jet_hook_listener_count"),
+    ("jet_std::JetHook::trace", "jet_hook_trace"),
+    ("jet_std::JetDecisionHook::on", "jet_decision_hook_on"),
+    ("jet_std::JetDecisionHook::once", "jet_decision_hook_once"),
+    ("jet_std::JetDecisionHook::on_priority", "jet_decision_hook_on_priority"),
+    ("jet_std::JetDecisionHook::run", "jet_decision_hook_run"),
+    ("jet_std::JetDecisionHook::listener_count", "jet_decision_hook_listener_count"),
+    ("jet_std::JetSubscription::unsubscribe", "jet_subscription_unsubscribe"),
+    ("jet_std::JetSubscription::active", "jet_subscription_active"),
+    ("jet_std::JetEventScope::cancel", "jet_event_scope_cancel"),
+    ("jet_std::JetEventScope::active_count", "jet_event_scope_active_count"),
+    ("jet_std::JetEventTrace::summary", "jet_event_trace_summary"),
+    ("jet_std::JetEventTrace::delivered", "jet_event_trace_delivered"),
+    ("jet_std::JetEventTrace::queued", "jet_event_trace_queued"),
+    ("jet_std::JetEventTrace::dropped", "jet_event_trace_dropped"),
+    ("jet_std::JetDispatchReport::state", "jet_dispatch_report_state"),
+    ("jet_std::JetDispatchReport::accepted", "jet_dispatch_report_accepted"),
+    ("jet_std::JetDispatchReport::delivered_handlers", "jet_dispatch_report_delivered_handlers"),
+    ("jet_std::JetDispatchReport::failures", "jet_dispatch_report_failures"),
+    ("jet_std::JetDispatchReport::trace", "jet_dispatch_report_trace"),
+    ("jet_channel_send", "jet_channel_send"),
+    ("jet_channel_receive", "jet_channel_receive"),
+    ("jet_channel_try_receive", "jet_channel_try_receive"),
+    ("jet_channel_is_timer", "jet_channel_is_timer"),
+    ("jet_channel_is_interval", "jet_channel_is_interval"),
+    ("jet_channel_is_cancelled", "jet_channel_is_cancelled"),
+    ("jet_channel_is_ready", "jet_channel_is_ready"),
+    ("jet_channel_delay_ms", "jet_channel_delay_ms"),
+    ("jet_channel_close", "jet_channel_close"),
+    ("jet_scheduler_select", "jet_scheduler_select"),
+    ("jet_scheduler_try_select", "jet_scheduler_try_select"),
+    ("jet_option_lift2", "jet_option_lift2"),
+    ("jet_fixed_list_index", "jet_fixed_list_index"),
+    ("jet_list_map", "jet_list_map"),
+    ("jet_list_filter", "jet_list_filter"),
+    ("jet_iter_map", "jet_iter_map"),
+    ("jet_iter_filter", "jet_iter_filter"),
+    ("jet_list_try_map", "jet_list_try_map"),
+    ("jet_list_try_filter", "jet_list_try_filter"),
+    ("jet_list_pop_kernel", "jet_list_pop_kernel"),
+    ("jet_list_remove_value", "jet_list_remove_value"),
+    ("jet_list_remove_slot", "jet_list_remove_slot"),
+    ("jet_map_pop_kernel", "jet_map_pop_kernel"),
+    ("jet_map_pop_first", "jet_map_pop_first"),
+    ("jet_list_take", "jet_list_take"),
+    ("jet_list_skip", "jet_list_skip"),
+    ("jet_iter_lazy", "jet_iter_lazy"),
+    ("jet_iter_from_vec", "jet_iter_from_vec"),
+    ("jet_iter_to_list", "jet_iter_to_list"),
+    ("jet_iter_collect", "jet_iter_collect"),
+    ("jet_iter_take", "jet_iter_take"),
+    ("jet_iter_skip", "jet_iter_skip"),
+    ("jet_iter_empty", "jet_iter_empty"),
+    ("jet_iter_some", "jet_iter_some"),
+    ("jet_iter_indexes", "jet_iter_indexes"),
+    ("jet_iter_zip", "jet_iter_zip"),
+    ("jet_iter_zip_strict", "jet_iter_zip_strict"),
+    ("jet_iter_zip_pad", "jet_iter_zip_pad"),
+    ("jet_iter_step_by", "jet_iter_step_by"),
+    ("jet_iter_dedup", "jet_iter_dedup"),
+    ("jet_iter_chunks", "jet_iter_chunks"),
+    ("jet_iter_windows", "jet_iter_windows"),
+    ("jet_iter_flatten", "jet_iter_flatten"),
+    ("jet_list_flatten", "jet_list_flatten"),
+    ("jet_iter_intersperse", "jet_iter_intersperse"),
+    ("jet_iter_repeat", "jet_iter_repeat"),
+    ("jet_iter_cycle", "jet_iter_cycle"),
+    ("jet_iter_drop_last", "jet_iter_drop_last"),
+    ("jet_iter_shuffle", "jet_iter_shuffle"),
+    ("jet_iter_is_sorted", "jet_iter_is_sorted"),
+    ("jet_iter_last_index_of", "jet_iter_last_index_of"),
+    ("jet_iter_average_int", "jet_iter_average_int"),
+    ("jet_iter_average_float", "jet_iter_average_float"),
+    ("jet_iter_compare", "jet_iter_compare"),
+    ("jet_iter_split", "jet_iter_split"),
+    ("jet_iter_zip_family", "jet_iter_zip_family"),
+    ("jet_list_try_collect", "jet_list_try_collect"),
+    ("jet_iter_first", "jet_iter_first"),
+    ("jet_iter_next", "jet_iter_next"),
+    ("jet_string_concat", "jet_string_concat"),
+    ("jet_view_copy", "jet_view_copy"),
+    ("jet_string_view_copy", "jet_string_view_copy"),
+    ("jet_float_display", "jet_float_display"),
+    ("jet_show", "jet_show"),
+    ("jet_fmt_decimal", "jet_fmt_decimal"),
+    ("jet_fmt_quantity", "jet_fmt_quantity"),
+    ("jet_fmt_fixed_even", "jet_fmt_fixed_even"),
+    ("jet_fmt_grouped", "jet_fmt_grouped"),
+    ("jet_fmt_decimal_int", "jet_fmt_decimal_int"),
+    ("jet_fmt_grouped_int", "jet_fmt_grouped_int"),
+    ("jet_group_decimal", "jet_group_decimal"),
+    ("jet_display", "jet_display"),
+    ("jet_debug", "jet_debug"),
+    ("jet_fmt_pretty", "jet_fmt_pretty"),
+    ("jet_gc_root", "jet_gc_root"),
+    ("jet_gc_apply", "jet_gc_apply"),
+    ("jet_gc_read", "jet_gc_read"),
+    ("jet_gc_edit_clear", "jet_gc_edit_clear"),
+    ("jet_gc_edit_pop", "jet_gc_edit_pop"),
+    ("jet_gc_edit_remove_index", "jet_gc_edit_remove_index"),
+    ("jet_gc_edit_insert_index", "jet_gc_edit_insert_index"),
+    ("jet_gc_edit_prepend", "jet_gc_edit_prepend"),
+    ("jet_gc_edit_additive", "jet_gc_edit_additive"),
+    ("jet_gc_edit_plain", "jet_gc_edit_plain"),
+    ("jet_gc_edit_edge_slot", "jet_gc_edit_edge_slot"),
+    ("jet_typed_sql_raw", "jet_typed_sql_raw"),
+    ("jet_typed_sql_interpolate", "jet_typed_sql_interpolate"),
+    ("jet_typed_sql_template", "jet_typed_sql_template"),
+    ("jet_typed_sql_params", "jet_typed_sql_params"),
+    ("jet_typed_html_raw", "jet_typed_html_raw"),
+    ("jet_typed_html_text", "jet_typed_html_text"),
+    ("jet_typed_html_escape", "jet_typed_html_escape"),
+    ("jet_typed_html_interpolate", "jet_typed_html_interpolate"),
+    ("jet_typed_sh_raw", "jet_typed_sh_raw"),
+    ("jet_typed_sh_interpolate", "jet_typed_sh_interpolate"),
+    ("jet_typed_path_component", "jet_typed_path_component"),
+    ("jet_typed_path_interpolate", "jet_typed_path_interpolate"),
+    ("jet_typed_path_literal", "jet_typed_path_literal"),
+    ("jet_typed_datetime_interpolate", "jet_typed_datetime_interpolate"),
+    ("jet_typed_datetime_literal", "jet_typed_datetime_literal"),
+    ("jet_typed_url_literal", "jet_typed_url_literal"),
+    ("jet_expiring_now", "jet_expiring_now"),
+    ("jet_expiring_new", "jet_expiring_new"),
+    ("jet_expiring_secret_new", "jet_expiring_secret_new"),
+    ("jet_expiring_get", "jet_expiring_get"),
+    ("jet_expiring_secret_with", "jet_expiring_secret_with"),
+    ("jet_fraction_value", "jet_fraction_value"),
+    ("jet_fraction_from_parts", "jet_fraction_from_parts"),
+    ("jet_fraction_add", "jet_fraction_add"),
+    ("jet_fraction_sub", "jet_fraction_sub"),
+    ("jet_fraction_mul", "jet_fraction_mul"),
+    ("jet_fraction_div", "jet_fraction_div"),
+    ("jet_fraction_equal", "jet_fraction_equal"),
+    ("jet_fraction_numerator", "jet_fraction_numerator"),
+    ("jet_fraction_denominator", "jet_fraction_denominator"),
+    ("jet_fraction_to_float", "jet_fraction_to_float"),
+    ("jet_fraction_is_zero", "jet_fraction_is_zero"),
+    ("jet_fraction_to_string", "jet_fraction_to_string"),
+    ("jet_complex_value", "jet_complex_value"),
+    ("jet_complex_from_parts", "jet_complex_from_parts"),
+    ("jet_complex_add", "jet_complex_add"),
+    ("jet_complex_sub", "jet_complex_sub"),
+    ("jet_complex_mul", "jet_complex_mul"),
+    ("jet_complex_div", "jet_complex_div"),
+    ("jet_complex_abs", "jet_complex_abs"),
+    ("jet_measurement_kernel_new", "jet_measurement_kernel_new"),
+    ("jet_measurement_kernel_from_relative", "jet_measurement_kernel_from_relative"),
+    ("jet_measurement_kernel_add", "jet_measurement_kernel_add"),
+    ("jet_measurement_kernel_sub", "jet_measurement_kernel_sub"),
+    ("jet_measurement_kernel_mul", "jet_measurement_kernel_mul"),
+    ("jet_measurement_kernel_div", "jet_measurement_kernel_div"),
+    ("jet_measurement_kernel_sqrt", "jet_measurement_kernel_sqrt"),
+    ("jet_measurement_kernel_show", "jet_measurement_kernel_show"),
+    ("jet_measurement_new", "jet_measurement_new"),
+    ("jet_measurement_value", "jet_measurement_value"),
+    ("jet_measurement_uncertainty", "jet_measurement_uncertainty"),
+    ("jet_measurement_add", "jet_measurement_add"),
+    ("jet_measurement_sub", "jet_measurement_sub"),
+    ("jet_measurement_mul", "jet_measurement_mul"),
+    ("jet_measurement_div", "jet_measurement_div"),
+    ("jet_measurement_sqrt", "jet_measurement_sqrt"),
+    ("jet_measurement_show", "jet_measurement_show"),
+    ("jet_shared_new", "jet_shared_new"),
+    ("jet_shared_get", "jet_shared_get"),
+    ("jet_shared_set", "jet_shared_set"),
+    ("jet_shared_replace", "jet_shared_replace"),
+    ("jet_shared_read", "jet_shared_read"),
+    ("jet_shared_edit", "jet_shared_edit"),
+    ("jet_shared_capture", "jet_shared_capture"),
+    ("jet_shared_capture_with", "jet_shared_capture_with"),
+    ("jet_shared_capture_txn_plain", "jet_shared_capture_txn_plain"),
+    ("jet_shared_capture_txn", "jet_shared_capture_txn"),
+    ("jet_shared_try_replace", "jet_shared_try_replace"),
+    ("jet_shared_snapshot_value", "jet_shared_snapshot_value"),
+    ("jet_shared_guard_read", "jet_shared_guard_read"),
+    ("jet_shared_guard_edit", "jet_shared_guard_edit"),
+    ("jet_shared_guard_map", "jet_shared_guard_map"),
+    ("jet_shared_guard_split", "jet_shared_guard_split"),
+    ("jet_stm_begin", "jet_stm_begin"),
+    ("jet_shared_read_txn", "jet_shared_read_txn"),
+    ("jet_shared_edit_txn", "jet_shared_edit_txn"),
+    ("jet_stm_commit", "jet_stm_commit"),
+    ("jet_shared_strong_count", "jet_shared_strong_count"),
+    ("jet_shared_same", "jet_shared_same"),
+    ("jet_shared_downgrade", "jet_shared_downgrade"),
+    ("jet_shared_weak_upgrade", "jet_shared_weak_upgrade"),
+    ("jet_cell_new", "jet_cell_new"),
+    ("jet_cell_get", "jet_cell_get"),
+    ("jet_cell_set", "jet_cell_set"),
+    ("jet_cell_replace", "jet_cell_replace"),
+    ("jet_cell_read", "jet_cell_read"),
+    ("jet_cell_edit", "jet_cell_edit"),
+    ("jet_cell_get_or_set", "jet_cell_get_or_set"),
+    ("jet_cell_guard_read", "jet_cell_guard_read"),
+    ("jet_cell_guard_edit", "jet_cell_guard_edit"),
+    ("jet_cell_guard_map", "jet_cell_guard_map"),
+    ("jet_cell_guard_split", "jet_cell_guard_split"),
+    ("jet_cell_read_guard_get", "jet_cell_read_guard_get"),
+    ("jet_cell_read_guard_read", "jet_cell_read_guard_read"),
+    ("jet_cell_edit_guard_get", "jet_cell_edit_guard_get"),
+    ("jet_cell_edit_guard_set", "jet_cell_edit_guard_set"),
+    ("jet_cell_edit_guard_read", "jet_cell_edit_guard_read"),
+    ("jet_cell_edit_guard_edit", "jet_cell_edit_guard_edit"),
+    ("jet_std::JetPool::new", "jet_pool_new"),
+    ("jet_std::JetPool::add", "jet_pool_add"),
+    ("jet_std::JetPool::remove", "jet_pool_remove"),
+    ("jet_std::JetPool::ids", "jet_pool_ids"),
+    ("jet_pool_get", "jet_pool_get"),
+    ("jet_pool_get_mut", "jet_pool_get_mut"),
+    ("jet_pool_set", "jet_pool_set"),
+    ("jet_authority_covers", "jet_authority_covers"),
+    ("jet_authority_workspace", "jet_authority_workspace"),
+    ("jet_authority_from_rights", "jet_authority_from_rights"),
+    ("jet_authority_with", "jet_authority_with"),
+    ("jet_authority_without", "jet_authority_without"),
+    ("jet_inline_range_from_int", "jet_inline_range_from_int"),
+    ("jet_compute_web_ok", "jet_compute_web_ok"),
+    ("jet_compute_web_err", "jet_compute_web_err"),
+    ("jet_compute_web_fail", "jet_compute_web_fail"),
+    ("jet_compute_web_num", "jet_compute_web_num"),
+    ("jet_compute_web_float", "jet_compute_web_float"),
+    ("jet_compute_web_shape", "jet_compute_web_shape"),
+    ("jet_compute_web_numel", "jet_compute_web_numel"),
+    ("jet_compute_web_placement", "jet_compute_web_placement"),
+    ("jet_compute_web_tensor", "jet_compute_web_tensor"),
+    ("jet_compute_web_device_show", "jet_compute_web_device_show"),
+    ("jet_compute_web_device", "jet_compute_web_device"),
+    ("jet_compute_web_same_device", "jet_compute_web_same_device"),
+    ("jet_compute_webgpu_device", "jet_compute_webgpu_device"),
+    ("jet_compute_webgpu_buffer", "jet_compute_webgpu_buffer"),
+    ("jet_compute_webgpu_params", "jet_compute_webgpu_params"),
+    ("jet_compute_webgpu_pipeline", "jet_compute_webgpu_pipeline"),
+    ("jet_compute_webgpu_dispatch", "jet_compute_webgpu_dispatch"),
+    ("jet_compute_webgpu_read", "jet_compute_webgpu_read"),
+    ("jet_compute_web_values", "jet_compute_web_values"),
+    ("jet_compute_web_buffer", "jet_compute_web_buffer"),
+    ("jet_compute_web_unary_shader", "jet_compute_web_unary_shader"),
+    ("jet_compute_web_binary_shader", "jet_compute_web_binary_shader"),
+    ("jet_compute_web_f32_values", "jet_compute_web_f32_values"),
+    ("jet_compute_web_gpu_unary", "jet_compute_web_gpu_unary"),
+    ("jet_compute_web_gpu_binary", "jet_compute_web_gpu_binary"),
+    ("jet_compute_web_gpu_matmul", "jet_compute_web_gpu_matmul"),
+    ("jet_compute_web_broadcast_shape", "jet_compute_web_broadcast_shape"),
+    ("jet_compute_web_broadcast_values", "jet_compute_web_broadcast_values"),
+    ("jet_compute_web_binary", "jet_compute_web_binary"),
+    ("jet_compute_web_unary", "jet_compute_web_unary"),
+    ("jet_compute_web_matmul", "jet_compute_web_matmul"),
+    ("jet_compute_web_upload", "jet_compute_web_upload"),
+    ("jet_compute_web_transfer", "jet_compute_web_transfer"),
+    ("jet_std_time_sleep_duration_ns", "jet_std_time_sleep_duration_ns"),
+    ("jet_time_sleep_until", "jet_time_sleep_until"),
+    ("jet_rt_callback", "jet_rt_callback"),
+    ("jet_rt_next_deadline", "jet_rt_next_deadline"),
+    ("jet_rt_receipt", "jet_rt_receipt"),
+    ("jet_rt_cancel", "jet_rt_cancel"),
+    ("jet_rt_is_cancelled", "jet_rt_is_cancelled"),
+    ("jet_compute_web_sum", "jet_compute_web_sum"),
+    ("jet_compute_web_mse", "jet_compute_web_mse"),
+    ("jet_compute_web_sgd", "jet_compute_web_sgd"),
+    ("jet_compute_web_set", "jet_compute_web_set"),
+    ("jet_compute_web_shape_result", "jet_compute_web_shape_result"),
+    ("jet_compute_web_call", "jet_compute_web_call"),
+    ("jet_time_monotonic_now_ns", "jet_time_monotonic_now_ns"),
+    ("jet_time_floor_div", "jet_time_floor_div"),
+    ("jet_time_mod", "jet_time_mod"),
+    ("jet_time_clamp_i64", "jet_time_clamp_i64"),
+    ("jet_time_checked_i64", "jet_time_checked_i64"),
+    ("jet_time_saturating_add_i64", "jet_time_saturating_add_i64"),
+    ("jet_time_saturating_mul_i64", "jet_time_saturating_mul_i64"),
+    ("jet_time_saturating_negated_i64", "jet_time_saturating_negated_i64"),
+    ("jet_time_saturating_abs_i64", "jet_time_saturating_abs_i64"),
+    ("jet_time_pad", "jet_time_pad"),
+    ("jet_time_year_string", "jet_time_year_string"),
+    ("jet_time_is_leap", "jet_time_is_leap"),
+    ("jet_time_days_in_month", "jet_time_days_in_month"),
+    ("jet_time_date", "jet_time_date"),
+    ("jet_time_day_number", "jet_time_day_number"),
+    ("jet_time_date_from_day_number", "jet_time_date_from_day_number"),
+    ("jet_time_add_days", "jet_time_add_days"),
+    ("jet_time_add_months", "jet_time_add_months"),
+    ("jet_time_date_parse", "jet_time_date_parse"),
+    ("jet_time_weekday", "jet_time_weekday"),
+    ("jet_time_iso_weekday", "jet_time_iso_weekday"),
+    ("jet_time_iso_week_year", "jet_time_iso_week_year"),
+    ("jet_time_iso_week", "jet_time_iso_week"),
+    ("jet_time_from_iso_week", "jet_time_from_iso_week"),
+    ("jet_time_parse_iso_week_date", "jet_time_parse_iso_week_date"),
+    ("jet_time_time", "jet_time_time"),
+    ("jet_time_parse_time", "jet_time_parse_time"),
+    ("jet_time_time_seconds", "jet_time_time_seconds"),
+    ("jet_time_time_nanoseconds", "jet_time_time_nanoseconds"),
+    ("jet_time_time_from_nanoseconds", "jet_time_time_from_nanoseconds"),
+    ("jet_time_date_time_from_ns", "jet_time_date_time_from_ns"),
+    ("jet_time_date_time_from_ms", "jet_time_date_time_from_ms"),
+    ("jet_time_date_time_from_seconds", "jet_time_date_time_from_seconds"),
+    ("jet_time_date_time_from_microseconds", "jet_time_date_time_from_microseconds"),
+    ("jet_time_date_time_from_nanoseconds", "jet_time_date_time_from_nanoseconds"),
+    ("jet_time_date_time_total_ns", "jet_time_date_time_total_ns"),
+    ("jet_time_date_time_date", "jet_time_date_time_date"),
+    ("jet_time_date_time_time", "jet_time_date_time_time"),
+    ("jet_time_date_time_add_duration", "jet_time_date_time_add_duration"),
+    ("jet_time_local_epoch_seconds", "jet_time_local_epoch_seconds"),
+    ("jet_time_parse_offset", "jet_time_parse_offset"),
+    ("jet_time_offset_string", "jet_time_offset_string"),
+    ("jet_time_parse_rfc3339", "jet_time_parse_rfc3339"),
+    ("jet_time_date_string", "jet_time_date_string"),
+    ("jet_time_time_string", "jet_time_time_string"),
+    ("jet_time_date_time_format_rfc3339", "jet_time_date_time_format_rfc3339"),
+    ("jet_time_period", "jet_time_period"),
+    ("jet_time_period_add", "jet_time_period_add"),
+    ("jet_time_period_negated", "jet_time_period_negated"),
+    ("jet_time_period_abs", "jet_time_period_abs"),
+    ("jet_time_period_month_delta", "jet_time_period_month_delta"),
+    ("jet_time_period_add_to_date", "jet_time_period_add_to_date"),
+    ("jet_time_period_add_to_datetime", "jet_time_period_add_to_datetime"),
+    ("jet_time_period_total_in", "jet_time_period_total_in"),
+    ("jet_time_unit_ns", "jet_time_unit_ns"),
+    ("jet_time_round_quotient", "jet_time_round_quotient"),
+    ("jet_time_round_ns", "jet_time_round_ns"),
+    ("jet_time_duration_abs", "jet_time_duration_abs"),
+    ("jet_time_duration_negated", "jet_time_duration_negated"),
+    ("jet_time_duration_sign", "jet_time_duration_sign"),
+    ("jet_time_duration_total_in", "jet_time_duration_total_in"),
+    ("jet_time_duration_round", "jet_time_duration_round"),
+    ("jet_time_ok", "jet_time_ok"),
+    ("jet_time_err", "jet_time_err"),
+    ("jet_time_result", "jet_time_result"),
+    ("jet_time_text_result", "jet_time_text_result"),
+    ("jet_time_range_result", "jet_time_range_result"),
+    ("jet_time_some", "jet_time_some"),
+    ("jet_time_none", "jet_time_none"),
+    ("jet_time_tzif_u32", "jet_time_tzif_u32"),
+    ("jet_time_tzif_i64", "jet_time_tzif_i64"),
+    ("jet_time_tzif_counts", "jet_time_tzif_counts"),
+    ("jet_time_tzif_block_size", "jet_time_tzif_block_size"),
+    ("jet_time_parse_tzif", "jet_time_parse_tzif"),
+    ("jet_time_zone", "jet_time_zone"),
+    ("jet_time_zone_info_at_utc", "jet_time_zone_info_at_utc"),
+    ("jet_time_zone_local_parts", "jet_time_zone_local_parts"),
+    ("jet_time_zone_local_to_utc", "jet_time_zone_local_to_utc"),
+    ("jet_time_zone_local_to_utc_offset", "jet_time_zone_local_to_utc_offset"),
+    ("jet_time_zone_start_of_day", "jet_time_zone_start_of_day"),
+    ("jet_time_zone_hours_in_day", "jet_time_zone_hours_in_day"),
+    ("jet_time_zone_transition", "jet_time_zone_transition"),
+    ("jet_time_zoned_from_local", "jet_time_zoned_from_local"),
+    ("jet_time_zoned_date", "jet_time_zoned_date"),
+    ("jet_time_zoned_time", "jet_time_zoned_time"),
+    ("jet_time_replace", "jet_time_replace"),
+    ("jet_time_format", "jet_time_format"),
+    ("jet_time_format_checked", "jet_time_format_checked"),
+    ("jet_time_method", "jet_time_method"),
+    ("jet_time_core", "jet_time_core"),
+    ("jet_time_add", "jet_time_add"),
+    ("jet_time_sub", "jet_time_sub"),
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6603
+fn web_runtime_link(name: String) -> String? Never! {
+    loop (source, local) in WEB_RUNTIME_LINKS { if source == name -> return Val(local) }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6608
+fn js_symbol_expression(symbol: MirSymbol) -> String MirWebError! {
+    if symbol == {
+        .Prelude(name) -> {
+            loop (source, local) in WEB_PRELUDE_LINKS { if source == name -> return local }
+            valid := true
+            loop (index, byte) in name.bytes() {
+                code :: Int.from_u8(byte)
+                alphabetic :: (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+                numeric :: code >= 48 && code <= 57
+                if !(alphabetic || code == 95 || code == 36 || (index != 0 && numeric)) -> valid = false
+            }
+            if valid -> return name
+            fail MirWebError.InvalidMir{message: "MIR Prelude symbol {name:?} has no direct local Web binding"}
+        }
+        .Runtime(name) -> web_runtime_link(name) ?? fail MirWebError.InvalidMir{message: "MIR Web runtime symbol {name:?} has no binding in the Web JS runtime module"}
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6641
+fn emit_js_terminator(out: &String, function: MirFunction, block: MirBasicBlock) MirWebError! {
+    if block.terminator == {
+        .Jump(target) | .Continue(target) -> &out.push_str("        __jet_pred = __jet_block; __jet_block = {target.0}; continue;\n")
+        .Branch(condition, then_target, else_target) -> &out.push_str("        __jet_pred = __jet_block; __jet_block = Boolean(__jet_values.get({condition.0})) ? {then_target.0} : {else_target.0}; continue;\n")
+        .Switch(subject, arms, otherwise) -> {
+            &out.push_str("        __jet_pred = __jet_block; const __jet_subject = __jet_values.get({subject.0}); __jet_block = ")
+            loop arm in arms -> &out.push_str("__jet_subject === __jet_values.get({arm.condition.0}) ? {arm.target.0} : ")
+            &out.push_str("{otherwise.0}; continue;\n")
+        }
+        .Return(value) -> {
+            if returned :: value -> &out.push_str("        return {js_return_expression(function, returned)};\n") else -> &out.push_str("        return undefined;\n")
+        }
+        .Yield(value, resume, _) -> {
+            generator :: function.generator ?? fail MirWebError.InvalidMir{message: "MIR function {function.id.0} has a Yield terminator without generator facts"}
+            value_declaration :: function.values.find(fn(row) -> row.0 == value) ?? fail MirWebError.InvalidMir{message: "MIR yield value {value.0} is missing from value declarations"}
+            if value_declaration.1 != generator.item -> fail MirWebError.InvalidMir{message: "MIR generator {function.id.0} yields a value with the wrong type"}
+            &out.push_str("        yield __jet_values.get({value.0}); __jet_pred = __jet_block; __jet_block = {resume.0}; continue;\n")
+        }
+        .Break(target, value) -> {
+            if broken :: value -> &out.push_str("        __jet_break_value = __jet_values.get({broken.0});\n")
+            &out.push_str("        __jet_pred = __jet_block; __jet_block = {target.0}; continue;\n")
+        }
+        .Unreachable(reason) -> &out.push_str("        throw new Error({js_string(reason)});\n")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6737
+fn js_return_expression(function: MirFunction, value: MirValueId) -> String Never! {
+    expression :: "__jet_values.get({value.0})"
+    if function.return_type.kind() == .Option(_) -> "jet_clean_option({expression})" else -> expression
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6747
+fn js_optional_string(value: String?) -> String Never! { if text :: value -> js_string(text) else -> "null" }
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6751
+fn js_route_field(field: AppRouteField) -> String Never! {
+    default :: js_optional_string(field.default)
+    "Object.freeze({{ name: {js_string(field.name)}, ty: {js_string(field.ty)}, codec: {js_string(field.codec)}, required: {field.required}, default: {default} }})"
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6767
+fn js_route_fields(fields: [AppRouteField]) -> String Never! {
+    rendered :: (loop field in fields -> js_route_field(field)).join(", ")
+    "Object.freeze([{rendered}])"
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6772
+fn js_route_loader(loader: AppRouteLoader?) -> String Never! {
+    value :: loader ?? return "null"
+    "Object.freeze({{ handler: {js_string(value.handler)}, data_type: {js_string(value.data_type)}, dependency: {js_string(value.dependency)}, preload: {value.preload}, cache_identity: {js_string(value.cache_identity)} }})"
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6786
+fn js_route_boundaries(boundaries: AppRouteBoundaries) -> String Never! {
+    "Object.freeze({{ pending: {js_optional_string(boundaries.pending)}, not_found: {js_optional_string(boundaries.not_found)}, error: {js_optional_string(boundaries.error)} }})"
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6795
+fn js_route_island(island: AppIslandFact?) -> String Never! {
+    value :: island ?? return "null"
+    captures :: (loop capture in value.resume_payload.captures -> "Object.freeze({{ name: {js_string(capture.name)}, ty: {js_string(capture.ty)}, serializable: {capture.serializable} }})").join(", ")
+    "Object.freeze({{ identity: {js_string(value.identity)}, hydration_trigger: {js_string(value.hydration_trigger.as_str())}, resume_payload: Object.freeze({{ captures: Object.freeze([{captures}]), serializable: {value.resume_payload.serializable} }}) }})"
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6822
+fn js_route_render_facts(facts: AppRenderFacts) -> String Never! {
+    override_mode :: if mode :: facts.override_mode -> js_string(mode.as_str()) else -> "null"
+    pending_boundary_id :: if id :: facts.pending_boundary_id -> id.get().to_string() else -> "null"
+    "Object.freeze({{ mode: {js_string(facts.mode.as_str())}, reason: Object.freeze({json_string_list(facts.reason)}), effects: Object.freeze({json_string_list(facts.effects)}), interactive: {facts.interactive}, loader: {js_optional_string(facts.loader)}, form: {js_optional_string(facts.form)}, cache: {js_string(facts.cache.as_str())}, override_mode: {override_mode}, pending_boundary_id: {pending_boundary_id}, island: {js_route_island(facts.island)} }})"
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6844
+fn js_route_projection(route: AppRoute) -> String Never! {
+    "Object.freeze({{ path: {js_string(route.path)}, handler: {js_string(route.handler)}, provenance: {js_string(route.provenance)}, route_identity: {js_string(route.route_identity)}, path_params: {js_route_fields(route.path_params)}, search_params: {js_route_fields(route.search_params)}, search_codec: {js_string(route.search_codec)}, loader: {js_route_loader(route.loader)}, boundaries: {js_route_boundaries(route.boundaries)}, precedence: {js_string(route.precedence)}, render_facts: {js_route_render_facts(route.render_facts)} }})"
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6860
+fn js_action_projection(action: AppAction) -> String Never! {
+    "Object.freeze({{ name: {js_string(action.name)}, handler: {js_string(action.handler)}, kind: {js_string(action.kind)}, preload: {action.preload}, input: {js_string(action.input_type)}, output: {js_string(action.output_type)}, error: {js_string(action.error_type)}, endpoint: {js_string(action.endpoint)}, method: {js_string(action.method)}, csrf: {js_string(action.csrf)}, effects: {json_string_list(action.effects)}, middleware: {json_string_list(action.middleware)}, provenance: {js_string(action.provenance)} }})"
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6880
+fn emit_js_routes(out: &String, program: MirProgram) Never! {
+    if graph :: program.facts.web_app {
+        &out.push_str("export const jet_app_graph = Object.freeze(")
+        &out.push_str(graph.to_json())
+        &out.push_str(");\nexport const jet_routes = Object.freeze({{\n")
+        loop route in graph.routes -> &out.push_str("  {js_string(route.path)}: {js_route_projection(route)},\n")
+        &out.push_str("}});\nexport const jet_actions = Object.freeze([\n")
+        loop action in graph.actions -> &out.push_str("  {js_action_projection(action)},\n")
+        &out.push_str("]);\n")
+    } else {
+        &out.push_str("export const jet_app_graph = null;\nexport const jet_routes = Object.freeze({{}});\nexport const jet_actions = Object.freeze([]);\n")
+    }
+    &out.push_str("globalThis.__jetAppGraph = jet_app_graph;\n")
+    &out.push_str("\n// The browser adapter consumes this checked graph and delegates route\n// matching/data production to the native server graph.\nexport const jet_web_app = jetDom.createWebApp({{ graph: jet_app_graph, routes: jet_routes, actions: jet_actions }});\nexport function jet_bootstrap_web(options = {{}}) {{\n  return jetDom.bootstrapWebApp(jet_web_app, options);\n}}\nexport const jet_web_bootstrap = jet_bootstrap_web;\nif (typeof document !== \"undefined\" && jet_app_graph !== null\n    && !globalThis.__jetWebDisableAutoBootstrap\n    && document.getElementById(\"jet-route-data\")) {{\n  queueMicrotask(() => {{\n    if (!globalThis.__jetWebApp) jet_bootstrap_web();\n  }});\n}}\n")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6933
+fn manifest_partitions(functions: [MirFunction]) -> [String:WebBucket] MirWebError! {
+    partitions := [String:WebBucket]{}
+    loop function in functions {
+        if !function.target_applicability.web -> next
+        bucket :: function.web_bucket ?? fail MirWebError.InvalidMir{message: "manifest function {function.id.0} is Web-applicable but has no checked Web bucket"}
+        if partitions.contains_key(function.key) -> fail MirWebError.InvalidMir{message: "manifest contains duplicate Web function key `{function.key}`"}
+        partitions[function.key] = bucket
+    }
+    partitions
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:6961
+fn emit_manifest(program: MirProgram, target: MirWebTarget, functions: [MirFunction], artifact: MirArtifactPlan, entry: MirFunctionId, artifact_identity: String) -> String MirWebError! {
+    out := "{{\n  \"schema\": \"mir-web-v1\",\n"
+    partitions :: manifest_partitions(functions)!
+    &out.push_str("  \"status\": \"m2\",\n  \"partitions\": {{\n")
+    keys := partitions.keys().collect()
+    &keys.sort()
+    loop (index, key) in keys {
+        if index != 0 -> &out.push_str(",\n")
+        &out.push_str("    {json_string(key)}: {optional_web_bucket(Val(partitions[key]))}")
+    }
+    &out.push_str("\n  }},\n  \"package\": {json_string(program.package_identity)},\n")
+    // GATE #4483: target facts belong to the selected Web artifact layout.
+    &out.push_str("  \"target\": {{ \"triple\": {json_string(target.layout.triple)}, \"pointer_size\": {target.layout.pointer_size}, \"pointer_alignment\": {target.layout.pointer_alignment} }},\n")
+    &out.push_str("  \"artifact_id\": {artifact.id.0},\n  \"entry\": {entry.0},\n  \"functions\": [\n")
+    sorted_functions := functions
+    &sorted_functions.sort_by_key(fn(function) -> function.id)
+    loop (index, function) in sorted_functions {
+        if index != 0 -> &out.push_str(",\n")
+        generic_params :: json_generic_params(function.generic_params, program)!
+        &out.push_str("    {{ \"id\": {function.id.0}, \"key\": {json_string(function.key)}, \"module\": {json_string(function.module)}, \"name\": {json_string(function.name)}, \"kind\": {json_string(function_kind_descriptor(function.kind))}, \"visibility\": {json_string(visibility_descriptor(function.visibility))}, \"web_bucket\": {optional_web_bucket(function.web_bucket)}, \"web_marker\": {optional_web_marker(function.web_marker)}, \"target_applicability\": {{ \"web\": {function.target_applicability.web} }}, \"wasm_export\": {is_wasm_export(function)}, \"generic_params\": {generic_params}, \"web_param_reconstructions\": {json_reconstructions(function.web_param_reconstructions)} }}")
+    }
+    &out.push_str("\n  ],\n  \"core_calls\": [\n")
+    core_calls := loop call in program.core_calls -> @call
+    &core_calls.sort_by_key(fn(call) -> call.id)
+    loop (index, call) in core_calls {
+        if index != 0 -> &out.push_str(",\n")
+        &out.push_str("    {{ \"id\": {call.id.0}, \"key\": {json_string(call.key)}, \"symbol\": {json_string(core_symbol(call.symbol))}, \"arity\": {call.arity}, \"max_arity\": {call.max_arity}, \"fallibility\": {json_string(core_call_fallibility_descriptor(call.fallibility))}, \"effect\": {optional_effect_descriptor(call.effect)}, \"pure_route\": {json_string(core_call_pure_route_descriptor(call.pure_route))}, \"interpreter_route\": {json_string(core_call_interpreter_route_descriptor(call.interpreter_route))} }}")
+    }
+    &out.push_str("\n  ],\n  \"prelude_calls\": [\n")
+    prelude_calls := loop call in program.prelude_calls -> @call
+    &prelude_calls.sort_by_key(fn(call) -> call.id)
+    loop (index, call) in prelude_calls {
+        if index != 0 -> &out.push_str(",\n")
+        &out.push_str("    {{ \"id\": {call.id.0}, \"module\": {json_string(call.module)}, \"member\": {json_string(call.member)}, \"family\": {json_string(prelude_family_descriptor(call.family))}, \"symbol\": {json_string(call.symbol.name())}, \"abi\": {json_string(prelude_abi_descriptor(call.abi))}, \"arity\": {call.signature.arity}, \"max_arity\": {call.signature.max_arity} }}")
+    }
+    &out.push_str("\n  ],\n  \"types\": [\n")
+    loop (index, type_def) in program.types {
+        if index != 0 -> &out.push_str(",\n")
+        generic_params :: json_generic_params(type_def.generic_params, program)!
+        &out.push_str("    {{ \"id\": {type_def.id.0}, \"key\": {json_string(type_def.key)}, \"name\": {json_string(type_def.name)}, \"kind\": {json_string(type_def_kind_descriptor(type_def.kind))}, \"generic_params\": {generic_params} }}")
+    }
+    &out.push_str("\n  ],\n  \"modules\": {json_modules(program)}")
+    &out.push_str(",\n  \"imports\": {json_imports(program)}")
+    &out.push_str(",\n  \"traits\": {json_traits(program)}")
+    &out.push_str(",\n  \"impls\": {json_impls(program)}")
+    &out.push_str(",\n  \"constants\": {json_constants(program)}")
+    &out.push_str(",\n  \"jobs\": {json_jobs(program)}")
+    &out.push_str(",\n  \"harnesses\": {json_harnesses(program)}")
+    artifacts :: json_artifacts(program, artifact.id, artifact_identity)!
+    &out.push_str(",\n  \"artifacts\": {artifacts}")
+    artifact_json :: json_artifact(artifact, program, artifact_identity)!
+    &out.push_str(",\n  \"artifact\": {artifact_json}")
+    entry_spec :: json_entry_spec(artifact.entry, program)!
+    &out.push_str(",\n  \"entry_spec\": {entry_spec}")
+    &out.push_str(",\n  \"app\": ")
+    if graph :: program.facts.web_app -> &out.push_str(graph.to_json()) else -> &out.push_str("null")
+    &out.push_str("\n}}\n")
+    out
+}

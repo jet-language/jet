@@ -1,1859 +1,761 @@
-// PORT-PENDING 0533 crates-jet-codegen-src-codegen-tir-tir-to-mir-expr-slice-6380: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6380-8234
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn lower_try_failure(
-//RS     ctx: &mut LowerCtx,
-//RS     error: jet_foundation::MIR::MirValueId,
-//RS     input_ty: &Type,
-//RS     convert: &TTryConvert,
-//RS     note: Option<jet_foundation::MIR::MirValueId>,
-//RS     result: &Type,
-//RS     location: Option<TryJourneySite<'_>>,
-//RS     carrier: &super::TFailureCarrier,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     let converted = match convert {
-//RS         TTryConvert::None => error,
-//RS         TTryConvert::DefaultErr => {
-//RS             let route = super::try_conversion_route(convert, input_ty, result, carrier)?;
-//RS             let target = Type::Named(crate::Syntax::TYPE_ERR.to_string());
-//RS             emit_static_call(ctx, &target, route, vec![error])?
-//RS         }
-//RS         TTryConvert::Typed {
-//RS             fn_name: conversion_fn,
-//RS             source,
-//RS             target,
-//RS         } => {
-//RS             let function = ctx.function_id_for(conversion_fn)?;
-//RS             let call_return_type = ctx
-//RS                 .function_registry
-//RS                 .call_return_type_for(function, &[])
-//RS                 .map_err(|message| ctx.error(ctx.span(), message))?
-//RS                 .unwrap_or_else(|| target.clone());
-//RS             let converted = ctx.emit(
-//RS                 "try-typed-error-conversion",
-//RS                 Some(call_return_type),
-//RS                 MirOperation::Call {
-//RS                     callee: MirCallee::User(function),
-//RS                     args: vec![mir_value_arg_with_access(ctx, error, MirAccess::Move)],
-//RS                     type_args: Vec::new(),
-//RS                 },
-//RS             )?;
-//RS             if matches!(
-//RS                 target,
-//RS                 Type::Named(name) if name == crate::Syntax::TYPE_ERR
-//RS             ) {
-//RS                 // A source-owned Core error reports under its user spelling
-//RS                 // (`CryptoError`), never its canonical owner identity.
-//RS                 let source_value = ctx.emit(
-//RS                     "try-conversion-source",
-//RS                     Some(Type::String),
-//RS                     MirOperation::Constant(MirConstant::String(
-//RS                         crate::Codegen::core_source_type_leaf(&source.name()).to_string(),
-//RS                     )),
-//RS                 )?;
-//RS                 let target_value = ctx.emit(
-//RS                     "try-conversion-target",
-//RS                     Some(Type::String),
-//RS                     MirOperation::Constant(MirConstant::String(target.name())),
-//RS                 )?;
-//RS                 let route = super::apply_conversion_route()?;
-//RS                 emit_static_call(
-//RS                     ctx,
-//RS                     &Type::Named(crate::Syntax::TYPE_ERR.to_string()),
-//RS                     route,
-//RS                     vec![converted, source_value, target_value],
-//RS                 )?
-//RS             } else {
-//RS                 converted
-//RS             }
-//RS         }
-//RS         TTryConvert::WidenUnion { tag, .. } => {
-//RS             // The caller's failure carrier names the union the member error
-//RS             // widens into (the Jet compiler reads the same carrier).
-//RS             let super::TFailureCarrier::Result { error: union, .. } = carrier else {
-//RS                 return Err(ctx.error(
-//RS                     ctx.span(),
-//RS                     "checked union error widening has no Result failure carrier",
-//RS                 ));
-//RS             };
-//RS             lower_union_widening(
-//RS                 ctx,
-//RS                 union,
-//RS                 tag,
-//RS                 vec![MirEnumArg {
-//RS                     field: None,
-//RS                     value: error,
-//RS                     boxed: false,
-//RS                 }],
-//RS             )?
-//RS         }
-//RS         TTryConvert::Never | TTryConvert::ProtocolExit => {
-//RS             return unsupported_expr(ctx, "TExprKind::Try (diverging failure conversion)");
-//RS         }
-//RS     };
-//RS 
-//RS     let Some(site) = location else {
-//RS         return Ok(converted);
-//RS     };
-//RS     if super::try_target_is_default_error(input_ty, convert) {
-//RS         if let Some(note) = note {
-//RS             let mut values = vec![converted];
-//RS             values.extend(lower_try_context_values(
-//RS                 ctx,
-//RS                 site.file,
-//RS                 site.line,
-//RS                 site.column,
-//RS                 site.fn_name,
-//RS             )?);
-//RS             values.push(note);
-//RS             let route = super::failure_context_route(result, carrier)?;
-//RS             let target = Type::Named(crate::Syntax::TYPE_ERR.to_string());
-//RS             return emit_static_call(ctx, &target, route, values);
-//RS         }
-//RS     }
-//RS     lower_try_journey(ctx, result, carrier, note, site)?;
-//RS     Ok(converted)
-//RS }
-//RS 
-//RS fn lower_or_fallback_expr(
-//RS     ctx: &mut LowerCtx,
-//RS     expr: &TExpr,
-//RS     value: &TExpr,
-//RS     fallback: &super::TOrFallback,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     let value_id = ctx.lower_child(value)?;
-//RS     let carrier = match &value.ty {
-//RS         crate::AST::Type::Option(_) => "option",
-//RS         crate::AST::Type::Result { .. } => "result",
-//RS         _ => {
-//RS             return unsupported_expr(
-//RS                 ctx,
-//RS                 &format!(
-//RS                     "TExprKind::OrFallback (non-carrier operand type {:?}, operation {:?})",
-//RS                     value.ty,
-//RS                     std::mem::discriminant(&value.kind),
-//RS                 ),
-//RS             );
-//RS         }
-//RS     };
-//RS     let (success_is_never, failure_is_never) = match &value.ty {
-//RS         crate::AST::Type::Result { ok, err } => (ok.is_never(), err.is_never()),
-//RS         crate::AST::Type::Option(_) => (false, false),
-//RS         _ => unreachable!("OrFallback carrier was checked above"),
-//RS     };
-//RS     // D-FAILURE-FOUNDATION1=A: TIR already nests two `??` peels for
-//RS     // `Result<Option<T>, E>` (Result → Option, then Option → T). Peel one
-//RS     // carrier here; a second MIR flatten would unwrap the row and leave the
-//RS     // outer Option `??` probing a map handle.
-//RS     let success_block = ctx.new_block(ctx.span(), "or-fallback-success")?;
-//RS     let failure_block = ctx.new_block(ctx.span(), "or-fallback-failure")?;
-//RS     let join = ctx.new_block(ctx.span(), "or-fallback-join")?;
-//RS     let condition = if carrier == "option" {
-//RS         ctx.emit(
-//RS             "or-fallback-option-condition",
-//RS             Some(crate::AST::Type::Bool),
-//RS             MirOperation::OptionIsSome { subject: value_id },
-//RS         )?
-//RS     } else {
-//RS         ctx.emit(
-//RS             "or-fallback-result-condition",
-//RS             Some(crate::AST::Type::Bool),
-//RS             MirOperation::ResultIsOk { subject: value_id },
-//RS         )?
-//RS     };
-//RS     ctx.terminate(MirTerminator::Branch {
-//RS         condition,
-//RS         then_target: success_block,
-//RS         else_target: failure_block,
-//RS     });
-//RS 
-//RS     let mut incoming = Vec::with_capacity(2);
-//RS     ctx.switch_to(success_block);
-//RS     let success = if success_is_never {
-//RS         ctx.terminate(MirTerminator::Unreachable {
-//RS             reason: "checked result success is uninhabited".to_string(),
-//RS         });
-//RS         None
-//RS     } else if carrier == "option" {
-//RS         let success_ty = value
-//RS             .ty
-//RS             .unwrap_option()
-//RS             .cloned()
-//RS             .ok_or_else(|| ctx.error(ctx.span(), "checked fallback option has no value type"))?;
-//RS         let success = ctx.emit(
-//RS             "or-fallback-option-value",
-//RS             Some(success_ty.clone()),
-//RS             MirOperation::OptionValue { subject: value_id },
-//RS         )?;
-//RS         Some(ctx.trait_box_value(success, &success_ty, &expr.ty)?)
-//RS     } else {
-//RS         let success_ty = value
-//RS             .ty
-//RS             .unwrap_result()
-//RS             .map(|(ok, _)| ok.clone())
-//RS             .ok_or_else(|| ctx.error(ctx.span(), "checked fallback result has no success type"))?;
-//RS         let success = ctx.emit(
-//RS             "or-fallback-result-value",
-//RS             Some(success_ty.clone()),
-//RS             MirOperation::ResultValue {
-//RS                 subject: value_id,
-//RS                 ok: true,
-//RS             },
-//RS         )?;
-//RS         Some(ctx.trait_box_value(success, &success_ty, &expr.ty)?)
-//RS     };
-//RS     let source = ctx.current_block();
-//RS     if !ctx.is_terminated() {
-//RS         ctx.terminate(MirTerminator::Jump { target: join });
-//RS         if let Some(success) = success {
-//RS             incoming.push((source, success));
-//RS         }
-//RS     }
-//RS 
-//RS     ctx.switch_to(failure_block);
-//RS     let fallback_value =
-//RS         lower_or_fallback_failure(ctx, expr, value, value_id, fallback, failure_is_never)?;
-//RS     if let Some(fallback_value) = fallback_value {
-//RS         let source = ctx.current_block();
-//RS         if !ctx.is_terminated() {
-//RS             ctx.terminate(MirTerminator::Jump { target: join });
-//RS             incoming.push((source, fallback_value));
-//RS         }
-//RS     }
-//RS     if incoming.is_empty() {
-//RS         return unsupported_expr(ctx, "TExprKind::OrFallback (no reachable value)");
-//RS     }
-//RS     ctx.switch_to(join);
-//RS     ctx.emit(
-//RS         "or-fallback-phi",
-//RS         Some(expr.ty.clone()),
-//RS         MirOperation::Phi { incoming },
-//RS     )
-//RS }
-//RS 
-//RS /// The failure route of `value ?? fallback` from the current (failure)
-//RS /// block: binds the ambient `err` of a Result carrier, then lowers the
-//RS /// fallback. Returns the fallback value when the fallback produces one.
-//RS fn lower_or_fallback_failure(
-//RS     ctx: &mut LowerCtx,
-//RS     expr: &TExpr,
-//RS     value: &TExpr,
-//RS     value_id: jet_foundation::MIR::MirValueId,
-//RS     fallback: &super::TOrFallback,
-//RS     failure_is_never: bool,
-//RS ) -> Result<Option<jet_foundation::MIR::MirValueId>, LowerError> {
-//RS     // The ambient `err` binding and the fallback body get their own cleanup
-//RS     // frame: `err` is bound only on the failure path, so its owned-drop must
-//RS     // not be queued on a frame the success path also exits.
-//RS     ctx.push_lexical_frame();
-//RS     let error_binding = if failure_is_never {
-//RS         ctx.terminate(MirTerminator::Unreachable {
-//RS             reason: "checked result failure is uninhabited".to_string(),
-//RS         });
-//RS         None
-//RS     } else if let crate::AST::Type::Result { err, .. } = &value.ty {
-//RS         let local = super::ambient_err_local();
-//RS         let previous_type = ctx.local_types.remove(&local.name);
-//RS         let previous_place = ctx.local_places.remove(&local.name);
-//RS         let previous_value = ctx.local_values.remove(&local.name);
-//RS         let error = ctx.emit(
-//RS             "or-fallback-error-value",
-//RS             Some((**err).clone()),
-//RS             MirOperation::ResultValue {
-//RS                 subject: value_id,
-//RS                 ok: false,
-//RS             },
-//RS         )?;
-//RS         let place = ctx.bind_local(&local, (**err).clone(), false, false, false)?;
-//RS         ctx.emit(
-//RS             "or-fallback-error-binding",
-//RS             None,
-//RS             MirOperation::WritePlace {
-//RS                 place,
-//RS                 value: error,
-//RS             },
-//RS         )?;
-//RS         Some((local.name, previous_type, previous_place, previous_value))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let fallback_value = if failure_is_never {
-//RS         None
-//RS     } else {
-//RS         lower_fallback_block(ctx, expr, fallback)?
-//RS     };
-//RS     ctx.pop_lexical_frame()?;
-//RS     if let Some((name, previous_type, previous_place, previous_value)) = error_binding {
-//RS         ctx.local_types.remove(&name);
-//RS         ctx.local_places.remove(&name);
-//RS         ctx.local_values.remove(&name);
-//RS         if let Some(ty) = previous_type {
-//RS             ctx.local_types.insert(name.clone(), ty);
-//RS         }
-//RS         if let Some(place) = previous_place {
-//RS             ctx.local_places.insert(name.clone(), place);
-//RS         }
-//RS         if let Some(value) = previous_value {
-//RS             ctx.local_values.insert(name, value);
-//RS         }
-//RS     }
-//RS     Ok(fallback_value)
-//RS }
-//RS 
-//RS /// D-MEM-COPYSEM1: `name :: place ?? <diverging fallback>` over a read
-//RS /// parameter's place. The carrier test reads the place itself and the
-//RS /// success route names the payload in place, so the binding copies nothing.
-//RS /// Returns the payload place, with lowering continuing on the success route;
-//RS /// `None` (nothing emitted) when `value` is not such a place or the fallback
-//RS /// can produce a value.
-//RS pub(super) fn lower_or_fallback_window(
-//RS     ctx: &mut LowerCtx,
-//RS     expr: &TExpr,
-//RS     value: &TExpr,
-//RS     fallback: &super::TOrFallback,
-//RS ) -> Result<Option<MirPlaceId>, LowerError> {
-//RS     let diverges = match fallback {
-//RS         super::TOrFallback::Value(value) => inline_block_diverges(value),
-//RS         _ => true,
-//RS     };
-//RS     let (payload_ty, kind) = match &value.ty {
-//RS         Type::Option(inner) => (
-//RS             (**inner).clone(),
-//RS             jet_foundation::MIR::MirPayloadKind::Option,
-//RS         ),
-//RS         Type::Result { ok, err } if !ok.is_never() && !err.is_never() => (
-//RS             (**ok).clone(),
-//RS             jet_foundation::MIR::MirPayloadKind::Result { ok: true },
-//RS         ),
-//RS         _ => return Ok(None),
-//RS     };
-//RS     if !diverges || payload_ty != expr.ty {
-//RS         return Ok(None);
-//RS     }
-//RS     let Some(subject) = ctx.lower_read_window(value)? else {
-//RS         return Ok(None);
-//RS     };
-//RS     let condition = match &value.ty {
-//RS         Type::Option(_) => ctx.emit(
-//RS             "or-fallback-option-condition",
-//RS             Some(Type::Bool),
-//RS             MirOperation::OptionIsSome { subject },
-//RS         )?,
-//RS         _ => ctx.emit(
-//RS             "or-fallback-result-condition",
-//RS             Some(Type::Bool),
-//RS             MirOperation::ResultIsOk { subject },
-//RS         )?,
-//RS     };
-//RS     let success_block = ctx.new_block(ctx.span(), "or-fallback-success")?;
-//RS     let failure_block = ctx.new_block(ctx.span(), "or-fallback-failure")?;
-//RS     ctx.terminate(MirTerminator::Branch {
-//RS         condition,
-//RS         then_target: success_block,
-//RS         else_target: failure_block,
-//RS     });
-//RS     ctx.switch_to(failure_block);
-//RS     if lower_or_fallback_failure(ctx, expr, value, subject, fallback, false)?.is_some() {
-//RS         return Err(ctx.error(ctx.span(), "diverging `??` fallback produced a value"));
-//RS     }
-//RS     if !ctx.is_terminated() {
-//RS         ctx.terminate(MirTerminator::Unreachable {
-//RS             reason: "diverging or-fallback".to_string(),
-//RS         });
-//RS     }
-//RS     ctx.switch_to(success_block);
-//RS     let window = ctx
-//RS         .read_window_of(subject)
-//RS         .ok_or_else(|| ctx.error(ctx.span(), "missing checked read window place"))?;
-//RS     Ok(Some(ctx.project_payload_place(window, kind, &payload_ty)?))
-//RS }
-//RS 
-//RS /// True when a `??` value fallback is an inline block that leaves through
-//RS /// its final `return`, `break`, or `next`.
-//RS fn inline_block_diverges(value: &TExpr) -> bool {
-//RS     matches!(
-//RS         &value.kind,
-//RS         TExprKind::InlineBlock(stmts)
-//RS             if matches!(
-//RS                 stmts.last(),
-//RS                 Some(
-//RS                     super::TStmt::Return(_)
-//RS                         | super::TStmt::Break(_)
-//RS                         | super::TStmt::BreakValue { .. }
-//RS                         | super::TStmt::Continue(_)
-//RS                 )
-//RS             )
-//RS     )
-//RS }
-//RS 
-//RS fn lower_fallback_block(
-//RS     ctx: &mut LowerCtx,
-//RS     expr: &TExpr,
-//RS     fallback: &super::TOrFallback,
-//RS ) -> Result<Option<jet_foundation::MIR::MirValueId>, LowerError> {
-//RS     match fallback {
-//RS         super::TOrFallback::Value(value) => {
-//RS             if inline_block_diverges(value) {
-//RS                 if let TExprKind::InlineBlock(stmts) = &value.kind {
-//RS                     ctx.lower_nested_stmts(stmts)?;
-//RS                 }
-//RS                 return Ok(None);
-//RS             }
-//RS             let source_ty = value.ty.clone();
-//RS             let value = ctx.lower_child(value)?;
-//RS             Ok(Some(ctx.trait_box_value(value, &source_ty, &expr.ty)?))
-//RS         }
-//RS         super::TOrFallback::Return(value) => {
-//RS             // The fallback's `return` is an ordinary function return: a
-//RS             // plain-return function (#3740) unwraps its `T Never!` carrier
-//RS             // and a contract scope checks its postconditions, exactly as for
-//RS             // a `return` statement.
-//RS             ctx.lower_return(value.as_deref())?;
-//RS             Ok(None)
-//RS         }
-//RS         super::TOrFallback::Panic { msg, loc } => {
-//RS             let values = vec![ctx.lower_child(msg)?];
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let call = ctx.intern_prelude_route(super::require_stop_route(
-//RS                 "panic",
-//RS                 values.len(),
-//RS                 &expr.ty,
-//RS                 &carrier,
-//RS             )?)?;
-//RS             let location = MirPanicLoc {
-//RS                 file: ctx.source_file_id_for(&loc.file),
-//RS                 line: loc.line,
-//RS                 column: loc.col,
-//RS             };
-//RS             let context = MirPanicContext {
-//RS                 function: loc.fn_name.clone(),
-//RS                 source_line: loc.src_line.clone(),
-//RS                 caret: loc.caret,
-//RS                 locals: loc
-//RS                     .locals
-//RS                     .iter()
-//RS                     .filter_map(|(name, local)| {
-//RS                         ctx.local_id_for(local).ok().map(|id| (name.clone(), id))
-//RS                     })
-//RS                     .collect(),
-//RS             };
-//RS             ctx.emit(
-//RS                 "or-fallback-panic",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::RequireStop {
-//RS                     call,
-//RS                     kind: MirRequireKind::Panic,
-//RS                     condition: None,
-//RS                     location,
-//RS                     context,
-//RS                     values,
-//RS                     always_stops: true,
-//RS                 }),
-//RS             )?;
-//RS             ctx.terminate(MirTerminator::Unreachable {
-//RS                 reason: "or-fallback panic".to_string(),
-//RS             });
-//RS             Ok(None)
-//RS         }
-//RS         super::TOrFallback::Break => {
-//RS             let target = ctx
-//RS                 .loops
-//RS                 .last()
-//RS                 .map(|(_, break_target, _)| *break_target)
-//RS                 .ok_or_else(|| ctx.error(ctx.span(), "fallback break outside loop"))?;
-//RS             ctx.terminate(MirTerminator::Jump { target });
-//RS             Ok(None)
-//RS         }
-//RS         super::TOrFallback::Continue => {
-//RS             let target = ctx
-//RS                 .loops
-//RS                 .last()
-//RS                 .map(|(_, _, continue_target)| *continue_target)
-//RS                 .ok_or_else(|| ctx.error(ctx.span(), "fallback continue outside loop"))?;
-//RS             ctx.terminate(MirTerminator::Jump { target });
-//RS             Ok(None)
-//RS         }
-//RS         super::TOrFallback::BreakLabel(label) => {
-//RS             let target = ctx
-//RS                 .loops
-//RS                 .iter()
-//RS                 .rev()
-//RS                 .find(|(name, _, _)| name.as_deref() == Some(label.as_str()))
-//RS                 .map(|(_, break_target, _)| *break_target)
-//RS                 .ok_or_else(|| ctx.error(ctx.span(), "fallback break label not found"))?;
-//RS             ctx.terminate(MirTerminator::Jump { target });
-//RS             Ok(None)
-//RS         }
-//RS         super::TOrFallback::ContinueLabel(label) => {
-//RS             let target = ctx
-//RS                 .loops
-//RS                 .iter()
-//RS                 .rev()
-//RS                 .find(|(name, _, _)| name.as_deref() == Some(label.as_str()))
-//RS                 .map(|(_, _, continue_target)| *continue_target)
-//RS                 .ok_or_else(|| ctx.error(ctx.span(), "fallback continue label not found"))?;
-//RS             ctx.terminate(MirTerminator::Jump { target });
-//RS             Ok(None)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn lower_call_args(
-//RS     ctx: &mut LowerCtx,
-//RS     args: &[TCallArg],
-//RS ) -> Result<Vec<jet_foundation::MIR::MirCallArg>, LowerError> {
-//RS     args.iter()
-//RS         .enumerate()
-//RS         .map(|(index, arg)| {
-//RS             let mut lowered = ctx.lower_call_arg(arg)?;
-//RS             lowered.source_index = Some(index);
-//RS             Ok(lowered)
-//RS         })
-//RS         .collect::<Result<Vec<_>, LowerError>>()
-//RS }
-//RS 
-//RS fn lower_extern_arg(
-//RS     ctx: &mut LowerCtx,
-//RS     arg: &super::TExternArg,
-//RS ) -> Result<jet_foundation::MIR::MirCallArg, LowerError> {
-//RS     let mut lowered = ctx.lower_plain_arg(&arg.value)?;
-//RS     let resource_take = matches!(&arg.value.kind, super::TExprKind::ResourceTake(_));
-//RS     lowered.access = if arg.mut_borrow {
-//RS         MirAccess::Write
-//RS     } else if arg.clone || resource_take {
-//RS         MirAccess::Move
-//RS     } else {
-//RS         MirAccess::Read
-//RS     };
-//RS     lowered.owned_last_use = matches!(lowered.access, MirAccess::Move);
-//RS     lowered.implicit_clone = arg.clone;
-//RS     Ok(lowered)
-//RS }
-//RS 
-//RS fn lower_enum_payload(
-//RS     ctx: &mut LowerCtx,
-//RS     enum_name: &str,
-//RS     owner_ty: &Type,
-//RS     variant: &str,
-//RS     payload: &TEnumPayload,
-//RS ) -> Result<Vec<MirEnumArg>, LowerError> {
-//RS     match payload {
-//RS         TEnumPayload::Unit => Ok(Vec::new()),
-//RS         TEnumPayload::Positional(args) => args
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, arg)| {
-//RS                 let expected = ctx.enum_payload_type_for(owner_ty, variant, index)?;
-//RS                 Ok(MirEnumArg {
-//RS                     field: None,
-//RS                     value: lower_enum_arg(ctx, arg, Some(&expected))?,
-//RS                     boxed: arg.boxed,
-//RS                 })
-//RS             })
-//RS             .collect(),
-//RS         TEnumPayload::Named(args) => {
-//RS             let mut lowered = Vec::with_capacity(args.len());
-//RS             for (name, arg) in args {
-//RS                 let (field, order) =
-//RS                     ctx.enum_named_payload_field(enum_name, variant, name)?;
-//RS                 let expected = ctx.enum_payload_type_for(owner_ty, variant, order)?;
-//RS                 lowered.push((
-//RS                     order,
-//RS                     MirEnumArg {
-//RS                         field: Some(field),
-//RS                         value: lower_enum_arg(ctx, arg, Some(&expected))?,
-//RS                         boxed: arg.boxed,
-//RS                     },
-//RS                 ));
-//RS             }
-//RS             lowered.sort_by_key(|(order, _)| *order);
-//RS             if lowered.windows(2).any(|pair| pair[0].0 == pair[1].0) {
-//RS                 return Err(ctx.error(
-//RS                     ctx.span(),
-//RS                     format!(
-//RS                         "duplicate checked enum field in `{enum_name}::{variant}`"
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             Ok(lowered.into_iter().map(|(_, arg)| arg).collect())
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn lower_enum_arg(
-//RS     ctx: &mut LowerCtx,
-//RS     arg: &TEnumArg,
-//RS     expected: Option<&Type>,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     let value = lower_cloned_value(ctx, &arg.value, arg.clone)?;
-//RS     expected
-//RS         .map(|expected| ctx.trait_box_value(value, &arg.value.ty, expected))
-//RS         .unwrap_or(Ok(value))
-//RS }
-//RS fn lower_conversion_int(
-//RS     ctx: &mut LowerCtx,
-//RS     value: i64,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     ctx.emit(
-//RS         "conversion-parameter-int",
-//RS         Some(Type::IntN {
-//RS             signed: true,
-//RS             bits: 64,
-//RS         }),
-//RS         MirOperation::Constant(MirConstant::Int {
-//RS             value,
-//RS             width: None,
-//RS             spelling: None,
-//RS         }),
-//RS     )
-//RS }
-//RS fn lower_conversion_float(
-//RS     ctx: &mut LowerCtx,
-//RS     value: f64,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     ctx.emit(
-//RS         "conversion-parameter-float",
-//RS         Some(Type::Float),
-//RS         MirOperation::Constant(MirConstant::Float {
-//RS             value,
-//RS             f32: false,
-//RS             spelling: None,
-//RS         }),
-//RS     )
-//RS }
-//RS 
-//RS fn lower_conversion_bool(
-//RS     ctx: &mut LowerCtx,
-//RS     value: bool,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     ctx.emit(
-//RS         "conversion-parameter-bool",
-//RS         Some(Type::Bool),
-//RS         MirOperation::Constant(MirConstant::Bool(value)),
-//RS     )
-//RS }
-//RS 
-//RS fn lower_conversion_string(
-//RS     ctx: &mut LowerCtx,
-//RS     value: String,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     ctx.emit(
-//RS         "conversion-parameter-string",
-//RS         Some(Type::String),
-//RS         MirOperation::Constant(MirConstant::String(value)),
-//RS     )
-//RS }
-//RS 
-//RS fn direct_prelude_route(
-//RS     module: &str,
-//RS     member: &str,
-//RS     symbol: &str,
-//RS     arity: usize,
-//RS     borrow_mask: &[bool],
-//RS     carrier: &super::TFailureCarrier,
-//RS ) -> TPreludeRoute {
-//RS     TPreludeRoute {
-//RS         family: MirPreludeFamily::StaticPrelude,
-//RS         module: module.to_string(),
-//RS         member: member.to_string(),
-//RS         symbol: MirSymbol::Prelude(symbol.to_string()),
-//RS         signature: MirCallSignature {
-//RS             arity,
-//RS             max_arity: arity,
-//RS             borrow_mask: borrow_mask.to_vec(),
-//RS         },
-//RS         effect: None,
-//RS         fallibility: carrier.clone(),
-//RS         abi: MirPreludeAbi::Value,
-//RS         authority: None,
-//RS         db_metadata: None,
-//RS     }
-//RS }
-//RS 
-//RS fn task_group_result_tasks(ty: &Type) -> bool {
-//RS     fn task_result(ty: &Type) -> bool {
-//RS         matches!(
-//RS             ty.without_user_tags(),
-//RS             Type::Apply { name, args }
-//RS                 if name == "Task"
-//RS                     && args.len() == 1
-//RS                     && matches!(args[0].without_user_tags(), Type::Result { .. })
-//RS         )
-//RS     }
-//RS     match ty.without_user_tags() {
-//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => task_result(inner),
-//RS         Type::Tuple(fields) => fields.iter().all(|(_, field)| task_result(field)),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn task_group_route(
-//RS     kind: MirTaskGroupKind,
-//RS     tasks_ty: &Type,
-//RS     carrier: &super::TFailureCarrier,
-//RS ) -> TPreludeRoute {
-//RS     let result = task_group_result_tasks(tasks_ty);
-//RS     let (name, symbol) = match (kind, result) {
-//RS         (MirTaskGroupKind::All, false) => ("all", "jet_std::jet_task_all"),
-//RS         (MirTaskGroupKind::Race, false) => ("race", "jet_std::jet_task_race"),
-//RS         (MirTaskGroupKind::Any, false) => ("any", "jet_std::jet_task_any"),
-//RS         (MirTaskGroupKind::All, true) => ("all_result", "jet_std::jet_task_all_result"),
-//RS         (MirTaskGroupKind::Race, true) => ("race_result", "jet_std::jet_task_race_result"),
-//RS         (MirTaskGroupKind::Any, true) => ("any_result", "jet_std::jet_task_any_result"),
-//RS     };
-//RS     direct_prelude_route("core.tasks", name, symbol, 1, &[false], carrier)
-//RS }
-//RS 
-//RS fn lower_select_builder(
-//RS     ctx: &mut LowerCtx,
-//RS     builder: &TExpr,
-//RS     receivers: &mut Vec<jet_foundation::MIR::MirValueId>,
-//RS     timers: &mut Vec<jet_foundation::MIR::MirValueId>,
-//RS ) -> Result<(), LowerError> {
-//RS     match &builder.kind {
-//RS         TExprKind::SelectStart => Ok(()),
-//RS         TExprKind::SelectRecv { builder, channel } => {
-//RS             receivers.push(ctx.lower_child(channel)?);
-//RS             lower_select_builder(ctx, builder, receivers, timers)
-//RS         }
-//RS         TExprKind::SelectAfter {
-//RS             builder,
-//RS             duration,
-//RS             value,
-//RS         } => {
-//RS             if value.is_some() {
-//RS                 return Err(ctx.error(
-//RS                     ctx.span(),
-//RS                     "readiness timer arm unexpectedly carries a value",
-//RS                 ));
-//RS             }
-//RS             let duration = TExpr {
-//RS                 ty: Type::Int,
-//RS                 kind: TExprKind::HandleMethod {
-//RS                     recv: Box::new((**duration).clone()),
-//RS                     op: THandleOp::DurationNsValue,
-//RS                     args: Vec::new(),
-//RS                 },
-//RS             };
-//RS             timers.push(ctx.lower_child(&duration)?);
-//RS             lower_select_builder(ctx, builder, receivers, timers)
-//RS         }
-//RS         _ => Err(ctx.error(
-//RS             ctx.span(),
-//RS             "select wait has a non-canonical readiness-table builder",
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS /// A readiness wait yields `(arm, value: T?)`; every receiver in its table
-//RS /// carries the bare element type `T`, not that tagged result.
-//RS fn select_payload_type(ty: &Type) -> Type {
-//RS     match ty.without_user_tags() {
-//RS         Type::Tuple(fields) if fields.len() == 2 => match fields[1].1.without_user_tags() {
-//RS             Type::Option(inner) => (**inner).clone(),
-//RS             other => other.clone(),
-//RS         },
-//RS         _ => ty.clone(),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_select_wait(
-//RS     ctx: &mut LowerCtx,
-//RS     expr: &TExpr,
-//RS     builder: &TExpr,
-//RS     nonblocking: bool,
-//RS     carrier: &super::TFailureCarrier,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     let mut receivers = Vec::new();
-//RS     let mut timers = Vec::new();
-//RS     lower_select_builder(ctx, builder, &mut receivers, &mut timers)?;
-//RS     let payload = select_payload_type(&expr.ty);
-//RS     let receiver_ty = Type::Apply {
-//RS         name: "Receiver".to_string(),
-//RS         args: vec![payload],
-//RS     };
-//RS     let receiver_list = ctx.emit(
-//RS         "select-receivers",
-//RS         Some(Type::List(Box::new(receiver_ty))),
-//RS         MirOperation::BuildList {
-//RS             values: receivers,
-//RS             trait_coercion: None,
-//RS         },
-//RS     )?;
-//RS     let timer_list = ctx.emit(
-//RS         "select-timers",
-//RS         Some(Type::List(Box::new(Type::Int))),
-//RS         MirOperation::BuildList {
-//RS             values: timers,
-//RS             trait_coercion: None,
-//RS         },
-//RS     )?;
-//RS     let (member, symbol) = if nonblocking {
-//RS         (
-//RS             "select_try_wait_tagged",
-//RS             "jet_std::jet_select_try_wait_tagged",
-//RS         )
-//RS     } else {
-//RS         ("select_wait_tagged", "jet_std::jet_select_wait_tagged")
-//RS     };
-//RS     let call = ctx.intern_prelude_route(direct_prelude_route(
-//RS         "core.tasks",
-//RS         member,
-//RS         symbol,
-//RS         2,
-//RS         &[true, false],
-//RS         carrier,
-//RS     ))?;
-//RS     ctx.emit(
-//RS         "select-wait",
-//RS         Some(expr.ty.clone()),
-//RS         MirOperation::Semantic(MirSemanticOp::Select {
-//RS             call,
-//RS             kind: MirSelectKind::Wait,
-//RS             values: vec![receiver_list, timer_list],
-//RS         }),
-//RS     )
-//RS }
-//RS 
-//RS fn lower_prelude_conversion(
-//RS     ctx: &mut LowerCtx,
-//RS     value: jet_foundation::MIR::MirValueId,
-//RS     parameters: Vec<jet_foundation::MIR::MirValueId>,
-//RS     target: &crate::AST::Type,
-//RS     route: super::TPreludeRoute,
-//RS     carrier: &super::TFailureCarrier,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     let call = ctx.intern_prelude_route(route)?;
-//RS     let line = ctx.source_line() as usize;
-//RS     let location = panic_location(ctx, line);
-//RS     let fallibility = ctx.lower_call_fallibility(carrier)?;
-//RS     let target_type = ctx.mir_type(target)?;
-//RS     ctx.emit(
-//RS         "prelude-conversion",
-//RS         Some(target.clone()),
-//RS         MirOperation::Convert {
-//RS             value,
-//RS             parameters,
-//RS             target: target_type,
-//RS             conversion: MirConversion::Prelude {
-//RS                 call,
-//RS                 location,
-//RS                 fallibility,
-//RS             },
-//RS         },
-//RS     )
-//RS }
-//RS 
-//RS fn lower_cloned_value(
-//RS     ctx: &mut LowerCtx,
-//RS     value: &TExpr,
-//RS     clone: bool,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     let value_id = ctx.lower_child(value)?;
-//RS     Ok(if clone {
-//RS         ctx.emit(
-//RS             "cloned-value",
-//RS             Some(value.ty.clone()),
-//RS             MirOperation::Copy {
-//RS                 value: value_id,
-//RS                 fact: jet_foundation::MIR::MirCopyFact::Materialize,
-//RS             },
-//RS         )?
-//RS     } else {
-//RS         value_id
-//RS     })
-//RS }
-//RS fn lower_core_closure_call(
-//RS     ctx: &mut LowerCtx,
-//RS     expr: &TExpr,
-//RS     kind: &TCoreClosureKind,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     let site = ctx.site_id_for(ctx.span(), "core-closure");
-//RS     let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS     let mut values = Vec::new();
-//RS     let mut closure = None;
-//RS     let (mir_kind, grouped_spawn, label) = match kind {
-//RS         TCoreClosureKind::Spawn {
-//RS             group,
-//RS             site: spawn_site,
-//RS             label,
-//RS             executable,
-//RS             ..
-//RS         } => {
-//RS             if let Some(group) = group {
-//RS                 values.push(ctx.lower_child(group)?);
-//RS             }
-//RS             let site_value = ctx.emit(
-//RS                 "core-closure.spawn-site",
-//RS                 Some(crate::AST::Type::Int),
-//RS                 MirOperation::Constant(MirConstant::Int {
-//RS                     value: *spawn_site as i64,
-//RS                     width: None,
-//RS                     spelling: None,
-//RS                 }),
-//RS             )?;
-//RS             let label_text = label.clone().unwrap_or_default();
-//RS             let label_value = ctx.emit(
-//RS                 "core-closure.spawn-label",
-//RS                 Some(crate::AST::Type::String),
-//RS                 MirOperation::Constant(MirConstant::String(label_text.clone())),
-//RS             )?;
-//RS             values.extend([site_value, label_value]);
-//RS             closure = Some(ctx.lower_spawn_lambda(executable)?);
-//RS             (MirCoreClosureKind::Spawn, group.is_some(), label_text)
-//RS         }
-//RS         TCoreClosureKind::Realtime {
-//RS             rate,
-//RS             frames,
-//RS             executable,
-//RS         } => {
-//RS             values.push(ctx.lower_child(rate)?);
-//RS             values.push(ctx.lower_child(frames)?);
-//RS             closure = Some(ctx.lower_lambda(executable)?);
-//RS             (MirCoreClosureKind::Realtime, false, String::new())
-//RS         }
-//RS         TCoreClosureKind::Serve {
-//RS             addr, executable, ..
-//RS         } => {
-//RS             values.push(ctx.lower_child(addr)?);
-//RS             closure = Some(ctx.lower_lambda_send(executable)?);
-//RS             (MirCoreClosureKind::Serve, false, String::new())
-//RS         }
-//RS         TCoreClosureKind::OnInterrupt { callback } => {
-//RS             values.push(ctx.lower_child(callback)?);
-//RS             (MirCoreClosureKind::OnInterrupt, false, String::new())
-//RS         }
-//RS         TCoreClosureKind::Guard { executable, .. } => {
-//RS             closure = Some(ctx.lower_lambda(executable)?);
-//RS             (MirCoreClosureKind::Guard, false, String::new())
-//RS         }
-//RS         TCoreClosureKind::OnCommit {
-//RS             handle_name,
-//RS             executable,
-//RS             ..
-//RS         } => {
-//RS             let handle_ty = ctx.local_types.get(handle_name).cloned().ok_or_else(|| {
-//RS                 ctx.error(
-//RS                     ctx.span(),
-//RS                     format!("missing checked transaction handle `{handle_name}`"),
-//RS                 )
-//RS             })?;
-//RS             values.push(ctx.lower_child(&TExpr {
-//RS                 ty: handle_ty,
-//RS                 kind: TExprKind::Local(TLocal::user(handle_name.clone())),
-//RS             })?);
-//RS             closure = Some(ctx.lower_lambda(executable)?);
-//RS             (MirCoreClosureKind::OnCommit, false, String::new())
-//RS         }
-//RS         TCoreClosureKind::OnRollback {
-//RS             handle_name,
-//RS             executable,
-//RS             ..
-//RS         } => {
-//RS             let handle_ty = ctx.local_types.get(handle_name).cloned().ok_or_else(|| {
-//RS                 ctx.error(
-//RS                     ctx.span(),
-//RS                     format!("missing checked transaction handle `{handle_name}`"),
-//RS                 )
-//RS             })?;
-//RS             values.push(ctx.lower_child(&TExpr {
-//RS                 ty: handle_ty,
-//RS                 kind: TExprKind::Local(TLocal::user(handle_name.clone())),
-//RS             })?);
-//RS             closure = Some(ctx.lower_lambda(executable)?);
-//RS             (MirCoreClosureKind::OnRollback, false, String::new())
-//RS         }
-//RS         TCoreClosureKind::ReactiveDerived { executable, .. } => {
-//RS             closure = Some(ctx.lower_lambda_send(executable)?);
-//RS             (MirCoreClosureKind::ReactiveDerived, false, String::new())
-//RS         }
-//RS         TCoreClosureKind::ReactiveEffect { executable, .. } => {
-//RS             closure = Some(ctx.lower_lambda_send(executable)?);
-//RS             (MirCoreClosureKind::ReactiveEffect, false, String::new())
-//RS         }
-//RS         TCoreClosureKind::UiReactiveRender { executable, .. } => {
-//RS             closure = Some(ctx.lower_lambda_send(executable)?);
-//RS             (MirCoreClosureKind::UiMount, false, String::new())
-//RS         }
-//RS         TCoreClosureKind::UiPreview {
-//RS             name,
-//RS             viewport,
-//RS             executable,
-//RS             playground,
-//RS             source_file,
-//RS             source_span,
-//RS             source_start_line,
-//RS             source_start_column,
-//RS             source_end_line,
-//RS             source_end_column,
-//RS             build_id,
-//RS             revision,
-//RS             ..
-//RS         } => {
-//RS             values.push(ctx.lower_child(name)?);
-//RS             if let Some(viewport) = viewport {
-//RS                 values.push(ctx.lower_child(viewport)?);
-//RS             }
-//RS             closure = Some(ctx.lower_lambda_send(executable)?);
-//RS             (
-//RS                 MirCoreClosureKind::UiPreview {
-//RS                     playground: *playground,
-//RS                     source_file: source_file.clone(),
-//RS                     source_span: *source_span,
-//RS                     source_start_line: *source_start_line,
-//RS                     source_start_column: *source_start_column,
-//RS                     source_end_line: *source_end_line,
-//RS                     source_end_column: *source_end_column,
-//RS                     build_id: build_id.clone(),
-//RS                     revision: revision.clone(),
-//RS                 },
-//RS                 false,
-//RS                 String::new(),
-//RS             )
-//RS         }
-//RS         TCoreClosureKind::UiButtonOnClick {
-//RS             label,
-//RS             shortcut,
-//RS             accessible_label,
-//RS             executable,
-//RS             ..
-//RS         } => {
-//RS             values.push(ctx.lower_child(label)?);
-//RS             values.push(ctx.lower_child(shortcut)?);
-//RS             values.push(ctx.lower_child(accessible_label)?);
-//RS             closure = Some(ctx.lower_lambda_send(executable)?);
-//RS             (MirCoreClosureKind::UiAction, false, String::new())
-//RS         }
-//RS         TCoreClosureKind::UiTextInputOnDrop {
-//RS             state,
-//RS             ime,
-//RS             executable,
-//RS             ..
-//RS         } => {
-//RS             values.push(ctx.lower_child(state)?);
-//RS             values.push(ctx.lower_child(ime)?);
-//RS             closure = Some(ctx.lower_lambda_send(executable)?);
-//RS             (MirCoreClosureKind::UiTextInputOnDrop, false, String::new())
-//RS         }
-//RS     };
-//RS     let call = ctx.intern_prelude_route(super::core_closure_route(
-//RS         mir_kind.clone(),
-//RS         grouped_spawn,
-//RS         &expr.ty,
-//RS         &carrier,
-//RS     )?)?;
-//RS     ctx.emit(
-//RS         "core-closure-call",
-//RS         Some(expr.ty.clone()),
-//RS         MirOperation::Semantic(MirSemanticOp::CoreClosureCall {
-//RS             call,
-//RS             kind: mir_kind,
-//RS             values,
-//RS             closure,
-//RS             site,
-//RS             label,
-//RS         }),
-//RS     )
-//RS }
-//RS fn lower_tlocal_value(
-//RS     ctx: &mut LowerCtx,
-//RS     local: &TLocal,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     let ty = ctx
-//RS         .local_types
-//RS         .get(&local.name)
-//RS         .cloned()
-//RS         .or_else(|| local.persist_ty.clone())
-//RS         .ok_or_else(|| {
-//RS             ctx.error(
-//RS                 ctx.span(),
-//RS                 format!("checked MIR local `{}` has no type", local.name),
-//RS             )
-//RS         })?;
-//RS     ctx.lower_child(&TExpr {
-//RS         ty,
-//RS         kind: TExprKind::Local(local.clone()),
-//RS     })
-//RS }
-//RS 
-//RS fn mir_gc_edit_kind(kind: TGcEditKind) -> jet_foundation::MIR::MirGcEditKind {
-//RS     match kind {
-//RS         TGcEditKind::Clear => jet_foundation::MIR::MirGcEditKind::Clear,
-//RS         TGcEditKind::Pop => jet_foundation::MIR::MirGcEditKind::Pop,
-//RS         TGcEditKind::RemoveIndex => jet_foundation::MIR::MirGcEditKind::RemoveIndex,
-//RS         TGcEditKind::InsertIndex => jet_foundation::MIR::MirGcEditKind::InsertIndex,
-//RS         TGcEditKind::Prepend => jet_foundation::MIR::MirGcEditKind::Prepend,
-//RS         TGcEditKind::Additive => jet_foundation::MIR::MirGcEditKind::Additive,
-//RS         TGcEditKind::Plain => jet_foundation::MIR::MirGcEditKind::Plain,
-//RS         TGcEditKind::EdgeSlot => jet_foundation::MIR::MirGcEditKind::EdgeSlot,
-//RS     }
-//RS }
-//RS 
-//RS fn gc_edit_site(ctx: &LowerCtx) -> MirGcEditSiteId {
-//RS     let span = ctx.span();
-//RS     MirGcEditSiteId(stable_id(
-//RS         "gc-edit-site",
-//RS         &format!(
-//RS             "{}|{}|{}|{}",
-//RS             ctx.function.key, ctx.function.source_file, span.start, span.end
-//RS         ),
-//RS     ))
-//RS }
-//RS 
-//RS /// Turn the checked edit body into an executable callback whose first source
-//RS /// slot is the rebound GC payload. The old TIR expression remains the body;
-//RS /// MIR carries the resulting closure value instead of eagerly executing it.
-//RS fn gc_edit_callback(ctx: &LowerCtx, edit: &TExpr, root_ty: Type) -> TLambda {
-//RS     let param = TLocal::generated("value");
-//RS     let span = ctx.span();
-//RS     TLambda {
-//RS         executable: TLambdaBody::Expr(Box::new(edit.clone())),
-//RS         source_span: span,
-//RS         frame_schedule: None,
-//RS         frame_schedule_derivation: None,
-//RS         capture_facts: TCaptureFacts::default(),
-//RS         host_param_conventions: None,
-//RS         failure_carrier: super::TFailureCarrier::from_checked_type(&edit.ty),
-//RS         effects: TEffectFacts::default(),
-//RS         source_params: vec![param.name.clone()],
-//RS         jit_name: format!("gc_edit_{}_{}", span.start, span.end),
-//RS         param_types: vec![root_ty],
-//RS         ret: (!matches!(
-//RS             &edit.ty,
-//RS             Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE
-//RS         ))
-//RS         .then_some(edit.ty.clone()),
-//RS         is_move: true,
-//RS         boxed: false,
-//RS         rc: false,
-//RS         arc: false,
-//RS         captures: Vec::new(),
-//RS         capture_origins: Default::default(),
-//RS         materialized_captures: Vec::new(),
-//RS         frozen_captures: Vec::new(),
-//RS         uses_stack_sentry: false,
-//RS     }
-//RS }
-//RS 
-//RS fn lower_pattern_probe(
-//RS     ctx: &mut LowerCtx,
-//RS     expr: &TExpr,
-//RS     matched: jet_foundation::MIR::MirValueId,
-//RS     probe: &super::TMatchProbe,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     if matches!(probe, super::TMatchProbe::IsSome) {
-//RS         return ctx.emit(
-//RS             "pattern-matched",
-//RS             Some(Type::Bool),
-//RS             MirOperation::PatternMatched { matched },
-//RS         );
-//RS     }
-//RS     let Type::Tuple(types) = &expr.ty else {
-//RS         return Err(ctx.error(ctx.span(), "checked pattern captures have no tuple type"));
-//RS     };
-//RS     let type_id = ctx
-//RS         .mir_type(&expr.ty)?
-//RS         .identity
-//RS         .ok_or_else(|| ctx.error(ctx.span(), "checked pattern tuple has no MIR identity"))?;
-//RS     let fields = types
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(index, (name, ty))| {
-//RS             let field = ctx.field_id_for_type(&expr.ty, name)?;
-//RS             let value = ctx.emit(
-//RS                 "pattern-capture",
-//RS                 Some((**ty).clone()),
-//RS                 MirOperation::PatternCapture { matched, index },
-//RS             )?;
-//RS             Ok((field, value))
-//RS         })
-//RS         .collect::<Result<Vec<_>, LowerError>>()?;
-//RS     ctx.emit(
-//RS         "pattern-captures",
-//RS         Some(expr.ty.clone()),
-//RS         MirOperation::Tuple { type_id, fields },
-//RS     )
-//RS }
-//RS 
-//RS fn lower_host_call(
-//RS     ctx: &mut LowerCtx,
-//RS     expr: &TExpr,
-//RS     host: &THostCall,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     match host {
-//RS         THostCall::CarrierFact { recv, field, notes } => {
-//RS             // D-FAIL-CARRIER1=A: `partial`/`notes` live on the error report, not
-//RS             // on the Result wrapper. Looking the field up on `recv.ty` synthesizes
-//RS             // a phantom Result owner and ICEs as a missing MIR type.
-//RS             let report_ty = match recv.ty.without_user_tags() {
-//RS                 crate::AST::Type::Result { err, .. } => err.as_ref(),
-//RS                 other => other,
-//RS             };
-//RS             let field_id = ctx.field_id_for_type(report_ty, field)?;
-//RS             let receiver = ctx.lower_child(recv)?;
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&recv.ty);
-//RS             let call =
-//RS                 ctx.intern_prelude_route(super::carrier_fact_route(*notes, &expr.ty, &carrier)?)?;
-//RS             ctx.emit(
-//RS                 "host-carrier-fact",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::CarrierFact {
-//RS                     call,
-//RS                     receiver,
-//RS                     field: field_id,
-//RS                     notes: *notes,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         THostCall::FixedListIndex {
-//RS             base,
-//RS             index,
-//RS             line: _,
-//RS         } => {
-//RS             let place =
-//RS                 ctx.lower_index_place(base, index, MirIndexKind::FixedListProof, MirAccess::Read)?;
-//RS             ctx.emit(
-//RS                 "host-fixed-list-index",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::ReadPlace(place),
-//RS             )
-//RS         }
-//RS         THostCall::OptionProbe {
-//RS             inner,
-//RS             kind: TOptionProbe::Field(field),
-//RS         } => lower_optional_field(ctx, expr, inner, field, false),
-//RS         THostCall::TupleIndex { base, index } => {
-//RS             let field = ctx.field_id_for_type(&base.ty, &index.to_string())?;
-//RS             let base = ctx.lower_child(base)?;
-//RS             ctx.emit(
-//RS                 "host-tuple-index",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Field { base, field },
-//RS             )
-//RS         }
-//RS         THostCall::FnName(name) => {
-//RS             let function = ctx.function_id_for(name)?;
-//RS             if let Some(adapted) = ctx.plain_named_fn_value(name, function, &expr.ty, false)? {
-//RS                 return Ok(adapted);
-//RS             }
-//RS             ctx.emit(
-//RS                 "host-function-value",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Closure {
-//RS                     function,
-//RS                     captures: Vec::new(),
-//RS                     facts: jet_foundation::MIR::MirCaptureFacts::default(),
-//RS                 },
-//RS             )
-//RS         }
-//RS         THostCall::MemoStats { name } => {
-//RS             let name_value = ctx.emit(
-//RS                 "memo-stats-name",
-//RS                 Some(Type::String),
-//RS                 MirOperation::Constant(MirConstant::String(name.clone())),
-//RS             )?;
-//RS             let bound_value = ctx.emit(
-//RS                 "memo-stats-bound",
-//RS                 Some(Type::Int),
-//RS                 MirOperation::Constant(MirConstant::Int {
-//RS                     value: -1,
-//RS                     width: None,
-//RS                     spelling: None,
-//RS                 }),
-//RS             )?;
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let route = super::memo_stats_route(&expr.ty, &carrier)?;
-//RS             let args = vec![
-//RS                 mir_value_arg(ctx, name_value),
-//RS                 mir_value_arg(ctx, bound_value),
-//RS             ];
-//RS             emit_host_route_call(ctx, expr, route, args)
-//RS         }
-//RS         THostCall::Helper { kind, args, .. } => {
-//RS             let args = lower_host_args(ctx, args)?;
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let route = super::helper_route(*kind, &expr.ty, &carrier)?;
-//RS             emit_host_route_call(ctx, expr, route, args)
-//RS         }
-//RS         THostCall::Method { recv, method, args } => {
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let route = super::host_method_route(&recv.ty, method, args.len(), &expr.ty, &carrier)?;
-//RS             let mut lowered = Vec::with_capacity(route.signature.arity);
-//RS             let mutates_receiver = matches!(
-//RS                 (recv.ty.without_user_tags(), method.as_str()),
-//RS                 (Type::Apply { name, .. }, "add" | "remove") if name == "Pool"
-//RS             );
-//RS             let receiver = if mutates_receiver {
-//RS                 let place =
-//RS                     lower_receiver_place(ctx, recv, MirAccess::Write)?.ok_or_else(|| {
-//RS                         ctx.error(ctx.span(), "mutable host receiver has no checked place")
-//RS                     })?;
-//RS                 let value = ctx.emit(
-//RS                     "host-call-place",
-//RS                     Some(recv.ty.clone()),
-//RS                     MirOperation::ReadPlace(place),
-//RS                 )?;
-//RS                 let mut argument = mir_value_arg_with_access(ctx, value, MirAccess::Write);
-//RS                 argument.place = Some(place);
-//RS                 argument
-//RS             } else {
-//RS                 ctx.lower_plain_arg(recv)?
-//RS             };
-//RS             lowered.push(receiver);
-//RS             if matches!(method.as_str(), "read_txn" | "edit_txn" | "capture_txn") {
-//RS                 let stm = TLocal::stm();
-//RS                 let stm = lower_tlocal_value(ctx, &stm)?;
-//RS                 lowered.push(mir_value_arg(ctx, stm));
-//RS             }
-//RS             lowered.extend(
-//RS                 args.iter()
-//RS                     .map(|arg| ctx.lower_plain_arg(arg))
-//RS                     .collect::<Result<Vec<_>, _>>()?,
-//RS             );
-//RS             if lowered.len() != route.signature.arity {
-//RS                 return Err(ctx.error(
-//RS                     ctx.span(),
-//RS                     format!(
-//RS                         "checked host method `{method}` has {} operands, route requires {}",
-//RS                         lowered.len(),
-//RS                         route.signature.arity
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             if matches!(method.as_str(), "read_txn" | "edit_txn" | "capture_txn") {
-//RS                 lowered[1].access = MirAccess::Write;
-//RS                 lowered[1].place = Some(lower_local_place(ctx, &TLocal::stm(), MirAccess::Write)?);
-//RS             }
-//RS             emit_host_route_call(ctx, expr, route, lowered)
-//RS         }
-//RS         THostCall::CellGuardProject {
-//RS             recv,
-//RS             paths,
-//RS             result_ty,
-//RS             editable,
-//RS             edit_paths_disjoint,
-//RS         } => {
-//RS             let guard = ctx.lower_plain_arg(recv)?.value;
-//RS             let mut field_paths = Vec::with_capacity(paths.len());
-//RS             for path in paths {
-//RS                 let mut owner_ty = recv.ty.clone();
-//RS                 let mut fields = Vec::with_capacity(path.len());
-//RS                 for field in path {
-//RS                     fields.push(ctx.field_id_for_type(&owner_ty, field)?);
-//RS                     owner_ty = ctx.checked_field_type(&owner_ty, field)?;
-//RS                 }
-//RS                 field_paths.push(fields);
-//RS             }
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let map_call = ctx.intern_prelude_route(super::cell_guard_map_route(
-//RS                 *editable, result_ty, &carrier,
-//RS             )?)?;
-//RS             let split_call = if field_paths.len() == 2 {
-//RS                 Some(ctx.intern_prelude_route(super::cell_guard_split_route(
-//RS                     *editable, result_ty, &carrier,
-//RS                 )?)?)
-//RS             } else {
-//RS                 None
-//RS             };
-//RS             ctx.emit(
-//RS                 "cell-guard-project",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::CellGuardProject {
-//RS                     map_call,
-//RS                     split_call,
-//RS                     guard,
-//RS                     paths: field_paths,
-//RS                     editable: *editable,
-//RS                     edit_paths_disjoint: *edit_paths_disjoint,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         THostCall::TypedText { kind, arg } => {
-//RS             let args = vec![ctx.lower_plain_arg(arg)?];
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let route = super::typed_text_route(*kind, &expr.ty, &carrier)?;
-//RS             emit_host_route_call(ctx, expr, route, args)
-//RS         }
-//RS         THostCall::GcEdit {
-//RS             root,
-//RS             edges,
-//RS             edit,
-//RS             index_temp,
-//RS             kind,
-//RS             ..
-//RS         } => {
-//RS             let root_ty = ctx
-//RS                 .local_types
-//RS                 .get(&root.name)
-//RS                 .cloned()
-//RS                 .or_else(|| root.persist_ty.clone())
-//RS                 .ok_or_else(|| {
-//RS                     ctx.error(
-//RS                         ctx.span(),
-//RS                         format!("checked MIR GC root `{}` has no type", root.name),
-//RS                     )
-//RS                 })?;
-//RS             let root_value = lower_tlocal_value(ctx, root)?;
-//RS             let edge_values = edges
-//RS                 .iter()
-//RS                 .map(|edge| lower_tlocal_value(ctx, edge))
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             let edit_lambda = gc_edit_callback(ctx, edit, root_ty);
-//RS             let edit_value = ctx.lower_lambda(&edit_lambda)?;
-//RS             let index = index_temp
-//RS                 .as_ref()
-//RS                 .map(|(_, value)| ctx.lower_plain_arg(value))
-//RS                 .transpose()?
-//RS                 .map(|arg| arg.value);
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let call =
-//RS                 ctx.intern_prelude_route(super::gc_edit_route(*kind, &expr.ty, &carrier)?)?;
-//RS             ctx.emit(
-//RS                 "host-gc-edit",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::GcEdit {
-//RS                     call,
-//RS                     root: root_value,
-//RS                     edges: edge_values,
-//RS                     edit: edit_value,
-//RS                     index,
-//RS                     kind: mir_gc_edit_kind(*kind),
-//RS                     site: gc_edit_site(ctx),
-//RS                 }),
-//RS             )
-//RS         }
-//RS         THostCall::GcRead { root } => {
-//RS             let root_value = lower_tlocal_value(ctx, root)?;
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let route = super::gc_read_route(&expr.ty, &carrier)?;
-//RS             let args = vec![mir_value_arg(ctx, root_value)];
-//RS             emit_host_route_call(ctx, expr, route, args)
-//RS         }
-//RS         THostCall::OptionProbe {
-//RS             inner,
-//RS             kind: TOptionProbe::IsSome,
-//RS         } => {
-//RS             let subject = ctx.lower_child(inner)?;
-//RS             ctx.emit(
-//RS                 "option-probe-is-some",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::OptionIsSome { subject },
-//RS             )
-//RS         }
-//RS         THostCall::OptionProbe {
-//RS             inner,
-//RS             kind: TOptionProbe::Unwrap,
-//RS         } => {
-//RS             let subject = ctx.lower_child(inner)?;
-//RS             ctx.emit(
-//RS                 "option-probe-unwrap",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::OptionValue { subject },
-//RS             )
-//RS         }
-//RS         THostCall::StrMatchScan {
-//RS             subject,
-//RS             parts,
-//RS             probe,
-//RS         } => {
-//RS             let subject = ctx.lower_plain_arg(subject)?.value;
-//RS             let pattern = parts
-//RS                 .iter()
-//RS                 .map(|part| match part {
-//RS                     crate::AST::StrMatchPart::Lit(text) => {
-//RS                         Ok(MirTextPatternPart::Literal(text.clone()))
-//RS                     }
-//RS                     crate::AST::StrMatchPart::Hole { ty, span, .. } => {
-//RS                         let ty = ty.clone().unwrap_or(Type::String);
-//RS                         Ok(MirTextPatternPart::Hole {
-//RS                             kind: lower_text_hole_kind(ctx, &ty, *span)?,
-//RS                             ty: lower_pattern_type(ctx, &ty)?,
-//RS                             span: *span,
-//RS                         })
-//RS                     }
-//RS                 })
-//RS                 .collect::<Result<Vec<_>, LowerError>>()?;
-//RS             let shape = MirPatternShape::Text(pattern, ctx.span());
-//RS             let matched = ctx.lower_pattern_match(subject, &shape)?;
-//RS             lower_pattern_probe(ctx, expr, matched, probe)
-//RS         }
-//RS         THostCall::BinMatchScan {
-//RS             subject,
-//RS             parts,
-//RS             probe,
-//RS         } => {
-//RS             let subject = ctx.lower_plain_arg(subject)?.value;
-//RS             let pattern = parts
-//RS                 .iter()
-//RS                 .map(|part| match part {
-//RS                     crate::AST::BinMatchPart::Lit(bytes) => {
-//RS                         Ok(MirBinaryPatternPart::Literal(bytes.clone()))
-//RS                     }
-//RS                     crate::AST::BinMatchPart::Hole { spec, span, .. } => match spec {
-//RS                         crate::AST::BinSpec::Bits { width, endian } => {
-//RS                             let ty = Type::IntN {
-//RS                                 signed: false,
-//RS                                 bits: *width,
-//RS                             };
-//RS                             Ok(MirBinaryPatternPart::Bits {
-//RS                                 width: *width,
-//RS                                 ty: lower_pattern_type(ctx, &ty)?,
-//RS                                 little: matches!(endian, crate::AST::BinEndian::Little),
-//RS                                 span: *span,
-//RS                             })
-//RS                         }
-//RS                         crate::AST::BinSpec::Rest => Ok(MirBinaryPatternPart::Rest {
-//RS                             ty: lower_pattern_type(
-//RS                                 ctx,
-//RS                                 &Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
-//RS                             )?,
-//RS                             span: *span,
-//RS                         }),
-//RS                     },
-//RS                 })
-//RS                 .collect::<Result<Vec<_>, LowerError>>()?;
-//RS             let shape = MirPatternShape::Binary(pattern, ctx.span());
-//RS             let matched = ctx.lower_pattern_match(subject, &shape)?;
-//RS             lower_pattern_probe(ctx, expr, matched, probe)
-//RS         }
-//RS         THostCall::SwitchSubjectField { field } => {
-//RS             let subject = ctx.switch_subject()?;
-//RS             let subject_ty = ctx.value_source_type(subject)?;
-//RS             let field = ctx.field_id_for_type(&subject_ty, field)?;
-//RS             ctx.emit(
-//RS                 "switch-subject-field",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Field {
-//RS                     base: subject,
-//RS                     field,
-//RS                 },
-//RS             )
-//RS         }
-//RS         THostCall::SwitchSubjectValue => ctx.switch_subject(),
-//RS         THostCall::YieldSend { value } => {
-//RS             let value = ctx.lower_child(value)?;
-//RS             let resume = ctx.new_block(ctx.span(), "yield.resume")?;
-//RS             let cancel = ctx.new_block(ctx.span(), "yield.cancel")?;
-//RS             ctx.terminate(MirTerminator::Yield {
-//RS                 value,
-//RS                 resume,
-//RS                 cancel,
-//RS             });
-//RS             // D-CANCELMODEL1=C: a consumer that stops pulling cancels the
-//RS             // producer at this yield. The cancel edge runs every active
-//RS             // cleanup, exactly as a `return` from this point would.
-//RS             ctx.switch_to(cancel);
-//RS             ctx.terminate_with_cleanup(MirTerminator::Return { value: None }, 0)?;
-//RS             ctx.switch_to(resume);
-//RS             ctx.emit(
-//RS                 "yield.unit",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Constant(MirConstant::Unit),
-//RS             )
-//RS         }
-//RS         THostCall::TypedTextInterp {
-//RS             kind,
-//RS             literals,
-//RS             holes,
-//RS             trusted_html,
-//RS         } => {
-//RS             let holes = holes
-//RS                 .iter()
-//RS                 .map(|hole| ctx.lower_plain_arg(hole).map(|arg| arg.value))
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let call = ctx
-//RS                 .intern_prelude_route(super::typed_text_interp_route(*kind, &expr.ty, &carrier)?)?;
-//RS             ctx.emit(
-//RS                 "host-typed-text-interp",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::TypedTextInterp {
-//RS                     call,
-//RS                     kind: *kind,
-//RS                     literals: literals.clone(),
-//RS                     holes,
-//RS                     trusted_html: trusted_html.clone(),
-//RS                 }),
-//RS             )
-//RS         }
-//RS         THostCall::ExpectSnapshot { value, snap_path } => {
-//RS             let value_ty = value.ty.clone();
-//RS             let value = ctx.lower_child(value)?;
-//RS             let shown = lower_direct_string_format(
-//RS                 ctx,
-//RS                 value,
-//RS                 &value_ty,
-//RS                 &crate::AST::StrFormat::Display,
-//RS                 &Type::String,
-//RS             )?;
-//RS             let path = ctx.emit(
-//RS                 "expect-snapshot-path",
-//RS                 Some(Type::String),
-//RS                 MirOperation::Constant(MirConstant::String(snap_path.clone())),
-//RS             )?;
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let route = super::expect_snapshot_route(&expr.ty, &carrier)?;
-//RS             let args = vec![mir_value_arg(ctx, shown), mir_value_arg(ctx, path)];
-//RS             emit_host_route_call(ctx, expr, route, args)
-//RS         }
-//RS         THostCall::EnvSet { name, value, loc } => {
-//RS             let record = crate::Syntax::core_call("core.sys", "set").ok_or_else(|| {
-//RS                 ctx.error(
-//RS                     ctx.span(),
-//RS                     "missing checked Core registry row `core.sys.set`",
-//RS                 )
-//RS             })?;
-//RS             let mut args = vec![ctx.lower_plain_arg(name)?, ctx.lower_plain_arg(value)?];
-//RS             for (index, arg) in args.iter_mut().enumerate() {
-//RS                 arg.access = if record
-//RS                     .signature
-//RS                     .borrow_mask
-//RS                     .get(index)
-//RS                     .copied()
-//RS                     .unwrap_or(false)
-//RS                 {
-//RS                     MirAccess::Read
-//RS                 } else {
-//RS                     MirAccess::Move
-//RS                 };
-//RS             }
-//RS             let core_result_ty = Type::Result {
-//RS                 ok: Box::new(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
-//RS                 err: Box::new(Type::Named("EnvError".to_string())),
-//RS             };
-//RS             let core_carrier = super::TFailureCarrier::from_checked_type(&core_result_ty);
-//RS             let core_call = MirCoreCall::from_record(record).id;
-//RS             let core_route = ctx.intern_core_route(record, &core_carrier)?;
-//RS             let core_fallibility = ctx.lower_call_fallibility(&core_carrier)?;
-//RS             let result = ctx.emit(
-//RS                 "core-sys-set",
-//RS                 Some(core_result_ty.clone()),
-//RS                 MirOperation::CoreCall {
-//RS                     call: core_call,
-//RS                     route: core_route,
-//RS                     args,
-//RS                     type_args: Vec::new(),
-//RS                     fallibility: core_fallibility,
-//RS                     data_plan: None,
-//RS                 },
-//RS             )?;
-//RS             let condition = ctx.emit(
-//RS                 "core-sys-set-ok",
-//RS                 Some(Type::Bool),
-//RS                 MirOperation::ResultIsOk { subject: result },
-//RS             )?;
-//RS             let failure = ctx.new_block(ctx.span(), "core-sys-set.failure")?;
-//RS             let join = ctx.new_block(ctx.span(), "core-sys-set.join")?;
-//RS             ctx.terminate(MirTerminator::Branch {
-//RS                 condition,
-//RS                 then_target: join,
-//RS                 else_target: failure,
-//RS             });
-//RS             ctx.switch_to(failure);
-//RS             let error = ctx.emit(
-//RS                 "core-sys-set-error",
-//RS                 Some(Type::Named("EnvError".to_string())),
-//RS                 MirOperation::ResultValue {
-//RS                     subject: result,
-//RS                     ok: false,
-//RS                 },
-//RS             )?;
-//RS             let error = lower_direct_string_format(
-//RS                 ctx,
-//RS                 error,
-//RS                 &Type::Named("EnvError".to_string()),
-//RS                 &crate::AST::StrFormat::Display,
-//RS                 &Type::String,
-//RS             )?;
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let route = super::require_stop_route("require", 1, &expr.ty, &carrier)?;
-//RS             let call = ctx.intern_prelude_route(route)?;
-//RS             let location = MirPanicLoc {
-//RS                 file: ctx.source_file_id_for(&loc.file),
-//RS                 line: loc.line,
-//RS                 column: loc.col,
-//RS             };
-//RS             let context = MirPanicContext {
-//RS                 function: loc.fn_name.clone(),
-//RS                 source_line: loc.src_line.clone(),
-//RS                 caret: loc.caret,
-//RS                 locals: loc
-//RS                     .locals
-//RS                     .iter()
-//RS                     .filter_map(|(name, local)| {
-//RS                         ctx.local_id_for(local).ok().map(|id| (name.clone(), id))
-//RS                     })
-//RS                     .collect(),
-//RS             };
-//RS             ctx.emit(
-//RS                 "core-sys-set-stop",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::RequireStop {
-//RS                     call,
-//RS                     kind: MirRequireKind::Require,
-//RS                     condition: Some(condition),
-//RS                     location,
-//RS                     context,
-//RS                     values: vec![error],
-//RS                     always_stops: false,
-//RS                 }),
-//RS             )?;
-//RS             ctx.terminate(MirTerminator::Jump { target: join });
-//RS             ctx.switch_to(join);
-//RS             ctx.emit(
-//RS                 "core-sys-set-unit",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Constant(MirConstant::Unit),
-//RS             )
-//RS         }
-//RS         THostCall::NumericBounds { ty, member } => {
-//RS             let constant = numeric_bound_constant(ty, member).ok_or_else(|| {
-//RS                 ctx.error(
-//RS                     ctx.span(),
-//RS                     format!("unsupported numeric bound `{}` on {}", member, ty.name()),
-//RS                 )
-//RS             })?;
-//RS             ctx.emit(
-//RS                 "host-numeric-bound",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Constant(constant),
-//RS             )
-//RS         }
-//RS 
-//RS         THostCall::ExpiringSecretNew {
-//RS             value,
-//RS             duration,
-//RS             clock,
-//RS             elem,
-//RS         } => {
-//RS             let mut args = vec![
-//RS                 ctx.lower_plain_arg(value)?,
-//RS                 ctx.lower_plain_arg(duration)?,
-//RS                 ctx.lower_plain_arg(clock)?,
-//RS             ];
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let route = super::expiring_route(true, &expr.ty, &carrier)?;
-//RS             apply_route_access(ctx, &route, &mut args)?;
-//RS             let call = ctx.intern_prelude_route(route)?;
-//RS             let type_args = vec![ctx.mir_type(elem)?];
-//RS             ctx.emit(
-//RS                 "host-expiring-secret-new",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-//RS                     call,
-//RS                     args,
-//RS                     owner_type_args: Vec::new(),
-//RS                     type_args,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         THostCall::ExpiringValueNew {
-//RS             value,
-//RS             duration,
-//RS             clock,
-//RS         } => {
-//RS             let value_ty = value.ty.clone();
-//RS             let mut args = vec![
-//RS                 ctx.lower_plain_arg(value)?,
-//RS                 ctx.lower_plain_arg(duration)?,
-//RS                 ctx.lower_plain_arg(clock)?,
-//RS             ];
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let route = super::expiring_route(false, &expr.ty, &carrier)?;
-//RS             apply_route_access(ctx, &route, &mut args)?;
-//RS             let call = ctx.intern_prelude_route(route)?;
-//RS             let type_args = vec![ctx.mir_type(&value_ty)?];
-//RS             ctx.emit(
-//RS                 "host-expiring-value-new",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-//RS                     call,
-//RS                     args,
-//RS                     owner_type_args: Vec::new(),
-//RS                     type_args,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         THostCall::CCallback {
-//RS             symbol,
-//RS             lambda,
-//RS             ret,
-//RS             managed,
-//RS             plan_digest,
-//RS             callback_identity,
-//RS         } => {
-//RS             let value = ctx.lower_lambda(lambda)?;
-//RS             let key = format!(
-//RS                 "{}::lambda@{}..{}",
-//RS                 ctx.function.key, lambda.source_span.start, lambda.source_span.end
-//RS             );
-//RS             let function = ctx
-//RS                 .nested_functions
-//RS                 .iter()
-//RS                 .find(|candidate| candidate.key == key)
-//RS                 .map(|candidate| candidate.id)
-//RS                 .ok_or_else(|| ctx.error(ctx.span(), "missing lowered C callback lambda"))?;
-//RS             if lambda.source_params.len() != lambda.param_types.len() {
-//RS                 return Err(ctx.error(
-//RS                     lambda.source_span,
-//RS                     "C callback lambda parameter names and types differ",
-//RS                 ));
-//RS             }
-//RS             let params = lambda
-//RS                 .source_params
-//RS                 .iter()
-//RS                 .cloned()
-//RS                 .zip(lambda.param_types.iter())
-//RS                 .enumerate()
-//RS                 .map(|(index, (name, ty))| {
-//RS                     Ok::<_, LowerError>(MirParam {
-//RS                         index,
-//RS                         name: name.clone(),
-//RS                         span: lambda.source_span,
-//RS                         ty: ctx.mir_type(ty)?,
-//RS                         access: MirAccess::Read,
-//RS                         ownership: MirOwnership::from_access(MirAccess::Read),
-//RS                         public_label: name.clone(),
-//RS                         variadic: false,
-//RS                         default_present: false,
-//RS                     })
-//RS                 })
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             let return_type = ret.as_ref().map(|ty| ctx.mir_type(ty)).transpose()?;
-//RS             let callback = MirCallbackAdapter {
-//RS                 id: MirCallbackId(stable_id(
-//RS                     "mir-callback",
-//RS                     &format!("{symbol}|{}", function.0),
-//RS                 )),
-//RS                 symbol: symbol.clone(),
-//RS                 function,
-//RS                 params,
-//RS                 return_type,
-//RS                 abi: MirForeignAbi::C,
-//RS                 managed: *managed,
-//RS                 plan_digest: plan_digest.clone(),
-//RS                 callback_identity: callback_identity.clone(),
-//RS             };
-//RS             if let Some(existing) = ctx.callbacks.iter().find(|row| row.id == callback.id) {
-//RS                 if format!("{existing:?}") != format!("{callback:?}") {
-//RS                     return Err(ctx.error(ctx.span(), "conflicting C callback adapter"));
-//RS                 }
-//RS             } else {
-//RS                 ctx.callbacks.push(callback.clone());
-//RS             }
-//RS             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-//RS             let route = super::c_callback_route(&expr.ty, &carrier)?;
-//RS             let call = ctx.intern_prelude_route(route)?;
-//RS             ctx.emit(
-//RS                 "c-callback",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::CCallback {
-//RS                     call,
-//RS                     callback: callback.id,
-//RS                     lambda: value,
-//RS                 }),
-//RS             )
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0533 crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6380-8234
+// Private continuation of the canonical checked TIR -> MIR expression lowerer.
+use jet_foundation.*
+use jet_codegen.Codegen.TIR.*
+use jet_codegen.Codegen.TIR.mir.*
+use jet_codegen.Codegen.[core_source_type_leaf]
+use jet_syntax.[TYPE_ERR, TYPE_BYTES, INTERNAL_UNIT_TYPE, core_call]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6380
+fn lower_try_failure(ctx: &LowerCtx, error: MIRValueID, input_ty: @Type, convert: @TTryConvert, note: MIRValueID?, result: @Type, location: TryJourneySite?, carrier: @TFailureCarrier) -> MIRValueID LowerError! {
+    converted :: if convert == {
+        .NoConversion -> error
+        .DefaultErr -> {
+            route :: try_conversion_route(convert, input_ty, result, carrier)?
+            target :: Type.Named(TYPE_ERR)
+            emit_static_call(&ctx, @target, route, [error])?
+        }
+        .Typed{fn_name: conversion_fn, source, target} -> {
+            function :: ctx.function_id_for(conversion_fn)?
+            call_return_type :: ctx.function_registry.call_return_type_for(function, []).map_err(fn(message) { ctx.error(ctx.span(), message) })? ?? ~target
+            converted :: ctx.emit("try-typed-error-conversion", Val(call_return_type), MIROperation.Call{callee: MIRCallee.User(function), args: [mir_value_arg_with_access(ctx, error, MIRAccess.Move)], type_args: []})?
+            if target == .Named(name) && name == TYPE_ERR {
+                // Source-owned errors report under the leaf spelling, not owner identity.
+                source_value :: ctx.emit("try-conversion-source", Val(Type.String), MIROperation.Constant{value: MIRConstant.String(core_source_type_leaf(source.name()).to_string())})?
+                target_value :: ctx.emit("try-conversion-target", Val(Type.String), MIROperation.Constant{value: MIRConstant.String(target.name())})?
+                route :: apply_conversion_route()?
+                target_error :: Type.Named(TYPE_ERR)
+                emit_static_call(&ctx, @target_error, route, [converted, source_value, target_value])?
+            } else -> converted
+        }
+        .WidenUnion{tag, ..} -> {
+            union :: if carrier == { .Result{error: union, ..} -> union else -> return Err(ctx.error(ctx.span(), "checked union error widening has no Result failure carrier")) }
+            lower_union_widening(&ctx, union, tag, [MIREnumArg{field: None, value: error, boxed: false}])?
+        }
+        .Never | .ProtocolExit -> return unsupported_expr(ctx, "TExprKind::Try (diverging failure conversion)")
+    }
+    site :: location ?? return converted
+    if try_target_is_default_error(input_ty, convert) {
+        if note == Val(value) {
+            values := [converted]
+            &values.extend(lower_try_context_values(&ctx, site.file, site.line, site.column, site.fn_name)?)
+            &values.push(value)
+            route :: failure_context_route(result, carrier)?
+            target :: Type.Named(TYPE_ERR)
+            return emit_static_call(&ctx, @target, route, ^values)
+        }
+    }
+    lower_try_journey(&ctx, result, carrier, note, site)?
+    converted
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6494
+fn lower_or_fallback_expr(ctx: &LowerCtx, expr: @TExpr, value: @TExpr, fallback: @TOrFallback) -> MIRValueID LowerError! {
+    value_id :: ctx.lower_child(value)?
+    carrier :: if value.ty == {
+        .Option(_) -> "option"
+        .Result{..} -> "result"
+        else -> return unsupported_expr(ctx, "TExprKind::OrFallback (non-carrier operand type {value.ty:?}, operation {value.kind.discriminant():?})")
+    }
+    (success_is_never, failure_is_never) :: if value.ty == {
+        .Result(ok, err) -> (ok.is_never(), err.is_never())
+        .Option(_) -> (false, false)
+        else -> panic("OrFallback carrier was checked above")
+    }
+    // Peel one carrier only: checked TIR already nests Result<Option<T>, E> peels.
+    success_block :: ctx.new_block(ctx.span(), "or-fallback-success")?
+    failure_block :: ctx.new_block(ctx.span(), "or-fallback-failure")?
+    join :: ctx.new_block(ctx.span(), "or-fallback-join")?
+    condition :: if carrier == "option" -> ctx.emit("or-fallback-option-condition", Val(Type.Bool), MIROperation.OptionIsSome{subject: value_id})?
+        else -> ctx.emit("or-fallback-result-condition", Val(Type.Bool), MIROperation.ResultIsOk{subject: value_id})?
+    ctx.terminate(MIRTerminator.Branch{condition: condition, then_target: success_block, else_target: failure_block})
+    incoming := [MIRPhiIncoming]{}
+    ctx.switch_to(success_block)
+    success := None as MIRValueID?
+    if success_is_never -> ctx.terminate(MIRTerminator.Unreachable{reason: "checked result success is uninhabited"})
+    else {
+        success_ty :: if carrier == "option" -> value.ty.unwrap_option().map(fn(ty) { ~ty }).ok_or_else(fn() { ctx.error(ctx.span(), "checked fallback option has no value type") })?
+            else -> value.ty.unwrap_result().map(fn(types) { ~types.0 }).ok_or_else(fn() { ctx.error(ctx.span(), "checked fallback result has no success type") })?
+        success_value :: if carrier == "option" -> ctx.emit("or-fallback-option-value", Val(~success_ty), MIROperation.OptionValue{subject: value_id})?
+            else -> ctx.emit("or-fallback-result-value", Val(~success_ty), MIROperation.ResultValue{subject: value_id, ok: true})?
+        success = Val(ctx.trait_box_value(success_value, @success_ty, @expr.ty)?)
+    }
+    source :: ctx.current_block()
+    if !ctx.is_terminated() {
+        ctx.terminate(MIRTerminator.Jump{target: join})
+        if success == Val(value) -> &incoming.push(MIRPhiIncoming{block: source, value: value})
+    }
+    ctx.switch_to(failure_block)
+    fallback_value :: lower_or_fallback_failure(&ctx, expr, value, value_id, fallback, failure_is_never)?
+    if fallback_value == Val(value) {
+        source :: ctx.current_block()
+        if !ctx.is_terminated() {
+            ctx.terminate(MIRTerminator.Jump{target: join})
+            &incoming.push(MIRPhiIncoming{block: source, value: value})
+        }
+    }
+    if incoming.is_empty() -> return unsupported_expr(ctx, "TExprKind::OrFallback (no reachable value)")
+    ctx.switch_to(join)
+    ctx.emit("or-fallback-phi", Val(~expr.ty), MIROperation.Phi{incoming: ^incoming})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6613
+fn lower_or_fallback_failure(ctx: &LowerCtx, expr: @TExpr, value: @TExpr, value_id: MIRValueID, fallback: @TOrFallback, failure_is_never: Bool) -> MIRValueID? LowerError! {
+    // err is bound only on failure; its owned-drop must not exit a success frame.
+    ctx.push_lexical_frame()
+    error_binding := None as (String, Type?, MIRPlaceID?, MIRValueID?)?
+    if failure_is_never -> ctx.terminate(MIRTerminator.Unreachable{reason: "checked result failure is uninhabited"})
+    else {
+        if value.ty == .Result{err, ..} {
+            local :: ambient_err_local()
+            previous_type :: &ctx.local_types.remove(local.name)
+            previous_place :: &ctx.local_places.remove(local.name)
+            previous_value :: &ctx.local_values.remove(local.name)
+            error :: ctx.emit("or-fallback-error-value", Val(~err), MIROperation.ResultValue{subject: value_id, ok: false})?
+            place :: ctx.bind_local(@local, ~err, false, false, false)?
+            _ :: ctx.emit("or-fallback-error-binding", None, MIROperation.WritePlace{place: place, value: error})?
+            error_binding = Val((local.name, previous_type, previous_place, previous_value))
+        }
+    }
+    fallback_value :: if failure_is_never -> None else -> lower_fallback_block(&ctx, expr, fallback)?
+    ctx.pop_lexical_frame()?
+    if error_binding == Val((name, previous_type, previous_place, previous_value)) {
+        _ :: &ctx.local_types.remove(name)
+        _ :: &ctx.local_places.remove(name)
+        _ :: &ctx.local_values.remove(name)
+        if previous_type == Val(ty) -> _ :: &ctx.local_types.add(name, ^ty)
+        if previous_place == Val(place) -> _ :: &ctx.local_places.add(name, place)
+        if previous_value == Val(value) -> _ :: &ctx.local_values.add(name, value)
+    }
+    fallback_value
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6685
+// A diverging fallback can project a borrowed payload place without copying it.
+pub fn lower_or_fallback_window(ctx: &LowerCtx, expr: @TExpr, value: @TExpr, fallback: @TOrFallback) -> MIRPlaceID? LowerError! {
+    diverges :: if fallback == { .Value(value) -> inline_block_diverges(value) else -> true }
+    (payload_ty, kind) :: if value.ty == {
+        .Option(inner) -> (~inner, MIRPayloadKind.Option)
+        .Result(ok, err) if !ok.is_never() && !err.is_never() -> (~ok, MIRPayloadKind.Result{ok: true})
+        else -> return None
+    }
+    if !diverges || payload_ty != expr.ty -> return None
+    subject :: ctx.lower_read_window(value)? ?? return None
+    condition :: if value.ty == .Option(_) -> ctx.emit("or-fallback-option-condition", Val(Type.Bool), MIROperation.OptionIsSome{subject: subject})?
+        else -> ctx.emit("or-fallback-result-condition", Val(Type.Bool), MIROperation.ResultIsOk{subject: subject})?
+    success_block :: ctx.new_block(ctx.span(), "or-fallback-success")?
+    failure_block :: ctx.new_block(ctx.span(), "or-fallback-failure")?
+    ctx.terminate(MIRTerminator.Branch{condition: condition, then_target: success_block, else_target: failure_block})
+    ctx.switch_to(failure_block)
+    if lower_or_fallback_failure(&ctx, expr, value, subject, fallback, false)?.is_some() -> return Err(ctx.error(ctx.span(), "diverging `??` fallback produced a value"))
+    if !ctx.is_terminated() -> ctx.terminate(MIRTerminator.Unreachable{reason: "diverging or-fallback"})
+    ctx.switch_to(success_block)
+    window :: ctx.read_window_of(subject).ok_or_else(fn() { ctx.error(ctx.span(), "missing checked read window place") })?
+    Val(ctx.project_payload_place(window, kind, @payload_ty)?)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6749
+fn inline_block_diverges(value: @TExpr) -> Bool Never! {
+    if value.kind == .InlineBlock(stmts) {
+        last :: stmts.last() ?? return false
+        return if last == { .Return{..} | .Break{..} | .BreakValue{..} | .Continue{..} -> true else -> false }
+    }
+    false
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6765
+fn lower_fallback_block(ctx: &LowerCtx, expr: @TExpr, fallback: @TOrFallback) -> MIRValueID? LowerError! {
+    if fallback == {
+        .Value(value) -> {
+            if inline_block_diverges(value) {
+                if value.kind == .InlineBlock(stmts) -> ctx.lower_nested_stmts(stmts)?
+                return None
+            }
+            source_ty :: @value.ty
+            lowered :: ctx.lower_child(value)?
+            Val(ctx.trait_box_value(lowered, source_ty, @expr.ty)?)
+        }
+        .Return(value) -> { ctx.lower_return(value.as_ref())?; None }
+        .Panic{message: msg, location: loc} -> {
+            values :: [ctx.lower_child(msg)?]
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            call :: ctx.intern_prelude_route(require_stop_route("panic", values.len(), @expr.ty, @carrier)?)?
+            location :: MIRPanicLoc{file: ctx.source_file_id_for(loc.file), line: loc.line, column: loc.column}
+            locals := [MIRPanicLocal]{}
+            loop local in loc.locals {
+                if ctx.local_id_for(@local.local).ok() == Val(id) -> &locals.push(MIRPanicLocal{name: ~local.display_name, local: id})
+            }
+            context :: MIRPanicContext{function: ~loc.function, source_line: ~loc.source_line, caret: loc.caret, locals: ^locals}
+            _ :: ctx.emit("or-fallback-panic", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: call, kind: MIRRequireKind.Panic, condition: None, location: location, context: context, values: values, always_stops: true}})?
+            ctx.terminate(MIRTerminator.Unreachable{reason: "or-fallback panic"})
+            None
+        }
+        .Break -> {
+            target :: ctx.loops.last().map(fn(loop_info) { loop_info.1 }).ok_or_else(fn() { ctx.error(ctx.span(), "fallback break outside loop") })?
+            ctx.terminate(MIRTerminator.Jump{target: target})
+            None
+        }
+        .Continue -> {
+            target :: ctx.loops.last().map(fn(loop_info) { loop_info.2 }).ok_or_else(fn() { ctx.error(ctx.span(), "fallback continue outside loop") })?
+            ctx.terminate(MIRTerminator.Jump{target: target})
+            None
+        }
+        .BreakLabel(label) -> {
+            target :: ctx.loops.iter().rev().find(fn(loop_info) { loop_info.0 == Val(label) }).map(fn(loop_info) { loop_info.1 }).ok_or_else(fn() { ctx.error(ctx.span(), "fallback break label not found") })?
+            ctx.terminate(MIRTerminator.Jump{target: target})
+            None
+        }
+        .ContinueLabel(label) -> {
+            target :: ctx.loops.iter().rev().find(fn(loop_info) { loop_info.0 == Val(label) }).map(fn(loop_info) { loop_info.2 }).ok_or_else(fn() { ctx.error(ctx.span(), "fallback continue label not found") })?
+            ctx.terminate(MIRTerminator.Jump{target: target})
+            None
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6877
+fn lower_call_args(ctx: &LowerCtx, args: @[TCallArg]) -> [MIRCallArg] LowerError! {
+    lowered := [MIRCallArg]{}
+    loop (index, arg) in args {
+        value := ctx.lower_call_arg(arg)?
+        value.source_index = Val(index)
+        &lowered.push(^value)
+    }
+    lowered
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6891
+fn lower_extern_arg(ctx: &LowerCtx, arg: @TExternArg) -> MIRCallArg LowerError! {
+    lowered := ctx.lower_plain_arg(@arg.value)?
+    resource_take :: if arg.value.kind == { .ResourceTake(_) -> true else -> false }
+    lowered.access = if arg.mut_borrow -> MIRAccess.Write else if arg.clone || resource_take -> MIRAccess.Move else -> MIRAccess.Read
+    lowered.owned_last_use = lowered.access == MIRAccess.Move
+    lowered.implicit_clone = arg.clone
+    lowered
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6909
+fn lower_enum_payload(ctx: &LowerCtx, enum_name: String, owner_ty: @Type, variant: String, payload: @TEnumPayload) -> [MIREnumArg] LowerError! {
+    if payload == {
+        .Unit -> []
+        .Positional(args) -> {
+            lowered := [MIREnumArg]{}
+            loop (index, arg) in args {
+                expected :: ctx.enum_payload_type_for(owner_ty, variant, index)?
+                &lowered.push(MIREnumArg{field: None, value: lower_enum_arg(&ctx, arg, Val(@expected))?, boxed: arg.boxed})
+            }
+            lowered
+        }
+        .Named(fields) -> {
+            lowered := [(USize, MIREnumArg)]{}
+            loop field in fields {
+                (id, order) :: ctx.enum_named_payload_field(enum_name, variant, field.name)?
+                expected :: ctx.enum_payload_type_for(owner_ty, variant, order)?
+                &lowered.push((order, MIREnumArg{field: Val(id), value: lower_enum_arg(&ctx, @field.value, Val(@expected))?, boxed: field.value.boxed}))
+            }
+            &lowered.sort_by_key(fn(value) { value.0 })
+            loop pair in lowered.windows(2) {
+                if pair[0].0 == pair[1].0 -> return Err(ctx.error(ctx.span(), "duplicate checked enum field in `{enum_name}::{variant}`"))
+            }
+            result := [MIREnumArg]{}
+            loop (_, arg) in ^lowered -> &result.push(^arg)
+            result
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6959
+fn lower_enum_arg(ctx: &LowerCtx, arg: @TEnumArg, expected: @Type?) -> MIRValueID LowerError! {
+    value :: lower_cloned_value(&ctx, @arg.value, arg.clone)?
+    if expected == Val(target) -> ctx.trait_box_value(value, @arg.value.ty, target) else -> value
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6969
+fn lower_conversion_int(ctx: &LowerCtx, value: I64) -> MIRValueID LowerError! {
+    ctx.emit("conversion-parameter-int", Val(Type.IntN{signed: true, bits: 64}), MIROperation.Constant{value: MIRConstant.Int{value: value as Int, width: None, spelling: None}})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6986
+fn lower_conversion_float(ctx: &LowerCtx, value: F64) -> MIRValueID LowerError! {
+    ctx.emit("conversion-parameter-float", Val(Type.Float), MIROperation.Constant{value: MIRConstant.Float{value: value, f32: false, spelling: None}})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7001
+fn lower_conversion_bool(ctx: &LowerCtx, value: Bool) -> MIRValueID LowerError! {
+    ctx.emit("conversion-parameter-bool", Val(Type.Bool), MIROperation.Constant{value: MIRConstant.Bool(value)})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7012
+fn lower_conversion_string(ctx: &LowerCtx, value: ^String) -> MIRValueID LowerError! {
+    ctx.emit("conversion-parameter-string", Val(Type.String), MIROperation.Constant{value: MIRConstant.String(^value)})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7023
+fn direct_prelude_route(module: String, member: String, symbol: String, arity: USize, borrow_mask: @[Bool], carrier: @TFailureCarrier) -> TPreludeRoute Never! {
+    TPreludeRoute{family: MIRPreludeFamily.StaticPrelude, module: ~module, member: ~member, symbol: MIRSymbol.Prelude(~symbol), signature: MIRCallSignature{arity: arity, max_arity: arity, borrow_mask: ~borrow_mask}, effect: None, fallibility: ~carrier, abi: MIRPreludeABI.Value, authority: None, db_metadata: None}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7049
+// task_group_result_tasks maps to Expressions.jet:5866 jet_codegen_task_group_result_tasks.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7050
+// Its nested task_result maps to Expressions.jet:5856 jet_codegen_task_result_type.
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7066
+fn task_group_route(kind: MIRTaskGroupKind, tasks_ty: @Type, carrier: @TFailureCarrier) -> TPreludeRoute Never! {
+    result :: jet_codegen_task_group_result_tasks(tasks_ty)
+    (name, symbol) :: if (kind, result) == {
+        (.All, false) -> ("all", "jet_std::jet_task_all")
+        (.Race, false) -> ("race", "jet_std::jet_task_race")
+        (.Any, false) -> ("any", "jet_std::jet_task_any")
+        (.All, true) -> ("all_result", "jet_std::jet_task_all_result")
+        (.Race, true) -> ("race_result", "jet_std::jet_task_race_result")
+        (.Any, true) -> ("any_result", "jet_std::jet_task_any_result")
+    }
+    direct_prelude_route("core.tasks", name, symbol, 1, @[false], carrier)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7083
+fn lower_select_builder(ctx: &LowerCtx, builder: @TExpr, receivers: &[MIRValueID], timers: &[MIRValueID]) -> Unit LowerError! {
+    if builder.kind == {
+        .SelectStart -> {}
+        .SelectRecv{builder, channel} -> {
+            &receivers.push(ctx.lower_child(channel)?)
+            lower_select_builder(&ctx, builder, &receivers, &timers)?
+        }
+        .SelectAfter{builder, duration, value} -> {
+            if value.is_some() -> return Err(ctx.error(ctx.span(), "readiness timer arm unexpectedly carries a value"))
+            nanoseconds :: TExpr{ty: Type.Int, kind: TExprKind.HandleMethod{receiver: ~duration, operation: THandleOp.DurationNsValue, args: []}, span: ctx.span(), integer_bounds: None, cost: None}
+            &timers.push(ctx.lower_child(@nanoseconds)?)
+            lower_select_builder(&ctx, builder, &receivers, &timers)?
+        }
+        else -> return Err(ctx.error(ctx.span(), "select wait has a non-canonical readiness-table builder"))
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7126
+fn select_payload_type(ty: @Type) -> Type Never! {
+    if ty.without_user_tags() == {
+        .Tuple(fields) if fields.len() == 2 -> if fields[1].ty.without_user_tags() == { .Option(inner) -> ~inner else -> ~fields[1].ty.without_user_tags() }
+        else -> ~ty
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7136
+fn lower_select_wait(ctx: &LowerCtx, expr: @TExpr, builder: @TExpr, nonblocking: Bool, carrier: @TFailureCarrier) -> MIRValueID LowerError! {
+    receivers := [MIRValueID]{}
+    timers := [MIRValueID]{}
+    lower_select_builder(&ctx, builder, &receivers, &timers)?
+    payload :: select_payload_type(@expr.ty)
+    receiver_ty :: Type.Apply("Receiver", [payload])
+    receiver_list :: ctx.emit("select-receivers", Val(Type.List(receiver_ty)), MIROperation.BuildList{values: ^receivers, trait_coercion: None})?
+    timer_list :: ctx.emit("select-timers", Val(Type.List(Type.Int)), MIROperation.BuildList{values: ^timers, trait_coercion: None})?
+    (member, symbol) :: if nonblocking -> ("select_try_wait_tagged", "jet_std::jet_select_try_wait_tagged") else -> ("select_wait_tagged", "jet_std::jet_select_wait_tagged")
+    call :: ctx.intern_prelude_route(direct_prelude_route("core.tasks", member, symbol, 2, @[true, false], carrier))?
+    ctx.emit("select-wait", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.Select{call: call, kind: MIRSelectKind.Wait, values: [receiver_list, timer_list]}})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7194
+fn lower_prelude_conversion(ctx: &LowerCtx, value: MIRValueID, parameters: ^[MIRValueID], target: @Type, route: ^TPreludeRoute, carrier: @TFailureCarrier) -> MIRValueID LowerError! {
+    call :: ctx.intern_prelude_route(^route)?
+    line :: ctx.source_line() as USize
+    location :: panic_location(ctx, line)
+    fallibility :: ctx.lower_call_fallibility(carrier)?
+    target_type :: ctx.mir_type(target)?
+    ctx.emit("prelude-conversion", Val(~target), MIROperation.Convert{value: value, parameters: ^parameters, target: target_type, conversion: MIRConversion.Prelude{call: call, location: location, fallibility: fallibility}})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7223
+fn lower_cloned_value(ctx: &LowerCtx, value: @TExpr, clone: Bool) -> MIRValueID LowerError! {
+    value_id :: ctx.lower_child(value)?
+    if clone -> ctx.emit("cloned-value", Val(~value.ty), MIROperation.Copy{value: value_id, fact: MIRCopyFact.Materialize}) else -> value_id
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7242
+fn lower_core_closure_call(ctx: &LowerCtx, expr: @TExpr, kind: @TCoreClosureKind) -> MIRValueID LowerError! {
+    site :: ctx.site_id_for(ctx.span(), "core-closure")
+    carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+    values := [MIRValueID]{}
+    closure := None as MIRValueID?
+    (mir_kind, grouped_spawn, label) :: if kind == {
+        .Spawn{group, site: spawn_site, label, executable, ..} -> {
+            if group == Val(group) -> &values.push(ctx.lower_child(group)?)
+            site_value :: ctx.emit("core-closure.spawn-site", Val(Type.Int), MIROperation.Constant{value: MIRConstant.Int{value: spawn_site as I64 as Int, width: None, spelling: None}})?
+            label_text :: label.map(fn(text) { ~text }) ?? ""
+            label_value :: ctx.emit("core-closure.spawn-label", Val(Type.String), MIROperation.Constant{value: MIRConstant.String(~label_text)})?
+            &values.extend([site_value, label_value])
+            closure = Val(ctx.lower_spawn_lambda(executable)?)
+            (MIRCoreClosureKind.Spawn, group.is_some(), label_text)
+        }
+        .Realtime{rate, frames, executable} -> {
+            &values.push(ctx.lower_child(rate)?)
+            &values.push(ctx.lower_child(frames)?)
+            closure = Val(ctx.lower_lambda(executable)?)
+            (MIRCoreClosureKind.Realtime, false, "")
+        }
+        .Serve{address: addr, executable, ..} -> {
+            &values.push(ctx.lower_child(addr)?)
+            closure = Val(ctx.lower_lambda_send(executable)?)
+            (MIRCoreClosureKind.Serve, false, "")
+        }
+        .OnInterrupt{callback} -> {
+            &values.push(ctx.lower_child(callback)?)
+            (MIRCoreClosureKind.OnInterrupt, false, "")
+        }
+        .Guard{executable, ..} -> { closure = Val(ctx.lower_lambda(executable)?); (MIRCoreClosureKind.Guard, false, "") }
+        .OnCommit{handle_name, executable, ..} -> {
+            handle_ty :: ctx.local_types.get(handle_name).map(fn(ty) { ~ty }).ok_or_else(fn() { ctx.error(ctx.span(), "missing checked transaction handle `{handle_name}`") })?
+            local :: tir_user_local(~handle_name, ctx.span())
+            handle :: TExpr{ty: handle_ty, kind: TExprKind.Local(local), span: ctx.span(), integer_bounds: None, cost: None}
+            &values.push(ctx.lower_child(@handle)?)
+            closure = Val(ctx.lower_lambda(executable)?)
+            (MIRCoreClosureKind.OnCommit, false, "")
+        }
+        .OnRollback{handle_name, executable, ..} -> {
+            handle_ty :: ctx.local_types.get(handle_name).map(fn(ty) { ~ty }).ok_or_else(fn() { ctx.error(ctx.span(), "missing checked transaction handle `{handle_name}`") })?
+            local :: tir_user_local(~handle_name, ctx.span())
+            handle :: TExpr{ty: handle_ty, kind: TExprKind.Local(local), span: ctx.span(), integer_bounds: None, cost: None}
+            &values.push(ctx.lower_child(@handle)?)
+            closure = Val(ctx.lower_lambda(executable)?)
+            (MIRCoreClosureKind.OnRollback, false, "")
+        }
+        .ReactiveDerived{executable, ..} -> { closure = Val(ctx.lower_lambda_send(executable)?); (MIRCoreClosureKind.ReactiveDerived, false, "") }
+        .ReactiveEffect{executable, ..} -> { closure = Val(ctx.lower_lambda_send(executable)?); (MIRCoreClosureKind.ReactiveEffect, false, "") }
+        .UIReactiveRender{executable, ..} -> { closure = Val(ctx.lower_lambda_send(executable)?); (MIRCoreClosureKind.UIMount, false, "") }
+        .UIPreview{name, viewport, executable, playground, source_file, source_span, source_start_line, source_start_column, source_end_line, source_end_column, build_id, revision, ..} -> {
+            &values.push(ctx.lower_child(name)?)
+            if viewport == Val(viewport) -> &values.push(ctx.lower_child(viewport)?)
+            closure = Val(ctx.lower_lambda_send(executable)?)
+            (MIRCoreClosureKind.UIPreview{playground: playground, source_file: ~source_file, source_span: source_span, source_start_line: source_start_line, source_start_column: source_start_column, source_end_line: source_end_line, source_end_column: source_end_column, build_id: ~build_id, revision: ~revision}, false, "")
+        }
+        .UIButtonOnClick{label, shortcut, accessible_label, executable, ..} -> {
+            &values.push(ctx.lower_child(label)?)
+            &values.push(ctx.lower_child(shortcut)?)
+            &values.push(ctx.lower_child(accessible_label)?)
+            closure = Val(ctx.lower_lambda_send(executable)?)
+            (MIRCoreClosureKind.UIAction, false, "")
+        }
+        .UITextInputOnDrop{state, ime, executable, ..} -> {
+            &values.push(ctx.lower_child(state)?)
+            &values.push(ctx.lower_child(ime)?)
+            closure = Val(ctx.lower_lambda_send(executable)?)
+            (MIRCoreClosureKind.UITextInputOnDrop, false, "")
+        }
+    }
+    call :: ctx.intern_prelude_route(core_closure_route(~mir_kind, grouped_spawn, @expr.ty, @carrier)?)?
+    ctx.emit("core-closure-call", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.CoreClosureCall{call: call, kind: ^mir_kind, values: ^values, closure: closure, site: site, label: label}})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7434
+fn lower_tlocal_value(ctx: &LowerCtx, local: @TLocal) -> MIRValueID LowerError! {
+    ty :: ctx.local_types.get(local.name).map(fn(ty) { ~ty }).or_else(fn() { ~local.persist_ty }).ok_or_else(fn() { ctx.error(ctx.span(), "checked MIR local `{local.name}` has no type") })?
+    expression :: TExpr{ty: ty, kind: TExprKind.Local(~local), span: ctx.span(), integer_bounds: None, cost: None}
+    ctx.lower_child(@expression)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7455
+// mir_gc_edit_kind maps to Statements.jet:2844 jet_codegen_gc_edit_kind, all eight variants.
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7468
+fn gc_edit_site(ctx: @LowerCtx) -> MIRGCEditSiteID Never! {
+    span :: ctx.span()
+    MIRGCEditSiteID{value: stable_id("gc-edit-site", "{ctx.function.key}|{ctx.function.source_file}|{span.start}|{span.end}")}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7482
+fn gc_edit_callback(ctx: @LowerCtx, edit: @TExpr, root_ty: ^Type) -> TLambda Never! {
+    span :: ctx.span()
+    param :: tir_generated_local("value", span)
+    owner_key :: "{ctx.function.key}::gc-edit@{span.start}..{span.end}"
+    parameter_symbol :: symbol_id(SymbolKind.Parameter, ctx.function.module_identity, owner_key, param.name)
+    ret :: if edit.ty == .Named(name) && name == INTERNAL_UNIT_TYPE -> None else -> Val(~edit.ty)
+    TLambda{executable: TLambdaBody.Expr(~edit), source_span: span, frame_schedule: None, frame_schedule_derivation: None,
+        capture_facts: TCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [], cloned: [], frozen: [], materialized: [], moved: []},
+        host_param_conventions: None, failure_carrier: TFailureCarrier.from_checked_type(@edit.ty),
+        effects: TEffectFacts{direct: [], solved: [], call_edges: [], maximal: false, direct_spans: []},
+        source_params: [param.name], source_param_symbols: [parameter_symbol], jit_name: "gc_edit_{span.start}_{span.end}", param_types: [^root_ty], ret: ret,
+        is_move: true, boxed: false, rc: false, arc: false, captures: [], capture_origins: [:], materialized_captures: [], frozen_captures: [], uses_stack_sentry: false}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7514
+fn lower_pattern_probe(ctx: &LowerCtx, expr: @TExpr, matched: MIRValueID, probe: @TMatchProbe) -> MIRValueID LowerError! {
+    if probe == TMatchProbe.IsSome -> return ctx.emit("pattern-matched", Val(Type.Bool), MIROperation.PatternMatched{matched: matched})
+    types :: if expr.ty == { .Tuple(types) -> types else -> return Err(ctx.error(ctx.span(), "checked pattern captures have no tuple type")) }
+    type_id :: ctx.mir_type(@expr.ty)?.identity.ok_or_else(fn() { ctx.error(ctx.span(), "checked pattern tuple has no MIR identity") })?
+    fields := [MIRFieldValue]{}
+    loop (index, field) in types {
+        id :: ctx.field_id_for_type(@expr.ty, field.name)?
+        value :: ctx.emit("pattern-capture", Val(~field.ty), MIROperation.PatternCapture{matched: matched, index: index})?
+        &fields.push(MIRFieldValue{field: id, value: value})
+    }
+    ctx.emit("pattern-captures", Val(~expr.ty), MIROperation.Tuple{type_id: type_id, fields: ^fields})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7554
+fn lower_host_call(ctx: &LowerCtx, expr: @TExpr, host: @THostCall) -> MIRValueID LowerError! {
+    if host == {
+        .CarrierFact{receiver: recv, field, notes} -> {
+            report_ty :: if recv.ty.without_user_tags() == { .Result{err, ..} -> err else -> recv.ty.without_user_tags() }
+            field_id :: ctx.field_id_for_type(report_ty, field)?
+            receiver :: ctx.lower_child(recv)?
+            carrier :: TFailureCarrier.from_checked_type(@recv.ty)
+            call :: ctx.intern_prelude_route(carrier_fact_route(notes, @expr.ty, @carrier)?)?
+            ctx.emit("host-carrier-fact", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.CarrierFact{call: call, receiver: receiver, field: field_id, notes: notes}})
+        }
+        .FixedListIndex{base, index, ..} -> {
+            place :: ctx.lower_index_place(base, index, MIRIndexKind.FixedListProof, MIRAccess.Read)?
+            ctx.emit("host-fixed-list-index", Val(~expr.ty), MIROperation.ReadPlace(place))
+        }
+        .OptionProbe{inner, kind: TOptionProbe.Field(field)} -> lower_optional_field(&ctx, expr, inner, field, false)
+        .TupleIndex{base, index} -> {
+            field :: ctx.field_id_for_type(@base.ty, index.to_string())?
+            value :: ctx.lower_child(base)?
+            ctx.emit("host-tuple-index", Val(~expr.ty), MIROperation.Field{base: value, field: field})
+        }
+        .FnName(name) -> {
+            function :: ctx.function_id_for(name)?
+            if ctx.plain_named_fn_value(name, function, @expr.ty, false)? == Val(adapted) -> return adapted
+            facts :: MIRCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [], cloned: [], frozen: [], materialized: [], moved: [], frame_schedule: None, frame_schedule_derivation: None}
+            ctx.emit("host-function-value", Val(~expr.ty), MIROperation.Closure{function: function, captures: [], facts: facts})
+        }
+        .MemoStats{name} -> {
+            name_value :: ctx.emit("memo-stats-name", Val(Type.String), MIROperation.Constant{value: MIRConstant.String(~name)})?
+            bound_value :: ctx.emit("memo-stats-bound", Val(Type.Int), MIROperation.Constant{value: MIRConstant.Int{value: -1, width: None, spelling: None}})?
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            route :: memo_stats_route(@expr.ty, @carrier)?
+            args :: [mir_value_arg(ctx, name_value), mir_value_arg(ctx, bound_value)]
+            emit_host_route_call(&ctx, expr, route, args)
+        }
+        .Helper{kind, args, ..} -> {
+            lowered :: lower_host_args(&ctx, args)?
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            route :: helper_route(kind, @expr.ty, @carrier)?
+            emit_host_route_call(&ctx, expr, route, lowered)
+        }
+        .Method{receiver: recv, method, args} -> {
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            route :: host_method_route(@recv.ty, method, args.len(), @expr.ty, @carrier)?
+            lowered := [MIRCallArg]{}
+            mutates_receiver :: (if recv.ty.without_user_tags() == { .Apply{name, ..} -> name == "Pool" else -> false }) && (method == "add" || method == "remove")
+            receiver :: if mutates_receiver {
+                place :: lower_receiver_place(&ctx, recv, MIRAccess.Write)?.ok_or_else(fn() { ctx.error(ctx.span(), "mutable host receiver has no checked place") })?
+                value :: ctx.emit("host-call-place", Val(~recv.ty), MIROperation.ReadPlace(place))?
+                argument := mir_value_arg_with_access(ctx, value, MIRAccess.Write)
+                argument.place = Val(place)
+                argument
+            } else -> ctx.lower_plain_arg(recv)?
+            &lowered.push(receiver)
+            transaction :: method == "read_txn" || method == "edit_txn" || method == "capture_txn"
+            if transaction {
+                stm :: TLocal.stm()
+                stm_value :: lower_tlocal_value(&ctx, @stm)?
+                &lowered.push(mir_value_arg(ctx, stm_value))
+            }
+            loop arg in args -> &lowered.push(ctx.lower_plain_arg(arg)?)
+            if lowered.len() != route.signature.arity -> return Err(ctx.error(ctx.span(), "checked host method `{method}` has {lowered.len()} operands, route requires {route.signature.arity}"))
+            if transaction {
+                lowered[1].access = MIRAccess.Write
+                stm :: TLocal.stm()
+                lowered[1].place = Val(lower_local_place(&ctx, @stm, MIRAccess.Write)?)
+            }
+            emit_host_route_call(&ctx, expr, route, ^lowered)
+        }
+        .CellGuardProject{receiver: recv, paths, result_type: result_ty, editable, edit_paths_disjoint} -> {
+            guard :: ctx.lower_plain_arg(recv)?.value
+            field_paths := [[MIRFieldID]]{}
+            loop path in paths {
+                owner_ty := ~recv.ty
+                fields := [MIRFieldID]{}
+                loop field in path {
+                    &fields.push(ctx.field_id_for_type(@owner_ty, field)?)
+                    owner_ty = ctx.checked_field_type(@owner_ty, field)?
+                }
+                &field_paths.push(^fields)
+            }
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            map_call :: ctx.intern_prelude_route(cell_guard_map_route(editable, result_ty, @carrier)?)?
+            split_call :: if field_paths.len() == 2 -> Val(ctx.intern_prelude_route(cell_guard_split_route(editable, result_ty, @carrier)?)?) else -> None
+            ctx.emit("cell-guard-project", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.CellGuardProject{map_call: map_call, split_call: split_call, guard: guard, paths: ^field_paths, editable: editable, edit_paths_disjoint: edit_paths_disjoint}})
+        }
+        .TypedText{kind, argument: arg} -> {
+            args :: [ctx.lower_plain_arg(arg)?]
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            route :: typed_text_route(kind, @expr.ty, @carrier)?
+            emit_host_route_call(&ctx, expr, route, args)
+        }
+        .GCEdit{root, edges, edit, index_temp, kind, ..} -> {
+            root_ty :: ctx.local_types.get(root.name).map(fn(ty) { ~ty }).or_else(fn() { ~root.persist_ty }).ok_or_else(fn() { ctx.error(ctx.span(), "checked MIR GC root `{root.name}` has no type") })?
+            root_value :: lower_tlocal_value(&ctx, root)?
+            edge_values := [MIRValueID]{}
+            loop edge in edges -> &edge_values.push(lower_tlocal_value(&ctx, edge)?)
+            edit_lambda :: gc_edit_callback(ctx, edit, root_ty)
+            edit_value :: ctx.lower_lambda(@edit_lambda)?
+            index := None as MIRValueID?
+            if index_temp == Val(value) -> index = Val(ctx.lower_plain_arg(value)?.value)
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            call :: ctx.intern_prelude_route(gc_edit_route(kind, @expr.ty, @carrier)?)?
+            ctx.emit("host-gc-edit", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.GCEdit{call: call, root: root_value, edges: ^edge_values, edit: edit_value, index: index, kind: jet_codegen_gc_edit_kind(kind), site: gc_edit_site(ctx)}})
+        }
+        .GCRead{root} -> {
+            root_value :: lower_tlocal_value(&ctx, root)?
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            route :: gc_read_route(@expr.ty, @carrier)?
+            emit_host_route_call(&ctx, expr, route, [mir_value_arg(ctx, root_value)])
+        }
+        .OptionProbe{inner, kind: TOptionProbe.IsSome} -> {
+            subject :: ctx.lower_child(inner)?
+            ctx.emit("option-probe-is-some", Val(~expr.ty), MIROperation.OptionIsSome{subject: subject})
+        }
+        .OptionProbe{inner, kind: TOptionProbe.Unwrap} -> {
+            subject :: ctx.lower_child(inner)?
+            ctx.emit("option-probe-unwrap", Val(~expr.ty), MIROperation.OptionValue{subject: subject})
+        }
+        .StrMatchScan{subject, parts, probe} -> {
+            value :: ctx.lower_plain_arg(subject)?.value
+            pattern := [MIRTextPatternPart]{}
+            loop part in parts {
+                if part == {
+                    .Lit(text) -> &pattern.push(MIRTextPatternPart.Literal(~text))
+                    .Hole{ty, span, ..} -> {
+                        ty :: ty.map(fn(ty) { ~ty }) ?? Type.String
+                        &pattern.push(MIRTextPatternPart.Hole{kind: lower_text_hole_kind(ctx, @ty, span)?, ty: lower_pattern_type(ctx, @ty)?, span: span})
+                    }
+                }
+            }
+            shape :: MIRPatternShape.Text(^pattern, ctx.span())
+            matched :: ctx.lower_pattern_match(value, @shape)?
+            lower_pattern_probe(&ctx, expr, matched, probe)
+        }
+        .BinMatchScan{subject, parts, probe} -> {
+            value :: ctx.lower_plain_arg(subject)?.value
+            pattern := [MIRBinaryPatternPart]{}
+            loop part in parts {
+                if part == {
+                    .Lit(bytes) -> &pattern.push(MIRBinaryPatternPart.Literal(~bytes))
+                    .Hole{spec, span, ..} -> if spec == {
+                        .Bits{width, endian} -> {
+                            ty :: Type.IntN{signed: false, bits: width}
+                            &pattern.push(MIRBinaryPatternPart.Bits{width: width, ty: lower_pattern_type(ctx, @ty)?, little: endian == BinEndian.Little, span: span})
+                        }
+                        .Rest -> {
+                            ty :: Type.Named(TYPE_BYTES)
+                            &pattern.push(MIRBinaryPatternPart.Rest{ty: lower_pattern_type(ctx, @ty)?, span: span})
+                        }
+                    }
+                }
+            }
+            shape :: MIRPatternShape.Binary(^pattern, ctx.span())
+            matched :: ctx.lower_pattern_match(value, @shape)?
+            lower_pattern_probe(&ctx, expr, matched, probe)
+        }
+        .SwitchSubjectField{field} -> {
+            subject :: ctx.switch_subject()?
+            subject_ty :: ctx.value_source_type(subject)?
+            id :: ctx.field_id_for_type(@subject_ty, field)?
+            ctx.emit("switch-subject-field", Val(~expr.ty), MIROperation.Field{base: subject, field: id})
+        }
+        .SwitchSubjectValue -> ctx.switch_subject()
+        .YieldSend{value} -> {
+            value :: ctx.lower_child(value)?
+            resume :: ctx.new_block(ctx.span(), "yield.resume")?
+            cancel :: ctx.new_block(ctx.span(), "yield.cancel")?
+            ctx.terminate(MIRTerminator.Yield{value: value, resume: resume, cancel: cancel})
+            // Stopping the consumer cancels the producer and runs every active cleanup.
+            ctx.switch_to(cancel)
+            ctx.terminate_with_cleanup(MIRTerminator.Return{value: None}, 0)?
+            ctx.switch_to(resume)
+            ctx.emit("yield.unit", Val(~expr.ty), MIROperation.Constant{value: MIRConstant.Unit})
+        }
+        .TypedTextInterp{kind, literals, holes, trusted_html} -> {
+            values := [MIRValueID]{}
+            loop hole in holes -> &values.push(ctx.lower_plain_arg(hole)?.value)
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            call :: ctx.intern_prelude_route(typed_text_interp_route(kind, @expr.ty, @carrier)?)?
+            ctx.emit("host-typed-text-interp", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.TypedTextInterp{call: call, kind: kind, literals: ~literals, holes: ^values, trusted_html: ~trusted_html}})
+        }
+        .ExpectSnapshot{value, snap_path} -> {
+            value_ty :: @value.ty
+            value :: ctx.lower_child(value)?
+            shown :: lower_direct_string_format(&ctx, value, value_ty, @StrFormat.Display, @Type.String)?
+            path :: ctx.emit("expect-snapshot-path", Val(Type.String), MIROperation.Constant{value: MIRConstant.String(~snap_path)})?
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            route :: expect_snapshot_route(@expr.ty, @carrier)?
+            emit_host_route_call(&ctx, expr, route, [mir_value_arg(ctx, shown), mir_value_arg(ctx, path)])
+        }
+        .EnvSet{name, value, location: loc} -> {
+            record :: core_call("core.sys", "set").ok_or_else(fn() { ctx.error(ctx.span(), "missing checked Core registry row `core.sys.set`") })?
+            args := [ctx.lower_plain_arg(name)?, ctx.lower_plain_arg(value)?]
+            loop (index, arg) in &args -> arg.access = if record.signature.borrow_mask.get(index) ?? false -> MIRAccess.Read else -> MIRAccess.Move
+            core_result_ty :: Type.Result(Type.Named(INTERNAL_UNIT_TYPE), Type.Named("EnvError"))
+            core_carrier :: TFailureCarrier.from_checked_type(@core_result_ty)
+            core_call :: MIRCoreCall.from_record(record).id
+            core_route :: ctx.intern_core_route(record, @core_carrier)?
+            core_fallibility :: ctx.lower_call_fallibility(@core_carrier)?
+            result :: ctx.emit("core-sys-set", Val(~core_result_ty), MIROperation.CoreCall{call: core_call, route: core_route, args: ^args, type_args: [], fallibility: core_fallibility, data_plan: None})?
+            condition :: ctx.emit("core-sys-set-ok", Val(Type.Bool), MIROperation.ResultIsOk{subject: result})?
+            failure :: ctx.new_block(ctx.span(), "core-sys-set.failure")?
+            join :: ctx.new_block(ctx.span(), "core-sys-set.join")?
+            ctx.terminate(MIRTerminator.Branch{condition: condition, then_target: join, else_target: failure})
+            ctx.switch_to(failure)
+            error :: ctx.emit("core-sys-set-error", Val(Type.Named("EnvError")), MIROperation.ResultValue{subject: result, ok: false})?
+            error_ty :: Type.Named("EnvError")
+            shown :: lower_direct_string_format(&ctx, error, @error_ty, @StrFormat.Display, @Type.String)?
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            route :: require_stop_route("require", 1, @expr.ty, @carrier)?
+            call :: ctx.intern_prelude_route(route)?
+            location :: MIRPanicLoc{file: ctx.source_file_id_for(loc.file), line: loc.line, column: loc.column}
+            locals := [MIRPanicLocal]{}
+            loop local in loc.locals {
+                if ctx.local_id_for(@local.local).ok() == Val(id) -> &locals.push(MIRPanicLocal{name: ~local.display_name, local: id})
+            }
+            context :: MIRPanicContext{function: ~loc.function, source_line: ~loc.source_line, caret: loc.caret, locals: ^locals}
+            _ :: ctx.emit("core-sys-set-stop", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: call, kind: MIRRequireKind.Require, condition: Val(condition), location: location, context: context, values: [shown], always_stops: false}})?
+            ctx.terminate(MIRTerminator.Jump{target: join})
+            ctx.switch_to(join)
+            ctx.emit("core-sys-set-unit", Val(~expr.ty), MIROperation.Constant{value: MIRConstant.Unit})
+        }
+        .NumericBounds{ty, member} -> {
+            constant :: numeric_bound_constant(ty, member).ok_or_else(fn() { ctx.error(ctx.span(), "unsupported numeric bound `{member}` on {ty.name()}") })?
+            ctx.emit("host-numeric-bound", Val(~expr.ty), MIROperation.Constant{value: constant})
+        }
+        .ExpiringSecretNew{value, duration, clock, element: elem} -> {
+            args := [ctx.lower_plain_arg(value)?, ctx.lower_plain_arg(duration)?, ctx.lower_plain_arg(clock)?]
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            route :: expiring_route(true, @expr.ty, @carrier)?
+            apply_route_access(ctx, @route, &args)?
+            call :: ctx.intern_prelude_route(route)?
+            type_args :: [ctx.mir_type(elem)?]
+            ctx.emit("host-expiring-secret-new", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: ^args, owner_type_args: [], type_args: type_args}})
+        }
+        .ExpiringValueNew{value, duration, clock} -> {
+            value_ty :: @value.ty
+            args := [ctx.lower_plain_arg(value)?, ctx.lower_plain_arg(duration)?, ctx.lower_plain_arg(clock)?]
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            route :: expiring_route(false, @expr.ty, @carrier)?
+            apply_route_access(ctx, @route, &args)?
+            call :: ctx.intern_prelude_route(route)?
+            type_args :: [ctx.mir_type(value_ty)?]
+            ctx.emit("host-expiring-value-new", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: ^args, owner_type_args: [], type_args: type_args}})
+        }
+        .CCallback{symbol, lambda, ret, managed, plan_digest, callback_identity} -> {
+            value :: ctx.lower_lambda(lambda)?
+            key :: "{ctx.function.key}::lambda@{lambda.source_span.start}..{lambda.source_span.end}"
+            function :: ctx.nested_functions.iter().find(fn(candidate) { candidate.key == key }).map(fn(candidate) { candidate.id }).ok_or_else(fn() { ctx.error(ctx.span(), "missing lowered C callback lambda") })?
+            if lambda.source_params.len() != lambda.param_types.len() -> return Err(ctx.error(lambda.source_span, "C callback lambda parameter names and types differ"))
+            params := [MIRParam]{}
+            loop (index, name) in lambda.source_params {
+                ty :: @lambda.param_types[index]
+                &params.push(MIRParam{index: index, name: ~name, span: lambda.source_span, ty: ctx.mir_type(ty)?, access: MIRAccess.Read, ownership: MIROwnership.from_access(MIRAccess.Read), public_label: ~name, variadic: false, default_present: false})
+            }
+            return_type := None as MIRType?
+            if ret == Val(ty) -> return_type = Val(ctx.mir_type(ty)?)
+            callback :: MIRCallbackAdapter{id: MIRCallbackID{value: stable_id("mir-callback", "{symbol}|{function.value}")}, symbol: ~symbol, function: function, params: ^params, return_type: return_type, abi: MIRForeignABI.C, managed: managed, plan_digest: ~plan_digest, callback_identity: ~callback_identity}
+            existing :: ctx.callbacks.iter().find(fn(row) { row.id == callback.id })
+            if existing == Val(row) {
+                if "{row:?}" != "{callback:?}" -> return Err(ctx.error(ctx.span(), "conflicting C callback adapter"))
+            } else -> &ctx.callbacks.push(~callback)
+            carrier :: TFailureCarrier.from_checked_type(@expr.ty)
+            route :: c_callback_route(@expr.ty, @carrier)?
+            call :: ctx.intern_prelude_route(route)?
+            ctx.emit("c-callback", Val(~expr.ty), MIROperation.Semantic{operation: MIRSemanticOp.CCallback{call: call, callback: callback.id, lambda: value}})
+        }
+    }
+}

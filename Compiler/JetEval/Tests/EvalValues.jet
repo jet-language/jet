@@ -1,0 +1,31 @@
+use jet_eval.EvalValues.*
+use jet_foundation.Span
+
+// Rust: crates/jet-comptime/src/Comptime/Diagnostics.rs:11
+#Test("comptime_panic_retains_exact_code_and_sanctioned_fix") {
+    span :: Span.default()
+    diagnostic :: comptime_panic("bad input", span)
+    assert(diagnostic.code == "E0953")
+    assert(diagnostic.span == Val(span))
+    assert(diagnostic.what == "your comptime code stopped the build")
+    assert(diagnostic.why == "while computing this value at compile time, the program panicked: bad input")
+    assert(diagnostic.fix == "this is the sanctioned way to validate at compile time — fix the input the check rejects")
+}
+// Rust: crates/jet-comptime/src/Comptime/Diagnostics.rs:25
+#Test("arithmetic_and_index_diagnostics_use_the_panic_family") {
+    span :: Span.default()
+    assert(overflow("multiply", span) == comptime_panic("tried to multiply two numbers and the result was too big for an Int", span))
+    assert(divide_by_zero(span) == comptime_panic("divided by zero", span))
+    assert(index_oob(2, -1, span) == comptime_panic("the list has 2 items, so position -1 doesn't exist", span))
+}
+// Rust: crates/jet-comptime/src/Comptime/Diagnostics.rs:62
+#Test("impurity_diagnostic_preserves_direct_and_transitive_paths") {
+    span :: Span.default()
+    direct :: impurity_diag("read", &[], span)
+    assert(direct.code == "E3401")
+    assert(direct.what == "`read` is not allowed in comptime code")
+    assert(direct.why == "`read` touches the outside world, so it can't run while compiling")
+    transitive :: impurity_diag("read", &["start", "helper"], span)
+    assert(transitive.why == "start calls helper calls `read`, which touches the outside world — comptime must give the same answer on every machine")
+    assert(transitive.fix == "compute this at runtime instead; the exceptions are `embed_file(\"path\")`, `embed_bytes(\"path\")`, and `find(\"glob\")`")
+}

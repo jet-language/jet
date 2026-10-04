@@ -1,0 +1,37 @@
+use jet_foundation.[Expr, Span, Type, BinOp, CtValue, Item]
+use JetCodegen.Codegen.Context.[build_cx_items, ExternFn]
+use JetCodegen.Codegen.TIR.[LowerEnv, TExprKind]
+use JetCodegen.Codegen.TIR.Lower.Expressions.[lower_expr_inner]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4450-4564 (behavioral control; no inline tests)
+#Test("lower_literal_width_and_boolean_facts_are_retained") {
+    cx :: build_cx_items([Item]{}, "", "literal.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("literal")
+    span :: Span{start: 0, end: 1}
+    boolean :: lower_expr_inner(Expr.Bool(true, span), cx, &env)
+    assert(boolean.ty == Type.Bool)
+    assert(boolean.kind == TExprKind.BoolLit(true))
+    float32 :: lower_expr_inner(Expr.Float(1.5, span, true, None), cx, &env)
+    assert(float32.ty == Type.Float32)
+    assert(float32.kind == TExprKind.FloatLit(1.5))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4450-4519 (behavioral control)
+#Test("lower_large_exact_int_does_not_use_lexer_fallback_zero") {
+    cx :: build_cx_items([Item]{}, "", "literal.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("literal")
+    span :: Span{start: 0, end: 20}
+    value :: lower_expr_inner(Expr.Int(0, span, None, Val("18446744073709551615")), cx, &env)
+    assert(value.ty == Type.Int)
+    assert(if value.kind == { .CtLit(.BigInt(number)) -> number.try_i64() == None else -> false })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:5251-5341 (behavioral control)
+#Test("lower_exact_int_division_constructs_fraction_before_integer_trapping") {
+    cx :: build_cx_items([Item]{}, "", "division.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("division")
+    span :: Span{start: 0, end: 1}
+    value :: lower_expr_inner(Expr.Binary(BinOp.Div, Expr.Int(1, span, None, None), Expr.Int(2, span, None, None), span), cx, &env)
+    assert(value.ty == Type.Named("Fraction"))
+    assert(if value.kind == { .PreciseBuiltin(type_name, func, args) -> type_name == "Fraction" && func == "from_parts" && args.len() == 2 else -> false })
+}

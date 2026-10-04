@@ -1,0 +1,18 @@
+use jet_comptime.Comptime.Methods.CoreCalls.Regex.*
+use jet_foundation.AST.CtValue
+use jet_foundation.Diagnostics.Span
+// Behavioral controls for Rust regex.rs:10/220/265; no inline Rust tests.
+#Test("regex_compile_failure_is_a_value_and_nonreceiver_is_unclaimed") {
+    span := Span.new(0, 0)
+    assert(regex_compile([CtValue.Str("[")], span).unwrap() == { Failed(_) -> true; _ -> false })
+    assert(apply_regex_method(&CtValue.Str("x"), "is_match", &[CtValue.Str("x")], span).is_none())
+    assert_eq(regex_escape([CtValue.Str("a+b.c")], span).unwrap(), CtValue.Str("a\\+b\\.c"))
+}
+#Test("regex_receiver_find_and_replace_keep_argument_order") {
+    span := Span.new(0, 0)
+    compiled := regex_compile([CtValue.Str("a+")], span).unwrap()
+    receiver := compiled == { Present(v) -> v; _ -> { panic("valid regex must compile") } }
+    assert_eq(apply_regex_method(receiver, "is_match", &[CtValue.Str("baa")], span).unwrap().unwrap(), CtValue.Bool(true))
+    assert_eq(apply_regex_method(receiver, "replace", &[CtValue.Str("baa"), CtValue.Str("x")], span).unwrap().unwrap(), CtValue.Str("bx"))
+    assert(apply_regex_method(receiver, "unknown", &[], span).is_none())
+}

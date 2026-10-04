@@ -1,1694 +1,601 @@
-// PORT-PENDING 0479 crates-jet-codegen-src-codegen-tir-lower-expressions-slice-5677: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:5677-7366
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         Expr::Call(call) => {
-//RS             in_own_frame(|| {
-//RS                 if let Some(lowered) = lower_raw_ok_call(call, cx, env) {
-//RS                     return lowered;
-//RS                 }
-//RS                 if let Some(lowered) = lower_raw_err_call(call, cx, env) {
-//RS                     return lowered;
-//RS                 }
-//RS                 // D-CONC-CHAN1=A: `channel<T>()` is a readable builtin. Keep
-//RS                 // the source surface direct, then normalize to the one existing
-//RS                 // Core/Prelude channel route consumed by AOT, JIT, and TIR.
-//RS                 if call.name == Syntax::BUILTIN_CHANNEL
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                     && !env.locals.contains_key(&call.name)
-//RS                     && call.args.len() <= 1
-//RS                 {
-//RS                     let Some(ty) = call.resolved_ret.clone() else {
-//RS                         return invariant_violation_expr(
-//RS                             call.name_span,
-//RS                             "channel constructor without a resolved return type",
-//RS                         );
-//RS                     };
-//RS                     let args: Vec<TExpr> = call
-//RS                         .args
-//RS                         .iter()
-//RS                         .map(|arg| lower_expr(&arg.expr, cx, env))
-//RS                         .collect();
-//RS                     let widen_to_vec = vec![false; args.len()];
-//RS                     return core_call_expr(
-//RS                         ty,
-//RS                         "core.tasks",
-//RS                         if call.args.is_empty() {
-//RS                             Syntax::INTERNAL_CHANNEL_NEW_METHOD
-//RS                         } else {
-//RS                             Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD
-//RS                         },
-//RS                         args,
-//RS                         call.name_span,
-//RS                         widen_to_vec,
-//RS                     );
-//RS                 }
-//RS                 // D-CONC-FREEZE1=A: sema has proved the source is an owned,
-//RS                 // deeply snapshot-able value. Reuse the existing structural
-//RS                 // clone/materialization nodes so every execution tier consumes
-//RS                 // one already-typed TIR representation. A nested freeze is the
-//RS                 // identity by law and therefore does not clone twice.
-//RS                 if call.name == Syntax::KW_FREEZE
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                     && !env.locals.contains_key(&call.name)
-//RS                     && call.args.len() == 1
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let source = &call.args[0].expr;
-//RS                         if let Expr::Call(inner) = source {
-//RS                             if inner.name == Syntax::KW_FREEZE && inner.args.len() == 1 {
-//RS                                 return lower_expr(source, cx, env);
-//RS                             }
-//RS                         }
-//RS                         let operand = lower_expr(source, cx, env);
-//RS                         let view_owned_ty =
-//RS                             view_copy_owned_type(&operand.ty).or_else(|| match source {
-//RS                                 Expr::Ident(name, _) => env
-//RS                                     .split_view_handle(name)
-//RS                                     .and_then(|ty| view_copy_owned_type(&ty)),
-//RS                                 _ => None,
-//RS                             });
-//RS                         let string_view = matches!(source, Expr::Ident(name, _) if env.is_string_view_local(name));
-//RS                         let is_view = view_owned_ty.is_some();
-//RS                         let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
-//RS                         let kind = if is_view || string_view {
-//RS                             TExprKind::MaterializeView(Box::new(operand))
-//RS                         } else if operand.ty.is_compute_tensor_family() {
-//RS                             env.note_clone(&ty);
-//RS                             TExprKind::ExplicitCopy(Box::new(operand))
-//RS                         } else {
-//RS                             env.note_clone(&ty);
-//RS                             TExprKind::Clone(Box::new(operand), jet_foundation::MIR::MirCopyFact::Explicit)
-//RS                         };
-//RS                         return TExpr { ty, kind };
-//RS                     });
-//RS                 }
-//RS                 // D-CALLPOLICY1=E: `apply` is a typed value transformation. Sema
-//RS                 // records the replacement on its final callable argument; lowering
-//RS                 // forwards that value through the one shared function-value seam.
-//RS                 if call.name == "apply"
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                     && !env.locals.contains_key(&call.name)
-//RS                     && call
-//RS                         .args
-//RS                         .last()
-//RS                         .is_some_and(|arg| arg.flags.callable_policy.is_some())
-//RS                 {
-//RS                     let target_name = match &call.args.last().expect("checked above").expr {
-//RS                         Expr::Ident(name, _) => Some(name.as_str()),
-//RS                         Expr::Paren(inner, _) => match inner.as_ref() {
-//RS                             Expr::Ident(name, _) => Some(name.as_str()),
-//RS                             _ => None,
-//RS                         },
-//RS                         _ => None,
-//RS                     };
-//RS                     let user_policy = call.args[..call.args.len().saturating_sub(1)]
-//RS                         .iter()
-//RS                         .find_map(|argument| {
-//RS                             let Expr::Call(policy) = &argument.expr else {
-//RS                                 return None;
-//RS                             };
-//RS                             if crate::AST::CallablePolicyChain::is_builtin(&policy.name) {
-//RS                                 return None;
-//RS                             }
-//RS                             let target_name = target_name?;
-//RS                             let wrapper = crate::AST::CallablePolicyChain::user_wrapper_name(
-//RS                                 &policy.name,
-//RS                                 target_name,
-//RS                             );
-//RS                             cx.sigs.contains_key(&wrapper).then_some((wrapper, policy))
-//RS                         });
-//RS                     if let Some((wrapper, policy)) = user_policy {
-//RS                         let callee_expr = &call.args.last().expect("checked above").expr;
-//RS                         let mut callee = lower_expr(callee_expr, cx, env);
-//RS                         let policy_sig = cx
-//RS                             .sigs
-//RS                             .get(&wrapper)
-//RS                             .expect("sema materialized the user policy wrapper");
-//RS                         // The wrapper's `call` parameter (after the policy
-//RS                         // parameters, before the target's own) is this
-//RS                         // `apply`'s checked callable type. Sema fixed it before
-//RS                         // the failure solve, so a named target inferred
-//RS                         // `T Never!` since then enters that slot through the
-//RS                         // plain-function adapter with the slot's carrier.
-//RS                         let target_arity = match callee.ty.without_user_tags() {
-//RS                             Type::Fn { params, .. } => Some(params.len()),
-//RS                             _ => None,
-//RS                         };
-//RS                         let call_slot = target_arity
-//RS                             .and_then(|arity| policy_sig.len().checked_sub(arity + 1))
-//RS                             .and_then(|index| policy_sig.get(index))
-//RS                             .map(|(_, slot)| slot)
-//RS                             .filter(|slot| matches!(slot.without_user_tags(), Type::Fn { .. }));
-//RS                         let named_target = matches!(
-//RS                             &callee.kind,
-//RS                             TExprKind::FnValue {
-//RS                                 kind: TFnValueKind::NamedFn {
-//RS                                     name: Some(_),
-//RS                                     lambda: None,
-//RS                                 },
-//RS                             }
-//RS                         );
-//RS                         if let Some(slot) = call_slot.filter(|_| named_target) {
-//RS                             callee.ty = slot.clone();
-//RS                         }
-//RS                         let policy_args = policy
-//RS                             .args
-//RS                             .iter()
-//RS                             .enumerate()
-//RS                             .map(|(index, argument)| {
-//RS                                 lower_one_call_arg(
-//RS                                     argument,
-//RS                                     policy_sig.get(index).cloned(),
-//RS                                     env,
-//RS                                     cx,
-//RS                                 )
-//RS                             })
-//RS                             .collect();
-//RS                         let policy_conventions = policy
-//RS                             .args
-//RS                             .iter()
-//RS                             .enumerate()
-//RS                             .map(|(index, _)| {
-//RS                                 policy_sig
-//RS                                     .get(index)
-//RS                                     .map(|(convention, _)| *convention)
-//RS                                     .unwrap_or(AccessConvention::Read)
-//RS                             })
-//RS                             .collect();
-//RS                         let mut capture_names = HashSet::new();
-//RS                         for argument in &policy.args {
-//RS                             let (reads, calls) =
-//RS                                 crate::Sema::expr_free_reads_and_calls(&argument.expr);
-//RS                             capture_names.extend(reads);
-//RS                             capture_names.extend(calls);
-//RS                         }
-//RS                         let (reads, calls) = crate::Sema::expr_free_reads_and_calls(callee_expr);
-//RS                         capture_names.extend(reads);
-//RS                         capture_names.extend(calls);
-//RS                         let mut capture_names = capture_names.into_iter().collect::<Vec<_>>();
-//RS                         capture_names.sort();
-//RS                         let captures = capture_names
-//RS                             .into_iter()
-//RS                             .filter_map(|name| {
-//RS                                 env.locals.contains_key(&name).then(|| {
-//RS                                     (
-//RS                                         name.clone(),
-//RS                                         env.local_of(&name).name,
-//RS                                         env.ty_of(&name)
-//RS                                             .expect("checked policy capture has a type")
-//RS                                             .clone(),
-//RS                                     )
-//RS                                 })
-//RS                             })
-//RS                             .collect();
-//RS                         let fn_type = callee.ty.clone();
-//RS                         return TExpr {
-//RS                             ty: fn_type.clone(),
-//RS                             kind: TExprKind::FnValue {
-//RS                                 kind: TFnValueKind::Policy {
-//RS                                     fn_type,
-//RS                                     policy_args,
-//RS                                     policy_conventions,
-//RS                                     wrapper_name: Some(wrapper),
-//RS                                     captures,
-//RS                                     callee: Box::new(callee),
-//RS                                 },
-//RS                             },
-//RS                         };
-//RS                     }
-//RS                     return lower_expr(&call.args.last().expect("checked above").expr, cx, env);
-//RS                 }
-//RS                 // Early comptime registration runs before sema annotates calls with
-//RS                 // `widen_approx`. Recognize the unshadowed builtin here too; sema
-//RS                 // still owns validation and gate recording, while TIR owns the one
-//RS                 // canonical Int-to-Float conversion used by every evaluator tier.
-//RS                 let builtin_approx = call.name == Syntax::BUILTIN_APPROX
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                     && !env.locals.contains_key(&call.name);
-//RS                 if (call.widen_approx || builtin_approx) && call.args.len() == 1 {
-//RS                     return in_own_frame(|| {
-//RS                         let source = lower_expr(&call.args[0].expr, cx, env);
-//RS                         let op = crate::Codegen::TIR::resolve_numeric_conversion_op("Float", "Int")
-//RS                             .expect("Float.from_int is a registered numeric conversion");
-//RS                         return TExpr {
-//RS                             ty: Type::Float,
-//RS                             kind: TExprKind::NumericMethod {
-//RS                                 recv: Box::new(source),
-//RS                                 op,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-TYPE2-UNCERT1=A: the canonical source constructor uses the
-//RS                 // existing typed Prelude route directly. `core.units.from` is
-//RS                 // source-owned and is not a second CoreCall dispatcher entry.
-//RS                 if call.name == "measurement"
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                     && !env.locals.contains_key(&call.name)
-//RS                     && call.args.len() == 2
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let args = call
-//RS                             .args
-//RS                             .iter()
-//RS                             .map(|argument| lower_expr(&argument.expr, cx, env))
-//RS                             .collect::<Vec<_>>();
-//RS                         TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: Syntax::TYPE_MEASUREMENT.to_string(),
-//RS                                 args: vec![Type::Float],
-//RS                             },
-//RS                             kind: TExprKind::PreciseBuiltin {
-//RS                                 type_name: Syntax::TYPE_MEASUREMENT.to_string(),
-//RS                                 func: "new".to_string(),
-//RS                                 args,
-//RS                             },
-//RS                         }
-//RS                     });
-//RS                 }
-//RS                 // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
-//RS                 // parses as `Expr::Call`. Function-type params are unmarked Read params.
-//RS                 // A declared function of the same name wins over the local, exactly
-//RS                 // as sema's `check_call` resolves it.
-//RS                 if env.locals.contains_key(&call.name)
-//RS                     && !cx.consts.contains_key(&call.name)
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let callee_ty = env.ty_of(&call.name).unwrap_or_else(unit_type);
-//RS                         let callee_t = TExpr {
-//RS                             ty: callee_ty,
-//RS                             kind: TExprKind::Local(env.local_of(&call.name)),
-//RS                         };
-//RS                         let callee_expr = Expr::Ident(call.name.clone(), call.name_span);
-//RS                         lower_fn_value_call(
-//RS                             Some(&callee_expr),
-//RS                             callee_t,
-//RS                             &call.args,
-//RS                             call.name_span.start as u32,
-//RS                             cx,
-//RS                             env,
-//RS                         )
-//RS                     });
-//RS                 }
-//RS                 if call.name == Syntax::RESOURCE_CLOSE && call.args.len() == 1 {
-//RS                     return in_own_frame(|| {
-//RS                         let resource = match &call.args[0].expr {
-//RS                             Expr::Ident(name, _) if env.is_resource(name) => TExpr {
-//RS                                 ty: env.ty_of(name).unwrap_or_else(unit_type),
-//RS                                 kind: TExprKind::ResourceTake(env.resource_take_place(name)),
-//RS                             },
-//RS                             expr => lower_expr(expr, cx, env),
-//RS                         };
-//RS                         let resource = if call.args[0].convention == AccessConvention::Move
-//RS                             && !matches!(&resource.kind, TExprKind::Move(_) | TExprKind::ResourceTake(_))
-//RS                         {
-//RS                             TExpr {
-//RS                                 ty: resource.ty.clone(),
-//RS                                 kind: TExprKind::Move(Box::new(resource)),
-//RS                             }
-//RS                         } else {
-//RS                             resource
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: unit_type(),
-//RS                             kind: TExprKind::Close(Box::new(resource)),
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: the synthetic typed-head call sema rewrote a typed
-//RS                 // text literal into (mirrors D-UNITLIT1's rewrite pattern). Args
-//RS                 // alternate literal-segment, hole, literal-segment, ..., always closing
-//RS                 // on a literal (`literals.len() == holes.len() + 1`) — even index is a
-//RS                 // compile-time-known literal segment, odd index is a hole value. SQL
-//RS                 // keeps holes as bound parameters. HTML escapes ordinary holes and
-//RS                 // directly composes holes already proven to be HTML.
-//RS                 if let Some(kind) = Syntax::typed_head_kind(&call.name)
-//RS                     .filter(|kind| kind.is_interpolated_template())
-//RS                     .filter(|_| !cx.sigs.contains_key(&call.name))
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let mut literals: Vec<String> = Vec::new();
-//RS                         let mut holes: Vec<TExpr> = Vec::new();
-//RS                         let mut trusted_html: Vec<bool> = Vec::new();
-//RS                         for (i, a) in call.args.iter().enumerate() {
-//RS                             if i % 2 == 0 {
-//RS                                 let lit = match &a.expr {
-//RS                                     Expr::Str(parts, _) => match parts.as_slice() {
-//RS                                         [crate::AST::StrPart::Lit(s)] => s.clone(),
-//RS                                         _ => String::new(),
-//RS                                     },
-//RS                                     _ => String::new(),
-//RS                                 };
-//RS                                 literals.push(lit);
-//RS                             } else {
-//RS                                 let mut hole = lower_expr(&a.expr, cx, env);
-//RS                                 let trusted = a.flags.trusted_html;
-//RS                                 if trusted {
-//RS                                     debug_assert_eq!(kind, Syntax::TypedHeadKind::HTML);
-//RS                                     hole.ty = Type::Named(Syntax::TYPE_HTML.to_string());
-//RS                                 }
-//RS                                 trusted_html.push(trusted);
-//RS                                 holes.push(hole);
-//RS                             }
-//RS                         }
-//RS                         let ty = Type::Named(kind.internal_type_name().to_string());
-//RS                         if kind == Syntax::TypedHeadKind::HTML && holes.is_empty() {
-//RS                             return TExpr {
-//RS                                 ty,
-//RS                                 kind: TExprKind::StrLit(vec![TStrPart::Lit(
-//RS                                     literals.into_iter().next().unwrap_or_default(),
-//RS                                 )]),
-//RS                             };
-//RS                         }
-//RS                         return TExpr {
-//RS                             ty,
-//RS                             kind: TExprKind::HostCall(Box::new(
-//RS                                 crate::Codegen::TIR::THostCall::TypedTextInterp {
-//RS                                     kind,
-//RS                                     literals,
-//RS                                     holes,
-//RS                                     trusted_html,
-//RS                                 },
-//RS                             )),
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-REGEX-LIT1=D: sema already validated this complete literal.
-//RS                 // Keep one Regex value through AOT/JIT instead of a fallible Result.
-//RS                 if call.name == Syntax::TYPE_REGEX
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                     && call.args.len() == 1
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         return core_call_expr(
-//RS                             Type::Named(Syntax::TYPE_REGEX.to_string()),
-//RS                             "core.regex",
-//RS                             "literal",
-//RS                             vec![lower_expr(&call.args[0].expr, cx, env)],
-//RS                             call.name_span,
-//RS                             vec![false],
-//RS                         );
-//RS                     });
-//RS                 }
-//RS                 // `print` is ambient only when the user has not defined their own
-//RS                 // `print` function (matches emit_call; sema enforces the shadowing).
-//RS                 // Each checked argument keeps its own Printable/Display contract
-//RS                 // and emits one output line in source evaluation order.
-//RS                 if call.name == Syntax::BUILTIN_PRINT && !cx.sigs.contains_key(&call.name) {
-//RS                     return in_own_frame(|| print_args(&call.args, cx, env, call.name_span.start));
-//RS                 }
-//RS                 // D-DBG1=A: the checked development trace (sema renamed it).
-//RS                 if call.name == Syntax::INTERNAL_DEBUG_TRACE && call.args.len() == 2 {
-//RS                     return in_own_frame(|| lower_debug_trace(call, cx, env));
-//RS                 }
-//RS                 // D-LIN1-DROP: `drop(x)` — discard the value (move-to-nowhere). Sema
-//RS                 // proved the discard is audited when the value is `#SingleUse`. Lowers
-//RS                 // to a plain `drop(arg)`; no `unsafe` (I3). Disjoint from a user `drop`
-//RS                 // fn or local of that name (`cx.sigs`/`env.locals` would be set then).
-//RS                 if call.name == Syntax::BUILTIN_CONSUME
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                     && !env.locals.contains_key(&call.name)
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let arg = lower_expr(&call.args[0].expr, cx, env);
-//RS                         return TExpr {
-//RS                             ty: unit_type(),
-//RS                             kind: TExprKind::Drop(Box::new(arg)),
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-TOOL4: `expect(x)` builds a snapshot harness holder. At MirBridge
-//RS                 // comptime the holder is the value itself — `consume(expect(x))` only
-//RS                 // needs the binding to exist; `.snapshot()` is a separate HostCall.
-//RS                 if call.name == Syntax::BUILTIN_EXPECT
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                     && !env.locals.contains_key(&call.name)
-//RS                     && call.args.len() == 1
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let arg = lower_expr(&call.args[0].expr, cx, env);
-//RS                         return TExpr {
-//RS                             ty: arg.ty.clone(),
-//RS                             kind: TExprKind::Clone(Box::new(arg), jet_foundation::MIR::MirCopyFact::Materialize),
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // c109 Phase 26: the rich-runtime-report builtins (S36) — render the whole
-//RS                 // emit string at lowering, byte-for-byte the AST helper. `assert`/
-//RS                 // `assert_eq`/`panic`
-//RS                 // are statement-position calls (a `()` result); the string is the `{ … }`
-//RS                 // block emit emits as an expr-statement. Disjoint from a user fn of the same
-//RS                 // name (`cx.sigs.contains_key` would be true then).
-//RS                 if !cx.sigs.contains_key(&call.name) && !env.locals.contains_key(&call.name) {
-//RS                     if call.name == Syntax::BUILTIN_ASSERT {
-//RS                         return in_own_frame(|| {
-//RS                             let (kind, loc) = lower_require_stop(call, cx, env);
-//RS                             return TExpr {
-//RS                                 ty: unit_type(),
-//RS                                 kind: TExprKind::RequireStop {
-//RS                                     kind,
-//RS                                     loc,
-//RS                                     always_stops: false,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     if call.name == Syntax::BUILTIN_ASSERT_EQ {
-//RS                         return in_own_frame(|| {
-//RS                             let (kind, loc) = lower_require_eq_stop(call, cx, env);
-//RS                             return TExpr {
-//RS                                 ty: unit_type(),
-//RS                                 kind: TExprKind::RequireStop {
-//RS                                     kind,
-//RS                                     loc,
-//RS                                     always_stops: false,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     if call.name == Syntax::BUILTIN_PANIC {
-//RS                         return in_own_frame(|| {
-//RS                             let (kind, loc) =
-//RS                                 lower_panic_stop(&call.name_span, &call.args, cx, env);
-//RS                             return TExpr {
-//RS                                 ty: unit_type(),
-//RS                                 kind: TExprKind::RequireStop {
-//RS                                     kind,
-//RS                                     loc,
-//RS                                     always_stops: true,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). Same
-//RS                 // lowering as `io.input(...)` (CoreCall would also work, but the bare-call
-//RS                 // surface has no module alias, so it is its own node). Resolves to
-//RS                 // `Result<String, IOError>` (matching sema), so it composes with the
-//RS                 // Phase-8 `??` fallback. The prompt arg (if any) is lowered in-subset.
-//RS                 if call.name == Syntax::BUILTIN_INPUT
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                     && !env.locals.contains_key(&call.name)
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let prompt = call
-//RS                             .args
-//RS                             .first()
-//RS                             .map(|a| Box::new(lower_expr(&a.expr, cx, env)));
-//RS                         return TExpr {
-//RS                             ty: Type::Result {
-//RS                                 ok: Box::new(Type::String),
-//RS                                 err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
-//RS                             },
-//RS                             kind: TExprKind::AmbientInput { prompt },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // c109 Phase 28: the overflow opt-out builtins `wrapping(e)`/`saturating(e)`/
-//RS                 // `checked(e)` (D-NUMOPS1), plus the sema-only checked wrapper used by
-//RS                 // D-WRAP-SCOPE1=A. The gate proved the name is one of the three (not
-//RS                 // shadowed) and the sole arg is an integer `Expr::Binary`. Reproduce
-//RS                 // `emit_call`'s arm (Expression.rs ~L1756): `(lhs).{name}_{op}(rhs)` with PLAIN
-//RS                 // operands (no trap helper). `checked_*` returns `Option<T>`; the others return
-//RS                 // `T` — set the result type accordingly so a `checked(...) ?? x` composes.
-//RS                 if matches!(
-//RS                     call.name.as_str(),
-//RS                     Syntax::BUILTIN_WRAPPING
-//RS                         | Syntax::BUILTIN_SATURATING
-//RS                         | Syntax::BUILTIN_CHECKED
-//RS                         | Syntax::INTERNAL_ARITHMETIC_CHECKED
-//RS                 ) && !cx.sigs.contains_key(&call.name)
-//RS                     && !env.locals.contains_key(&call.name)
-//RS                 {
-//RS                     if let Some(Expr::Binary(op, l, r, _)) = call.args.first().map(|a| &a.expr) {
-//RS                         return in_own_frame(|| {
-//RS                             let op_suffix = match op {
-//RS                                 BinOp::Add => "add",
-//RS                                 BinOp::Sub => "sub",
-//RS                                 BinOp::Mul => "mul",
-//RS                                 BinOp::Div => "div",
-//RS                                 BinOp::Pow => "pow",
-//RS                                 // Sema validated an arithmetic op; mirror the AST default.
-//RS                                 _ => "add",
-//RS                             };
-//RS                             let lhs = lower_expr(l, cx, env);
-//RS                             let rhs = lower_expr(r, cx, env);
-//RS                             let line = cx.src_line_col(call.name_span.start).0 as u32;
-//RS                             let val_ty = lhs.ty.clone();
-//RS                             let result_ty = if call.name == Syntax::BUILTIN_CHECKED {
-//RS                                 Type::Option(Box::new(val_ty))
-//RS                             } else {
-//RS                                 val_ty
-//RS                             };
-//RS                             let policy = call
-//RS                                 .args
-//RS                                 .first()
-//RS                                 .and_then(|arg| arg.flags.arithmetic_policy);
-//RS                             let prefix = if call.name == Syntax::INTERNAL_ARITHMETIC_CHECKED {
-//RS                                 "checked_policy".to_string()
-//RS                             } else {
-//RS                                 call.name.clone()
-//RS                             };
-//RS                             return TExpr {
-//RS                                 ty: result_ty,
-//RS                                 kind: TExprKind::OverflowOpt {
-//RS                                     prefix,
-//RS                                     op: op_suffix,
-//RS                                     line,
-//RS                                     policy,
-//RS                                     lhs: Box::new(lhs),
-//RS                                     rhs: Box::new(rhs),
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 // c109 Phase 14: an FFI extern call (`emit_call`'s `extern_funcs` arm).
-//RS                 // Checked BEFORE the unqualified arms, matching `emit_call`'s order. Args
-//RS                 // use `emit_extern_call_args` (a non-scalar `Read` is `(…).clone()`).
-//RS                 if !env.locals.contains_key(&call.name) {
-//RS                     if let Some(extern_fn) = cx.extern_funcs.get(&call.name).cloned() {
-//RS                         let wrapper = if extern_fn.c_abi
-//RS                             && extern_fn.component.is_none()
-//RS                             && !call.name.contains("::")
-//RS                         {
-//RS                             crate::Sema::guest_import_wrapper_name(&cx.module_alias, &call.name)
-//RS                         } else {
-//RS                             extern_fn.wrapper
-//RS                         };
-//RS                         let c_abi = extern_fn.c_abi;
-//RS                         return in_own_frame(|| {
-//RS                             let sig = cx.sigs.get(&call.name).cloned();
-//RS                             let eargs = call
-//RS                                 .args
-//RS                                 .iter()
-//RS                                 .enumerate()
-//RS                                 .map(|(i, a)| {
-//RS                                     let conv = sig
-//RS                                         .as_ref()
-//RS                                         .and_then(|ps| ps.get(i))
-//RS                                         .map(|(c, t)| (*c, t.clone()));
-//RS                                     lower_extern_call_arg(a, conv, env, cx)
-//RS                                 })
-//RS                                 .collect();
-//RS                             // `Context` records foreign declarations with their
-//RS                             // raw bridge ABI; ordinary `#Import(c)` functions
-//RS                             // retain their effective carrier in `fn_types`.
-//RS                             let return_type = extern_call_return_type(cx, &call.name);
-//RS                             let lowered = TExpr {
-//RS                                 ty: return_type,
-//RS                                 kind: TExprKind::ExternCall {
-//RS                                     symbol: cx
-//RS                                         .foreign_call_keys
-//RS                                         .get(&call.name)
-//RS                                         .cloned()
-//RS                                         .unwrap_or(wrapper),
-//RS                                     c_abi,
-//RS                                     args: eargs,
-//RS                                 },
-//RS                             };
-//RS                             let lowered = match source_arg_order(&call.args) {
-//RS                                 Some(order) => preserve_source_arg_order(
-//RS                                     lowered,
-//RS                                     &order,
-//RS                                     call.args.len(),
-//RS                                     call.name_span.start as u32,
-//RS                                 ),
-//RS                                 None => lowered,
-//RS                             };
-//RS                             return wrap_foreign_undo(
-//RS                                 lowered,
-//RS                                 cx.foreign_undos.get(&call.name).map(String::as_str),
-//RS                                 call.name_span.start as u32,
-//RS                                 cx,
-//RS                                 env,
-//RS                             );
-//RS                         });
-//RS                     }
-//RS                     if let Some(foreign_key) = cx.foreign_call_keys.get(&call.name).cloned() {
-//RS                         return in_own_frame(|| {
-//RS                             let sig = cx.sigs.get(&call.name).cloned();
-//RS                             let eargs = call
-//RS                                 .args
-//RS                                 .iter()
-//RS                                 .enumerate()
-//RS                                 .map(|(i, a)| {
-//RS                                     let conv = sig
-//RS                                         .as_ref()
-//RS                                         .and_then(|ps| ps.get(i))
-//RS                                         .map(|(c, t)| (*c, t.clone()));
-//RS                                     lower_extern_call_arg(a, conv, env, cx)
-//RS                                 })
-//RS                                 .collect();
-//RS                             let lowered = TExpr {
-//RS                                 ty: extern_call_return_type(cx, &call.name),
-//RS                                 kind: TExprKind::ExternCall {
-//RS                                     symbol: foreign_key,
-//RS                                     c_abi: true,
-//RS                                     args: eargs,
-//RS                                 },
-//RS                             };
-//RS                             let lowered = match source_arg_order(&call.args) {
-//RS                                 Some(order) => preserve_source_arg_order(
-//RS                                     lowered,
-//RS                                     &order,
-//RS                                     call.args.len(),
-//RS                                     call.name_span.start as u32,
-//RS                                 ),
-//RS                                 None => lowered,
-//RS                             };
-//RS                             wrap_foreign_undo(
-//RS                                 lowered,
-//RS                                 cx.foreign_undos.get(&call.name).map(String::as_str),
-//RS                                 call.name_span.start as u32,
-//RS                                 cx,
-//RS                                 env,
-//RS                             )
-//RS                         });
-//RS                     }
-//RS                     // c109 Phase 14: unqualified inline-module import (`emit_call`'s
-//RS                     // `unqualified_inline` arm) → `{root}__jet_{mangled}(args)`.
-//RS                     let inline_mangled = cx
-//RS                         .inline_unqualified
-//RS                         .get(&env.fn_name)
-//RS                         .and_then(|scope| scope.get(&call.name))
-//RS                         .or_else(|| cx.unqualified_inline.get(&call.name))
-//RS                         .cloned();
-//RS                     if let Some(mangled_key) = inline_mangled {
-//RS                         return in_own_frame(|| {
-//RS                             let undo = cx.foreign_undos.get(&mangled_key).map(String::as_str);
-//RS                             let sig = cx.sigs.get(&mangled_key).cloned();
-//RS                             let args: Vec<_> = call
-//RS                                 .args
-//RS                                 .iter()
-//RS                                 .enumerate()
-//RS                                 .map(|(i, a)| {
-//RS                                     let conv = sig
-//RS                                         .as_ref()
-//RS                                         .and_then(|ps| ps.get(i))
-//RS                                         .map(|(c, t)| (*c, t.clone()));
-//RS                                     lower_one_call_arg(a, conv, env, cx)
-//RS                                 })
-//RS                                 .collect();
-//RS                             let target_return = call_return_type_with_args(
-//RS                                 cx,
-//RS                                 &mangled_key,
-//RS                                 &call.type_args,
-//RS                                 &args,
-//RS                             );
-//RS                             let ret = match module_call_source_return_type(
-//RS                                 cx,
-//RS                                 &mangled_key,
-//RS                                 call.resolved_ret.as_ref(),
-//RS                             ) {
-//RS                                 Ok(ret) => ret,
-//RS                                 Err(error) => {
-//RS                                     return invariant_violation_expr(call.name_span, error);
-//RS                                 }
-//RS                             };
-//RS                             let lowered = TExpr {
-//RS                                 ty: ret,
-//RS                                 kind: TExprKind::ModuleCall {
-//RS                                     form: TModuleCallForm::InlineMangled {
-//RS                                         mangled: demand_generic_free_function(
-//RS                                             cx,
-//RS                                             &mangled_key,
-//RS                                             &args,
-//RS                                             &call.type_args,
-//RS                                         )
-//RS                                         .unwrap_or(mangled_key),
-//RS                                     },
-//RS                                     target_return: Some(target_return),
-//RS                                     type_args: call.type_args.clone(),
-//RS                                     args,
-//RS                                 },
-//RS                             };
-//RS                             let lowered = match source_arg_order(&call.args) {
-//RS                                 Some(order) => preserve_source_arg_order(
-//RS                                     lowered,
-//RS                                     &order,
-//RS                                     call.args.len(),
-//RS                                     call.name_span.start as u32,
-//RS                                 ),
-//RS                                 None => lowered,
-//RS                             };
-//RS                             return wrap_foreign_undo(
-//RS                                 lowered,
-//RS                                 undo,
-//RS                                 call.name_span.start as u32,
-//RS                                 cx,
-//RS                                 env,
-//RS                             );
-//RS                         });
-//RS                     }
-//RS                     // c109 Phase 14: unqualified file-module import (`emit_call`'s
-//RS                     // `unqualified_file` arm) → `{root}{rust_mod}::{mangle(fn)}(args)`. The
-//RS                     // AST looks up the sig under `(call.name, fn_name)`.
-//RS                     let inline_file = cx
-//RS                         .inline_unqualified_file
-//RS                         .get(&env.fn_name)
-//RS                         .and_then(|scope| scope.get(&call.name))
-//RS                         .or_else(|| cx.unqualified_file.get(&call.name))
-//RS                         .cloned();
-//RS                     if let Some((rust_mod, fn_name)) = inline_file {
-//RS                         return in_own_frame(|| {
-//RS                             let undo = cx
-//RS                                 .foreign_undos
-//RS                                 .get(&format!("{rust_mod}::{fn_name}"))
-//RS                                 .map(String::as_str);
-//RS                             let sig = cx
-//RS                                 .import_sigs
-//RS                                 .get(&(call.name.clone(), fn_name.clone()))
-//RS                                 .cloned();
-//RS                             let args = call
-//RS                                 .args
-//RS                                 .iter()
-//RS                                 .enumerate()
-//RS                                 .map(|(i, a)| {
-//RS                                     let conv = sig
-//RS                                         .as_ref()
-//RS                                         .and_then(|ps| ps.get(i))
-//RS                                         .map(|(c, t)| (*c, t.clone()));
-//RS                                     lower_one_call_arg(a, conv, env, cx)
-//RS                                 })
-//RS                                 .collect();
-//RS                             let target_return = match imported_module_call_target_return(
-//RS                                 cx,
-//RS                                 &call.name,
-//RS                                 &fn_name,
-//RS                                 call.resolved_ret.as_ref(),
-//RS                             ) {
-//RS                                 Ok(target_return) => target_return,
-//RS                                 Err(error) => {
-//RS                                     return invariant_violation_expr(call.name_span, error);
-//RS                                 }
-//RS                             };
-//RS                             let ret = match module_call_source_return_type(
-//RS                                 cx,
-//RS                                 &format!("{}.{}", call.name, fn_name),
-//RS                                 call.resolved_ret.as_ref(),
-//RS                             ) {
-//RS                                 Ok(ret) => ret,
-//RS                                 Err(error) => {
-//RS                                     return invariant_violation_expr(call.name_span, error);
-//RS                                 }
-//RS                             };
-//RS                             let lowered = TExpr {
-//RS                                 ty: ret,
-//RS                                 kind: TExprKind::ModuleCall {
-//RS                                     form: TModuleCallForm::Qualified {
-//RS                                         rust_mod,
-//RS                                         rust_fn: mangle(&fn_name).to_string(),
-//RS                                     },
-//RS                                     target_return,
-//RS                                     type_args: call.type_args.clone(),
-//RS                                     args,
-//RS                                 },
-//RS                             };
-//RS                             let lowered = match source_arg_order(&call.args) {
-//RS                                 Some(order) => preserve_source_arg_order(
-//RS                                     lowered,
-//RS                                     &order,
-//RS                                     call.args.len(),
-//RS                                     call.name_span.start as u32,
-//RS                                 ),
-//RS                                 None => lowered,
-//RS                             };
-//RS                             return wrap_foreign_undo(
-//RS                                 lowered,
-//RS                                 undo,
-//RS                                 call.name_span.start as u32,
-//RS                                 cx,
-//RS                                 env,
-//RS                             );
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 // D-ZIPPAD1: free zip-family calls carry their complete result type
-//RS                 // from sema. Lower the same variadic contract as the method form;
-//RS                 // no ordinary function lookup or codegen-side type inference is
-//RS                 // involved.
-//RS                 if matches!(call.name.as_str(), "zip" | "zip_short" | "zip_pad")
-//RS                     && !cx.sigs.contains_key(&call.name)
-//RS                     && call.resolved_ret.is_some()
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let is_pad = call.name == "zip_pad";
-//RS                         let mut inputs = Vec::new();
-//RS                         let mut fields = Vec::new();
-//RS                         let mut fills = Vec::new();
-//RS                         for arg in &call.args {
-//RS                             match (is_pad, arg.label.as_ref().map(|(name, _)| name.as_str())) {
-//RS                                 (true, Some("fill")) | (true, Some("fills")) => {
-//RS                                     fills.push(lower_expr(&arg.expr, cx, env));
-//RS                                 }
-//RS                                 _ => {
-//RS                                     let index = fields.len();
-//RS                                     let name = arg.label.as_ref().map(|(name, _)| name.as_str());
-//RS                                     let field = name.map_or_else(
-//RS                                         || {
-//RS                                             ["a", "b", "c", "d", "e", "f"].get(index).map_or_else(
-//RS                                                 || format!("column_{index}"),
-//RS                                                 |name| (*name).to_string(),
-//RS                                             )
-//RS                                         },
-//RS                                         str::to_string,
-//RS                                     );
-//RS                                     fields.push(field);
-//RS                                     inputs.push(lower_expr(&arg.expr, cx, env));
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         let ret = call
-//RS                             .resolved_ret
-//RS                             .as_ref()
-//RS                             .expect("zip result resolved by sema");
-//RS                         if inputs.is_empty() {
-//RS                             return crate::Codegen::TIR::lower_empty_zip_family(
-//RS                                 ret,
-//RS                                 &call.name,
-//RS                                 call.name_span,
-//RS                             );
-//RS                         }
-//RS                         let mut all = inputs.into_iter();
-//RS                         let first = all.next().expect("non-empty zip inputs");
-//RS                         return crate::Codegen::TIR::lower_zip_family(
-//RS                             first,
-//RS                             all.collect(),
-//RS                             fills,
-//RS                             fields,
-//RS                             &call.name,
-//RS                             call.name_span,
-//RS                             Some(ret),
-//RS                         );
-//RS                     });
-//RS                 }
-//RS                 // D-DECIMAL1: `Decimal(…)` constructor.
-//RS                 if !env.locals.contains_key(&call.name)
-//RS                     && call.name == crate::Syntax::TYPE_DECIMAL
-//RS                     && !cx.type_names.contains(&call.name)
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let targs: Vec<TExpr> = call
-//RS                             .args
-//RS                             .iter()
-//RS                             .map(|a| lower_expr(&a.expr, cx, env))
-//RS                             .collect();
-//RS                         return TExpr {
-//RS                             ty: Type::Named(call.name.clone()),
-//RS                             kind: TExprKind::PreciseBuiltin {
-//RS                                 type_name: call.name.clone(),
-//RS                                 func: "from_str".to_string(),
-//RS                                 args: targs,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-TYPE2-IMAG1=A: unit-literal elaboration and explicit
-//RS                 // construction share the precise builtin constructor seam.
-//RS                 if !env.locals.contains_key(&call.name)
-//RS                     && call.name == crate::Syntax::TYPE_COMPLEX
-//RS                     && !cx.type_names.contains(&call.name)
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let targs: Vec<TExpr> = call
-//RS                             .args
-//RS                             .iter()
-//RS                             .map(|a| lower_expr(&a.expr, cx, env))
-//RS                             .collect();
-//RS                         return TExpr {
-//RS                             ty: Type::Named(call.name.clone()),
-//RS                             kind: TExprKind::PreciseBuiltin {
-//RS                                 type_name: call.name.clone(),
-//RS                                 func: "from_parts".to_string(),
-//RS                                 args: targs,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-SIMD2 / D-LINALG1: a built-in math-type constructor. Plainly lower the
-//RS                 // float components and emit `{root}jet_math_<T>_new(…)`.
-//RS                 if !env.locals.contains_key(&call.name)
-//RS                     && crate::Sema::is_math_type(&call.name)
-//RS                     && !cx.type_names.contains(&call.name)
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let targs: Vec<TExpr> = call
-//RS                             .args
-//RS                             .iter()
-//RS                             .map(|a| lower_expr(&a.expr, cx, env))
-//RS                             .collect();
-//RS                         return TExpr {
-//RS                             ty: Type::Named(call.name.clone()),
-//RS                             kind: TExprKind::MathBuiltin {
-//RS                                 type_name: call.name.clone(),
-//RS                                 func: "new".to_string(),
-//RS                                 args: targs,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if call.range_checked && !env.locals.contains_key(&call.name) {
-//RS                     if let Some(arg) = call.args.first() {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Result {
-//RS                                     ok: Box::new(Type::Named(call.name.clone())),
-//RS                                     err: Box::new(Type::String),
-//RS                                 },
-//RS                                 kind: TExprKind::RangeCheckedCtor {
-//RS                                     name: call.name.clone(),
-//RS                                     arg: Box::new(lower_expr(&arg.expr, cx, env)),
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 if !env.locals.contains_key(&call.name) {
-//RS                     if let (Some((base, _)), Some(arg)) =
-//RS                         (cx.distinct_types.get(&call.name), call.args.first())
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(call.name.clone()),
-//RS                                 kind: TExprKind::DistinctCtor {
-//RS                                     name: call.name.clone(),
-//RS                                     arg: Box::new(lower_expr(&arg.expr, cx, env)),
-//RS                                     base: base.clone(),
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a call to a trait-bounded
-//RS                 // variadic function — sema left the trailing args unpacked
-//RS                 // (`CheckerInfer/calls.rs::check_variadic_bound_tail`), so the arity
-//RS                 // is just "how many args past the fixed prefix". Route to the
-//RS                 // per-arity function `VariadicBound.rs` synthesizes; record the
-//RS                 // arity so the post-pass in `Codegen/mod.rs` knows to emit it.
-//RS                 if let Some((fixed, _bounds)) = cx.variadic_bound_fns.get(&call.name).cloned() {
-//RS                     return in_own_frame(|| {
-//RS                         let lowered = crate::Codegen::VariadicBound::lower_variadic_bound_call(
-//RS                             call, fixed, cx, env,
-//RS                         );
-//RS                         return match source_arg_order(&call.args) {
-//RS                             Some(order) => preserve_source_arg_order(
-//RS                                 lowered,
-//RS                                 &order,
-//RS                                 call.args.len(),
-//RS                                 call.name_span.start as u32,
-//RS                             ),
-//RS                             None => lowered,
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
-//RS                 // decided here, totally — via the shared `lower_one_call_arg` (the single
-//RS                 // `emit_call_args` reproduction). c109 Phase 13: a callee with a Fn-typed
-//RS                 // param (now in subset) routes its arg through the Box-coercion form.
-//RS                 let sig = checked_direct_call_sig(call, cx);
-//RS                 let args: Vec<TCallArg> = call
-//RS                     .args
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .map(|(i, a)| {
-//RS                         let conv = sig
-//RS                             .as_ref()
-//RS                             .and_then(|ps| ps.get(i))
-//RS                             .map(|(c, t)| (*c, t.clone()));
-//RS                         lower_one_call_arg(a, conv, env, cx)
-//RS                     })
-//RS                     .collect();
-//RS                 let target_name =
-//RS                     demand_generic_free_function(cx, &call.name, &args, &call.type_args)
-//RS                         .unwrap_or_else(|| call.name.clone());
-//RS                 in_own_frame(|| {
-//RS                     let ret = call_return_type_with_args(cx, &call.name, &call.type_args, &args);
-//RS                     let mut lowered = TExpr {
-//RS                         ty: ret,
-//RS                         kind: TExprKind::Call {
-//RS                             name: cx.jit_local_call_prefix.as_ref().map_or_else(
-//RS                                 || target_name.clone(),
-//RS                                 |prefix| format!("{prefix}{}", mangle(&target_name)),
-//RS                             ),
-//RS                             type_args: call.type_args.clone(),
-//RS                             args,
-//RS                         },
-//RS                     };
-//RS                     if let Some((pre, _)) = cx.contract_sigs.get(&call.name) {
-//RS                         let (bindings, contracts) = lower_call_pre_contracts(
-//RS                             call,
-//RS                             match &mut lowered.kind {
-//RS                                 TExprKind::Call { args, .. } => args,
-//RS                                 _ => unreachable!("plain call lowering produces a Call node"),
-//RS                             },
-//RS                             pre,
-//RS                             cx,
-//RS                             env,
-//RS                         );
-//RS                         if !contracts.is_empty() {
-//RS                             let mut stmts = bindings;
-//RS                             stmts.extend(
-//RS                                 contracts
-//RS                                     .into_iter()
-//RS                                     .map(|contract| TStmt::Contract { contract }),
-//RS                             );
-//RS                             let call_ty = lowered.ty.clone();
-//RS                             stmts.push(TStmt::ExprStmt(lowered));
-//RS                             lowered = TExpr {
-//RS                                 ty: call_ty,
-//RS                                 kind: TExprKind::InlineBlock(stmts),
-//RS                             };
-//RS                         }
-//RS                     }
-//RS                     let lowered = match source_arg_order(&call.args) {
-//RS                         Some(order) => preserve_source_arg_order(
-//RS                             lowered,
-//RS                             &order,
-//RS                             call.args.len(),
-//RS                             call.name_span.start as u32,
-//RS                         ),
-//RS                         None => lowered,
-//RS                     };
-//RS                     // A body may be flow-divergent even when its callable contract
-//RS                     // promises a value (for example, a panic followed by an
-//RS                     // unreachable return). Keep that declared value type at call
-//RS                     // sites; only a source-declared `Never` is itself a stopping
-//RS                     // expression. This matters for task payloads, whose `Task<T>`
-//RS                     // element type is the callable's declared `T`, not its body
-//RS                     // reachability fact.
-//RS                     let declared_never = cx
-//RS                         .fn_source_types
-//RS                         .get(&call.name)
-//RS                         .and_then(|ty| match ty {
-//RS                             Type::Fn { ret: Some(ret), .. } => Some(cx.expand_type_aliases(ret)),
-//RS                             _ => None,
-//RS                         })
-//RS                         .is_some_and(
-//RS                             |ty| matches!(ty, Type::Named(name) if name == Syntax::TYPE_NEVER),
-//RS                         );
-//RS                     if cx.diverging_functions.contains(&call.name) && declared_never {
-//RS                         let line = cx.src_line_col(call.name_span.start).0;
-//RS                         let never = Type::Named(Syntax::TYPE_NEVER.to_string());
-//RS                         TExpr {
-//RS                             ty: never.clone(),
-//RS                             kind: TExprKind::InlineBlock(vec![
-//RS                                 TStmt::ExprStmt(lowered),
-//RS                                 TStmt::ExprStmt(TExpr {
-//RS                                     ty: never,
-//RS                                     kind: TExprKind::Unreachable { line },
-//RS                                 }),
-//RS                             ]),
-//RS                         }
-//RS                     } else {
-//RS                         // A comptime fragment lowers a helper body before sema
-//RS                         // records `resolved_ret`. A `T Never!` callee cannot
-//RS                         // fail, so consume its carrier exactly as sema's checked
-//RS                         // call would; a condition or `&&` operand then sees `T`.
-//RS                         let resolved_ret = call.resolved_ret.clone().or_else(|| {
-//RS                             crate::Codegen::TIR::mir::never_carrier_success(&lowered.ty).cloned()
-//RS                         });
-//RS                         consume_plain_helper_route(
-//RS                             resolved_ret.as_ref(),
-//RS                             call.name_span,
-//RS                             lowered,
-//RS                             cx,
-//RS                             env,
-//RS                         )
-//RS                     }
-//RS                 })
-//RS             })
-//RS         }
-//RS         // c109 Phase 6: a method call. The gate (`method_call_in_subset`) admitted
-//RS         // exactly the synthetic `.clone()` or a user instance method on a covered
-//RS         // type; lower accordingly. Every dispatch fact is resolved here (totality).
-//RS         Expr::MethodCall { .. } => lower_method_chain(e, cx, env),
-//RS         // `lower_expr_segment` removes value-level `if` nodes from its build queue;
-//RS         // delegate here as well so this dispatch remains total when called directly.
-//RS         Expr::If { .. } => lower_expr_segment(e, cx, env),
-//RS 
-//RS         // c109 Phase 3: a struct literal. The gate already proved the type is a
-//RS         // plain covered user struct (no trait coercion, no import namespace, no
-//RS         // generic args), so the Rust head is `__jet_<name>` and field names mangle.
-//RS         // Field values are lowered as-is — no clone/coercion at the literal site
-//RS         // (mirrors the AST path; a value's own move/clone facts live in itself).
-//RS         Expr::StructLit {
-//RS             type_name,
-//RS             type_args,
-//RS             import_ns,
-//RS             as_trait,
-//RS             fields,
-//RS             inferred,
-//RS             span,
-//RS         } => {
-//RS             // A comptime fragment can lower a helper body before sema rewrites
-//RS             // the explicit named-payload form `Enum.Variant.{ … }` (parsed as a
-//RS             // dotted struct head) to `Expr::EnumLit`. Apply the same rewrite
-//RS             // here so the literal keeps its enum identity instead of naming a
-//RS             // nonexistent `Enum.Variant` struct row.
-//RS             if !*inferred && type_args.is_empty() && import_ns.is_none() {
-//RS                 if let Some((enum_name, variant)) = type_name.split_once('.') {
-//RS                     let owner = cx
-//RS                         .local_type_identities
-//RS                         .get(enum_name)
-//RS                         .map(String::as_str)
-//RS                         .unwrap_or(enum_name);
-//RS                     let is_variant = [enum_name, owner].into_iter().any(|enum_key| {
-//RS                         cx.enum_variants.get(enum_key).is_some_and(|variants| {
-//RS                             variants.iter().any(|(candidate, _)| candidate == variant)
-//RS                         })
-//RS                     });
-//RS                     if is_variant {
-//RS                         let enum_lit = Expr::EnumLit {
-//RS                             type_name: enum_name.to_string(),
-//RS                             variant: variant.to_string(),
-//RS                             variant_span: None,
-//RS                             args: fields
-//RS                                 .iter()
-//RS                                 .map(|(label, _, expr)| EnumLitArg::Named {
-//RS                                     label: label.clone(),
-//RS                                     expr: expr.clone(),
-//RS                                 })
-//RS                                 .collect(),
-//RS                             leading_dot: false,
-//RS                             span: *span,
-//RS                         };
-//RS                         return lower_temporary_expr(&enum_lit, cx, env);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             in_own_frame(|| {
-//RS                 // c109 Phase 30: a trait-object coercion (`Circle {…}` in a `[Shape]` list). The
-//RS                 // AST wraps the rendered literal `Box::new(<lit>) as Box<dyn __jet_<Trait>>`; the
-//RS                 // value's type is the trait object. Resolved here (totality) — only the plain
-//RS                 // user-struct branch below carries it (a coerced import_ns/prelude literal is
-//RS                 // not a construct any covered program produces; the gate keeps those uncoerced).
-//RS                 let trait_coerce = as_trait
-//RS                     .as_ref()
-//RS                     .map(|trait_name| (trait_name.clone(), type_name.clone()));
-//RS                 // c109 Phase 19: a FOREIGN (imported user) struct literal `alias.Type { … }`
-//RS                 // (`import_ns`). The AST `emit_struct_lit` `import_ns` branch emits
-//RS                 // `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED fields.
-//RS                 // Resolve the head here (totality); a missing alias falls to `user_unknown`,
-//RS                 // exactly as the AST path (the gate already required the alias to resolve).
-//RS                 if let Some(alias) = import_ns {
-//RS                     return in_own_frame(|| {
-//RS                         if cx.core_import_module_for_function(&env.fn_name, alias)
-//RS                             == Some("core.encoding")
-//RS                             && matches!(
-//RS                                 type_name.as_str(),
-//RS                                 "EncodingLimits" | "EncodingCause" | "EncodingError"
-//RS                             )
-//RS                             && type_args.is_empty()
-//RS                         {
-//RS                             return in_own_frame(|| {
-//RS                                 let tfields = fields
-//RS                                     .iter()
-//RS                                     .map(|(name, _, value)| {
-//RS                                         (name.clone(), lower_expr(value, cx, env), false)
-//RS                                     })
-//RS                                     .collect();
-//RS                                 return TExpr {
-//RS                                     ty: Type::Named(type_name.clone()),
-//RS                                     kind: TExprKind::StructLit {
-//RS                                         fields: tfields,
-//RS                                         extra: None,
-//RS                                         as_trait: None,
-//RS                                     },
-//RS                                 };
-//RS                             });
-//RS                         }
-//RS                         if cx.core_import_module_for_function(&env.fn_name, alias)
-//RS                             == Some("core.encoding.cbor")
-//RS                             && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
-//RS                             && type_args.is_empty()
-//RS                         {
-//RS                             return in_own_frame(|| {
-//RS                                 let tfields = fields
-//RS                                     .iter()
-//RS                                     .map(|(name, _, value)| {
-//RS                                         (name.clone(), lower_expr(value, cx, env), false)
-//RS                                     })
-//RS                                     .collect();
-//RS                                 return TExpr {
-//RS                                     ty: Type::Named(type_name.clone()),
-//RS                                     kind: TExprKind::StructLit {
-//RS                                         fields: tfields,
-//RS                                         extra: None,
-//RS                                         as_trait: None,
-//RS                                     },
-//RS                                 };
-//RS                             });
-//RS                         }
-//RS                         if cx.core_import_module_for_function(&env.fn_name, alias)
-//RS                             == Some("core.encoding.xml")
-//RS                             && matches!(
-//RS                                 type_name.as_str(),
-//RS                                 "XMLLimits"
-//RS                                     | "XMLParseOptions"
-//RS                                     | "XMLRenderOptions"
-//RS                                     | "XMLCanonical"
-//RS                                     | "XMLError"
-//RS                             )
-//RS                             && type_args.is_empty()
-//RS                         {
-//RS                             return in_own_frame(|| {
-//RS                                 let tfields = fields
-//RS                                     .iter()
-//RS                                     .map(|(name, _, value)| {
-//RS                                         (name.clone(), lower_expr(value, cx, env), false)
-//RS                                     })
-//RS                                     .collect();
-//RS                                 return TExpr {
-//RS                                     ty: Type::Named(type_name.clone()),
-//RS                                     kind: TExprKind::StructLit {
-//RS                                         fields: tfields,
-//RS                                         extra: None,
-//RS                                         as_trait: None,
-//RS                                     },
-//RS                                 };
-//RS                             });
-//RS                         }
-//RS                         if cx.core_import_module_for_function(&env.fn_name, alias)
-//RS                             == Some(crate::Syntax::CORE_EMAIL_MODULE)
-//RS                             && matches!(
-//RS                                 type_name.as_str(),
-//RS                                 "RecipientReport"
-//RS                                     | "SendReport"
-//RS                                     | "Limits"
-//RS                                     | "DKIMConfig"
-//RS                                     | "SMTPConfig"
-//RS                             )
-//RS                         {
-//RS                             return in_own_frame(|| {
-//RS                                 let tfields = fields
-//RS                                     .iter()
-//RS                                     .map(|(name, _, value)| {
-//RS                                         (name.clone(), lower_expr(value, cx, env), false)
-//RS                                     })
-//RS                                     .collect();
-//RS                                 return TExpr {
-//RS                                     ty: if type_args.is_empty() {
-//RS                                         Type::Named(type_name.clone())
-//RS                                     } else {
-//RS                                         Type::Apply {
-//RS                                             name: type_name.clone(),
-//RS                                             args: type_args.clone(),
-//RS                                         }
-//RS                                     },
-//RS                                     kind: TExprKind::StructLit {
-//RS                                         fields: tfields,
-//RS                                         extra: None,
-//RS                                         as_trait: None,
-//RS                                     },
-//RS                                 };
-//RS                             });
-//RS                         }
-//RS                         let tfields = fields
-//RS                             .iter()
-//RS                             .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
-//RS                             .collect();
-//RS                         let qualified = in_own_frame(|| {
-//RS                             if cx.code_modules.contains(alias) {
-//RS                                 // Inline-module instance members are local generated nominals.
-//RS                                 // Their qualified source spelling is never a foreign identity.
-//RS                                 jet_foundation::Names::member_name(alias, type_name)
-//RS                             } else if let Some(identity) =
-//RS                                 cx.foreign_type_identity(alias, type_name)
-//RS                             {
-//RS                                 identity
-//RS                             } else {
-//RS                                 // A bundle-backed context spells a dotted head one of exactly two
-//RS                                 // ways: an inline-module member or an import. Failing both tables
-//RS                                 // there is a genuine internal contradiction (I3).
-//RS                                 jet_foundation::ice!(
-//RS                                     None,
-//RS                                     "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
-//RS                                 )
-//RS                             }
-//RS                         });
-//RS                         return TExpr {
-//RS                             ty: if type_args.is_empty() {
-//RS                                 Type::Named(qualified)
-//RS                             } else {
-//RS                                 Type::Apply {
-//RS                                     name: qualified,
-//RS                                     args: type_args.clone(),
-//RS                                 }
-//RS                             },
-//RS                             kind: TExprKind::StructLit {
-//RS                                 fields: tfields,
-//RS                                 extra: None,
-//RS                                 as_trait: None,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // c109 Phase 17: a PRELUDE struct literal (HTTPRequest/HTTPResponse).
-//RS                 if net_handle_rust_type(type_name).is_some() {
-//RS                     return in_own_frame(|| {
-//RS                         // A prelude struct has no boxed (recursive) edges.
-//RS                         // Reapply checked field types to bare `None`, whose
-//RS                         // context-free TIR placeholder is `Option<Int>`.
-//RS                         let resolved_ty = Type::Named(type_name.clone());
-//RS                         let mut tfields: Vec<(String, TExpr, bool)> = fields
-//RS                             .iter()
-//RS                             .map(|(n, _, fe)| {
-//RS                                 let mut value = lower_expr(fe, cx, env);
-//RS                                 if let Some(fty) = struct_field_type(cx, &resolved_ty, n) {
-//RS                                     if matches!(&value.kind, TExprKind::Absent)
-//RS                                         && matches!(&fty, Type::Option(_))
-//RS                                     {
-//RS                                         value.ty = fty;
-//RS                                     }
-//RS                                 }
-//RS                                 (n.clone(), value, false)
-//RS                             })
-//RS                             .collect();
-//RS                         let extra = if type_name == "HTTPRequest" {
-//RS                             Some(crate::Codegen::TIR::TStructExtra::HTTPRequestParams)
-//RS                         } else {
-//RS                             None
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Named(type_name.clone()),
-//RS                             kind: TExprKind::StructLit {
-//RS                                 fields: tfields.drain(..).collect(),
-//RS                                 extra,
-//RS                                 as_trait: None,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }` —
-//RS                 // a plain dot-ctor core struct, `jet_std::TextWidth` head, no injected
-//RS                 // extra field (unlike HTTPRequest's `params`).
-//RS                 if type_name == Syntax::TYPE_ERR {
-//RS                     return in_own_frame(|| {
-//RS                         let tfields = fields
-//RS                             .iter()
-//RS                             .map(|(name, _, value)| {
-//RS                                 (
-//RS                                     name.clone(),
-//RS                                     lower_default_err_field(name, value, cx, env),
-//RS                                     false,
-//RS                                 )
-//RS                             })
-//RS                             .collect();
-//RS                         return TExpr {
-//RS                             ty: Type::Named(Syntax::TYPE_ERR.to_string()),
-//RS                             kind: TExprKind::StructLit {
-//RS                                 fields: tfields,
-//RS                                 extra: None,
-//RS                                 as_trait: None,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if matches!(
-//RS                     type_name.as_str(),
-//RS                     "TextWidth" | "TerminalSize" | "TerminalPolicy"
-//RS                 ) {
-//RS                     return in_own_frame(|| {
-//RS                         let tfields: Vec<(String, TExpr, bool)> = fields
-//RS                             .iter()
-//RS                             .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
-//RS                             .collect();
-//RS                         return TExpr {
-//RS                             ty: Type::Named(type_name.clone()),
-//RS                             kind: TExprKind::StructLit {
-//RS                                 fields: tfields,
-//RS                                 extra: None,
-//RS                                 as_trait: None,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == "AsyncPolicy" {
-//RS                     return in_own_frame(|| {
-//RS                         let tfields = fields
-//RS                             .iter()
-//RS                             .map(|(name, _, value)| {
-//RS                                 (name.clone(), lower_expr(value, cx, env), false)
-//RS                             })
-//RS                             .collect();
-//RS                         return TExpr {
-//RS                             ty: Type::Named(type_name.clone()),
-//RS                             kind: TExprKind::StructLit {
-//RS                                 fields: tfields,
-//RS                                 extra: None,
-//RS                                 as_trait: None,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-ENCSTREAM-SURFACE1=A: shared encoding value constructors.
-//RS                 if matches!(
-//RS                     type_name.as_str(),
-//RS                     "EncodingLimits" | "EncodingCause" | "EncodingError"
-//RS                 ) {
-//RS                     return in_own_frame(|| {
-//RS                         let tfields = fields
-//RS                             .iter()
-//RS                             .map(|(name, _, value)| {
-//RS                                 (name.clone(), lower_expr(value, cx, env), false)
-//RS                             })
-//RS                             .collect();
-//RS                         return TExpr {
-//RS                             ty: Type::Named(type_name.clone()),
-//RS                             kind: TExprKind::StructLit {
-//RS                                 fields: tfields,
-//RS                                 extra: None,
-//RS                                 as_trait: None,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-VALIDATE1: `FieldError.{ path: …, reason: … }` — same shape,
-//RS                 // separate jet_std Rust head.
-//RS                 if type_name == "FieldError" {
-//RS                     return in_own_frame(|| {
-//RS                         let tfields = fields
-//RS                             .iter()
-//RS                             .map(|(name, _, value)| {
-//RS                                 (name.clone(), lower_expr(value, cx, env), false)
-//RS                             })
-//RS                             .collect();
-//RS                         return TExpr {
-//RS                             ty: Type::Named(type_name.clone()),
-//RS                             kind: TExprKind::StructLit {
-//RS                                 fields: tfields,
-//RS                                 extra: None,
-//RS                                 as_trait: None,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if matches!(
-//RS                     type_name.as_str(),
-//RS                     "RecipientReport" | "SendReport" | "Limits" | "DKIMConfig" | "SMTPConfig"
-//RS                 ) {
-//RS                     return in_own_frame(|| {
-//RS                         let tfields = fields
-//RS                             .iter()
-//RS                             .map(|(name, _, value)| {
-//RS                                 (name.clone(), lower_expr(value, cx, env), false)
-//RS                             })
-//RS                             .collect();
-//RS                         return TExpr {
-//RS                             ty: if type_args.is_empty() {
-//RS                                 Type::Named(type_name.clone())
-//RS                             } else {
-//RS                                 Type::Apply {
-//RS                                     name: type_name.clone(),
-//RS                                     args: type_args.clone(),
-//RS                                 }
-//RS                             },
-//RS                             kind: TExprKind::StructLit {
-//RS                                 fields: tfields,
-//RS                                 extra: None,
-//RS                                 as_trait: None,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`).
-//RS                 // The Rust head is the turbofish `__jet_<Name>::<args>` (`user_type_apply_rust`),
-//RS                 // resolved at lowering; fields mangle. A non-generic literal renders `__jet_<Name>`.
-//RS                 // c109: an UNqualified FOREIGN struct (`Note { … }`, no `import_ns`) prefixes its
-//RS                 // module head (`{root}__jet_<mod>::__jet_<Note>`), exactly as `user_type_apply_rust`
-//RS                 // — or rustc can't find the type (E0422). A local struct keeps the plain head.
-//RS                 // Struct head spelling comes from `TExpr.ty` at emit (`cx.rust_type`).
-//RS                 // D-PATCH1: partial `T.Patch.{ … }` — fill omitted fields with `None`,
-//RS                 // wrap provided scalars in `Some(…)`.
-//RS                 if let Some(base_name) = type_name.strip_suffix(".Patch") {
-//RS                     // TIR's entry-module shape table contains source structs, not
-//RS                     // sema's synthetic patch item. Reconstruct that one derived
-//RS                     // shape from the base fields, preserving the computed-field
-//RS                     // exclusion owned by the patchable sema pass.
-//RS                     let all = cx.struct_fields.get(base_name).map(|base_fields| {
-//RS                         base_fields
-//RS                             .iter()
-//RS                             .filter(|(name, _)| {
-//RS                                 !cx.computed_fields
-//RS                                     .get(base_name)
-//RS                                     .is_some_and(|computed| computed.contains(name))
-//RS                             })
-//RS                             .map(|(name, field_ty)| {
-//RS                                 (name.clone(), Type::Option(Box::new(field_ty.clone())))
-//RS                             })
-//RS                             .collect::<Vec<_>>()
-//RS                     });
-//RS                     if let Some(all) = all {
-//RS                         return in_own_frame(|| {
-//RS                             let provided: std::collections::HashMap<_, _> =
-//RS                                 fields.iter().map(|(n, _, fe)| (n.as_str(), fe)).collect();
-//RS                             let tfields = all
-//RS                                 .iter()
-//RS                                 .map(|(fname, fty)| {
-//RS                                     let te = if let Some(fe) = provided.get(fname.as_str()) {
-//RS                                         fit_patch_field_value(lower_expr(fe, cx, env), fty)
-//RS                                     } else {
-//RS                                         TExpr {
-//RS                                             ty: fty.clone(),
-//RS                                             kind: TExprKind::Absent,
-//RS                                         }
-//RS                                     };
-//RS                                     (fname.clone(), te, false)
-//RS                                 })
-//RS                                 .collect();
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(type_name.clone()),
-//RS                                 kind: TExprKind::StructLit {
-//RS                                     fields: tfields,
-//RS                                     extra: None,
-//RS                                     as_trait: None,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 in_own_frame(|| {
-//RS                     // I3: sema already proved this literal names a real struct. A
-//RS                     // declaring-module local may carry the imported module's canonical
-//RS                     // identity; an entry-module local keeps its source spelling.
-//RS                     // The `jet run` TIR path lowers before the AOT context registers
-//RS                     // local structs, so an absent map entry remains ordinary.
-//RS                     let mut resolved_name = cx
-//RS                         .local_type_identities
-//RS                         .get(type_name)
-//RS                         .cloned()
-//RS                         .or_else(|| {
-//RS                             if cx.struct_fields.contains_key(type_name) {
-//RS                                 Some(type_name.clone())
-//RS                             } else {
-//RS                                 cx.foreign_type_identity("", type_name)
-//RS                             }
-//RS                         })
-//RS                         .unwrap_or_else(|| type_name.clone());
-//RS                     // Generic-module bodies can retain a source leaf whose
-//RS                     // instantiated nominal has the same leaf in the entry
-//RS                     // module. A checked direct return carries the canonical
-//RS                     // instance identity; prefer it only for that ambiguous
-//RS                     // leaf instead of asking MIR to guess.
-//RS                     let context_name = env
-//RS                         .ret_ty
-//RS                         .as_ref()
-//RS                         .and_then(|ty| match ty {
-//RS                             Type::Named(name) => Some(name.as_str()),
-//RS                             _ => None,
-//RS                         })
-//RS                         .or(env.self_owner.as_deref());
-//RS                     if let Some(context_name) = context_name {
-//RS                         let same_leaf =
-//RS                             context_name.rsplit("::").next().unwrap_or(context_name) == type_name;
-//RS                         let leaf_count = cx
-//RS                             .struct_fields
-//RS                             .keys()
-//RS                             .filter(|name| name.rsplit("::").next().unwrap_or(name) == type_name)
-//RS                             .count();
-//RS                         if same_leaf
-//RS                             && leaf_count > 1
-//RS                             && cx.struct_fields.contains_key(context_name)
-//RS                         {
-//RS                             resolved_name = context_name.to_string();
-//RS                         }
-//RS                     }
-//RS                     let resolved_ty = if type_args.is_empty() {
-//RS                         Type::Named(resolved_name.clone())
-//RS                     } else {
-//RS                         Type::Apply {
-//RS                             name: resolved_name.clone(),
-//RS                             args: type_args.clone(),
-//RS                         }
-//RS                     };
-//RS                     // c109: a self-referential field (`child: Tree?` on `Tree`) has Rust type
-//RS                     // `Box<…>` (`cx.boxed_edges`); resolve the `boxed` flag here (a total fact)
-//RS                     // so emit can wrap the value in `Box::new(…)`, exactly as `emit_struct_lit`.
-//RS                     let mut tfields = fields
-//RS                         .iter()
-//RS                         .map(|(n, _, fe)| {
-//RS                             let boxed =
-//RS                                 cx.boxed_edges.contains(&(resolved_name.clone(), n.clone()));
-//RS                             let mut value = lower_owned_expr(fe, cx, env);
-//RS                             // D-UNIONTYPE1=A: member → union inject at Codable/struct field sites.
-//RS                             if let Some(fty) = struct_field_type(cx, &resolved_ty, n) {
-//RS                                 if matches!(&value.kind, TExprKind::Absent)
-//RS                                     && matches!(&fty, Type::Option(_))
-//RS                                 {
-//RS                                     value.ty = fty.clone();
-//RS                                 }
-//RS                                 // A typed fixed-list literal is lowered without an
-//RS                                 // expected type at this point. Reapply the field's
-//RS                                 // concrete shape before emission, or a `[T#N]` field
-//RS                                 // receives a `Vec<T>` and rustc reports an internal
-//RS                                 // type error (I2).
-//RS                                 value = preserve_typed_list_shape(value, &fty, cx);
-//RS                                 value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, &fty);
-//RS                                 value = crate::Codegen::TIR::box_present_trait_payload(value, &fty, cx);
-//RS                                 value = lower_atomic_initializer(value, &fty);
-//RS                             }
-//RS                             (n.clone(), value, boxed)
-//RS                         })
-//RS                         .collect::<Vec<_>>();
-//RS                     if cx.published_schemas.contains(&resolved_name) {
-//RS                         let holder_ty = Type::Named(Syntax::TYPE_DATA.to_string());
-//RS                         let holder = if env.fn_name == "decode" {
-//RS                             TExpr {
-//RS                                 ty: holder_ty,
-//RS                                 kind: TExprKind::Local(TLocal::user("tree")),
-//RS                             }
-//RS                         } else {
-//RS                             core_call_expr(
-//RS                                 holder_ty,
-//RS                                 "core.encoding",
-//RS                                 "__published_schema_empty",
-//RS                                 Vec::new(),
-//RS                                 *span,
-//RS                                 Vec::new(),
-//RS                             )
-//RS                         };
-//RS                         tfields.push((Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string(), holder, false));
-//RS                     }
-//RS                     // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
-//RS                     // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
-//RS                     let ty = match as_trait {
-//RS                         Some(t) => Type::TraitObject(vec![t.clone()]),
-//RS                         None => resolved_ty,
-//RS                     };
-//RS                     TExpr {
-//RS                         ty,
-//RS                         kind: TExprKind::StructLit {
-//RS                             fields: tfields,
-//RS                             extra: None,
-//RS                             as_trait: trait_coerce,
-//RS                         },
-//RS                     }
-//RS                 })
-//RS             })
-//RS         }
-//RS         // Direct module constants share Expr::Field with ordinary projections.
-//RS         // Consume only the NameLedger-backed const site first; subsequent
-//RS         // branches keep existing Core and struct-field handling.
-// END-PORT-PENDING 0479 crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:5677-7366
+use jet_foundation.AST.[Expr, Call, Type, AccessConvention, BinOp, StrPart, EnumLitArg]
+use jet_foundation.Diagnostics.[Span]
+use jet_foundation.MIR.[MirCopyFact]
+use jet_foundation.Syntax
+use jet_codegen.Codegen.TIR.[TExpr, TExprKind, TFnValueKind, TCallArg, TStrPart, THostCall, TModuleCallForm, TStmt, TStructExtra, TLocal]
+use jet_codegen.Codegen.Context.[Cx]
+use jet_codegen.Codegen.TIR.[LowerEnv]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:5677-6795
+// Call arm of lower_expr_inner; the canonical dispatcher invokes this body.
+fn lower_expr_inner_call(call: &Call, cx: &Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() {
+        if lower_raw_ok_call(call, cx, &env) == .Val(lowered) -> return lowered
+        if lower_raw_err_call(call, cx, &env) == .Val(lowered) -> return lowered
+        if call.name == Syntax.BUILTIN_CHANNEL && !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name) && call.args.len() <= 1 {
+            ty := call.resolved_ret ?? return invariant_violation_expr(call.name_span, "channel constructor without a resolved return type")
+            args := loop arg in call.args -> lower_expr(arg.expr, cx, &env)
+            widen_to_vec := loop _ in args -> false
+            method := if call.args.is_empty() -> Syntax.INTERNAL_CHANNEL_NEW_METHOD else -> Syntax.INTERNAL_CHANNEL_BOUNDED_METHOD
+            return core_call_expr(ty, "core.tasks", method, args, call.name_span, widen_to_vec)
+        }
+        if call.name == Syntax.KW_FREEZE && !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name) && call.args.len() == 1 {
+            return in_own_frame(fn() {
+                source := call.args[0].expr
+                if source == .Call(inner) {
+                    if inner.name == Syntax.KW_FREEZE && inner.args.len() == 1 -> return lower_expr(source, cx, &env)
+                }
+                operand := lower_expr(source, cx, &env)
+                view_owned_ty := view_copy_owned_type(operand.ty)
+                if view_owned_ty == None {
+                    if source == .Ident(name, _) {
+                        if env.split_view_handle(name) == .Val(ty) -> view_owned_ty = view_copy_owned_type(ty)
+                    }
+                }
+                string_view := if source == { .Ident(name, _) -> env.is_string_view_local(name) else -> false }
+                is_view := view_owned_ty != None
+                ty := view_owned_ty ?? operand.ty
+                kind := if is_view || string_view -> TExprKind.MaterializeView(operand)
+                else if operand.ty.is_compute_tensor_family() {
+                    env.note_clone(ty)
+                    TExprKind.ExplicitCopy(operand)
+                } else {
+                    env.note_clone(ty)
+                    TExprKind.Clone(operand, MirCopyFact.Explicit)
+                }
+                TExpr{ty: ty, kind: kind}
+            })
+        }
+        last_arg := call.args.last()
+        has_policy := if last_arg == .Val(arg) -> arg.flags.callable_policy != None else -> false
+        if call.name == "apply" && !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name) && has_policy {
+            target_expr := (last_arg ?? panic("checked above")).expr
+            target_name := if target_expr == {
+                .Ident(name, _) -> Val(name)
+                .Paren(inner, _) -> if inner == { .Ident(name, _) -> Val(name) else -> None }
+                else -> None
+            }
+            user_policy := None
+            loop argument in call.args[0..<call.args.len().saturating_sub(1)] {
+                if argument.expr == .Call(policy) {
+                    if jet_foundation.AST.CallablePolicyChain.is_builtin(policy.name) -> continue
+                    name := target_name ?? continue
+                    wrapper := jet_foundation.AST.CallablePolicyChain.user_wrapper_name(policy.name, name)
+                    if cx.sigs.contains_key(wrapper) {
+                        user_policy = Val((wrapper, policy))
+                        break
+                    }
+                }
+            }
+            if user_policy == .Val((wrapper, policy)) {
+                callee := lower_expr(target_expr, cx, &env)
+                policy_sig := cx.sigs.get(wrapper) ?? panic("sema materialized the user policy wrapper")
+                target_arity := if callee.ty.without_user_tags() == { .Fn(params, _, _, _) -> Val(params.len()) else -> None }
+                call_slot := None
+                if target_arity == .Val(arity) {
+                    if policy_sig.len().checked_sub(arity + 1) == .Val(index) {
+                        if policy_sig.get(index) == .Val((_, slot)) {
+                            if slot.without_user_tags() == { .Fn(_, _, _, _) -> true else -> false } -> call_slot = Val(slot)
+                        }
+                    }
+                }
+                named_target := if callee.kind == { .FnValue(.NamedFn(.Val(_), None)) -> true else -> false }
+                if named_target {
+                    if call_slot == .Val(slot) -> callee.ty = slot
+                }
+                policy_args := loop (index, argument) in policy.args.iter().enumerate() -> lower_one_call_arg(argument, policy_sig.get(index), &env, cx)
+                policy_conventions := loop (index, _) in policy.args.iter().enumerate() -> if policy_sig.get(index) == .Val((convention, _)) -> convention else -> AccessConvention.Read
+                capture_names := Set<String>{}
+                loop argument in policy.args {
+                    (reads, calls) := jet_sema.expr_free_reads_and_calls(argument.expr)
+                    &capture_names.extend(reads)
+                    &capture_names.extend(calls)
+                }
+                (reads, calls) := jet_sema.expr_free_reads_and_calls(target_expr)
+                &capture_names.extend(reads)
+                &capture_names.extend(calls)
+                sorted_names := capture_names.iter().collect()
+                &sorted_names.sort()
+                captures := sorted_names.iter().filter_map(fn(name) {
+                    if !env.locals.contains_key(name) -> return None
+                    ty := env.ty_of(name) ?? panic("checked policy capture has a type")
+                    Val((name, env.local_of(name).name, ty))
+                }).collect()
+                fn_type := callee.ty
+                return TExpr{ty: fn_type, kind: TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: fn_type, policy_args: policy_args, policy_conventions: policy_conventions, wrapper_name: Val(wrapper), captures: captures, callee: callee}}}
+            }
+            return lower_expr(target_expr, cx, &env)
+        }
+        builtin_approx := call.name == Syntax.BUILTIN_APPROX && !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name)
+        if (call.widen_approx || builtin_approx) && call.args.len() == 1 {
+            return in_own_frame(fn() {
+                source := lower_expr(call.args[0].expr, cx, &env)
+                op := jet_codegen.Codegen.TIR.resolve_numeric_conversion_op("Float", "Int") ?? panic("Float.from_int is a registered numeric conversion")
+                TExpr{ty: Type.Float, kind: TExprKind.NumericMethod{recv: source, op: op}}
+            })
+        }
+        if call.name == "measurement" && !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name) && call.args.len() == 2 {
+            return in_own_frame(fn() {
+                args := loop argument in call.args -> lower_expr(argument.expr, cx, &env)
+                TExpr{ty: Type.Apply{name: Syntax.TYPE_MEASUREMENT, args: [Type]{Type.Float}}, kind: TExprKind.PreciseBuiltin{type_name: Syntax.TYPE_MEASUREMENT, func: "new", args: args}}
+            })
+        }
+        if env.locals.contains_key(call.name) && !cx.consts.contains_key(call.name) && !cx.sigs.contains_key(call.name) {
+            return in_own_frame(fn() {
+                callee_ty := env.ty_of(call.name) ?? unit_type()
+                callee_t := TExpr{ty: callee_ty, kind: TExprKind.Local(env.local_of(call.name))}
+                callee_expr := Expr.Ident(call.name, call.name_span)
+                lower_fn_value_call(Val(callee_expr), callee_t, call.args, U32.from_int(call.name_span.start), cx, &env)
+            })
+        }
+        if call.name == Syntax.RESOURCE_CLOSE && call.args.len() == 1 {
+            return in_own_frame(fn() {
+                source := call.args[0].expr
+                resource := if source == {
+                    .Ident(name, _) -> if env.is_resource(name) -> TExpr{ty: env.ty_of(name) ?? unit_type(), kind: TExprKind.ResourceTake(env.resource_take_place(name))} else -> lower_expr(source, cx, &env)
+                    else -> lower_expr(source, cx, &env)
+                }
+                already_moved := if resource.kind == { .Move(_) | .ResourceTake(_) -> true else -> false }
+                if call.args[0].convention == AccessConvention.Move && !already_moved -> resource = TExpr{ty: resource.ty, kind: TExprKind.Move(resource)}
+                TExpr{ty: unit_type(), kind: TExprKind.Close(resource)}
+            })
+        }
+        typed_kind := Syntax.typed_head_kind(call.name)
+        if typed_kind == .Val(kind) {
+            if kind.is_interpolated_template() && !cx.sigs.contains_key(call.name) {
+                return in_own_frame(fn() {
+                    literals := [String]{}
+                    holes := [TExpr]{}
+                    trusted_html := [Bool]{}
+                    loop (i, arg) in call.args.iter().enumerate() {
+                        if i % 2 == 0 {
+                            lit := if arg.expr == {
+                                .Str(parts, _) -> if parts.len() == 1 -> if parts[0] == { .Lit(s) -> s else -> "" } else -> ""
+                                else -> ""
+                            }
+                            &literals.push(lit)
+                        } else {
+                            hole := lower_expr(arg.expr, cx, &env)
+                            trusted := arg.flags.trusted_html
+                            if trusted {
+                                debug_assert(kind == Syntax.TypedHeadKind.HTML)
+                                hole.ty = Type.Named(Syntax.TYPE_HTML)
+                            }
+                            &trusted_html.push(trusted)
+                            &holes.push(hole)
+                        }
+                    }
+                    ty := Type.Named(kind.internal_type_name())
+                    if kind == Syntax.TypedHeadKind.HTML && holes.is_empty() -> return TExpr{ty: ty, kind: TExprKind.StrLit([TStrPart]{TStrPart.Lit(literals.first() ?? "")})}
+                    TExpr{ty: ty, kind: TExprKind.HostCall(THostCall.TypedTextInterp{kind: kind, literals: literals, holes: holes, trusted_html: trusted_html})}
+                })
+            }
+        }
+        if call.name == Syntax.TYPE_REGEX && !cx.sigs.contains_key(call.name) && call.args.len() == 1 {
+            return in_own_frame(fn() { core_call_expr(Type.Named(Syntax.TYPE_REGEX), "core.regex", "literal", [TExpr]{lower_expr(call.args[0].expr, cx, &env)}, call.name_span, [Bool]{false}) })
+        }
+        if call.name == Syntax.BUILTIN_PRINT && !cx.sigs.contains_key(call.name) -> return in_own_frame(fn() { print_args(call.args, cx, &env, call.name_span.start) })
+        if call.name == Syntax.INTERNAL_DEBUG_TRACE && call.args.len() == 2 -> return in_own_frame(fn() { lower_debug_trace(call, cx, &env) })
+        if call.name == Syntax.BUILTIN_CONSUME && !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name) {
+            return in_own_frame(fn() {
+                arg := lower_expr(call.args[0].expr, cx, &env)
+                TExpr{ty: unit_type(), kind: TExprKind.Drop(arg)}
+            })
+        }
+        if call.name == Syntax.BUILTIN_EXPECT && !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name) && call.args.len() == 1 {
+            return in_own_frame(fn() {
+                arg := lower_expr(call.args[0].expr, cx, &env)
+                TExpr{ty: arg.ty, kind: TExprKind.Clone(arg, MirCopyFact.Materialize)}
+            })
+        }
+        if !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name) {
+            if call.name == Syntax.BUILTIN_ASSERT {
+                return in_own_frame(fn() {
+                    (kind, loc) := lower_require_stop(call, cx, &env)
+                    TExpr{ty: unit_type(), kind: TExprKind.RequireStop{kind: kind, loc: loc, always_stops: false}}
+                })
+            }
+            if call.name == Syntax.BUILTIN_ASSERT_EQ {
+                return in_own_frame(fn() {
+                    (kind, loc) := lower_require_eq_stop(call, cx, &env)
+                    TExpr{ty: unit_type(), kind: TExprKind.RequireStop{kind: kind, loc: loc, always_stops: false}}
+                })
+            }
+            if call.name == Syntax.BUILTIN_PANIC {
+                return in_own_frame(fn() {
+                    (kind, loc) := lower_panic_stop(call.name_span, call.args, cx, &env)
+                    TExpr{ty: unit_type(), kind: TExprKind.RequireStop{kind: kind, loc: loc, always_stops: true}}
+                })
+            }
+        }
+        if call.name == Syntax.BUILTIN_INPUT && !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name) {
+            return in_own_frame(fn() {
+                prompt := if call.args.first() == .Val(arg) -> Val(lower_expr(arg.expr, cx, &env)) else -> None
+                TExpr{ty: Type.Result{ok: Type.String, err: Type.Named(Syntax.TYPE_IO_ERROR)}, kind: TExprKind.AmbientInput{prompt: prompt}}
+            })
+        }
+        overflow_builtin := call.name == Syntax.BUILTIN_WRAPPING || call.name == Syntax.BUILTIN_SATURATING || call.name == Syntax.BUILTIN_CHECKED || call.name == Syntax.INTERNAL_ARITHMETIC_CHECKED
+        if overflow_builtin && !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name) {
+            if call.args.first() == .Val(arg) {
+                if arg.expr == .Binary(op, l, r, _) {
+                    return in_own_frame(fn() {
+                        op_suffix := if op == { .Add -> "add" .Sub -> "sub" .Mul -> "mul" .Div -> "div" .Pow -> "pow" else -> "add" }
+                        lhs := lower_expr(l, cx, &env)
+                        rhs := lower_expr(r, cx, &env)
+                        line := U32.from_int(cx.src_line_col(call.name_span.start).0)
+                        result_ty := if call.name == Syntax.BUILTIN_CHECKED -> Type.Option(lhs.ty) else -> lhs.ty
+                        prefix := if call.name == Syntax.INTERNAL_ARITHMETIC_CHECKED -> "checked_policy" else -> call.name
+                        TExpr{ty: result_ty, kind: TExprKind.OverflowOpt{prefix: prefix, op: op_suffix, line: line, policy: arg.flags.arithmetic_policy, lhs: lhs, rhs: rhs}}
+                    })
+                }
+            }
+        }
+        // Foreign declarations resolve before unqualified module calls.
+        if !env.locals.contains_key(call.name) {
+            if cx.extern_funcs.get(call.name) == .Val(extern_fn) {
+                wrapper := if extern_fn.c_abi && extern_fn.component == None && !call.name.contains("::") -> jet_sema.guest_import_wrapper_name(cx.module_alias, call.name) else -> extern_fn.wrapper
+                c_abi := extern_fn.c_abi
+                return in_own_frame(fn() {
+                    sig := cx.sigs.get(call.name)
+                    eargs := loop (i, arg) in call.args.iter().enumerate() {
+                        conv := if sig == .Val(ps) -> ps.get(i) else -> None
+                        lower_extern_call_arg(arg, conv, &env, cx)
+                    }
+                    return_type := extern_call_return_type(cx, call.name)
+                    lowered := TExpr{ty: return_type, kind: TExprKind.ExternCall{symbol: cx.foreign_call_keys.get(call.name) ?? wrapper, c_abi: c_abi, args: eargs}}
+                    if source_arg_order(call.args) == .Val(order) -> lowered = preserve_source_arg_order(lowered, order, call.args.len(), U32.from_int(call.name_span.start))
+                    wrap_foreign_undo(lowered, cx.foreign_undos.get(call.name), U32.from_int(call.name_span.start), cx, &env)
+                })
+            }
+            if cx.foreign_call_keys.get(call.name) == .Val(foreign_key) {
+                return in_own_frame(fn() {
+                    sig := cx.sigs.get(call.name)
+                    eargs := loop (i, arg) in call.args.iter().enumerate() {
+                        conv := if sig == .Val(ps) -> ps.get(i) else -> None
+                        lower_extern_call_arg(arg, conv, &env, cx)
+                    }
+                    lowered := TExpr{ty: extern_call_return_type(cx, call.name), kind: TExprKind.ExternCall{symbol: foreign_key, c_abi: true, args: eargs}}
+                    if source_arg_order(call.args) == .Val(order) -> lowered = preserve_source_arg_order(lowered, order, call.args.len(), U32.from_int(call.name_span.start))
+                    wrap_foreign_undo(lowered, cx.foreign_undos.get(call.name), U32.from_int(call.name_span.start), cx, &env)
+                })
+            }
+            inline_mangled := None
+            if cx.inline_unqualified.get(env.fn_name) == .Val(scope) -> inline_mangled = scope.get(call.name)
+            if inline_mangled == None -> inline_mangled = cx.unqualified_inline.get(call.name)
+            if inline_mangled == .Val(mangled_key) {
+                return in_own_frame(fn() {
+                    undo := cx.foreign_undos.get(mangled_key)
+                    sig := cx.sigs.get(mangled_key)
+                    args := loop (i, arg) in call.args.iter().enumerate() {
+                        conv := if sig == .Val(ps) -> ps.get(i) else -> None
+                        lower_one_call_arg(arg, conv, &env, cx)
+                    }
+                    target_return := call_return_type_with_args(cx, mangled_key, call.type_args, args)
+                    ret := unit_type()
+                    try { ret :: module_call_source_return_type(cx, mangled_key, call.resolved_ret) } catch error { return invariant_violation_expr(call.name_span, error) }
+                    mangled := demand_generic_free_function(cx, mangled_key, args, call.type_args) ?? mangled_key
+                    lowered := TExpr{ty: ret, kind: TExprKind.ModuleCall{form: TModuleCallForm.InlineMangled{mangled: mangled}, target_return: Val(target_return), type_args: call.type_args, args: args}}
+                    if source_arg_order(call.args) == .Val(order) -> lowered = preserve_source_arg_order(lowered, order, call.args.len(), U32.from_int(call.name_span.start))
+                    wrap_foreign_undo(lowered, undo, U32.from_int(call.name_span.start), cx, &env)
+                })
+            }
+            inline_file := None
+            if cx.inline_unqualified_file.get(env.fn_name) == .Val(scope) -> inline_file = scope.get(call.name)
+            if inline_file == None -> inline_file = cx.unqualified_file.get(call.name)
+            if inline_file == .Val((rust_mod, fn_name)) {
+                return in_own_frame(fn() {
+                    undo := cx.foreign_undos.get("{rust_mod}::{fn_name}")
+                    // GATE #4499: canonical tuple-key equality/hash.
+                    sig := cx.import_sigs.get((call.name, fn_name))
+                    args := loop (i, arg) in call.args.iter().enumerate() {
+                        conv := if sig == .Val(ps) -> ps.get(i) else -> None
+                        lower_one_call_arg(arg, conv, &env, cx)
+                    }
+                    target_return := None
+                    try { target_return :: imported_module_call_target_return(cx, call.name, fn_name, call.resolved_ret) } catch error { return invariant_violation_expr(call.name_span, error) }
+                    ret := unit_type()
+                    try { ret :: module_call_source_return_type(cx, "{call.name}.{fn_name}", call.resolved_ret) } catch error { return invariant_violation_expr(call.name_span, error) }
+                    lowered := TExpr{ty: ret, kind: TExprKind.ModuleCall{form: TModuleCallForm.Qualified{rust_mod: rust_mod, rust_fn: mangle(fn_name)}, target_return: target_return, type_args: call.type_args, args: args}}
+                    if source_arg_order(call.args) == .Val(order) -> lowered = preserve_source_arg_order(lowered, order, call.args.len(), U32.from_int(call.name_span.start))
+                    wrap_foreign_undo(lowered, undo, U32.from_int(call.name_span.start), cx, &env)
+                })
+            }
+        }
+        if (call.name == "zip" || call.name == "zip_short" || call.name == "zip_pad") && !cx.sigs.contains_key(call.name) && call.resolved_ret != None {
+            return in_own_frame(fn() {
+                is_pad := call.name == "zip_pad"
+                inputs := [TExpr]{}
+                fields := [String]{}
+                fills := [TExpr]{}
+                loop arg in call.args {
+                    name := if arg.label == .Val((name, _)) -> Val(name) else -> None
+                    if is_pad && (name == Val("fill") || name == Val("fills")) -> &fills.push(lower_expr(arg.expr, cx, &env))
+                    else {
+                        index := fields.len()
+                        fallback := [String]{"a", "b", "c", "d", "e", "f"}.get(index) ?? "column_{index}"
+                        &fields.push(name ?? fallback)
+                        &inputs.push(lower_expr(arg.expr, cx, &env))
+                    }
+                }
+                ret := call.resolved_ret ?? panic("zip result resolved by sema")
+                if inputs.is_empty() -> return jet_codegen.Codegen.TIR.lower_empty_zip_family(ret, call.name, call.name_span)
+                all := inputs.into_iter()
+                first := &all.next() ?? panic("non-empty zip inputs")
+                jet_codegen.Codegen.TIR.lower_zip_family(first, all.collect(), fills, fields, call.name, call.name_span, Val(ret))
+            })
+        }
+        if !env.locals.contains_key(call.name) && call.name == Syntax.TYPE_DECIMAL && !cx.type_names.contains(call.name) {
+            return in_own_frame(fn() {
+                targs := loop arg in call.args -> lower_expr(arg.expr, cx, &env)
+                TExpr{ty: Type.Named(call.name), kind: TExprKind.PreciseBuiltin{type_name: call.name, func: "from_str", args: targs}}
+            })
+        }
+        if !env.locals.contains_key(call.name) && call.name == Syntax.TYPE_COMPLEX && !cx.type_names.contains(call.name) {
+            return in_own_frame(fn() {
+                targs := loop arg in call.args -> lower_expr(arg.expr, cx, &env)
+                TExpr{ty: Type.Named(call.name), kind: TExprKind.PreciseBuiltin{type_name: call.name, func: "from_parts", args: targs}}
+            })
+        }
+        if !env.locals.contains_key(call.name) && jet_sema.is_math_type(call.name) && !cx.type_names.contains(call.name) {
+            return in_own_frame(fn() {
+                targs := loop arg in call.args -> lower_expr(arg.expr, cx, &env)
+                TExpr{ty: Type.Named(call.name), kind: TExprKind.MathBuiltin{type_name: call.name, func: "new", args: targs}}
+            })
+        }
+        if call.range_checked && !env.locals.contains_key(call.name) {
+            if call.args.first() == .Val(arg) {
+                return in_own_frame(fn() { TExpr{ty: Type.Result{ok: Type.Named(call.name), err: Type.String}, kind: TExprKind.RangeCheckedCtor{name: call.name, arg: lower_expr(arg.expr, cx, &env)}} })
+            }
+        }
+        if !env.locals.contains_key(call.name) {
+            if cx.distinct_types.get(call.name) == .Val((base, _)) {
+                if call.args.first() == .Val(arg) {
+                    return in_own_frame(fn() { TExpr{ty: Type.Named(call.name), kind: TExprKind.DistinctCtor{name: call.name, arg: lower_expr(arg.expr, cx, &env), base: base}} })
+                }
+            }
+        }
+        if cx.variadic_bound_fns.get(call.name) == .Val((fixed, _bounds)) {
+            return in_own_frame(fn() {
+                lowered := jet_codegen.Codegen.VariadicBound.lower_variadic_bound_call(call, fixed, cx, &env)
+                if source_arg_order(call.args) == .Val(order) -> preserve_source_arg_order(lowered, order, call.args.len(), U32.from_int(call.name_span.start)) else -> lowered
+            })
+        }
+        sig := checked_direct_call_sig(call, cx)
+        args := loop (i, arg) in call.args.iter().enumerate() {
+            conv := if sig == .Val(ps) -> ps.get(i) else -> None
+            lower_one_call_arg(arg, conv, &env, cx)
+        }
+        target_name := demand_generic_free_function(cx, call.name, args, call.type_args) ?? call.name
+        in_own_frame(fn() {
+            ret := call_return_type_with_args(cx, call.name, call.type_args, args)
+            name := if cx.jit_local_call_prefix == .Val(prefix) -> "{prefix}{mangle(target_name)}" else -> target_name
+            lowered := TExpr{ty: ret, kind: TExprKind.Call{name: name, type_args: call.type_args, args: args}}
+            if cx.contract_sigs.get(call.name) == .Val((pre, _)) {
+                if lowered.kind == .Call(callee_name, type_args, call_args) {
+                    (bindings, contracts) := lower_call_pre_contracts(call, &call_args, pre, cx, &env)
+                    lowered.kind = TExprKind.Call{name: callee_name, type_args: type_args, args: call_args}
+                    if !contracts.is_empty() {
+                        stmts := bindings
+                        loop contract in contracts -> &stmts.push(TStmt.Contract{contract: contract})
+                        call_ty := lowered.ty
+                        &stmts.push(TStmt.ExprStmt(lowered))
+                        lowered = TExpr{ty: call_ty, kind: TExprKind.InlineBlock(stmts)}
+                    }
+                } else -> panic("plain call lowering produces a Call node")
+            }
+            if source_arg_order(call.args) == .Val(order) -> lowered = preserve_source_arg_order(lowered, order, call.args.len(), U32.from_int(call.name_span.start))
+            // Only source-declared Never stops; divergent bodies keep their promised carrier.
+            declared_never := false
+            if cx.fn_source_types.get(call.name) == .Val(ty) {
+                if ty == .Fn(_, .Val(ret), _, _) {
+                    expanded := cx.expand_type_aliases(ret)
+                    declared_never = if expanded == { .Named(name) -> name == Syntax.TYPE_NEVER else -> false }
+                }
+            }
+            if cx.diverging_functions.contains(call.name) && declared_never {
+                line := cx.src_line_col(call.name_span.start).0
+                never := Type.Named(Syntax.TYPE_NEVER)
+                TExpr{ty: never, kind: TExprKind.InlineBlock([TStmt]{TStmt.ExprStmt(lowered), TStmt.ExprStmt(TExpr{ty: never, kind: TExprKind.Unreachable{line: line}})})}
+            } else {
+                resolved_ret := call.resolved_ret
+                if resolved_ret == None -> resolved_ret = jet_codegen.Codegen.TIR.mir.never_carrier_success(lowered.ty)
+                consume_plain_helper_route(resolved_ret, call.name_span, lowered, cx, &env)
+            }
+        })
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:6799-6802
+fn lower_expr_inner_method_or_if(e: &Expr, cx: &Cx, env: &LowerEnv) -> TExpr? {
+    if e == {
+        .MethodCall(_, _, _, _, _, _, _, _, _, _) -> Val(lower_method_chain(e, cx, &env))
+        .If(_, _, _, _) -> Val(lower_expr_segment(e, cx, &env))
+        else -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:6809-7363
+fn lower_expr_inner_struct_literal(e: &Expr, cx: &Cx, env: &LowerEnv) -> TExpr {
+    (type_name, type_args, import_ns, as_trait, fields, inferred, span) := if e == {
+        .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span) -> (type_name, type_args, import_ns, as_trait, fields, inferred, span)
+        else -> panic("struct literal dispatch requires StructLit")
+    }
+    // Before sema's named-payload rewrite, preserve the enum's nominal identity.
+    if !inferred && type_args.is_empty() && import_ns == None {
+        if type_name.split_once('.') == .Val((enum_name, variant)) {
+            owner := cx.local_type_identities.get(enum_name) ?? enum_name
+            is_variant := [String]{enum_name, owner}.iter().any(fn(enum_key) {
+                if cx.enum_variants.get(enum_key) == .Val(variants) -> variants.iter().any(fn(pair) { pair.0 == variant }) else -> false
+            })
+            if is_variant {
+                args := loop (label, _, expression) in fields -> EnumLitArg.Named{label: label, expr: expression}
+                enum_lit := Expr.EnumLit{type_name: enum_name, variant: variant, variant_span: None, args: args, leading_dot: false, span: span}
+                return lower_temporary_expr(enum_lit, cx, &env)
+            }
+        }
+    }
+    in_own_frame(fn() {
+        trait_coerce := if as_trait == .Val(trait_name) -> Val((trait_name, type_name)) else -> None
+        if import_ns == .Val(alias) {
+            return in_own_frame(fn() {
+                if cx.core_import_module_for_function(env.fn_name, alias) == Val("core.encoding") && (type_name == "EncodingLimits" || type_name == "EncodingCause" || type_name == "EncodingError") && type_args.is_empty() {
+                    return in_own_frame(fn() {
+                        tfields := loop (name, _, value) in fields -> (name, lower_expr(value, cx, &env), false)
+                        TExpr{ty: Type.Named(type_name), kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+                    })
+                }
+                if cx.core_import_module_for_function(env.fn_name, alias) == Val("core.encoding.cbor") && (type_name == "CBOROptions" || type_name == "CBORError") && type_args.is_empty() {
+                    return in_own_frame(fn() {
+                        tfields := loop (name, _, value) in fields -> (name, lower_expr(value, cx, &env), false)
+                        TExpr{ty: Type.Named(type_name), kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+                    })
+                }
+                xml_type := type_name == "XMLLimits" || type_name == "XMLParseOptions" || type_name == "XMLRenderOptions" || type_name == "XMLCanonical" || type_name == "XMLError"
+                if cx.core_import_module_for_function(env.fn_name, alias) == Val("core.encoding.xml") && xml_type && type_args.is_empty() {
+                    return in_own_frame(fn() {
+                        tfields := loop (name, _, value) in fields -> (name, lower_expr(value, cx, &env), false)
+                        TExpr{ty: Type.Named(type_name), kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+                    })
+                }
+                email_type := type_name == "RecipientReport" || type_name == "SendReport" || type_name == "Limits" || type_name == "DKIMConfig" || type_name == "SMTPConfig"
+                if cx.core_import_module_for_function(env.fn_name, alias) == Val(Syntax.CORE_EMAIL_MODULE) && email_type {
+                    return in_own_frame(fn() {
+                        tfields := loop (name, _, value) in fields -> (name, lower_expr(value, cx, &env), false)
+                        ty := if type_args.is_empty() -> Type.Named(type_name) else -> Type.Apply{name: type_name, args: type_args}
+                        TExpr{ty: ty, kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+                    })
+                }
+                tfields := loop (name, _, value) in fields -> (name, lower_expr(value, cx, &env), false)
+                qualified := in_own_frame(fn() {
+                    if cx.code_modules.contains(alias) -> jet_foundation.Names.member_name(alias, type_name)
+                    else if cx.foreign_type_identity(alias, type_name) == .Val(identity) -> identity
+                    else -> jet_foundation.ice(None, "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)")
+                })
+                ty := if type_args.is_empty() -> Type.Named(qualified) else -> Type.Apply{name: qualified, args: type_args}
+                TExpr{ty: ty, kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+            })
+        }
+        if net_handle_rust_type(type_name) != None {
+            return in_own_frame(fn() {
+                resolved_ty := Type.Named(type_name)
+                tfields := loop (name, _, fe) in fields {
+                    value := lower_expr(fe, cx, &env)
+                    if struct_field_type(cx, resolved_ty, name) == .Val(fty) {
+                        optional := if fty == { .Option(_) -> true else -> false }
+                        if value.kind == TExprKind.Absent && optional -> value.ty = fty
+                    }
+                    (name, value, false)
+                }
+                extra := if type_name == "HTTPRequest" -> Val(TStructExtra.HTTPRequestParams) else -> None
+                TExpr{ty: Type.Named(type_name), kind: TExprKind.StructLit{fields: tfields, extra: extra, as_trait: None}}
+            })
+        }
+        if type_name == Syntax.TYPE_ERR {
+            return in_own_frame(fn() {
+                tfields := loop (name, _, value) in fields -> (name, lower_default_err_field(name, value, cx, &env), false)
+                TExpr{ty: Type.Named(Syntax.TYPE_ERR), kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+            })
+        }
+        if type_name == "TextWidth" || type_name == "TerminalSize" || type_name == "TerminalPolicy" {
+            return in_own_frame(fn() {
+                tfields := loop (name, _, value) in fields -> (name, lower_expr(value, cx, &env), false)
+                TExpr{ty: Type.Named(type_name), kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+            })
+        }
+        if type_name == "AsyncPolicy" {
+            return in_own_frame(fn() {
+                tfields := loop (name, _, value) in fields -> (name, lower_expr(value, cx, &env), false)
+                TExpr{ty: Type.Named(type_name), kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+            })
+        }
+        if type_name == "EncodingLimits" || type_name == "EncodingCause" || type_name == "EncodingError" {
+            return in_own_frame(fn() {
+                tfields := loop (name, _, value) in fields -> (name, lower_expr(value, cx, &env), false)
+                TExpr{ty: Type.Named(type_name), kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+            })
+        }
+        if type_name == "FieldError" {
+            return in_own_frame(fn() {
+                tfields := loop (name, _, value) in fields -> (name, lower_expr(value, cx, &env), false)
+                TExpr{ty: Type.Named(type_name), kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+            })
+        }
+        if type_name == "RecipientReport" || type_name == "SendReport" || type_name == "Limits" || type_name == "DKIMConfig" || type_name == "SMTPConfig" {
+            return in_own_frame(fn() {
+                tfields := loop (name, _, value) in fields -> (name, lower_expr(value, cx, &env), false)
+                ty := if type_args.is_empty() -> Type.Named(type_name) else -> Type.Apply{name: type_name, args: type_args}
+                TExpr{ty: ty, kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+            })
+        }
+        if type_name.strip_suffix(".Patch") == .Val(base_name) {
+            if cx.struct_fields.get(base_name) == .Val(base_fields) {
+                all := base_fields.iter().filter_map(fn(pair) {
+                    (name, field_ty) := pair
+                    if cx.computed_fields.get(base_name) == .Val(computed) {
+                        if computed.contains(name) -> return None
+                    }
+                    Val((name, Type.Option(field_ty)))
+                }).collect()
+                return in_own_frame(fn() {
+                    provided := [String:Int]{}
+                    loop (index, field) in fields.iter().enumerate() -> _ := &provided.insert(field.0, index)
+                    tfields := loop (fname, fty) in all {
+                        te := if provided.get(fname) == .Val(index) -> fit_patch_field_value(lower_expr(fields[index].2, cx, &env), fty) else -> TExpr{ty: fty, kind: TExprKind.Absent}
+                        (fname, te, false)
+                    }
+                    TExpr{ty: Type.Named(type_name), kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: None}}
+                })
+            }
+        }
+        in_own_frame(fn() {
+            identity := cx.local_type_identities.get(type_name)
+            if identity == None {
+                identity = if cx.struct_fields.contains_key(type_name) -> Val(type_name) else -> cx.foreign_type_identity("", type_name)
+            }
+            resolved_name := identity ?? type_name
+            context_name := if env.ret_ty == .Val(ty) -> if ty == { .Named(name) -> Val(name) else -> None } else -> None
+            if context_name == None -> context_name = env.self_owner
+            if context_name == .Val(context_name) {
+                same_leaf := (context_name.rsplit("::").next() ?? context_name) == type_name
+                leaf_count := cx.struct_fields.keys().filter(fn(name) { (name.rsplit("::").next() ?? name) == type_name }).count()
+                if same_leaf && leaf_count > 1 && cx.struct_fields.contains_key(context_name) -> resolved_name = context_name
+            }
+            resolved_ty := if type_args.is_empty() -> Type.Named(resolved_name) else -> Type.Apply{name: resolved_name, args: type_args}
+            tfields := loop (name, _, fe) in fields {
+                // GATE #4499: canonical tuple-key equality/hash for recursive edges.
+                boxed := cx.boxed_edges.contains((resolved_name, name))
+                value := lower_owned_expr(fe, cx, &env)
+                if struct_field_type(cx, resolved_ty, name) == .Val(fty) {
+                    optional := if fty == { .Option(_) -> true else -> false }
+                    if value.kind == TExprKind.Absent && optional -> value.ty = fty
+                    value = preserve_typed_list_shape(value, fty, cx)
+                    value = jet_codegen.Codegen.TIR.maybe_widen_expr_to_union(value, fty)
+                    value = jet_codegen.Codegen.TIR.box_present_trait_payload(value, fty, cx)
+                    value = lower_atomic_initializer(value, fty)
+                }
+                (name, value, boxed)
+            }
+            if cx.published_schemas.contains(resolved_name) {
+                holder_ty := Type.Named(Syntax.TYPE_DATA)
+                holder := if env.fn_name == "decode" -> TExpr{ty: holder_ty, kind: TExprKind.Local(TLocal.user("tree"))} else -> core_call_expr(holder_ty, "core.encoding", "__published_schema_empty", [TExpr]{}, span, [Bool]{})
+                &tfields.push((Syntax.PUBLISHED_UNKNOWN_FIELDS, holder, false))
+            }
+            ty := if as_trait == .Val(trait_name) -> Type.TraitObject([String]{trait_name}) else -> resolved_ty
+            TExpr{ty: ty, kind: TExprKind.StructLit{fields: tfields, extra: None, as_trait: trait_coerce}}
+        })
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:5677-7366
+// Private slice seam: None means this slice does not own the expression arm.
+fn lower_expr_inner_5677_7366(e: &Expr, cx: &Cx, env: &LowerEnv) -> TExpr? {
+    if e == {
+        .Call(call) -> Val(lower_expr_inner_call(call, cx, &env))
+        .MethodCall(_, _, _, _, _, _, _, _, _, _) | .If(_, _, _, _) -> lower_expr_inner_method_or_if(e, cx, &env)
+        .StructLit(_, _, _, _, _, _, _) -> Val(lower_expr_inner_struct_literal(e, cx, &env))
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:7364-7366
+// Direct module constants use the next slice's Field arm, before ordinary projections.
 

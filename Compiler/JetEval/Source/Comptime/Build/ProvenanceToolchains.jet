@@ -1,421 +1,168 @@
-// PORT-PENDING 0568 crates-jet-comptime-src-comptime-build-provenance-toolchains-module-group: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:1-417
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::handles::{ProbeId, SigningIdentityId, ToolchainHandle, ToolchainId};
-//RS use std::collections::BTreeMap;
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct LockRecord {
-//RS     pub key: String,
-//RS     pub digest: String,
-//RS }
-//RS 
-//RS impl LockRecord {
-//RS     pub fn new(key: impl Into<String>, digest: impl Into<String>) -> Self {
-//RS         LockRecord {
-//RS             key: key.into(),
-//RS             digest: digest.into(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum ProvenanceSource {
-//RS     InferredHost,
-//RS     JetpackDependency(String),
-//RS     AmbientRecord(String),
-//RS     UserDeclared(String),
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BuildProvenance {
-//RS     pub source: ProvenanceSource,
-//RS     pub lock: Option<LockRecord>,
-//RS }
-//RS 
-//RS impl BuildProvenance {
-//RS     pub fn inferred_host() -> Self {
-//RS         BuildProvenance {
-//RS             source: ProvenanceSource::InferredHost,
-//RS             lock: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn jetpack_dependency(dep: impl Into<String>, lock: LockRecord) -> Self {
-//RS         BuildProvenance {
-//RS             source: ProvenanceSource::JetpackDependency(dep.into()),
-//RS             lock: Some(lock),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn ambient_record(record: impl Into<String>) -> Self {
-//RS         BuildProvenance {
-//RS             source: ProvenanceSource::AmbientRecord(record.into()),
-//RS             lock: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn user_declared(source: impl Into<String>, lock: Option<LockRecord>) -> Self {
-//RS         BuildProvenance {
-//RS             source: ProvenanceSource::UserDeclared(source.into()),
-//RS             lock,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SdkIdentity {
-//RS     pub name: String,
-//RS     pub version: String,
-//RS     pub provenance: BuildProvenance,
-//RS }
-//RS 
-//RS impl SdkIdentity {
-//RS     pub fn new(
-//RS         name: impl Into<String>,
-//RS         version: impl Into<String>,
-//RS         provenance: BuildProvenance,
-//RS     ) -> Self {
-//RS         SdkIdentity {
-//RS             name: name.into(),
-//RS             version: version.into(),
-//RS             provenance,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct LinkerIdentity {
-//RS     pub name: String,
-//RS     pub provenance: BuildProvenance,
-//RS }
-//RS 
-//RS impl LinkerIdentity {
-//RS     pub fn new(name: impl Into<String>, provenance: BuildProvenance) -> Self {
-//RS         LinkerIdentity {
-//RS             name: name.into(),
-//RS             provenance,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Sysroot identity for cross compilation (E4-JP15) — enters action keys with
-//RS /// toolchain / SDK / linker / signing.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SysrootIdentity {
-//RS     pub name: String,
-//RS     pub path_digest: String,
-//RS     pub provenance: BuildProvenance,
-//RS }
-//RS 
-//RS impl SysrootIdentity {
-//RS     pub fn new(
-//RS         name: impl Into<String>,
-//RS         path_digest: impl Into<String>,
-//RS         provenance: BuildProvenance,
-//RS     ) -> Self {
-//RS         SysrootIdentity {
-//RS             name: name.into(),
-//RS             path_digest: path_digest.into(),
-//RS             provenance,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SigningIdentitySpec {
-//RS     pub label: String,
-//RS     pub provenance: BuildProvenance,
-//RS }
-//RS 
-//RS impl SigningIdentitySpec {
-//RS     pub fn new(label: impl Into<String>, provenance: BuildProvenance) -> Self {
-//RS         SigningIdentitySpec {
-//RS             label: label.into(),
-//RS             provenance,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BuildSigningIdentity {
-//RS     pub id: SigningIdentityId,
-//RS     pub name: String,
-//RS     pub label: String,
-//RS     pub provenance: BuildProvenance,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum ToolchainRole {
-//RS     Host,
-//RS     Target,
-//RS }
-//RS 
-//RS /// How an action resolves its executable. Ambient resolution is retained for
-//RS /// existing host actions. Declared-only resolution is the hermetic path used
-//RS /// by provisioned toolchains: no executable may come from PATH or an
-//RS /// undeclared filesystem spelling.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-//RS pub enum ToolchainResolution {
-//RS     #[default]
-//RS     Ambient,
-//RS     DeclaredOnly,
-//RS }
-//RS 
-//RS /// A read-only host directory made visible to a sandboxed build action. The
-//RS /// source and destination are both part of the action's toolchain identity;
-//RS /// the execution adapters only marshal this declaration to their native
-//RS /// sandbox backend.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BuildMount {
-//RS     pub source: String,
-//RS     pub destination: String,
-//RS     /// Stable content identity for action keys. Empty means the source path
-//RS     /// itself is the identity, which preserves the behavior of generic
-//RS     /// callers; provisioned toolchains supply their Hangar object digest.
-//RS     pub identity: String,
-//RS }
-//RS 
-//RS impl BuildMount {
-//RS     pub fn read_only_with_identity(
-//RS         source: impl Into<String>,
-//RS         destination: impl Into<String>,
-//RS         identity: impl Into<String>,
-//RS     ) -> Self {
-//RS         BuildMount {
-//RS             source: source.into(),
-//RS             destination: destination.into(),
-//RS             identity: identity.into(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ToolchainSpec {
-//RS     pub role: ToolchainRole,
-//RS     pub host_triple: String,
-//RS     pub target_triple: String,
-//RS     pub sdk: Option<SdkIdentity>,
-//RS     pub linker: Option<LinkerIdentity>,
-//RS     pub sysroot: Option<SysrootIdentity>,
-//RS     /// Executables are part of the declared toolchain. Target actions and
-//RS     /// probes resolve through this map instead of borrowing the host PATH.
-//RS     pub tools: BTreeMap<String, String>,
-//RS     pub resolution: ToolchainResolution,
-//RS     pub mounts: Vec<BuildMount>,
-//RS     pub provenance: BuildProvenance,
-//RS }
-//RS 
-//RS impl ToolchainSpec {
-//RS     pub fn target(target_triple: impl Into<String>, provenance: BuildProvenance) -> Self {
-//RS         ToolchainSpec {
-//RS             role: ToolchainRole::Target,
-//RS             host_triple: "host".to_string(),
-//RS             target_triple: target_triple.into(),
-//RS             sdk: None,
-//RS             linker: None,
-//RS             sysroot: None,
-//RS             tools: BTreeMap::new(),
-//RS             resolution: ToolchainResolution::Ambient,
-//RS             mounts: Vec::new(),
-//RS             provenance,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn host(host_triple: impl Into<String>, provenance: BuildProvenance) -> Self {
-//RS         let host_triple = host_triple.into();
-//RS         ToolchainSpec {
-//RS             role: ToolchainRole::Host,
-//RS             target_triple: host_triple.clone(),
-//RS             host_triple,
-//RS             sdk: None,
-//RS             linker: None,
-//RS             sysroot: None,
-//RS             tools: BTreeMap::new(),
-//RS             resolution: ToolchainResolution::Ambient,
-//RS             mounts: Vec::new(),
-//RS             provenance,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_host_triple(mut self, host_triple: impl Into<String>) -> Self {
-//RS         self.host_triple = host_triple.into();
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_sdk(mut self, sdk: SdkIdentity) -> Self {
-//RS         self.sdk = Some(sdk);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_linker(mut self, linker: LinkerIdentity) -> Self {
-//RS         self.linker = Some(linker);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_sysroot(mut self, sysroot: SysrootIdentity) -> Self {
-//RS         self.sysroot = Some(sysroot);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_tool(mut self, name: impl Into<String>, path: impl Into<String>) -> Self {
-//RS         self.tools.insert(name.into(), path.into());
-//RS         self
-//RS     }
-//RS 
-//RS     /// Require every action executable to be named by this toolchain. This is
-//RS     /// the only mode allowed for a hermetic provisioned compiler.
-//RS     pub fn declared_only(mut self) -> Self {
-//RS         self.resolution = ToolchainResolution::DeclaredOnly;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_read_only_mount_identity(
-//RS         mut self,
-//RS         source: impl Into<String>,
-//RS         destination: impl Into<String>,
-//RS         identity: impl Into<String>,
-//RS     ) -> Self {
-//RS         self.mounts.push(BuildMount::read_only_with_identity(
-//RS             source,
-//RS             destination,
-//RS             identity,
-//RS         ));
-//RS         self
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BuildToolchain {
-//RS     pub id: ToolchainId,
-//RS     pub name: String,
-//RS     pub role: ToolchainRole,
-//RS     pub host_triple: String,
-//RS     pub target_triple: String,
-//RS     pub sdk: Option<SdkIdentity>,
-//RS     pub linker: Option<LinkerIdentity>,
-//RS     pub sysroot: Option<SysrootIdentity>,
-//RS     pub tools: BTreeMap<String, String>,
-//RS     pub resolution: ToolchainResolution,
-//RS     pub mounts: Vec<BuildMount>,
-//RS     pub provenance: BuildProvenance,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum ReproducibilityClass {
-//RS     Reproducible,
-//RS     Ambient,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum ProbeKind {
-//RS     FindProgram {
-//RS         program: String,
-//RS     },
-//RS     PkgConfig {
-//RS         package: String,
-//RS         min_version: Option<String>,
-//RS     },
-//RS     HeaderCheck {
-//RS         header: String,
-//RS     },
-//RS     CompileCheck {
-//RS         name: String,
-//RS         includes: Vec<String>,
-//RS         code: String,
-//RS     },
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ProbeSpec {
-//RS     pub kind: ProbeKind,
-//RS     pub reproducibility: ReproducibilityClass,
-//RS     pub provenance: BuildProvenance,
-//RS     pub toolchain: Option<ToolchainHandle>,
-//RS }
-//RS 
-//RS impl ProbeSpec {
-//RS     pub fn find_program(program: impl Into<String>) -> Self {
-//RS         ProbeSpec {
-//RS             kind: ProbeKind::FindProgram {
-//RS                 program: program.into(),
-//RS             },
-//RS             reproducibility: ReproducibilityClass::Ambient,
-//RS             provenance: BuildProvenance::ambient_record("find_program"),
-//RS             toolchain: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn pkg_config(package: impl Into<String>) -> Self {
-//RS         ProbeSpec {
-//RS             kind: ProbeKind::PkgConfig {
-//RS                 package: package.into(),
-//RS                 min_version: None,
-//RS             },
-//RS             reproducibility: ReproducibilityClass::Ambient,
-//RS             provenance: BuildProvenance::ambient_record("pkg_config"),
-//RS             toolchain: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn header_check(header: impl Into<String>) -> Self {
-//RS         ProbeSpec {
-//RS             kind: ProbeKind::HeaderCheck {
-//RS                 header: header.into(),
-//RS             },
-//RS             reproducibility: ReproducibilityClass::Ambient,
-//RS             provenance: BuildProvenance::ambient_record("header_check"),
-//RS             toolchain: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn compile_check(
-//RS         name: impl Into<String>,
-//RS         includes: impl IntoIterator<Item = impl Into<String>>,
-//RS         code: impl Into<String>,
-//RS     ) -> Self {
-//RS         ProbeSpec {
-//RS             kind: ProbeKind::CompileCheck {
-//RS                 name: name.into(),
-//RS                 includes: includes.into_iter().map(Into::into).collect(),
-//RS                 code: code.into(),
-//RS             },
-//RS             reproducibility: ReproducibilityClass::Ambient,
-//RS             provenance: BuildProvenance::ambient_record("compile_check"),
-//RS             toolchain: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_min_version(mut self, version: impl Into<String>) -> Self {
-//RS         if let ProbeKind::PkgConfig { min_version, .. } = &mut self.kind {
-//RS             *min_version = Some(version.into());
-//RS         }
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_toolchain(mut self, toolchain: ToolchainHandle) -> Self {
-//RS         self.toolchain = Some(toolchain);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_reproducibility(mut self, reproducibility: ReproducibilityClass) -> Self {
-//RS         self.reproducibility = reproducibility;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_provenance(mut self, provenance: BuildProvenance) -> Self {
-//RS         self.provenance = provenance;
-//RS         self
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BuildProbe {
-//RS     pub id: ProbeId,
-//RS     pub name: String,
-//RS     pub kind: ProbeKind,
-//RS     pub reproducibility: ReproducibilityClass,
-//RS     pub provenance: BuildProvenance,
-//RS     pub toolchain: ToolchainHandle,
-//RS }
-// END-PORT-PENDING 0568 crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:1-417
+use jet_comptime.Comptime.Build.Handles.[ProbeId, SigningIdentityId, ToolchainHandle, ToolchainId]
 
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:5
+#Derive(Debug, Clone, Eq)
+pub struct LockRecord { pub key: String; pub digest: String }
+impl LockRecord {
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:11
+    pub fn new(key: String, digest: String) -> LockRecord { LockRecord { key: ^key, digest: ^digest } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:21
+#Derive(Debug, Clone, Eq)
+pub enum ProvenanceSource { InferredHost; JetpackDependency(String); AmbientRecord(String); UserDeclared(String) }
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:29
+#Derive(Debug, Clone, Eq)
+pub struct BuildProvenance { pub source: ProvenanceSource; pub lock: LockRecord? }
+impl BuildProvenance {
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:34
+    pub fn inferred_host() -> BuildProvenance { BuildProvenance { source: .InferredHost, lock: None } }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:41
+    pub fn jetpack_dependency(dep: String, lock: LockRecord) -> BuildProvenance { BuildProvenance { source: .JetpackDependency(^dep), lock: Val(^lock) } }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:48
+    pub fn ambient_record(record: String) -> BuildProvenance { BuildProvenance { source: .AmbientRecord(^record), lock: None } }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:55
+    pub fn user_declared(source: String, lock: LockRecord?) -> BuildProvenance { BuildProvenance { source: .UserDeclared(^source), lock: ^lock } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:64
+#Derive(Debug, Clone, Eq)
+pub struct SdkIdentity { pub name: String; pub version: String; pub provenance: BuildProvenance }
+impl SdkIdentity {
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:71
+    pub fn new(name: String, version: String, provenance: BuildProvenance) -> SdkIdentity { SdkIdentity { name: ^name, version: ^version, provenance: ^provenance } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:85
+#Derive(Debug, Clone, Eq)
+pub struct LinkerIdentity { pub name: String; pub provenance: BuildProvenance }
+impl LinkerIdentity {
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:91
+    pub fn new(name: String, provenance: BuildProvenance) -> LinkerIdentity { LinkerIdentity { name: ^name, provenance: ^provenance } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:99
+// Sysroot identity enters action keys with toolchain / SDK / linker / signing.
+#Derive(Debug, Clone, Eq)
+pub struct SysrootIdentity { pub name: String; pub path_digest: String; pub provenance: BuildProvenance }
+impl SysrootIdentity {
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:109
+    pub fn new(name: String, path_digest: String, provenance: BuildProvenance) -> SysrootIdentity { SysrootIdentity { name: ^name, path_digest: ^path_digest, provenance: ^provenance } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:123
+#Derive(Debug, Clone, Eq)
+pub struct SigningIdentitySpec { pub label: String; pub provenance: BuildProvenance }
+impl SigningIdentitySpec {
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:129
+    pub fn new(label: String, provenance: BuildProvenance) -> SigningIdentitySpec { SigningIdentitySpec { label: ^label, provenance: ^provenance } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:138
+#Derive(Debug, Clone, Eq)
+pub struct BuildSigningIdentity { pub id: SigningIdentityId; pub name: String; pub label: String; pub provenance: BuildProvenance }
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:146
+#Derive(Debug, Clone, Copy, Eq)
+pub enum ToolchainRole { Host; Target }
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:152
+// Declared-only forbids executables from PATH or undeclared filesystem spellings.
+#Derive(Debug, Clone, Copy, Eq)
+pub enum ToolchainResolution { Ambient; DeclaredOnly }
+impl ToolchainResolution { pub fn default() -> ToolchainResolution { .Ambient } }
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:163
+// Read-only sandbox mount. Empty identity means the source path is its identity.
+#Derive(Debug, Clone, Eq)
+pub struct BuildMount { pub source: String; pub destination: String; pub identity: String }
+impl BuildMount {
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:177
+    pub fn read_only_with_identity(source: String, destination: String, identity: String) -> BuildMount { BuildMount { source: ^source, destination: ^destination, identity: ^identity } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:191
+#Derive(Debug, Clone, Eq)
+pub struct ToolchainSpec {
+    pub role: ToolchainRole
+    pub host_triple: String
+    pub target_triple: String
+    pub sdk: SdkIdentity?
+    pub linker: LinkerIdentity?
+    pub sysroot: SysrootIdentity?
+    // Executables resolve through this declared map rather than host PATH.
+    pub tools: [String:String]
+    pub resolution: ToolchainResolution
+    pub mounts: [BuildMount]
+    pub provenance: BuildProvenance
+}
+impl ToolchainSpec {
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:207
+    pub fn target(target_triple: String, provenance: BuildProvenance) -> ToolchainSpec {
+        ToolchainSpec { role: .Target, host_triple: "host", target_triple: ^target_triple, sdk: None, linker: None, sysroot: None, tools: [:], resolution: .Ambient, mounts: [], provenance: ^provenance }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:222
+    pub fn host(host_triple: String, provenance: BuildProvenance) -> ToolchainSpec {
+        ToolchainSpec { role: .Host, target_triple: host_triple.clone(), host_triple: ^host_triple, sdk: None, linker: None, sysroot: None, tools: [:], resolution: .Ambient, mounts: [], provenance: ^provenance }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:238
+    pub fn with_host_triple(self: ToolchainSpec, host_triple: String) -> ToolchainSpec { self.host_triple = ^host_triple; ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:243
+    pub fn with_sdk(self: ToolchainSpec, sdk: SdkIdentity) -> ToolchainSpec { self.sdk = Val(^sdk); ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:248
+    pub fn with_linker(self: ToolchainSpec, linker: LinkerIdentity) -> ToolchainSpec { self.linker = Val(^linker); ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:253
+    pub fn with_sysroot(self: ToolchainSpec, sysroot: SysrootIdentity) -> ToolchainSpec { self.sysroot = Val(^sysroot); ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:258
+    pub fn with_tool(self: ToolchainSpec, name: String, path: String) -> ToolchainSpec { _ :: self.tools.insert(^name, ^path); ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:265
+    pub fn declared_only(self: ToolchainSpec) -> ToolchainSpec { self.resolution = .DeclaredOnly; ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:270
+    pub fn with_read_only_mount_identity(self: ToolchainSpec, source: String, destination: String, identity: String) -> ToolchainSpec {
+        self.mounts.push(BuildMount.read_only_with_identity(^source, ^destination, ^identity)); ^self
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:286
+#Derive(Debug, Clone, Eq)
+pub struct BuildToolchain {
+    pub id: ToolchainId
+    pub name: String
+    pub role: ToolchainRole
+    pub host_triple: String
+    pub target_triple: String
+    pub sdk: SdkIdentity?
+    pub linker: LinkerIdentity?
+    pub sysroot: SysrootIdentity?
+    pub tools: [String:String]
+    pub resolution: ToolchainResolution
+    pub mounts: [BuildMount]
+    pub provenance: BuildProvenance
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:302
+#Derive(Debug, Clone, Copy, Eq)
+pub enum ReproducibilityClass { Reproducible; Ambient }
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:308
+#Derive(Debug, Clone, Eq)
+pub enum ProbeKind {
+    FindProgram { program: String }
+    PkgConfig { package: String, min_version: String? }
+    HeaderCheck { header: String }
+    CompileCheck { name: String, includes: [String], code: String }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:327
+#Derive(Debug, Clone, Eq)
+pub struct ProbeSpec { pub kind: ProbeKind; pub reproducibility: ReproducibilityClass; pub provenance: BuildProvenance; pub toolchain: ToolchainHandle? }
+impl ProbeSpec {
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:335
+    pub fn find_program(program: String) -> ProbeSpec { ProbeSpec { kind: .FindProgram { program: ^program }, reproducibility: .Ambient, provenance: BuildProvenance.ambient_record("find_program"), toolchain: None } }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:346
+    pub fn pkg_config(package: String) -> ProbeSpec { ProbeSpec { kind: .PkgConfig { package: ^package, min_version: None }, reproducibility: .Ambient, provenance: BuildProvenance.ambient_record("pkg_config"), toolchain: None } }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:358
+    pub fn header_check(header: String) -> ProbeSpec { ProbeSpec { kind: .HeaderCheck { header: ^header }, reproducibility: .Ambient, provenance: BuildProvenance.ambient_record("header_check"), toolchain: None } }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:369
+    pub fn compile_check(name: String, includes: [String], code: String) -> ProbeSpec { ProbeSpec { kind: .CompileCheck { name: ^name, includes: ^includes, code: ^code }, reproducibility: .Ambient, provenance: BuildProvenance.ambient_record("compile_check"), toolchain: None } }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:386
+    pub fn with_min_version(self: ProbeSpec, version: String) -> ProbeSpec {
+        match &self.kind { .PkgConfig { min_version, .. } => { min_version = Val(^version) }; _ => {} }
+        ^self
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:393
+    pub fn with_toolchain(self: ProbeSpec, toolchain: ToolchainHandle) -> ProbeSpec { self.toolchain = Val(toolchain); ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:398
+    pub fn with_reproducibility(self: ProbeSpec, reproducibility: ReproducibilityClass) -> ProbeSpec { self.reproducibility = reproducibility; ^self }
+    // Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:403
+    pub fn with_provenance(self: ProbeSpec, provenance: BuildProvenance) -> ProbeSpec { self.provenance = ^provenance; ^self }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:410
+#Derive(Debug, Clone, Eq)
+pub struct BuildProbe { pub id: ProbeId; pub name: String; pub kind: ProbeKind; pub reproducibility: ReproducibilityClass; pub provenance: BuildProvenance; pub toolchain: ToolchainHandle }

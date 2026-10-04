@@ -1,0 +1,7 @@
+use jet_comptime.Comptime.UrlLite.[url_percent_encode, url_percent_decode_str]
+// Rust: crates/jet-comptime/src/Comptime/UrlLite.rs:122-128
+#Test("url_percent_codec") {
+    assert_eq(url_percent_encode("a b/é", false), "a%20b%2F%C3%A9")
+    assert_eq(url_percent_decode_str("a%20b%2F%C3%A9").unwrap(), "a b/é")
+    assert(url_percent_decode_str("%FF").is_err())
+}

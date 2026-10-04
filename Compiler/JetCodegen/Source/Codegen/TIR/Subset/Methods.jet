@@ -1,1916 +1,574 @@
-// PORT-PENDING 0523 crates-jet-codegen-src-codegen-tir-subset-methods: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1-1912
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::AST::{Expr, Type};
-//RS use crate::Codegen::Cx;
-//RS use crate::Codegen::TIR::THandleOp;
-//RS use crate::Codegen::TIR::allocator_constructor_owner;
-//RS use crate::Codegen::TIR::core_call_covered;
-//RS use crate::Codegen::TIR::core_closure_call_in_subset;
-//RS use crate::Codegen::TIR::core_enum_equal_type;
-//RS use crate::Codegen::TIR::duration_new_unit;
-//RS use crate::Codegen::TIR::enum_is_covered;
-//RS use crate::Codegen::TIR::expr_in_subset;
-//RS use crate::Codegen::TIR::game_static_type;
-//RS use crate::Codegen::TIR::handle_method_op;
-//RS use crate::Codegen::TIR::http_client_static_op;
-//RS use crate::Codegen::TIR::is_app_method_name;
-//RS use crate::Codegen::TIR::is_civil_time_method_name;
-//RS use crate::Codegen::TIR::is_concurrency_method_name;
-//RS use crate::Codegen::TIR::is_covered_builtin_name;
-//RS use crate::Codegen::TIR::is_covered_enum_ty;
-//RS use crate::Codegen::TIR::is_covered_foreign_value_ty;
-//RS use crate::Codegen::TIR::is_covered_numeric_method;
-//RS use crate::Codegen::TIR::is_covered_struct_ty;
-//RS use crate::Codegen::TIR::is_devserver_method_name;
-//RS use crate::Codegen::TIR::is_event_handle_type;
-//RS use crate::Codegen::TIR::is_event_method_name;
-//RS use crate::Codegen::TIR::is_http_method_name;
-//RS use crate::Codegen::TIR::is_http_type;
-//RS use crate::Codegen::TIR::is_loadable_method_name;
-//RS use crate::Codegen::TIR::is_measurement_method_name;
-//RS use crate::Codegen::TIR::is_process_handle_method_name;
-//RS use crate::Codegen::TIR::is_reactive_effect_method_name;
-//RS use crate::Codegen::TIR::is_reactive_method_name;
-//RS use crate::Codegen::TIR::is_sketch_method_name;
-//RS use crate::Codegen::TIR::is_sketch_type;
-//RS use crate::Codegen::TIR::is_ui_backend_method_name;
-//RS use crate::Codegen::TIR::is_watch_handle_type;
-//RS use crate::Codegen::TIR::is_watch_method_name;
-//RS use crate::Codegen::TIR::lambda_in_subset;
-//RS use crate::Codegen::TIR::router_register_in_subset;
-//RS use crate::Codegen::TIR::service_method_route;
-//RS use crate::Codegen::TIR::solve_new_type;
-//RS use crate::Codegen::TIR::subset::core_call_args_in_subset;
-//RS use crate::Codegen::TIR::tls_static_op;
-//RS use crate::Codegen::foreign_binding_method_key;
-//RS use crate::Codegen::is_db_value_type_name;
-//RS use crate::Codegen::is_db_value_variant;
-//RS use crate::Codegen::is_json_type_name;
-//RS use crate::Codegen::is_json_variant;
-//RS use crate::Codegen::is_key_variant;
-//RS use crate::Syntax;
-//RS use std::collections::HashSet;
-//RS 
-//RS /// c109 Phase 6: is this `Expr::MethodCall` inside the subset? Two shapes only:
-//RS /// the synthetic `.clone()`, or a user-defined instance method on a covered type.
-//RS pub(crate) fn method_call_in_subset(
-//RS     receiver: &Expr,
-//RS     method: &str,
-//RS     args: &[crate::AST::CallArg],
-//RS     recv_type: &Option<String>,
-//RS     resolved_ret: &Option<Type>,
-//RS     cx: &Cx,
-//RS     locals: &HashSet<String>,
-//RS ) -> bool {
-//RS     // D-CALLVALUE1=B: the sema marker is the method-shaped spelling of the
-//RS     // same function-value call represented by `Expr::CallValue`.
-//RS     if recv_type.as_deref() == Some(Syntax::INTERNAL_CALL_VALUE) {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     // Equatable `==` is rewritten to `.equal(rhs)` for every type that
-//RS     // implements the trait, including `[U8]` / list / bytes. Exclusive
-//RS     // handle gates below (Shared/Cell/…) must not swallow that operator.
-//RS     if matches!(method, "equal" | "compare") && args.len() == 1 {
-//RS         return expr_in_subset(receiver, cx, locals) && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     if crate::Codegen::TIR::web_receiver_projection(recv_type.as_deref(), method, args.len())
-//RS         .is_some()
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     // D-VALIDATE1: `Validate.over(value)` is only a compiler-owned head; its
-//RS     // materialized builder is an ordinary covered struct value.
-//RS     if recv_type.as_deref() == Some(Syntax::INTERNAL_VALIDATE_OVER)
-//RS         && method == "over"
-//RS         && args.is_empty()
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals);
-//RS     }
-//RS     // D-AUTHORITY-NAME1=A: the carried Authority value
-//RS     // has exactly one instance family. Keep both operations in TIR as ordinary
-//RS     // receiver calls; their policy lives in the shared Prelude helpers.
-//RS     if recv_type.as_deref() == Some(Syntax::TYPE_AUTHORITY)
-//RS         && matches!(method, "with" | "without")
-//RS         && args.len() == 1
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals) && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // D-MEMO1=A: sema resolves `name.cache()` to the MemoStats projection.
-//RS     // Mirror the lowerer's exact shape so the TIR gate cannot reject a call
-//RS     // that lower_method_call_with_sig already represents canonically.
-//RS     if method == Syntax::METHOD_MEMO_CACHE
-//RS         && args.is_empty()
-//RS         && matches!(resolved_ret, Some(Type::Named(name)) if name == Syntax::TYPE_MEMO_STATS)
-//RS     {
-//RS         return matches!(receiver, Expr::Ident(_, _));
-//RS     }
-//RS     // D-CALLDUAL1=E: sema has already resolved a receiver-first `#Root` call
-//RS     // to one ordinary function, import, or Core print target. Keep this gate
-//RS     // structural; the target's signature and capabilities were checked in
-//RS     // sema, and lowering preserves them on the ordinary call node.
-//RS     if recv_type.as_deref().is_some_and(|name| {
-//RS         name == Syntax::INTERNAL_ROOT_CALL_LOCAL
-//RS             || name.starts_with(Syntax::INTERNAL_ROOT_CALL_IMPORT_PREFIX)
-//RS             || name.starts_with(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX)
-//RS     }) {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     // D-NETIO-CONTRACT2=B / D-DBDRIVER1=A: sema resolves bounded dispatch to
-//RS     // either the type parameter (legacy metadata) or the selected trait owner.
-//RS     // Both lower through the same trait-bound call; specialization erases the
-//RS     // type parameter but deliberately retains the trait owner.
-//RS     if recv_type.as_ref().is_some_and(|name| {
-//RS         cx.current_type_params.borrow().contains(name.as_str())
-//RS             || cx.trait_names.contains(name)
-//RS             || crate::Generics::is_builtin_trait(name)
-//RS             || matches!(
-//RS                 name.as_str(),
-//RS                 crate::Generics::IO_READER | crate::Generics::IO_WRITER
-//RS             )
-//RS     }) && matches!(
-//RS         method,
-//RS         "read"
-//RS             | "write"
-//RS             | "write_all"
-//RS             | "add"
-//RS             | "sub"
-//RS             | "mul"
-//RS             | "div"
-//RS             | "equal"
-//RS             | "compare"
-//RS             | "query"
-//RS             | "query_one"
-//RS             | "execute"
-//RS             | "begin"
-//RS             | "commit"
-//RS             | "rollback"
-//RS     ) {
-//RS         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals))
-//RS             && expr_in_subset(receiver, cx, locals);
-//RS     }
-//RS     // D-QUERY-RETAIN1=A: typed Query/Group receiver methods and the checked-SQL
-//RS     // list door lower through `lower_query_receiver_call`, which emits the same
-//RS     // typed CoreCall node in every tier. Admit exactly the receiver families and
-//RS     // callback arities that that lowerer recognizes; otherwise a query-containing
-//RS     // entry is incorrectly omitted from the TIR function table and the driver
-//RS     // reports the misleading "selected entry is not a top-level function".
-//RS     if matches!(
-//RS         recv_type.as_deref(),
-//RS         Some("Query" | "DataGroupedQuery" | "DataTracked" | "DataWatch")
-//RS     ) || (recv_type.is_none()
-//RS         && method == "query"
-//RS         && args.len() == 1
-//RS         && match receiver {
-//RS             Expr::Ident(alias, _) => {
-//RS                 locals.contains(alias) || cx.any_core_import_module(alias).is_none()
-//RS             }
-//RS             _ => true,
-//RS         })
-//RS     {
-//RS         let method_ok = match recv_type.as_deref() {
-//RS             Some("Query") => matches!(
-//RS                 method,
-//RS                 "filter"
-//RS                     | "sort_by"
-//RS                     | "map"
-//RS                     | "min"
-//RS                     | "max"
-//RS                     | "inner_join"
-//RS                     | "left_join"
-//RS                     | "collect"
-//RS                     | "plan"
-//RS                     | "group_by"
-//RS                     | "watch"
-//RS             ),
-//RS             Some("DataGroupedQuery") => matches!(method, "count" | "sum" | "mean"),
-//RS             Some("DataTracked") => {
-//RS                 matches!(method, "query" | "insert" | "replace" | "remove")
-//RS             }
-//RS             Some("DataWatch") => matches!(method, "get" | "status" | "cancel"),
-//RS             None => true,
-//RS             _ => false,
-//RS         };
-//RS         if method_ok {
-//RS             return expr_in_subset(receiver, cx, locals)
-//RS                 && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS         }
-//RS     }
-//RS     // Shape (a): the sema-inserted `.clone()`. It takes no args; the receiver is an
-//RS     // owning field read / borrowed value, which must itself be in-subset. The AST
-//RS     // path emits `(recv).clone()` unconditionally (no `recv_type` needed) — match it.
-//RS     if method == "clone" {
-//RS         return args.is_empty() && expr_in_subset(receiver, cx, locals);
-//RS     }
-//RS     // D-TYPE2-SPELL1: the inline-range descriptor is a static typed-value head,
-//RS     // not a runtime receiver. Sema records the resolved range on `Int(lo..hi)`;
-//RS     // lowering consumes that same fact into `TNumericOp::InlineRange`.
-//RS     let inline_range_head = matches!(receiver, Expr::Call(call)
-//RS     if call.name == Syntax::TYPE_INT
-//RS         && call.args.len() == 1
-//RS         && match call.resolved_ret.as_ref() {
-//RS             Some(Type::InlineRange { .. }) => true,
-//RS             Some(Type::Result { ok, .. }) => matches!(ok.as_ref(), Type::InlineRange { .. }),
-//RS             _ => false,
-//RS         });
-//RS     if method == Syntax::conversion_method_for_source("Int") && args.len() == 1 && inline_range_head
-//RS     {
-//RS         return expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // D-TOOL4: `expect(x).snapshot()` — snapshot assertion. Receiver is a Call to
-//RS     // the ambient `expect` builtin (not a user fn / local). Zero method args; the
-//RS     // wrapped value must itself be in-subset. Lowers to `jet_expect(…).snapshot(…)?`.
-//RS     // Other `.snapshot()` shapes (user methods, Rollback) fall through below.
-//RS     if method == Syntax::BUILTIN_SNAPSHOT {
-//RS         if let Expr::Call(call) = receiver {
-//RS             if call.name == Syntax::BUILTIN_EXPECT
-//RS                 && !cx.sigs.contains_key(&call.name)
-//RS                 && !locals.contains(&call.name)
-//RS                 && call.args.len() == 1
-//RS                 && args.is_empty()
-//RS             {
-//RS                 return expr_in_subset(&call.args[0].expr, cx, locals);
-//RS             }
-//RS         }
-//RS     }
-//RS     // Qualified file-module calls can carry sema's `Unit` receiver sentinel
-//RS     // when their return type is unit. They are still module calls, not user
-//RS     // instance methods; admit the same resolved import shape as the ordinary
-//RS     // `recv_type == None` path below.
-//RS     if let Expr::Ident(alias, _) = receiver {
-//RS         if !locals.contains(alias)
-//RS             && (cx
-//RS                 .reexport_calls
-//RS                 .contains_key(&(alias.clone(), method.to_string()))
-//RS                 || cx.import_mods.contains_key(alias)
-//RS                 || cx.code_modules.contains(alias.as_str()))
-//RS         {
-//RS             return args.iter().all(|a| {
-//RS                 !a.flags.shared_auto_clone
-//RS                     && arg_conv_in_subset(a)
-//RS                     && expr_in_subset(&a.expr, cx, locals)
-//RS             });
-//RS         }
-//RS     }
-//RS     // c109 Phase 23: `.raw()` on a distinct type (D-DIST3). The AST `emit_method_call`
-//RS     // special-cases `method == "raw"` BEFORE any user dispatch, unconditionally emitting
-//RS     // `({recv}).0`. Sema (CheckerInfer ~L2039) admits `.raw()` ONLY on a distinct-type
-//RS     // value (E0311 otherwise), so any `.raw()` that survives to codegen is on a distinct
-//RS     // — covering an in-subset 0-arg `.raw()` is safe (and `recv_type` is `None` here,
-//RS     // since sema's `.raw()` arm returns the base type without the recv_type writeback).
-//RS     // D-TYPEDTEXT1=D: `SQL.raw("…")` / `HTML.raw("…")` — `SQL`/`HTML` name the
-//RS     // type (not a value), so `recv_type` is unset here. Checked BEFORE the
-//RS     // distinct-type `.raw()` below (same method name, disjoint receiver shape —
-//RS     // a distinct value's `.raw()` never takes an argument).
-//RS     if method == "raw" {
-//RS         if let Expr::Ident(n, _) = receiver {
-//RS             if n == "SQL" || n == "HTML" || n == Syntax::TYPE_SH {
-//RS                 return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
-//RS             }
-//RS         }
-//RS         // A checked text type is an ordinary String-backed distinct. Sema owns
-//RS         // the CheckedText and unsafe-region proof; TIR only admits the
-//RS         // resulting static construction shape.
-//RS         if args.len() == 1 {
-//RS             if let Some(type_name) = static_call_type_name(receiver, locals) {
-//RS                 if cx
-//RS                     .distinct_type_identity(&type_name)
-//RS                     .and_then(|identity| cx.distinct_types.get(&identity))
-//RS                     .is_some_and(|(base, _)| *base == Type::String)
-//RS                 {
-//RS                     return expr_in_subset(&args[0].expr, cx, locals);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     // D-FAIL-CARRIER1=A: the carrier's middle states. Sema marks the receiver
-//RS     // via `recv_type_out` once it has proved the shape (see `infer_method_call`).
-//RS     if recv_type.as_deref() == Some("__Carrier__") {
-//RS         return args.is_empty() && expr_in_subset(receiver, cx, locals);
-//RS     }
-//RS     // D-CMP3WAY1=B: Ordering combinators are core Prelude operations, not user
-//RS     // methods in the registry. Their arguments and receiver stay on the TIR path.
-//RS     if matches!(method, "then" | "reverse")
-//RS         && (recv_type.as_deref() == Some(Syntax::TYPE_ORDERING)
-//RS             || (recv_type.is_none() && !matches!(receiver, Expr::Ident(..))))
-//RS     {
-//RS         return ((method == "then" && args.len() == 1) || (method == "reverse" && args.is_empty()))
-//RS             && expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     if method == Syntax::METHOD_DISTINCT_RAW {
-//RS         return args.is_empty() && expr_in_subset(receiver, cx, locals);
-//RS     }
-//RS     // D-TYPEDTEXT1=D: `.template()`/`.params()` (SQL) and `.text()` (HTML) —
-//RS     // 0-arg accessors on a checked typed-text value.
-//RS     if recv_type.as_deref() == Some("SQL") && matches!(method, "template" | "params") {
-//RS         return args.is_empty() && expr_in_subset(receiver, cx, locals);
-//RS     }
-//RS     if recv_type.as_deref() == Some("HTML") && method == "text" {
-//RS         return args.is_empty() && expr_in_subset(receiver, cx, locals);
-//RS     }
-//RS     // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
-//RS     // Sema types the handle `Transaction` (`recv_type == Some("Transaction")`).
-//RS     // It lowers to a Drop-backed commit guard (a `scope.guard` cousin), so the
-//RS     // single arg must be an in-subset literal zero-param lambda.
-//RS     if method == Syntax::TXN_ON_COMMIT && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE) {
-//RS         return args.len() == 1
-//RS             && args[0].label.is_none()
-//RS             && matches!(&args[0].expr, Expr::Lambda(_))
-//RS             && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` — the mirror of
-//RS     // `on_commit`, same in-subset shape (a literal zero-param lambda on a handle sema
-//RS     // typed `Transaction`).
-//RS     if method == Syntax::TXN_ON_ROLLBACK && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE) {
-//RS         return args.len() == 1
-//RS             && args[0].label.is_none()
-//RS             && matches!(&args[0].expr, Expr::Lambda(_))
-//RS             && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // D-CONC-SPAWN1=D: canonical task nodes lower through the same spawn/select
-//RS     // TIR shapes as the pre-existing task implementation.
-//RS     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
-//RS         && method == Syntax::INTERNAL_TASK_SPAWN_METHOD
-//RS     {
-//RS         return args.len() == 1
-//RS             && args[0].label.is_none()
-//RS             && matches!(&args[0].expr, Expr::Lambda(_))
-//RS             && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
-//RS         && method == Syntax::INTERNAL_TASK_TIMEOUT_METHOD
-//RS     {
-//RS         return args.len() == 1
-//RS             && args[0].label.is_none()
-//RS             && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
-//RS         && matches!(
-//RS             method,
-//RS             Syntax::INTERNAL_TASK_ALL_METHOD
-//RS                 | Syntax::INTERNAL_TASK_RACE_METHOD
-//RS                 | Syntax::INTERNAL_TASK_ANY_METHOD
-//RS         )
-//RS     {
-//RS         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     let task_group_receiver = matches!(
-//RS         recv_type.as_deref(),
-//RS         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
-//RS     );
-//RS     if task_group_receiver && method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
-//RS         return args.len() == 1
-//RS             && args[0].label.is_none()
-//RS             && matches!(&args[0].expr, Expr::Lambda(_))
-//RS             && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // D-CONC-SPAWN1=D: canonical `task.group` combinators use the same TIR
-//RS     // nodes as top-level `task.all`/`task.race`/`task.any`.
-//RS     if task_group_receiver && method == Syntax::INTERNAL_TASK_ALL_METHOD {
-//RS         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // D-CONC-SPAWN1=D: `task.race { … }` / `task.any { … }` — nested child combinators.
-//RS     if task_group_receiver
-//RS         && (method == Syntax::INTERNAL_TASK_RACE_METHOD
-//RS             || method == Syntax::INTERNAL_TASK_ANY_METHOD)
-//RS     {
-//RS         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // D-RECEIPT1: `receipt.attach(value)` is an ambient compiler-owned handle
-//RS     // operation. The lowerer intentionally does not lower the receiver (it
-//RS     // materializes the current receipt as the destination), so do not require
-//RS     // the ambient identifier to be a local here; only the payload crosses the
-//RS     // TIR boundary.
-//RS     if recv_type.as_deref() == Some(Syntax::INTERNAL_RECEIPT_HANDLE)
-//RS         && method == Syntax::METHOD_RECEIPT_ATTACH
-//RS     {
-//RS         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // D-SHARED-REVISION1: snapshot capture and compare-and-replace are lowered
-//RS     // by the canonical JetShared methods. `capture` optionally takes one
-//RS     // projection lambda; `try_replace` takes the observed snapshot and the
-//RS     // replacement value.
-//RS     if recv_type.as_deref() == Some("Shared") {
-//RS         if method == "capture" {
-//RS             return match args {
-//RS                 [] => true,
-//RS                 [arg] => {
-//RS                     matches!(&arg.expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
-//RS                 }
-//RS                 _ => false,
-//RS             };
-//RS         }
-//RS         if method == "try_replace" {
-//RS             return args.len() == 2 && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS         }
-//RS     }
-//RS     // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids` and
-//RS     // `Shared<T>.read/edit`. Sema sets `recv_type` to `"Pool"`/`"Shared"`
-//RS     // explicitly for these (see `CheckerInfer/calls.rs`'s comment on why — the
-//RS     // method names collide with Set/List/Map's `add`/`remove`, unlike Task/
-//RS     // Sender's globally-unambiguous names), so gate on that instead of a name+
-//RS     // arity guess. `recv_type == Some("Pool")` is ALSO how D-ALLOC1's `mem.Pool`
-//RS     // slab allocator (a completely different, pre-existing type — see
-//RS     // `Type::Named` vs this stage's `Type::Apply` in the type's own doc
-//RS     // comment) marks its `.alloc`/`.reset` methods, so only intercept
-//RS     // (and `return`) for the THREE names this stage actually owns — anything
-//RS     // else falls through to the allocator's existing `("Arena"|"Bump"|"Pool"|
-//RS     // "Fixed", …)` shape further down, unbroken.
-//RS     if recv_type.as_deref() == Some("Pool") && matches!(method, "add" | "remove" | "ids") {
-//RS         return match method {
-//RS             "add" => args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals),
-//RS             "remove" => args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals),
-//RS             "ids" => args.is_empty(),
-//RS             _ => unreachable!("matches! above admitted only these"),
-//RS         };
-//RS     }
-//RS     if recv_type.as_deref() == Some("Shared") {
-//RS         return match method {
-//RS             "read" | "edit" | "read_txn" => {
-//RS                 args.len() == 1
-//RS                     && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
-//RS             }
-//RS             "guard_read" | "guard_edit" | "downgrade" | "strong_count" => args.is_empty(),
-//RS             "same" => args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals),
-//RS             _ => false,
-//RS         };
-//RS     }
-//RS     if recv_type.as_deref() == Some(Syntax::TYPE_SHARED_WEAK) {
-//RS         return method == "upgrade" && args.is_empty();
-//RS     }
-//RS     if recv_type.as_deref() == Some(Syntax::TYPE_SHARED_GUARD) {
-//RS         return match method {
-//RS             "map" => {
-//RS                 args.len() == 1
-//RS                     && matches!(&args[0].expr, Expr::Lambda(lam)
-//RS                         if lam.meta.guard_projection.is_some()
-//RS                             && lambda_in_subset(lam, cx, locals))
-//RS             }
-//RS             "split" => {
-//RS                 args.len() == 2
-//RS                     && args.iter().all(|arg| {
-//RS                         matches!(
-//RS                             &arg.expr,
-//RS                             Expr::Lambda(lam)
-//RS                                 if lam.meta.guard_projection.is_some()
-//RS                                     && lambda_in_subset(lam, cx, locals)
-//RS                         )
-//RS                     })
-//RS             }
-//RS             "wait" => {
-//RS                 args.len() == 2
-//RS                     && expr_in_subset(&args[0].expr, cx, locals)
-//RS                     && matches!(&args[1].expr, Expr::Lambda(lam)
-//RS                         if lambda_in_subset(lam, cx, locals))
-//RS             }
-//RS             _ => false,
-//RS         };
-//RS     }
-//RS     if recv_type.as_deref() == Some(Syntax::TYPE_CONDITION) {
-//RS         return matches!(method, "notify_one" | "notify_all") && args.is_empty();
-//RS     }
-//RS     // D-SERVICE1=D: typed tree/endpoint methods lower to the same Prelude
-//RS     // core-call adapter as their private runtime names. Keep this coverage
-//RS     // proof beside the route table so `jet run` cannot reject a checked service
-//RS     // example after sema accepts it.
-//RS     if recv_type
-//RS         .as_deref()
-//RS         .is_some_and(|handle| service_method_route(handle, method).is_some())
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     if matches!(
-//RS         recv_type.as_deref(),
-//RS         Some("Cell" | "CellReadGuard" | "CellEditGuard")
-//RS     ) {
-//RS         let plain = match (recv_type.as_deref(), method, args.len()) {
-//RS             (Some("Cell"), "get" | "guard_read" | "guard_edit", 0)
-//RS             | (Some("Cell"), "set" | "replace", 1)
-//RS             | (Some("CellReadGuard" | "CellEditGuard"), "get", 0)
-//RS             | (Some("CellEditGuard"), "set", 1) => true,
-//RS             _ => false,
-//RS         };
-//RS         if plain {
-//RS             return expr_in_subset(receiver, cx, locals)
-//RS                 && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS         }
-//RS         let closure = matches!(
-//RS             (recv_type.as_deref(), method),
-//RS             (Some("Cell"), "get_or_set" | "read" | "edit")
-//RS                 | (Some("CellReadGuard"), "read" | "map" | "split")
-//RS                 | (Some("CellEditGuard"), "read" | "edit" | "map" | "split")
-//RS         );
-//RS         if closure {
-//RS             return expr_in_subset(receiver, cx, locals)
-//RS                 && !args.is_empty()
-//RS                 && args.iter().all(|arg| {
-//RS                     arg.label.is_none()
-//RS                         && matches!(&arg.expr, Expr::Lambda(lambda)
-//RS                             if lambda_in_subset(lambda, cx, locals))
-//RS                 });
-//RS         }
-//RS         return false;
-//RS     }
-//RS     if recv_type.as_deref() == Some("ExpiringSecret") {
-//RS         if method == "new"
-//RS             && args.len() == 3
-//RS             && matches!(receiver, Expr::Ident(name, _) if name == "ExpiringSecret")
-//RS         {
-//RS             return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS         }
-//RS         return method == "with"
-//RS             && args.len() == 1
-//RS             && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals));
-//RS     }
-//RS     // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
-//RS     // where `step: fn(Int) => Int` is a field on a covered struct, NOT a user method.
-//RS     // Sema (CheckerInfer ~L2329) sets `recv_type == Some(<StructType>)` and re-routes the
-//RS     // node through `infer_call_value`, but registers NO `method_sigs` entry (it is a field,
-//RS     // not a method). The AST `emit_method_call` (Expression.rs ~L1573) detects this case
-//RS     // FIRST — a `struct_fields` entry whose type is `Type::Fn` — and emits
-//RS     // `(({recv}).{__jet_<field>})({args})` with PLAIN args (`emit_call_args(.., None, ..)`).
-//RS     // We mirror that order: tried before the user-method/static shapes so a fn-field whose
-//RS     // name happens to match a method name resolves to the field, exactly as the AST path.
-//RS     if fn_field_call_in_subset(receiver, method, args, recv_type, cx, locals) {
-//RS         return true;
-//RS     }
-//RS     // Shape (l) [c109 Phase 24]: a JSON construction `JSON.Boolean(b)` / `JSON.Number(n)`
-//RS     // / `JSON.Text(s)` / `JSON.Array(xs)` / `JSON.Object(map)`. The receiver is the
-//RS     // bare `Ident("JSON")` (a type name, NOT a local), and `method` is a JSON variant.
-//RS     // Sema (`check_core_json_lit`) types it as `JSON` WITHOUT setting `recv_type` (so
-//RS     // `recv_type == None`), and the AST `emit_method_call` routes it through
-//RS     // `emit_core_json_lit` (Expression.rs ~L1633) BEFORE the user enum-lit / instance
-//RS     // shapes. Tried here FIRST among the type-name receivers: `JSON` is not a core
-//RS     // import alias (so the core shape declines), not a local, not a user enum/struct
-//RS     // name. The single payload arg must be in-subset. `JSON.Null` is the no-arg Field
-//RS     // form, handled in `expr_in_subset`'s `Field` arm, not here.
-//RS     if let Expr::Ident(type_name, _) = receiver {
-//RS         if !locals.contains(type_name) && is_json_type_name(type_name) && is_json_variant(method) {
-//RS             return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS         }
-//RS     }
-//RS     // D-DBDRIVER1: a `DBValue` construction `DBValue.Int(n)` / `.Float(f)` /
-//RS     // `.Text(s)` / `.Bool(b)` / `.Blob(bytes)` — same shape as the JSON
-//RS     // construction just above.
-//RS     if let Expr::Ident(type_name, _) = receiver {
-//RS         if !locals.contains(type_name)
-//RS             && is_db_value_type_name(type_name)
-//RS             && is_db_value_variant(method)
-//RS         {
-//RS             return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS         }
-//RS     }
-//RS     // Prelude payload enum constructions `Key.Variant(args)` (D-TERM1) and
-//RS     // `DataEvent.Variant(arg)`. Sema leaves `recv_type == None` and a bare
-//RS     // type-name receiver. A grouped `use core.encoding.[DataEvent]` also binds
-//RS     // `DataEvent` in `core_imports`, so this must run before the core-call
-//RS     // shape below, which would read `DataEvent.Key(k)` as a Core function call
-//RS     // and refuse it. The lowerer admits the same shape.
-//RS     if recv_type.is_none() {
-//RS         if let Expr::Ident(type_name, _) = receiver {
-//RS             if !locals.contains(type_name) {
-//RS                 if type_name == crate::Syntax::TYPE_KEY {
-//RS                     return is_key_variant(method)
-//RS                         && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                 }
-//RS                 if type_name == "DataEvent" {
-//RS                     return matches!(method, "Bool" | "Int" | "Float" | "Text" | "Bytes" | "Key")
-//RS                         && args.len() == 1
-//RS                         && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     // Shape (e) [c109 Phase 10]: a core/stdlib module call `alias.method(args)` where
-//RS     // `alias` is a core import. Sema leaves `recv_type == None` for core calls
-//RS     // (`infer_core_call` returns without setting it). A core call is uniquely a
-//RS     // `MethodCall` whose receiver is an `Ident(alias)` with `alias ∈ cx.core_imports`
-//RS     // — disjoint from the builtin shape (which needs a *value* receiver) and the
-//RS     // static shape (a covered *type-name* receiver). Tried BEFORE the builtin shape:
-//RS     // a core method named `get`/`split`/… would otherwise be claimed (and rejected,
-//RS     // since a module alias is not a local) by the builtin shape's `return`. The
-//RS     // covered set is the type-monomorphic core calls (`core_call_covered`); the
-//RS     // polymorphic math/random/io specials + every closure-taking / handle-constructor
-//RS     // call stay on the AST path.
-//RS     if recv_type.is_none() {
-//RS         if matches!(receiver, Expr::Field(..)) {
-//RS             if let Some(submodule) = core_module_path_from_receiver(receiver, cx, locals) {
-//RS                 return core_call_covered(&submodule, method)
-//RS                     && core_call_args_in_subset(&submodule, method, args, cx, locals);
-//RS             }
-//RS             if let Expr::Field(base, leaf, _) = receiver {
-//RS                 if let Expr::Ident(owner, _) = base.as_ref() {
-//RS                     if cx
-//RS                         .inline_reexport_foreign
-//RS                         .contains_key(&(owner.clone(), leaf.clone()))
-//RS                     {
-//RS                         return args.iter().all(|a| {
-//RS                             !a.flags.shared_auto_clone
-//RS                                 && arg_conv_in_subset(a)
-//RS                                 && expr_in_subset(&a.expr, cx, locals)
-//RS                         });
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Expr::Ident(alias, _) = receiver {
-//RS             if !locals.contains(alias) {
-//RS                 if let Some(module) = cx.any_core_import_module(alias) {
-//RS                     // c109 Phase 13: closure-taking core calls (`tasks.spawn`,
-//RS                     // `http.serve`, `scope.guard`) — NOT in `core_fixed_sig`, each a
-//RS                     // bespoke emit shape with a literal-lambda closure arg.
-//RS                     if core_closure_call_in_subset(module, method, args, cx, locals) {
-//RS                         return true;
-//RS                     }
-//RS                     return core_call_covered(module, method)
-//RS                         && core_call_args_in_subset(module, method, args, cx, locals);
-//RS                 }
-//RS                 if let Some((module, real_method)) = cx
-//RS                     .inline_reexport_core
-//RS                     .get(&(alias.clone(), method.to_string()))
-//RS                 {
-//RS                     return core_call_covered(module, real_method)
-//RS                         && core_call_args_in_subset(module, real_method, args, cx, locals);
-//RS                 }
-//RS                 if cx.any_foreign_import_module(alias).is_some() {
-//RS                     return args.iter().all(|a| {
-//RS                         !a.flags.shared_auto_clone
-//RS                             && arg_conv_in_subset(a)
-//RS                             && expr_in_subset(&a.expr, cx, locals)
-//RS                     });
-//RS                 }
-//RS                 // Shape (i) [c109 Phase 14]: a qualified cross-module call
-//RS                 // `alias.method(args)` — a `pub use` re-export (`reexport_calls`), a
-//RS                 // file/dir-module import (`import_mods`), or an inline code module
-//RS                 // (`code_modules`). The AST `emit_method_call` checks these in this
-//RS                 // exact order (after `core_imports`, already handled above). Each
-//RS                 // lowers to its resolved `{root}{mod}::{fn}` / `{root}user_{a}__{m}`
-//RS                 // form. Args carry their import-signature conventions, reproduced via
-//RS                 // `lower_one_call_arg`; the Arc form stays excluded.
-//RS                 let is_module_alias = cx
-//RS                     .reexport_calls
-//RS                     .contains_key(&(alias.clone(), method.to_string()))
-//RS                     || cx.import_mods.contains_key(alias)
-//RS                     || cx.code_modules.contains(alias.as_str());
-//RS                 if is_module_alias {
-//RS                     return args.iter().all(|a| {
-//RS                         !a.flags.shared_auto_clone
-//RS                             && arg_conv_in_subset(a)
-//RS                             && expr_in_subset(&a.expr, cx, locals)
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     // Shape (k) [c109 Phase 19]: allocator constructors are admitted from the
-//RS     // checked dispatch owner and return fact. Sema rewrites `mem.Arena` (and
-//RS     // siblings) to a nominal sentinel before TIR, so source-shape inspection
-//RS     // would be both stale and unsound here.
-//RS     if let Some(alloc_type) = allocator_constructor_owner(recv_type.as_deref(), method) {
-//RS         let return_ok = matches!(resolved_ret, Some(Type::Named(name)) if name == alloc_type);
-//RS         let arity_ok = if alloc_type == "Fixed" {
-//RS             args.len() == 1
-//RS         } else {
-//RS             args.len() <= 1
-//RS         };
-//RS         return return_ok && arity_ok && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` mirrors `mem.Arena.new()`:
-//RS     // receiver is a module-field sentinel, not a runtime value.
-//RS     if solve_new_type(receiver, method, cx, locals).is_some() {
-//RS         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     if duration_new_unit(receiver, method, locals).is_some() {
-//RS         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     if let Some(static_type) = game_static_type(receiver, method, cx, locals) {
-//RS         let want = match (static_type, method) {
-//RS             ("Backend", "headless") => 0,
-//RS             _ => 1,
-//RS         };
-//RS         return args.len() == want && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     if let Some(op) = tls_static_op(receiver, method, cx, locals) {
-//RS         let want = match op {
-//RS             THandleOp::TLSClientConfigDefault => 0,
-//RS             THandleOp::TLSRootCertificatesFromPem => 1,
-//RS             THandleOp::TLSClientIdentityFromPem => 2,
-//RS             _ => return false,
-//RS         };
-//RS         return args.len() == want && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     if http_client_static_op(receiver, method, cx, locals).is_some() {
-//RS         return args.is_empty();
-//RS     }
-//RS     // Shape (d) [c109 Phase 9]: a built-in collection/string method
-//RS     // (`emit_builtin_method`) — `len`/`push`/`get`/`keys`/`trim`/`split`/… on a
-//RS     // list/map/string receiver. Sema resolves these via `Collections::
-//RS     // builtin_method_return` and normally leaves `recv_type == None`; a
-//RS     // parenthesized/fallible String receiver may retain `Some("String")`.
-//RS     // Both spellings are the same canonical String surface, while user
-//RS     // instance/handle/numeric receivers carry another nominal `recv_type`.
-//RS     // Therefore only `None` or `Some("String")`, plus a covered builtin name
-//RS     // and an in-subset *value* receiver, uniquely identifies this route.
-//RS     // A bare type-name ident (a static-call receiver) is NOT in `locals`, so it
-//RS     // fails `expr_in_subset` and is excluded here, falling through to the
-//RS     // static shape.
-//RS     //
-//RS     // The Map-vs-List-vs-String emit branch (`rty = expr_jet_ty(receiver)`) is
-//RS     // resolved at LOWERING from the receiver's total type (reproducing the AST's
-//RS     // `expr_jet_ty`, incl. its `None` → default-branch partiality), never re-derived
-//RS     // in emit. Tried BEFORE the static/instance shapes (both keyed on the same
-//RS     // `recv_type`) to claim builtins first.
-//RS     if is_builtin_collection_recv(recv_type.as_deref())
-//RS         && is_covered_builtin_name(method, args.len())
-//RS     {
-//RS         // D-MAP-MERGE1=E: optional second arg may be named `conflict:`.
-//RS         let labels_ok = if matches!(method, "zip" | "zip_short" | "zip_pad") {
-//RS             true
-//RS         } else if method == "merge" && args.len() == 2 {
-//RS             args[0].label.is_none()
-//RS                 && matches!(
-//RS                     args[1].label.as_ref().map(|(n, _)| n.as_str()),
-//RS                     None | Some("conflict")
-//RS                 )
-//RS         } else {
-//RS             args.iter().all(|a| a.label.is_none())
-//RS         };
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && labels_ok
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     if recv_type.as_deref() == Some("Atomic") && is_covered_builtin_name(method, args.len()) {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // Sema may retain the nominal Set family in `recv_type` for an instance
-//RS     // operation. It is still the same built-in collection surface, not a user
-//RS     // method; keep it on the TIR/JIT path rather than falling through to Todo.
-//RS     if matches!(
-//RS         recv_type.as_deref(),
-//RS         Some("Set") | Some(crate::Syntax::TYPE_RANK)
-//RS     ) && is_covered_builtin_name(method, args.len())
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // Shape (d-coll-ctor) [D-COLLBREADTH1=A]: a collection static constructor —
-//RS     // `Set.from([...])` or `Queue.new()`. The receiver is a bare type-name ident
-//RS     // (`"Set"` / `crate::Syntax::TYPE_QUEUE`), NOT a local. Sema types the call and leaves
-//RS     // `recv_type == None`. The method is `"from"` (for Set) or `"new"` (for Queue).
-//RS     // Both are `is_intercepted_method_name` names, so they never reach the static
-//RS     // user-type shape (line ~2843). This shape claims them BEFORE that check. Every arg
-//RS     // must be in-subset (for `Set.from`, the list literal is always in-subset).
-//RS     if recv_type.is_none() {
-//RS         if let Expr::Ident(type_name, _) = receiver {
-//RS             if !locals.contains(type_name.as_str()) {
-//RS                 match (type_name.as_str(), method, args.len()) {
-//RS                     ("Set", "from", 1)
-//RS                     | ("Set", "new", 0)
-//RS                     | ("Map", "new", 0)
-//RS                     | ("Map", "from_keys", 2)
-//RS                     | ("Map", "fromkeys", 2)
-//RS                     | (crate::Syntax::TYPE_RANK, "from", 1)
-//RS                     | ("PriorityQueue", "from", 1)
-//RS                     | (crate::Syntax::TYPE_BYTES, "from", 1)
-//RS                     | (crate::Syntax::TYPE_TALLY, "new", 0)
-//RS                     | (crate::Syntax::TYPE_QUEUE, "new", 0)
-//RS                     | (crate::Syntax::TYPE_QUEUE, "init", 1)
-//RS                     | (crate::Syntax::TYPE_RANK, "new", 0)
-//RS                     | ("PriorityQueue", "new", 0)
-//RS                     | ("Cache", "new", 1)
-//RS                     | (crate::Syntax::TYPE_BITS, "new", 0)
-//RS                     | (crate::Syntax::TYPE_BYTES, "new", 0)
-//RS                     | (crate::Syntax::TYPE_BYTES, "with_capacity", 1)
-//RS                     | (crate::Syntax::TYPE_LIST, "try_new", 0)
-//RS                     | (crate::Syntax::TYPE_LIST, "try_with_capacity", 1) => {
-//RS                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                     }
-//RS                     // D-MEM1 S6: `Pool<T>.new()` / `Shared.new(x)` — same bare
-//RS                     // type-name static-constructor shape as `Queue.new()` above.
-//RS                     ("Pool", "new", 0) => return true,
-//RS                     ("Shared", "new", 1) => {
-//RS                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                     }
-//RS                     ("Condition", "new", 0) => return true,
-//RS                     ("Cell", "new", 1) => {
-//RS                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                     }
-//RS                     ("ExpiringSecret", "new", 3) => {
-//RS                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                     }
-//RS                     ("ExpiringValue", "new", 3) => {
-//RS                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                     }
-//RS                     // D-PATHFS1: `Path.from(str)` — static constructor for typed paths.
-//RS                     // Like `Set.from`, admitted before `static_method_call_in_subset`
-//RS                     // blocks `from` (an intercepted name). Path is not a user type.
-//RS                     ("Path", "from", 1) if !cx.type_names.contains("Path") => {
-//RS                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                     }
-//RS                     // D-SHIFT1 (c7shift): `Reader.over(bytes)` / `Cursor.over(s)` —
-//RS                     // same static-constructor admission shape as `Path.from`.
-//RS                     ("Reader", "over", 1) if !cx.type_names.contains("Reader") => {
-//RS                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                     }
-//RS                     ("Cursor", "over", 1) if !cx.type_names.contains("Cursor") => {
-//RS                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                     }
-//RS                     // D-HTTP-CORE2=A: exact nominal HTTP constructors exported
-//RS                     // as `http.Type.method(...)`; Body/Headers retain their
-//RS                     // canonical public names while other carriers use HTTP names.
-//RS                     ("HTTPMethod", "custom", 1)
-//RS                     | (
-//RS                         "HTTPMethod",
-//RS                         "get" | "head" | "post" | "put" | "delete" | "connect" | "options"
-//RS                         | "trace" | "patch",
-//RS                         0,
-//RS                     )
-//RS                     | ("HTTPStatus", "new", 1)
-//RS                     | ("HTTPVersion", "http_1_0" | "http_1_1" | "http_2", 0)
-//RS                     | ("HTTPHeaderName" | "HTTPHeaderValue", "new", 1)
-//RS                     | ("Headers", "new", 0)
-//RS                     | ("Body", "empty", 0)
-//RS                     | ("Body", "bytes" | "json" | "form" | "multipart", 1)
-//RS                     | ("Body", "text" | "reader", 1 | 2) => {
-//RS                         return args
-//RS                             .iter()
-//RS                             .all(|argument| expr_in_subset(&argument.expr, cx, locals));
-//RS                     }
-//RS                     // D-HOLE1: `Option.lift2(f, a, b)` — static combinator, not a
-//RS                     // user type. `f` is a plain in-subset lambda arg (no closure-arg
-//RS                     // gate needed here — `expr_in_subset`'s `Expr::Lambda` arm already
-//RS                     // routes through `lambda_in_subset`).
-//RS                     ("Option", "lift2", 3) if !cx.type_names.contains("Option") => {
-//RS                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     // Shape (d3) [c109 Phase 21 / D-TUPLE-DESTRUCT1]: a Task/Receiver/Sender
-//RS     // concurrency method. Sema types these via
-//RS     // `Collections::builtin_method_return`'s `Type::Apply` arms
-//RS     // (`task_method_return`/`receiver_method_return`/`sender_method_return`,
-//RS     // Source/Collections.rs) and leaves `recv_type == None` (a Phase-9 builtin gap).
-//RS     // The AST `emit_builtin_method` dispatches them on the method NAME alone
-//RS     // (`join`/`detach`/`receive`/`send`). The names + arg counts are disjoint from
-//RS     // every other shape: `Task.join()` is the 0-arg `join` (the 1-arg list
-//RS     // `join(sep)` is claimed by shape d above); `detach`/`receive` (0 args) and
-//RS     // `send` (1 arg) are used by no other builtin. The receiver is a `Task`/
-//RS     // `Receiver`/`Sender` value `(tx, rx) := tasks.channel<T>()`-destructured or
-//RS     // `task`-produced. Tried after the collection builtins so a
-//RS     // list/map/string method can't be misclaimed.
-//RS     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // Shape (d4): `Match.group(n)` (D-REGEXENGINE1). Sema sets `recv_type ==
-//RS     // Some("Match")` (the `Match` receiver type, CheckerInfer's user/handle-method
-//RS     // writeback), and the AST `emit_builtin_method` dispatches it on the method NAME
-//RS     // guarded by `rty == Some(Named("Match"))` (Expression.rs ~L1132). Keyed on
-//RS     // `recv_type == Some("Match")` + `group`/1 — disjoint from every user instance method
-//RS     // (whose `recv_type` is a covered struct/enum, never `Match`) and from the numeric
-//RS     // shape (a numeric `recv_type`). The receiver is a `Match` value (`if m == value(mat)`
-//RS     // binding). Lowered to `BuiltinMethod`/`TBuiltinOp::MatchGroup`. The result is `?String`.
-//RS     if recv_type.as_deref() == Some("Match") && method == "group" && args.len() == 1 {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // Shape (d5) [D-REACT1=B]: a reactive `Signal`/`Derived` method (`.get()`/`.set(v)`).
-//RS     // Sema sets `recv_type == Some("Signal"|"Derived")` (CheckerInfer's reactive arm), so
-//RS     // these are keyed on recv_type — NOT the bare name (`get`/0 would alias a list `get`).
-//RS     // `Signal.get()`/`Derived.get()` → `(recv).get()`; `Signal.set(v)` → `(recv).set(v)`.
-//RS     if matches!(
-//RS         recv_type.as_deref(),
-//RS         Some("Signal") | Some("Derived") | Some("Computed")
-//RS     ) && is_reactive_method_name(method, args.len())
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     if recv_type.as_deref() == Some(crate::Syntax::TYPE_EFFECT)
-//RS         && is_reactive_effect_method_name(method, args.len())
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals);
-//RS     }
-//RS     // Shape (d5b) [D-EVENT1=D]: Event/Hook handle methods. Handler arguments
-//RS     // must be literal lambdas so lowering can seed payload/result types and
-//RS     // render the stored callback for the event runtime.
-//RS     if is_event_handle_type(recv_type.as_deref()) && is_event_method_name(method, args.len()) {
-//RS         let handler_ok = match (method, args.len()) {
-//RS             ("on" | "once", 2) => args
-//RS                 .get(1)
-//RS                 .is_some_and(|a| a.label.is_none() && matches!(a.expr, Expr::Lambda(_))),
-//RS             ("on_priority", 3) => {
-//RS                 args.get(1)
-//RS                     .is_some_and(|a| expr_in_subset(&a.expr, cx, locals))
-//RS                     && args
-//RS                         .get(2)
-//RS                         .is_some_and(|a| a.label.is_none() && matches!(a.expr, Expr::Lambda(_)))
-//RS             }
-//RS             _ => true,
-//RS         };
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && handler_ok
-//RS             && args.iter().enumerate().all(|(i, a)| {
-//RS                 a.label.is_none()
-//RS                     && match (method, args.len(), i) {
-//RS                         ("on" | "once", 2, 1) | ("on_priority", 3, 2) => true,
-//RS                         _ => expr_in_subset(&a.expr, cx, locals),
-//RS                     }
-//RS             });
-//RS     }
-//RS     // Shape (d5c) [D-WATCH-SCOPE1]: watcher handle/set methods. Callback
-//RS     // handlers are literal lambdas so lowering can seed `WatchEvent`.
-//RS     if is_watch_handle_type(recv_type.as_deref()) && is_watch_method_name(method, args.len()) {
-//RS         let handler_ok = match (recv_type.as_deref(), method, args.len()) {
-//RS             (Some("WatchHandle"), "on" | "once", 2) => args
-//RS                 .get(1)
-//RS                 .is_some_and(|a| a.label.is_none() && matches!(a.expr, Expr::Lambda(_))),
-//RS             _ => true,
-//RS         };
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && handler_ok
-//RS             && args.iter().enumerate().all(|(i, a)| {
-//RS                 a.label.is_none()
-//RS                     && match (recv_type.as_deref(), method, args.len(), i) {
-//RS                         (Some("WatchHandle"), "on" | "once", 2, 1) => true,
-//RS                         _ => expr_in_subset(&a.expr, cx, locals),
-//RS                     }
-//RS             });
-//RS     }
-//RS     // D-PROCESS1: ProcessSpec/ProcessChild subprocess handles. The lowerer routes
-//RS     // every admitted method through fixed prelude helpers, with sema-proved arity.
-//RS     if matches!(
-//RS         recv_type.as_deref(),
-//RS         Some(
-//RS             "ProcessSpec"
-//RS                 | "ProcessChild"
-//RS                 | "ProcessStdin"
-//RS                 | "ProcessStdoutStream"
-//RS                 | "ProcessStderrStream"
-//RS                 | "TerminalSession"
-//RS         )
-//RS     ) && is_process_handle_method_name(recv_type.as_deref(), method, args.len())
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // Shape (d6) [D-HONESTNUM1=A]: a `Measurement<Float>` method.
-//RS     // Sema sets `recv_type == Some("Measurement")`.
-//RS     if recv_type.as_deref() == Some("Measurement") && is_measurement_method_name(method, args.len())
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // Shape (d7) [D-PENDING1=B]: a `Loadable<T,E>` method.
-//RS     // Sema sets `recv_type == Some("Loadable")`.
-//RS     if recv_type.as_deref() == Some("Loadable") && is_loadable_method_name(method, args.len()) {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` construction and access.
-//RS     //
-//RS     // Sema types `ExpiringValue.new(value, ttl, clock)` with `recv_type ==
-//RS     // Some("ExpiringValue")` (CheckerInfer/calls/method_calls.rs ~1333), so the
-//RS     // static-call shape further down — gated on `recv_type.is_none()` — can never
-//RS     // see the constructor, and its `("ExpiringValue", "new", 3)` row was dead. The
-//RS     // sibling `ExpiringSecret` already claims its own `new` on the matching
-//RS     // `recv_type` arm above; this is the same shape for the same reason.
-//RS     //
-//RS     // The receiver is the bare TYPE NAME, not a value, so only the arguments are
-//RS     // checked (a type-name ident is not a local and would fail `expr_in_subset`)
-//RS     // — again mirroring the `ExpiringSecret.new` arm. Lowering resolves the
-//RS     // identical key through `static_call_type_name_lower` and emits
-//RS     // `THostCall::ExpiringValueNew` (lower/method_calls.rs ~6336), which AOT
-//RS     // (TIR/emit/expressions.rs), the resident JIT (jit/lower_ctx.rs
-//RS     // `THostCall::ExpiringValueNew`) and the interpreter (TIR/eval/exprs.rs) all
-//RS     // consume — so the lowering this admits exists on every tier (I9).
-//RS     if recv_type.as_deref() == Some(Syntax::EXPIRING_VALUE_TYPE) {
-//RS         if method == "new"
-//RS             && args.len() == 3
-//RS             && matches!(receiver, Expr::Ident(name, _) if name == Syntax::EXPIRING_VALUE_TYPE)
-//RS         {
-//RS             return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS         }
-//RS         if matches!(
-//RS             (method, args.len()),
-//RS             ("get", 1) | ("is_valid", 1) | ("force", 1)
-//RS         ) {
-//RS             return expr_in_subset(receiver, cx, locals)
-//RS                 && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS         }
-//RS     }
-//RS     // Shape (d7b) [D-RENDERTGT2=A]: a UI backend method.
-//RS     if matches!(
-//RS         recv_type.as_deref(),
-//RS         Some("NullBackend" | "TUIBackend" | "GtkBackend")
-//RS     ) && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // c-devserver (owner-directed 2026-07-01): a DevServer builder method.
-//RS     if recv_type.as_deref() == Some("DevServer") && is_devserver_method_name(method, args.len()) {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // D-WEBAPP1=D: an App builder method.
-//RS     if recv_type.as_deref() == Some("App") && is_app_method_name(method, args.len()) {
-//RS         // `.routes(from: "…")` uses a labeled arg; other builder methods stay
-//RS         // positional. Labels are erased at emit — only the expression matters.
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // Shape (d8) [D-APPROX1=A]: a sketch method (HyperLogLog/TDigest/CMS/ReservoirSampler).
-//RS     if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // Shape (d10) [D-NETDEP1=A / D-HTTPLIB1=A]: an HTTP type method call.
-//RS     if is_http_type(recv_type.as_deref()) && is_http_method_name(recv_type.as_deref(), method) {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // Shape (d9) [D-TIMEDEPTH1=A]: a civil-time method (Date/DateTime).
-//RS     if matches!(
-//RS         recv_type.as_deref(),
-//RS         Some(
-//RS             "Date"
-//RS                 | "LocalDate"
-//RS                 | "LocalTime"
-//RS                 | "DateTime"
-//RS                 | "Instant"
-//RS                 | "Period"
-//RS                 | "Zone"
-//RS                 | "ZonedDateTime"
-//RS         )
-//RS     ) && is_civil_time_method_name(recv_type.as_deref(), method)
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // D-TIMEDEPTH1=A: Duration's comparison hooks lower to the existing typed
-//RS     // binary path because Duration is a raw-nanosecond carrier, not a time
-//RS     // handle. The binary path emits the same Prelude Comparable/Equatable hook
-//RS     // used by AOT and already has evaluator/JIT scalar support.
-//RS     if recv_type.as_deref() == Some(Syntax::DURATION_TYPE)
-//RS         && matches!(method, "equal" | "compare")
-//RS         && args.len() == 1
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals) && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // Shape (f) [c109 Phase 11]: a closure-taking collection method (`map`/`filter`/
-//RS     // `each`/`find`/`any`/`all`/`sort_by`/`reduce`). Like the Phase-9 builtin shape it
-//RS     // carries `recv_type == None` and an in-subset *value* receiver. The Fn-vs-FnMut
-//RS     // emit branch reads the lambda arg's `needs_fn_mut` meta. Ordinary `map` may
-//RS     // also carry a sema-checked local callback; all other closure args remain
-//RS     // literal lambdas here because their lowering needs the lambda metadata.
-//RS     // `reduce` takes (seed, lambda); the rest take (lambda).
-//RS     if recv_type.is_none() && closure_method_in_subset(method, args, cx, locals) {
-//RS         return expr_in_subset(receiver, cx, locals);
-//RS     }
-//RS     if recv_type.as_deref() == Some("Int") && method == "to_radix" && args.len() == 1 {
-//RS         return expr_in_subset(receiver, cx, locals) && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS 
-//RS     // Shape (g) [c109 Phase 12]: a numeric query or fixed-width overflow-policy
-//RS     // method (`is_nan`/`count_ones`/`checked_add` — D-INTBIG1/D-NUMOPS1). Sema sets
-//RS     // `recv_type == Some(<numeric name>)` for a numeric receiver (CheckerInfer
-//RS     // ~L2248), so a numeric method is uniquely a `MethodCall` whose `recv_type` parses
-//RS     // as a numeric type name (`Int`/`Float`/`F32`/`I8..U64`) and whose `method` is a
-//RS     // covered numeric op. Query methods are nullary; overflow methods take one
-//RS     // same-width integer argument.
-//RS     if let Some(numeric_name) = recv_type {
-//RS         if let Some(numeric_ty) = crate::AST::numeric_type_from_name(numeric_name) {
-//RS             let is_overflow_method =
-//RS                 crate::Collections::numeric_overflow_method(method, args.len()).is_some();
-//RS             if (!is_overflow_method || matches!(&numeric_ty, Type::IntN { .. }))
-//RS                 && is_covered_numeric_method(method, args.len())
-//RS             {
-//RS                 return expr_in_subset(receiver, cx, locals)
-//RS                     && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS             }
-//RS         }
-//RS     }
-//RS     // Core enum equality is sema-resolved as `Equatable.equal`, but the
-//RS     // representation is a shared Prelude enum rather than a user item with a
-//RS     // registered method signature. Lowering reuses the existing typed equality
-//RS     // node, so every execution tier consumes the same operation.
-//RS     if method == "equal"
-//RS         && args.len() == 1
-//RS         && recv_type
-//RS             .as_deref()
-//RS             .is_some_and(|name| core_enum_equal_type(name.rsplit('.').next().unwrap_or(name)))
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals) && expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     // Shape (h2) [c109 Phase 25]: HTTPRouter route registration `router.get(path, handler)`
-//RS     // / `.post`/`.put`/`.delete` (D-ROUTE1=A). Sema sets `recv_type == Some("HTTPRouter")`.
-//RS     // The AST `emit_builtin_method` keys these on `rty == Some(HTTPRouter)` BEFORE the
-//RS     // generic `get`/`post` collection arms, and emits the handler via `emit_router_handler`
-//RS     // (a boxed `Fn(HTTPRequest)=>HTTPResponse` closure). We cover it when the receiver is
-//RS     // in-subset, the path arg is in-subset, and the handler arg is one `emit_router_handler`
-//RS     // reproduces byte-for-byte: a bare top-level-fn name (NOT a local → the `Box::new(move
-//RS     // |__req| __jet_<fn>(&__req)) as …` wrapper) or an in-subset literal lambda. Tried BEFORE
-//RS     // the numeric/handle/builtin shapes so the HTTPRouter `get`/`post` is claimed here.
-//RS     if recv_type.as_deref() == Some("HTTPRouter")
-//RS         && matches!(method, "get" | "post" | "put" | "delete")
-//RS         && args.len() == 2
-//RS     {
-//RS         return router_register_in_subset(receiver, args, cx, locals);
-//RS     }
-//RS     // Plugin members are the statically registered exports of the loaded
-//RS     // Component interface. Sema owns export/name/shape validation; this gate
-//RS     // only admits the already-checked receiver and argument expressions.
-//RS     if recv_type.as_deref() == Some("Plugin")
-//RS         && !matches!(method, "call" | "call_int" | "call_bool" | "call_text")
-//RS     {
-//RS         return expr_in_subset(receiver, cx, locals)
-//RS             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // Shape (h) [c109 Phase 13]: a method ON a handle (FileReader/FileWriter/
-//RS     // StdinHandle/Stopwatch/TcpListener/TcpStream). Sema sets `recv_type ==
-//RS     // Some(<handle>)` (CheckerInfer, via the handle `*_method_return` tables). The AST
-//RS     // emit branch (`emit_builtin_method`) keys on `rty = expr_jet_ty(receiver)`; for
-//RS     // these handles the receiver is ALWAYS a `let`-bound local from a covered
-//RS     // handle-producing core call (`files.open`/`time.start`/`net.tcp_connect`/…) or
-//RS     // another covered handle method (`listener.accept()`), so its slot type is total
-//RS     // (`Some(<handle>)`) — `rty == recv_type` always, and the rty-keyed branch fires
-//RS     // identically. (c109 Phase 20: HTTPRequest/HTTPResponse accessors are NOW covered —
-//RS     // sema writes the `http.serve` lambda-param type back onto `p.ty`, so the slot type
-//RS     // is total even for an unannotated `(req)` param; the AST `rty`-keyed handle arm then
-//RS     // fires identically. They join `handle_method_op`.) Disjoint from
-//RS     // the numeric shape (a handle name isn't numeric) and the instance/static shapes
-//RS     // (a handle name isn't a covered struct/enum).
-//RS     // D-SIMD2 / D-LINALG1: a method on a built-in math value type (and NOT a user
-//RS     // type sharing the name). Admitted when the receiver + args are in-subset.
-//RS     if let Some(handle) = recv_type {
-//RS         if crate::Sema::is_math_type(handle) && !cx.type_names.contains(handle) {
-//RS             let is_reduce = method == "reduce" && crate::Sema::is_simd_lane_type(handle);
-//RS             if is_reduce || crate::Sema::math_method_return(handle, method, args.len()).is_some() {
-//RS                 return expr_in_subset(receiver, cx, locals)
-//RS                     && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS             }
-//RS         }
-//RS     }
-//RS     if let Some(handle) = recv_type {
-//RS         if (handle == "__SerdeEncode__" && method == "encode" && args.is_empty())
-//RS             || (handle == "__Debug__" && method == "debug" && args.is_empty())
-//RS             || (handle == Syntax::TYPE_DATA
-//RS                 && method == Syntax::METHOD_DATATREE_DECODE
-//RS                 && args.is_empty())
-//RS         {
-//RS             return expr_in_subset(receiver, cx, locals);
-//RS         }
-//RS         if handle_method_op(handle, method, args.len()).is_some() {
-//RS             return expr_in_subset(receiver, cx, locals)
-//RS                 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS         }
-//RS         // D-SHIFT1 (c7shift): `cursor.take_pattern("…")` — not in
-//RS         // `handle_method_op` (its `THandleOp` carries the pattern parts, so
-//RS         // it's built at lowering, not from a `(handle, method, nargs)` key).
-//RS         // The sole argument is a parser-committed `Expr::StrMatchLit` leaf.
-//RS         if handle == "Cursor"
-//RS             && method == Syntax::METHOD_TAKE_PATTERN
-//RS             && args.len() == 1
-//RS             && matches!(args[0].expr, Expr::StrMatchLit(_, _))
-//RS         {
-//RS             return expr_in_subset(receiver, cx, locals);
-//RS         }
-//RS         // D-BINPAT1 (card #506 follow-up): `reader.take_pattern([U8]{"…"})` —
-//RS         // same reasoning, byte-mode sibling. The sole argument is a
-//RS         // parser-committed `Expr::BinMatchLit` leaf.
-//RS         if handle == "Reader"
-//RS             && method == Syntax::METHOD_TAKE_PATTERN
-//RS             && args.len() == 1
-//RS             && (matches!(args[0].expr, Expr::BinMatchLit(_, _))
-//RS                 || expr_in_subset(&args[0].expr, cx, locals))
-//RS         {
-//RS             return expr_in_subset(receiver, cx, locals);
-//RS         }
-//RS     }
-//RS     // D-LAYOUT1 / D-LAYOUT-GATES1: a method on `LayoutHandle`/`Constraint`
-//RS     // (mirrors the D-SIMD2 math-method carve-out immediately above). Admitted
-//RS     // when the receiver + args are in-subset.
-//RS     if let Some(handle) = recv_type {
-//RS         if crate::Sema::is_layout_type(handle)
-//RS             && crate::Sema::layout_method_return(handle, method, args.len()).is_some()
-//RS         {
-//RS             return expr_in_subset(receiver, cx, locals)
-//RS                 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS         }
-//RS     }
-//RS     // D-ENCSTREAM-SURFACE1=A: `encoding.EncodingLimits.safe()` is a
-//RS     // qualified shared-type constructor, not a submodule call.
-//RS     if recv_type.is_none() && method == "safe" && args.is_empty() {
-//RS         // D-APILABEL1=A: the bare spelling is what a synthesized Core default uses.
-//RS         if let Expr::Ident(type_name, _) = receiver {
-//RS             let is_core_email_limits = type_name == "Limits"
-//RS                 && cx
-//RS                     .core_imports
-//RS                     .values()
-//RS                     .any(|module| module == "core.email");
-//RS             if matches!(type_name.as_str(), "EncodingLimits" | "Limits")
-//RS                 && (!cx.struct_fields.contains_key(type_name) || is_core_email_limits)
-//RS             {
-//RS                 return true;
-//RS             }
-//RS         }
-//RS         if let Expr::Field(base, leaf, _) = receiver {
-//RS             if leaf == "EncodingLimits" {
-//RS                 if let Expr::Ident(alias, _) = base.as_ref() {
-//RS                     if cx.any_core_import_module(alias) == Some("core.encoding") {
-//RS                         return true;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if leaf == "DataLimits" {
-//RS                 if let Expr::Ident(alias, _) = base.as_ref() {
-//RS                     if cx.any_core_import_module(alias) == Some("core.data") {
-//RS                         return true;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if leaf == "CBOROptions" {
-//RS                 if let Expr::Ident(alias, _) = base.as_ref() {
-//RS                     if cx.any_core_import_module(alias) == Some("core.encoding.cbor") {
-//RS                         return true;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if matches!(
-//RS                 leaf.as_str(),
-//RS                 "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions"
-//RS             ) {
-//RS                 if let Expr::Ident(alias, _) = base.as_ref() {
-//RS                     if cx.any_core_import_module(alias) == Some("core.encoding.xml") {
-//RS                         return true;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if leaf == "Limits" {
-//RS                 if let Expr::Ident(alias, _) = base.as_ref() {
-//RS                     if cx.any_core_import_module(alias) == Some("core.email") {
-//RS                         return true;
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     // Shape (j) [c109 Phase 16]: an enum-variant CONSTRUCTION `Enum.Variant(args)`.
-//RS     // The parser/sema never produce an `Expr::EnumLit` node for a payload variant —
-//RS     // a `Type.Variant(args)` stays a `MethodCall` (sema type-checks it via
-//RS     // `check_enum_lit` in place but does NOT rewrite the node). The AST `emit_method_call`
-//RS     // (Expression.rs ~L1635) routes such a call to `emit_enum_lit` when the receiver is
-//RS     // a known enum and `method` is a variant. This is THE shape that constructs
-//RS     // string/struct/collection-payload and recursive (boxed) enum values. We cover it
-//RS     // when the enum is covered and every (positional) arg is in-subset; the
-//RS     // borrowed-clone/`Box::new` decisions are resolved at lowering (`lower_enum_arg`),
-//RS     // reproducing `emit_boxed_enum_arg` byte-for-byte. Tried BEFORE the static shape
-//RS     // (which excludes variants), matching the AST dispatch order.
-//RS     if recv_type.is_none() {
-//RS         if let Expr::Ident(type_name, _) = receiver {
-//RS             if !locals.contains(type_name) {
-//RS                 if let Some(variants) = cx.enum_variants.get(type_name) {
-//RS                     if variants.iter().any(|(v, _)| v == method) {
-//RS                         return enum_is_covered(type_name, cx)
-//RS                             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     // Shape (c): a STATIC (associated) method call `Type.make(x)`. Phase 6 deferred
-//RS     // this (its `recv_type` is `None`). The AST path emits `__jet_<T>::__jet_<method>(…)`
-//RS     // when the receiver is a type name in `cx.type_names` (Expression.rs ~L1644). We
-//RS     // reproduce exactly that, and only that: the receiver is a bare type-name ident
-//RS     // (not a local), the type is a covered struct/enum, the method is a registered
-//RS     // user method (in `method_sigs`) that is NOT an enum *variant* (those emit an enum
-//RS     // literal, a different lowering) and NOT a builtin/special intercept.
-//RS     if recv_type.is_none() {
-//RS         if let Some(type_name) = static_call_type_name(receiver, locals) {
-//RS             return static_method_call_in_subset(&type_name, method, args, cx, locals);
-//RS         }
-//RS     }
-//RS     if recv_type.is_none() {
-//RS         return false;
-//RS     }
-//RS     let recv_type_leaf = recv_type.as_deref().map(|name| {
-//RS         name.rsplit("::")
-//RS             .next()
-//RS             .unwrap_or(name)
-//RS             .rsplit('.')
-//RS             .next()
-//RS             .unwrap_or(name)
-//RS     });
-//RS     // D-CRYPTO-SUBSET1: Core crypto constructors are Jet-declared static
-//RS     // methods; a checked path may still carry the nominal receiver marker.
-//RS     // Reuse the existing constructor admission table for that shape.
-//RS     if let Some(type_name) = recv_type_leaf {
-//RS         if matches!(
-//RS             type_name,
-//RS             "Secret"
-//RS                 | "SigningKey"
-//RS                 | "X25519SecretKey"
-//RS                 | "VerifyKey"
-//RS                 | "X25519PublicKey"
-//RS                 | "Signature"
-//RS                 | "WrappedVaultKey"
-//RS                 | "KeyUnlock"
-//RS         ) && matches!(receiver, Expr::Ident(name, _) if name == type_name && !locals.contains(name))
-//RS         {
-//RS             return static_method_call_in_subset(type_name, method, args, cx, locals);
-//RS         }
-//RS     }
-//RS     if matches!(
-//RS         (recv_type_leaf, method, args.len()),
-//RS         (Some("SigningKey" | "X25519SecretKey"), "public_key", 0)
-//RS             | (Some("WrappedVaultKey"), "bytes", 0)
-//RS             | (Some("Digest256" | "Digest512"), "hex" | "as_bytes", 0)
-//RS             | (Some("X25519PublicKey"), "text", 0)
-//RS     ) {
-//RS         return expr_in_subset(receiver, cx, locals);
-//RS     }
-//RS     // Shape (n) [c109 Phase 30]: DYNAMIC dispatch on a TRAIT-OBJECT receiver
-//RS     // (`s.name()`/`s.area()` where `s: Shape` is a `Box<dyn __jet_Shape>`). Sema sets
-//RS     // `recv_type == Some(<trait>)` with the trait in `cx.trait_names`; the AST
-//RS     // `emit_method_call` (Expression.rs ~L1657) keys on `cx.trait_names.contains(rt)` and
-//RS     // emits `({recv}).{method}({args})` — the BARE method name (vtable dispatch), args
-//RS     // lowered PLAINLY (`emit_call_args(.., None, ..)`). Disjoint from the user-instance
-//RS     // shape below (a trait name is never a covered struct/enum) and from the
-//RS     // numeric/handle/builtin shapes (a trait name isn't any of those). Covered when the
-//RS     // receiver is in-subset and every arg is in-subset + unlabeled.
-//RS     if let Some(ty) = recv_type {
-//RS         if cx.trait_names.contains(ty) {
-//RS             return expr_in_subset(receiver, cx, locals)
-//RS                 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS         }
-//RS     }
-//RS     // Shape (b): a user-defined instance method. The `recv_type` is the TOTAL sema
-//RS     // fact; a `None` was handled above (static). Anything else (a fallback-inferred
-//RS     // path) the subset must NOT reproduce — but `recv_type == Some` is the total
-//RS     // instance-method signal.
-//RS     let Some(ty) = recv_type else {
-//RS         return false;
-//RS     };
-//RS     // The method must be a user-defined method on that type (in `method_sigs`). A real
-//RS     // `method_sigs` entry is the TOTAL "this is a user method on `ty`" signal: the AST
-//RS     // `emit_method_call` now dispatches to the user method (`__jet_<method>`) BEFORE
-//RS     // `emit_builtin_method` whenever `recv_type == Some(T)` and `(T, method) ∈ method_sigs`
-//RS     // (the builtin-name-collision fix), so a user method SHADOWING a builtin name
-//RS     // (`get`/`len`/…) routes here, not through the name-keyed builtin path.
-//RS     let metadata_ty = cx.method_metadata_name(ty, method);
-//RS     let binding_method = cx
-//RS         .extern_funcs
-//RS         .contains_key(&foreign_binding_method_key(ty, method));
-//RS     let sig = cx.method_sigs.get(&(metadata_ty, method.to_string()));
-//RS     let distinct_numeric_operator = cx
-//RS         .distinct_types
-//RS         .get(ty)
-//RS         .is_some_and(|(_, numeric)| *numeric)
-//RS         && !cx.distinct_ranges.contains_key(ty)
-//RS         && matches!(method, "add" | "sub" | "mul" | "div")
-//RS         && args.len() == 1;
-//RS     let distinct_trait_method = cx.distinct_types.contains_key(ty)
-//RS         && (cx.trait_methods.contains(&(ty.clone(), method.to_string()))
-//RS             || distinct_numeric_operator);
-//RS     if sig.is_none() && !binding_method && !distinct_trait_method {
-//RS         // No user method: a name a core/stdlib/builtin/special lowering would intercept
-//RS         // *before* the user dispatch (`emit_builtin_method`, the `.raw()`/`.snapshot()`/
-//RS         // alloc special cases) has bespoke name-keyed lowering — exclude it (those are
-//RS         // covered by their own shapes, not the user-method TIR).
-//RS         return false;
-//RS     }
-//RS     // A builtin-name method with NO `method_sigs` entry was already excluded above. With a
-//RS     // real user method present, the intercepted-name check (`is_intercepted_method_name`,
-//RS     // still used by the static-call shape) no longer applies — the AST path dispatches to
-//RS     // the user method. The `clone`/`raw` special forms returned earlier in this function;
-//RS     // `snapshot`/`new` fire their AST special cases only for non-instance receivers (an
-//RS     // `expect(...)` call / a type-name ident), so an INSTANCE method of that name with a
-//RS     // `method_sigs` entry reaches here and routes to the user method on BOTH paths.
-//RS     // The receiver type must be a covered struct or enum (so the receiver place
-//RS     // emits exactly as the AST path does, and the method is a plain user method).
-//RS     let recv_ty = Type::Named(ty.clone());
-//RS     // D-OPMIX1: `impl Int.Mul(Price)` is a user method on a builtin. Admit it
-//RS     // when method_sigs has the hook, so mixed arithmetic stays in TIR.
-//RS     let operator_hook =
-//RS         sig.is_some() && matches!(method, "add" | "sub" | "mul" | "div") && args.len() == 1;
-//RS     if !is_covered_struct_ty(&recv_ty, cx)
-//RS         && !is_covered_enum_ty(&recv_ty, cx)
-//RS         && !is_covered_foreign_value_ty(&recv_ty, cx)
-//RS         && !distinct_trait_method
-//RS         && !operator_hook
-//RS     {
-//RS         return false;
-//RS     }
-//RS     // The receiver expression must itself be in-subset (a covered local/param/field).
-//RS     if !expr_in_subset(receiver, cx, locals) {
-//RS         return false;
-//RS     }
-//RS     // Arity must match the resolved signature (sema guaranteed it, but be defensive).
-//RS     if sig.is_some_and(|sig| args.len() != sig.len()) {
-//RS         return false;
-//RS     }
-//RS     // Every argument must be in-subset. Unlike a plain call, a method arg MAY use any
-//RS     // of `Read`/`Move`/`Mutate` with implicit/Arc clone — those are carried as total
-//RS     // flags and emitted verbatim (mirroring `emit_call_args`). c109 Phase 13: a Fn-typed
-//RS     // param routes through the `Box::new(…) as <fn-type>` coercion (`lower_one_call_arg`).
-//RS     // D-APILABEL1=A: sema binds labels by name and rewrites arguments into
-//RS     // declaration order. Lowering reads `source_index` to preserve the order
-//RS     // in which the caller wrote their expressions.
-//RS     args.iter().all(|a| expr_in_subset(&a.expr, cx, locals))
-//RS }
-//RS 
-//RS pub(super) fn core_module_path_from_receiver(
-//RS     receiver: &Expr,
-//RS     cx: &Cx,
-//RS     locals: &std::collections::HashSet<String>,
-//RS ) -> Option<String> {
-//RS     match receiver {
-//RS         Expr::Ident(alias, _) if !locals.contains(alias) => {
-//RS             cx.any_core_import_module(alias).map(str::to_owned)
-//RS         }
-//RS         Expr::Field(base, leaf, _) => {
-//RS             let module = core_module_path_from_receiver(base, cx, locals)?;
-//RS             let submodule = format!("{module}.{leaf}");
-//RS             crate::Syntax::is_known_core_module(&submodule).then_some(submodule)
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// c109 Phase 27: is `recv.method(args)` a call THROUGH a fn-typed struct FIELD (not a
-//RS /// user method)? Returns the field's `Type::Fn` when so. `recv_type` is the total sema
-//RS /// fact (`Some(<StructType>)`, set by CheckerInfer's fn-field arm); the field must exist
-//RS /// on a COVERED struct with a `Type::Fn` type and the same name as `method`. Mirrors the
-//RS /// AST `emit_method_call` fn-field branch's guard (`struct_fields` lookup + `Type::Fn`).
-//RS pub(crate) fn fn_field_call_ty<'a>(
-//RS     method: &str,
-//RS     recv_type: &Option<String>,
-//RS     cx: &'a Cx,
-//RS ) -> Option<&'a Type> {
-//RS     let ty_name = recv_type.as_ref()?;
-//RS     if !is_covered_struct_ty(&Type::Named(ty_name.clone()), cx) {
-//RS         return None;
-//RS     }
-//RS     let fields = cx.struct_fields.get(ty_name)?;
-//RS     let (_, fty) = fields.iter().find(|(n, _)| n == method)?;
-//RS     matches!(fty, Type::Fn { .. }).then_some(fty)
-//RS }
-//RS 
-//RS /// c109 Phase 27: is `w.step(4)` (a call through a fn-typed struct field) in-subset? The
-//RS /// receiver and every arg must be in-subset; args are emitted PLAINLY by the AST path
-//RS /// (`emit_call_args(.., None, ..)`), so no convention/Arc-clone fact applies — exclude any
-//RS /// labeled / Arc-clone arg defensively (sema never produces them here, but stay strict).
-//RS pub(crate) fn fn_field_call_in_subset(
-//RS     receiver: &Expr,
-//RS     method: &str,
-//RS     args: &[crate::AST::CallArg],
-//RS     recv_type: &Option<String>,
-//RS     cx: &Cx,
-//RS     locals: &HashSet<String>,
-//RS ) -> bool {
-//RS     if fn_field_call_ty(method, recv_type, cx).is_none() {
-//RS         return false;
-//RS     }
-//RS     expr_in_subset(receiver, cx, locals)
-//RS         && args.iter().all(|a| {
-//RS             a.label.is_none() && !a.flags.shared_auto_clone && expr_in_subset(&a.expr, cx, locals)
-//RS         })
-//RS }
-//RS 
-//RS /// c109 Phase 7: is a STATIC method call `Type.make(args)` inside the subset? The
-//RS /// AST path (Expression.rs ~L1644) emits `__jet_<Type>::__jet_<method>(args)` for a
-//RS /// `MethodCall` whose receiver is an ident in `cx.type_names`. We admit exactly that
-//RS /// case, conservatively:
-//RS ///   - `type_name` is NOT a local (a local shadowing a type would be a field/method
-//RS ///     access, not a static call);
-//RS ///   - `type_name` is a covered struct or enum (so its `__jet_<T>` prefix is right);
-//RS ///   - `method` is NOT an enum *variant* of `type_name` — a `Enum.Variant(args)`
-//RS ///     receiver+method emits an enum literal (a different lowering, Expression.rs
-//RS ///     ~L1635), so exclude it (Phase 4 covers enum literals via `Expr::EnumLit`/
-//RS ///     unit `Expr::Field`, not this MethodCall shape);
-//RS ///   - `method` is NOT a builtin/special intercept (`new`, etc.);
-//RS ///   - `(type_name, method)` is a registered user method (`method_sigs`);
-//RS ///   - every arg is in-subset, unlabeled, and not Fn-typed.
-//RS /// D-PROTO1/D-PROTO2: resolve a static-method receiver to a user type name.
-//RS /// `Payment.Client.client()` is `MethodCall(Field(Ident(Payment), Client), …)`.
-//RS pub(crate) fn static_call_type_name_unchecked(receiver: &Expr) -> Option<String> {
-//RS     match receiver {
-//RS         Expr::Ident(name, _) => Some(name.clone()),
-//RS         Expr::Field(base, leaf, _) => {
-//RS             if let Expr::Ident(prefix, _) = base.as_ref() {
-//RS                 if prefix
-//RS                     .chars()
-//RS                     .next()
-//RS                     .is_some_and(|c| c.is_ascii_uppercase())
-//RS                 {
-//RS                     return Some(format!("{prefix}.{leaf}"));
-//RS                 }
-//RS             }
-//RS             None
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn static_call_type_name(receiver: &Expr, locals: &HashSet<String>) -> Option<String> {
-//RS     let name = static_call_type_name_unchecked(receiver)?;
-//RS     match receiver {
-//RS         Expr::Ident(n, _) if locals.contains(n) => None,
-//RS         Expr::Field(base, _, _) => {
-//RS             if let Expr::Ident(prefix, _) = base.as_ref() {
-//RS                 if locals.contains(prefix) {
-//RS                     return None;
-//RS                 }
-//RS             }
-//RS             Some(name)
-//RS         }
-//RS         _ => Some(name),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn static_method_call_in_subset(
-//RS     type_name: &str,
-//RS     method: &str,
-//RS     args: &[crate::AST::CallArg],
-//RS     cx: &Cx,
-//RS     locals: &HashSet<String>,
-//RS ) -> bool {
-//RS     if type_name == "UIShortcut" && method == "cmd" {
-//RS         return args.len() == 1
-//RS             && args[0].label.is_none()
-//RS             && matches!(
-//RS                 args[0].expr.without_parens(),
-//RS                 Expr::Str(parts, _)
-//RS                     if parts.len() == 1
-//RS                         && matches!(&parts[0], crate::AST::StrPart::Lit(value) if !value.trim().is_empty())
-//RS             );
-//RS     }
-//RS     if locals.contains(type_name) {
-//RS         return false;
-//RS     }
-//RS     let is_string_distinct = cx
-//RS         .distinct_type_identity(type_name)
-//RS         .and_then(|identity| cx.distinct_types.get(&identity))
-//RS         .is_some_and(|(base, _)| *base == Type::String);
-//RS     if is_string_distinct && matches!(method, "from" | "encode_hole" | "raw") {
-//RS         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     if type_name == "FieldError" && method == "under" && args.len() == 2 {
-//RS         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     // D-SHAPE-PROJECT1=A: `T.merge(flags, settings)` on a `#CLI` struct lowers
-//RS     // to the `core.args merge` CoreCall; both layers are ordinary values.
-//RS     if method == "merge"
-//RS         && args.len() == 2
-//RS         && cx.type_names.contains(type_name)
-//RS         && cx.struct_fields.contains_key(type_name)
-//RS         && !cx.sigs.contains_key(&format!("{type_name}::merge"))
-//RS     {
-//RS         return args
-//RS             .iter()
-//RS             .all(|arg| arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     if matches!(
-//RS         (type_name, method, args.len()),
-//RS         ("Clock", "new", 1)
-//RS             | ("Clock", "system", 0)
-//RS             | ("Clock", "now", 0)
-//RS             | (Syntax::TYPE_AUTHORITY, "workspace", 0)
-//RS             | ("Date", "today", 0)
-//RS             | ("Path", "home", 0)
-//RS     ) {
-//RS         return true;
-//RS     }
-//RS     if type_name == Syntax::TYPE_AUTHORITY && method == "from_rights" && args.len() == 1 {
-//RS         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     if matches!((type_name, method, args.len()), ("ExpiringValue", "new", 3)) {
-//RS         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     if matches!(
-//RS         (type_name, method, args.len()),
-//RS         ("ExpiringSecret", "new", 3)
-//RS     ) {
-//RS         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-//RS     }
-//RS     if matches!(
-//RS         (type_name, method, args.len()),
-//RS         ("Int" | "Float", "parse", 1)
-//RS     ) {
-//RS         return expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     if type_name == "Int" && method == "from_radix" && args.len() == 2 {
-//RS         return args
-//RS             .iter()
-//RS             .all(|argument| expr_in_subset(&argument.expr, cx, locals));
-//RS     }
-//RS     if matches!(
-//RS         (type_name, method, args.len()),
-//RS         ("String", "from_bytes" | "from_bytes_lossy", 1)
-//RS     ) {
-//RS         return expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     if crate::AST::numeric_type_from_name(type_name).is_some()
-//RS         && Syntax::numeric_conversion_source(method).is_some()
-//RS         && args.len() == 1
-//RS     {
-//RS         return expr_in_subset(&args[0].expr, cx, locals);
-//RS     }
-//RS     if let Some((base, _)) = cx.distinct_types.get(type_name) {
-//RS         if base.is_numeric()
-//RS             && Syntax::numeric_conversion_source(method).is_some()
-//RS             && args.len() == 1
-//RS         {
-//RS             return expr_in_subset(&args[0].expr, cx, locals);
-//RS         }
-//RS         if !base.is_numeric()
-//RS             && Syntax::conversion_method_for_source(&base.name()) == method
-//RS             && args.len() == 1
-//RS         {
-//RS             return expr_in_subset(&args[0].expr, cx, locals);
-//RS         }
-//RS     }
-//RS     if cx.unit_facts.contains_key(type_name) && method.starts_with("from_") {
-//RS         if args.len() == 1 {
-//RS             return expr_in_subset(&args[0].expr, cx, locals);
-//RS         }
-//RS         if method.ends_with("_rounded") && args.len() == 3 {
-//RS             // Sema may fill `type_name` on the rounding enum lit; only the
-//RS             // variant spelling matters for the subset gate.
-//RS             let mode = matches!(
-//RS                 &args[1].expr,
-//RS                 Expr::EnumLit { variant, args, .. }
-//RS                     if args.is_empty()
-//RS                         && Syntax::unit_rounding_mode(variant).is_some()
-//RS             );
-//RS             return args[0].label.is_none()
-//RS                 && args[1].label.is_none()
-//RS                 && args[2].label.as_ref().map(|(label, _)| label.as_str()) == Some("digits")
-//RS                 && mode
-//RS                 && expr_in_subset(&args[0].expr, cx, locals)
-//RS                 && expr_in_subset(&args[2].expr, cx, locals);
-//RS         }
-//RS     }
-//RS     if matches!(
-//RS         (type_name, method, args.len()),
-//RS         ("Secret", "from_text" | "from_bytes", 1)
-//RS             | ("SigningKey" | "X25519SecretKey", "new_random", 0)
-//RS             | (
-//RS                 "SigningKey"
-//RS                     | "X25519SecretKey"
-//RS                     | "VerifyKey"
-//RS                     | "X25519PublicKey"
-//RS                     | "Signature"
-//RS                     | "WrappedVaultKey",
-//RS                 "from_bytes",
-//RS                 1
-//RS             )
-//RS             | ("KeyUnlock", "Recipient" | "Passphrase", 1)
-//RS             | ("X25519PublicKey", "from_text", 1)
-//RS     ) {
-//RS         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // D-SIMD2 / D-LINALG1: a static method on a built-in math type (`F32x4.splat(x)`,
-//RS     // `Vec3.from_array([…])`). Admitted when the (type, method, nargs) names a covered
-//RS     // static and every arg is in-subset.
-//RS     if crate::Sema::is_math_type(type_name)
-//RS         && !cx.type_names.contains(type_name)
-//RS         && crate::Sema::math_static_return(type_name, method, args.len()).is_some()
-//RS     {
-//RS         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     if type_name == "Perf"
-//RS         && !cx.type_names.contains("Perf")
-//RS         && core_call_covered("core.perf", method)
-//RS     {
-//RS         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     // c109 Phase 25: a STATIC constructor `Type.new(args)` is the Phase-7 static-call
-//RS     // shape (`recv_type == None`, receiver a covered type-name ident, `(Type, "new") ∈
-//RS     // method_sigs`) — NOT a builtin/instance intercept. `emit_builtin_method` has no
-//RS     // `new` arm, and the only `new` special-case (`MEM_ALLOC_NEW`, D-ALLOC1) fires ONLY
-//RS     // for a `Field(mem_alias, AllocType)` receiver, never an `Ident(Type)` receiver. So
-//RS     // the AST path falls through `emit_builtin_method` (returns None) to the type-name
-//RS     // static dispatch (Expression.rs ~L1644) → `__jet_<Type>::__jet_new(args)` — exactly
-//RS     // what the StaticCall lowering reproduces. We therefore admit `new` HERE (the
-//RS     // static shape) while `is_intercepted_method_name` keeps the INSTANCE-method intercept
-//RS     // (shape b) whole: a user instance method named `new`/`get`/… stays on the AST path.
-//RS     if method == crate::Generics::LITERAL_FROM_LITERAL
-//RS         && matches!(
-//RS             cx.trait_method_traits
-//RS                 .get(&(type_name.to_string(), method.to_string())),
-//RS             Some(trait_name) if crate::Generics::is_literal_capability(trait_name)
-//RS         )
-//RS     {
-//RS         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-//RS     }
-//RS     if method != Syntax::MEM_ALLOC_NEW && is_intercepted_method_name(method) {
-//RS         return false;
-//RS     }
-//RS     let ty = Type::Named(type_name.to_string());
-//RS     if !is_covered_struct_ty(&ty, cx) && !is_covered_enum_ty(&ty, cx) {
-//RS         return false;
-//RS     }
-//RS     // An enum-name receiver whose `method` names a variant emits an enum literal,
-//RS     // not a static call — exclude (it never reaches `method_sigs` on the AST path).
-//RS     if let Some(variants) = cx.enum_variants.get(type_name) {
-//RS         if variants.iter().any(|(v, _)| v == method) {
-//RS             return false;
-//RS         }
-//RS     }
-//RS     let Some(sig) = cx
-//RS         .method_sigs
-//RS         .get(&(type_name.to_string(), method.to_string()))
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     if args.len() != sig.len() {
-//RS         return false;
-//RS     }
-//RS     // c109 Phase 13: a Fn-typed static-method param routes through the Box-coercion
-//RS     // (`lower_one_call_arg`). D-APILABEL1=A: sema binds a call-site label by
-//RS     // name and hands TIR declaration-order arguments; lowering pins observable
-//RS     // expressions to their written order before emission.
-//RS     args.iter()
-//RS         .zip(sig.iter())
-//RS         .all(|(a, (_, _pty))| expr_in_subset(&a.expr, cx, locals))
-//RS }
-//RS 
-//RS /// Method names a core/stdlib/builtin/special lowering intercepts *before* the
-//RS /// user-method dispatch (`emit_method_call` → `emit_builtin_method` and the
-//RS /// `.raw()`/`.snapshot()`/`mem.*.new` special cases).
-//RS /// A user method sharing one of these names is emitted by that bespoke lowering on
-//RS /// the AST path, not by `method_sigs`, so the TIR must NOT claim it — exclude.
-//RS /// The list is intentionally a superset (every name those paths mention, guarded
-//RS /// or not): an extra exclusion only keeps a function on the AST path (always safe).
-//RS pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
-//RS     matches!(
-//RS         method,
-//RS         // Special-cased in `emit_method_call` / `emit_expr` (clone is the synthetic
-//RS         // path, handled separately above; raw/snapshot/new have bespoke lowering).
-//RS         "clone" | "raw" | "snapshot" | "new"
-//RS         // String / list / map / collection builtins (`emit_builtin_method`).
-//RS         | "parse" | "from_bytes" | "from_bytes_lossy" | "len" | "is_empty" | "push" | "append" | "pop" | "insert"
-//RS         | "remove" | "get" | "post" | "put" | "delete" | "first" | "last"
-//RS         | "contains" | "has" | "index_of" | "index" | "reverse" | "sort" | "sort_desc" | "join" | "detach"
-//RS         | "receive" | "sender" | "send" | "clear" | "chars" | "bytes" | "encode" | "trim"
-//RS         | "strip" | "lstrip" | "rstrip" | "expandtabs" | "startswith" | "endswith"
-//RS         | "split" | "starts_with" | "ends_with" | "replace" | "to_upper"
-//RS         | "to_lower" | "to_ascii_upper" | "to_ascii_lower" | "repeat" | "slice" | "keys" | "values" | "items" | "has_key" | "add" | "add_new" | "setdefault" | "update"
-//RS         | "difference_update" | "intersection_update" | "symmetric_difference_update"
-//RS         | "merge"
-//RS         | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all" | "count_where"
-//RS         | "sort_by" | "sort_by_desc" | "reduce" | "update_first"
-//RS         | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "normalize"
-//RS         | "remove_prefix" | "remove_suffix" | "rsplit" | "equal" | "copy"
-//RS         | "rfind" | "rpartition"
-//RS         // D-ITER1: lazy iterator adapters.
-//RS         | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
-//RS         | "indexed" | "indexes" | "zip" | "zip_short" | "zip_pad"
-//RS         | "take_while" | "skip_while" | "flat_map" | "scan"
-//RS         | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "counts" | "partition"
-//RS         | "para_map" | "para_filter" | "para_partition" | "para_fold"
-//RS         // #1479
-//RS         | "cycle" | "drop_last" | "shuffle" | "is_sorted" | "is_sorted_by"
-//RS         | "dedup_by" | "average" | "chunk_while" | "last_index_of" | "compare"
-//RS         | "to_set"
-//RS         // Numeric predicates / bit ops (D-NUMOPS1).
-//RS         | "is_nan" | "is_infinite" | "is_finite"
-//RS         | "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
-//RS         // Stopwatch / file / stdin / net / http / regex / alloc handle methods.
-//RS         | "elapsed_millis" | "write_line" | "flush" | "read_line" | "lines"
-//RS         | "alloc" | "reset" | "accept" | "local_addr" | "read" | "write"
-//RS         | "peer_addr" | "close" | "method" | "path" | "body" | "header" | "param"
-//RS         | "status" | "group"
-//RS         // D-COLLBREADTH1=A: Set<T> and Queue<T> methods.
-//RS         | "union" | "to_list" | "collect" | "count" | "top_n"
-//RS         | "push_front" | "push_back" | "pop_front" | "pop_back" | "peek_front" | "peek_back"
-//RS         | "capacity"
-//RS         // `from` is the static constructor for Set — admitted here so the static-call
-//RS         // shape below can claim it before `is_intercepted_method_name` blocks it.
-//RS         // `init` is Queue's list constructor (same surface role).
-//RS         | "from" | "init"
-//RS         // D-HOLE1: `zip` is already listed above (D-ITER1); `lift2` is `Option`'s
-//RS         // static combinator, admitted the same way `from`/`new` are.
-//RS         | "lift2"
-//RS     )
-//RS }
-//RS 
-//RS /// A call argument is in-subset only if its convention is one the emitter
-//RS /// reproduces: a `Read` borrow or a by-`Move` value (with an optional implicit
-//RS /// clone). `Mutate` args would need `&mut place` handling we don't yet emit.
-//RS pub(crate) fn arg_conv_in_subset(_a: &crate::AST::CallArg) -> bool {
-//RS     // c109 Phase 26: ALL three call-arg conventions are now in-subset. `Read` (`&(…)`
-//RS     // for a non-scalar) and `Move` (plain value — `take`-marked args, `08_ownership`'s
-//RS     // `archive(take "vault")`) were already admitted; `Mutate` (`&mut (…)`,
-//RS     // `bump(mut score)`) is the lift. `lower_one_call_arg` already resolves all three
-//RS     // borrow wrappers from the sig convention (`emit_call_args`' `match conv` —
-//RS     // `Read`/non-scalar → `&(…)`, `Mutate` → `&mut (…)`, else plain), reproduced
-//RS     // byte-for-byte in `emit_tir_call_args`. No convention is excluded.
-//RS     true
-//RS }
-//RS 
-//RS /// c109 Phase 11: is `method` a closure-taking collection method the TIR lowers,
-//RS /// with in-subset args? Covers `map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`
-//RS /// (1 arg: a lambda) and `reduce` (2 args: a seed value + a lambda). The closure-arg
-//RS /// position is normally a literal `Expr::Lambda` (the Fn-vs-FnMut emit branch reads
-//RS /// its `needs_fn_mut` meta). Ordinary `map` also admits a sema-checked local
-//RS /// callback; lowering wraps its inputs in the collection helper's host-borrow
-//RS /// convention. D-PARCAPTURE1 also admits top-level function values. The seed
-//RS /// (`reduce`) and every callback body must be in-subset. No labels.
-//RS pub(crate) fn closure_method_in_subset(
-//RS     method: &str,
-//RS     args: &[crate::AST::CallArg],
-//RS     cx: &Cx,
-//RS     locals: &HashSet<String>,
-//RS ) -> bool {
-//RS     let para_callback = |expr: &Expr| match expr {
-//RS         Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
-//RS         Expr::Ident(name, _) => cx.fn_types.contains_key(name),
-//RS         _ => false,
-//RS     };
-//RS     let map_callback = |expr: &Expr| match expr {
-//RS         Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
-//RS         // Sema has already proved a local callback has the map Fn shape. Keep
-//RS         // it on the same TIR path as a literal lambda; the lowerer reads the
-//RS         // callback's resolved local type and emits the shared helper.
-//RS         Expr::Ident(name, _) => locals.contains(name) || cx.fn_types.contains_key(name),
-//RS         _ => false,
-//RS     };
-//RS     if !crate::Collections::is_closure_method(method) {
-//RS         return false;
-//RS     }
-//RS     if args.iter().enumerate().any(|(index, arg)| {
-//RS         arg.label.is_some()
-//RS             && !(method == "para_map"
-//RS                 && index == 1
-//RS                 && arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("limit"))
-//RS     }) {
-//RS         return false;
-//RS     }
-//RS     match method {
-//RS         "edit_disjoint" => {
-//RS             args.len() == 2
-//RS                 && expr_in_subset(&args[0].expr, cx, locals)
-//RS                 && matches!(&args[1].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
-//RS         }
-//RS         "reduce" | "scan" | "fold" => {
-//RS             // (seed, lambda). The seed is any in-subset value; the lambda must be a
-//RS             // literal in-subset closure.
-//RS             args.len() == 2
-//RS                 && expr_in_subset(&args[0].expr, cx, locals)
-//RS                 && matches!(&args[1].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
-//RS         }
-//RS         "para_fold" => args.len() == 3 && args.iter().all(|arg| para_callback(&arg.expr)),
-//RS         "para_map" | "para_filter" | "para_partition" => {
-//RS             args.first().is_some_and(|arg| para_callback(&arg.expr))
-//RS                 && match method {
-//RS                     "para_map" if args.len() == 2 => expr_in_subset(&args[1].expr, cx, locals),
-//RS                     "para_map" => args.len() == 1,
-//RS                     _ => args.len() == 1,
-//RS                 }
-//RS         }
-//RS         // (lambda). map/filter/each/find/any/all/count_where/sort_by + D-ITER1 +
-//RS         // D-PARCAPTURE1 closure adapters.
-//RS         "map" => args.len() == 1 && map_callback(&args[0].expr),
-//RS         "update_first" => {
-//RS             args.len() == 2
-//RS                 && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
-//RS                 && expr_in_subset(&args[1].expr, cx, locals)
-//RS         }
-//RS         _ => {
-//RS             args.len() == 1
-//RS                 && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn is_builtin_collection_recv(recv_type: Option<&str>) -> bool {
-//RS     match recv_type {
-//RS         None | Some("String" | "Option" | "SQL") => true,
-//RS         Some(name) => {
-//RS             let leaf = name.rsplit('.').next().unwrap_or(name);
-//RS             matches!(
-//RS                 leaf,
-//RS                 crate::Syntax::TYPE_BYTES
-//RS                     | crate::Syntax::TYPE_LIST
-//RS                     | "Equatable"
-//RS                     | "FixedList"
-//RS                     | "Set"
-//RS                     | "Map"
-//RS             ) || leaf.starts_with('[')
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0523 crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1-1912
+use JetSema.AST.[Expr, Type, CallArg, StrPart, numeric_type_from_name]
+use JetSema.[Syntax, Generics, Collections, Sema]
+use JetCodegen.Codegen.[Cx, foreign_binding_method_key, is_db_value_type_name, is_db_value_variant, is_json_type_name, is_json_variant, is_key_variant]
+use JetCodegen.Codegen.TIR.*
+use JetCodegen.Codegen.TIR.Subset.CoreCalls.core_call_args_in_subset
+use core.collections.Set
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:54
+pub fn method_call_in_subset(receiver: Expr, method: String, args: [CallArg], recv_type: String?, resolved_ret: Type?, cx: Cx, locals: Set<String>) -> Bool {
+    if recv_type == Val(Syntax.INTERNAL_CALL_VALUE) {
+        return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) })
+    }
+    if (method == "equal" || method == "compare") && args.len() == 1 {
+        return expr_in_subset(receiver, cx, locals) && expr_in_subset(args[0].expr, cx, locals)
+    }
+    if web_receiver_projection(recv_type, method, args.len()).is_some() {
+        return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) })
+    }
+    if recv_type == Val(Syntax.INTERNAL_VALIDATE_OVER) && method == "over" && args.is_empty() {
+        return expr_in_subset(receiver, cx, locals)
+    }
+    if recv_type == Val(Syntax.TYPE_AUTHORITY) && (method == "with" || method == "without") && args.len() == 1 {
+        return expr_in_subset(receiver, cx, locals) && expr_in_subset(args[0].expr, cx, locals)
+    }
+    if method == Syntax.METHOD_MEMO_CACHE && args.is_empty() && resolved_ret.is_some_and(fn(ty) {
+        ty == { Named(name) -> name == Syntax.TYPE_MEMO_STATS; _ -> false }
+    }) {
+        return receiver == { Ident(_, _) -> true; _ -> false }
+    }
+    if recv_type.is_some_and(fn(name) {
+        name == Syntax.INTERNAL_ROOT_CALL_LOCAL || name.starts_with(Syntax.INTERNAL_ROOT_CALL_IMPORT_PREFIX) || name.starts_with(Syntax.INTERNAL_ROOT_CALL_CORE_PREFIX)
+    }) {
+        return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) })
+    }
+    if recv_type.is_some_and(fn(name) {
+        cx.current_type_params.borrow().contains(name) || cx.trait_names.contains(name) || Generics.is_builtin_trait(name) || name == Generics.IO_READER || name == Generics.IO_WRITER
+    }) && method == {
+        "read" | "write" | "write_all" | "add" | "sub" | "mul" | "div" | "equal" | "compare" | "query" | "query_one" | "execute" | "begin" | "commit" | "rollback" -> true
+        _ -> false
+    } {
+        return args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) && expr_in_subset(receiver, cx, locals)
+    }
+    if (recv_type == { Val("Query" | "DataGroupedQuery" | "DataTracked" | "DataWatch") -> true; _ -> false }) ||
+        (recv_type.is_none() && method == "query" && args.len() == 1 && receiver == {
+            Ident(alias, _) -> locals.contains(alias) || cx.any_core_import_module(alias).is_none()
+            _ -> true
+        }) {
+        method_ok := recv_type == {
+            Val("Query") -> method == { "filter" | "sort_by" | "map" | "min" | "max" | "inner_join" | "left_join" | "collect" | "plan" | "group_by" | "watch" -> true; _ -> false }
+            Val("DataGroupedQuery") -> method == { "count" | "sum" | "mean" -> true; _ -> false }
+            Val("DataTracked") -> method == { "query" | "insert" | "replace" | "remove" -> true; _ -> false }
+            Val("DataWatch") -> method == { "get" | "status" | "cancel" -> true; _ -> false }
+            None -> true
+            _ -> false
+        }
+        if method_ok { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) }
+    }
+    if method == "clone" { return args.is_empty() && expr_in_subset(receiver, cx, locals) }
+    inline_range_head := receiver == {
+        Call(call) -> call.name == Syntax.TYPE_INT && call.args.len() == 1 && call.resolved_ret == {
+            Val(InlineRange { .. }) -> true
+            Val(Result { ok, .. }) -> ok == { InlineRange { .. } -> true; _ -> false }
+            _ -> false
+        }
+        _ -> false
+    }
+    if method == Syntax.conversion_method_for_source("Int") && args.len() == 1 && inline_range_head {
+        return expr_in_subset(args[0].expr, cx, locals)
+    }
+    if method == Syntax.BUILTIN_SNAPSHOT {
+        if receiver == { Call(call) -> {
+            if call.name == Syntax.BUILTIN_EXPECT && !cx.sigs.contains_key(call.name) && !locals.contains(call.name) && call.args.len() == 1 && args.is_empty() {
+                return expr_in_subset(call.args[0].expr, cx, locals)
+            }
+        }; _ -> {} }
+    }
+    if receiver == { Ident(alias, _) -> {
+        if !locals.contains(alias) && (cx.reexport_calls.contains_key((alias, method)) || cx.import_mods.contains_key(alias) || cx.code_modules.contains(alias)) {
+            return args.iter().all(fn(a) { !a.flags.shared_auto_clone && arg_conv_in_subset(a) && expr_in_subset(a.expr, cx, locals) })
+        }
+    }; _ -> {} }
+    if method == "raw" {
+        if receiver == { Ident(n, _) -> {
+            if n == "SQL" || n == "HTML" || n == Syntax.TYPE_SH { return args.len() == 1 && expr_in_subset(args[0].expr, cx, locals) }
+        }; _ -> {} }
+        if args.len() == 1 {
+            if static_call_type_name(receiver, locals) == Val(type_name) {
+                if cx.distinct_type_identity(type_name).and_then(fn(identity) { cx.distinct_types.get(identity) }).is_some_and(fn(entry) { entry.0 == Type.String }) {
+                    return expr_in_subset(args[0].expr, cx, locals)
+                }
+            }
+        }
+    }
+    if recv_type == Val("__Carrier__") { return args.is_empty() && expr_in_subset(receiver, cx, locals) }
+    if (method == "then" || method == "reverse") && (recv_type == Val(Syntax.TYPE_ORDERING) || (recv_type.is_none() && !(receiver == { Ident(_, _) -> true; _ -> false }))) {
+        return ((method == "then" && args.len() == 1) || (method == "reverse" && args.is_empty())) && expr_in_subset(receiver, cx, locals) && args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) })
+    }
+    if method == Syntax.METHOD_DISTINCT_RAW { return args.is_empty() && expr_in_subset(receiver, cx, locals) }
+    if recv_type == Val("SQL") && (method == "template" || method == "params") { return args.is_empty() && expr_in_subset(receiver, cx, locals) }
+    if recv_type == Val("HTML") && method == "text" { return args.is_empty() && expr_in_subset(receiver, cx, locals) }
+    if method == Syntax.TXN_ON_COMMIT && recv_type == Val(Syntax.TXN_HANDLE_TYPE) {
+        return args.len() == 1 && args[0].label.is_none() && (args[0].expr == { Lambda(_) -> true; _ -> false }) && expr_in_subset(args[0].expr, cx, locals)
+    }
+    if method == Syntax.TXN_ON_ROLLBACK && recv_type == Val(Syntax.TXN_HANDLE_TYPE) {
+        return args.len() == 1 && args[0].label.is_none() && (args[0].expr == { Lambda(_) -> true; _ -> false }) && expr_in_subset(args[0].expr, cx, locals)
+    }
+    if recv_type == Val(Syntax.INTERNAL_TASK_SURFACE_TYPE) && method == Syntax.INTERNAL_TASK_SPAWN_METHOD {
+        return args.len() == 1 && args[0].label.is_none() && (args[0].expr == { Lambda(_) -> true; _ -> false }) && expr_in_subset(args[0].expr, cx, locals)
+    }
+    if recv_type == Val(Syntax.INTERNAL_TASK_SURFACE_TYPE) && method == Syntax.INTERNAL_TASK_TIMEOUT_METHOD {
+        return args.len() == 1 && args[0].label.is_none() && expr_in_subset(args[0].expr, cx, locals)
+    }
+    if recv_type == Val(Syntax.INTERNAL_TASK_SURFACE_TYPE) && (method == Syntax.INTERNAL_TASK_ALL_METHOD || method == Syntax.INTERNAL_TASK_RACE_METHOD || method == Syntax.INTERNAL_TASK_ANY_METHOD) {
+        return args.len() == 1 && expr_in_subset(args[0].expr, cx, locals)
+    }
+    task_group_receiver := recv_type == Val(Syntax.TYPE_TASKGROUP) || recv_type == Val(Syntax.INTERNAL_TASK_GROUP_SURFACE_TYPE)
+    if task_group_receiver && method == Syntax.INTERNAL_TASK_SPAWN_METHOD {
+        return args.len() == 1 && args[0].label.is_none() && (args[0].expr == { Lambda(_) -> true; _ -> false }) && expr_in_subset(args[0].expr, cx, locals)
+    }
+    if task_group_receiver && method == Syntax.INTERNAL_TASK_ALL_METHOD { return args.len() == 1 && expr_in_subset(args[0].expr, cx, locals) }
+    if task_group_receiver && (method == Syntax.INTERNAL_TASK_RACE_METHOD || method == Syntax.INTERNAL_TASK_ANY_METHOD) { return args.len() == 1 && expr_in_subset(args[0].expr, cx, locals) }
+    // The receipt destination is ambient; only its payload crosses TIR.
+    if recv_type == Val(Syntax.INTERNAL_RECEIPT_HANDLE) && method == Syntax.METHOD_RECEIPT_ATTACH { return args.len() == 1 && expr_in_subset(args[0].expr, cx, locals) }
+    if recv_type == Val("Shared") {
+        if method == "capture" {
+            return args == {
+                [] -> true
+                [arg] -> arg.expr == { Lambda(lam) -> lambda_in_subset(lam, cx, locals); _ -> false }
+                _ -> false
+            }
+        }
+        if method == "try_replace" { return args.len() == 2 && args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) }
+    }
+    if recv_type == Val("Pool") && (method == "add" || method == "remove" || method == "ids") {
+        return method == {
+            "add" -> args.len() == 1 && expr_in_subset(args[0].expr, cx, locals)
+            "remove" -> args.len() == 1 && expr_in_subset(args[0].expr, cx, locals)
+            "ids" -> args.is_empty()
+            _ -> panic("matches! above admitted only these")
+        }
+    }
+    if recv_type == Val("Shared") {
+        return method == {
+            "read" | "edit" | "read_txn" -> args.len() == 1 && (args[0].expr == { Lambda(lam) -> lambda_in_subset(lam, cx, locals); _ -> false })
+            "guard_read" | "guard_edit" | "downgrade" | "strong_count" -> args.is_empty()
+            "same" -> args.len() == 1 && expr_in_subset(args[0].expr, cx, locals)
+            _ -> false
+        }
+    }
+    if recv_type == Val(Syntax.TYPE_SHARED_WEAK) { return method == "upgrade" && args.is_empty() }
+    if recv_type == Val(Syntax.TYPE_SHARED_GUARD) {
+        return method == {
+            "map" -> args.len() == 1 && (args[0].expr == { Lambda(lam) -> lam.meta.guard_projection.is_some() && lambda_in_subset(lam, cx, locals); _ -> false })
+            "split" -> args.len() == 2 && args.iter().all(fn(arg) { arg.expr == { Lambda(lam) -> lam.meta.guard_projection.is_some() && lambda_in_subset(lam, cx, locals); _ -> false } })
+            "wait" -> args.len() == 2 && expr_in_subset(args[0].expr, cx, locals) && (args[1].expr == { Lambda(lam) -> lambda_in_subset(lam, cx, locals); _ -> false })
+            _ -> false
+        }
+    }
+    if recv_type == Val(Syntax.TYPE_CONDITION) { return (method == "notify_one" || method == "notify_all") && args.is_empty() }
+    if recv_type.is_some_and(fn(handle) { service_method_route(handle, method).is_some() }) {
+        return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) })
+    }
+    if recv_type == { Val("Cell" | "CellReadGuard" | "CellEditGuard") -> true; _ -> false } {
+        plain := (recv_type, method, args.len()) == {
+            (Val("Cell"), "get" | "guard_read" | "guard_edit", 0) | (Val("Cell"), "set" | "replace", 1) | (Val("CellReadGuard" | "CellEditGuard"), "get", 0) | (Val("CellEditGuard"), "set", 1) -> true
+            _ -> false
+        }
+        if plain { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) }
+        closure := (recv_type, method) == {
+            (Val("Cell"), "get_or_set" | "read" | "edit") | (Val("CellReadGuard"), "read" | "map" | "split") | (Val("CellEditGuard"), "read" | "edit" | "map" | "split") -> true
+            _ -> false
+        }
+        if closure {
+            return expr_in_subset(receiver, cx, locals) && !args.is_empty() && args.iter().all(fn(arg) { arg.label.is_none() && (arg.expr == { Lambda(lambda) -> lambda_in_subset(lambda, cx, locals); _ -> false }) })
+        }
+        return false
+    }
+    if recv_type == Val("ExpiringSecret") {
+        if method == "new" && args.len() == 3 && (receiver == { Ident(name, _) -> name == "ExpiringSecret"; _ -> false }) {
+            return args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) })
+        }
+        return method == "with" && args.len() == 1 && (args[0].expr == { Lambda(lam) -> lambda_in_subset(lam, cx, locals); _ -> false })
+    }
+    // Function-valued fields win before instance/static method dispatch.
+    if fn_field_call_in_subset(receiver, method, args, recv_type, cx, locals) { return true }
+    if receiver == { Ident(type_name, _) -> {
+        if !locals.contains(type_name) && is_json_type_name(type_name) && is_json_variant(method) { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    }; _ -> {} }
+    if receiver == { Ident(type_name, _) -> {
+        if !locals.contains(type_name) && is_db_value_type_name(type_name) && is_db_value_variant(method) { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    }; _ -> {} }
+    if recv_type.is_none() {
+        if receiver == { Ident(type_name, _) -> {
+            if !locals.contains(type_name) {
+                if type_name == Syntax.TYPE_KEY { return is_key_variant(method) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+                if type_name == "DataEvent" { return (method == { "Bool" | "Int" | "Float" | "Text" | "Bytes" | "Key" -> true; _ -> false }) && args.len() == 1 && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+            }
+        }; _ -> {} }
+    }
+    if recv_type.is_none() {
+        if receiver == { Field(_, _, _) -> true; _ -> false } {
+            if core_module_path_from_receiver(receiver, cx, locals) == Val(submodule) {
+                return core_call_covered(submodule, method) && core_call_args_in_subset(submodule, method, args, cx, locals)
+            }
+            if receiver == { Field(base, leaf, _) -> {
+                if base == { Ident(owner, _) -> {
+                    if cx.inline_reexport_foreign.contains_key((owner, leaf)) {
+                        return args.iter().all(fn(a) { !a.flags.shared_auto_clone && arg_conv_in_subset(a) && expr_in_subset(a.expr, cx, locals) })
+                    }
+                }; _ -> {} }
+            }; _ -> {} }
+        }
+        if receiver == { Ident(alias, _) -> {
+            if !locals.contains(alias) {
+                if cx.any_core_import_module(alias) == Val(module) {
+                    if core_closure_call_in_subset(module, method, args, cx, locals) { return true }
+                    return core_call_covered(module, method) && core_call_args_in_subset(module, method, args, cx, locals)
+                }
+                if cx.inline_reexport_core.get((alias, method)) == Val((module, real_method)) {
+                    return core_call_covered(module, real_method) && core_call_args_in_subset(module, real_method, args, cx, locals)
+                }
+                if cx.any_foreign_import_module(alias).is_some() {
+                    return args.iter().all(fn(a) { !a.flags.shared_auto_clone && arg_conv_in_subset(a) && expr_in_subset(a.expr, cx, locals) })
+                }
+                is_module_alias := cx.reexport_calls.contains_key((alias, method)) || cx.import_mods.contains_key(alias) || cx.code_modules.contains(alias)
+                if is_module_alias { return args.iter().all(fn(a) { !a.flags.shared_auto_clone && arg_conv_in_subset(a) && expr_in_subset(a.expr, cx, locals) }) }
+            }
+        }; _ -> {} }
+    }
+    if allocator_constructor_owner(recv_type, method) == Val(alloc_type) {
+        return_ok := resolved_ret == { Val(Named(name)) -> name == alloc_type; _ -> false }
+        arity_ok := if alloc_type == "Fixed" { args.len() == 1 } else { args.len() <= 1 }
+        return return_ok && arity_ok && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) })
+    }
+    if solve_new_type(receiver, method, cx, locals).is_some() { return args.len() == 1 && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if duration_new_unit(receiver, method, locals).is_some() { return args.len() == 1 && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if game_static_type(receiver, method, cx, locals) == Val(static_type) {
+        want := (static_type, method) == { ("Backend", "headless") -> 0; _ -> 1 }
+        return args.len() == want && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) })
+    }
+    if tls_static_op(receiver, method, cx, locals) == Val(op) {
+        want := op == { TLSClientConfigDefault -> 0; TLSRootCertificatesFromPem -> 1; TLSClientIdentityFromPem -> 2; _ -> { return false } }
+        return args.len() == want && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) })
+    }
+    if http_client_static_op(receiver, method, cx, locals).is_some() { return args.is_empty() }
+    if is_builtin_collection_recv(recv_type) && is_covered_builtin_name(method, args.len()) {
+        labels_ok := if method == "zip" || method == "zip_short" || method == "zip_pad" { true }
+            else if method == "merge" && args.len() == 2 { args[0].label.is_none() && (args[1].label.map(fn(label) { label.0 }) == { None | Val("conflict") -> true; _ -> false }) }
+            else { args.iter().all(fn(a) { a.label.is_none() }) }
+        return expr_in_subset(receiver, cx, locals) && labels_ok && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) })
+    }
+    if recv_type == Val("Atomic") && is_covered_builtin_name(method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if (recv_type == Val("Set") || recv_type == Val(Syntax.TYPE_RANK)) && is_covered_builtin_name(method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if recv_type.is_none() {
+        if receiver == { Ident(type_name, _) -> {
+            if !locals.contains(type_name) {
+                if (type_name, method, args.len()) == {
+                    ("Set", "from", 1) | ("Set", "new", 0) | ("Map", "new", 0) | ("Map", "from_keys", 2) | ("Map", "fromkeys", 2)
+                    | (Syntax.TYPE_RANK, "from", 1) | ("PriorityQueue", "from", 1) | (Syntax.TYPE_BYTES, "from", 1)
+                    | (Syntax.TYPE_TALLY, "new", 0) | (Syntax.TYPE_QUEUE, "new", 0) | (Syntax.TYPE_QUEUE, "init", 1)
+                    | (Syntax.TYPE_RANK, "new", 0) | ("PriorityQueue", "new", 0) | ("Cache", "new", 1)
+                    | (Syntax.TYPE_BITS, "new", 0) | (Syntax.TYPE_BYTES, "new", 0) | (Syntax.TYPE_BYTES, "with_capacity", 1)
+                    | (Syntax.TYPE_LIST, "try_new", 0) | (Syntax.TYPE_LIST, "try_with_capacity", 1) -> true
+                    _ -> false
+                } { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+                if (type_name, method, args.len()) == ("Pool", "new", 0) { return true }
+                if (type_name, method, args.len()) == ("Shared", "new", 1) { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+                if (type_name, method, args.len()) == ("Condition", "new", 0) { return true }
+                if (type_name, method, args.len()) == ("Cell", "new", 1) { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+                if (type_name, method, args.len()) == ("ExpiringSecret", "new", 3) { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+                if (type_name, method, args.len()) == ("ExpiringValue", "new", 3) { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+                if (type_name, method, args.len()) == ("Path", "from", 1) && !cx.type_names.contains("Path") { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+                if (type_name, method, args.len()) == ("Reader", "over", 1) && !cx.type_names.contains("Reader") { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+                if (type_name, method, args.len()) == ("Cursor", "over", 1) && !cx.type_names.contains("Cursor") { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+                if (type_name, method, args.len()) == {
+                    ("HTTPMethod", "custom", 1) | ("HTTPMethod", "get" | "head" | "post" | "put" | "delete" | "connect" | "options" | "trace" | "patch", 0)
+                    | ("HTTPStatus", "new", 1) | ("HTTPVersion", "http_1_0" | "http_1_1" | "http_2", 0)
+                    | ("HTTPHeaderName" | "HTTPHeaderValue", "new", 1) | ("Headers", "new", 0) | ("Body", "empty", 0)
+                    | ("Body", "bytes" | "json" | "form" | "multipart", 1) | ("Body", "text" | "reader", 1 | 2) -> true
+                    _ -> false
+                } { return args.iter().all(fn(argument) { expr_in_subset(argument.expr, cx, locals) }) }
+                if (type_name, method, args.len()) == ("Option", "lift2", 3) && !cx.type_names.contains("Option") { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+            }
+        }; _ -> {} }
+    }
+    if recv_type.is_none() && is_concurrency_method_name(method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if recv_type == Val("Match") && method == "group" && args.len() == 1 { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if (recv_type == { Val("Signal" | "Derived" | "Computed") -> true; _ -> false }) && is_reactive_method_name(method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if recv_type == Val(Syntax.TYPE_EFFECT) && is_reactive_effect_method_name(method, args.len()) { return expr_in_subset(receiver, cx, locals) }
+    if is_event_handle_type(recv_type) && is_event_method_name(method, args.len()) {
+        handler_ok := (method, args.len()) == {
+            ("on" | "once", 2) -> args.get(1).is_some_and(fn(a) { a.label.is_none() && (a.expr == { Lambda(_) -> true; _ -> false }) })
+            ("on_priority", 3) -> args.get(1).is_some_and(fn(a) { expr_in_subset(a.expr, cx, locals) }) && args.get(2).is_some_and(fn(a) { a.label.is_none() && (a.expr == { Lambda(_) -> true; _ -> false }) })
+            _ -> true
+        }
+        return expr_in_subset(receiver, cx, locals) && handler_ok && args.iter().enumerate().all(fn(entry) {
+            (i, a) := entry
+            a.label.is_none() && ((method, args.len(), i) == { ("on" | "once", 2, 1) | ("on_priority", 3, 2) -> true; _ -> expr_in_subset(a.expr, cx, locals) })
+        })
+    }
+    if is_watch_handle_type(recv_type) && is_watch_method_name(method, args.len()) {
+        handler_ok := (recv_type, method, args.len()) == {
+            (Val("WatchHandle"), "on" | "once", 2) -> args.get(1).is_some_and(fn(a) { a.label.is_none() && (a.expr == { Lambda(_) -> true; _ -> false }) })
+            _ -> true
+        }
+        return expr_in_subset(receiver, cx, locals) && handler_ok && args.iter().enumerate().all(fn(entry) {
+            (i, a) := entry
+            a.label.is_none() && ((recv_type, method, args.len(), i) == { (Val("WatchHandle"), "on" | "once", 2, 1) -> true; _ -> expr_in_subset(a.expr, cx, locals) })
+        })
+    }
+    if (recv_type == { Val("ProcessSpec" | "ProcessChild" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "TerminalSession") -> true; _ -> false }) && is_process_handle_method_name(recv_type, method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if recv_type == Val("Measurement") && is_measurement_method_name(method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if recv_type == Val("Loadable") && is_loadable_method_name(method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if recv_type == Val(Syntax.EXPIRING_VALUE_TYPE) {
+        if method == "new" && args.len() == 3 && (receiver == { Ident(name, _) -> name == Syntax.EXPIRING_VALUE_TYPE; _ -> false }) { return args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) }
+        if (method, args.len()) == { ("get", 1) | ("is_valid", 1) | ("force", 1) -> true; _ -> false } { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) }
+    }
+    if (recv_type == { Val("NullBackend" | "TUIBackend" | "GtkBackend") -> true; _ -> false }) && is_ui_backend_method_name(recv_type, method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if recv_type == Val("DevServer") && is_devserver_method_name(method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if recv_type == Val("App") && is_app_method_name(method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if is_sketch_type(recv_type) && is_sketch_method_name(recv_type, method) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if is_http_type(recv_type) && is_http_method_name(recv_type, method) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if (recv_type == { Val("Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "Period" | "Zone" | "ZonedDateTime") -> true; _ -> false }) && is_civil_time_method_name(recv_type, method) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if recv_type == Val(Syntax.DURATION_TYPE) && (method == "equal" || method == "compare") && args.len() == 1 { return expr_in_subset(receiver, cx, locals) && expr_in_subset(args[0].expr, cx, locals) }
+    if recv_type.is_none() && closure_method_in_subset(method, args, cx, locals) { return expr_in_subset(receiver, cx, locals) }
+    if recv_type == Val("Int") && method == "to_radix" && args.len() == 1 { return expr_in_subset(receiver, cx, locals) && expr_in_subset(args[0].expr, cx, locals) }
+    if recv_type == Val(numeric_name) {
+        if numeric_type_from_name(numeric_name) == Val(numeric_ty) {
+            is_overflow_method := Collections.numeric_overflow_method(method, args.len()).is_some()
+            if (!is_overflow_method || (numeric_ty == { IntN { .. } -> true; _ -> false })) && is_covered_numeric_method(method, args.len()) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) }
+        }
+    }
+    if method == "equal" && args.len() == 1 && recv_type.is_some_and(fn(name) { core_enum_equal_type(name.rsplit('.').next().unwrap_or(name)) }) { return expr_in_subset(receiver, cx, locals) && expr_in_subset(args[0].expr, cx, locals) }
+    if recv_type == Val("HTTPRouter") && (method == "get" || method == "post" || method == "put" || method == "delete") && args.len() == 2 { return router_register_in_subset(receiver, args, cx, locals) }
+    if recv_type == Val("Plugin") && !(method == { "call" | "call_int" | "call_bool" | "call_text" -> true; _ -> false }) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if recv_type == Val(handle) {
+        if Sema.is_math_type(handle) && !cx.type_names.contains(handle) {
+            is_reduce := method == "reduce" && Sema.is_simd_lane_type(handle)
+            if is_reduce || Sema.math_method_return(handle, method, args.len()).is_some() { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+        }
+    }
+    if recv_type == Val(handle) {
+        if (handle == "__SerdeEncode__" && method == "encode" && args.is_empty()) || (handle == "__Debug__" && method == "debug" && args.is_empty()) || (handle == Syntax.TYPE_DATA && method == Syntax.METHOD_DATATREE_DECODE && args.is_empty()) { return expr_in_subset(receiver, cx, locals) }
+        if handle_method_op(handle, method, args.len()).is_some() { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+        if handle == "Cursor" && method == Syntax.METHOD_TAKE_PATTERN && args.len() == 1 && (args[0].expr == { StrMatchLit(_, _) -> true; _ -> false }) { return expr_in_subset(receiver, cx, locals) }
+        if handle == "Reader" && method == Syntax.METHOD_TAKE_PATTERN && args.len() == 1 && ((args[0].expr == { BinMatchLit(_, _) -> true; _ -> false }) || expr_in_subset(args[0].expr, cx, locals)) { return expr_in_subset(receiver, cx, locals) }
+    }
+    if recv_type == Val(handle) {
+        if Sema.is_layout_type(handle) && Sema.layout_method_return(handle, method, args.len()).is_some() { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    }
+    if recv_type.is_none() && method == "safe" && args.is_empty() {
+        if receiver == { Ident(type_name, _) -> {
+            is_core_email_limits := type_name == "Limits" && cx.core_imports.values().any(fn(module) { module == "core.email" })
+            if (type_name == "EncodingLimits" || type_name == "Limits") && (!cx.struct_fields.contains_key(type_name) || is_core_email_limits) { return true }
+        }; _ -> {} }
+        if receiver == { Field(base, leaf, _) -> {
+            if leaf == "EncodingLimits" { if base == { Ident(alias, _) -> { if cx.any_core_import_module(alias) == Val("core.encoding") { return true } }; _ -> {} } }
+            if leaf == "DataLimits" { if base == { Ident(alias, _) -> { if cx.any_core_import_module(alias) == Val("core.data") { return true } }; _ -> {} } }
+            if leaf == "CBOROptions" { if base == { Ident(alias, _) -> { if cx.any_core_import_module(alias) == Val("core.encoding.cbor") { return true } }; _ -> {} } }
+            if leaf == { "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" -> true; _ -> false } { if base == { Ident(alias, _) -> { if cx.any_core_import_module(alias) == Val("core.encoding.xml") { return true } }; _ -> {} } }
+            if leaf == "Limits" { if base == { Ident(alias, _) -> { if cx.any_core_import_module(alias) == Val("core.email") { return true } }; _ -> {} } }
+        }; _ -> {} }
+    }
+    if recv_type.is_none() {
+        if receiver == { Ident(type_name, _) -> {
+            if !locals.contains(type_name) {
+                if cx.enum_variants.get(type_name) == Val(variants) {
+                    if variants.iter().any(fn(entry) { entry.0 == method }) { return enum_is_covered(type_name, cx) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+                }
+            }
+        }; _ -> {} }
+    }
+    if recv_type.is_none() {
+        if static_call_type_name(receiver, locals) == Val(type_name) { return static_method_call_in_subset(type_name, method, args, cx, locals) }
+    }
+    if recv_type.is_none() { return false }
+    recv_type_leaf := recv_type.map(fn(name) { name.rsplit("::").next().unwrap_or(name).rsplit('.').next().unwrap_or(name) })
+    if recv_type_leaf == Val(type_name) {
+        if (type_name == { "Secret" | "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "WrappedVaultKey" | "KeyUnlock" -> true; _ -> false }) && (receiver == { Ident(name, _) -> name == type_name && !locals.contains(name); _ -> false }) { return static_method_call_in_subset(type_name, method, args, cx, locals) }
+    }
+    if (recv_type_leaf, method, args.len()) == {
+        (Val("SigningKey" | "X25519SecretKey"), "public_key", 0) | (Val("WrappedVaultKey"), "bytes", 0) | (Val("Digest256" | "Digest512"), "hex" | "as_bytes", 0) | (Val("X25519PublicKey"), "text", 0) -> true
+        _ -> false
+    } { return expr_in_subset(receiver, cx, locals) }
+    if recv_type == Val(ty) { if cx.trait_names.contains(ty) { return expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) } }
+    ty := recv_type == { Val(value) -> value; None -> { return false } }
+    metadata_ty := cx.method_metadata_name(ty, method)
+    binding_method := cx.extern_funcs.contains_key(foreign_binding_method_key(ty, method))
+    sig := cx.method_sigs.get((metadata_ty, method))
+    distinct_numeric_operator := cx.distinct_types.get(ty).is_some_and(fn(entry) { entry.1 }) && !cx.distinct_ranges.contains_key(ty) && (method == { "add" | "sub" | "mul" | "div" -> true; _ -> false }) && args.len() == 1
+    distinct_trait_method := cx.distinct_types.contains_key(ty) && (cx.trait_methods.contains((ty, method)) || distinct_numeric_operator)
+    if sig.is_none() && !binding_method && !distinct_trait_method { return false }
+    recv_ty := Type.Named(ty.to_string())
+    operator_hook := sig.is_some() && (method == { "add" | "sub" | "mul" | "div" -> true; _ -> false }) && args.len() == 1
+    if !is_covered_struct_ty(recv_ty, cx) && !is_covered_enum_ty(recv_ty, cx) && !is_covered_foreign_value_ty(recv_ty, cx) && !distinct_trait_method && !operator_hook { return false }
+    if !expr_in_subset(receiver, cx, locals) { return false }
+    if sig.is_some_and(fn(signature) { args.len() != signature.len() }) { return false }
+    args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1430
+pub fn core_module_path_from_receiver(receiver: Expr, cx: Cx, locals: Set<String>) -> String? {
+    receiver == {
+        Ident(alias, _) -> if !locals.contains(alias) { cx.any_core_import_module(alias).map(fn(module) { module.to_string() }) } else { None }
+        Field(base, leaf, _) -> {
+            module := core_module_path_from_receiver(base, cx, locals)?
+            submodule := "{module}.{leaf}"
+            if Syntax.is_known_core_module(submodule) { Val(^submodule) } else { None }
+        }
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1453
+pub fn fn_field_call_ty(method: String, recv_type: String?, cx: Cx) -> Type? {
+    ty_name := recv_type?
+    if !is_covered_struct_ty(Type.Named(ty_name.to_string()), cx) { return None }
+    fields := cx.struct_fields.get(ty_name)?
+    (_, fty) := fields.iter().find(fn(entry) { entry.0 == method })?
+    if fty == { Fn { .. } -> true; _ -> false } { Val(fty) } else { None }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1471
+pub fn fn_field_call_in_subset(receiver: Expr, method: String, args: [CallArg], recv_type: String?, cx: Cx, locals: Set<String>) -> Bool {
+    if fn_field_call_ty(method, recv_type, cx).is_none() { return false }
+    expr_in_subset(receiver, cx, locals) && args.iter().all(fn(a) { a.label.is_none() && !a.flags.shared_auto_clone && expr_in_subset(a.expr, cx, locals) })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1504
+pub fn static_call_type_name_unchecked(receiver: Expr) -> String? {
+    receiver == {
+        Ident(name, _) -> Val(name.to_string())
+        Field(base, leaf, _) -> {
+            if base == { Ident(prefix, _) -> {
+                if prefix.chars().next().is_some_and(fn(c) { c.is_ascii_uppercase() }) { return Val("{prefix}.{leaf}") }
+            }; _ -> {} }
+            None
+        }
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1523
+pub fn static_call_type_name(receiver: Expr, locals: Set<String>) -> String? {
+    name := static_call_type_name_unchecked(receiver)?
+    receiver == {
+        Ident(n, _) -> if locals.contains(n) { None } else { Val(^name) }
+        Field(base, _, _) -> {
+            if base == { Ident(prefix, _) -> { if locals.contains(prefix) { return None } }; _ -> {} }
+            Val(^name)
+        }
+        _ -> Val(^name)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1539
+pub fn static_method_call_in_subset(type_name: String, method: String, args: [CallArg], cx: Cx, locals: Set<String>) -> Bool {
+    if type_name == "UIShortcut" && method == "cmd" {
+        return args.len() == 1 && args[0].label.is_none() && (args[0].expr.without_parens() == {
+            Str(parts, _) -> parts.len() == 1 && (parts[0] == { Lit(value) -> { text := value.trim() // #4303
+                !text.is_empty() }; _ -> false })
+            _ -> false
+        })
+    }
+    if locals.contains(type_name) { return false }
+    is_string_distinct := cx.distinct_type_identity(type_name).and_then(fn(identity) { cx.distinct_types.get(identity) }).is_some_and(fn(entry) { entry.0 == Type.String })
+    if is_string_distinct && (method == "from" || method == "encode_hole" || method == "raw") { return args.len() == 1 && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if type_name == "FieldError" && method == "under" && args.len() == 2 { return args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) }
+    if method == "merge" && args.len() == 2 && cx.type_names.contains(type_name) && cx.struct_fields.contains_key(type_name) && !cx.sigs.contains_key("{type_name}::merge") { return args.iter().all(fn(arg) { arg.label.is_none() && expr_in_subset(arg.expr, cx, locals) }) }
+    if (type_name, method, args.len()) == { ("Clock", "new", 1) | ("Clock", "system", 0) | ("Clock", "now", 0) | (Syntax.TYPE_AUTHORITY, "workspace", 0) | ("Date", "today", 0) | ("Path", "home", 0) -> true; _ -> false } { return true }
+    if type_name == Syntax.TYPE_AUTHORITY && method == "from_rights" && args.len() == 1 { return args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) }
+    if (type_name, method, args.len()) == ("ExpiringValue", "new", 3) { return args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) }
+    if (type_name, method, args.len()) == ("ExpiringSecret", "new", 3) { return args.iter().all(fn(arg) { expr_in_subset(arg.expr, cx, locals) }) }
+    if (type_name, method, args.len()) == { ("Int" | "Float", "parse", 1) -> true; _ -> false } { return expr_in_subset(args[0].expr, cx, locals) }
+    if type_name == "Int" && method == "from_radix" && args.len() == 2 { return args.iter().all(fn(argument) { expr_in_subset(argument.expr, cx, locals) }) }
+    if (type_name, method, args.len()) == { ("String", "from_bytes" | "from_bytes_lossy", 1) -> true; _ -> false } { return expr_in_subset(args[0].expr, cx, locals) }
+    if numeric_type_from_name(type_name).is_some() && Syntax.numeric_conversion_source(method).is_some() && args.len() == 1 { return expr_in_subset(args[0].expr, cx, locals) }
+    if cx.distinct_types.get(type_name) == Val((base, _)) {
+        if base.is_numeric() && Syntax.numeric_conversion_source(method).is_some() && args.len() == 1 { return expr_in_subset(args[0].expr, cx, locals) }
+        if !base.is_numeric() && Syntax.conversion_method_for_source(base.name()) == method && args.len() == 1 { return expr_in_subset(args[0].expr, cx, locals) }
+    }
+    if cx.unit_facts.contains_key(type_name) && method.starts_with("from_") {
+        if args.len() == 1 { return expr_in_subset(args[0].expr, cx, locals) }
+        if method.ends_with("_rounded") && args.len() == 3 {
+            mode := args[1].expr == { EnumLit { variant, args: variant_args, .. } -> variant_args.is_empty() && Syntax.unit_rounding_mode(variant).is_some(); _ -> false }
+            return args[0].label.is_none() && args[1].label.is_none() && args[2].label.map(fn(label) { label.0 }) == Val("digits") && mode && expr_in_subset(args[0].expr, cx, locals) && expr_in_subset(args[2].expr, cx, locals)
+        }
+    }
+    if (type_name, method, args.len()) == {
+        ("Secret", "from_text" | "from_bytes", 1) | ("SigningKey" | "X25519SecretKey", "new_random", 0)
+        | ("SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "WrappedVaultKey", "from_bytes", 1)
+        | ("KeyUnlock", "Recipient" | "Passphrase", 1) | ("X25519PublicKey", "from_text", 1) -> true
+        _ -> false
+    } { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if Sema.is_math_type(type_name) && !cx.type_names.contains(type_name) && Sema.math_static_return(type_name, method, args.len()).is_some() { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if type_name == "Perf" && !cx.type_names.contains("Perf") && core_call_covered("core.perf", method) { return args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if method == Generics.LITERAL_FROM_LITERAL && cx.trait_method_traits.get((type_name, method)).is_some_and(fn(trait_name) { Generics.is_literal_capability(trait_name) }) { return args.len() == 1 && args.iter().all(fn(a) { expr_in_subset(a.expr, cx, locals) }) }
+    if method != Syntax.MEM_ALLOC_NEW && is_intercepted_method_name(method) { return false }
+    ty := Type.Named(type_name.to_string())
+    if !is_covered_struct_ty(ty, cx) && !is_covered_enum_ty(ty, cx) { return false }
+    if cx.enum_variants.get(type_name) == Val(variants) { if variants.iter().any(fn(entry) { entry.0 == method }) { return false } }
+    sig := cx.method_sigs.get((type_name, method)) == { Val(value) -> value; None -> { return false } }
+    if args.len() != sig.len() { return false }
+    args.iter().zip(sig.iter()).all(fn(entry) { expr_in_subset(entry.0.expr, cx, locals) })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1754
+pub fn is_intercepted_method_name(method: String) -> Bool {
+    method == {
+        "clone" | "raw" | "snapshot" | "new"
+        | "parse" | "from_bytes" | "from_bytes_lossy" | "len" | "is_empty" | "push" | "append" | "pop" | "insert"
+        | "remove" | "get" | "post" | "put" | "delete" | "first" | "last"
+        | "contains" | "has" | "index_of" | "index" | "reverse" | "sort" | "sort_desc" | "join" | "detach"
+        | "receive" | "sender" | "send" | "clear" | "chars" | "bytes" | "encode" | "trim"
+        | "strip" | "lstrip" | "rstrip" | "expandtabs" | "startswith" | "endswith"
+        | "split" | "starts_with" | "ends_with" | "replace" | "to_upper"
+        | "to_lower" | "to_ascii_upper" | "to_ascii_lower" | "repeat" | "slice" | "keys" | "values" | "items" | "has_key" | "add" | "add_new" | "setdefault" | "update"
+        | "difference_update" | "intersection_update" | "symmetric_difference_update" | "merge"
+        | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all" | "count_where"
+        | "sort_by" | "sort_by_desc" | "reduce" | "update_first"
+        | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "normalize"
+        | "remove_prefix" | "remove_suffix" | "rsplit" | "equal" | "copy" | "rfind" | "rpartition"
+        | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
+        | "indexed" | "indexes" | "zip" | "zip_short" | "zip_pad"
+        | "take_while" | "skip_while" | "flat_map" | "scan"
+        | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "counts" | "partition"
+        | "para_map" | "para_filter" | "para_partition" | "para_fold"
+        | "cycle" | "drop_last" | "shuffle" | "is_sorted" | "is_sorted_by"
+        | "dedup_by" | "average" | "chunk_while" | "last_index_of" | "compare" | "to_set"
+        | "is_nan" | "is_infinite" | "is_finite" | "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
+        | "elapsed_millis" | "write_line" | "flush" | "read_line" | "lines"
+        | "alloc" | "reset" | "accept" | "local_addr" | "read" | "write"
+        | "peer_addr" | "close" | "method" | "path" | "body" | "header" | "param" | "status" | "group"
+        | "union" | "to_list" | "collect" | "count" | "top_n"
+        | "push_front" | "push_back" | "pop_front" | "pop_back" | "peek_front" | "peek_back" | "capacity"
+        | "from" | "init" | "lift2" -> true
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1810
+// All three conventions are lowered canonically; none is excluded.
+pub fn arg_conv_in_subset(_a: CallArg) -> Bool { true }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1829
+pub fn closure_method_in_subset(method: String, args: [CallArg], cx: Cx, locals: Set<String>) -> Bool {
+    para_callback := fn(expr: Expr) { expr == { Lambda(lam) -> lambda_in_subset(lam, cx, locals); Ident(name, _) -> cx.fn_types.contains_key(name); _ -> false } }
+    map_callback := fn(expr: Expr) { expr == { Lambda(lam) -> lambda_in_subset(lam, cx, locals); Ident(name, _) -> locals.contains(name) || cx.fn_types.contains_key(name); _ -> false } }
+    if !Collections.is_closure_method(method) { return false }
+    if args.iter().enumerate().any(fn(entry) {
+        (index, arg) := entry
+        arg.label.is_some() && !(method == "para_map" && index == 1 && arg.label.map(fn(label) { label.0 }) == Val("limit"))
+    }) { return false }
+    method == {
+        "edit_disjoint" -> args.len() == 2 && expr_in_subset(args[0].expr, cx, locals) && (args[1].expr == { Lambda(lam) -> lambda_in_subset(lam, cx, locals); _ -> false })
+        "reduce" | "scan" | "fold" -> args.len() == 2 && expr_in_subset(args[0].expr, cx, locals) && (args[1].expr == { Lambda(lam) -> lambda_in_subset(lam, cx, locals); _ -> false })
+        "para_fold" -> args.len() == 3 && args.iter().all(fn(arg) { para_callback(arg.expr) })
+        "para_map" | "para_filter" | "para_partition" -> args.first().is_some_and(fn(arg) { para_callback(arg.expr) }) && (if method == "para_map" && args.len() == 2 { expr_in_subset(args[1].expr, cx, locals) } else { args.len() == 1 })
+        "map" -> args.len() == 1 && map_callback(args[0].expr)
+        "update_first" -> args.len() == 2 && (args[0].expr == { Lambda(lam) -> lambda_in_subset(lam, cx, locals); _ -> false }) && expr_in_subset(args[1].expr, cx, locals)
+        _ -> args.len() == 1 && (args[0].expr == { Lambda(lam) -> lambda_in_subset(lam, cx, locals); _ -> false })
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1896
+fn is_builtin_collection_recv(recv_type: String?) -> Bool {
+    recv_type == {
+        None | Val("String" | "Option" | "SQL") -> true
+        Val(name) -> {
+            leaf := name.rsplit('.').next().unwrap_or(name)
+            (leaf == { Syntax.TYPE_BYTES | Syntax.TYPE_LIST | "Equatable" | "FixedList" | "Set" | "Map" -> true; _ -> false }) || leaf.starts_with('[')
+        }
+    }
+}

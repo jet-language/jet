@@ -1,0 +1,27 @@
+use jet_sema.[PolicyDomain, PolicyFactGraph, collect_policy_facts]
+// Rust: crates/jet-sema/src/Sema/PolicyFacts.rs:55-79 (behavioral control)
+#Test("policy_graph_records_order_duplicates_and_domain_membership") {
+    graph := PolicyFactGraph.default()
+    &graph.record(PolicyDomain.Contract, "f", "first")
+    &graph.record(PolicyDomain.Contract, "f", "second")
+    &graph.record(PolicyDomain.Memory, "!Mem.Copy", "denial")
+    assert(graph.facts().len() == 3)
+    assert(graph.facts()[0].detail == "first")
+    assert(graph.facts()[1].detail == "second")
+    assert(graph.has_domain(PolicyDomain.Memory))
+    assert(!graph.has_domain(PolicyDomain.Taint))
+    assert(graph.domains().len() == 2)
+    assert(PolicyDomain.Refinement.as_str() == "refinement")
+    assert(PolicyDomain.Contract.as_str() == "contract")
+    assert(PolicyDomain.Taint.as_str() == "taint")
+    assert(PolicyDomain.Budget.as_str() == "budget")
+    assert(PolicyDomain.Bounds.as_str() == "bounds")
+    assert(PolicyDomain.Replay.as_str() == "replay")
+    assert(PolicyDomain.Memory.as_str() == "memory")
+}
+// Rust: crates/jet-sema/src/Sema/PolicyFacts.rs:82 (behavioral control)
+#Test("policy_facts_parse_real_source_and_propagate_lexical_failure") {
+    graph :: collect_policy_facts("fn run() {{ }}") !? panic("ordinary source must parse")
+    assert(graph.facts().is_empty())
+    assert(collect_policy_facts("\"unterminated").is_err())
+}

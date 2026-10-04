@@ -1,2275 +1,806 @@
-// PORT-PENDING 0470 crates-jet-codegen-src-codegen-tir-artifact-plan: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1-2271
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Checked artifact/module facts shared by every MIR adapter.
-//RS //!
-//RS //! This projection deliberately contains semantic rows only.  It does not retain
-//RS //! `ProgramBundle`, source text, AST items, generated Rust names, or a second
-//RS //! parser.  Adapters resolve the string keys against the function/type rows they
-//RS //! already own.
-//RS 
-//RS #![allow(dead_code)]
-//RS use crate::AST::{
-//RS     AccessConvention, CtValue, EverySchedule, Expr, Func, ImportDecl, ImportKind, Item,
-//RS     JobCachePolicy, JobScope, JobSkip, OutputKind, Param, ParamZone, ProgramBundle, TestDef, Type,
-//RS };
-//RS use crate::AST::{FfiCloseAdapter, FfiCloseSource, FfiHandleFact, FfiThreadSafety};
-//RS use crate::Diagnostics::Span;
-//RS use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactRequest};
-//RS use jet_foundation::Names::{
-//RS     NameAlias, NameDeclaration, NameModule, NameReference, NameVisibility, StructureFact,
-//RS };
-//RS use std::collections::{BTreeMap, BTreeSet, HashMap};
-//RS 
-//RS pub(super) use jet_foundation::MIR::{
-//RS     MirArtifactKind as TirArtifactKind, MirArtifactTarget as TirArtifactTarget,
-//RS };
-//RS 
-//RS /// The requested execution target is an input to artifact lowering rather than
-//RS /// a value rediscovered from emitted source.
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(super) enum TirArtifactEntryKind {
-//RS     Library,
-//RS     Command,
-//RS     App,
-//RS     Service,
-//RS     Test,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(super) enum TirEntryOutput {
-//RS     None,
-//RS     ReturnValue,
-//RS }
-//RS 
-//RS /// Target applicability is a checked four-target fact.  The TIR row uses the
-//RS /// same shape as MIR so a requested artifact cannot accidentally widen its
-//RS /// bridge/link facts to another execution tier.
-//RS pub(super) type TirTargetApplicability = jet_foundation::MIR::MirTargetApplicability;
-//RS 
-//RS fn target_applicability_for(target: TirArtifactTarget) -> TirTargetApplicability {
-//RS     match target {
-//RS         TirArtifactTarget::RustAot => TirTargetApplicability {
-//RS             rust_aot: true,
-//RS             cranelift: false,
-//RS             interpreter: false,
-//RS             web: false,
-//RS         },
-//RS         TirArtifactTarget::Cranelift => TirTargetApplicability {
-//RS             rust_aot: false,
-//RS             cranelift: true,
-//RS             interpreter: false,
-//RS             web: false,
-//RS         },
-//RS         TirArtifactTarget::Interpreter => TirTargetApplicability {
-//RS             rust_aot: false,
-//RS             cranelift: false,
-//RS             interpreter: true,
-//RS             web: false,
-//RS         },
-//RS         TirArtifactTarget::Web => TirTargetApplicability {
-//RS             rust_aot: false,
-//RS             cranelift: false,
-//RS             interpreter: false,
-//RS             web: true,
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(super) enum TirAccess {
-//RS     Read,
-//RS     Write,
-//RS     Move,
-//RS }
-//RS 
-//RS fn lower_access(access: AccessConvention) -> TirAccess {
-//RS     match access {
-//RS         AccessConvention::Read => TirAccess::Read,
-//RS         AccessConvention::Write => TirAccess::Write,
-//RS         AccessConvention::Move => TirAccess::Move,
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirFunctionRef {
-//RS     pub key: String,
-//RS     pub module: String,
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     pub visibility: NameVisibility,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirFunctionFact {
-//RS     pub reference: TirFunctionRef,
-//RS     pub params: Vec<TirParamFact>,
-//RS     pub return_type: Option<Type>,
-//RS     pub is_pure: bool,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirParamFact {
-//RS     pub index: usize,
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     pub ty: Type,
-//RS     pub access: TirAccess,
-//RS     pub label: String,
-//RS     pub zone: ParamZone,
-//RS     pub variadic: bool,
-//RS     pub default_present: bool,
-//RS }
-//RS 
-//RS fn lower_param(param: &Param, index: usize) -> TirParamFact {
-//RS     TirParamFact {
-//RS         index,
-//RS         name: param.name.clone(),
-//RS         span: param.name_span,
-//RS         ty: param.ty.clone(),
-//RS         access: lower_access(param.convention),
-//RS         label: param.call_label().to_string(),
-//RS         zone: param.zone,
-//RS         variadic: param.variadic,
-//RS         default_present: param.default.is_some(),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_params(params: &[Param]) -> Vec<TirParamFact> {
-//RS     params
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(index, param)| lower_param(param, index))
-//RS         .collect()
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirModuleFact {
-//RS     pub key: String,
-//RS     pub name: String,
-//RS     pub path: String,
-//RS     pub source_path: String,
-//RS     pub imports: Vec<String>,
-//RS     pub item_order: Vec<TirItemRef>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) enum TirItemRef {
-//RS     Type(String),
-//RS     Trait(String),
-//RS     Function(String),
-//RS     Constant(String),
-//RS     Impl(String),
-//RS     Foreign(String),
-//RS     Module(String),
-//RS     Unknown(String),
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirImportFact {
-//RS     pub module: String,
-//RS     pub alias: String,
-//RS     pub visibility: NameVisibility,
-//RS     pub kind: TirImportKind,
-//RS     pub span: Span,
-//RS     pub version: Option<String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) enum TirImportKind {
-//RS     File {
-//RS         path: String,
-//RS     },
-//RS     Module {
-//RS         path: String,
-//RS     },
-//RS     Unqualified {
-//RS         module: String,
-//RS         items: Vec<TirImportItem>,
-//RS     },
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirImportItem {
-//RS     pub original: String,
-//RS     pub local: String,
-//RS     pub item: TirItemRef,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Default)]
-//RS pub(super) struct TirNameFacts {
-//RS     pub modules: Vec<NameModule>,
-//RS     pub declarations: Vec<NameDeclaration>,
-//RS     pub aliases: Vec<NameAlias>,
-//RS     pub references: Vec<NameReference>,
-//RS     pub structure_facts: Vec<StructureFact>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirForeignFact {
-//RS     pub key: String,
-//RS     pub module: String,
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     pub symbol: String,
-//RS     pub path: String,
-//RS     pub params: Vec<TirParamFact>,
-//RS     pub bridge_eligible: bool,
-//RS     /// Inline C scalar bodies consume Jet's raw one-word scalar representation.
-//RS     pub raw_scalar_abi: bool,
-//RS     pub return_type: Option<Type>,
-//RS     pub abi: String,
-//RS     pub language: String,
-//RS     pub applicability: TirTargetApplicability,
-//RS     pub effect_root: Option<String>,
-//RS     pub callback_transport: Option<String>,
-//RS     pub callback_plan_digest: Option<String>,
-//RS     pub callback_identity: Option<String>,
-//RS     pub link_key: Option<String>,
-//RS     pub callback_key: Option<String>,
-//RS     pub handle_key: Option<String>,
-//RS     pub close_function_key: Option<String>,
-//RS     pub undo_function_key: Option<String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirLinkUnit {
-//RS     pub key: String,
-//RS     pub crate_spec: String,
-//RS     pub cache_identity: String,
-//RS     pub applicability: TirTargetApplicability,
-//RS     pub dependency_dirs: Vec<String>,
-//RS     pub link_closure: Vec<String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirCallbackFact {
-//RS     pub key: String,
-//RS     pub symbol: String,
-//RS     pub function: TirFunctionRef,
-//RS     pub params: Vec<TirParamFact>,
-//RS     pub return_type: Option<Type>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(super) enum TirHandleOwnership {
-//RS     Owned,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirHandleFact {
-//RS     pub key: String,
-//RS     pub lib: String,
-//RS     pub typedef_name: String,
-//RS     pub jet_name: String,
-//RS     pub ownership: TirHandleOwnership,
-//RS     pub close: String,
-//RS     pub close_source: FfiCloseSource,
-//RS     pub thread_safety: FfiThreadSafety,
-//RS     pub close_function_key: Option<String>,
-//RS     pub undo_function_key: Option<String>,
-//RS     pub send: bool,
-//RS     pub sync: bool,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirCImportLink {
-//RS     pub importing_module: String,
-//RS     pub scope: Option<String>,
-//RS     pub alias: String,
-//RS     pub target_module: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirCLib {
-//RS     pub lib: String,
-//RS     pub module: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirCOverlayOverride {
-//RS     pub lib: String,
-//RS     pub generated_symbol: String,
-//RS     pub overlay_symbol: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirCloseAdapter {
-//RS     pub lib: String,
-//RS     pub handle_type: String,
-//RS     pub raw_function: String,
-//RS     pub adapter_function: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Default)]
-//RS pub(super) struct TirCffiFacts {
-//RS     pub import_links: Vec<TirCImportLink>,
-//RS     pub libs: Vec<TirCLib>,
-//RS     pub overlay_overrides: Vec<TirCOverlayOverride>,
-//RS     pub boundaries: Vec<jet_foundation::AST::FfiBoundaryFacts>,
-//RS     pub handle_facts: Vec<TirHandleFact>,
-//RS     pub direct_links: Vec<String>,
-//RS     pub transitive_links: Vec<String>,
-//RS     pub close_adapters: Vec<TirCloseAdapter>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) enum TirCliDefault {
-//RS     TypeDefault,
-//RS     Value(CtValue),
-//RS     Recorded(String),
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) enum TirCliInputShape {
-//RS     Flag,
-//RS     Value {
-//RS         kind: crate::CLISchema::CLIValueKind,
-//RS         optional: bool,
-//RS         default: Option<TirCliDefault>,
-//RS     },
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirCliInput {
-//RS     pub field: String,
-//RS     pub flag: String,
-//RS     pub short: Option<String>,
-//RS     pub env: Option<String>,
-//RS     pub help: String,
-//RS     pub metavar: Option<String>,
-//RS     pub shape: TirCliInputShape,
-//RS     pub positional: Option<u16>,
-//RS     pub variadic: bool,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirCliCommand {
-//RS     pub name: String,
-//RS     pub description: Option<String>,
-//RS     pub function: Option<TirFunctionRef>,
-//RS     pub receiver: Option<String>,
-//RS     pub inputs: Vec<TirCliInput>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirCliEntry {
-//RS     pub record_inputs: bool,
-//RS     pub description: Option<String>,
-//RS     pub inputs: Vec<TirCliInput>,
-//RS     pub commands: Vec<TirCliCommand>,
-//RS     pub standard: bool,
-//RS     pub version: Option<String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirEntrySpec {
-//RS     pub kind: TirArtifactEntryKind,
-//RS     pub function: Option<TirFunctionRef>,
-//RS     pub cli: Option<TirCliEntry>,
-//RS     pub output: TirEntryOutput,
-//RS     pub output_kind: OutputKind,
-//RS     pub initialize_environment: bool,
-//RS     pub initialize_gc: bool,
-//RS     pub serves_until_stopped: bool,
-//RS     pub package_version: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirJobArgument {
-//RS     pub name: String,
-//RS     pub label: String,
-//RS     /// Display spelling from `CLISchema::JobArgumentSchema` (value kind).
-//RS     pub ty: String,
-//RS     /// The checked parameter type the job function is called with.
-//RS     pub param_ty: crate::AST::Type,
-//RS     pub required: bool,
-//RS     pub default: Option<String>,
-//RS     pub variadic: bool,
-//RS     pub zone: ParamZone,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirJobFact {
-//RS     pub key: String,
-//RS     pub function: Option<TirFunctionRef>,
-//RS     pub name: String,
-//RS     pub scope: JobScope,
-//RS     pub doc: Option<String>,
-//RS     pub arguments: Vec<TirJobArgument>,
-//RS     /// A job whose one parameter is a `#CLI` record takes the record's
-//RS     /// fields as its command inputs, exactly like a record entry.
-//RS     pub record_inputs: Option<Vec<TirCliInput>>,
-//RS     pub schedule: Option<EverySchedule>,
-//RS     /// D-DX-JOBGRAPH1=A: checked predecessor names and graph bound.
-//RS     pub after: Vec<String>,
-//RS     pub parallel: usize,
-//RS     pub packages: Vec<String>,
-//RS     pub working_directory: Option<String>,
-//RS     pub input_paths: Vec<String>,
-//RS     pub output_paths: Vec<String>,
-//RS     pub skip: Option<JobSkip>,
-//RS     pub cache: JobCachePolicy,
-//RS     pub limits: BTreeMap<String, String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(super) enum TirTestKind {
-//RS     Unit,
-//RS     Property,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirTestFact {
-//RS     pub key: String,
-//RS     pub function: TirFunctionRef,
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     pub kind: TirTestKind,
-//RS     pub parameters: Vec<TirParamFact>,
-//RS     pub faults: Vec<String>,
-//RS     pub expected_failure: bool,
-//RS     /// Compiler-synthesized property row for a callable's `#Pre` contract.
-//RS     pub contract_generated: bool,
-//RS     /// Sampled contract rows only (#2502): the compiler-synthesized pre-call
-//RS     /// eligibility predicate over the candidate's own checked `#Pre`
-//RS     /// conditions. The harness evaluates it BEFORE invoking the callable.
-//RS     pub eligibility: Option<TirFunctionRef>,
-//RS     /// Stable reason when contract input generation cannot be attempted.
-//RS     pub generation_unavailable_reason: Option<String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirOutputCheck {
-//RS     pub key: String,
-//RS     pub name: String,
-//RS     pub function: TirFunctionRef,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirCoveragePoint {
-//RS     pub key: String,
-//RS     pub function: TirFunctionRef,
-//RS     pub block: Option<String>,
-//RS     pub span: Span,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(super) enum TirHarnessKind {
-//RS     Test,
-//RS     Fuzz,
-//RS     Coverage,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirHarnessPlan {
-//RS     pub key: String,
-//RS     pub kind: TirHarnessKind,
-//RS     pub tests: Vec<String>,
-//RS     pub output_checks: Vec<TirOutputCheck>,
-//RS     pub selected_test: Option<String>,
-//RS     pub coverage_points: Vec<TirCoveragePoint>,
-//RS     pub command_override: bool,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(super) enum TirExportAbi {
-//RS     C,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirExport {
-//RS     pub symbol: String,
-//RS     pub function: TirFunctionRef,
-//RS     pub abi: TirExportAbi,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirArtifactPlan {
-//RS     pub key: String,
-//RS     pub kind: TirArtifactKind,
-//RS     pub name: String,
-//RS     pub target: TirArtifactTarget,
-//RS     pub modules: Vec<String>,
-//RS     pub links: Vec<String>,
-//RS     pub jobs: Vec<String>,
-//RS     pub runtime_parts: BTreeSet<String>,
-//RS     pub exports: Vec<TirExport>,
-//RS     pub provider_identity: String,
-//RS     pub closure_identity: String,
-//RS     pub artifact_identity: String,
-//RS     pub entry: Option<TirEntrySpec>,
-//RS     pub harness: Option<String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirArtifactFacts {
-//RS     pub package_identity: String,
-//RS     pub package_version: String,
-//RS     pub target: TirArtifactTarget,
-//RS     pub build_mode: MirArtifactBuildMode,
-//RS     pub build: crate::Facts::BuildFactSnapshot,
-//RS     pub names: TirNameFacts,
-//RS     pub functions: Vec<TirFunctionFact>,
-//RS     pub modules: Vec<TirModuleFact>,
-//RS     pub imports: Vec<TirImportFact>,
-//RS     pub foreign: Vec<TirForeignFact>,
-//RS     pub links: Vec<TirLinkUnit>,
-//RS     pub callbacks: Vec<TirCallbackFact>,
-//RS     pub handles: Vec<TirHandleFact>,
-//RS     pub entry: Option<TirEntrySpec>,
-//RS     pub cli: Option<TirCliEntry>,
-//RS     pub jobs: Vec<TirJobFact>,
-//RS     pub tests: Vec<TirTestFact>,
-//RS     pub output_checks: Vec<TirOutputCheck>,
-//RS     pub coverage_points: Vec<TirCoveragePoint>,
-//RS     pub harnesses: Vec<TirHarnessPlan>,
-//RS     pub artifacts: Vec<TirArtifactPlan>,
-//RS     pub cffi: TirCffiFacts,
-//RS }
-//RS 
-//RS pub(super) fn module_identity(bundle: &ProgramBundle, index: usize) -> String {
-//RS     crate::Codegen::Context::module_identity(bundle, index)
-//RS }
-//RS 
-//RS fn key(module: &str, name: &str) -> String {
-//RS     if module.is_empty() {
-//RS         name.to_string()
-//RS     } else if name.is_empty() {
-//RS         module.to_string()
-//RS     } else {
-//RS         format!("{module}::{name}")
-//RS     }
-//RS }
-//RS 
-//RS fn function_ref(
-//RS     module: &str,
-//RS     name: &str,
-//RS     span: Span,
-//RS     visibility: NameVisibility,
-//RS ) -> TirFunctionRef {
-//RS     TirFunctionRef {
-//RS         key: key(module, name),
-//RS         module: module.to_string(),
-//RS         name: name.to_string(),
-//RS         span,
-//RS         visibility,
-//RS     }
-//RS }
-//RS 
-//RS fn function_visibility(function: &Func) -> NameVisibility {
-//RS     NameVisibility::from_flags(function.is_pub, function.is_package_pub)
-//RS }
-//RS 
-//RS fn is_operator_trait(trait_name: &str) -> bool {
-//RS     matches!(
-//RS         trait_name,
-//RS         crate::Syntax::TRAIT_ADD
-//RS             | crate::Syntax::TRAIT_SUB
-//RS             | crate::Syntax::TRAIT_MUL
-//RS             | crate::Syntax::TRAIT_DIV
-//RS             | crate::Syntax::TRAIT_EQUATABLE
-//RS             | crate::Syntax::TRAIT_COMPARABLE
-//RS     )
-//RS }
-//RS 
-//RS fn method_reference_name(
-//RS     owner: &str,
-//RS     trait_name: Option<&str>,
-//RS     operator_rhs: Option<&Type>,
-//RS     method: &Func,
-//RS ) -> String {
-//RS     match trait_name {
-//RS         Some(trait_name) if is_operator_trait(trait_name) => {
-//RS             let rhs = operator_rhs.expect("sema must normalize every operator RHS");
-//RS             crate::Traits::operator_method_identity(owner, trait_name, &method.name, rhs)
-//RS         }
-//RS         Some(trait_name) => format!("{owner}::{trait_name}::{}", method.name),
-//RS         None => format!("{owner}::{}", method.name),
-//RS     }
-//RS }
-//RS 
-//RS fn item_ref(module: &str, item: &Item) -> Option<TirItemRef> {
-//RS     let reference = match item {
-//RS         Item::Func(function) => TirItemRef::Function(key(module, &function.name)),
-//RS         Item::Struct(definition) => TirItemRef::Type(key(module, &definition.name)),
-//RS         Item::Enum(definition) => TirItemRef::Type(key(module, &definition.name)),
-//RS         Item::Distinct(definition) => TirItemRef::Type(key(module, &definition.name)),
-//RS         Item::TypeAlias(definition) => TirItemRef::Type(key(module, &definition.name)),
-//RS         Item::UnitFamily(definition) => TirItemRef::Type(key(module, &definition.family)),
-//RS         Item::Trait(definition) => TirItemRef::Trait(key(module, &definition.name)),
-//RS         Item::Impl(definition) => {
-//RS             let local = match definition.trait_name.as_deref() {
-//RS                 Some(trait_name) if is_operator_trait(trait_name) => {
-//RS                     let rhs = definition
-//RS                         .operator_rhs
-//RS                         .as_ref()
-//RS                         .expect("sema must normalize every operator RHS");
-//RS                     format!(
-//RS                         "impl::{}::{trait_name}<{}>",
-//RS                         definition.type_name,
-//RS                         rhs.name()
-//RS                     )
-//RS                 }
-//RS                 Some(trait_name) => format!("impl::{}::{trait_name}", definition.type_name),
-//RS                 None => format!("impl::{}", definition.type_name),
-//RS             };
-//RS             TirItemRef::Impl(key(module, &local))
-//RS         }
-//RS         Item::Const(definition) => TirItemRef::Constant(key(module, &definition.name)),
-//RS         Item::Test(definition) => TirItemRef::Unknown(test_key(module, definition)),
-//RS         Item::ExternRust(_) => TirItemRef::Foreign(key(module, "extern")),
-//RS         Item::CodeModule(definition) if definition.body.is_some() => {
-//RS             TirItemRef::Module(key(module, &definition.name))
-//RS         }
-//RS         // A file module has its own loaded-module identity and is represented
-//RS         // by the synthetic File import, not as an inline child of this module.
-//RS         Item::CodeModule(_) => return None,
-//RS         _ => TirItemRef::Unknown(std::any::type_name::<Item>().to_string()),
-//RS     };
-//RS     Some(reference)
-//RS }
-//RS 
-//RS pub(super) fn test_key(module: &str, test: &TestDef) -> String {
-//RS     let name = test.name.as_deref().unwrap_or("anonymous");
-//RS     key(
-//RS         module,
-//RS         &format!("test::{name}@{}..{}", test.span.start, test.span.end),
-//RS     )
-//RS }
-//RS pub(super) fn contract_key(module: &str, function: &Func) -> String {
-//RS     key(
-//RS         module,
-//RS         &format!(
-//RS             "contract::{}@{}..{}",
-//RS             function.name, function.span.start, function.span.end
-//RS         ),
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn contract_eligibility_key(module: &str, function: &Func) -> String {
-//RS     key(
-//RS         module,
-//RS         &format!(
-//RS             "contract-pre::{}@{}..{}",
-//RS             function.name, function.span.start, function.span.end
-//RS         ),
-//RS     )
-//RS }
-//RS 
-//RS /// The sampling plan the TIR item walk records for every contract candidate:
-//RS /// contract key → `None` (sampled: predicate + wrapper were materialized) or
-//RS /// `Some(reason)` (explicit unavailable record; only the trivial unavailable
-//RS /// wrapper was materialized).
-//RS pub(super) type ContractSamplingPlan = BTreeMap<String, Option<String>>;
-//RS 
-//RS /// One canonical eligibility fact for generated contract sampling (#2502).
-//RS ///
-//RS /// Both artifact discovery and TIR item materialization consult this same
-//RS /// classification, so every emitted test row resolves to a lowered callable
-//RS /// and every non-sampled candidate is an explicit unavailable record — never
-//RS /// an unresolved synthetic key and never silently omitted. `covered` is the
-//RS /// TIR coverage fact for the candidate in its own module context.
-//RS ///
-//RS /// Returns `None` for a non-candidate (no `#Pre` clauses or no parameters),
-//RS /// `Some(None)` for a sampled candidate, and `Some(Some(reason))` for an
-//RS /// explicit unavailable record.
-//RS pub(super) fn contract_sampling_reason(function: &Func, covered: bool) -> Option<Option<String>> {
-//RS     if function.pre.is_empty() || function.params.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let precondition_calls_function = function.pre.iter().any(|clause| {
-//RS         let mut found = false;
-//RS         clause.cond.for_each_expr(|expr| {
-//RS             if matches!(expr, Expr::Call(_) | Expr::MethodCall { .. }) {
-//RS                 found = true;
-//RS             }
-//RS         });
-//RS         found
-//RS     });
-//RS     let reason = if function.inline_foreign.is_some() {
-//RS         Some("contract_target_foreign")
-//RS     } else if !function.type_params.is_empty() {
-//RS         Some("contract_target_generic")
-//RS     } else if !covered {
-//RS         Some("contract_target_unsupported")
-//RS     } else if precondition_calls_function {
-//RS         Some("precondition_calls_function")
-//RS     } else {
-//RS         None
-//RS     };
-//RS     Some(reason.map(str::to_string))
-//RS }
-//RS 
-//RS fn lower_contract_test(
-//RS     function: &Func,
-//RS     module: &str,
-//RS     contract_rows: &ContractSamplingPlan,
-//RS ) -> Option<TirTestFact> {
-//RS     if function.pre.is_empty() || function.params.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let key = contract_key(module, function);
-//RS     // Only candidates the TIR item walk materialized get a row; the walk and
-//RS     // this discovery share `contract_sampling_reason`, so a missing entry
-//RS     // means the callable is outside the compiled program.
-//RS     let reason = contract_rows.get(&key)?.clone();
-//RS     let function_ref = TirFunctionRef {
-//RS         key: key.clone(),
-//RS         module: module.to_string(),
-//RS         name: key.clone(),
-//RS         span: function.span,
-//RS         visibility: NameVisibility::Private,
-//RS     };
-//RS     let sampled = reason.is_none();
-//RS     Some(TirTestFact {
-//RS         key: key.clone(),
-//RS         function: function_ref,
-//RS         name: format!("contract::{}", function.name),
-//RS         span: function.span,
-//RS         kind: TirTestKind::Property,
-//RS         parameters: if sampled {
-//RS             lower_params(&function.params)
-//RS         } else {
-//RS             Vec::new()
-//RS         },
-//RS         faults: Vec::new(),
-//RS         expected_failure: false,
-//RS         contract_generated: true,
-//RS         eligibility: sampled.then(|| TirFunctionRef {
-//RS             key: contract_eligibility_key(module, function),
-//RS             module: module.to_string(),
-//RS             name: contract_eligibility_key(module, function),
-//RS             span: function.span,
-//RS             visibility: NameVisibility::Private,
-//RS         }),
-//RS         generation_unavailable_reason: reason,
-//RS     })
-//RS }
-//RS 
-//RS /// Return the checked Core namespace represented by a parser-level
-//RS /// unqualified import. `use core.mem` is parsed as `module_alias = "core"`
-//RS /// with `mem` as its only member, while Core has no source-module row in the
-//RS /// checked bundle. Keep that edge as a path import instead of manufacturing a
-//RS /// MIR module ID for the parser prefix.
-//RS fn core_import_module_path(
-//RS     module_alias: &str,
-//RS     items: &[(String, Option<String>)],
-//RS ) -> Option<String> {
-//RS     crate::AST::core_list_prefix(module_alias)?;
-//RS 
-//RS     let mut target = None;
-//RS     for (original, _) in items {
-//RS         let module = match crate::AST::core_list_path(module_alias, original)? {
-//RS             crate::AST::CoreListPath::Module(module)
-//RS             | crate::AST::CoreListPath::Item { module, .. } => module,
-//RS         };
-//RS         if let Some(existing) = &target {
-//RS             if existing != &module {
-//RS                 return Some(module_alias.to_string());
-//RS             }
-//RS         } else {
-//RS             target = Some(module);
-//RS         }
-//RS     }
-//RS     target.or_else(|| Some(module_alias.to_string()))
-//RS }
-//RS 
-//RS fn lower_import(
-//RS     bundle: &ProgramBundle,
-//RS     module_index: usize,
-//RS     module: &str,
-//RS     import: &ImportDecl,
-//RS ) -> TirImportFact {
-//RS     let kind = match &import.kind {
-//RS         ImportKind::File(path, _) => TirImportKind::File { path: path.clone() },
-//RS         ImportKind::Module(path, _) => TirImportKind::Module { path: path.clone() },
-//RS         ImportKind::Unqualified {
-//RS             module_alias,
-//RS             items,
-//RS             ..
-//RS         } => {
-//RS             if let Some(path) = core_import_module_path(module_alias, items) {
-//RS                 TirImportKind::Module { path }
-//RS             } else {
-//RS                 // A member list names its module by the alias of a file or
-//RS                 // module import in the same file (D-MOD-CYCLE1=A package
-//RS                 // siblings bind this way), so resolve it through that edge.
-//RS                 let target_module = bundle
-//RS                     .name_ledger
-//RS                     .import_target(module_index, import.span)
-//RS                     .or_else(|| {
-//RS                         bundle.modules[module_index]
-//RS                             .imports
-//RS                             .iter()
-//RS                             .filter(|candidate| {
-//RS                                 !matches!(candidate.kind, ImportKind::Unqualified { .. })
-//RS                                     && candidate.import_alias() == *module_alias
-//RS                             })
-//RS                             .find_map(|candidate| {
-//RS                                 bundle.name_ledger.import_target(module_index, candidate.span)
-//RS                             })
-//RS                     })
-//RS                     .map(|target| module_identity(bundle, target))
-//RS                     .unwrap_or_else(|| module_alias.clone());
-//RS                 let imported = items
-//RS                     .iter()
-//RS                     .map(|(original, local)| {
-//RS                         let local_name = local.as_deref().unwrap_or(original);
-//RS                         let resolved = bundle
-//RS                             .name_ledger
-//RS                             .canonical_path(module_index, local_name)
-//RS                             .or_else(|| Some(key(&target_module, original)))
-//RS                             .unwrap_or_else(|| original.clone());
-//RS                         TirImportItem {
-//RS                             original: original.clone(),
-//RS                             local: local_name.to_string(),
-//RS                             item: TirItemRef::Unknown(resolved),
-//RS                         }
-//RS                     })
-//RS                     .collect();
-//RS                 TirImportKind::Unqualified {
-//RS                     module: target_module,
-//RS                     items: imported,
-//RS                 }
-//RS             }
-//RS         }
-//RS     };
-//RS     TirImportFact {
-//RS         module: module.to_string(),
-//RS         alias: import.alias.clone(),
-//RS         visibility: NameVisibility::from_flags(import.is_pub, import.is_package_pub),
-//RS         kind,
-//RS         span: import.span,
-//RS         version: import
-//RS             .inline_version
-//RS             .as_ref()
-//RS             .map(|version| version.text.clone()),
-//RS     }
-//RS }
-//RS 
-//RS fn collect_imports(
-//RS     bundle: &ProgramBundle,
-//RS     module_index: usize,
-//RS     module: &str,
-//RS     imports: &mut Vec<TirImportFact>,
-//RS ) {
-//RS     let loaded = &bundle.modules[module_index];
-//RS     imports.extend(
-//RS         loaded
-//RS             .imports
-//RS             .iter()
-//RS             .map(|import| lower_import(bundle, module_index, module, import)),
-//RS     );
-//RS     fn nested(
-//RS         bundle: &ProgramBundle,
-//RS         module_index: usize,
-//RS         module: &str,
-//RS         items: &[Item],
-//RS         imports: &mut Vec<TirImportFact>,
-//RS     ) {
-//RS         for item in items {
-//RS             let Item::CodeModule(code_module) = item else {
-//RS                 continue;
-//RS             };
-//RS             let child = key(module, &code_module.name);
-//RS             imports.extend(
-//RS                 code_module
-//RS                     .imports
-//RS                     .iter()
-//RS                     .map(|import| lower_import(bundle, module_index, &child, import)),
-//RS             );
-//RS             if let Some(body) = &code_module.body {
-//RS                 nested(bundle, module_index, &child, body, imports);
-//RS             }
-//RS         }
-//RS     }
-//RS     nested(bundle, module_index, module, &loaded.items, imports);
-//RS }
-//RS 
-//RS fn lower_cli_default(default: &crate::CLISchema::CLIDefault) -> TirCliDefault {
-//RS     match default {
-//RS         crate::CLISchema::CLIDefault::TypeDefault => TirCliDefault::TypeDefault,
-//RS         crate::CLISchema::CLIDefault::Value(value) => TirCliDefault::Value(value.clone()),
-//RS         crate::CLISchema::CLIDefault::Recorded(value) => TirCliDefault::Recorded(value.clone()),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn lower_cli_input(input: &crate::CLISchema::CLIInputSchema) -> TirCliInput {
-//RS     let shape = match &input.shape {
-//RS         crate::CLISchema::CLIInputShape::Flag => TirCliInputShape::Flag,
-//RS         crate::CLISchema::CLIInputShape::Value {
-//RS             kind,
-//RS             optional,
-//RS             default,
-//RS         } => TirCliInputShape::Value {
-//RS             kind: *kind,
-//RS             optional: *optional,
-//RS             default: default.as_ref().map(lower_cli_default),
-//RS         },
-//RS     };
-//RS     TirCliInput {
-//RS         field: input.field.clone(),
-//RS         flag: input.flag.clone(),
-//RS         short: input.short.clone(),
-//RS         env: input.env.clone(),
-//RS         help: input.help.clone(),
-//RS         metavar: input.metavar.clone(),
-//RS         shape,
-//RS         positional: input.positional,
-//RS         variadic: false,
-//RS     }
-//RS }
-//RS 
-//RS fn find_entry_struct<'a>(items: &'a [Item], name: &str) -> Option<&'a crate::AST::StructDef> {
-//RS     let leaf = name.rsplit("::").next().unwrap_or(name);
-//RS     items.iter().find_map(|item| match item {
-//RS         Item::Struct(definition) if definition.name == leaf => Some(definition),
-//RS         _ => None,
-//RS     })
-//RS }
-//RS 
-//RS fn lower_cli_entry(
-//RS     bundle: &ProgramBundle,
-//RS     schema: &crate::CLISchema::CLICommandSchema,
-//RS     module: &str,
-//RS ) -> Option<TirCliEntry> {
-//RS     if schema.entry_type.is_empty()
-//RS         && schema.inputs.is_empty()
-//RS         && schema.commands.is_empty()
-//RS         && !schema.standard
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let inputs = schema.inputs.iter().map(lower_cli_input).collect();
-//RS     let root = bundle.modules.get(bundle.entry)?;
-//RS     let structure = find_entry_struct(&root.items, &schema.entry_type);
-//RS     let commands = schema
-//RS         .commands
-//RS         .iter()
-//RS         .map(|command| {
-//RS             let target = structure.and_then(|structure| {
-//RS                 crate::CLISchema::command_target(
-//RS                     structure,
-//RS                     command,
-//RS                     &root.items,
-//RS                     &schema.entry_type,
-//RS                 )
-//RS             });
-//RS             let function = target.as_ref().map(|target| {
-//RS                 let method = target.is_method;
-//RS                 let function_module = module;
-//RS                 let function_name = if method {
-//RS                     format!("{}::{}", schema.entry_type, target.function.name)
-//RS                 } else {
-//RS                     target.function.name.clone()
-//RS                 };
-//RS                 function_ref(
-//RS                     function_module,
-//RS                     &function_name,
-//RS                     target.function.span,
-//RS                     function_visibility(&target.function),
-//RS                 )
-//RS             });
-//RS             // Both command methods (`self`) and bound functions receive the
-//RS             // decoded program struct as their first argument.
-//RS             let receiver = target
-//RS                 .as_ref()
-//RS                 .filter(|target| target.bound_shared || target.is_method)
-//RS                 .map(|_| key(module, &schema.entry_type));
-//RS             TirCliCommand {
-//RS                 name: command.name.clone(),
-//RS                 description: command.description.clone(),
-//RS                 function,
-//RS                 receiver,
-//RS                 inputs: command.inputs.iter().map(lower_cli_input).collect(),
-//RS             }
-//RS         })
-//RS         .collect();
-//RS     Some(TirCliEntry {
-//RS         record_inputs: !schema.entry_type.is_empty(),
-//RS         description: schema.description.clone(),
-//RS         inputs,
-//RS         commands,
-//RS         standard: schema.standard,
-//RS         version: schema.version.clone(),
-//RS     })
-//RS }
-//RS 
-//RS fn output_entry(bundle: &ProgramBundle) -> Option<crate::AST::ResolvedOutput> {
-//RS     bundle
-//RS         .modules
-//RS         .iter()
-//RS         .flat_map(|module| module.items.iter())
-//RS         .find_map(|item| {
-//RS             let Item::Const(constant) = item else {
-//RS                 return None;
-//RS             };
-//RS             let output = constant.resolved_output.as_ref()?;
-//RS             output.selected.then(|| output.clone())
-//RS         })
-//RS }
-//RS 
-//RS fn entry_kind(kind: OutputKind) -> TirArtifactEntryKind {
-//RS     match kind {
-//RS         OutputKind::Library => TirArtifactEntryKind::Library,
-//RS         OutputKind::Executable => TirArtifactEntryKind::Command,
-//RS         OutputKind::Service => TirArtifactEntryKind::Service,
-//RS         OutputKind::Check => TirArtifactEntryKind::Test,
-//RS         OutputKind::Environment
-//RS         | OutputKind::Image
-//RS         | OutputKind::Bundle
-//RS         | OutputKind::System
-//RS         | OutputKind::Fleet => TirArtifactEntryKind::App,
-//RS     }
-//RS }
-//RS 
-//RS fn entry_output(kind: OutputKind) -> TirEntryOutput {
-//RS     match kind {
-//RS         OutputKind::Executable | OutputKind::Service | OutputKind::Check => {
-//RS             TirEntryOutput::ReturnValue
-//RS         }
-//RS         OutputKind::Library
-//RS         | OutputKind::Environment
-//RS         | OutputKind::Image
-//RS         | OutputKind::Bundle
-//RS         | OutputKind::System
-//RS         | OutputKind::Fleet => TirEntryOutput::None,
-//RS     }
-//RS }
-//RS 
-//RS fn no_os_profile(bundle: &ProgramBundle) -> bool {
-//RS     bundle
-//RS         .build_facts
-//RS         .target_dossier
-//RS         .machine
-//RS         .as_deref()
-//RS         .is_some_and(|machine| machine.no_os)
-//RS }
-//RS 
-//RS fn initialize_environment(bundle: &ProgramBundle, target: TirArtifactTarget) -> bool {
-//RS     matches!(
-//RS         target,
-//RS         TirArtifactTarget::RustAot | TirArtifactTarget::Cranelift
-//RS     ) && !no_os_profile(bundle)
-//RS }
-//RS 
-//RS fn lower_entry(
-//RS     bundle: &ProgramBundle,
-//RS     target: TirArtifactTarget,
-//RS     cli: Option<TirCliEntry>,
-//RS ) -> Option<TirEntrySpec> {
-//RS     if let Some(output) = output_entry(bundle) {
-//RS         let module = module_identity(bundle, output.module);
-//RS         let function = Some(function_ref(
-//RS             &module,
-//RS             &output.semantic_name,
-//RS             output.definition,
-//RS             NameVisibility::Public,
-//RS         ));
-//RS         return Some(TirEntrySpec {
-//RS             kind: entry_kind(output.kind),
-//RS             function,
-//RS             cli,
-//RS             output: entry_output(output.kind),
-//RS             output_kind: output.kind,
-//RS             initialize_environment: initialize_environment(bundle, target),
-//RS             initialize_gc: false,
-//RS             serves_until_stopped: matches!(output.kind, OutputKind::Service)
-//RS                 || crate::AST::bundle_serves_until_stopped(bundle),
-//RS             package_version: bundle.build_facts.package_version.clone(),
-//RS         });
-//RS     }
-//RS     // Sema has checked `run`; retain typed entries with their canonical CLI
-//RS     // decoder just as we retain parameterless entries.
-//RS     let function = bundle
-//RS         .modules
-//RS         .get(bundle.entry)?
-//RS         .items
-//RS         .iter()
-//RS         .find_map(|item| match item {
-//RS             Item::Func(function)
-//RS                 if function.name == "run" && (function.params.is_empty() || cli.is_some()) =>
-//RS             {
-//RS                 Some(function)
-//RS             }
-//RS             _ => None,
-//RS         })?;
-//RS     let module = module_identity(bundle, bundle.entry);
-//RS     Some(TirEntrySpec {
-//RS         kind: TirArtifactEntryKind::Command,
-//RS         function: Some(function_ref(
-//RS             &module,
-//RS             &function.name,
-//RS             function.span,
-//RS             function_visibility(function),
-//RS         )),
-//RS         cli,
-//RS         output: TirEntryOutput::ReturnValue,
-//RS         output_kind: OutputKind::Executable,
-//RS         initialize_environment: initialize_environment(bundle, target),
-//RS         initialize_gc: false,
-//RS         serves_until_stopped: crate::AST::bundle_serves_until_stopped(bundle),
-//RS         package_version: bundle.build_facts.package_version.clone(),
-//RS     })
-//RS }
-//RS 
-//RS /// A parameter type a job can take straight from the command line.
-//RS fn job_cli_scalar(ty: &crate::AST::Type) -> bool {
-//RS     use crate::AST::Type;
-//RS     match ty {
-//RS         Type::Option(inner) => !matches!(inner.as_ref(), Type::Option(_)) && job_cli_scalar(inner),
-//RS         Type::Bool | Type::Int | Type::Float | Type::Float32 | Type::String | Type::IntN { .. } => {
-//RS             true
-//RS         }
-//RS         Type::Named(name) => name == crate::Syntax::TYPE_PATH,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// The command inputs of a job whose single parameter is a `#CLI` record.
-//RS fn job_record_inputs(bundle: &ProgramBundle, function: &Func) -> Option<Vec<TirCliInput>> {
-//RS     let [param] = function.params.as_slice() else {
-//RS         return None;
-//RS     };
-//RS     let crate::AST::Type::Named(name) = &param.ty else {
-//RS         return None;
-//RS     };
-//RS     let leaf = name.rsplit(['.', ':']).next().unwrap_or(name);
-//RS     bundle
-//RS         .modules
-//RS         .iter()
-//RS         .find_map(|module| {
-//RS             module.items.iter().find_map(|item| match item {
-//RS                 Item::Struct(structure) if structure.name == leaf => {
-//RS                     crate::CLISchema::command_schema_with_items(&module.items, structure)
-//RS                 }
-//RS                 _ => None,
-//RS             })
-//RS         })
-//RS         .map(|schema| schema.inputs.iter().map(lower_cli_input).collect())
-//RS }
-//RS 
-//RS fn lower_job(bundle: &ProgramBundle, function: &Func, module: &str) -> Option<TirJobFact> {
-//RS     if !function.is_job {
-//RS         return None;
-//RS     }
-//RS     let record_inputs = job_record_inputs(bundle, function);
-//RS     // A job row carries checked command inputs. Parameters that are neither
-//RS     // one `#CLI` record nor command-line scalars have no command form, so the
-//RS     // job keeps no row (it stays callable from code and queues).
-//RS     if record_inputs.is_none()
-//RS         && !function.params.iter().all(|param| job_cli_scalar(&param.ty))
-//RS     {
-//RS         return None;
-//RS     }
-//RS     // A bare `#Job` carries no marker arguments, so the parser records no
-//RS     // metadata. It is still a job: use the checked defaults that
-//RS     // `JobFact::from_function` and `jet jobs` already apply.
-//RS     let default_metadata = crate::AST::JobMetadata::default();
-//RS     let metadata = function.job_metadata.as_ref().unwrap_or(&default_metadata);
-//RS     let job = crate::CLISchema::JobFact::from_function(function);
-//RS     Some(TirJobFact {
-//RS         key: key(module, &format!("job::{}", function.name)),
-//RS         function: Some(function_ref(
-//RS             module,
-//RS             &function.name,
-//RS             function.span,
-//RS             function_visibility(function),
-//RS         )),
-//RS         name: job.name,
-//RS         scope: metadata.scope,
-//RS         doc: job.doc,
-//RS         arguments: job
-//RS             .arguments
-//RS             .into_iter()
-//RS             .zip(
-//RS                 function
-//RS                     .params
-//RS                     .iter()
-//RS                     .filter(|param| param.name != crate::Syntax::KW_SELF),
-//RS             )
-//RS             .map(|(argument, param)| TirJobArgument {
-//RS                 name: argument.name,
-//RS                 label: argument.label,
-//RS                 ty: argument.ty,
-//RS                 param_ty: param.ty.clone(),
-//RS                 required: argument.required,
-//RS                 default: argument.default,
-//RS                 variadic: argument.variadic,
-//RS                 zone: argument.zone,
-//RS             })
-//RS             .collect(),
-//RS         record_inputs,
-//RS         schedule: function.every.as_ref().and_then(|every| every.resolved),
-//RS         after: metadata.after.clone(),
-//RS         parallel: metadata.parallel.unwrap_or(1),
-//RS         packages: metadata.packages.clone(),
-//RS         working_directory: metadata.cwd.clone(),
-//RS         input_paths: metadata.inputs.clone(),
-//RS         output_paths: metadata.outputs.clone(),
-//RS         skip: metadata.skip.clone(),
-//RS         cache: metadata.cache,
-//RS         limits: metadata.limits.clone(),
-//RS     })
-//RS }
-//RS 
-//RS fn lower_test(test: &TestDef, module: &str) -> TirTestFact {
-//RS     let key = test_key(module, test);
-//RS     let function = TirFunctionRef {
-//RS         key: key.clone(),
-//RS         module: module.to_string(),
-//RS         name: key.clone(),
-//RS         span: test.span,
-//RS         visibility: NameVisibility::Private,
-//RS     };
-//RS     TirTestFact {
-//RS         key: key.clone(),
-//RS         function,
-//RS         name: test.name.clone().unwrap_or_else(|| key.clone()),
-//RS         span: test.span,
-//RS         kind: if test.params.is_empty() {
-//RS             TirTestKind::Unit
-//RS         } else {
-//RS             TirTestKind::Property
-//RS         },
-//RS         parameters: lower_params(&test.params),
-//RS         faults: test.faults.clone(),
-//RS         expected_failure: test.expected_fail,
-//RS         contract_generated: false,
-//RS         eligibility: None,
-//RS         generation_unavailable_reason: None,
-//RS     }
-//RS }
-//RS 
-//RS fn lower_foreign(
-//RS     function: &crate::AST::ExternFn,
-//RS     module: &str,
-//RS     crate_spec: &str,
-//RS     target: TirArtifactTarget,
-//RS ) -> TirForeignFact {
-//RS     let function_key = key(module, &function.rust_path);
-//RS     TirForeignFact {
-//RS         key: function_key.clone(),
-//RS         module: module.to_string(),
-//RS         name: function.name.clone(),
-//RS         span: function.span,
-//RS         symbol: function_key,
-//RS         path: function.rust_path.clone(),
-//RS         params: lower_params(&function.params),
-//RS         bridge_eligible: true,
-//RS         raw_scalar_abi: false,
-//RS         return_type: function.return_type.clone(),
-//RS         abi: function
-//RS             .abi
-//RS             .as_ref()
-//RS             .map_or_else(|| "C".to_string(), |(abi, _)| abi.clone()),
-//RS         language: format!("rust:{crate_spec}"),
-//RS         applicability: target_applicability_for(target),
-//RS         effect_root: function.effect_root.clone(),
-//RS         callback_transport: None,
-//RS         callback_plan_digest: None,
-//RS         callback_identity: None,
-//RS         // A Rust crate is resolved by the foreign-crate build, not by a MIR
-//RS         // link unit; only C providers own link rows (see `lower_links`).
-//RS         link_key: None,
-//RS         callback_key: None,
-//RS         handle_key: None,
-//RS         close_function_key: function.close.as_ref().map(|(name, _)| key(module, name)),
-//RS         undo_function_key: function.undo.as_ref().map(|(name, _)| key(module, name)),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_c_foreign(
-//RS     function: &crate::AST::ExternFn,
-//RS     module: &str,
-//RS     lib: &str,
-//RS     handles: &[FfiHandleFact],
-//RS     target: TirArtifactTarget,
-//RS ) -> TirForeignFact {
-//RS     let function_key = key(module, &function.name);
-//RS     let handle_key = function
-//RS         .return_type
-//RS         .as_ref()
-//RS         .and_then(|ty| match ty {
-//RS             Type::Named(name)
-//RS                 if handles
-//RS                     .iter()
-//RS                     .any(|handle| handle.lib == lib && handle.jet_name == *name) =>
-//RS             {
-//RS                 Some(format!("c::{lib}::{name}"))
-//RS             }
-//RS             _ => None,
-//RS         })
-//RS         .or_else(|| {
-//RS             function.params.iter().find_map(|param| match &param.ty {
-//RS                 Type::Named(name)
-//RS                     if handles
-//RS                         .iter()
-//RS                         .any(|handle| handle.lib == lib && handle.jet_name == *name) =>
-//RS                 {
-//RS                     Some(format!("c::{lib}::{name}"))
-//RS                 }
-//RS                 _ => None,
-//RS             })
-//RS         });
-//RS     TirForeignFact {
-//RS         key: function_key,
-//RS         module: module.to_string(),
-//RS         name: function.name.clone(),
-//RS         span: function.span,
-//RS         symbol: function.rust_path.clone(),
-//RS         path: function.rust_path.clone(),
-//RS         params: lower_params(&function.params),
-//RS         bridge_eligible: function.hidden_c_bridge_compatible_with_handles(handles),
-//RS         raw_scalar_abi: false,
-//RS         return_type: function.return_type.clone(),
-//RS         abi: function
-//RS             .abi
-//RS             .as_ref()
-//RS             .map_or_else(|| "C".to_string(), |(abi, _)| abi.clone()),
-//RS         language: "c".to_string(),
-//RS         applicability: target_applicability_for(target),
-//RS         effect_root: function.effect_root.clone(),
-//RS         callback_transport: function.callback_transport.clone(),
-//RS         callback_plan_digest: function.callback_plan_digest.clone(),
-//RS         callback_identity: function.callback_identity.clone(),
-//RS         link_key: Some(format!("c::{lib}")),
-//RS         callback_key: None,
-//RS         handle_key,
-//RS         close_function_key: function.close.as_ref().map(|(name, _)| key(module, name)),
-//RS         undo_function_key: function.undo.as_ref().map(|(name, _)| key(module, name)),
-//RS     }
-//RS }
-//RS 
-//RS /// Lower a top-level `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)` function to the
-//RS /// native bridge symbol emitted by the prepared FFI crate. The call expression
-//RS /// retains the wrapper identity (`jet_ffi_<name>`); MIR uses this row to resolve
-//RS /// that identity to the checked bridge symbol (`jet_inline_jet_ffi_<name>`).
-//RS fn lower_inline_c_foreign(
-//RS     function: &Func,
-//RS     module: &str,
-//RS     target: TirArtifactTarget,
-//RS ) -> Option<TirForeignFact> {
-//RS     let inline = function.inline_foreign.as_ref()?;
-//RS     let language = inline.lang.to_ascii_lowercase();
-//RS     if !matches!(language.as_str(), "c" | "asm" | "cpp") {
-//RS         return None;
-//RS     }
-//RS     let wrapper = format!("jet_ffi_{}", function.name);
-//RS     let applicability = if matches!(target, TirArtifactTarget::Web) {
-//RS         // The native bridge has no browser provider. Keep this fact explicit so
-//RS         // Web cannot silently fall back to AOT or resident native execution.
-//RS         TirTargetApplicability::default()
-//RS     } else {
-//RS         target_applicability_for(target)
-//RS     };
-//RS     Some(TirForeignFact {
-//RS         key: wrapper.clone(),
-//RS         module: module.to_string(),
-//RS         name: function.name.clone(),
-//RS         span: function.span,
-//RS         symbol: format!("jet_inline_{wrapper}"),
-//RS         path: wrapper,
-//RS         params: lower_params(&function.params),
-//RS         bridge_eligible: true,
-//RS         raw_scalar_abi: true,
-//RS         return_type: function.return_type.clone(),
-//RS         abi: "C".to_string(),
-//RS         language,
-//RS         applicability,
-//RS         effect_root: None,
-//RS         callback_transport: None,
-//RS         callback_plan_digest: None,
-//RS         callback_identity: None,
-//RS         link_key: None,
-//RS         callback_key: None,
-//RS         handle_key: None,
-//RS         close_function_key: None,
-//RS         undo_function_key: None,
-//RS     })
-//RS }
-//RS /// Lower one per-callable `#Import(c)` declaration into the same foreign row
-//RS /// used by its generated C ABI wrapper.  The expression lowering keeps the
-//RS /// wrapper identity as the MIR foreign key; omitting this row leaves a
-//RS /// checked `ExternCall` pointing at an unregistered foreign ID.
-//RS fn lower_guest_import_foreign(
-//RS     function: &Func,
-//RS     module: &str,
-//RS     module_alias: &str,
-//RS     target: TirArtifactTarget,
-//RS ) -> Option<TirForeignFact> {
-//RS     let import = crate::Sema::guest_import_function_signature(function)?;
-//RS     let bridge_eligible = crate::Sema::guest_import_bridge_compatible(function);
-//RS     let wrapper = crate::Sema::guest_import_wrapper_name(module_alias, &function.name);
-//RS     let wraps_default_failure = function
-//RS         .return_type
-//RS         .as_ref()
-//RS         .map(|ty| crate::AST::FailureContract::from_return_type(Some(ty)).effective_type() != *ty)
-//RS         .unwrap_or(false);
-//RS     Some(TirForeignFact {
-//RS         key: wrapper.clone(),
-//RS         module: module.to_string(),
-//RS         name: function.name.clone(),
-//RS         span: function.span,
-//RS         symbol: import.symbol.clone(),
-//RS         path: import.symbol,
-//RS         params: lower_params(&function.params),
-//RS         raw_scalar_abi: true,
-//RS         bridge_eligible,
-//RS         return_type: function.return_type.clone(),
-//RS         abi: "C".to_string(),
-//RS         language: "c".to_string(),
-//RS         applicability: target_applicability_for(target),
-//RS         effect_root: None,
-//RS         callback_transport: wraps_default_failure.then(|| "guest-import-result".to_string()),
-//RS         callback_identity: None,
-//RS         callback_plan_digest: None,
-//RS         link_key: None,
-//RS         callback_key: None,
-//RS         handle_key: None,
-//RS         close_function_key: None,
-//RS         undo_function_key: None,
-//RS     })
-//RS }
-//RS 
-//RS fn push_function(facts: &mut TirArtifactFacts, module: &str, function: &Func, name: String) {
-//RS     facts.functions.push(TirFunctionFact {
-//RS         reference: function_ref(module, &name, function.span, function_visibility(function)),
-//RS         params: lower_params(&function.params),
-//RS         return_type: function.return_type.clone(),
-//RS         is_pure: function.is_pure,
-//RS     });
-//RS }
-//RS 
-//RS fn collect_items(
-//RS     bundle: &ProgramBundle,
-//RS     module_index: usize,
-//RS     module: &str,
-//RS     items: &[Item],
-//RS     facts: &mut TirArtifactFacts,
-//RS     target: TirArtifactTarget,
-//RS     contract_rows: &ContractSamplingPlan,
-//RS ) {
-//RS     for item in items {
-//RS         let reference = item_ref(module, item);
-//RS         match item {
-//RS             Item::Func(function) => {
-//RS                 if let Some(foreign) = lower_guest_import_foreign(
-//RS                     function,
-//RS                     module,
-//RS                     &bundle.modules[module_index].alias,
-//RS                     target,
-//RS                 ) {
-//RS                     facts.foreign.push(foreign);
-//RS                 }
-//RS                 if let Some(foreign) = lower_inline_c_foreign(function, module, target) {
-//RS                     facts.foreign.push(foreign);
-//RS                 }
-//RS                 push_function(facts, module, function, function.name.clone());
-//RS                 if let Some(job) = lower_job(bundle, function, module) {
-//RS                     facts.jobs.push(job);
-//RS                 }
-//RS                 if let Some(test) = lower_contract_test(function, module, contract_rows) {
-//RS                     facts.tests.push(test);
-//RS                 }
-//RS             }
-//RS             Item::Struct(definition) => {
-//RS                 for function in &definition.methods {
-//RS                     push_function(
-//RS                         facts,
-//RS                         module,
-//RS                         function,
-//RS                         format!("{}::{}", definition.name, function.name),
-//RS                     );
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     for function in &implementation.methods {
-//RS                         push_function(
-//RS                             facts,
-//RS                             module,
-//RS                             function,
-//RS                             method_reference_name(
-//RS                                 &definition.name,
-//RS                                 Some(implementation.trait_name.as_str()),
-//RS                                 implementation.operator_rhs.as_ref(),
-//RS                                 function,
-//RS                             ),
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 for function in &definition.methods {
-//RS                     push_function(
-//RS                         facts,
-//RS                         module,
-//RS                         function,
-//RS                         format!("{}::{}", definition.name, function.name),
-//RS                     );
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     for function in &implementation.methods {
-//RS                         push_function(
-//RS                             facts,
-//RS                             module,
-//RS                             function,
-//RS                             method_reference_name(
-//RS                                 &definition.name,
-//RS                                 Some(implementation.trait_name.as_str()),
-//RS                                 implementation.operator_rhs.as_ref(),
-//RS                                 function,
-//RS                             ),
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 for function in &implementation.methods {
-//RS                     let name = method_reference_name(
-//RS                         &implementation.type_name,
-//RS                         implementation.trait_name.as_deref(),
-//RS                         implementation.operator_rhs.as_ref(),
-//RS                         function,
-//RS                     );
-//RS                     push_function(facts, module, function, name);
-//RS                 }
-//RS             }
-//RS             Item::Test(test) => facts.tests.push(lower_test(test, module)),
-//RS             Item::ExternRust(block) => {
-//RS                 for function in &block.functions {
-//RS                     let row = lower_foreign(function, module, &block.crate_spec, target);
-//RS                     facts.foreign.push(row);
-//RS                 }
-//RS             }
-//RS             Item::CModule(c_module) => {
-//RS                 for function in &c_module.functions {
-//RS                     facts.foreign.push(lower_c_foreign(
-//RS                         function,
-//RS                         module,
-//RS                         &c_module.lib,
-//RS                         &bundle.cffi.handle_facts,
-//RS                         target,
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             Item::CodeModule(code_module) => {
-//RS                 if let Some(body) = &code_module.body {
-//RS                     let child = key(module, &code_module.name);
-//RS                     facts.modules.push(TirModuleFact {
-//RS                         key: child.clone(),
-//RS                         name: code_module.name.clone(),
-//RS                         path: child.clone(),
-//RS                         source_path: bundle.modules[module_index].display.clone(),
-//RS                         imports: code_module
-//RS                             .imports
-//RS                             .iter()
-//RS                             .map(|import| key(&child, &import.alias))
-//RS                             .collect(),
-//RS                         item_order: body
-//RS                             .iter()
-//RS                             .filter_map(|item| item_ref(&child, item))
-//RS                             .collect(),
-//RS                     });
-//RS                     collect_items(
-//RS                         bundle,
-//RS                         module_index,
-//RS                         &child,
-//RS                         body,
-//RS                         facts,
-//RS                         target,
-//RS                         contract_rows,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         if let Some(reference) = reference {
-//RS             if let TirItemRef::Unknown(_) = &reference {
-//RS                 // Unknown item kinds are still represented in module order; the
-//RS                 // semantic row carries the checked spelling rather than source text.
-//RS             }
-//RS             if let Some(module_row) = facts.modules.iter_mut().find(|row| row.key == module) {
-//RS                 module_row.item_order.push(reference);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn lower_names(bundle: &ProgramBundle) -> TirNameFacts {
-//RS     let mut facts = TirNameFacts {
-//RS         modules: bundle
-//RS             .modules
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter_map(|(index, _)| bundle.name_ledger.module(index).cloned())
-//RS             .collect(),
-//RS         declarations: bundle.name_ledger.declarations().cloned().collect(),
-//RS         aliases: bundle.name_ledger.aliases().cloned().collect(),
-//RS         references: bundle.name_ledger.references().values().cloned().collect(),
-//RS         structure_facts: bundle.name_ledger.structure_facts().to_vec(),
-//RS     };
-//RS     facts
-//RS         .declarations
-//RS         .sort_by_key(|row| (row.module, row.name.clone(), row.path.clone()));
-//RS     facts
-//RS         .aliases
-//RS         .sort_by_key(|row| (row.module, row.name.clone(), row.target.clone()));
-//RS     facts.references.sort_by_key(|row| {
-//RS         (
-//RS             row.module_path.clone(),
-//RS             row.kind.clone(),
-//RS             row.def_span.start,
-//RS             row.def_span.end,
-//RS         )
-//RS     });
-//RS     facts.structure_facts.sort_by_key(|row| {
-//RS         (
-//RS             row.subject.clone(),
-//RS             row.source.clone(),
-//RS             row.span.start,
-//RS             row.span.end,
-//RS         )
-//RS     });
-//RS     facts
-//RS }
-//RS 
-//RS fn lower_cffi(bundle: &ProgramBundle) -> TirCffiFacts {
-//RS     TirCffiFacts {
-//RS         import_links: bundle
-//RS             .cffi
-//RS             .import_links
-//RS             .iter()
-//RS             .map(|link| TirCImportLink {
-//RS                 importing_module: module_identity(bundle, link.importing_idx),
-//RS                 scope: link.scope.clone(),
-//RS                 alias: link.alias.clone(),
-//RS                 target_module: module_identity(bundle, link.target_idx),
-//RS             })
-//RS             .collect(),
-//RS         libs: bundle
-//RS             .cffi
-//RS             .libs
-//RS             .iter()
-//RS             .map(|lib| TirCLib {
-//RS                 lib: lib.lib.clone(),
-//RS                 module: module_identity(bundle, lib.module_idx),
-//RS             })
-//RS             .collect(),
-//RS         overlay_overrides: bundle
-//RS             .cffi
-//RS             .overlay_overrides
-//RS             .iter()
-//RS             .map(|override_row| TirCOverlayOverride {
-//RS                 lib: override_row.lib.clone(),
-//RS                 generated_symbol: override_row.generated_symbol.clone(),
-//RS                 overlay_symbol: override_row.overlay_symbol.clone(),
-//RS             })
-//RS             .collect(),
-//RS         boundaries: bundle.cffi.boundaries.clone(),
-//RS         handle_facts: bundle.cffi.handle_facts.iter().map(lower_handle).collect(),
-//RS         direct_links: bundle.cffi.link_closure.direct.clone(),
-//RS         transitive_links: bundle.cffi.link_closure.transitive.clone(),
-//RS         close_adapters: bundle
-//RS             .cffi
-//RS             .close_adapters
-//RS             .iter()
-//RS             .map(lower_close_adapter)
-//RS             .collect(),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_handle(fact: &FfiHandleFact) -> TirHandleFact {
-//RS     let key = format!("c::{}::{}", fact.lib, fact.jet_name);
-//RS     TirHandleFact {
-//RS         key,
-//RS         lib: fact.lib.clone(),
-//RS         typedef_name: fact.typedef_name.clone(),
-//RS         jet_name: fact.jet_name.clone(),
-//RS         ownership: TirHandleOwnership::Owned,
-//RS         close: fact.close.clone(),
-//RS         close_source: fact.close_source,
-//RS         thread_safety: fact.thread_safety,
-//RS         close_function_key: Some(format!("c::{}::{}", fact.lib, fact.close)),
-//RS         undo_function_key: None,
-//RS         send: matches!(fact.thread_safety, FfiThreadSafety::Safe),
-//RS         sync: matches!(fact.thread_safety, FfiThreadSafety::Safe),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_close_adapter(adapter: &FfiCloseAdapter) -> TirCloseAdapter {
-//RS     TirCloseAdapter {
-//RS         lib: adapter.lib.clone(),
-//RS         handle_type: adapter.handle_type.clone(),
-//RS         raw_function: adapter.raw_function.clone(),
-//RS         adapter_function: adapter.adapter_function.clone(),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_links(bundle: &ProgramBundle, target: TirArtifactTarget) -> Vec<TirLinkUnit> {
-//RS     let cache_identity = bundle.cffi.link_closure.stable_key();
-//RS     let applicability = target_applicability_for(target);
-//RS     let mut links = bundle
-//RS         .cffi
-//RS         .libs
-//RS         .iter()
-//RS         .map(|lib| TirLinkUnit {
-//RS             key: format!("c::{}", lib.lib),
-//RS             crate_spec: lib.lib.clone(),
-//RS             cache_identity: cache_identity.clone(),
-//RS             applicability,
-//RS             dependency_dirs: Vec::new(),
-//RS             link_closure: bundle
-//RS                 .cffi
-//RS                 .link_closure
-//RS                 .libraries()
-//RS                 .map(str::to_string)
-//RS                 .collect(),
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     if links.is_empty() && !cache_identity.is_empty() {
-//RS         links.push(TirLinkUnit {
-//RS             key: "c::closure".to_string(),
-//RS             crate_spec: "c".to_string(),
-//RS             cache_identity,
-//RS             applicability,
-//RS             dependency_dirs: Vec::new(),
-//RS             link_closure: bundle
-//RS                 .cffi
-//RS                 .link_closure
-//RS                 .libraries()
-//RS                 .map(str::to_string)
-//RS                 .collect(),
-//RS         });
-//RS     }
-//RS     links
-//RS }
-//RS 
-//RS fn lower_callbacks(bundle: &ProgramBundle, facts: &TirArtifactFacts) -> Vec<TirCallbackFact> {
-//RS     let functions = facts
-//RS         .functions
-//RS         .iter()
-//RS         .map(|function| (function.reference.key.clone(), function))
-//RS         .collect::<HashMap<_, _>>();
-//RS     let mut names = bundle.ffi_callback_fns.iter().cloned().collect::<Vec<_>>();
-//RS     names.sort();
-//RS     names
-//RS         .into_iter()
-//RS         .filter_map(|name| {
-//RS             let function = functions.get(&name)?;
-//RS             Some(TirCallbackFact {
-//RS                 key: format!("{}::callback", function.reference.key),
-//RS                 symbol: function.reference.key.clone(),
-//RS                 function: function.reference.clone(),
-//RS                 params: function.params.clone(),
-//RS                 return_type: function.return_type.clone(),
-//RS             })
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn lower_cli_and_entry(
-//RS     bundle: &ProgramBundle,
-//RS     target: TirArtifactTarget,
-//RS ) -> (Option<TirCliEntry>, Option<TirEntrySpec>) {
-//RS     let schema = crate::CLISchema::executable_schema(bundle);
-//RS     let module = module_identity(bundle, bundle.entry);
-//RS     let cli = lower_cli_entry(bundle, &schema, &module);
-//RS     let entry = lower_entry(bundle, target, cli.clone());
-//RS     (cli, entry)
-//RS }
-//RS fn lower_output_checks(bundle: &ProgramBundle, facts: &TirArtifactFacts) -> Vec<TirOutputCheck> {
-//RS     let mut rows = Vec::new();
-//RS     for module in &bundle.modules {
-//RS         let module_index = bundle
-//RS             .modules
-//RS             .iter()
-//RS             .position(|candidate| std::ptr::eq(candidate, module))
-//RS             .unwrap_or(bundle.entry);
-//RS         let module_key = module_identity(bundle, module_index);
-//RS         for item in &module.items {
-//RS             let Item::Const(constant) = item else {
-//RS                 continue;
-//RS             };
-//RS             let Some(output) = constant
-//RS                 .resolved_output
-//RS                 .as_ref()
-//RS                 .filter(|output| output.selected && output.kind == OutputKind::Check)
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             let callable_name = if output.semantic_name.is_empty() {
-//RS                 output.source_name.as_str()
-//RS             } else {
-//RS                 output.semantic_name.as_str()
-//RS             };
-//RS             if callable_name.is_empty() {
-//RS                 continue;
-//RS             }
-//RS             let function = facts
-//RS                 .functions
-//RS                 .iter()
-//RS                 .find(|function| {
-//RS                     function.reference.module == module_key
-//RS                         && (function.reference.name == callable_name
-//RS                             || function.reference.key == callable_name)
-//RS                 })
-//RS                 .map(|function| function.reference.clone())
-//RS                 .unwrap_or_else(|| {
-//RS                     function_ref(
-//RS                         &module_key,
-//RS                         callable_name,
-//RS                         output.definition,
-//RS                         NameVisibility::Private,
-//RS                     )
-//RS                 });
-//RS             rows.push(TirOutputCheck {
-//RS                 key: format!(
-//RS                     "{}::output-check::{}@{}..{}",
-//RS                     module_key, output.output_name, output.definition.start, output.definition.end
-//RS                 ),
-//RS                 name: output.output_name.clone(),
-//RS                 function,
-//RS             });
-//RS         }
-//RS     }
-//RS     rows
-//RS }
-//RS 
-//RS fn lower_coverage_points(facts: &TirArtifactFacts) -> Vec<TirCoveragePoint> {
-//RS     let mut rows = Vec::new();
-//RS     let mut seen = BTreeSet::new();
-//RS     for test in &facts.tests {
-//RS         let key = format!("{}::coverage::entry", test.key);
-//RS         if seen.insert(key.clone()) {
-//RS             rows.push(TirCoveragePoint {
-//RS                 key,
-//RS                 function: test.function.clone(),
-//RS                 block: Some("entry".to_string()),
-//RS                 span: test.span,
-//RS             });
-//RS         }
-//RS     }
-//RS     for function in &facts.functions {
-//RS         let key = format!("{}::coverage::entry", function.reference.key);
-//RS         if seen.insert(key.clone()) {
-//RS             rows.push(TirCoveragePoint {
-//RS                 key,
-//RS                 function: function.reference.clone(),
-//RS                 block: Some("entry".to_string()),
-//RS                 span: function.reference.span,
-//RS             });
-//RS         }
-//RS     }
-//RS     rows
-//RS }
-//RS 
-//RS fn lower_harness(facts: &TirArtifactFacts) -> Option<TirHarnessPlan> {
-//RS     if facts.tests.is_empty() && facts.output_checks.is_empty() && facts.coverage_points.is_empty()
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let kind = if facts.tests.is_empty() && facts.output_checks.is_empty() {
-//RS         TirHarnessKind::Coverage
-//RS     } else {
-//RS         TirHarnessKind::Test
-//RS     };
-//RS     Some(TirHarnessPlan {
-//RS         key: format!("{}::harness::{kind:?}", facts.package_identity),
-//RS         kind,
-//RS         tests: facts.tests.iter().map(|test| test.key.clone()).collect(),
-//RS         output_checks: facts.output_checks.clone(),
-//RS         selected_test: None,
-//RS         coverage_points: facts.coverage_points.clone(),
-//RS         command_override: false,
-//RS     })
-//RS }
-//RS 
-//RS fn lower_exports(
-//RS     bundle: &ProgramBundle,
-//RS     facts: &TirArtifactFacts,
-//RS     kind: TirArtifactKind,
-//RS ) -> Vec<TirExport> {
-//RS     let surface = match kind {
-//RS         TirArtifactKind::NativeLibrary => crate::Sema::guest_export_surface(bundle),
-//RS         TirArtifactKind::SandboxPlugin => crate::Sema::sandbox_export_surface(bundle),
-//RS         TirArtifactKind::NativeExecutable
-//RS         | TirArtifactKind::WebApplication
-//RS         | TirArtifactKind::TestExecutable
-//RS         | TirArtifactKind::FuzzExecutable
-//RS         | TirArtifactKind::TestOverride => Vec::new(),
-//RS     };
-//RS     surface
-//RS         .into_iter()
-//RS         .filter(|export| match kind {
-//RS             TirArtifactKind::SandboxPlugin => true,
-//RS             _ => export.scalar.is_some(),
-//RS         })
-//RS         .filter_map(|export| {
-//RS             let function = facts
-//RS                 .functions
-//RS                 .iter()
-//RS                 .find(|function| function.reference.name == export.name)?;
-//RS             Some(TirExport {
-//RS                 symbol: export.name,
-//RS                 function: function.reference.clone(),
-//RS                 abi: TirExportAbi::C,
-//RS             })
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn lower_artifact_plan(
-//RS     bundle: &ProgramBundle,
-//RS     target: TirArtifactTarget,
-//RS     facts: &TirArtifactFacts,
-//RS ) -> TirArtifactPlan {
-//RS     let entry = facts.entry.clone();
-//RS     let kind = match entry.as_ref().map(|entry| entry.output_kind) {
-//RS         Some(OutputKind::Library) => TirArtifactKind::NativeLibrary,
-//RS         Some(OutputKind::Service) => TirArtifactKind::WebApplication,
-//RS         Some(OutputKind::Check) => TirArtifactKind::TestExecutable,
-//RS         _ => match target {
-//RS             TirArtifactTarget::Web => TirArtifactKind::WebApplication,
-//RS             _ => TirArtifactKind::NativeExecutable,
-//RS         },
-//RS     };
-//RS     let dossier = &bundle.build_facts.target_dossier;
-//RS     TirArtifactPlan {
-//RS         key: format!("{}::artifact::{target:?}", facts.package_identity),
-//RS         kind,
-//RS         name: facts.package_identity.clone(),
-//RS         target,
-//RS         modules: facts
-//RS             .modules
-//RS             .iter()
-//RS             .map(|module| module.key.clone())
-//RS             .collect(),
-//RS         links: facts.links.iter().map(|link| link.key.clone()).collect(),
-//RS         jobs: facts.jobs.iter().map(|job| job.key.clone()).collect(),
-//RS         runtime_parts: bundle.used_core.iter().cloned().collect(),
-//RS         exports: lower_exports(bundle, facts, kind),
-//RS         provider_identity: dossier.provider_identity.clone(),
-//RS         closure_identity: dossier.closure_identity.clone(),
-//RS         artifact_identity: format!(
-//RS             "{}:{}:{}",
-//RS             dossier.compiler_identity,
-//RS             dossier.environment_identity,
-//RS             bundle.build_facts.target_triple
-//RS         ),
-//RS         entry,
-//RS         harness: facts.harnesses.first().map(|harness| harness.key.clone()),
-//RS     }
-//RS }
-//RS /// Lower one explicitly requested artifact.  The request owns target, kind,
-//RS /// build mode, and optional artifact name; no profile or artifact kind is
-//RS /// inferred from source output.
-//RS pub(super) fn lower_tir_artifact_facts_for_request(
-//RS     bundle: &ProgramBundle,
-//RS     request: MirArtifactRequest,
-//RS     contract_rows: &ContractSamplingPlan,
-//RS ) -> TirArtifactFacts {
-//RS     let MirArtifactRequest {
-//RS         target,
-//RS         kind,
-//RS         mode,
-//RS         name,
-//RS     } = request;
-//RS     let selected_name = name.clone();
-//RS     let mut facts = lower_tir_artifact_facts_for_target(bundle, target, contract_rows);
-//RS     facts.build_mode = mode;
-//RS     if let Some(name) = name {
-//RS         if let Some(plan) = facts.artifacts.first_mut() {
-//RS             plan.name = name;
-//RS         }
-//RS     }
-//RS     let exports = lower_exports(bundle, &facts, kind);
-//RS     if let Some(plan) = facts.artifacts.first_mut() {
-//RS         plan.kind = kind;
-//RS         plan.exports = exports;
-//RS     }
-//RS     if matches!(
-//RS         kind,
-//RS         TirArtifactKind::TestExecutable | TirArtifactKind::FuzzExecutable
-//RS     ) {
-//RS         facts.entry = None;
-//RS         if let Some(plan) = facts.artifacts.first_mut() {
-//RS             plan.entry = None;
-//RS         }
-//RS     }
-//RS     if mode == MirArtifactBuildMode::Fuzz {
-//RS         if let Some(harness) = facts.harnesses.first_mut() {
-//RS             harness.kind = TirHarnessKind::Fuzz;
-//RS             harness.selected_test = selected_name.as_deref().and_then(|name| {
-//RS                 facts
-//RS                     .tests
-//RS                     .iter()
-//RS                     .find(|test| test.name == name)
-//RS                     .map(|test| test.key.clone())
-//RS             });
-//RS             harness.key = format!("{}::harness::{:?}", facts.package_identity, harness.kind);
-//RS         }
-//RS         if let Some(plan) = facts.artifacts.first_mut() {
-//RS             plan.harness = facts.harnesses.first().map(|harness| harness.key.clone());
-//RS         }
-//RS     }
-//RS     if matches!(
-//RS         (kind, mode),
-//RS         (TirArtifactKind::TestOverride, MirArtifactBuildMode::Test)
-//RS     ) {
-//RS         let module = module_identity(bundle, bundle.entry);
-//RS         if let Some(function) = facts
-//RS             .functions
-//RS             .iter()
-//RS             .find(|function| {
-//RS                 function.reference.module == module && function.reference.name == "test"
-//RS             })
-//RS             .map(|function| function.reference.clone())
-//RS         {
-//RS             let entry = TirEntrySpec {
-//RS                 kind: TirArtifactEntryKind::Test,
-//RS                 function: Some(function),
-//RS                 cli: None,
-//RS                 output: TirEntryOutput::ReturnValue,
-//RS                 output_kind: OutputKind::Check,
-//RS                 initialize_environment: initialize_environment(bundle, target),
-//RS                 initialize_gc: false,
-//RS                 serves_until_stopped: false,
-//RS                 package_version: bundle.build_facts.package_version.clone(),
-//RS             };
-//RS             facts.entry = Some(entry.clone());
-//RS             if let Some(harness) = facts.harnesses.first_mut() {
-//RS                 harness.command_override = true;
-//RS             }
-//RS             if let Some(plan) = facts.artifacts.first_mut() {
-//RS                 plan.entry = Some(entry);
-//RS                 plan.harness = facts.harnesses.first().map(|harness| harness.key.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     facts
-//RS }
-//RS 
-//RS /// Target-aware artifact projection.  The target is typed so no adapter parses
-//RS /// a command line or guesses a backend from generated Rust.
-//RS pub(super) fn lower_tir_artifact_facts_for_target(
-//RS     bundle: &ProgramBundle,
-//RS     target: TirArtifactTarget,
-//RS     contract_rows: &ContractSamplingPlan,
-//RS ) -> TirArtifactFacts {
-//RS     let package_identity = bundle.build_facts.package_name.clone();
-//RS     let mut facts = TirArtifactFacts {
-//RS         package_identity: package_identity.clone(),
-//RS         package_version: bundle.build_facts.package_version.clone(),
-//RS         target,
-//RS         build_mode: MirArtifactBuildMode::Dev,
-//RS         build: bundle.build_facts.clone(),
-//RS         names: lower_names(bundle),
-//RS         functions: Vec::new(),
-//RS         modules: Vec::new(),
-//RS         imports: Vec::new(),
-//RS         foreign: Vec::new(),
-//RS         links: Vec::new(),
-//RS         callbacks: Vec::new(),
-//RS         handles: Vec::new(),
-//RS         entry: None,
-//RS         cli: None,
-//RS         jobs: Vec::new(),
-//RS         tests: Vec::new(),
-//RS         output_checks: Vec::new(),
-//RS         coverage_points: Vec::new(),
-//RS         harnesses: Vec::new(),
-//RS         artifacts: Vec::new(),
-//RS         cffi: lower_cffi(bundle),
-//RS     };
-//RS 
-//RS     for (module_index, module) in bundle.modules.iter().enumerate() {
-//RS         let identity = module_identity(bundle, module_index);
-//RS         facts.modules.push(TirModuleFact {
-//RS             key: identity.clone(),
-//RS             name: module.alias.clone(),
-//RS             path: module.display.clone(),
-//RS             source_path: module.display.clone(),
-//RS             imports: module
-//RS                 .imports
-//RS                 .iter()
-//RS                 .map(|import| key(&identity, &import.alias))
-//RS                 .collect(),
-//RS             item_order: module
-//RS                 .items
-//RS                 .iter()
-//RS                 .filter_map(|item| item_ref(&identity, item))
-//RS                 .collect(),
-//RS         });
-//RS         collect_imports(bundle, module_index, &identity, &mut facts.imports);
-//RS         collect_items(
-//RS             bundle,
-//RS             module_index,
-//RS             &identity,
-//RS             &module.items,
-//RS             &mut facts,
-//RS             target,
-//RS             contract_rows,
-//RS         );
-//RS     }
-//RS     facts.links = lower_links(bundle, target);
-//RS     facts.handles = facts.cffi.handle_facts.clone();
-//RS     let (cli, entry) = lower_cli_and_entry(bundle, target);
-//RS     facts.cli = cli;
-//RS     facts.entry = entry;
-//RS     facts.output_checks = lower_output_checks(bundle, &facts);
-//RS     facts.coverage_points = lower_coverage_points(&facts);
-//RS     if let Some(harness) = lower_harness(&facts) {
-//RS         facts.harnesses.push(harness);
-//RS     }
-//RS     facts
-//RS         .artifacts
-//RS         .push(lower_artifact_plan(bundle, target, &facts));
-//RS     facts.callbacks = lower_callbacks(bundle, &facts);
-//RS     facts
-//RS }
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS     use crate::AST::ExternFn;
-//RS 
-//RS     fn param(name: &str, convention: AccessConvention, ty: Type) -> Param {
-//RS         Param {
-//RS             convention,
-//RS             root: false,
-//RS             name: name.to_string(),
-//RS             name_span: Span::new(0, 0),
-//RS             public_label: None,
-//RS             zone: ParamZone::Either,
-//RS             ty,
-//RS             ty_span: Span::new(0, 0),
-//RS             default: None,
-//RS             variadic: false,
-//RS             variadic_bound_list: None,
-//RS             declared_view_from_names: None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn foreign(name: &str, params: Vec<Param>, return_type: Option<Type>, generated: bool) -> ExternFn {
-//RS         ExternFn {
-//RS             abi: None,
-//RS             name: name.to_string(),
-//RS             name_span: Span::new(0, 0),
-//RS             params,
-//RS             return_type,
-//RS             return_type_span: None,
-//RS             rust_path: name.to_string(),
-//RS             rust_path_span: Span::new(0, 0),
-//RS             generated,
-//RS             callback_transport: None,
-//RS             callback_plan_digest: None,
-//RS             callback_identity: None,
-//RS             effect_root: None,
-//RS             undo: None,
-//RS             close: None,
-//RS             span: Span::new(0, 0),
-//RS         }
-//RS     }
-//RS 
-//RS     fn handle(name: &str) -> FfiHandleFact {
-//RS         FfiHandleFact {
-//RS             lib: "fixture".to_string(),
-//RS             typedef_name: name.to_string(),
-//RS             jet_name: name.to_string(),
-//RS             close: format!("{name}_close"),
-//RS             close_source: FfiCloseSource::Conventional,
-//RS             thread_safety: FfiThreadSafety::Safe,
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn writeback_rows_reach_artifact_foreign_facts() {
-//RS         let handles = vec![handle("HbFont"), handle("HbBuffer")];
-//RS         let cases = vec![
-//RS             foreign(
-//RS                 "edit_scalar",
-//RS                 vec![param("value", AccessConvention::Write, Type::Int)],
-//RS                 None,
-//RS                 false,
-//RS             ),
-//RS             foreign(
-//RS                 "edit_string",
-//RS                 vec![param("value", AccessConvention::Write, Type::String)],
-//RS                 Some(Type::String),
-//RS                 false,
-//RS             ),
-//RS             foreign(
-//RS                 "edit_handle",
-//RS                 vec![param(
-//RS                     "font",
-//RS                     AccessConvention::Write,
-//RS                     Type::Named("HbFont".into()),
-//RS                 )],
-//RS                 None,
-//RS                 true,
-//RS             ),
-//RS             foreign(
-//RS                 "edit_mixed_handles",
-//RS                 vec![
-//RS                     param("font", AccessConvention::Write, Type::Named("HbFont".into())),
-//RS                     param("buffer", AccessConvention::Read, Type::Named("HbBuffer".into())),
-//RS                 ],
-//RS                 None,
-//RS                 true,
-//RS             ),
-//RS         ];
-//RS 
-//RS         for function in &cases {
-//RS             assert!(
-//RS                 function.hidden_c_bridge_compatible_with_handles(&handles),
-//RS                 "{} must use the resident writeback bridge",
-//RS                 function.name
-//RS             );
-//RS             let row = lower_c_foreign(
-//RS                 function,
-//RS                 "ffi_fixture",
-//RS                 "fixture",
-//RS                 &handles,
-//RS                 TirArtifactTarget::Cranelift,
-//RS             );
-//RS             assert_eq!(row.abi, "C");
-//RS             assert_eq!(row.language, "c");
-//RS             assert!(row.applicability.cranelift);
-//RS             assert_eq!(row.params[0].access, TirAccess::Write);
-//RS         }
-//RS 
-//RS         let handle_row = lower_c_foreign(
-//RS             &cases[2],
-//RS             "ffi_fixture",
-//RS             "fixture",
-//RS             &handles,
-//RS             TirArtifactTarget::Interpreter,
-//RS         );
-//RS         assert_eq!(handle_row.handle_key.as_deref(), Some("c::fixture::HbFont"));
-//RS         assert!(handle_row.applicability.interpreter);
-//RS         let typed_record = foreign(
-//RS             "typed_record",
-//RS             vec![param(
-//RS                 "coord",
-//RS                 AccessConvention::Read,
-//RS                 Type::Named("Coord".into()),
-//RS             )],
-//RS             Some(Type::Named("Coord".into())),
-//RS             false,
-//RS         );
-//RS         let direct_row = lower_c_foreign(
-//RS             &typed_record,
-//RS             "ffi_fixture",
-//RS             "fixture",
-//RS             &handles,
-//RS             TirArtifactTarget::RustAot,
-//RS         );
-//RS         assert!(!direct_row.bridge_eligible);
-//RS         assert_eq!(direct_row.key, "ffi_fixture::typed_record");
-//RS         assert_eq!(direct_row.symbol, "typed_record");
-//RS         assert_eq!(direct_row.path, "typed_record");
-//RS     }
-//RS 
-//RS }
-// END-PORT-PENDING 0470 crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1-2271
+// Checked artifact/module semantic facts shared by every MIR adapter.
+// No bundle/source/AST state is retained in the resulting rows.
+use jet_foundation.AST.[AccessConvention, CtValue, EverySchedule, Expr, Func, ImportDecl, ImportKind, Item, JobCachePolicy, JobScope, JobSkip, OutputKind, Param, ParamZone, ProgramBundle, TestDef, Type, FfiCloseAdapter, FfiCloseSource, FfiHandleFact, FfiThreadSafety, FfiBoundaryFacts]
+use jet_foundation.Diagnostics.[Span]
+use jet_foundation.MIR.[MirArtifactBuildMode, MirArtifactRequest, MirArtifactKind, MirArtifactTarget, MirTargetApplicability]
+use jet_foundation.Names.[NameAlias, NameDeclaration, NameModule, NameReference, NameVisibility, StructureFact]
+use jet_foundation.CLISchema.[CLIValueKind]
+use jet_foundation.Facts.[BuildFactSnapshot]
+use jet_foundation.Syntax
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:29
+enum TirArtifactEntryKind { Library, Command, App, Service, Test }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:38
+enum TirEntryOutput { None, ReturnValue }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:46
+alias TirTargetApplicability :: MirTargetApplicability
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:23
+alias TirArtifactKind :: MirArtifactKind
+alias TirArtifactTarget :: MirArtifactTarget
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:48
+fn target_applicability_for(target: TirArtifactTarget) -> TirTargetApplicability {
+    if target == {
+        .RustAot -> TirTargetApplicability{rust_aot: true, cranelift: false, interpreter: false, web: false}
+        .Cranelift -> TirTargetApplicability{rust_aot: false, cranelift: true, interpreter: false, web: false}
+        .Interpreter -> TirTargetApplicability{rust_aot: false, cranelift: false, interpreter: true, web: false}
+        .Web -> TirTargetApplicability{rust_aot: false, cranelift: false, interpreter: false, web: true}
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:78
+enum TirAccess { Read, Write, Move }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:84
+fn lower_access(access: AccessConvention) -> TirAccess {
+    if access == { .Read -> TirAccess.Read .Write -> TirAccess.Write .Move -> TirAccess.Move }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:93
+struct TirFunctionRef { key: String, module: String, name: String, span: Span, visibility: NameVisibility }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:102
+struct TirFunctionFact { reference: TirFunctionRef, params: [TirParamFact], return_type: Type?, is_pure: Bool }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:110
+struct TirParamFact {
+    index: Int, name: String, span: Span, ty: Type, access: TirAccess,
+    label: String, zone: ParamZone, variadic: Bool, default_present: Bool,
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:122
+fn lower_param(param: &Param, index: Int) -> TirParamFact {
+    TirParamFact{index: index, name: param.name, span: param.name_span, ty: param.ty, access: lower_access(param.convention), label: param.call_label(), zone: param.zone, variadic: param.variadic, default_present: param.default != None}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:136
+fn lower_params(params: &[Param]) -> [TirParamFact] {
+    loop (index, param) in params.iter().enumerate() -> lower_param(param, index)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:145
+struct TirModuleFact { key: String, name: String, path: String, source_path: String, imports: [String], item_order: [TirItemRef] }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:155
+enum TirItemRef { Type(String), Trait(String), Function(String), Constant(String), Impl(String), Foreign(String), Module(String), Unknown(String) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:168
+struct TirImportFact { module: String, alias: String, visibility: NameVisibility, kind: TirImportKind, span: Span, version: String? }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:178
+enum TirImportKind {
+    File { path: String }
+    Module { path: String }
+    Unqualified { module: String, items: [TirImportItem] }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:191
+struct TirImportItem { original: String, local: String, item: TirItemRef }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:198
+#Derive(Default)
+struct TirNameFacts { modules: [NameModule], declarations: [NameDeclaration], aliases: [NameAlias], references: [NameReference], structure_facts: [StructureFact] }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:208
+struct TirForeignFact {
+    key: String, module: String, name: String, span: Span, symbol: String, path: String,
+    params: [TirParamFact], bridge_eligible: Bool, raw_scalar_abi: Bool, return_type: Type?,
+    abi: String, language: String, applicability: TirTargetApplicability,
+    effect_root: String?, callback_transport: String?, callback_plan_digest: String?, callback_identity: String?,
+    link_key: String?, callback_key: String?, handle_key: String?, close_function_key: String?, undo_function_key: String?,
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:235
+struct TirLinkUnit { key: String, crate_spec: String, cache_identity: String, applicability: TirTargetApplicability, dependency_dirs: [String], link_closure: [String] }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:245
+struct TirCallbackFact { key: String, symbol: String, function: TirFunctionRef, params: [TirParamFact], return_type: Type? }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:254
+enum TirHandleOwnership { Owned }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:259
+struct TirHandleFact {
+    key: String, lib: String, typedef_name: String, jet_name: String, ownership: TirHandleOwnership,
+    close: String, close_source: FfiCloseSource, thread_safety: FfiThreadSafety,
+    close_function_key: String?, undo_function_key: String?, send: Bool, sync: Bool,
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:275
+struct TirCImportLink { importing_module: String, scope: String?, alias: String, target_module: String }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:283
+struct TirCLib { lib: String, module: String }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:289
+struct TirCOverlayOverride { lib: String, generated_symbol: String, overlay_symbol: String }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:296
+struct TirCloseAdapter { lib: String, handle_type: String, raw_function: String, adapter_function: String }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:304
+#Derive(Default)
+struct TirCffiFacts {
+    import_links: [TirCImportLink], libs: [TirCLib], overlay_overrides: [TirCOverlayOverride],
+    boundaries: [FfiBoundaryFacts], handle_facts: [TirHandleFact], direct_links: [String], transitive_links: [String], close_adapters: [TirCloseAdapter],
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:316
+enum TirCliDefault { TypeDefault, Value(CtValue), Recorded(String) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:323
+enum TirCliInputShape {
+    Flag
+    Value { kind: CLIValueKind, optional: Bool, default: TirCliDefault? }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:333
+struct TirCliInput {
+    field: String, flag: String, short: String?, env: String?, help: String, metavar: String?,
+    shape: TirCliInputShape, positional: U16?, variadic: Bool,
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:346
+struct TirCliCommand { name: String, description: String?, function: TirFunctionRef?, receiver: String?, inputs: [TirCliInput] }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:355
+struct TirCliEntry { record_inputs: Bool, description: String?, inputs: [TirCliInput], commands: [TirCliCommand], standard: Bool, version: String? }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:365
+struct TirEntrySpec {
+    kind: TirArtifactEntryKind, function: TirFunctionRef?, cli: TirCliEntry?, output: TirEntryOutput, output_kind: OutputKind,
+    initialize_environment: Bool, initialize_gc: Bool, serves_until_stopped: Bool, package_version: String,
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:378
+struct TirJobArgument { name: String, label: String, ty: String, param_ty: Type, required: Bool, default: String?, variadic: Bool, zone: ParamZone }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:392
+struct TirJobFact {
+    key: String, function: TirFunctionRef?, name: String, scope: JobScope, doc: String?,
+    arguments: [TirJobArgument], record_inputs: [TirCliInput]?, schedule: EverySchedule?,
+    after: [String], parallel: Int, packages: [String], working_directory: String?,
+    input_paths: [String], output_paths: [String], skip: JobSkip?, cache: JobCachePolicy, limits: [String:String],
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:416
+enum TirTestKind { Unit, Property }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:422
+struct TirTestFact {
+    key: String, function: TirFunctionRef, name: String, span: Span, kind: TirTestKind,
+    parameters: [TirParamFact], faults: [String], expected_failure: Bool, contract_generated: Bool,
+    eligibility: TirFunctionRef?, generation_unavailable_reason: String?,
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:442
+struct TirOutputCheck { key: String, name: String, function: TirFunctionRef }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:449
+struct TirCoveragePoint { key: String, function: TirFunctionRef, block: String?, span: Span }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:457
+enum TirHarnessKind { Test, Fuzz, Coverage }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:464
+struct TirHarnessPlan { key: String, kind: TirHarnessKind, tests: [String], output_checks: [TirOutputCheck], selected_test: String?, coverage_points: [TirCoveragePoint], command_override: Bool }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:475
+enum TirExportAbi { C }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:480
+struct TirExport { symbol: String, function: TirFunctionRef, abi: TirExportAbi }
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:487
+struct TirArtifactPlan {
+    key: String, kind: TirArtifactKind, name: String, target: TirArtifactTarget,
+    modules: [String], links: [String], jobs: [String], runtime_parts: Set<String>,
+    exports: [TirExport], provider_identity: String, closure_identity: String, artifact_identity: String,
+    entry: TirEntrySpec?, harness: String?,
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:505
+struct TirArtifactFacts {
+    package_identity: String, package_version: String, target: TirArtifactTarget, build_mode: MirArtifactBuildMode,
+    build: BuildFactSnapshot, names: TirNameFacts, functions: [TirFunctionFact], modules: [TirModuleFact], imports: [TirImportFact],
+    foreign: [TirForeignFact], links: [TirLinkUnit], callbacks: [TirCallbackFact], handles: [TirHandleFact],
+    entry: TirEntrySpec?, cli: TirCliEntry?, jobs: [TirJobFact], tests: [TirTestFact],
+    output_checks: [TirOutputCheck], coverage_points: [TirCoveragePoint], harnesses: [TirHarnessPlan], artifacts: [TirArtifactPlan], cffi: TirCffiFacts,
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:529
+fn module_identity(bundle: &ProgramBundle, index: Int) -> String {
+    jet_codegen.Codegen.Context.module_identity(bundle, index)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:533
+fn key(module: String, name: String) -> String {
+    if module.is_empty() -> name else if name.is_empty() -> module else -> "{module}::{name}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:543
+fn function_ref(module: String, name: String, span: Span, visibility: NameVisibility) -> TirFunctionRef {
+    TirFunctionRef{key: key(module, name), module: module, name: name, span: span, visibility: visibility}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:558
+fn function_visibility(function: &Func) -> NameVisibility {
+    NameVisibility.from_flags(function.is_pub, function.is_package_pub)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:562
+fn is_operator_trait(trait_name: String) -> Bool {
+    trait_name == Syntax.TRAIT_ADD || trait_name == Syntax.TRAIT_SUB || trait_name == Syntax.TRAIT_MUL || trait_name == Syntax.TRAIT_DIV || trait_name == Syntax.TRAIT_EQUATABLE || trait_name == Syntax.TRAIT_COMPARABLE
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:574
+fn method_reference_name(owner: String, trait_name: String?, operator_rhs: Type?, method: &Func) -> String {
+    if trait_name == .Val(trait_name) {
+        if is_operator_trait(trait_name) {
+            rhs := operator_rhs ?? panic("sema must normalize every operator RHS")
+            return jet_foundation.Traits.operator_method_identity(owner, trait_name, method.name, rhs)
+        }
+        return "{owner}::{trait_name}::{method.name}"
+    }
+    "{owner}::{method.name}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:590
+fn item_ref(module: String, item: &Item) -> TirItemRef? {
+    reference := if item == {
+        .Func(function) -> TirItemRef.Function(key(module, function.name))
+        .Struct(definition) -> TirItemRef.Type(key(module, definition.name))
+        .Enum(definition) -> TirItemRef.Type(key(module, definition.name))
+        .Distinct(definition) -> TirItemRef.Type(key(module, definition.name))
+        .TypeAlias(definition) -> TirItemRef.Type(key(module, definition.name))
+        .UnitFamily(definition) -> TirItemRef.Type(key(module, definition.family))
+        .Trait(definition) -> TirItemRef.Trait(key(module, definition.name))
+        .Impl(definition) -> {
+            local := if definition.trait_name == .Val(trait_name) {
+                if is_operator_trait(trait_name) {
+                    rhs := definition.operator_rhs ?? panic("sema must normalize every operator RHS")
+                    "impl::{definition.type_name}::{trait_name}<{rhs.name()}>"
+                } else -> "impl::{definition.type_name}::{trait_name}"
+            } else -> "impl::{definition.type_name}"
+            TirItemRef.Impl(key(module, local))
+        }
+        .Const(definition) -> TirItemRef.Constant(key(module, definition.name))
+        .Test(definition) -> TirItemRef.Unknown(test_key(module, definition))
+        .ExternRust(_) -> TirItemRef.Foreign(key(module, "extern"))
+        .CodeModule(definition) -> {
+            if definition.body == None -> return None
+            TirItemRef.Module(key(module, definition.name))
+        }
+        else -> TirItemRef.Unknown(std.any.type_name<Item>())
+    }
+    Val(reference)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:631
+fn test_key(module: String, test: &TestDef) -> String {
+    name := test.name ?? "anonymous"
+    key(module, "test::{name}@{test.span.start}..{test.span.end}")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:638
+fn contract_key(module: String, function: &Func) -> String {
+    key(module, "contract::{function.name}@{function.span.start}..{function.span.end}")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:648
+fn contract_eligibility_key(module: String, function: &Func) -> String {
+    key(module, "contract-pre::{function.name}@{function.span.start}..{function.span.end}")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:662
+// Absent candidate / sampled None / explicit unavailability reason.
+alias ContractSamplingPlan :: [String:String?]
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:675
+fn contract_sampling_reason(function: &Func, covered: Bool) -> String?? {
+    if function.pre.is_empty() || function.params.is_empty() -> return None
+    precondition_calls_function := function.pre.iter().any(fn(clause) {
+        found := false
+        clause.cond.for_each_expr(fn(expr) {
+            if expr == { .Call(_) | .MethodCall(_, _, _, _, _) -> true else -> false } -> found = true
+        })
+        found
+    })
+    reason := if {
+        function.inline_foreign != None -> Val("contract_target_foreign")
+        !function.type_params.is_empty() -> Val("contract_target_generic")
+        !covered -> Val("contract_target_unsupported")
+        precondition_calls_function -> Val("precondition_calls_function")
+        else -> None
+    }
+    Val(reason)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:702
+fn lower_contract_test(function: &Func, module: String, contract_rows: &ContractSamplingPlan) -> TirTestFact? {
+    if function.pre.is_empty() || function.params.is_empty() -> return None
+    row_key := contract_key(module, function)
+    reason := contract_rows.get(row_key) ?? return None
+    reference := TirFunctionRef{key: row_key, module: module, name: row_key, span: function.span, visibility: NameVisibility.Private}
+    sampled := reason == None
+    eligibility := if sampled -> Val(TirFunctionRef{key: contract_eligibility_key(module, function), module: module, name: contract_eligibility_key(module, function), span: function.span, visibility: NameVisibility.Private}) else -> None
+    Val(TirTestFact{key: row_key, function: reference, name: "contract::{function.name}", span: function.span, kind: TirTestKind.Property, parameters: if sampled -> lower_params(function.params) else -> [TirParamFact]{}, faults: [String]{}, expected_failure: false, contract_generated: true, eligibility: eligibility, generation_unavailable_reason: reason})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:753
+fn core_import_module_path(module_alias: String, items: &[(String, String?)]) -> String? {
+    _ := jet_foundation.AST.core_list_prefix(module_alias) ?? return None
+    target := None
+    loop (original, _) in items {
+        path := jet_foundation.AST.core_list_path(module_alias, original) ?? return None
+        module := if path == { .Module(module) | .Item(module, _) -> module }
+        if target == .Val(existing) {
+            if existing != module -> return Val(module_alias)
+        } else -> target = Val(module)
+    }
+    if target == None -> Val(module_alias) else -> target
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:776
+fn lower_import(bundle: &ProgramBundle, module_index: Int, module: String, import: &ImportDecl) -> TirImportFact {
+    kind := if import.kind == {
+        .File(path, _) -> TirImportKind.File{path: path}
+        .Module(path, _) -> TirImportKind.Module{path: path}
+        .Unqualified(module_alias, items, _) -> {
+            if core_import_module_path(module_alias, items) == .Val(path) -> TirImportKind.Module{path: path}
+            else {
+                target := bundle.name_ledger.import_target(module_index, import.span)
+                if target == None {
+                    loop candidate in bundle.modules[module_index].imports {
+                        unqualified := if candidate.kind == { .Unqualified(_, _, _) -> true else -> false }
+                        if !unqualified && candidate.import_alias() == module_alias {
+                            target = bundle.name_ledger.import_target(module_index, candidate.span)
+                            if target != None -> break
+                        }
+                    }
+                }
+                target_module := if target == .Val(index) -> module_identity(bundle, index) else -> module_alias
+                imported := loop (original, local) in items {
+                    local_name := local ?? original
+                    resolved := bundle.name_ledger.canonical_path(module_index, local_name) ?? key(target_module, original)
+                    TirImportItem{original: original, local: local_name, item: TirItemRef.Unknown(resolved)}
+                }
+                TirImportKind.Unqualified{module: target_module, items: imported}
+            }
+        }
+    }
+    version := if import.inline_version == .Val(version) -> Val(version.text) else -> None
+    TirImportFact{module: module, alias: import.alias, visibility: NameVisibility.from_flags(import.is_pub, import.is_package_pub), kind: kind, span: import.span, version: version}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:849
+fn collect_imports(bundle: &ProgramBundle, module_index: Int, module: String, imports: &[TirImportFact]) {
+    loaded := bundle.modules[module_index]
+    loop import in loaded.imports -> &imports.push(lower_import(bundle, module_index, module, import))
+    // Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:862
+    fn nested(bundle: &ProgramBundle, module_index: Int, module: String, items: &[Item], imports: &[TirImportFact]) {
+        loop item in items {
+            if item == .CodeModule(code_module) {
+                child := key(module, code_module.name)
+                loop import in code_module.imports -> &imports.push(lower_import(bundle, module_index, child, import))
+                if code_module.body == .Val(body) -> nested(bundle, module_index, child, body, &imports)
+            }
+        }
+    }
+    nested(bundle, module_index, module, loaded.items, &imports)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:888
+fn lower_cli_default(default: &jet_foundation.CLISchema.CLIDefault) -> TirCliDefault {
+    if default == { .TypeDefault -> TirCliDefault.TypeDefault .Value(value) -> TirCliDefault.Value(value) .Recorded(value) -> TirCliDefault.Recorded(value) }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:896
+fn lower_cli_input(input: &jet_foundation.CLISchema.CLIInputSchema) -> TirCliInput {
+    shape := if input.shape == {
+        .Flag -> TirCliInputShape.Flag
+        .Value(kind, optional, default) -> {
+            lowered_default := if default == .Val(value) -> Val(lower_cli_default(value)) else -> None
+            TirCliInputShape.Value{kind: kind, optional: optional, default: lowered_default}
+        }
+    }
+    TirCliInput{field: input.field, flag: input.flag, short: input.short, env: input.env, help: input.help, metavar: input.metavar, shape: shape, positional: input.positional, variadic: false}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:922
+fn find_entry_struct(items: &[Item], name: String) -> jet_foundation.AST.StructDef? {
+    leaf := name.rsplit("::").next() ?? name
+    loop item in items {
+        if item == .Struct(definition) {
+            if definition.name == leaf -> return Val(definition)
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:930
+fn lower_cli_entry(bundle: &ProgramBundle, schema: &jet_foundation.CLISchema.CLICommandSchema, module: String) -> TirCliEntry? {
+    if schema.entry_type.is_empty() && schema.inputs.is_empty() && schema.commands.is_empty() && !schema.standard -> return None
+    inputs := loop input in schema.inputs -> lower_cli_input(input)
+    root := bundle.modules.get(bundle.entry) ?? return None
+    structure := find_entry_struct(root.items, schema.entry_type)
+    commands := loop command in schema.commands {
+        target := if structure == .Val(structure) -> jet_foundation.CLISchema.command_target(structure, command, root.items, schema.entry_type) else -> None
+        reference := None
+        receiver := None
+        if target == .Val(target) {
+            function_name := if target.is_method -> "{schema.entry_type}::{target.function.name}" else -> target.function.name
+            reference = Val(function_ref(module, function_name, target.function.span, function_visibility(target.function)))
+            if target.bound_shared || target.is_method -> receiver = Val(key(module, schema.entry_type))
+        }
+        command_inputs := loop input in command.inputs -> lower_cli_input(input)
+        TirCliCommand{name: command.name, description: command.description, function: reference, receiver: receiver, inputs: command_inputs}
+    }
+    Val(TirCliEntry{record_inputs: !schema.entry_type.is_empty(), description: schema.description, inputs: inputs, commands: commands, standard: schema.standard, version: schema.version})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:997
+fn output_entry(bundle: &ProgramBundle) -> jet_foundation.AST.ResolvedOutput? {
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item == .Const(constant) {
+                if constant.resolved_output == .Val(output) {
+                    if output.selected -> return Val(output)
+                }
+            }
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1011
+fn entry_kind(kind: OutputKind) -> TirArtifactEntryKind {
+    if kind == {
+        .Library -> TirArtifactEntryKind.Library
+        .Executable -> TirArtifactEntryKind.Command
+        .Service -> TirArtifactEntryKind.Service
+        .Check -> TirArtifactEntryKind.Test
+        .Environment | .Image | .Bundle | .System | .Fleet -> TirArtifactEntryKind.App
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1025
+fn entry_output(kind: OutputKind) -> TirEntryOutput {
+    if kind == {
+        .Executable | .Service | .Check -> TirEntryOutput.ReturnValue
+        .Library | .Environment | .Image | .Bundle | .System | .Fleet -> TirEntryOutput.None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1039
+fn no_os_profile(bundle: &ProgramBundle) -> Bool {
+    if bundle.build_facts.target_dossier.machine == .Val(machine) -> machine.no_os else -> false
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1048
+fn initialize_environment(bundle: &ProgramBundle, target: TirArtifactTarget) -> Bool {
+    (target == TirArtifactTarget.RustAot || target == TirArtifactTarget.Cranelift) && !no_os_profile(bundle)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1055
+fn lower_entry(bundle: &ProgramBundle, target: TirArtifactTarget, cli: TirCliEntry?) -> TirEntrySpec? {
+    if output_entry(bundle) == .Val(output) {
+        module := module_identity(bundle, output.module)
+        reference := Val(function_ref(module, output.semantic_name, output.definition, NameVisibility.Public))
+        return Val(TirEntrySpec{kind: entry_kind(output.kind), function: reference, cli: cli, output: entry_output(output.kind), output_kind: output.kind, initialize_environment: initialize_environment(bundle, target), initialize_gc: false, serves_until_stopped: output.kind == OutputKind.Service || jet_foundation.AST.bundle_serves_until_stopped(bundle), package_version: bundle.build_facts.package_version})
+    }
+    root := bundle.modules.get(bundle.entry) ?? return None
+    function := root.items.iter().find_map(fn(item) {
+        if item == .Func(function) {
+            if function.name == "run" && (function.params.is_empty() || cli != None) -> return Val(function)
+        }
+        None
+    }) ?? return None
+    module := module_identity(bundle, bundle.entry)
+    Val(TirEntrySpec{kind: TirArtifactEntryKind.Command, function: Val(function_ref(module, function.name, function.span, function_visibility(function))), cli: cli, output: TirEntryOutput.ReturnValue, output_kind: OutputKind.Executable, initialize_environment: initialize_environment(bundle, target), initialize_gc: false, serves_until_stopped: jet_foundation.AST.bundle_serves_until_stopped(bundle), package_version: bundle.build_facts.package_version})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1116
+fn job_cli_scalar(ty: &Type) -> Bool {
+    if ty == {
+        .Option(inner) -> {
+            nested := if inner == { .Option(_) -> true else -> false }
+            !nested && job_cli_scalar(inner)
+        }
+        .Bool | .Int | .Float | .Float32 | .String | .IntN(_, _) -> true
+        .Named(name) -> name == Syntax.TYPE_PATH
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1129
+fn job_record_inputs(bundle: &ProgramBundle, function: &Func) -> [TirCliInput]? {
+    if function.params.len() != 1 -> return None
+    name := if function.params[0].ty == { .Named(name) -> name else -> return None }
+    leaf := name.rsplit(['.', ':']).next() ?? name
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item == .Struct(structure) {
+                if structure.name == leaf {
+                    if jet_foundation.CLISchema.command_schema_with_items(module.items, structure) == .Val(schema) {
+                        inputs := loop input in schema.inputs -> lower_cli_input(input)
+                        return Val(inputs)
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1151
+fn lower_job(bundle: &ProgramBundle, function: &Func, module: String) -> TirJobFact? {
+    if !function.is_job -> return None
+    record_inputs := job_record_inputs(bundle, function)
+    if record_inputs == None && !function.params.iter().all(fn(param) { job_cli_scalar(param.ty) }) -> return None
+    metadata := function.job_metadata ?? jet_foundation.AST.JobMetadata.default()
+    job := jet_foundation.CLISchema.JobFact.from_function(function)
+    params := function.params.iter().filter(fn(param) { param.name != Syntax.KW_SELF })
+    arguments := loop (argument, param) in job.arguments.iter().zip(params) -> TirJobArgument{name: argument.name, label: argument.label, ty: argument.ty, param_ty: param.ty, required: argument.required, default: argument.default, variadic: argument.variadic, zone: argument.zone}
+    schedule := if function.every == .Val(every) -> every.resolved else -> None
+    Val(TirJobFact{key: key(module, "job::{function.name}"), function: Val(function_ref(module, function.name, function.span, function_visibility(function))), name: job.name, scope: metadata.scope, doc: job.doc, arguments: arguments, record_inputs: record_inputs, schedule: schedule, after: metadata.after, parallel: metadata.parallel ?? 1, packages: metadata.packages, working_directory: metadata.cwd, input_paths: metadata.inputs, output_paths: metadata.outputs, skip: metadata.skip, cache: metadata.cache, limits: metadata.limits})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1215
+fn lower_test(test: &TestDef, module: String) -> TirTestFact {
+    row_key := test_key(module, test)
+    reference := TirFunctionRef{key: row_key, module: module, name: row_key, span: test.span, visibility: NameVisibility.Private}
+    TirTestFact{key: row_key, function: reference, name: test.name ?? row_key, span: test.span, kind: if test.params.is_empty() -> TirTestKind.Unit else -> TirTestKind.Property, parameters: lower_params(test.params), faults: test.faults, expected_failure: test.expected_fail, contract_generated: false, eligibility: None, generation_unavailable_reason: None}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1243
+fn lower_foreign(function: &jet_foundation.AST.ExternFn, module: String, crate_spec: String, target: TirArtifactTarget) -> TirForeignFact {
+    function_key := key(module, function.rust_path)
+    abi := if function.abi == .Val((abi, _)) -> abi else -> "C"
+    close_key := if function.close == .Val((name, _)) -> Val(key(module, name)) else -> None
+    undo_key := if function.undo == .Val((name, _)) -> Val(key(module, name)) else -> None
+    TirForeignFact{key: function_key, module: module, name: function.name, span: function.span, symbol: function_key, path: function.rust_path, params: lower_params(function.params), bridge_eligible: true, raw_scalar_abi: false, return_type: function.return_type, abi: abi, language: "rust:{crate_spec}", applicability: target_applicability_for(target), effect_root: function.effect_root, callback_transport: None, callback_plan_digest: None, callback_identity: None, link_key: None, callback_key: None, handle_key: None, close_function_key: close_key, undo_function_key: undo_key}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1281
+fn lower_c_foreign(function: &jet_foundation.AST.ExternFn, module: String, lib: String, handles: &[FfiHandleFact], target: TirArtifactTarget) -> TirForeignFact {
+    function_key := key(module, function.name)
+    handle_key := None
+    if function.return_type == .Val(ty) {
+        if ty == .Named(name) {
+            if handles.iter().any(fn(handle) { handle.lib == lib && handle.jet_name == name }) -> handle_key = Val("c::{lib}::{name}")
+        }
+    }
+    if handle_key == None {
+        loop param in function.params {
+            if param.ty == .Named(name) {
+                if handles.iter().any(fn(handle) { handle.lib == lib && handle.jet_name == name }) {
+                    handle_key = Val("c::{lib}::{name}")
+                    break
+                }
+            }
+        }
+    }
+    abi := if function.abi == .Val((abi, _)) -> abi else -> "C"
+    close_key := if function.close == .Val((name, _)) -> Val(key(module, name)) else -> None
+    undo_key := if function.undo == .Val((name, _)) -> Val(key(module, name)) else -> None
+    TirForeignFact{key: function_key, module: module, name: function.name, span: function.span, symbol: function.rust_path, path: function.rust_path, params: lower_params(function.params), bridge_eligible: function.hidden_c_bridge_compatible_with_handles(handles), raw_scalar_abi: false, return_type: function.return_type, abi: abi, language: "c", applicability: target_applicability_for(target), effect_root: function.effect_root, callback_transport: function.callback_transport, callback_plan_digest: function.callback_plan_digest, callback_identity: function.callback_identity, link_key: Val("c::{lib}"), callback_key: None, handle_key: handle_key, close_function_key: close_key, undo_function_key: undo_key}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1347
+fn lower_inline_c_foreign(function: &Func, module: String, target: TirArtifactTarget) -> TirForeignFact? {
+    inline := function.inline_foreign ?? return None
+    language := inline.lang.to_ascii_lowercase()
+    if language != "c" && language != "asm" && language != "cpp" -> return None
+    wrapper := "jet_ffi_{function.name}"
+    applicability := if target == TirArtifactTarget.Web -> TirTargetApplicability.default() else -> target_applicability_for(target)
+    Val(TirForeignFact{key: wrapper, module: module, name: function.name, span: function.span, symbol: "jet_inline_{wrapper}", path: wrapper, params: lower_params(function.params), bridge_eligible: true, raw_scalar_abi: true, return_type: function.return_type, abi: "C", language: language, applicability: applicability, effect_root: None, callback_transport: None, callback_plan_digest: None, callback_identity: None, link_key: None, callback_key: None, handle_key: None, close_function_key: None, undo_function_key: None})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1394
+fn lower_guest_import_foreign(function: &Func, module: String, module_alias: String, target: TirArtifactTarget) -> TirForeignFact? {
+    import := jet_sema.guest_import_function_signature(function) ?? return None
+    bridge_eligible := jet_sema.guest_import_bridge_compatible(function)
+    wrapper := jet_sema.guest_import_wrapper_name(module_alias, function.name)
+    wraps_default_failure := if function.return_type == .Val(ty) -> jet_foundation.AST.FailureContract.from_return_type(Val(ty)).effective_type() != ty else -> false
+    transport := if wraps_default_failure -> Val("guest-import-result") else -> None
+    Val(TirForeignFact{key: wrapper, module: module, name: function.name, span: function.span, symbol: import.symbol, path: import.symbol, params: lower_params(function.params), raw_scalar_abi: true, bridge_eligible: bridge_eligible, return_type: function.return_type, abi: "C", language: "c", applicability: target_applicability_for(target), effect_root: None, callback_transport: transport, callback_identity: None, callback_plan_digest: None, link_key: None, callback_key: None, handle_key: None, close_function_key: None, undo_function_key: None})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1434
+fn push_function(facts: &TirArtifactFacts, module: String, function: &Func, name: String) {
+    &facts.functions.push(TirFunctionFact{reference: function_ref(module, name, function.span, function_visibility(function)), params: lower_params(function.params), return_type: function.return_type, is_pure: function.is_pure})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1443
+fn collect_items(bundle: &ProgramBundle, module_index: Int, module: String, items: &[Item], facts: &TirArtifactFacts, target: TirArtifactTarget, contract_rows: &ContractSamplingPlan) {
+    loop item in items {
+        reference := item_ref(module, item)
+        if item == {
+            .Func(function) -> {
+                if lower_guest_import_foreign(function, module, bundle.modules[module_index].alias, target) == .Val(foreign) -> &facts.foreign.push(foreign)
+                if lower_inline_c_foreign(function, module, target) == .Val(foreign) -> &facts.foreign.push(foreign)
+                push_function(&facts, module, function, function.name)
+                if lower_job(bundle, function, module) == .Val(job) -> &facts.jobs.push(job)
+                if lower_contract_test(function, module, contract_rows) == .Val(test) -> &facts.tests.push(test)
+            }
+            .Struct(definition) -> {
+                loop function in definition.methods -> push_function(&facts, module, function, "{definition.name}::{function.name}")
+                loop implementation in definition.trait_impls {
+                    loop function in implementation.methods {
+                        push_function(&facts, module, function, method_reference_name(definition.name, Val(implementation.trait_name), implementation.operator_rhs, function))
+                    }
+                }
+            }
+            .Enum(definition) -> {
+                loop function in definition.methods -> push_function(&facts, module, function, "{definition.name}::{function.name}")
+                loop implementation in definition.trait_impls {
+                    loop function in implementation.methods {
+                        push_function(&facts, module, function, method_reference_name(definition.name, Val(implementation.trait_name), implementation.operator_rhs, function))
+                    }
+                }
+            }
+            .Impl(implementation) -> {
+                loop function in implementation.methods {
+                    name := method_reference_name(implementation.type_name, implementation.trait_name, implementation.operator_rhs, function)
+                    push_function(&facts, module, function, name)
+                }
+            }
+            .Test(test) -> &facts.tests.push(lower_test(test, module))
+            .ExternRust(block) -> {
+                loop function in block.functions -> &facts.foreign.push(lower_foreign(function, module, block.crate_spec, target))
+            }
+            .CModule(c_module) -> {
+                loop function in c_module.functions -> &facts.foreign.push(lower_c_foreign(function, module, c_module.lib, bundle.cffi.handle_facts, target))
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) {
+                    child := key(module, code_module.name)
+                    imports := loop import in code_module.imports -> key(child, import.alias)
+                    order := body.iter().filter_map(fn(item) { item_ref(child, item) }).collect()
+                    &facts.modules.push(TirModuleFact{key: child, name: code_module.name, path: child, source_path: bundle.modules[module_index].display, imports: imports, item_order: order})
+                    collect_items(bundle, module_index, child, body, &facts, target, contract_rows)
+                }
+            }
+            else -> {}
+        }
+        if reference == .Val(reference) {
+            // Unknown kinds still retain semantic spelling in module order.
+            row := facts.modules.iter().position(fn(row) { row.key == module })
+            if row == .Val(index) -> &facts.modules[index].item_order.push(reference)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1597
+fn lower_names(bundle: &ProgramBundle) -> TirNameFacts {
+    modules := bundle.modules.iter().enumerate().filter_map(fn(pair) { bundle.name_ledger.module(pair.0) }).collect()
+    facts := TirNameFacts{modules: modules, declarations: bundle.name_ledger.declarations().collect(), aliases: bundle.name_ledger.aliases().collect(), references: bundle.name_ledger.references().values().collect(), structure_facts: bundle.name_ledger.structure_facts()}
+    &facts.declarations.sort_by_key(fn(row) { (row.module, row.name, row.path) })
+    &facts.aliases.sort_by_key(fn(row) { (row.module, row.name, row.target) })
+    &facts.references.sort_by_key(fn(row) { (row.module_path, row.kind, row.def_span.start, row.def_span.end) })
+    &facts.structure_facts.sort_by_key(fn(row) { (row.subject, row.source, row.span.start, row.span.end) })
+    facts
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1635
+fn lower_cffi(bundle: &ProgramBundle) -> TirCffiFacts {
+    import_links := loop link in bundle.cffi.import_links -> TirCImportLink{importing_module: module_identity(bundle, link.importing_idx), scope: link.scope, alias: link.alias, target_module: module_identity(bundle, link.target_idx)}
+    libs := loop lib in bundle.cffi.libs -> TirCLib{lib: lib.lib, module: module_identity(bundle, lib.module_idx)}
+    overrides := loop row in bundle.cffi.overlay_overrides -> TirCOverlayOverride{lib: row.lib, generated_symbol: row.generated_symbol, overlay_symbol: row.overlay_symbol}
+    handles := loop fact in bundle.cffi.handle_facts -> lower_handle(fact)
+    adapters := loop adapter in bundle.cffi.close_adapters -> lower_close_adapter(adapter)
+    TirCffiFacts{import_links: import_links, libs: libs, overlay_overrides: overrides, boundaries: bundle.cffi.boundaries, handle_facts: handles, direct_links: bundle.cffi.link_closure.direct, transitive_links: bundle.cffi.link_closure.transitive, close_adapters: adapters}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1680
+fn lower_handle(fact: &FfiHandleFact) -> TirHandleFact {
+    TirHandleFact{key: "c::{fact.lib}::{fact.jet_name}", lib: fact.lib, typedef_name: fact.typedef_name, jet_name: fact.jet_name, ownership: TirHandleOwnership.Owned, close: fact.close, close_source: fact.close_source, thread_safety: fact.thread_safety, close_function_key: Val("c::{fact.lib}::{fact.close}"), undo_function_key: None, send: fact.thread_safety == FfiThreadSafety.Safe, sync: fact.thread_safety == FfiThreadSafety.Safe}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1698
+fn lower_close_adapter(adapter: &FfiCloseAdapter) -> TirCloseAdapter {
+    TirCloseAdapter{lib: adapter.lib, handle_type: adapter.handle_type, raw_function: adapter.raw_function, adapter_function: adapter.adapter_function}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1707
+fn lower_links(bundle: &ProgramBundle, target: TirArtifactTarget) -> [TirLinkUnit] {
+    cache_identity := bundle.cffi.link_closure.stable_key()
+    applicability := target_applicability_for(target)
+    links := loop lib in bundle.cffi.libs -> TirLinkUnit{key: "c::{lib.lib}", crate_spec: lib.lib, cache_identity: cache_identity, applicability: applicability, dependency_dirs: [String]{}, link_closure: bundle.cffi.link_closure.libraries().collect()}
+    if links.is_empty() && !cache_identity.is_empty() -> &links.push(TirLinkUnit{key: "c::closure", crate_spec: "c", cache_identity: cache_identity, applicability: applicability, dependency_dirs: [String]{}, link_closure: bundle.cffi.link_closure.libraries().collect()})
+    links
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1746
+fn lower_callbacks(bundle: &ProgramBundle, facts: &TirArtifactFacts) -> [TirCallbackFact] {
+    functions := [String:Int]{}
+    loop (index, function) in facts.functions.iter().enumerate() -> _ := &functions.insert(function.reference.key, index)
+    names := bundle.ffi_callback_fns.iter().collect()
+    &names.sort()
+    rows := [TirCallbackFact]{}
+    loop name in names {
+        if functions.get(name) == .Val(index) {
+            function := facts.functions[index]
+            &rows.push(TirCallbackFact{key: "{function.reference.key}::callback", symbol: function.reference.key, function: function.reference, params: function.params, return_type: function.return_type})
+        }
+    }
+    rows
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1769
+fn lower_cli_and_entry(bundle: &ProgramBundle, target: TirArtifactTarget) -> (TirCliEntry?, TirEntrySpec?) {
+    schema := jet_foundation.CLISchema.executable_schema(bundle)
+    module := module_identity(bundle, bundle.entry)
+    cli := lower_cli_entry(bundle, schema, module)
+    entry := lower_entry(bundle, target, cli)
+    (cli, entry)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1779
+fn lower_output_checks(bundle: &ProgramBundle, facts: &TirArtifactFacts) -> [TirOutputCheck] {
+    rows := [TirOutputCheck]{}
+    loop (module_index, module) in bundle.modules.iter().enumerate() {
+        module_key := module_identity(bundle, module_index)
+        loop item in module.items {
+            if item == .Const(constant) {
+                output := constant.resolved_output ?? continue
+                if !output.selected || output.kind != OutputKind.Check -> continue
+                callable_name := if output.semantic_name.is_empty() -> output.source_name else -> output.semantic_name
+                if callable_name.is_empty() -> continue
+                row := facts.functions.iter().find(fn(function) { function.reference.module == module_key && (function.reference.name == callable_name || function.reference.key == callable_name) })
+                reference := if row == .Val(function) -> function.reference else -> function_ref(module_key, callable_name, output.definition, NameVisibility.Private)
+                &rows.push(TirOutputCheck{key: "{module_key}::output-check::{output.output_name}@{output.definition.start}..{output.definition.end}", name: output.output_name, function: reference})
+            }
+        }
+    }
+    rows
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1837
+fn lower_coverage_points(facts: &TirArtifactFacts) -> [TirCoveragePoint] {
+    rows := [TirCoveragePoint]{}
+    seen := Set<String>{}
+    loop test in facts.tests {
+        row_key := "{test.key}::coverage::entry"
+        if &seen.insert(row_key) -> &rows.push(TirCoveragePoint{key: row_key, function: test.function, block: Val("entry"), span: test.span})
+    }
+    loop function in facts.functions {
+        row_key := "{function.reference.key}::coverage::entry"
+        if &seen.insert(row_key) -> &rows.push(TirCoveragePoint{key: row_key, function: function.reference, block: Val("entry"), span: function.reference.span})
+    }
+    rows
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1865
+fn lower_harness(facts: &TirArtifactFacts) -> TirHarnessPlan? {
+    if facts.tests.is_empty() && facts.output_checks.is_empty() && facts.coverage_points.is_empty() -> return None
+    kind := if facts.tests.is_empty() && facts.output_checks.is_empty() -> TirHarnessKind.Coverage else -> TirHarnessKind.Test
+    tests := loop test in facts.tests -> test.key
+    Val(TirHarnessPlan{key: "{facts.package_identity}::harness::{kind:?}", kind: kind, tests: tests, output_checks: facts.output_checks, selected_test: None, coverage_points: facts.coverage_points, command_override: false})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1886
+fn lower_exports(bundle: &ProgramBundle, facts: &TirArtifactFacts, kind: TirArtifactKind) -> [TirExport] {
+    surface := if kind == {
+        .NativeLibrary -> jet_sema.guest_export_surface(bundle)
+        .SandboxPlugin -> jet_sema.sandbox_export_surface(bundle)
+        .NativeExecutable | .WebApplication | .TestExecutable | .FuzzExecutable | .TestOverride -> []
+    }
+    rows := [TirExport]{}
+    loop export in surface {
+        if kind != TirArtifactKind.SandboxPlugin && export.scalar == None -> continue
+        if facts.functions.iter().find(fn(function) { function.reference.name == export.name }) == .Val(function) {
+            &rows.push(TirExport{symbol: export.name, function: function.reference, abi: TirExportAbi.C})
+        }
+    }
+    rows
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1920
+fn lower_artifact_plan(bundle: &ProgramBundle, target: TirArtifactTarget, facts: &TirArtifactFacts) -> TirArtifactPlan {
+    entry := facts.entry
+    output_kind := if entry == .Val(entry) -> Val(entry.output_kind) else -> None
+    kind := if output_kind == {
+        .Val(.Library) -> TirArtifactKind.NativeLibrary
+        .Val(.Service) -> TirArtifactKind.WebApplication
+        .Val(.Check) -> TirArtifactKind.TestExecutable
+        else -> if target == TirArtifactTarget.Web -> TirArtifactKind.WebApplication else -> TirArtifactKind.NativeExecutable
+    }
+    dossier := bundle.build_facts.target_dossier
+    modules := loop module in facts.modules -> module.key
+    links := loop link in facts.links -> link.key
+    jobs := loop job in facts.jobs -> job.key
+    harness := if facts.harnesses.first() == .Val(harness) -> Val(harness.key) else -> None
+    TirArtifactPlan{key: "{facts.package_identity}::artifact::{target:?}", kind: kind, name: facts.package_identity, target: target, modules: modules, links: links, jobs: jobs, runtime_parts: bundle.used_core.iter().collect(), exports: lower_exports(bundle, facts, kind), provider_identity: dossier.provider_identity, closure_identity: dossier.closure_identity, artifact_identity: "{dossier.compiler_identity}:{dossier.environment_identity}:{bundle.build_facts.target_triple}", entry: entry, harness: harness}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1965
+fn lower_tir_artifact_facts_for_request(bundle: &ProgramBundle, request: MirArtifactRequest, contract_rows: &ContractSamplingPlan) -> TirArtifactFacts {
+    target := request.target
+    kind := request.kind
+    mode := request.mode
+    name := request.name
+    facts := lower_tir_artifact_facts_for_target(bundle, target, contract_rows)
+    facts.build_mode = mode
+    if name == .Val(name) {
+        if !facts.artifacts.is_empty() -> facts.artifacts[0].name = name
+    }
+    exports := lower_exports(bundle, facts, kind)
+    if !facts.artifacts.is_empty() {
+        facts.artifacts[0].kind = kind
+        facts.artifacts[0].exports = exports
+    }
+    if kind == TirArtifactKind.TestExecutable || kind == TirArtifactKind.FuzzExecutable {
+        facts.entry = None
+        if !facts.artifacts.is_empty() -> facts.artifacts[0].entry = None
+    }
+    if mode == MirArtifactBuildMode.Fuzz {
+        if !facts.harnesses.is_empty() {
+            facts.harnesses[0].kind = TirHarnessKind.Fuzz
+            selected_test := None
+            if name == .Val(name) {
+                if facts.tests.iter().find(fn(test) { test.name == name }) == .Val(test) -> selected_test = Val(test.key)
+            }
+            facts.harnesses[0].selected_test = selected_test
+            facts.harnesses[0].key = "{facts.package_identity}::harness::{facts.harnesses[0].kind:?}"
+        }
+        if !facts.artifacts.is_empty() -> facts.artifacts[0].harness = if facts.harnesses.first() == .Val(harness) -> Val(harness.key) else -> None
+    }
+    if kind == TirArtifactKind.TestOverride && mode == MirArtifactBuildMode.Test {
+        module := module_identity(bundle, bundle.entry)
+        if facts.functions.iter().find(fn(function) { function.reference.module == module && function.reference.name == "test" }) == .Val(function) {
+            entry := TirEntrySpec{kind: TirArtifactEntryKind.Test, function: Val(function.reference), cli: None, output: TirEntryOutput.ReturnValue, output_kind: OutputKind.Check, initialize_environment: initialize_environment(bundle, target), initialize_gc: false, serves_until_stopped: false, package_version: bundle.build_facts.package_version}
+            facts.entry = Val(entry)
+            if !facts.harnesses.is_empty() -> facts.harnesses[0].command_override = true
+            if !facts.artifacts.is_empty() {
+                facts.artifacts[0].entry = Val(entry)
+                facts.artifacts[0].harness = if facts.harnesses.first() == .Val(harness) -> Val(harness.key) else -> None
+            }
+        }
+    }
+    facts
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:2053
+fn lower_tir_artifact_facts_for_target(bundle: &ProgramBundle, target: TirArtifactTarget, contract_rows: &ContractSamplingPlan) -> TirArtifactFacts {
+    package_identity := bundle.build_facts.package_name
+    facts := TirArtifactFacts{package_identity: package_identity, package_version: bundle.build_facts.package_version, target: target, build_mode: MirArtifactBuildMode.Dev, build: bundle.build_facts, names: lower_names(bundle), functions: [], modules: [], imports: [], foreign: [], links: [], callbacks: [], handles: [], entry: None, cli: None, jobs: [], tests: [], output_checks: [], coverage_points: [], harnesses: [], artifacts: [], cffi: lower_cffi(bundle)}
+    loop (module_index, module) in bundle.modules.iter().enumerate() {
+        identity := module_identity(bundle, module_index)
+        imports := loop import in module.imports -> key(identity, import.alias)
+        order := module.items.iter().filter_map(fn(item) { item_ref(identity, item) }).collect()
+        &facts.modules.push(TirModuleFact{key: identity, name: module.alias, path: module.display, source_path: module.display, imports: imports, item_order: order})
+        collect_imports(bundle, module_index, identity, &facts.imports)
+        collect_items(bundle, module_index, identity, module.items, &facts, target, contract_rows)
+    }
+    facts.links = lower_links(bundle, target)
+    facts.handles = facts.cffi.handle_facts
+    (cli, entry) := lower_cli_and_entry(bundle, target)
+    facts.cli = cli
+    facts.entry = entry
+    facts.output_checks = lower_output_checks(bundle, facts)
+    facts.coverage_points = lower_coverage_points(facts)
+    if lower_harness(facts) == .Val(harness) -> &facts.harnesses.push(harness)
+    plan := lower_artifact_plan(bundle, target, facts)
+    &facts.artifacts.push(plan)
+    facts.callbacks = lower_callbacks(bundle, facts)
+    facts
+}
 

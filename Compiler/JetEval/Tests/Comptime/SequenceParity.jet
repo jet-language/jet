@@ -1,0 +1,26 @@
+use jet_comptime.Comptime.SequenceParity.[eval_zip, aggregate, extreme]
+use jet_foundation.[CtValue, CtFloat, NamedCtValue, Type, Span]
+// Rust: crates/jet-comptime/src/Comptime/SequenceParity.rs:489
+#Test("strict_zip_reports_unequal_lengths_while_zip_pad_honors_common_fill") {
+    first :: [CtValue]{CtValue.Int{value: 1}, CtValue.Int{value: 2}}
+    args :: [CtValue]{CtValue.List{values: [CtValue]{CtValue.Int{value: 3}}}}
+    assert(eval_zip(&first, "zip", &args, &[String?]{None}, Span.default()).is_err())
+    padded :: eval_zip(&first, "zip_pad", &[CtValue]{args[0], CtValue.Int{value: 9}}, &[String?]{None, Val("fill")}, Span.default())!
+    assert(padded == CtValue.List{values: [CtValue]{
+        CtValue.Struct{type_name: "(a,b)", fields: [NamedCtValue]{NamedCtValue{name: "a", value: CtValue.Int{value: 1}}, NamedCtValue{name: "b", value: CtValue.Int{value: 3}}}},
+        CtValue.Struct{type_name: "(a,b)", fields: [NamedCtValue]{NamedCtValue{name: "a", value: CtValue.Int{value: 2}}, NamedCtValue{name: "b", value: CtValue.Int{value: 9}}}}
+    }})
+}
+// Rust: crates/jet-comptime/src/Comptime/SequenceParity.rs:653
+#Test("empty_aggregates_keep_the_resolved_float_width") {
+    assert(aggregate(&[CtValue]{}, false, Val(Type.Float32), Span.default())! == CtValue.Float{value: CtFloat.f32(0.0)})
+    assert(aggregate(&[CtValue]{}, true, Val(Type.Float), Span.default())! == CtValue.Float{value: CtFloat.f64(1.0)})
+    assert(aggregate(&[CtValue]{}, true, None, Span.default())! == CtValue.Int{value: 1})
+}
+// Rust: crates/jet-comptime/src/Comptime/SequenceParity.rs:617
+#Test("extreme_orders_numeric_values_numerically") {
+    values :: [CtValue]{CtValue.Int{value: 9}, CtValue.Int{value: 10}}
+    assert(extreme(&values, true, Span.default())! == Val(CtValue.Int{value: 10}))
+    assert(extreme(&values, false, Span.default())! == Val(CtValue.Int{value: 9}))
+    assert(extreme(&[CtValue]{}, false, Span.default())! == None)
+}

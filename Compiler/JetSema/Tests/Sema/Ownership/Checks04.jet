@@ -1,0 +1,32 @@
+use jet_foundation.[DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4558-4654 (behavioral control; no inline Rust tests)
+#Test("unmarked_owned_string_reuse_materializes_a_share") {
+    diagnostics :: statements05_diagnostics("fn run() {{ value :: \"hello\"\n other :: value\n result :: value }}\n")
+    assert(!diagnostics.any(d -> d.code == "E0121"), "{diagnostics:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4846-4910 (behavioral control)
+#Test("exact_string_move_reuse_keeps_the_original_move_diagnostic") {
+    diagnostics :: statements05_diagnostics("fn run() {{ value :: \"hello\"\n other :: ^value\n result :: value }}\n")
+    assert(diagnostics.any(d -> d.code == "E0121"), "{diagnostics:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4846-4910 (behavioral control)
+#Test("copy_value_exact_move_does_not_invalidate_source") {
+    diagnostics :: statements05_diagnostics("fn run() Int {{ value :: 3\n other :: ^value\n return value }}\n")
+    assert(!diagnostics.any(d -> d.code == "E0121"), "{diagnostics:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4846-4910 (behavioral control)
+#Test("exact_move_from_borrowed_parameter_reports_borrowed_storage") {
+    diagnostics :: statements05_diagnostics("fn run(value: String) String -> ^value\n")
+    assert(diagnostics.any(d -> d.code == "E0201" && d.what.contains("borrowed storage")), "{diagnostics:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4354-4386 (behavioral control)
+#Test("ordinary_scalar_statement_does_not_invent_a_must_use_duty") {
+    diagnostics :: statements05_diagnostics("fn value() Int -> 4\nfn run() {{ value() }}\n")
+    assert(!diagnostics.any(d -> d.code == "E0419"), "{diagnostics:?}")
+}

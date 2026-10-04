@@ -1,0 +1,66 @@
+use jet_comptime.Comptime.Build.CacheCas.*
+use std.io
+
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:133
+#Test("content_digest_requires_sha256_and_normalizes_hex") {
+    assert(ContentDigest.parse("sha256:" + "A".repeat(64)).unwrap().as_str() == "sha256:" + "a".repeat(64))
+    assert(ContentDigest.parse("sha256:" + "a".repeat(63)).unwrap_err().kind() == io.ErrorKind.InvalidData)
+    assert(ContentDigest.parse("sha256:" + "g".repeat(64)).unwrap_err().kind() == io.ErrorKind.InvalidData)
+    assert(ContentDigest.parse("sha512:" + "a".repeat(64)).unwrap_err().kind() == io.ErrorKind.InvalidData)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:198
+#Test("cache_lookup_requires_each_frontend_stage_in_order") {
+    completion := FrontEndCompletion(parsed: false, sema_checked: false, policy_checked: false, diagnostics_complete: false)
+    assert(completion.authorize_cache_lookup() == Err(CacheBypassDenied.Parser))
+    completion.parsed = true
+    assert(completion.authorize_cache_lookup() == Err(CacheBypassDenied.Sema))
+    completion.sema_checked = true
+    assert(completion.authorize_cache_lookup() == Err(CacheBypassDenied.Policy))
+    completion.policy_checked = true
+    assert(completion.authorize_cache_lookup() == Err(CacheBypassDenied.Diagnostics))
+    assert(FrontEndCompletion.all_complete().authorize_cache_lookup().is_ok())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:444
+#Test("sandbox_proof_rejects_partial_worker_identity") {
+    proof :: RemoteSandboxProof.new("sandbox", "action", ContentDigest.from_bytes(b"input"))
+    assert(proof.is_complete())
+    partial :: proof.clone().with_worker_identity("worker", "", "native", "receipt")
+    assert(!partial.is_complete())
+    complete :: proof.clone().with_attempt_id("attempt").with_worker_identity("worker", "platform", "native", "receipt")
+    assert(complete.is_complete())
+    invalid := proof.clone()
+    invalid.sandbox_id = "bad\nname"
+    assert(!invalid.is_complete())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:542
+#Test("remote_policy_checks_proof_before_grant") {
+    denied :: RemoteCachePolicy.disabled_until_grant_and_sandbox_proof().check(RemoteActionRequest.Execute).unwrap_err()
+    assert(denied.reason == RemoteDeniedReason.MissingGrantAndSandboxProof)
+    malformed :: RemoteSandboxProof.new("", "action", ContentDigest.from_bytes(b"input"))
+    assert(RemoteCachePolicy.with_grants(false, false, false, malformed).check(RemoteActionRequest.CacheRead).unwrap_err().reason == RemoteDeniedReason.MissingGrantAndSandboxProof)
+    proof :: RemoteSandboxProof.new("sandbox", "action", ContentDigest.from_bytes(b"input"))
+    policy :: RemoteCachePolicy.with_grants(false, false, true, proof)
+    assert(policy.check(RemoteActionRequest.CacheRead).unwrap_err().reason == RemoteDeniedReason.GrantNotAllowed)
+    assert(policy.check(RemoteActionRequest.Execute).is_ok())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:614
+#Test("remote_credentials_are_bounded_and_never_debugged") {
+    assert(RemoteCredential.new(b"").is_err())
+    assert(RemoteCredential.new(&[0].repeat(4097)).is_err())
+    credential :: RemoteCredential.new(b"USER_SECRET").unwrap()
+    assert(!std.fmt.debug(&credential).contains("USER_SECRET"))
+    assert(std.fmt.debug(&credential).contains("configured"))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:1314
+#Test("remote_envelope_authenticates_payload_kind_and_bound") {
+    transport :: RemoteCacheTransport.authenticated(OSPath.new("/unused-envelope-control"), b"credential").unwrap()
+    wire :: transport.seal_limited("test", b"payload", 7).unwrap()
+    assert(transport.open_limited("test", &wire, 7).unwrap() == b"payload")
+    assert(transport.open_limited("other", &wire, 7).is_err())
+    assert(transport.open_limited("test", &wire, 6).is_err())
+    assert(transport.seal_limited("test", b"payload", 6).is_err())
+    changed := wire.clone()
+    changed[changed.len() - 1] = b'X'
+    assert(transport.open_limited("test", &changed, 7).is_err())
+    assert(transport.open_limited("test", b"JET-REMOTE/1", 7).is_err())
+}

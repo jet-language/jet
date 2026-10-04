@@ -1,0 +1,62 @@
+use jet_foundation.[CtBigInt, Expr, Span, StrPart, Type, Syntax]
+use jet_sema.[IntegerInterval, integer_width_interval, exact_integer_literal, exact_integer_fits, exact_decimal_literal, is_reactive_handle_ty]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:20-65
+#Test("integer_interval_arithmetic_contains_every_endpoint") {
+    a :: IntegerInterval.new(-3, 7)
+    b :: IntegerInterval.from_bounds((-2, 4))
+    assert_eq(a.negated(), Val(IntegerInterval.new(-7, 3)))
+    assert_eq(a.add(b), Val(IntegerInterval.new(-5, 11)))
+    assert_eq(a.sub(b), Val(IntegerInterval.new(-7, 9)))
+    assert_eq(a.mul(b), Val(IntegerInterval.new(-14, 28)))
+    assert(a.contains_interval(IntegerInterval.new(-3, 7)))
+    assert(a.contains_interval(IntegerInterval.new(-1, 2)))
+    assert(!a.contains_interval(IntegerInterval.new(-4, 2)))
+    assert(!a.contains_interval(IntegerInterval.new(-1, 8)))
+    assert_eq(IntegerInterval.fixed_list_indexes(4), Val(IntegerInterval.new(0, 3)))
+    assert_eq(IntegerInterval.fixed_list_indexes(0), Val(IntegerInterval.new(0, -1)))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:37-55
+#Test("integer_interval_checked_overflow_does_not_wrap") {
+    maximum :: IntegerInterval.new(I128.MAX, I128.MAX)
+    minimum :: IntegerInterval.new(I128.MIN, I128.MIN)
+    one :: IntegerInterval.new(1, 1)
+    assert_eq(maximum.add(one), None)
+    assert_eq(minimum.sub(one), None)
+    assert_eq(minimum.negated(), None)
+    assert_eq(maximum.mul(IntegerInterval.new(2, 2)), None)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:73-99
+#Test("integer_literal_checks_use_exact_spelling_not_lexer_sentinel") {
+    u8 :: integer_width_interval(false, 8)
+    i8 :: integer_width_interval(true, 8)
+    assert_eq((u8.lo, u8.hi), (0, 255))
+    assert_eq((i8.lo, i8.hi), (-128, 127))
+    assert(u8.contains_exact(exact_integer_literal(255, None)))
+    assert(!u8.contains_exact(exact_integer_literal(256, None)))
+    assert(i8.contains_exact(exact_integer_literal(128, Val("128")).neg()))
+    huge :: exact_integer_literal(0, Val("18446744073709551616"))
+    assert(!exact_integer_fits(huge, 0, I128.from(U64.MAX)))
+    assert_eq(exact_integer_literal(12, Val("invalid")).compare(CtBigInt.from_int(12)), Ordering.Equal)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:101-135
+#Test("decimal_and_reactive_producers_use_canonical_shapes") {
+    span :: Span.new(3, 9)
+    expr :: exact_decimal_literal("-1.25", span)
+    if expr == .Call(call) {
+        assert_eq(call.name, Syntax.TYPE_DECIMAL)
+        assert_eq(call.name_span, span)
+        assert_eq(call.args.len(), 1)
+        assert_eq(call.args[0].expr, Expr.Str{parts: [StrPart.Lit{value: "-1.25"}], span: span})
+        assert_eq(call.resolved_ret, None)
+        assert(!call.range_checked && !call.widen_approx)
+    } else -> panic("expected Decimal call")
+    assert(is_reactive_handle_ty(Type.Apply{name: Syntax.TYPE_SIGNAL, args: [Type.Int]}))
+    assert(is_reactive_handle_ty(Type.Apply{name: Syntax.TYPE_DERIVED, args: [Type.String]}))
+    assert(is_reactive_handle_ty(Type.Apply{name: Syntax.TYPE_COMPUTED, args: [Type.Bool]}))
+    assert(!is_reactive_handle_ty(Type.Named{name: Syntax.TYPE_SIGNAL}))
+    assert(!is_reactive_handle_ty(Type.Apply{name: "Other", args: [Type.Int]}))
+}

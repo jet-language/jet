@@ -1,0 +1,48 @@
+use jet_foundation.[CtValue, Expr, Marker, MarkerCallArg, MarkerDeclParam, RuleArgumentBinding, Span, TAppliedRuleArgKind, Type]
+use JetSema.Sema.MarkerRules.[ValidatedRuleArguments, check_deprecated_marker_visibility, declared_argument_type_mismatch, is_lazy_memo_iter]
+
+// Rust: crates/jet-sema/src/Sema/CheckerMarkers.rs:52-82 (behavioral control; no inline Rust tests)
+#Test("validated_rule_arguments_keep_source_and_parameter_indices_distinct") {
+    arguments :: ValidatedRuleArguments{
+        bindings: [RuleArgumentBinding{source_index: 2, parameter_index: Val(0), ty: TAppliedRuleArgKind.String}, RuleArgumentBinding{source_index: 0, parameter_index: Val(2), ty: TAppliedRuleArgKind.Bool}],
+        types: [Val(Type.String), Val(Type.Bool)],
+        constants: [Val(CtValue.Str("name")), Val(CtValue.Bool(true))],
+    }
+    assert(arguments.type_for_source(2) == Val(Type.String))
+    assert(arguments.type_for_source(0) == Val(Type.Bool))
+    assert(arguments.constant_for_source(2) == Val(CtValue.Str("name")))
+    assert(arguments.constant_for_parameter(2) == Val(CtValue.Bool(true)))
+    assert(arguments.type_for_source(1) == None)
+    assert(arguments.constant_for_parameter(1) == None)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerMarkers.rs:1000-1007 (behavioral control)
+#Test("memo_iterator_gate_requires_exact_lazy_family_and_one_argument") {
+    assert(is_lazy_memo_iter(Type.Apply{name: "Iter", args: [Type.Int]}))
+    assert(is_lazy_memo_iter(Type.Apply{name: "ViewIter", args: [Type.Int]}))
+    assert(!is_lazy_memo_iter(Type.Apply{name: "Iter", args: []}))
+    assert(!is_lazy_memo_iter(Type.Apply{name: "Iter", args: [Type.Int, Type.Bool]}))
+    assert(!is_lazy_memo_iter(Type.List(Type.Int)))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerMarkers.rs:1071-1084 (behavioral control)
+#Test("deprecated_marker_is_public_item_contract_and_keeps_span") {
+    span :: Span.new(4, 15)
+    marker :: Marker{name: "Deprecated", negated: false, name_span: span, args: [MarkerCallArg]{}, arg_labels: [], span: span, ct: None}
+    diagnostics := []
+    check_deprecated_marker_visibility([marker], true, &diagnostics)
+    assert(diagnostics.is_empty())
+    check_deprecated_marker_visibility([marker], false, &diagnostics)
+    assert(diagnostics.len() == 1)
+    assert(diagnostics[0].code == "E0932")
+    assert(diagnostics[0].span == Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerMarkers.rs:1425-1454 (behavioral control)
+#Test("declared_marker_literal_shape_rejects_only_proven_mismatch") {
+    span :: Span.new(0, 1)
+    parameter :: MarkerDeclParam{name: "flag", name_span: span, ty: Val(Type.Bool), ty_span: Val(span), value: None, variadic: false}
+    assert(!declared_argument_type_mismatch(Expr.Bool(true, span), parameter))
+    assert(declared_argument_type_mismatch(Expr.ListLit([], span), parameter))
+    assert(!declared_argument_type_mismatch(Expr.Ident("local_flag", span), parameter))
+}

@@ -1,1108 +1,494 @@
-// PORT-PENDING 0405 crates-jet-sema-src-sema-checkerinfer-calls-method-calls-slice-5478: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5478-6581
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS             Type::Named(n) => n.as_str(),
-//RS             _ => "",
-//RS         };
-//RS         // D-REGEXENGINE1=A: method calls on compiled Regex and Match values.
-//RS         if let Some(ret) = regex_method_return(&recv_ty, method, args) {
-//RS             match (recv_name, method, args.len()) {
-//RS                 ("Regex", "count", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                 }
-//RS                 (
-//RS                     "Regex",
-//RS                     "is_match" | "full_match" | "match" | "find" | "find_all" | "matches" | "split",
-//RS                     1,
-//RS                 ) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                 }
-//RS                 ("Regex", "replace" | "replace_first", 2) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                     self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
-//RS                 }
-//RS                 ("Regex", "split_limit", 2) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                     self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
-//RS                 }
-//RS                 ("Regex", "replace_all_with", 2) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                     let cb = Type::Fn {
-//RS                         params: vec![Type::Named("Match".to_string())],
-//RS                         ret: Some(Box::new(Type::String)),
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     };
-//RS                     self.expect_core_arg(method, 1, &cb, &mut args[1]);
-//RS                 }
-//RS                 ("Match", "group" | "group_start" | "group_end", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
-//RS                 }
-//RS                 ("Match", "name", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                 }
-//RS                 _ => {
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             *recv_type_out = Some(match &recv_ty {
-//RS                 Type::Named(n) => n.clone(),
-//RS                 _ => "Regex".to_string(),
-//RS             });
-//RS             // Preserve the exact Regex/Match return so a following method in
-//RS             // the same chain can recover its receiver type from this node.
-//RS             *resolved_ret_out = ret.clone();
-//RS             return ret;
-//RS         }
-//RS         // D-TIMEDEPTH1=A: method calls on the shared civil-time surface.
-//RS         let civil_recv_name = match &recv_ty {
-//RS             Type::Named(name) => Some(name.as_str()),
-//RS             _ => None,
-//RS         };
-//RS         if let Some(contract) =
-//RS             civil_recv_name.and_then(|name| civil_time_method_contract(name, method))
-//RS         {
-//RS             let params = contract
-//RS                 .iter()
-//RS                 .map(|param| crate::Sema::CallBinder::BindParam {
-//RS                     label: param.label,
-//RS                     name: param.label,
-//RS                     zone: param.zone,
-//RS                     default: None,
-//RS                     convention: AccessConvention::Read,
-//RS                     ty: None,
-//RS                     variadic: false,
-//RS                     core_default: param.default,
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS             if crate::Sema::CallBinder::bind_call_args(method, &params, args, span, &mut self.diags)
-//RS                 .is_none()
-//RS             {
-//RS                 for arg in args.iter_mut() {
-//RS                     self.infer(&mut arg.expr);
-//RS                 }
-//RS                 *recv_type_out = civil_recv_name.map(str::to_string);
-//RS                 return None;
-//RS             }
-//RS             self.register_binder_refs(args);
-//RS         }
-//RS         if let Some(ret) = civil_time_method_return(&recv_ty, method, args) {
-//RS             let recv_name = match &recv_ty {
-//RS                 Type::Named(n) => n.as_str(),
-//RS                 _ => "",
-//RS             };
-//RS             match (recv_name, method, args.len()) {
-//RS                 ("Date" | "LocalDate", "add_days" | "add_months", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
-//RS                 }
-//RS                 ("Date" | "LocalDate", "diff_days", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("LocalDate".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("Date" | "LocalDate", "equal" | "compare", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("LocalDate".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("Date" | "LocalDate", "add_period" | "subtract_period", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("Period".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("Date" | "LocalDate", "truncate" | "format" | "format_checked", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                 }
-//RS                 ("Date" | "LocalDate", "replace", 3) => {
-//RS                     for i in 0..3 {
-//RS                         self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
-//RS                     }
-//RS                 }
-//RS                 ("Date" | "LocalDate", "with", argc) if argc == 3 || argc == 4 => {
-//RS                     for i in 0..3 {
-//RS                         self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
-//RS                     }
-//RS                     if argc == 4 {
-//RS                         self.expect_core_arg(method, 3, &Type::String, &mut args[3]);
-//RS                     }
-//RS                 }
-//RS                 ("Date" | "LocalDate", "until" | "since", argc) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("LocalDate".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                     for index in 1..argc.min(4) {
-//RS                         self.expect_core_arg(method, index, &Type::String, &mut args[index]);
-//RS                     }
-//RS                     if argc > 4 {
-//RS                         self.expect_core_arg(method, 4, &Type::Int, &mut args[4]);
-//RS                     }
-//RS                 }
-//RS                 ("DateTime", "plus_duration" | "subtract_duration", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("Duration".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("DateTime", "add_nanoseconds", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
-//RS                 }
-//RS                 ("DateTime", "equal" | "compare", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("DateTime".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("DateTime", "difference", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("DateTime".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("DateTime", "add_period" | "subtract_period", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("Period".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("DateTime", "until" | "since", argc) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("DateTime".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                     for index in 1..argc.min(4) {
-//RS                         self.expect_core_arg(method, index, &Type::String, &mut args[index]);
-//RS                     }
-//RS                     if argc > 4 {
-//RS                         self.expect_core_arg(method, 4, &Type::Int, &mut args[4]);
-//RS                     }
-//RS                 }
-//RS                 ("DateTime", "in_zone", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::Named("Zone".to_string()), &mut args[0]);
-//RS                 }
-//RS                 ("DateTime", "truncate" | "floor" | "ceil", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                 }
-//RS                 ("DateTime", "truncate" | "floor" | "ceil", 2) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                     self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
-//RS                 }
-//RS                 ("DateTime", "round", argc) if (1..=3).contains(&argc) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                     if argc > 1 {
-//RS                         self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
-//RS                     }
-//RS                     if argc > 2 {
-//RS                         self.expect_core_arg(method, 2, &Type::String, &mut args[2]);
-//RS                     }
-//RS                 }
-//RS                 ("DateTime", "format" | "format_checked", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                 }
-//RS                 ("DateTime", "replace", 6) => {
-//RS                     for i in 0..6 {
-//RS                         self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
-//RS                     }
-//RS                 }
-//RS                 ("DateTime", "with", argc) if argc == 6 || argc == 7 => {
-//RS                     for i in 0..6 {
-//RS                         self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
-//RS                     }
-//RS                     if argc == 7 {
-//RS                         self.expect_core_arg(method, 6, &Type::String, &mut args[6]);
-//RS                     }
-//RS                 }
-//RS                 ("LocalTime", "add_duration" | "subtract_duration", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("Duration".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("LocalTime", "equal" | "compare", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("LocalTime".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("LocalTime", "truncate" | "floor" | "ceil", argc) if argc == 1 || argc == 2 => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                     if argc == 2 {
-//RS                         self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
-//RS                     }
-//RS                 }
-//RS                 ("LocalTime", "round", argc) if (1..=3).contains(&argc) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                     if argc > 1 {
-//RS                         self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
-//RS                     }
-//RS                     if argc > 2 {
-//RS                         self.expect_core_arg(method, 2, &Type::String, &mut args[2]);
-//RS                     }
-//RS                 }
-//RS                 ("LocalTime", "until" | "since", argc) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("LocalTime".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                     for index in 1..argc.min(4) {
-//RS                         self.expect_core_arg(method, index, &Type::String, &mut args[index]);
-//RS                     }
-//RS                     if argc > 4 {
-//RS                         self.expect_core_arg(method, 4, &Type::Int, &mut args[4]);
-//RS                     }
-//RS                 }
-//RS                 ("ZonedDateTime", "add_duration" | "subtract_duration", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("Duration".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("ZonedDateTime", "add_period" | "subtract_period", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("Period".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("ZonedDateTime", "format" | "format_checked", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                 }
-//RS                 ("ZonedDateTime", "format_rfc9557", 0) => {}
-//RS                 ("ZonedDateTime", "with_time", argc) if argc == 1 || argc == 2 => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("LocalTime".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                     if argc == 2 {
-//RS                         self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
-//RS                     }
-//RS                 }
-//RS                 ("ZonedDateTime", "equal" | "compare", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("ZonedDateTime".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("ZonedDateTime", "with_zone", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::Named("Zone".to_string()), &mut args[0]);
-//RS                 }
-//RS                 ("ZonedDateTime", "until" | "since", argc) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("ZonedDateTime".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                     for index in 1..argc.min(4) {
-//RS                         self.expect_core_arg(method, index, &Type::String, &mut args[index]);
-//RS                     }
-//RS                     if argc > 4 {
-//RS                         self.expect_core_arg(method, 4, &Type::Int, &mut args[4]);
-//RS                     }
-//RS                 }
-//RS                 ("Zone", "next_transition" | "previous_transition", 1) => {
-//RS                     self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
-//RS                 }
-//RS                 ("Zone", "start_of_day" | "hours_in_day", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("LocalDate".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("ZonedDateTime", "start_of_day" | "hours_in_day" | "next_transition" | "previous_transition", 0) => {}
-//RS                 ("Instant", "equal" | "compare", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("Instant".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("Period", "add" | "sub", 1) => {
-//RS                     self.expect_core_arg(
-//RS                         method,
-//RS                         0,
-//RS                         &Type::Named("Period".to_string()),
-//RS                         &mut args[0],
-//RS                     );
-//RS                 }
-//RS                 ("Period", "total_in", 2) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                     let anchor_ty = crate::AST::canonicalize_union(vec![
-//RS                         Type::Named("Date".to_string()),
-//RS                         Type::Named("LocalDate".to_string()),
-//RS                         Type::Named("DateTime".to_string()),
-//RS                     ]);
-//RS                     self.expect_core_arg(method, 1, &anchor_ty, &mut args[1]);
-//RS                 }
-//RS                 ("Duration", "round", argc) if (1..=3).contains(&argc) => {
-//RS                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                     if argc > 1 {
-//RS                         self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
-//RS                     }
-//RS                     if argc > 2 {
-//RS                         self.expect_core_arg(method, 2, &Type::String, &mut args[2]);
-//RS                     }
-//RS                 }
-//RS                 _ => {
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             *recv_type_out = Some(match &recv_ty {
-//RS                 Type::Named(n) => n.clone(),
-//RS                 _ => "Date".to_string(),
-//RS             });
-//RS             return ret;
-//RS         }
-//RS         // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): method calls on
-//RS         // Arena/Bump/Pool/Fixed allocators. Reset invalidates live views;
-//RS         // universal `close(^allocator)` owns terminal release.
-//RS         if let Type::Named(handle_ty) = &recv_ty {
-//RS             let handle_ty_s = handle_ty.clone();
-//RS             if handle_ty_s == "Fixed" && matches!(method, "new" | "over") {
-//RS                 *recv_type_out = Some(handle_ty_s.clone());
-//RS                 *resolved_ret_out = Some(Type::Named(handle_ty_s.clone()));
-//RS                 if !self.allow_fixed_constructor {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0103",
-//RS                             format!("`Fixed.{method}` must directly initialize a lexical binding"),
-//RS                             "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration".to_string(),
-//RS                             format!("write `fixed :: mem.Fixed.{method}(…)`"),
-//RS                             Some(span),
-//RS                         ));
-//RS                 }
-//RS                 if args.len() != 1 {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0103",
-//RS                             format!("`Fixed.{method}` takes exactly one argument"),
-//RS                             if method == "new" {
-//RS                                 "the inline backing size must be a positive compile-time integer".to_string()
-//RS                             } else {
-//RS                                 "the backing must be one mutable fixed-size byte array".to_string()
-//RS                             },
-//RS                             if method == "new" {
-//RS                                 "write `fixed :: mem.Fixed.new(size: 4096)`".to_string()
-//RS                             } else {
-//RS                                 "write `fixed :: mem.Fixed.over(&bytes)` with the write-access marker `&`".to_string()
-//RS                             },
-//RS                             Some(span),
-//RS                         ));
-//RS                     for arg in args.iter_mut() {
-//RS                         self.infer(&mut arg.expr);
-//RS                     }
-//RS                     return Some(Type::Named(handle_ty_s));
-//RS                 }
-//RS                 let inferred = self.infer(&mut args[0].expr);
-//RS                 if method == "new" {
-//RS                     let direct_size = match &args[0].expr {
-//RS                         Expr::Int(value, _, _, _) => Some(*value),
-//RS                         Expr::ComptimeName {
-//RS                             value: Some(CtValue::Int(value)),
-//RS                             ..
-//RS                         } => Some(*value),
-//RS                         Expr::Ident(name, _) => match self.current_ct_globals().get(name) {
-//RS                             Some(CtValue::Int(value)) => Some(*value),
-//RS                             _ => None,
-//RS                         },
-//RS                         _ => None,
-//RS                     };
-//RS                     if !self.defer_ct_evaluation {
-//RS                         let size = direct_size.or_else(|| {
-//RS                             let evaluated = {
-//RS                                 let globals = self.current_ct_globals();
-//RS                                 crate::Comptime::evaluate_owned_with_imports_opts_collecting(
-//RS                                     &args[0].expr,
-//RS                                     self.ct_checked_funcs_for_evaluation(),
-//RS                                     self.ct_externs,
-//RS                                     self.ct_base_dir,
-//RS                                     globals.as_ref(),
-//RS                                     self.core_imports,
-//RS                                     self.gates,
-//RS                                     0,
-//RS                                     None,
-//RS                                 )
-//RS                             };
-//RS                             match evaluated {
-//RS                                 Ok((CtValue::Int(value), inputs)) => {
-//RS                                     self.ct_embed_inputs.extend(inputs);
-//RS                                     Some(value)
-//RS                                 }
-//RS                                 _ => None,
-//RS                             }
-//RS                         });
-//RS                         if let Some(size) = size.filter(|size| *size > 0) {
-//RS                             let arg_span = args[0].expr.span();
-//RS                             args[0].expr = Expr::Int(size, arg_span, None, None);
-//RS                         } else {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                     "E0103",
-//RS                                     "`Fixed.new` needs a positive compile-time byte size".to_string(),
-//RS                                     "runtime-sized storage cannot become an inline fixed array in the current stack frame".to_string(),
-//RS                                     "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`".to_string(),
-//RS                                     Some(args[0].expr.span()),
-//RS                                 ));
-//RS                         }
-//RS                     }
-//RS                 } else {
-//RS                     let fixed_bytes = matches!(
-//RS                         inferred,
-//RS                         Some(Type::FixedList { elem, len, .. })
-//RS                             if len.literal_value().is_some_and(|len| len > 0)
-//RS                                 && matches!(*elem, Type::IntN { signed: false, bits: 8 })
-//RS                     );
-//RS                     let direct_mutable_buffer = args[0].convention == AccessConvention::Write
-//RS                         && matches!(&args[0].expr, Expr::Ident(..));
-//RS                     if !fixed_bytes || !direct_mutable_buffer {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                                 "E0103",
-//RS                                 "`Fixed.over` needs one mutable fixed-size byte buffer".to_string(),
-//RS                                 "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed".to_string(),
-//RS                                 "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-access marker `&`".to_string(),
-//RS                                 Some(args[0].expr.span()),
-//RS                             ));
-//RS                     }
-//RS                 }
-//RS                 return Some(Type::Named(handle_ty_s));
-//RS             }
-//RS             if let Some(ret) =
-//RS                 alloc_method_return(&handle_ty_s, method, args, span, &mut self.diags)
-//RS             {
-//RS                 let recv_name = if let Expr::Ident(n, _) = &**receiver {
-//RS                     Some(n.clone())
-//RS                 } else {
-//RS                     None
-//RS                 };
-//RS                 // D-ALLOC2: `reset` invalidates every value previously
-//RS                 // allocated in this arena. Any view of it used afterward is
-//RS                 // E0632 (use-after-reset) — the runtime `&mut self`
-//RS                 // signatures would also reject, so Jet rejects first (I2).
-//RS                 if method == "reset" {
-//RS                     if let Some(ref name) = recv_name {
-//RS                         if handle_ty_s == "Fixed" {
-//RS                             self.check_owner_change(name, "be reset", span);
-//RS                         }
-//RS                         self.kill_views_of_arena(name, method, span);
-//RS                     }
-//RS                 }
-//RS                 *recv_type_out = Some(handle_ty_s.clone());
-//RS                 // For allocator value methods, infer the payload once. The
-//RS                 // fallible spelling keeps the same payload inside one
-//RS                 // `T !AllocError` carrier.
-//RS                 if matches!(method, "alloc" | "try_alloc") {
-//RS                     if let Some(arg) = args.get_mut(0) {
-//RS                         let inferred = self.infer(&mut arg.expr);
-//RS                         let resolved = if method == "try_alloc" {
-//RS                             Some(result_ty(
-//RS                                 Type::allocator_view(inferred.clone().unwrap_or(Type::Int)),
-//RS                                 Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string()),
-//RS                             ))
-//RS                         } else {
-//RS                             inferred
-//RS                         };
-//RS                         *resolved_ret_out = resolved.clone();
-//RS                         return resolved;
-//RS                     }
-//RS                     return None;
-//RS                 }
-//RS                 for a in args.iter_mut() {
-//RS                     self.infer(&mut a.expr);
-//RS                 }
-//RS                 *resolved_ret_out = ret.clone();
-//RS                 return ret;
-//RS             }
-//RS         }
-//RS         // D-ARGS1: method calls on ArgsSpec / ParsedArgs (builder and result types).
-//RS         if let Type::Named(handle_ty) = &recv_ty {
-//RS             if handle_ty == "ArgsSpec" {
-//RS                 if let Some(ret) =
-//RS                     args_spec_method_return(method, args.len(), span, &mut self.diags)
-//RS                 {
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     *recv_type_out = Some("ArgsSpec".to_string());
-//RS                     *resolved_ret_out = ret.clone();
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             if handle_ty == "ParsedArgs" {
-//RS                 if let Some(ret) =
-//RS                     parsed_args_method_return(method, args.len(), span, &mut self.diags)
-//RS                 {
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     *recv_type_out = Some("ParsedArgs".to_string());
-//RS                     *resolved_ret_out = ret.clone();
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             // D-FOUND-REALTIME1=A: callback streams own a typed, bounded
-//RS             // lifecycle surface; receipt/deadline reads do not block.
-//RS             if handle_ty == "RealtimeStream" {
-//RS                 if let Some(ret) = crate::Sema::realtime_stream_method_return(method, args.len()) {
-//RS                     for arg in args.iter_mut() {
-//RS                         self.infer(&mut arg.expr);
-//RS                     }
-//RS                     *recv_type_out = Some(handle_ty.clone());
-//RS                     *resolved_ret_out = ret.clone();
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             if handle_ty == "ProcessSpec" {
-//RS                 if let Some(ret) =
-//RS                     process_spec_method_return(method, args.len(), span, &mut self.diags)
-//RS                 {
-//RS                     if matches!(method, "run" | "spawn") {
-//RS                         self.record_effect(Effect::Exec.name(), span);
-//RS                     }
-//RS                     let stream_mode_ty = Type::Named("ProcessStreamMode".to_string());
-//RS                     match method {
-//RS                         "cwd" | "env_remove" | "arg" if args.len() == 1 => {
-//RS                             self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                         }
-//RS                         "args_extend" if args.len() == 1 => {
-//RS                             self.expect_core_arg(
-//RS                                 method,
-//RS                                 0,
-//RS                                 &Type::List(Box::new(Type::String)),
-//RS                                 &mut args[0],
-//RS                             );
-//RS                         }
-//RS                         "stdin" | "stdout" | "stderr" if args.len() == 1 => {
-//RS                             self.expect_core_arg(method, 0, &stream_mode_ty, &mut args[0]);
-//RS                         }
-//RS                         "env" if args.len() == 2 => {
-//RS                             self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                             self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
-//RS                         }
-//RS                         "timeout" if args.len() == 1 => {
-//RS                             self.expect_core_arg(
-//RS                                 method,
-//RS                                 0,
-//RS                                 &Type::Named("Duration".to_string()),
-//RS                                 &mut args[0],
-//RS                             );
-//RS                         }
-//RS                         "cpu_time_limit" if args.len() == 1 => {
-//RS                             self.expect_core_arg(
-//RS                                 method,
-//RS                                 0,
-//RS                                 &Type::Named("Duration".to_string()),
-//RS                                 &mut args[0],
-//RS                             );
-//RS                         }
-//RS                         "output_limit" if args.len() == 1 => {
-//RS                             self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
-//RS                         }
-//RS                         "memory_limit" | "open_file_limit" if args.len() == 1 => {
-//RS                             self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
-//RS                         }
-//RS                         "terminal" if args.len() == 1 => {
-//RS                             self.expect_core_arg(
-//RS                                 method,
-//RS                                 0,
-//RS                                 &Type::Named(Syntax::TYPE_TERMINAL_POLICY.to_string()),
-//RS                                 &mut args[0],
-//RS                             );
-//RS                         }
-//RS                         "under" if args.len() == 1 => {
-//RS                             self.expect_core_arg(
-//RS                                 method,
-//RS                                 0,
-//RS                                 &Type::Named(Syntax::TYPE_AUTHORITY.to_string()),
-//RS                                 &mut args[0],
-//RS                             );
-//RS                         }
-//RS                         _ => {
-//RS                             for a in args.iter_mut() {
-//RS                                 self.infer(&mut a.expr);
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     *recv_type_out = Some("ProcessSpec".to_string());
-//RS                     if method == "abilities" {
-//RS                         *resolved_ret_out = ret.clone();
-//RS                     }
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             if handle_ty == "ProcessChild" {
-//RS                 if let Some(ret) =
-//RS                     process_child_method_return(method, args.len(), span, &mut self.diags)
-//RS                 {
-//RS                     if method != "id" {
-//RS                         self.record_effect(Effect::Exec.name(), span);
-//RS                     }
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     *recv_type_out = Some("ProcessChild".to_string());
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             if handle_ty == Syntax::TYPE_TERMINAL_SESSION {
-//RS                 if let Some(ret) =
-//RS                     terminal_session_method_return(method, args.len(), span, &mut self.diags)
-//RS                 {
-//RS                     self.record_effect(Effect::Exec.name(), span);
-//RS                     if method == "resize" && args.len() == 1 {
-//RS                         self.expect_core_arg(
-//RS                             method,
-//RS                             0,
-//RS                             &Type::Named(Syntax::TYPE_TERMINAL_SIZE.to_string()),
-//RS                             &mut args[0],
-//RS                         );
-//RS                     } else {
-//RS                         for arg in args.iter_mut() {
-//RS                             self.infer(&mut arg.expr);
-//RS                         }
-//RS                     }
-//RS                     *recv_type_out = Some(Syntax::TYPE_TERMINAL_SESSION.to_string());
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             // D-PROCESS1=A / D-FOUND-LIFECYCLE1=A: `.write(text)`/`.close()` on the
-//RS             // `child.stdin` writer handle.
-//RS             if handle_ty == "ProcessStdin" {
-//RS                 if let Some(ret) =
-//RS                     process_stdin_method_return(method, args.len(), span, &mut self.diags)
-//RS                 {
-//RS                     self.record_effect(Effect::Exec.name(), span);
-//RS                     if method == "write" && args.len() == 1 {
-//RS                         self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-//RS                     } else {
-//RS                         for a in args.iter_mut() {
-//RS                             self.infer(&mut a.expr);
-//RS                         }
-//RS                     }
-//RS                     *recv_type_out = Some("ProcessStdin".to_string());
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             // D-PROCESS1=A: `.lines()` on `child.stdout`/`child.stderr` streaming
-//RS             // reader handles (loop-source-only — E2502 in bindings.rs).
-//RS             if handle_ty == "ProcessStdoutStream" || handle_ty == "ProcessStderrStream" {
-//RS                 if let Some(ret) =
-//RS                     process_stream_method_return(method, args.len(), span, &mut self.diags)
-//RS                 {
-//RS                     self.record_effect(Effect::Exec.name(), span);
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     *recv_type_out = Some(handle_ty.clone());
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             // D-RENDERTGT2=A (c133 M1/M2): UI backend measure/layout/paint/on_event.
-//RS             if handle_ty == "NullBackend" || handle_ty == "TUIBackend" || handle_ty == "GtkBackend"
-//RS             {
-//RS                 if let Some(ret) =
-//RS                     ui_backend_method_return(handle_ty, method, args.len(), span, &mut self.diags)
-//RS                 {
-//RS                     // D-A11YGATE1=B (c134 Phase 6, E2931): duplicate accessible
-//RS                     // labels among an inline focus group's interactive nodes.
-//RS                     if method == "set_focus_group" {
-//RS                         self.check_a11y_focus_group_duplicates(args, span);
-//RS                     }
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     *recv_type_out = Some(handle_ty.to_string());
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             // c-devserver (owner-directed 2026-07-01): DevServer builder
-//RS             // methods (.html/.port/.serve).
-//RS             if handle_ty == "DevServer" {
-//RS                 if let Some(ret) =
-//RS                     devserver_method_return(method, args.len(), span, &mut self.diags)
-//RS                 {
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     *recv_type_out = Some("DevServer".to_string());
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             // D-WEBAPP1=D: App builder chain (.route/.action/.mount/…).
-//RS             if handle_ty == "App" {
-//RS                 if matches!(method, "route" | "page" | "layout") {
-//RS                     self.check_http_route_constant("App", method, args);
-//RS                 }
-//RS                 if let Some(ret) = app_method_return(method, args.len(), span, &mut self.diags) {
-//RS                     for a in args.iter_mut() {
-//RS                         self.infer(&mut a.expr);
-//RS                     }
-//RS                     *recv_type_out = Some("App".to_string());
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS         }
-//RS         // D-DET1: methods on the deterministic injected Clock/Rng capability (and
-//RS         // Stopwatch). Reading time/randomness THROUGH the handle is reproducible.
-//RS         // Set `recv_type_out` so codegen routes the call to the handle-method op
-//RS         // (TIR shape (h)) rather than failing the typed-IR subset check.
-//RS         let handle_receiver = match &recv_ty {
-//RS             Type::Tagged {
-//RS                 marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::SystemClock),
-//RS                 inner,
-//RS             } => inner.as_ref(),
-//RS             other => other,
-//RS         };
-//RS         if let Type::Named(handle_ty) = handle_receiver {
-//RS             // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried
-//RS             // Authority value is ordinary data. Its only instance family is
-//RS             // the Prelude `with`/`without` narrowing pair.
-//RS             if handle_ty == crate::Syntax::TYPE_AUTHORITY {
-//RS                 if let Some(ret) =
-//RS                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     let handle_ty = handle_ty.clone();
-//RS                     let result =
-//RS                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                     *recv_type_out = Some(handle_ty);
-//RS                     *resolved_ret_out = result.clone();
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS             // D-DET-CAPAPI: `rng.pick(list)` / `rng.shuffle(&list)` are GENERIC — the
-//RS             // element type comes from the `[T]` arg, mirroring the ambient
-//RS             // `random.pick`/`random.shuffle`. Resolve element-aware here (the
-//RS             // `builtin_method_return` table only carries Int placeholders).
-//RS             if handle_ty == crate::Syntax::RNG_TYPE
-//RS                 && matches!(method, "pick" | "weighted_pick" | "sample" | "shuffle")
-//RS             {
-//RS                 let handle_ty = handle_ty.clone();
-//RS                 let result = self.finish_rng_generic(receiver, method, args, span);
-//RS                 *recv_type_out = Some(handle_ty);
-//RS                 *resolved_ret_out = result.clone();
-//RS                 return result;
-//RS             }
-//RS             if matches!(
-//RS                 handle_ty.as_str(),
-//RS                 "Clock"
-//RS                     | "RNG"
-//RS                     | crate::Syntax::DETERMINISTIC_WORLD_TYPE
-//RS                     | "Fake"
-//RS                     | "Duration"
-//RS                     | "Solver"
-//RS                     | "TestSuite"
-//RS             ) {
-//RS                 if let Some(ret) =
-//RS                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     let handle_ty = handle_ty.clone();
-//RS                     let result =
-//RS                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                     *recv_type_out = Some(handle_ty);
-//RS                     *resolved_ret_out = result.clone();
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS         }
-//RS         // D-REACT1=B: methods on the reactive handle types `Signal<T>`/`Derived<T>`
-//RS         // (`.get()`, `.set(v)`). Set `recv_type_out` to the handle name so codegen
-//RS         // routes the call to the reactive-method shape (keyed on recv_type, not the
-//RS         // bare method name — `get`/0 would otherwise alias a list `get`).
-//RS         if let Type::Apply { name, .. } = &recv_ty {
-//RS             if matches!(name.as_str(), "Signal" | "Derived" | "Computed") {
-//RS                 if let Some(ret) =
-//RS                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     let handle_ty = name.clone();
-//RS                     let result =
-//RS                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                     *recv_type_out = Some(handle_ty);
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS         }
-//RS         // D-FFI-CALLBACK2=A: event.stop() closes admission without waiting.
-//RS         // The receiver is represented by a TLS event slot in the runtime
-//RS         // route, so lowering emits a zero-argument native helper.
-//RS         if let Type::Apply { name, .. } = &recv_ty {
-//RS             if name == "FfiCallbackEvent" && method == "stop" && args.is_empty() {
-//RS                 *recv_type_out = Some(name.clone());
-//RS                 return Some(Type::Tuple(vec![]));
-//RS             }
-//RS         }
-//RS         // D-EVENT1=D: methods on compiler-known Event<T>/Hook<T,R> values.
-//RS         // Set `recv_type_out` so TIR lowers these to the event runtime method
-//RS         // shape instead of the generic collection builtin fallback.
-//RS         if let Type::Apply { name, .. } = &recv_ty {
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 crate::Syntax::TYPE_EVENT
-//RS                     | crate::Syntax::TYPE_ASYNC_EVENT
-//RS                     | crate::Syntax::TYPE_HOOK
-//RS                     | crate::Syntax::TYPE_DECISION_HOOK
-//RS                     | crate::Syntax::TYPE_DISPATCH_REPORT
-//RS             ) {
-//RS                 if let Some(ret) =
-//RS                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     let handle_ty = name.clone();
-//RS                     let result =
-//RS                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                     *recv_type_out = Some(handle_ty);
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Type::Named(name) = &recv_ty {
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 crate::Syntax::TYPE_EFFECT
-//RS                     | crate::Syntax::TYPE_SUBSCRIPTION
-//RS                     | crate::Syntax::TYPE_EVENT_SCOPE
-//RS                     | crate::Syntax::TYPE_EVENT_TRACE
-//RS             ) {
-//RS                 if let Some(ret) =
-//RS                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     let handle_ty = name.clone();
-//RS                     let result =
-//RS                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                     *recv_type_out = Some(handle_ty);
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Type::Named(name) = &recv_ty {
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 crate::Syntax::TYPE_WATCH_HANDLE | crate::Syntax::TYPE_WATCH_SET
-//RS             ) {
-//RS                 if let Some(ret) =
-//RS                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     let handle_ty = name.clone();
-//RS                     let result =
-//RS                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                     *recv_type_out = Some(handle_ty);
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS         }
-//RS         // D-TYPE2-UNCERT1=A: a Measurement exposes its two observations.
-//RS         // Arithmetic is the ordinary operator surface; the old named
-//RS         // add/sub/mul/div methods are not a second spelling.
-//RS         if let Type::Apply { name, .. } = &recv_ty {
-//RS             if name == crate::Syntax::TYPE_MEASUREMENT
-//RS                 && matches!((method, args.len()), ("value" | "uncertainty", 0))
-//RS             {
-//RS                 *recv_type_out = Some(crate::Syntax::TYPE_MEASUREMENT.to_string());
-//RS                 return Some(Type::Float);
-//RS             }
-//RS         }
-//RS         // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids`
-//RS         // and `Shared<T>.read/edit` set `recv_type_out` explicitly (unlike Task/
-//RS         // Sender/Receiver, whose method NAMES alone are globally unambiguous —
-//RS         // `add`/`remove`/`ids`/`read`/`edit` collide with Set/List/Map method
-//RS         // names, so codegen's subset gate needs `recv_type` to disambiguate the
-//RS         // receiver, the same reason Signal/Derived/Measurement set it above).
-//RS         // The actual dispatch (`finish_pool_add` etc.) already lives in
-//RS         // `finish_builtin_method`, reached the same way Signal/Derived reach it.
-//RS         if let Type::Apply { name, .. } = &recv_ty {
-//RS             if name == crate::Syntax::EXPIRING_VALUE_TYPE {
-//RS                 if method == "force" {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                             "E0511",
-//RS                             "`ExpiringValue.force` bypasses expiry checking".to_string(),
-//RS                             "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly".to_string(),
-//RS                             "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
-//RS                             Some(span),
-//RS                         ));
-//RS                 }
-//RS                 if let Some(ret) = expiring_method_return(&recv_ty, method, args.len()) {
-//RS                     if method == "get" && args.len() == 1 {
-//RS                         self.expect_core_arg(
-//RS                             "get",
-//RS                             0,
-//RS                             &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
-//RS                             &mut args[0],
-//RS                         );
-//RS                     }
-//RS                     *recv_type_out = Some(crate::Syntax::EXPIRING_VALUE_TYPE.to_string());
-//RS                     return ret;
-//RS                 }
-//RS             }
-//RS             if name == "ExpiringSecret" && method == "with" {
-//RS                 if !expiring_clock_is_deterministic {
-//RS                     self.record_effect(Effect::Time.name(), span);
-//RS                     if self.in_pure && self.det_suppress == 0 {
-//RS                         self.diags
-//RS                             .push(crate::Sema::e3403("ExpiringSecret.with", Some(span)));
-//RS                     }
-//RS                 }
-//RS                 let inner = match &recv_ty {
-//RS                     Type::Apply { args, .. } => args.first().cloned().unwrap_or(Type::Int),
-//RS                     _ => unreachable!(),
-//RS                 };
-//RS                 let result = self.finish_expiring_secret_with(&inner, args, span);
-//RS                 *recv_type_out = Some("ExpiringSecret".to_string());
-//RS                 return result.map(|ok| Type::Result {
-//RS                     ok: Box::new(ok),
-//RS                     err: Box::new(Type::Named("Expired".to_string())),
-//RS                 });
-//RS             }
-//RS             if name == "Pool" {
-//RS                 if let Some(ret) =
-//RS                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     let result =
-//RS                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                     *recv_type_out = Some("Pool".to_string());
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS             if matches!(name.as_str(), "Cell" | "CellReadGuard" | "CellEditGuard") {
-//RS                 if let Some(ret) =
-//RS                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     let result =
-//RS                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                     // Cell methods refine the builtin table's placeholder
-//RS                     // return from the checked receiver and callback types.
-//RS                     // Persist that exact fact for every later tier.
-//RS                     *resolved_ret_out = result.clone();
-//RS                     *recv_type_out = Some(name.clone());
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Type::Shared(_) = &recv_ty {
-//RS             if let Some(ret) =
-//RS                 Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS             {
-//RS                 let result =
-//RS                     self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                 *recv_type_out = Some("Shared".to_string());
-//RS                 // D-STM1=A (card #506): a `Shared.edit` on the direct path of a
-//RS                 // `#Transact` block joins the block's atomic commit — the write is
-//RS                 // DEFERRED, so the call yields nothing (Unit), matching codegen's
-//RS                 // `edit_txn(…) -> ()`. Consuming it (`x :: h.edit(…)`) then fails as an
-//RS                 // ordinary type error against Unit. `txn_depth` is 0 inside a nested
-//RS                 // lambda (an `on_commit` hook / a spawned task), where the edit stays
-//RS                 // immediate and keeps its normal return — so this narrows exactly to
-//RS                 // the edits the STM plane actually defers (the codegen routes the same
-//RS                 // set, resetting `in_stm_transact` for lambda bodies).
-//RS                 if method == "edit" && self.txn_depth > 0 {
-//RS                     let deferred = Type::Tuple(vec![]);
-//RS                     *resolved_ret_out = Some(deferred.clone());
-//RS                     return Some(deferred);
-//RS                 }
-//RS                 // D-CONC-SHARE1=A: `read`/`edit` answer whatever the closure
-//RS                 // answers — for the plain-access desugar that is ONE FIELD of
-//RS                 // the payload, not the payload. `shared_method_return`'s row is
-//RS                 // a placeholder that says `T`, so persist the checked type the
-//RS                 // way the Cell branch above does; otherwise every later tier
-//RS                 // re-derives the placeholder and a chained call off the read
-//RS                 // (`queue.jobs.first()`) dispatches against `T` and loses its
-//RS                 // own result type.
-//RS                 *resolved_ret_out = result.clone();
-//RS                 return result;
-//RS             }
-//RS         }
-//RS         if let Type::Apply { name, .. } = &recv_ty {
-//RS             if name == crate::Syntax::TYPE_SHARED_SNAPSHOT {
-//RS                 if let Some(ret) =
-//RS                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     let result =
-//RS                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                     *recv_type_out = Some(crate::Syntax::TYPE_SHARED_SNAPSHOT.to_string());
-//RS                     *resolved_ret_out = result.clone();
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Type::Apply { name, .. } = &recv_ty {
-//RS             if name == crate::Syntax::TYPE_SHARED_WEAK {
-//RS                 if let Some(ret) =
-//RS                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     let result =
-//RS                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-//RS                     *recv_type_out = Some(crate::Syntax::TYPE_SHARED_WEAK.to_string());
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS         }
-//RS         let shared_guard_ty = match &recv_ty {
-//RS             Type::Tagged { marker, inner }
-//RS                 if matches!(
-//RS                     marker,
-//RS                     crate::AST::TagMarker::Internal(
-//RS                         crate::AST::InternalTag::SharedGuardRead
-//RS                             | crate::AST::InternalTag::SharedGuardEdit
-//RS                     )
-//RS                 ) && matches!(
-//RS                     inner.as_ref(),
-//RS                     Type::Apply { name, .. }
-//RS                         if name == crate::Syntax::TYPE_SHARED_GUARD
-//RS                 ) =>
-//RS             {
-//RS                 Some(recv_ty.clone())
-//RS             }
-//RS             Type::Apply { name, .. } if name == crate::Syntax::TYPE_SHARED_GUARD => {
-//RS                 let editable = match &**receiver {
-//RS                     Expr::Ident(name, _) => self
-//RS                         .lookup(name)
-//RS                         .is_some_and(|info| info.param_conv == Some(AccessConvention::Write)),
-//RS                     _ => false,
-//RS                 };
-//RS                 Some(Type::Tagged {
-//RS                     marker: crate::AST::TagMarker::Internal(if editable {
-//RS                         crate::AST::InternalTag::SharedGuardEdit
-//RS                     } else {
-//RS                         crate::AST::InternalTag::SharedGuardRead
-//RS                     }),
-//RS                     inner: Box::new(recv_ty.clone()),
-//RS 
-//RS                 })
-//RS             }
-// END-PORT-PENDING 0405 crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5478-6581
+use jet_foundation.[Type, Expr, CallArg, Span, Diagnostic, AccessConvention, CtValue, TagMarker, InternalTag, canonicalize_union]
+use jet_sema.[Checker, regex_method_return, civil_time_method_contract, civil_time_method_return, alloc_method_return, args_spec_method_return, parsed_args_method_return, realtime_stream_method_return, process_spec_method_return, process_child_method_return, terminal_session_method_return, process_stdin_method_return, process_stream_method_return, ui_backend_method_return, devserver_method_return, app_method_return, expiring_method_return, result_ty, e3403]
+use jet_syntax as Syntax
+use jet_sema.Collections
+use jet_sema.CallBinder
+use jet_comptime.[evaluate_owned_with_imports_opts_collecting]
 
+// Private continuation of the SAME infer_method_call. Outer None means this
+// slice did not return; Val(None) is a handled method with no return type.
+// Parent routes this continuation after the email arm, and passes shared_guard_ty
+// to its next continuation at Rust :6582. No receiver reinference or checker copy.
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5478
+fn infer_method_call_5478(self: &Checker, receiver: &Expr, recv_ty: Type, method: String, args: &[CallArg], span: Span, recv_type_out: &String?, resolved_ret_out: &Type?, shared_guard_ty: &Type?, expiring_clock_is_deterministic: Bool) -> Type?? {
+    recv_name :: if recv_ty == {.Named(name) -> name else -> ""}
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5482
+    if regex_method_return(recv_ty, method, args) == .Val(ret) {
+        if (recv_name, method, args.len()) == {
+            ("Regex", "count" | "is_match" | "full_match" | "match" | "find" | "find_all" | "matches" | "split", 1) -> self.expect_core_arg(method, 0, Type.String, &args[0])
+            ("Regex", "replace" | "replace_first", 2) -> {
+                self.expect_core_arg(method, 0, Type.String, &args[0])
+                self.expect_core_arg(method, 1, Type.String, &args[1])
+            }
+            ("Regex", "split_limit", 2) -> {
+                self.expect_core_arg(method, 0, Type.String, &args[0])
+                self.expect_core_arg(method, 1, Type.Int, &args[1])
+            }
+            ("Regex", "replace_all_with", 2) -> {
+                self.expect_core_arg(method, 0, Type.String, &args[0])
+                cb :: Type.Fn{params: [Type.Named{name: "Match"}], ret: Val(Type.String), effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None}
+                self.expect_core_arg(method, 1, cb, &args[1])
+            }
+            ("Match", "group" | "group_start" | "group_end", 1) -> self.expect_core_arg(method, 0, Type.Int, &args[0])
+            ("Match", "name", 1) -> self.expect_core_arg(method, 0, Type.String, &args[0])
+            else -> { loop arg in &args -> _ :: self.infer(&arg.expr) }
+        }
+        recv_type_out = Val(if recv_ty == {.Named(name) -> name else -> "Regex"})
+        resolved_ret_out = ret
+        return Val(ret)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5536
+    civil_recv_name :: if recv_ty == {.Named(name) -> Val(name) else -> None}
+    if civil_recv_name == .Val(name) {
+        if civil_time_method_contract(name, method) == .Val(contract) {
+            params := [CallBinder.BindParam]{}
+            loop param in contract {
+                &params.push(CallBinder.BindParam{label: param.label, name: param.label, zone: param.zone, default: None, convention: AccessConvention.Read, ty: None, variadic: false, core_default: param.default})
+            }
+            if CallBinder.bind_call_args(method, params, &args, span, &self.diags) == None {
+                loop arg in &args -> _ :: self.infer(&arg.expr)
+                recv_type_out = civil_recv_name
+                return Val(None)
+            }
+            self.register_binder_refs(args)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5567
+    if civil_time_method_return(recv_ty, method, args) == .Val(ret) {
+        self.check_civil_method_arguments(recv_name, method, &args)
+        recv_type_out = Val(if recv_ty == {.Named(name) -> name else -> "Date"})
+        return Val(ret)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5876
+    if recv_ty == .Named(handle_ty) {
+        if handle_ty == "Fixed" && (method == "new" || method == "over") {
+            recv_type_out = Val(handle_ty)
+            resolved_ret_out = Val(Type.Named{name: handle_ty})
+            if !self.allow_fixed_constructor -> self.diags.push(Diagnostic.error("E0103", "`Fixed.{method}` must directly initialize a lexical binding", "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration", "write `fixed :: mem.Fixed.{method}(…)`", Val(span)))
+            if args.len() != 1 {
+                why :: if method == "new" -> "the inline backing size must be a positive compile-time integer" else -> "the backing must be one mutable fixed-size byte array"
+                fix :: if method == "new" -> "write `fixed :: mem.Fixed.new(size: 4096)`" else -> "write `fixed :: mem.Fixed.over(&bytes)` with the write-access marker `&`"
+                self.diags.push(Diagnostic.error("E0103", "`Fixed.{method}` takes exactly one argument", why, fix, Val(span)))
+                loop arg in &args -> _ :: self.infer(&arg.expr)
+                return Val(Val(Type.Named{name: handle_ty}))
+            }
+            inferred :: self.infer(&args[0].expr)
+            if method == "new" {
+                direct_size :: if args[0].expr == {
+                    .Int(value, _, _, _) -> Val(value)
+                    .ComptimeName(_, _, .Val(.Int(value)), _) -> Val(value)
+                    .Ident(name, _) -> if self.current_ct_globals().get(name) == {.Val(.Int(value)) -> Val(value) else -> None}
+                    else -> None
+                }
+                if !self.defer_ct_evaluation {
+                    size := direct_size
+                    if size == None {
+                        globals :: self.current_ct_globals()
+                        evaluated :: evaluate_owned_with_imports_opts_collecting(args[0].expr, self.ct_checked_funcs_for_evaluation(), self.ct_externs, self.ct_base_dir, globals, self.core_imports, self.gates, 0, None)
+                        if evaluated == .Ok((.Int(value), inputs)) {
+                            self.ct_embed_inputs.extend(inputs)
+                            size = Val(value)
+                        }
+                    }
+                    if size == .Val(value) && value > 0 {
+                        arg_span :: args[0].expr.span()
+                        args[0].expr = Expr.Int(value, arg_span, None, None)
+                    } else {
+                        self.diags.push(Diagnostic.error("E0103", "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`", Val(args[0].expr.span())))
+                    }
+                }
+            } else {
+                fixed_bytes :: if inferred == {
+                    .Val(.FixedList(elem, len)) -> if len.literal_value() == .Val(value) -> value > 0 && elem == Type.IntN{signed: false, bits: 8} else -> false
+                    else -> false
+                }
+                direct_mutable_buffer :: args[0].convention == AccessConvention.Write && if args[0].expr == {.Ident(_, _) -> true else -> false}
+                if !fixed_bytes || !direct_mutable_buffer -> self.diags.push(Diagnostic.error("E0103", "`Fixed.over` needs one mutable fixed-size byte buffer", "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed", "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-access marker `&`", Val(args[0].expr.span())))
+            }
+            return Val(Val(Type.Named{name: handle_ty}))
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5983
+        if alloc_method_return(handle_ty, method, args, span, &self.diags) == .Val(ret) {
+            recv_name :: if receiver == {.Ident(name, _) -> Val(name) else -> None}
+            if method == "reset" && recv_name == .Val(name) {
+                if handle_ty == "Fixed" -> self.check_owner_change(name, "be reset", span)
+                self.kill_views_of_arena(name, method, span)
+            }
+            recv_type_out = Val(handle_ty)
+            if method == "alloc" || method == "try_alloc" {
+                if args.len() > 0 {
+                    inferred :: self.infer(&args[0].expr)
+                    resolved :: if method == "try_alloc" -> Val(result_ty(Type.allocator_view(inferred ?? Type.Int), Type.Named{name: Syntax.TYPE_ALLOC_ERROR})) else -> inferred
+                    resolved_ret_out = resolved
+                    return Val(resolved)
+                }
+                return Val(None)
+            }
+            loop arg in &args -> _ :: self.infer(&arg.expr)
+            resolved_ret_out = ret
+            return Val(ret)
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6031
+        if handle_ty == "ArgsSpec" {
+            if args_spec_method_return(method, args.len(), span, &self.diags) == .Val(ret) {
+                loop arg in &args -> _ :: self.infer(&arg.expr)
+                recv_type_out = Val("ArgsSpec")
+                resolved_ret_out = ret
+                return Val(ret)
+            }
+        }
+        if handle_ty == "ParsedArgs" {
+            if parsed_args_method_return(method, args.len(), span, &self.diags) == .Val(ret) {
+                loop arg in &args -> _ :: self.infer(&arg.expr)
+                recv_type_out = Val("ParsedArgs")
+                resolved_ret_out = ret
+                return Val(ret)
+            }
+        }
+        if handle_ty == "RealtimeStream" {
+            if realtime_stream_method_return(method, args.len()) == .Val(ret) {
+                loop arg in &args -> _ :: self.infer(&arg.expr)
+                recv_type_out = Val(handle_ty)
+                resolved_ret_out = ret
+                return Val(ret)
+            }
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6068
+        if handle_ty == "ProcessSpec" {
+            if process_spec_method_return(method, args.len(), span, &self.diags) == .Val(ret) {
+                if method == "run" || method == "spawn" -> self.record_effect("Exec", span)
+                if (method, args.len()) == {
+                    ("cwd" | "env_remove" | "arg", 1) -> self.expect_core_arg(method, 0, Type.String, &args[0])
+                    ("args_extend", 1) -> self.expect_core_arg(method, 0, Type.List{elem: Type.String}, &args[0])
+                    ("stdin" | "stdout" | "stderr", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "ProcessStreamMode"}, &args[0])
+                    ("env", 2) -> {
+                        self.expect_core_arg(method, 0, Type.String, &args[0])
+                        self.expect_core_arg(method, 1, Type.String, &args[1])
+                    }
+                    ("timeout" | "cpu_time_limit", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Duration"}, &args[0])
+                    ("output_limit" | "memory_limit" | "open_file_limit", 1) -> self.expect_core_arg(method, 0, Type.Int, &args[0])
+                    ("terminal", 1) -> self.expect_core_arg(method, 0, Type.Named{name: Syntax.TYPE_TERMINAL_POLICY}, &args[0])
+                    ("under", 1) -> self.expect_core_arg(method, 0, Type.Named{name: Syntax.TYPE_AUTHORITY}, &args[0])
+                    else -> { loop arg in &args -> _ :: self.infer(&arg.expr) }
+                }
+                recv_type_out = Val("ProcessSpec")
+                if method == "abilities" -> resolved_ret_out = ret
+                return Val(ret)
+            }
+        }
+        if handle_ty == "ProcessChild" {
+            if process_child_method_return(method, args.len(), span, &self.diags) == .Val(ret) {
+                if method != "id" -> self.record_effect("Exec", span)
+                loop arg in &args -> _ :: self.infer(&arg.expr)
+                recv_type_out = Val("ProcessChild")
+                return Val(ret)
+            }
+        }
+        if handle_ty == Syntax.TYPE_TERMINAL_SESSION {
+            if terminal_session_method_return(method, args.len(), span, &self.diags) == .Val(ret) {
+                self.record_effect("Exec", span)
+                if method == "resize" && args.len() == 1 {
+                    self.expect_core_arg(method, 0, Type.Named{name: Syntax.TYPE_TERMINAL_SIZE}, &args[0])
+                } else {
+                    loop arg in &args -> _ :: self.infer(&arg.expr)
+                }
+                recv_type_out = Val(Syntax.TYPE_TERMINAL_SESSION)
+                return Val(ret)
+            }
+        }
+        if handle_ty == "ProcessStdin" {
+            if process_stdin_method_return(method, args.len(), span, &self.diags) == .Val(ret) {
+                self.record_effect("Exec", span)
+                if method == "write" && args.len() == 1 {
+                    self.expect_core_arg(method, 0, Type.String, &args[0])
+                } else {
+                    loop arg in &args -> _ :: self.infer(&arg.expr)
+                }
+                recv_type_out = Val("ProcessStdin")
+                return Val(ret)
+            }
+        }
+        if handle_ty == "ProcessStdoutStream" || handle_ty == "ProcessStderrStream" {
+            if process_stream_method_return(method, args.len(), span, &self.diags) == .Val(ret) {
+                self.record_effect("Exec", span)
+                loop arg in &args -> _ :: self.infer(&arg.expr)
+                recv_type_out = Val(handle_ty)
+                return Val(ret)
+            }
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6214
+        if handle_ty == "NullBackend" || handle_ty == "TUIBackend" || handle_ty == "GtkBackend" {
+            if ui_backend_method_return(handle_ty, method, args.len(), span, &self.diags) == .Val(ret) {
+                if method == "set_focus_group" -> self.check_a11y_focus_group_duplicates(args, span)
+                loop arg in &args -> _ :: self.infer(&arg.expr)
+                recv_type_out = Val(handle_ty)
+                return Val(ret)
+            }
+        }
+        if handle_ty == "DevServer" {
+            if devserver_method_return(method, args.len(), span, &self.diags) == .Val(ret) {
+                loop arg in &args -> _ :: self.infer(&arg.expr)
+                recv_type_out = Val("DevServer")
+                return Val(ret)
+            }
+        }
+        if handle_ty == "App" {
+            if method == "route" || method == "page" || method == "layout" -> self.check_http_route_constant("App", method, args)
+            if app_method_return(method, args.len(), span, &self.diags) == .Val(ret) {
+                loop arg in &args -> _ :: self.infer(&arg.expr)
+                recv_type_out = Val("App")
+                return Val(ret)
+            }
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6262
+    handle_receiver :: if recv_ty == {.Tagged(.Internal(.SystemClock), inner) -> inner else -> recv_ty}
+    if handle_receiver == .Named(handle_ty) {
+        if handle_ty == Syntax.TYPE_AUTHORITY {
+            if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+                result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+                recv_type_out = Val(handle_ty)
+                resolved_ret_out = result
+                return Val(result)
+            }
+        }
+        if handle_ty == Syntax.RNG_TYPE && (method == "pick" || method == "weighted_pick" || method == "sample" || method == "shuffle") {
+            result :: self.finish_rng_generic(&receiver, method, &args, span)
+            recv_type_out = Val(handle_ty)
+            resolved_ret_out = result
+            return Val(result)
+        }
+        if handle_ty == "Clock" || handle_ty == "RNG" || handle_ty == Syntax.DETERMINISTIC_WORLD_TYPE || handle_ty == "Fake" || handle_ty == "Duration" || handle_ty == "Solver" || handle_ty == "TestSuite" {
+            if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+                result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+                recv_type_out = Val(handle_ty)
+                resolved_ret_out = result
+                return Val(result)
+            }
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6324
+    if recv_ty == .Apply(name, _) {
+        if name == "Signal" || name == "Derived" || name == "Computed" {
+            if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+                result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+                recv_type_out = Val(name)
+                return Val(result)
+            }
+        }
+        if name == "FfiCallbackEvent" && method == "stop" && args.len() == 0 {
+            recv_type_out = Val(name)
+            return Val(Val(Type.Tuple{fields: []}))
+        }
+        if name == Syntax.TYPE_EVENT || name == Syntax.TYPE_ASYNC_EVENT || name == Syntax.TYPE_HOOK || name == Syntax.TYPE_DECISION_HOOK || name == Syntax.TYPE_DISPATCH_REPORT {
+            if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+                result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+                recv_type_out = Val(name)
+                return Val(result)
+            }
+        }
+    }
+    if recv_ty == .Named(name) {
+        if name == Syntax.TYPE_EFFECT || name == Syntax.TYPE_SUBSCRIPTION || name == Syntax.TYPE_EVENT_SCOPE || name == Syntax.TYPE_EVENT_TRACE {
+            if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+                result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+                recv_type_out = Val(name)
+                return Val(result)
+            }
+        }
+        if name == Syntax.TYPE_WATCH_HANDLE || name == Syntax.TYPE_WATCH_SET {
+            if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+                result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+                recv_type_out = Val(name)
+                return Val(result)
+            }
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6407
+    if recv_ty == .Apply(name, _) {
+        if name == Syntax.TYPE_MEASUREMENT && (method == "value" || method == "uncertainty") && args.len() == 0 {
+            recv_type_out = Val(Syntax.TYPE_MEASUREMENT)
+            return Val(Val(Type.Float))
+        }
+        if name == Syntax.EXPIRING_VALUE_TYPE {
+            if method == "force" -> self.diags.push(Diagnostic.error("E0511", "`ExpiringValue.force` bypasses expiry checking", "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly", "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead", Val(span)))
+            if expiring_method_return(recv_ty, method, args.len()) == .Val(ret) {
+                if method == "get" && args.len() == 1 -> self.expect_core_arg("get", 0, Type.Named{name: Syntax.CLOCK_TYPE}, &args[0])
+                recv_type_out = Val(Syntax.EXPIRING_VALUE_TYPE)
+                return Val(ret)
+            }
+        }
+        if name == "ExpiringSecret" && method == "with" {
+            if !expiring_clock_is_deterministic {
+                self.record_effect("Time", span)
+                if self.in_pure && self.det_suppress == 0 -> self.diags.push(e3403("ExpiringSecret.with", Val(span)))
+            }
+            inner :: if recv_ty == {.Apply(_, type_args) -> type_args.get(0) ?? Type.Int else -> unreachable!()}
+            result :: self.finish_expiring_secret_with(inner, &args, span)
+            recv_type_out = Val("ExpiringSecret")
+            return Val(if result == .Val(ok) -> Val(Type.Result{ok: ok, err: Type.Named{name: "Expired"}}) else -> None)
+        }
+        if name == "Pool" {
+            if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+                result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+                recv_type_out = Val("Pool")
+                return Val(result)
+            }
+        }
+        if name == "Cell" || name == "CellReadGuard" || name == "CellEditGuard" {
+            if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+                result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+                resolved_ret_out = result
+                recv_type_out = Val(name)
+                return Val(result)
+            }
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6491
+    if recv_ty == .Shared(_) {
+        if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+            result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+            recv_type_out = Val("Shared")
+            if method == "edit" && self.txn_depth > 0 {
+                deferred :: Type.Tuple{fields: []}
+                resolved_ret_out = Val(deferred)
+                return Val(Val(deferred))
+            }
+            resolved_ret_out = result
+            return Val(result)
+        }
+    }
+    if recv_ty == .Apply(name, _) {
+        if name == Syntax.TYPE_SHARED_SNAPSHOT {
+            if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+                result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+                recv_type_out = Val(Syntax.TYPE_SHARED_SNAPSHOT)
+                resolved_ret_out = result
+                return Val(result)
+            }
+        }
+        if name == Syntax.TYPE_SHARED_WEAK {
+            if Collections.builtin_method_return(recv_ty, method, args.len(), false) == .Val(ret) {
+                result :: self.finish_builtin_method(&receiver, method, recv_ty, &args, span, ret)
+                recv_type_out = Val(Syntax.TYPE_SHARED_WEAK)
+                return Val(result)
+            }
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6549
+    shared_guard_ty = self.infer_method_shared_guard_type_6549(&receiver, recv_ty)
+    None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5572-5866
+fn check_civil_method_arguments(self: &Checker, recv_name: String, method: String, args: &[CallArg]) {
+    argc :: args.len()
+    if (recv_name, method, argc) == {
+        ("Date" | "LocalDate", "add_days" | "add_months", 1) -> self.expect_core_arg(method, 0, Type.Int, &args[0])
+        ("Date" | "LocalDate", "diff_days" | "equal" | "compare", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "LocalDate"}, &args[0])
+        ("Date" | "LocalDate", "add_period" | "subtract_period", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Period"}, &args[0])
+        ("Date" | "LocalDate", "truncate" | "format" | "format_checked", 1) -> self.expect_core_arg(method, 0, Type.String, &args[0])
+        ("Date" | "LocalDate", "replace", 3) -> { loop i in 0..3 -> self.expect_core_arg(method, i, Type.Int, &args[i]) }
+        ("Date" | "LocalDate", "with", n) -> {
+            if n == 3 || n == 4 {
+                loop i in 0..3 -> self.expect_core_arg(method, i, Type.Int, &args[i])
+                if n == 4 -> self.expect_core_arg(method, 3, Type.String, &args[3])
+            } else { loop arg in &args -> _ :: self.infer(&arg.expr) }
+        }
+        ("Date" | "LocalDate", "until" | "since", _) -> {
+            self.expect_core_arg(method, 0, Type.Named{name: "LocalDate"}, &args[0])
+            loop i in 1..argc.min(4) -> self.expect_core_arg(method, i, Type.String, &args[i])
+            if argc > 4 -> self.expect_core_arg(method, 4, Type.Int, &args[4])
+        }
+        ("DateTime", "plus_duration" | "subtract_duration", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Duration"}, &args[0])
+        ("DateTime", "add_nanoseconds", 1) -> self.expect_core_arg(method, 0, Type.Int, &args[0])
+        ("DateTime", "equal" | "compare" | "difference", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "DateTime"}, &args[0])
+        ("DateTime", "add_period" | "subtract_period", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Period"}, &args[0])
+        ("DateTime", "until" | "since", _) -> {
+            self.expect_core_arg(method, 0, Type.Named{name: "DateTime"}, &args[0])
+            loop i in 1..argc.min(4) -> self.expect_core_arg(method, i, Type.String, &args[i])
+            if argc > 4 -> self.expect_core_arg(method, 4, Type.Int, &args[4])
+        }
+        ("DateTime", "in_zone", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Zone"}, &args[0])
+        ("DateTime", "truncate" | "floor" | "ceil", 1) -> self.expect_core_arg(method, 0, Type.String, &args[0])
+        ("DateTime", "truncate" | "floor" | "ceil", 2) -> {
+            self.expect_core_arg(method, 0, Type.String, &args[0])
+            self.expect_core_arg(method, 1, Type.Int, &args[1])
+        }
+        ("DateTime", "format" | "format_checked", 1) -> self.expect_core_arg(method, 0, Type.String, &args[0])
+        ("DateTime", "replace", 6) -> { loop i in 0..6 -> self.expect_core_arg(method, i, Type.Int, &args[i]) }
+        ("DateTime", "with", n) -> {
+            if n == 6 || n == 7 {
+                loop i in 0..6 -> self.expect_core_arg(method, i, Type.Int, &args[i])
+                if n == 7 -> self.expect_core_arg(method, 6, Type.String, &args[6])
+            } else { loop arg in &args -> _ :: self.infer(&arg.expr) }
+        }
+        ("LocalTime", "add_duration" | "subtract_duration", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Duration"}, &args[0])
+        ("LocalTime", "equal" | "compare", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "LocalTime"}, &args[0])
+        ("LocalTime", "truncate" | "floor" | "ceil", n) -> {
+            if n == 1 || n == 2 {
+                self.expect_core_arg(method, 0, Type.String, &args[0])
+                if n == 2 -> self.expect_core_arg(method, 1, Type.Int, &args[1])
+            } else { loop arg in &args -> _ :: self.infer(&arg.expr) }
+        }
+        ("LocalTime", "until" | "since", _) -> {
+            self.expect_core_arg(method, 0, Type.Named{name: "LocalTime"}, &args[0])
+            loop i in 1..argc.min(4) -> self.expect_core_arg(method, i, Type.String, &args[i])
+            if argc > 4 -> self.expect_core_arg(method, 4, Type.Int, &args[4])
+        }
+        ("ZonedDateTime", "add_duration" | "subtract_duration", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Duration"}, &args[0])
+        ("ZonedDateTime", "add_period" | "subtract_period", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Period"}, &args[0])
+        ("ZonedDateTime", "format" | "format_checked", 1) -> self.expect_core_arg(method, 0, Type.String, &args[0])
+        ("ZonedDateTime", "format_rfc9557", 0) -> {}
+        ("ZonedDateTime", "with_time", n) -> {
+            if n == 1 || n == 2 {
+                self.expect_core_arg(method, 0, Type.Named{name: "LocalTime"}, &args[0])
+                if n == 2 -> self.expect_core_arg(method, 1, Type.String, &args[1])
+            } else { loop arg in &args -> _ :: self.infer(&arg.expr) }
+        }
+        ("ZonedDateTime", "equal" | "compare", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "ZonedDateTime"}, &args[0])
+        ("ZonedDateTime", "with_zone", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Zone"}, &args[0])
+        ("ZonedDateTime", "until" | "since", _) -> {
+            self.expect_core_arg(method, 0, Type.Named{name: "ZonedDateTime"}, &args[0])
+            loop i in 1..argc.min(4) -> self.expect_core_arg(method, i, Type.String, &args[i])
+            if argc > 4 -> self.expect_core_arg(method, 4, Type.Int, &args[4])
+        }
+        ("Zone", "next_transition" | "previous_transition", 1) -> self.expect_core_arg(method, 0, Type.Int, &args[0])
+        ("Zone", "start_of_day" | "hours_in_day", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "LocalDate"}, &args[0])
+        ("ZonedDateTime", "start_of_day" | "hours_in_day" | "next_transition" | "previous_transition", 0) -> {}
+        ("Instant", "equal" | "compare", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Instant"}, &args[0])
+        ("Period", "add" | "sub", 1) -> self.expect_core_arg(method, 0, Type.Named{name: "Period"}, &args[0])
+        ("Period", "total_in", 2) -> {
+            self.expect_core_arg(method, 0, Type.String, &args[0])
+            anchor_ty :: canonicalize_union([Type.Named{name: "Date"}, Type.Named{name: "LocalDate"}, Type.Named{name: "DateTime"}])
+            self.expect_core_arg(method, 1, anchor_ty, &args[1])
+        }
+        ("DateTime" | "LocalTime" | "Duration", "round", n) -> {
+            if n >= 1 && n <= 3 {
+                self.expect_core_arg(method, 0, Type.String, &args[0])
+                if n > 1 -> self.expect_core_arg(method, 1, Type.Int, &args[1])
+                if n > 2 -> self.expect_core_arg(method, 2, Type.String, &args[2])
+            } else { loop arg in &args -> _ :: self.infer(&arg.expr) }
+        }
+        else -> { loop arg in &args -> _ :: self.infer(&arg.expr) }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:6549-6581
+fn infer_method_shared_guard_type_6549(self: &Checker, receiver: &Expr, recv_ty: Type) -> Type? {
+    return if recv_ty == {
+        .Tagged(marker, inner) -> {
+            guarded :: if inner == {.Apply(name, _) -> name == Syntax.TYPE_SHARED_GUARD else -> false}
+            if guarded && (marker == .Internal(.SharedGuardRead) || marker == .Internal(.SharedGuardEdit)) -> Val(recv_ty) else -> None
+        }
+        .Apply(name, _) -> {
+            if name != Syntax.TYPE_SHARED_GUARD -> return None
+            editable :: if receiver == {
+                .Ident(variable, _) -> if self.lookup(variable) == .Val(info) -> info.param_conv == Val(AccessConvention.Write) else -> false
+                else -> false
+            }
+            Val(Type.Tagged{marker: TagMarker.Internal(if editable -> InternalTag.SharedGuardEdit else -> InternalTag.SharedGuardRead), inner: recv_ty})
+        }
+        else -> None
+    }
+}

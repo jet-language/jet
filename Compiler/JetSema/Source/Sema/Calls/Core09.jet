@@ -1,771 +1,297 @@
-// PORT-PENDING 0410 crates-jet-sema-src-sema-checkerinfer-expr-module-group-slice-5079: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5079-5845
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS             Expr::Field(_, _, span) => {
-//RS                 let span = *span;
-//RS                 // D-CONC-SHARE1=A (card #1561): a plain field read on a
-//RS                 // `Shared<T>` handle is one locked read. Rewrite to the
-//RS                 // Prelude's read seam and re-infer, so every execution tier
-//RS                 // keeps consuming exactly one shared-access shape (I9).
-//RS                 if self.desugar_shared_field_read(e) {
-//RS                     return self.infer(e);
-//RS                 }
-//RS                 // D-PROCESS-SESSION2=D: known terminal facts are checked
-//RS                 // namespace members but lower to ordinary String keys. This
-//RS                 // keeps `Set<String>` open to preview keys without an extra
-//RS                 // public report type.
-//RS                 if let Expr::Field(inner, member, _) = e {
-//RS                     if matches!(&**inner, Expr::Ident(name, _) if name == Syntax::TERMINAL_FACT_NAMESPACE)
-//RS                     {
-//RS                         if let Some(fact) = Syntax::terminal_fact(member) {
-//RS                             *e = Expr::Str(vec![StrPart::Lit(fact.to_string())], span);
-//RS                             return Some(Type::String);
-//RS                         }
-//RS                         let candidates = Syntax::TERMINAL_FACTS
-//RS                             .iter()
-//RS                             .map(|fact| (*fact).to_string())
-//RS                             .collect::<Vec<_>>();
-//RS                         let suggestion = suggest_field(member, &candidates);
-//RS                         let fix = suggestion.as_ref().map_or_else(
-//RS                             || "use a documented TerminalFact key or a preview string".to_string(),
-//RS                             |fact| format!("did you mean `TerminalFact.{fact}`?"),
-//RS                         );
-//RS                         let mut diagnostic = Diagnostic::error(
-//RS                             "E0302",
-//RS                             format!("`TerminalFact` has no key `{member}`"),
-//RS                             "stable terminal fact keys use the checked TerminalFact namespace"
-//RS                                 .to_string(),
-//RS                             fix,
-//RS                             Some(span),
-//RS                         );
-//RS                         if let Some(fact) = suggestion {
-//RS                             diagnostic = diagnostic.with_edit(TextEdit {
-//RS                                 span,
-//RS                                 new_text: fact,
-//RS                             });
-//RS                         }
-//RS                         self.diags.push(diagnostic);
-//RS                         return None;
-//RS                     }
-//RS                 }
-//RS                 // D-TAG1: fold a dotted variant path (`Damage.Fire.Burn`) into an
-//RS                 // enum literal so codegen sees one EnumLit node. Single-segment
-//RS                 // `Enum.Variant` keeps its existing Field route (unchanged Rust).
-//RS                 // D-MOD2: an alias-qualified enum (`types.Kind.Alpha`) always
-//RS                 // folds, because the Field route has no module-alias hop.
-//RS                 if let Some((type_name, variant)) = self.fold_enum_variant_path(e) {
-//RS                     if variant.contains('.') || (type_name.contains("::") && !variant.is_empty()) {
-//RS                         let ty = self.check_enum_lit(&type_name, &variant, &mut [], span, None);
-//RS                         *e = Expr::EnumLit {
-//RS                             type_name,
-//RS                             variant,
-//RS                             variant_span: None,
-//RS                             args: Vec::new(),
-//RS                             leading_dot: false,
-//RS                             span,
-//RS                         };
-//RS                         return Some(ty);
-//RS                     }
-//RS                 }
-//RS                 if let Some(result) = self.fold_fact_read(e) {
-//RS                     return result;
-//RS                 }
-//RS                 let Expr::Field(inner, member, _) = e else {
-//RS                     unreachable!("matched Field above")
-//RS                 };
-//RS                 let member = member.clone();
-//RS                 // D-RANGE-EXCL1=C: bare `xs.indexes` is the ratified noun form
-//RS                 // (Swift `.indices` style). Rewrite to the zero-arg method so
-//RS                 // TIR/codegen reuse the existing member path; `indexes()` also
-//RS                 // remains valid.
-//RS                 if member == "indexes" {
-//RS                     self.borrow_ctx = true;
-//RS                     let base_ty = self.infer(inner)?;
-//RS                     let is_seq = matches!(&base_ty, Type::List(_) | Type::FixedList { .. })
-//RS                         || matches!(&base_ty, Type::Apply { name, .. } if name == "Iter");
-//RS                     if is_seq {
-//RS                         let receiver =
-//RS                             std::mem::replace(inner, Box::new(Expr::Ident(String::new(), span)));
-//RS                         *e = Expr::MethodCall {
-//RS                             receiver,
-//RS                             method: "indexes".to_string(),
-//RS                             method_span: span,
-//RS                             owner_type_args: Vec::new(),
-//RS                             type_args: Vec::new(),
-//RS                             args: Vec::new(),
-//RS                             recv_type: None,
-//RS                             resolved_ret: None,
-//RS                             operator_rhs: None,
-//RS                             checked_widen: false,
-//RS                         };
-//RS                         return self.infer(e);
-//RS                     }
-//RS                 }
-//RS                 self.infer_field(inner, &member, span)
-//RS             }
-//RS             Expr::OptField {
-//RS                 base,
-//RS                 member,
-//RS                 member_span,
-//RS                 flatten,
-//RS                 ..
-//RS             } => {
-//RS                 let bt = self.infer(base)?;
-//RS                 let inner_t = match bt {
-//RS                     Type::Option(inner) => *inner,
-//RS                     other => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0047",
-//RS                             format!(
-//RS                                 "`?.` needs an optional on the left, but this is `{}`",
-//RS                                 other.show()
-//RS                             ),
-//RS                             "optional chaining short-circuits a `T?` to absent on a missing link"
-//RS                                 .to_string(),
-//RS                             "use plain `.` here, or make the value optional first".to_string(),
-//RS                             Some(*member_span),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                 };
-//RS                 let fty = self.field_type(&inner_t, member, *member_span)?;
-//RS                 match fty {
-//RS                     Type::Option(x) => {
-//RS                         *flatten = true;
-//RS                         Some(Type::Option(x))
-//RS                     }
-//RS                     t => Some(Type::Option(Box::new(t))),
-//RS                 }
-//RS             }
-//RS             Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 method_span,
-//RS                 owner_type_args,
-//RS                 type_args,
-//RS                 args,
-//RS                 recv_type,
-//RS                 resolved_ret,
-//RS                 operator_rhs: _,
-//RS                 checked_widen: _,
-//RS             } => {
-//RS                 // D-SHAPE3a=A: the parser's empty identifier is the unspellable
-//RS                 // receiver sentinel for `.new(...)`. Resolve it only from the same
-//RS                 // expected type already propagated for literals/calls; never search a
-//RS                 // constructor registry. Rewriting here gives TIR/AOT/dev the ordinary
-//RS                 // explicit static-call path.
-//RS                 if matches!(&**receiver, Expr::Ident(name, _) if name.is_empty()) {
-//RS                     let resolved = match self.expected_type.as_ref() {
-//RS                         Some(Type::Named(name)) => Some((name.clone(), Vec::new())),
-//RS                         Some(Type::Apply { name, args }) => Some((name.clone(), args.clone())),
-//RS                         Some(Type::Shared(inner)) => {
-//RS                             Some(("Shared".to_string(), vec![(**inner).clone()]))
-//RS                         }
-//RS                         Some(Type::List(inner)) => {
-//RS                             Some(("List".to_string(), vec![(**inner).clone()]))
-//RS                         }
-//RS                         Some(Type::Map { key, value, .. }) => {
-//RS                             Some(("Map".to_string(), vec![(**key).clone(), (**value).clone()]))
-//RS                         }
-//RS                         Some(Type::Int) => Some(("Int".to_string(), Vec::new())),
-//RS                         Some(Type::Float) => Some(("Float".to_string(), Vec::new())),
-//RS                         Some(Type::Bool) => Some(("Bool".to_string(), Vec::new())),
-//RS                         Some(Type::String) => Some(("String".to_string(), Vec::new())),
-//RS                         Some(Type::Char) => Some(("Char".to_string(), Vec::new())),
-//RS                         Some(Type::IntN { signed, bits }) => {
-//RS                             Some((crate::AST::int_spelling(*signed, *bits), Vec::new()))
-//RS                         }
-//RS                         Some(Type::Float32) => Some(("F32".to_string(), Vec::new())),
-//RS                         Some(Type::Tagged { inner, .. }) => match inner.as_ref() {
-//RS                             Type::Named(name) => Some((name.clone(), Vec::new())),
-//RS                             Type::Apply { name, args } => Some((name.clone(), args.clone())),
-//RS                             _ => None,
-//RS                         },
-//RS                         _ => None,
-//RS                     };
-//RS                     let Some((type_name, expected_args)) = resolved else {
-//RS                         for arg in args.iter_mut() {
-//RS                             self.infer(&mut arg.expr);
-//RS                         }
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0356",
-//RS                             "`.new(...)` needs one known receiver type here".to_string(),
-//RS                             "the inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry".to_string(),
-//RS                             "add a type annotation or write the full `Type.new(...)` form".to_string(),
-//RS                             Some(*method_span),
-//RS                         ));
-//RS                         return None;
-//RS                     };
-//RS                     **receiver = Expr::Ident(type_name, receiver.span());
-//RS                     if owner_type_args.is_empty() {
-//RS                         *owner_type_args = expected_args;
-//RS                     }
-//RS                 }
-//RS                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): `.push`/`.insert` may grow a
-//RS                 // List/Map's backing heap allocation — capacity headroom isn't
-//RS                 // statically provable in general, so ANY call of this shape is
-//RS                 // flagged, full stop (no receiver-type check needed).
-//RS                 if matches!(method.as_str(), "push" | "insert" | "add" | "add_new") {
-//RS                     self.record_memory_event(crate::Sema::MemoryEvent::new(
-//RS                         crate::Sema::MemoryEventKind::Allocation,
-//RS                         *method_span,
-//RS                         format!("`.{method}` may allocate to grow backing storage"),
-//RS                     ));
-//RS                 }
-//RS                 // D-TAG1: a payload leaf under a group — `Damage.Fire.Burn(5)`
-//RS                 // parses as a method call on the `Damage.Fire` field chain. Fold
-//RS                 // chain + method into one dotted variant path and rewrite to an
-//RS                 // enum literal (single-segment `Enum.Variant(args)` keeps its
-//RS                 // existing MethodCall route — receiver is a bare Ident there,
-//RS                 // which `fold_enum_variant_path` deliberately does not fold).
-//RS                 // D-MOD2: `types.Kind.Beta(3)` folds with an empty prefix.
-//RS                 if recv_type.is_none()
-//RS                     && type_args.is_empty()
-//RS                     && args.iter().all(|a| a.label.is_none())
-//RS                 {
-//RS                     if let Some((type_name, prefix)) = self.fold_enum_variant_path(receiver) {
-//RS                         let variant = if prefix.is_empty() {
-//RS                             method.clone()
-//RS                         } else {
-//RS                             format!("{prefix}.{}", method)
-//RS                         };
-//RS                         let span = Span::new(
-//RS                             receiver.span().start,
-//RS                             args.last()
-//RS                                 .map(|a| a.span.end)
-//RS                                 .unwrap_or(method_span.end)
-//RS                                 .max(method_span.end),
-//RS                         );
-//RS                         let mut enum_args: Vec<EnumLitArg> = args
-//RS                             .drain(..)
-//RS                             .map(|a| EnumLitArg::Positional(a.expr))
-//RS                             .collect();
-//RS                         let ty =
-//RS                             self.check_enum_lit(&type_name, &variant, &mut enum_args, span, None);
-//RS                         *e = Expr::EnumLit {
-//RS                             type_name,
-//RS                             variant,
-//RS                             variant_span: None,
-//RS                             args: enum_args,
-//RS                             leading_dot: false,
-//RS                             span,
-//RS                         };
-//RS                         return Some(ty);
-//RS                     }
-//RS                 }
-//RS                 // Fixed.over borrows raw backing; unlike an ordinary `&` fill
-//RS                 // call it does not promise to initialize every byte. Let the
-//RS                 // constructor inspect the array type without consuming its
-//RS                 // write-before-read obligation.
-//RS                 let fixed_uninit = if method == "over"
-//RS                     && matches!(&**receiver, Expr::Field(_, name, _) if name == "Fixed")
-//RS                 {
-//RS                     args.iter()
-//RS                         .filter_map(|arg| match &arg.expr {
-//RS                             Expr::Ident(name, _) => self
-//RS                                 .flow
-//RS                                 .uninit
-//RS                                 .get(name)
-//RS                                 .cloned()
-//RS                                 .map(|state| (name.clone(), state)),
-//RS                             _ => None,
-//RS                         })
-//RS                         .collect::<Vec<_>>()
-//RS                 } else {
-//RS                     Vec::new()
-//RS                 };
-//RS                 if fixed_uninit.is_empty() {
-//RS                     self.clear_uninit_mut_args(args);
-//RS                 } else {
-//RS                     // `Fixed.over(&bytes)` is the one raw-storage adapter: it
-//RS                     // borrows the wrapper without claiming initialization.
-//RS                     for (name, _) in &fixed_uninit {
-//RS                         self.flow.uninit.remove(name);
-//RS                     }
-//RS                 }
-//RS                 // D-CAP-RECEIVER1=D: lift the written receiver mark, resolve
-//RS                 // the ordinary unmarked call, then check the mark against the
-//RS                 // convention the resolved method recorded for its receiver.
-//RS                 self.begin_receiver_mark(receiver);
-//RS                 let inferred = self.infer_method_call(
-//RS                     receiver,
-//RS                     method,
-//RS                     *method_span,
-//RS                     owner_type_args,
-//RS                     type_args,
-//RS                     args,
-//RS                     recv_type,
-//RS                     resolved_ret,
-//RS                 );
-//RS                 self.finish_receiver_mark(receiver);
-//RS                 for (name, state) in fixed_uninit {
-//RS                     self.flow.uninit.set(&name, state);
-//RS                 }
-//RS                 if let Some(edit) = self.process_args_view_edit(
-//RS                     receiver,
-//RS                     method,
-//RS                     *method_span,
-//RS                     args,
-//RS                     inferred.as_ref(),
-//RS                 ) {
-//RS                     let diagnostic =
-//RS                         Diagnostic::from_row("L0515", &[], Some(*method_span)).with_edit(edit);
-//RS                     self.diags.push(diagnostic);
-//RS                 }
-//RS                 if let Some(edit) = self.message_text_edit(
-//RS                     receiver,
-//RS                     method,
-//RS                     *method_span,
-//RS                     args,
-//RS                     recv_type.as_deref(),
-//RS                 ) {
-//RS                     let diagnostic =
-//RS                         Diagnostic::from_row("L0516", &[], Some(*method_span)).with_edit(edit);
-//RS                     self.diags.push(diagnostic);
-//RS                 }
-//RS                 if let Some(edit) = self.unit_scalar_rewrap_edit(
-//RS                     receiver,
-//RS                     method,
-//RS                     *method_span,
-//RS                     args,
-//RS                     inferred.as_ref(),
-//RS                 ) {
-//RS                     let diagnostic =
-//RS                         Diagnostic::from_row("L0519", &[], Some(*method_span)).with_edit(edit);
-//RS                     self.diags.push(diagnostic);
-//RS                 }
-//RS                 if method == "replace"
-//RS                     && inferred
-//RS                         .as_ref()
-//RS                         .is_some_and(|ty| matches!(ty, Type::String))
-//RS                 {
-//RS                     if let Some(edit) = redundant_fixed_cleanup_edit(
-//RS                         self.source,
-//RS                         receiver,
-//RS                         *method_span,
-//RS                         args,
-//RS                         recv_type.as_deref(),
-//RS                     ) {
-//RS                         self.diags.push(
-//RS                             Diagnostic::from_row("L0518", &[], Some(*method_span)).with_edit(edit),
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 // S40 / D-RANGE-VALUE1: the one-argument String method is the
-//RS                 // surface spelling of the existing Range-aware Slice node.
-//RS                 // The method table has already checked the argument and
-//RS                 // receiver, so all tiers share the same TIR shape.
-//RS                 let string_slice_range = method == "slice"
-//RS                     && args.len() == 1
-//RS                     && recv_type.as_deref() == Some(crate::Syntax::TYPE_STRING)
-//RS                     && inferred
-//RS                         .as_ref()
-//RS                         .is_some_and(|ty| matches!(ty, Type::String));
-//RS                 if string_slice_range {
-//RS                     let slice_span = *method_span;
-//RS                     let base = std::mem::replace(receiver, Box::new(Expr::Absent(slice_span)));
-//RS                     let range = std::mem::replace(&mut args[0].expr, Expr::Absent(slice_span));
-//RS                     let zero = || Box::new(Expr::Int(0, slice_span, None, None));
-//RS                     *e = Expr::Slice {
-//RS                         base,
-//RS                         start: zero(),
-//RS                         end: zero(),
-//RS                         range: Some(Box::new(range)),
-//RS                         span: slice_span,
-//RS                     };
-//RS                 }
-//RS                 inferred
-//RS             }
-//RS             Expr::StructLit {
-//RS                 type_name,
-//RS                 type_args,
-//RS                 import_ns,
-//RS                 fields,
-//RS                 inferred,
-//RS                 span,
-//RS                 ..
-//RS             } => {
-//RS                 // D-UITREE1/D-DOTCTOR1: the explicit named-payload enum form
-//RS                 // (`Event.Named.{ field: value }`) is parsed as a dotted
-//RS                 // struct head because the parser cannot know which dotted
-//RS                 // names are enum variants. Resolve the head here, where the
-//RS                 // registry is authoritative, and lower it to the same
-//RS                 // EnumLit node as `.Named.{ ... }`.
-//RS                 if !*inferred && type_args.is_empty() && import_ns.is_none() {
-//RS                     if let Some((enum_name, variant)) = type_name.split_once('.') {
-//RS                         let is_variant = self
-//RS                             .resolve_enum_variants_cloned(enum_name)
-//RS                             .is_some_and(|variants| variants.contains_key(variant));
-//RS                         if is_variant {
-//RS                             let args = std::mem::take(fields)
-//RS                                 .into_iter()
-//RS                                 .map(|(label, _, expr)| crate::AST::EnumLitArg::Named {
-//RS                                     label,
-//RS                                     expr,
-//RS                                 })
-//RS                                 .collect();
-//RS                             let enum_lit = Expr::EnumLit {
-//RS                                 type_name: enum_name.to_string(),
-//RS                                 variant: variant.to_string(),
-//RS                                 variant_span: None,
-//RS                                 args,
-//RS                                 leading_dot: false,
-//RS                                 span: *span,
-//RS                             };
-//RS                             *e = enum_lit;
-//RS                             return self.infer(e);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-DOTCTOR1: inferred `.{ … }` form — resolve type_name from context
-//RS                 // and write it back so later passes (TIR lowering, codegen) see it.
-//RS                 if *inferred {
-//RS                     let mut expected = self.expected_type.clone();
-//RS                     while let Some(Type::Tagged { inner, .. }) = expected {
-//RS                         expected = Some(*inner);
-//RS                     }
-//RS                     match expected {
-//RS                         Some(Type::Named(ctx_name)) => {
-//RS                             *type_name = ctx_name;
-//RS                         }
-//RS                         Some(Type::Apply { name, args }) => {
-//RS                             *type_name = name;
-//RS                             *type_args = args;
-//RS                         }
-//RS                         _ => {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0119",
-//RS                                 "`{ … }` needs a known struct type here".to_string(),
-//RS                                 "the inferred construction form requires an expected type \
-//RS                                  from the surrounding context (binding annotation, return type, etc.)"
-//RS                                     .to_string(),
-//RS                                 "name the type at the value, e.g. `x :: Point{x: 1, y: 2}`, or inside a list `[Point{ … }, { … }]`"
-//RS                                     .to_string(),
-//RS                                 Some(*span),
-//RS                             ));
-//RS                             for (_, _, e) in fields.iter_mut() {
-//RS                                 self.infer(e);
-//RS                             }
-//RS                             return None;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // Inline-module members are local nominals with a mangled
-//RS                 // semantic identity, not foreign imports. Resolve that identity
-//RS                 // here so every later tier sees a local struct literal and never
-//RS                 // asks the foreign-import table to rediscover it.
-//RS                 let code_module_type = import_ns.as_ref().and_then(|namespace| {
-//RS                     self.code_modules
-//RS                         .get(namespace)
-//RS                         .map(|module| crate::Sema::Bundle::module_type_name(module, type_name))
-//RS                 });
-//RS                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): a struct literal for a type
-//RS                 // that owns heap data (directly or transitively) allocates.
-//RS                 let mut resolved = self.check_struct_lit(
-//RS                     type_name,
-//RS                     type_args,
-//RS                     import_ns.as_deref(),
-//RS                     fields,
-//RS                     *span,
-//RS                 );
-//RS                 if let Some(canonical) = code_module_type {
-//RS                     resolved = match resolved {
-//RS                         Type::Named(_) => Type::Named(canonical.clone()),
-//RS                         Type::Apply { args, .. } => Type::Apply {
-//RS                             name: canonical.clone(),
-//RS                             args,
-//RS                         },
-//RS                         other => other,
-//RS                     };
-//RS                     *type_name = canonical;
-//RS                     *import_ns = None;
-//RS                 }
-//RS                 Some(resolved)
-//RS             }
-//RS             Expr::EnumLit {
-//RS                 type_name,
-//RS                 variant,
-//RS                 variant_span,
-//RS                 args,
-//RS                 span,
-//RS                 ..
-//RS             } => {
-//RS                 if type_name.is_empty() {
-//RS                     // D-ENUMDOT2=A: leading-dot variant — resolve type from expected context.
-//RS                     let mut expected = self.expected_type.clone();
-//RS                     while let Some(Type::Tagged { inner, .. }) = expected {
-//RS                         expected = Some(*inner);
-//RS                     }
-//RS                     let resolved = expected.and_then(|et| {
-//RS                         let name = match &et {
-//RS                             Type::Named(n) => Some(n.clone()),
-//RS                             Type::Apply { name, .. } => Some(name.clone()),
-//RS                             Type::Option(inner) => match inner.as_ref() {
-//RS                                 Type::Named(n) => Some(n.clone()),
-//RS                                 _ => None,
-//RS                             },
-//RS                             // D-ERR-CASES1=A: a case that exactly one union
-//RS                             // member declares builds that member.
-//RS                             Type::Union(_) => match self.flat_union_case_owner(&et, variant) {
-//RS                                 Some(Type::Named(n)) => Some(n),
-//RS                                 Some(Type::Apply { name, .. }) => Some(name),
-//RS                                 _ => None,
-//RS                             },
-//RS                             _ => None,
-//RS                         };
-//RS                         name.filter(|n| self.resolve_enum_variants_cloned(n).is_some())
-//RS                     });
-//RS                     match resolved {
-//RS                         // D-MOD2: an alias-qualified expected type (`types.Kind`)
-//RS                         // takes the imported enum's canonical identity.
-//RS                         Some(tn) => *type_name = self.import_qualified_nominal(&tn).unwrap_or(tn),
-//RS                         None => {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0330",
-//RS                                 format!("can't infer the enum type for `.{}`", variant),
-//RS                                 "a leading-dot variant needs a known enum type from context"
-//RS                                     .to_string(),
-//RS                                 format!(
-//RS                                     "add a type annotation, or write the full form `EnumName.{}`",
-//RS                                     variant
-//RS                                 ),
-//RS                                 Some(*span),
-//RS                             ));
-//RS                             return None;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): an enum literal for a type
-//RS                 // that owns heap data (directly or transitively) allocates.
-//RS                 Some(self.check_enum_lit(type_name, variant, args, *span, *variant_span))
-//RS             }
-//RS             // D-TAINT1: `#Tainted expr` — the value-fact tag is type-transparent.
-//RS             // Its type is exactly the inner's type; taint propagation + the E0721
-//RS             // sink check run in the dedicated taint pass (Sema/Taint.rs), erased
-//RS             // in codegen (I3).
-//RS             Expr::Tainted(inner, tag, span) => {
-//RS                 let tag = tag.as_deref().unwrap_or("Input");
-//RS                 if !self.tag_is_declared(tag) {
-//RS                     self.diags
-//RS                         .push(crate::Sema::Diagnostics::undeclared_value_tag(
-//RS                             tag,
-//RS                             self.closest_declared_tag(tag).as_deref(),
-//RS                             *span,
-//RS                         ));
-//RS                 }
-//RS                 self.infer(inner)
-//RS             }
-//RS             Expr::Present(inner, _span) => {
-//RS                 let expected = self
-//RS                     .expected_type
-//RS                     .clone()
-//RS                     .and_then(|ty| ty.unwrap_option().cloned());
-//RS                 let t = self.infer_aggregate_value(inner, expected.as_ref())?;
-//RS                 // S48: a concrete payload meets a single-trait optional slot
-//RS                 // (`Val(Real{…})` into `Adapter?`). The optional holds the
-//RS                 // boxed trait value, as a trait-typed parameter does.
-//RS                 let payload = match expected {
-//RS                     Some(slot) if self.trait_slot_accepts(&slot, &t) => match slot {
-//RS                         Type::Named(name) => Type::TraitObject(vec![name]),
-//RS                         trait_value => trait_value,
-//RS                     },
-//RS                     _ => t,
-//RS                 };
-//RS                 Some(Type::Option(Box::new(payload)))
-//RS             }
-//RS             Expr::Absent(span) => {
-//RS                 if let Some(expected) = self.expected_type.clone() {
-//RS                     if expected.unwrap_option().is_some() {
-//RS                         Some(expected)
-//RS                     } else {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0308",
-//RS                             format!("bare `{}` needs a known optional type here", Syntax::LIT_NULL),
-//RS                             format!(
-//RS                                 "`{}` only fits where a `T?` is expected (S32)",
-//RS                                 Syntax::LIT_NULL
-//RS                             ),
-//RS                             format!(
-//RS                                 "add a type annotation, or use `{}` where the type is already known",
-//RS                                 Syntax::LIT_NULL
-//RS                             ),
-//RS                             Some(*span),
-//RS                         ));
-//RS                         None
-//RS                     }
-//RS                 } else {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0308",
-//RS                         format!(
-//RS                             "bare `{}` needs a known optional type here",
-//RS                             Syntax::LIT_NULL
-//RS                         ),
-//RS                         format!(
-//RS                             "`{}` only fits where a `T?` is expected (S32)",
-//RS                             Syntax::LIT_NULL
-//RS                         ),
-//RS                         format!(
-//RS                             "add a type annotation, or use `{}` where the type is already known",
-//RS                             Syntax::LIT_NULL
-//RS                         ),
-//RS                         Some(*span),
-//RS                     ));
-//RS                     None
-//RS                 }
-//RS             }
-//RS             Expr::PatternTest {
-//RS                 subject,
-//RS                 pattern,
-//RS                 span,
-//RS             } => {
-//RS                 self.check_pattern_test(subject, pattern, *span);
-//RS                 Some(Type::Bool)
-//RS             }
-//RS             // D-REDUCE-VALUE1: this node exists only to teach retired `#Op` calls.
-//RS             // The reduce method consumes it before reaching here; a bare/misplaced
-//RS             // marker is a usage error.
-//RS             Expr::ReduceMarker(name, span) => {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E2510",
-//RS                     format!("`#{}` is only valid inside a lane `.reduce(…)`", name),
-//RS                     "a reduce-op marker names the fold operation; it isn't a value on its own"
-//RS                         .to_string(),
-//RS                     "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`".to_string(),
-//RS                     Some(*span),
-//RS                 ));
-//RS                 None
-//RS             }
-//RS             // Card #1440: the synthesized final arm of an else-less exhaustive
-//RS             // dispatch. Diverging and typeless — the If unification's
-//RS             // `(Some(then), None)` arm lets the pattern arms' type win.
-//RS             Expr::NoElse(_) => None,
-//RS             Expr::Todo { expected_type, .. } => {
-//RS                 // D-TOOL2 (E2-M11): `todo` is a typed goal — valid in any
-//RS                 // position. Fill the expected-type field so codegen can print
-//RS                 // it in the panic message, then return that type (or the
-//RS                 // fallback Unit so callers that require Some(…) are satisfied).
-//RS                 let ty = self.expected_type.clone();
-//RS                 if let Some(ref t) = ty {
-//RS                     *expected_type = Some(t.name());
-//RS                 } else {
-//RS                     *expected_type = Some("(unknown)".to_string());
-//RS                 }
-//RS                 // Return the expected type so the surrounding expression sees
-//RS                 // a consistent type. If no expected type is known, return Unit.
-//RS                 // todo is diverging — it never returns, so any type is OK.
-//RS                 // When the expected type is unknown, return Int as a placeholder
-//RS                 // so callers that need Some(…) don't see a false type error.
-//RS                 Some(ty.unwrap_or(Type::Int))
-//RS             }
-//RS             Expr::Ok(inner, span) => self.infer_ok(inner, *span),
-//RS             Expr::Err(inner, span) => self.infer_err(inner, *span),
-//RS             Expr::Try(inner, span, convert, note) => self.infer_try(inner, *span, convert, note),
-//RS             Expr::OrFallback {
-//RS                 value,
-//RS                 fallback,
-//RS                 span,
-//RS                 is_option,
-//RS             } => self.infer_or_fallback(value, fallback, *span, is_option),
-//RS             Expr::Lambda(lam) => {
-//RS                 let http_handler = self
-//RS                     .expected_type
-//RS                     .as_ref()
-//RS                     .is_some_and(is_http_handler_type);
-//RS                 let expected = match self.expected_type.as_ref() {
-//RS                     Some(Type::Named(name))
-//RS                         if name.rsplit('.').next() == Some("HTTPHandler") =>
-//RS                         Some(Type::Fn {
-//RS                             params: vec![Type::Named("HTTPRequest".to_string())],
-//RS                             ret: Some(Box::new(Type::Result {
-//RS                                 ok: Box::new(Type::Named("HTTPResponse".to_string())),
-//RS                                 err: Box::new(Type::Named("HTTPError".to_string())),
-//RS                             })),
-//RS                             effect_bound: None,
-//RS                             return_view_provenance: None,
-//RS                             param_contract: None,
-//RS                             call_metadata: None,
-//RS                         }),
-//RS                     _ => self.expected_type.clone(),
-//RS                 };
-//RS                 let saved_http_depth = self.http_handler_depth;
-//RS                 let saved_escapes = self.lambda_escapes;
-//RS                 if http_handler {
-//RS                     self.http_handler_depth += 1;
-//RS                     self.lambda_escapes = true;
-//RS                 }
-//RS                 let result = self.with_deferred_call_access(|checker| {
-//RS                     checker.check_lambda(lam, expected.as_ref())
-//RS                 });
-//RS                 self.http_handler_depth = saved_http_depth;
-//RS                 self.lambda_escapes = saved_escapes;
-//RS                 result
-//RS             }
-//RS             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
-//RS             // D-META-STAGE1=B: a compile-time name resolves from the values the
-//RS             // compiler already computed, under the name as written. There is no
-//RS             // stage boundary to check — inside a compile-time context the
-//RS             // interpreter reads it, and outside one sema folds it here so
-//RS             // codegen only ever sees the value.
-//RS             Expr::ComptimeName { name, span, value } => {
-//RS                 if let Some(v) = value.clone() {
-//RS                     return Some(v.jet_type());
-//RS                 }
-//RS                 if !self.in_comptime {
-//RS                     let known = self.current_ct_globals().get(name).cloned();
-//RS                     if let Some(v) = known {
-//RS                         // D-META-STAGE1=B: the mark is part of the identifier,
-//RS                         // so a marked name is looked up like any other name and
-//RS                         // answers the type its binding was given. The folded
-//RS                         // value's own shape is the fallback, not the authority:
-//RS                         // it cannot recover a generic argument the value does
-//RS                         // not carry, so `Loadable.Idle` would come back as a
-//RS                         // bare `Loadable` and lose its methods.
-//RS                         let ty = self
-//RS                             .lookup(name)
-//RS                             .map(|info| info.ty.clone())
-//RS                             // A module-level marked const types like any other
-//RS                             // module const: from the registered signature, not
-//RS                             // the folded value (which loses generic arguments —
-//RS                             // `Loadable.idle()` would come back a bare
-//RS                             // `Loadable` and lose its methods).
-//RS                             .or_else(|| self.consts.get(name).cloned())
-//RS                             .unwrap_or_else(|| v.jet_type());
-//RS                         *value = Some(v);
-//RS                         return Some(ty);
-//RS                     }
-//RS                     let (name, span) = (name.clone(), *span);
-//RS                     self.unknown_name(&name, span);
-//RS                 }
-//RS                 None
-//RS             }
-//RS             // D-FMTPARENS1=A: parenthesized expressions are transparent to type checking.
-//RS             Expr::Paren(inner, _) => {
-//RS                 let mut inner = inner.as_mut();
-//RS                 let mut entered = 0;
-//RS                 while matches!(inner, Expr::Paren(..)) {
-//RS                     if !self.enter_source_nesting(inner.span()) {
-//RS                         for _ in 0..entered {
-//RS                             self.leave_source_nesting();
-//RS                         }
-//RS                         return None;
-//RS                     }
-//RS                     entered += 1;
-//RS                     let Expr::Paren(next, _) = inner else {
-//RS                         unreachable!("checked parenthesized expression")
-//RS                     };
-//RS                     inner = next;
-//RS                 }
-//RS                 let result = self.infer(inner);
-//RS                 for _ in 0..entered {
-//RS                     self.leave_source_nesting();
-//RS                 }
-//RS                 result
-//RS             }
-//RS             Expr::TypedLit { .. } => unreachable!("TypedLit elaborated before match"),
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-BYTELIT1=B: lower validated byte text to ordinary U8 integer
-//RS     /// elements. The shared AST helper rejects non-ASCII literal text before
-//RS     /// this path constructs values for the normal list checker.
-// END-PORT-PENDING 0410 crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5079-5845
+use jet_foundation.[Expr, Type, Span, StrPart, EnumLitArg, Diagnostic, TextEdit, Syntax, int_spelling]
+use jet_sema.[Checker, MemoryEvent, MemoryEventKind, suggest_field, redundant_fixed_cleanup_edit, is_http_handler_type, module_type_name, undeclared_value_tag]
 
+// Private payload helpers for the corresponding canonical Checker.infer_inner arms.
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5079
+    fn infer_inner_field(self: &Self, e: &Expr) -> Type? Never! {
+        span :: e.span()
+        if &self.desugar_shared_field_read(&e) -> return &self.infer(&e)
+        if e == .Field(inner, member, _) && inner == .Ident(name, _) && name == Syntax.TERMINAL_FACT_NAMESPACE {
+            if Syntax.terminal_fact(member) == .Val(fact) {
+                e = Expr.Str([StrPart.Lit(fact)], span)
+                return Val(Type.String)
+            }
+            candidates :: Syntax.TERMINAL_FACTS.to_array()
+            suggestion :: suggest_field(member, candidates)
+            fix :: suggestion.map(fn(fact) { "did you mean `TerminalFact.{fact}`?" }) ?? "use a documented TerminalFact key or a preview string"
+            diagnostic := Diagnostic.error("E0302", "`TerminalFact` has no key `{member}`", "stable terminal fact keys use the checked TerminalFact namespace", fix, Val(span))
+            if suggestion == .Val(fact) -> diagnostic = diagnostic.with_edit(TextEdit{span: span, new_text: fact})
+            &self.diags.push(^diagnostic)
+            return None
+        }
+        if self.fold_enum_variant_path(e) == .Val((type_name, variant)) && (variant.contains('.') || (type_name.contains("::") && !variant.is_empty())) {
+            args := [EnumLitArg]{}
+            ty :: &self.check_enum_lit(type_name, variant, &args, span, None)
+            e = Expr.EnumLit(type_name, variant, None, [], false, span)
+            return Val(ty)
+        }
+        if &self.fold_fact_read(&e) == .Val(result) -> return result
+        if e == .Field(inner, member, _) {
+            if member == "indexes" {
+                self.borrow_ctx = true
+                base_ty :: &self.infer(&inner) ?? return None
+                is_seq :: if base_ty == { .List | .FixedList -> true; .Apply(name, _) -> name == "Iter"; else -> false }
+                if is_seq {
+                    receiver :: ^inner
+                    e = Expr.MethodCall(^receiver, "indexes", span, [], [], [], None, None, None, false)
+                    return &self.infer(&e)
+                }
+            }
+            return &self.infer_field(&inner, member, span)
+        }
+        panic("matched Field above")
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5181
+    fn infer_inner_opt_field(self: &Self, e: &Expr) -> Type? Never! {
+        if e == .OptField(base, member, member_span, flatten, _) {
+            bt :: &self.infer(&base) ?? return None
+            inner_t :: if bt == {
+                .Option(inner) -> inner
+                other -> {
+                    &self.diags.push(Diagnostic.error("E0047", "`?.` needs an optional on the left, but this is `{other.show()}`", "optional chaining short-circuits a `T?` to absent on a missing link", "use plain `.` here, or make the value optional first", Val(member_span)))
+                    return None
+                }
+            }
+            fty :: &self.field_type(inner_t, member, member_span) ?? return None
+            if fty == { .Option(x) -> { flatten = true; Val(Type.Option(x)) }; t -> Val(Type.Option(t)) }
+        } else { panic("matched OptField") }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5215
+    fn infer_inner_method_call(self: &Self, e: &Expr) -> Type? Never! {
+        if e == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, _, _) {
+            if receiver == .Ident(name, _) && name.is_empty() {
+                resolved :: if self.expected_type == {
+                    .Val(.Named(name)) -> Val((name, []))
+                    .Val(.Apply(name, args)) -> Val((name, args))
+                    .Val(.Shared(inner)) -> Val(("Shared", [inner]))
+                    .Val(.List(inner)) -> Val(("List", [inner]))
+                    .Val(.Map(key, value, _)) -> Val(("Map", [key, value]))
+                    .Val(.Int) -> Val(("Int", []))
+                    .Val(.Float) -> Val(("Float", []))
+                    .Val(.Bool) -> Val(("Bool", []))
+                    .Val(.String) -> Val(("String", []))
+                    .Val(.Char) -> Val(("Char", []))
+                    .Val(.IntN(signed, bits)) -> Val((int_spelling(signed, bits), []))
+                    .Val(.Float32) -> Val(("F32", []))
+                    .Val(.Tagged(inner, _)) -> if inner == { .Named(name) -> Val((name, [])); .Apply(name, args) -> Val((name, args)); else -> None }
+                    else -> None
+                }
+                (type_name, expected_args) :: resolved ?? {
+                    loop arg in &args -> _ :: &self.infer(&arg.expr)
+                    &self.diags.push(Diagnostic.error("E0356", "`.new(...)` needs one known receiver type here", "the inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry", "add a type annotation or write the full `Type.new(...)` form", Val(method_span)))
+                    return None
+                }
+                receiver = Expr.Ident(type_name, receiver.span())
+                if owner_type_args.is_empty() -> owner_type_args = expected_args
+            }
+            if method == "push" || method == "insert" || method == "add" || method == "add_new" -> &self.record_memory_event(MemoryEvent.new(MemoryEventKind.Allocation, method_span, "`.{method}` may allocate to grow backing storage"))
+            if recv_type == None && type_args.is_empty() && args.all(fn(a) { a.label == None }) {
+                if self.fold_enum_variant_path(receiver) == .Val((type_name, prefix)) {
+                    variant :: if prefix.is_empty() { method } else { "{prefix}.{method}" }
+                    span :: Span.new(receiver.span().start, (args.last().map(fn(a) { a.span.end }) ?? method_span.end).max(method_span.end))
+                    enum_args := (^args).map(fn(a) { EnumLitArg.Positional(^a.expr) }).to_array()
+                    args = []
+                    ty :: &self.check_enum_lit(type_name, variant, &enum_args, span, None)
+                    e = Expr.EnumLit(type_name, variant, None, ^enum_args, false, span)
+                    return Val(ty)
+                }
+            }
+            fixed_uninit := []
+            if method == "over" && receiver == .Field(_, name, _) && name == "Fixed" {
+                loop arg in args {
+                    if arg.expr == .Ident(name, _) && self.flow.uninit.get(name) == .Val(state) -> &fixed_uninit.push((name, state.clone()))
+                }
+            }
+            if fixed_uninit.is_empty() { &self.clear_uninit_mut_args(&args) } else {
+                loop (name, _) in fixed_uninit -> _ :: &self.flow.uninit.remove(name)
+            }
+            &self.begin_receiver_mark(&receiver)
+            inferred :: &self.infer_method_call(&receiver, method, method_span, &owner_type_args, &type_args, &args, &recv_type, &resolved_ret)
+            &self.finish_receiver_mark(&receiver)
+            loop (name, state) in fixed_uninit -> &self.flow.uninit.set(name, ^state)
+            if self.process_args_view_edit(receiver, method, method_span, args, inferred) == .Val(edit) -> &self.diags.push(Diagnostic.from_row("L0515", [], Val(method_span)).with_edit(edit))
+            if self.message_text_edit(receiver, method, method_span, args, recv_type) == .Val(edit) -> &self.diags.push(Diagnostic.from_row("L0516", [], Val(method_span)).with_edit(edit))
+            if self.unit_scalar_rewrap_edit(receiver, method, method_span, args, inferred) == .Val(edit) -> &self.diags.push(Diagnostic.from_row("L0519", [], Val(method_span)).with_edit(edit))
+            if method == "replace" && inferred == Val(Type.String) {
+                if redundant_fixed_cleanup_edit(self.source, receiver, method_span, args, recv_type) == .Val(edit) -> &self.diags.push(Diagnostic.from_row("L0518", [], Val(method_span)).with_edit(edit))
+            }
+            if method == "slice" && args.len() == 1 && recv_type == Val(Syntax.TYPE_STRING) && inferred == Val(Type.String) {
+                slice_span :: method_span
+                base :: ^receiver
+                range :: ^args[0].expr
+                e = Expr.Slice(^base, Expr.Int(0, slice_span, None, None), Expr.Int(0, slice_span, None, None), Val(^range), slice_span)
+            }
+            inferred
+        } else { panic("matched MethodCall") }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5454
+    fn infer_inner_struct_lit(self: &Self, e: &Expr) -> Type? Never! {
+        if e == .StructLit(type_name, type_args, import_ns, fields, inferred, span, ..) {
+            if !inferred && type_args.is_empty() && import_ns == None {
+                if type_name.split_once('.') == .Val((enum_name, variant)) {
+                    is_variant :: self.resolve_enum_variants_cloned(enum_name).is_some_and(fn(variants) { variants.contains_key(variant) })
+                    if is_variant {
+                        args :: (^fields).map(fn((label, _, expr)) { EnumLitArg.Named(label, ^expr) }).to_array()
+                        fields = []
+                        e = Expr.EnumLit(enum_name, variant, None, ^args, false, span)
+                        return &self.infer(&e)
+                    }
+                }
+            }
+            if inferred {
+                expected := self.expected_type
+                loop expected == .Val(.Tagged(inner, _)) -> expected = Val(inner)
+                if expected == {
+                    .Val(.Named(ctx_name)) -> type_name = ctx_name
+                    .Val(.Apply(name, args)) -> { type_name = name; type_args = args }
+                    else -> {
+                        &self.diags.push(Diagnostic.error("E0119", "`{ … }` needs a known struct type here", "the inferred construction form requires an expected type from the surrounding context (binding annotation, return type, etc.)", "name the type at the value, e.g. `x :: Point{x: 1, y: 2}`, or inside a list `[Point{ … }, { … }]`", Val(span)))
+                        loop (_, _, expr) in &fields -> _ :: &self.infer(&expr)
+                        return None
+                    }
+                }
+            }
+            code_module_type :: import_ns.and_then(fn(namespace) { self.code_modules.get(namespace).map(fn(module) { module_type_name(module, type_name) }) })
+            resolved := &self.check_struct_lit(type_name, type_args, import_ns, &fields, span)
+            if code_module_type == .Val(canonical) {
+                resolved = if resolved == { .Named(_) -> Type.Named(canonical); .Apply(_, args) -> Type.Apply(canonical, args); other -> other }
+                type_name = canonical
+                import_ns = None
+            }
+            Val(resolved)
+        } else { panic("matched StructLit") }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5560
+    fn infer_inner_enum_lit(self: &Self, e: &Expr) -> Type? Never! {
+        if e == .EnumLit(type_name, variant, variant_span, args, _, span) {
+            if type_name.is_empty() {
+                expected := self.expected_type
+                loop expected == .Val(.Tagged(inner, _)) -> expected = Val(inner)
+                resolved :: expected.and_then(fn(et) {
+                    name :: if et == {
+                        .Named(n) | .Apply(n, _) -> Val(n)
+                        .Option(inner) -> if inner == { .Named(n) -> Val(n); else -> None }
+                        .Union(_) -> if self.flat_union_case_owner(et, variant) == { .Val(.Named(n)) | .Val(.Apply(n, _)) -> Val(n); else -> None }
+                        else -> None
+                    }
+                    name.filter(fn(n) { self.resolve_enum_variants_cloned(n) != None })
+                })
+                if resolved == .Val(tn) { type_name = self.import_qualified_nominal(tn) ?? tn } else {
+                    &self.diags.push(Diagnostic.error("E0330", "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "add a type annotation, or write the full form `EnumName.{variant}`", Val(span)))
+                    return None
+                }
+            }
+            Val(&self.check_enum_lit(type_name, variant, &args, span, variant_span))
+        } else { panic("matched EnumLit") }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5621
+    fn infer_inner_tainted(self: &Self, e: &Expr) -> Type? Never! {
+        if e == .Tainted(inner, tag, span) {
+            tag :: tag ?? "Input"
+            if !self.tag_is_declared(tag) -> &self.diags.push(undeclared_value_tag(tag, self.closest_declared_tag(tag), span))
+            &self.infer(&inner)
+        } else { panic("matched Tainted") }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5633
+    fn infer_inner_present(self: &Self, e: &Expr) -> Type? Never! {
+        if e == .Present(inner, _) {
+            expected :: self.expected_type.and_then(fn(ty) { ty.unwrap_option() })
+            t :: &self.infer_aggregate_value(&inner, expected) ?? return None
+            payload :: if expected == .Val(slot) && self.trait_slot_accepts(slot, t) {
+                if slot == { .Named(name) -> Type.TraitObject([name]); trait_value -> trait_value }
+            } else { t }
+            Val(Type.Option(payload))
+        } else { panic("matched Present") }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5651
+    fn infer_inner_absent(self: &Self, span: Span) -> Type? Never! {
+        if self.expected_type == .Val(expected) && expected.unwrap_option() != None -> return Val(expected)
+        &self.diags.push(Diagnostic.error("E0308", "bare `{Syntax.LIT_NULL}` needs a known optional type here", "`{Syntax.LIT_NULL}` only fits where a `T?` is expected (S32)", "add a type annotation, or use `{Syntax.LIT_NULL}` where the type is already known", Val(span)))
+        None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5691
+    fn infer_inner_pattern_test(self: &Self, e: &Expr) -> Type? Never! {
+        if e == .PatternTest(subject, pattern, span) -> &self.check_pattern_test(&subject, &pattern, span)
+        Val(Type.Bool)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5702
+    fn infer_inner_reduce_marker(self: &Self, name: String, span: Span) -> Type? Never! {
+        &self.diags.push(Diagnostic.error("E2510", "`#{name}` is only valid inside a lane `.reduce(…)`", "a reduce-op marker names the fold operation; it isn't a value on its own", "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`", Val(span)))
+        None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5716
+    fn infer_inner_no_else(self, e: Expr) -> Type? Never! { None }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5717
+    fn infer_inner_todo(self: &Self, e: &Expr) -> Type? Never! {
+        ty :: self.expected_type
+        if e == .Todo(expected_type, ..) -> expected_type = Val(ty.map(fn(t) { t.name() }) ?? "(unknown)")
+        Val(ty ?? Type.Int)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5735
+    fn infer_inner_ok(self: &Self, e: &Expr) -> Type? Never! { if e == .Ok(inner, span) { &self.infer_ok(&inner, span) } else { panic("matched Ok") } }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5736
+    fn infer_inner_err(self: &Self, e: &Expr) -> Type? Never! { if e == .Err(inner, span) { &self.infer_err(&inner, span) } else { panic("matched Err") } }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5737
+    fn infer_inner_try(self: &Self, e: &Expr) -> Type? Never! { if e == .Try(inner, span, convert, note) { &self.infer_try(&inner, span, &convert, &note) } else { panic("matched Try") } }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5738
+    fn infer_inner_or_fallback(self: &Self, e: &Expr) -> Type? Never! { if e == .OrFallback(value, fallback, span, is_option) { &self.infer_or_fallback(&value, &fallback, span, &is_option) } else { panic("matched OrFallback") } }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5744
+    fn infer_inner_lambda(self: &Self, e: &Expr) -> Type? Never! {
+        if e == .Lambda(lam) {
+            http_handler :: self.expected_type.is_some_and(is_http_handler_type)
+            expected :: if self.expected_type == {
+                .Val(.Named(name)) -> if name.rsplit('.').next() == Val("HTTPHandler") {
+                    Val(Type.Fn([Type.Named("HTTPRequest")], Val(Type.Result(Type.Named("HTTPResponse"), Type.Named("HTTPError"))), None, None, None, None))
+                } else { self.expected_type }
+                else -> self.expected_type
+            }
+            saved_http_depth :: self.http_handler_depth
+            saved_escapes :: self.lambda_escapes
+            if http_handler { self.http_handler_depth += 1; self.lambda_escapes = true }
+            result :: &self.with_deferred_call_access(fn(checker) { &checker.check_lambda(&lam, expected) })
+            self.http_handler_depth = saved_http_depth
+            self.lambda_escapes = saved_escapes
+            result
+        } else { panic("matched Lambda") }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5778
+    fn infer_inner_call_value(self: &Self, e: &Expr) -> Type? Never! { if e == .CallValue(callee, args, span) { &self.infer_call_value(&callee, &args, span) } else { panic("matched CallValue") } }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5784
+    fn infer_inner_comptime_name(self: &Self, e: &Expr) -> Type? Never! {
+        if e == .ComptimeName(name, span, value) {
+            if value == .Val(v) -> return Val(v.jet_type())
+            if !self.in_comptime {
+                if self.current_ct_globals().get(name) == .Val(v) {
+                    ty :: self.lookup(name).map(fn(info) { info.ty }).or_else(fn() { self.consts.get(name) }) ?? v.jet_type()
+                    value = Val(v)
+                    return Val(ty)
+                }
+                &self.unknown_name(name, span)
+            }
+            None
+        } else { panic("matched ComptimeName") }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5817
+    fn infer_inner_paren(self: &Self, e: &Expr) -> Type? Never! {
+        if e == .Paren(first, _) {
+            inner := &first
+            entered := 0
+            loop inner == .Paren(next, _) {
+                if !&self.enter_source_nesting(inner.span()) {
+                    loop _ in 0..<entered -> &self.leave_source_nesting()
+                    return None
+                }
+                entered += 1
+                inner = &next
+            }
+            result :: &self.infer(inner)
+            loop _ in 0..<entered -> &self.leave_source_nesting()
+            result
+        } else { panic("matched Paren") }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5839
+    fn infer_inner_typed_lit(self, e: Expr) -> Type? Never! { panic("TypedLit elaborated before match") }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5843-5845
+// Validated byte text lowers to U8 elements via the following canonical AST helper.

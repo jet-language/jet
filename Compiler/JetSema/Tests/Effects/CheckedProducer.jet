@@ -7,20 +7,21 @@ use jet_foundation.[DIAGNOSTIC_ERROR, Program, TFunc, foundation_embedded_core, 
 use jet_parser.[parse_source]
 use jet_sema.[SemaBuildFacts, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_effect_trait_contracts, sema_finalize_registration_graph, sema_test_prepare_graph]
 
-fn effect_producer_module(program: ^Program, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
+fn effect_producer_module(program: ^Program, source: String, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
     SemaRegistrationModuleInput{package_identity: package, module_identity: identity,
         module_name: identity, module_path: path, source_file: path,
         source_segments: [], source_origin: SemaSourceOrigin.Snapshot,
-        program: program, foreign_handles: []}
+        program: program, unit_source: source, foreign_handles: []}
 }
 fn effect_producer_registration(source: String) -> SemaRegistrationGraph Never! {
     original :: parse_source(source.bytes())
     assert(original.diagnostics.len() == 0)
-    canonical :: parse_source(foundation_embedded_core().effect_source().bytes())
+    effects_source :: foundation_embedded_core().effect_source()
+    canonical :: parse_source(effects_source.bytes())
     assert(canonical.diagnostics.len() == 0)
     inputs :: [SemaRegistrationModuleInput]{
-        effect_producer_module(^original.program, "main", "facts.jet", "facts"),
-        effect_producer_module(^canonical.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude"),
+        effect_producer_module(^original.program, source, "main", "facts.jet", "facts"),
+        effect_producer_module(^canonical.program, effects_source, "effects", "Prelude/Effects.jet", "jet:canonical-prelude"),
     }
     build :: SemaBuildFacts{package_name: "facts", package_version: "1.0.0", os: "linux", profile: "test",
         stamp_git: None, stamp_dirty: false, stamp_toolchain: "effect-test", stamp_at: "", artifact_build: false}

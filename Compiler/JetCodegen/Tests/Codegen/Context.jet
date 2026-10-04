@@ -1,0 +1,42 @@
+use jet_codegen.Codegen.Context.[core_rust_type_name, core_email_rust_type_name, core_crypto_type_name, core_crypto_rust_type_name, file_handle_rust_type, root_prelude_rust_type_name, history_rust_type_name, nominal_leaf, layout_handle_rust_type, job_queue_rust_type]
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:766-1008
+#Test("context_core_carriers_do_not_match_arbitrary_user_leaves") {
+    assert(core_rust_type_name("core.time.LocalDate") == Val("JetDate"))
+    assert(core_rust_type_name("user::LocalDate") == None)
+    assert(core_rust_type_name("<corelib>/Core/sync::sync.jet::RowPolicy") == None)
+    assert(core_rust_type_name("RowPolicy") == Val("JetRowPolicy"))
+    assert(core_rust_type_name("<corelib>/Core/encoding::encoding.jet::DataTree") == Val("DataTree"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1015-1087
+#Test("context_email_and_crypto_owner_boundaries") {
+    assert(core_email_rust_type_name("core.email.EmailError") == Val("Error"))
+    assert(core_email_rust_type_name("user.EmailError") == None)
+    assert(core_crypto_type_name("crypto.SigningKey") == Val("SigningKey"))
+    assert(core_crypto_type_name("user.SigningKey") == None)
+    assert(core_crypto_rust_type_name("core.crypto.SigningKey") == None)
+    assert(core_crypto_rust_type_name("core.crypto.KeyUnlock") == Val("JetVaultKeyUnlock<'_>"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1097-1221
+#Test("context_root_handles_and_loop_markers") {
+    assert(layout_handle_rust_type("HVar") == layout_handle_rust_type("VVar"))
+    assert(layout_handle_rust_type("LengthVar") == Val("jet_layout::LinExpr"))
+    assert(file_handle_rust_type("ProcessLines") == Val("()"))
+    assert(file_handle_rust_type("ProcessStdoutStream") == Val("jet_std::ProcessStdoutStreamHandle"))
+    assert(file_handle_rust_type("<corelib>/Core/files::Core/files/files.jet::FileReader") == Val("JetFileReader"))
+    assert(file_handle_rust_type("user::FileReader") == None)
+    assert(job_queue_rust_type("JobQueue") == Val("JetJobQueue<'static>"))
+    assert(root_prelude_rust_type_name("JobQueue") == job_queue_rust_type("JobQueue"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:732-758,1291-1295
+#Test("context_history_ownership_and_nominal_leaf") {
+    assert(history_rust_type_name("core.test.HistoryCase") == Val("HistoryCase"))
+    assert(history_rust_type_name("user.HistoryCase") == None)
+    assert(history_rust_type_name("HistoryCase") == Val("HistoryCase"))
+    assert(nominal_leaf("package::module::Record") == "Record")
+    assert(nominal_leaf("module.Record") == "Record")
+    assert(nominal_leaf("Record") == "Record")
+}

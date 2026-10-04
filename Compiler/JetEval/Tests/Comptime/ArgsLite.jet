@@ -1,0 +1,17 @@
+use jet_comptime.Comptime.ArgsLite.[spec_value, parsed_value, spec_id, parsed_id]
+use jet_foundation.AST.CtValue
+
+// Rust: crates/jet-comptime/src/Comptime/ArgsLite.rs:75
+#Test("args_handles_keep_nominal_spec_and_parsed_owners_distinct") {
+    assert(spec_id(spec_value(42)) == Val(42))
+    assert(parsed_id(parsed_value(42)) == Val(42))
+    assert(spec_id(parsed_value(42)).is_none())
+    assert(parsed_id(spec_value(42)).is_none())
+}
+
+// Rust: crates/jet-comptime/src/Comptime/ArgsLite.rs:89
+#Test("args_handle_id_uses_first_matching_typed_field") {
+    value := CtValue.Struct { type_name: "ArgsSpec", fields: [("id", CtValue.Str("not integer")), ("id", CtValue.Int(7)), ("id", CtValue.Int(8))] }
+    assert(spec_id(value) == Val(7))
+    assert(spec_id(CtValue.Unit).is_none())
+}

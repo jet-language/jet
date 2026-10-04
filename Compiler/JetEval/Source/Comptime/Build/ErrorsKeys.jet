@@ -1,686 +1,374 @@
-// PORT-PENDING 0563 crates-jet-comptime-src-comptime-build-errors-keys-module-group: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:1-682
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::actions_policy::{
-//RS     ActionCache, BuildAction, BuildCapability, BuildResourcePool, LegacyWrapperKind,
-//RS     PolicyExplanation,
-//RS };
-//RS use super::cache_cas::{ActionInputSnapshot, ActionKey, ContentDigest};
-//RS use super::execution_helpers::action_pools;
-//RS use super::execution_runtime::BuildProbeFact;
-//RS use super::handles::{ActionId, ProbeId, SigningIdentityId, TargetId, ToolchainId};
-//RS use super::plan_graph::BuildPlan;
-//RS use super::provenance_toolchains::{
-//RS     BuildProbe, BuildProvenance, BuildSigningIdentity, BuildToolchain, ProbeKind, ProvenanceSource,
-//RS     ReproducibilityClass, ToolchainResolution, ToolchainRole,
-//RS };
-//RS use super::targets::BuildPath;
-//RS use crate::SHA256;
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::path::Path;
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(super) enum NameKind {
-//RS     Target,
-//RS     Action,
-//RS     Toolchain,
-//RS     SigningIdentity,
-//RS     Probe,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum BuildError {
-//RS     EmptyTargetName,
-//RS     EmptyActionName,
-//RS     EmptyToolchainName,
-//RS     EmptySigningIdentityName,
-//RS     EmptyProbeName,
-//RS     DuplicateTargetName(String),
-//RS     DuplicateActionName(String),
-//RS     CompilerPackageDependencyMissing {
-//RS         package: String,
-//RS         dependency: String,
-//RS     },
-//RS     DuplicateToolchainName(String),
-//RS     DuplicateSigningIdentityName(String),
-//RS     DuplicateProbeName(String),
-//RS     EmptyPath,
-//RS     InvalidPath(String),
-//RS     EmptyToolchainTriple(String),
-//RS     EmptyIdentityField(String),
-//RS     MissingLockedProvenance(String),
-//RS     EmptyProbeField(String),
-//RS     EmptyActionArgv(String),
-//RS     EmptyEnvName(String),
-//RS     UndeclaredEnvName {
-//RS         action: String,
-//RS         key: String,
-//RS     },
-//RS     CachedActionWithoutOutputs(String),
-//RS     PhonyActionWithoutCaps(String),
-//RS     PhonyActionWithOutputs(String),
-//RS     DuplicateActionOutput {
-//RS         action: String,
-//RS         output: String,
-//RS     },
-//RS     DuplicateBuildOutput {
-//RS         output: String,
-//RS         first_action: String,
-//RS         second_action: String,
-//RS     },
-//RS     UnknownTarget(TargetId),
-//RS     UnknownAction(ActionId),
-//RS     UnknownToolchain(ToolchainId),
-//RS     UnknownSigningIdentity(SigningIdentityId),
-//RS     UnknownProbe(ProbeId),
-//RS     LegacyWrapperWithoutInputs(LegacyWrapperKind),
-//RS     LegacyWrapperWithoutOutputs(LegacyWrapperKind),
-//RS     LegacyWrapperWithoutCaps(LegacyWrapperKind),
-//RS     LegacyWrapperCommandMismatch {
-//RS         wrapper: LegacyWrapperKind,
-//RS         actual: String,
-//RS     },
-//RS     LegacyProjectFileMissing(LegacyWrapperKind),
-//RS     LegacyProjectFileInvalid(String),
-//RS     PolicyDenied(PolicyExplanation),
-//RS     EmptyPluginField(String),
-//RS     InvalidPluginDigest(String),
-//RS     PackagedPlugin(String),
-//RS     PluginVersionMismatch {
-//RS         plugin: String,
-//RS         expected: String,
-//RS         actual: String,
-//RS     },
-//RS     EmptyGeneratedModuleField(String),
-//RS     InvalidGeneratedModulePath(String),
-//RS     DuplicateGeneratedModuleName(String),
-//RS     DuplicateGeneratedModulePath(String),
-//RS     GeneratedModuleCycle {
-//RS         module: String,
-//RS         path: String,
-//RS     },
-//RS     TargetDependencyCycle(DependencyCycle),
-//RS     ActionDependencyCycle(DependencyCycle),
-//RS }
-//RS 
-//RS /// One dependency cycle, in the order the graph walk found it: every node
-//RS /// from the first repeated node back to itself.
-//RS ///
-//RS /// The chain *is* the diagnostic — a cycle is only actionable when the whole
-//RS /// loop is named — so `Debug` prints the chain instead of a field list.
-//RS /// Reporters render `BuildError` both through `build_error_text` and through
-//RS /// `{error:?}`, and both must name every node.
-//RS #[derive(Clone, PartialEq, Eq)]
-//RS pub struct DependencyCycle(Vec<String>);
-//RS 
-//RS impl DependencyCycle {
-//RS     /// Node names in traversal order. The first name repeats as the last.
-//RS     pub fn nodes(&self) -> &[String] {
-//RS         &self.0
-//RS     }
-//RS 
-//RS     /// The rendered loop: `` `a` -> `b` -> `a` ``.
-//RS     pub fn chain(&self) -> String {
-//RS         self.0
-//RS             .iter()
-//RS             .map(|node| format!("`{node}`"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(" -> ")
-//RS     }
-//RS }
-//RS 
-//RS impl std::fmt::Debug for DependencyCycle {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         f.write_str(&self.chain())
-//RS     }
-//RS }
-//RS 
-//RS /// Diagnostic text for one dependency cycle: the whole loop, why the graph
-//RS /// cannot be built, and the one edit that removes it. The target graph and
-//RS /// the action graph are two call sites of the same fault, so they share this
-//RS /// wording instead of each spelling out its own.
-//RS pub(super) fn dependency_cycle_text(kind: &str, cycle: &DependencyCycle) -> String {
-//RS     format!(
-//RS         "{kind} dependency graph contains a cycle: {}; a cycle has no build order, so no {kind} in it can ever start; remove one dependency from that chain",
-//RS         cycle.chain()
-//RS     )
-//RS }
-//RS 
-//RS /// The cycle a depth-first walk just closed: the traversal stack from the
-//RS /// first visit of `repeated` through to `repeated` again.
-//RS pub(super) fn closed_cycle<N: Copy + PartialEq>(
-//RS     stack: &[N],
-//RS     repeated: N,
-//RS     name: impl Fn(N) -> String,
-//RS ) -> DependencyCycle {
-//RS     let start = stack.iter().position(|node| *node == repeated).unwrap_or(0);
-//RS     DependencyCycle(
-//RS         stack[start..]
-//RS             .iter()
-//RS             .copied()
-//RS             .chain(std::iter::once(repeated))
-//RS             .map(name)
-//RS             .collect(),
-//RS     )
-//RS }
-//RS 
-//RS /// The cycle left behind when a topological sort stalls. A stalled sort has
-//RS /// no traversal stack to read, so the residual graph is walked again here.
-//RS /// `remaining` is ordered and every node's prerequisites are sorted before
-//RS /// they are followed, so one graph always renders one chain.
-//RS pub(super) fn stalled_cycle<N: Ord + Clone>(
-//RS     remaining: &BTreeSet<N>,
-//RS     dependencies: impl Fn(&N) -> Vec<N>,
-//RS     name: impl Fn(&N) -> String,
-//RS ) -> DependencyCycle {
-//RS     let mut settled = BTreeSet::new();
-//RS     for node in remaining {
-//RS         let mut stack = Vec::new();
-//RS         if let Some(cycle) = walk_stalled(node, remaining, &dependencies, &mut stack, &mut settled)
-//RS         {
-//RS             return DependencyCycle(cycle.iter().map(&name).collect());
-//RS         }
-//RS     }
-//RS     // Unreachable for a real stall: every remaining node still waits on a
-//RS     // remaining prerequisite, so the residual graph holds a cycle. Name the
-//RS     // stuck nodes rather than nothing if a caller ever stalls for another
-//RS     // reason.
-//RS     DependencyCycle(remaining.iter().map(&name).collect())
-//RS }
-//RS 
-//RS fn walk_stalled<N: Ord + Clone>(
-//RS     node: &N,
-//RS     remaining: &BTreeSet<N>,
-//RS     dependencies: &impl Fn(&N) -> Vec<N>,
-//RS     stack: &mut Vec<N>,
-//RS     settled: &mut BTreeSet<N>,
-//RS ) -> Option<Vec<N>> {
-//RS     if settled.contains(node) {
-//RS         return None;
-//RS     }
-//RS     if let Some(start) = stack.iter().position(|entry| entry == node) {
-//RS         let mut cycle = stack[start..].to_vec();
-//RS         cycle.push(node.clone());
-//RS         return Some(cycle);
-//RS     }
-//RS     stack.push(node.clone());
-//RS     let mut prerequisites = dependencies(node);
-//RS     prerequisites.sort();
-//RS     for prerequisite in &prerequisites {
-//RS         if !remaining.contains(prerequisite) {
-//RS             continue;
-//RS         }
-//RS         if let Some(cycle) = walk_stalled(prerequisite, remaining, dependencies, stack, settled) {
-//RS             return Some(cycle);
-//RS         }
-//RS     }
-//RS     stack.pop();
-//RS     settled.insert(node.clone());
-//RS     None
-//RS }
-//RS 
-//RS /// The target graph closed a loop at `repeated` while `stack` was being
-//RS /// walked. Names come from the plan so the message reads in user terms.
-//RS pub(super) fn target_cycle_error(
-//RS     plan: &BuildPlan,
-//RS     stack: &[TargetId],
-//RS     repeated: TargetId,
-//RS ) -> BuildError {
-//RS     BuildError::TargetDependencyCycle(closed_cycle(stack, repeated, |target: TargetId| {
-//RS         plan.targets
-//RS             .get(target.0)
-//RS             .map(|target| target.name.clone())
-//RS             .unwrap_or_else(|| format!("target#{}", target.0))
-//RS     }))
-//RS }
-//RS 
-//RS /// The action graph stalled with `remaining` unordered. Names come from the
-//RS /// plan so the message reads in user terms.
-//RS pub(super) fn action_cycle_error(
-//RS     plan: &BuildPlan,
-//RS     remaining: &BTreeSet<ActionId>,
-//RS     prerequisites: &BTreeMap<ActionId, Vec<ActionId>>,
-//RS ) -> BuildError {
-//RS     BuildError::ActionDependencyCycle(stalled_cycle(
-//RS         remaining,
-//RS         |action: &ActionId| prerequisites.get(action).cloned().unwrap_or_default(),
-//RS         |action: &ActionId| {
-//RS             plan.actions
-//RS                 .get(action.0)
-//RS                 .map(|action| action.name.clone())
-//RS                 .unwrap_or_else(|| format!("action#{}", action.0))
-//RS         },
-//RS     ))
-//RS }
-//RS 
-//RS pub(super) fn canonical_action_key(
-//RS     plan: &BuildPlan,
-//RS     action: &BuildAction,
-//RS     inputs: &[ActionInputSnapshot],
-//RS ) -> ActionKey {
-//RS     let mut w = KeyWriter::new();
-//RS     w.str("jet.action-key.v2");
-//RS     w.str("kind");
-//RS     w.str(action.kind.as_str());
-//RS     w.str("observe-exact-source");
-//RS     w.bool(action.kind.observes_exact_source());
-//RS     w.str("compiler-owned");
-//RS     w.bool(action.compiler_owned);
-//RS     w.str("argv");
-//RS     w.vec_str(action.argv.iter().map(String::as_str));
-//RS     w.str("env-allowlist");
-//RS     let allowlisted_env = allowlisted_env(action);
-//RS     w.map_str(&allowlisted_env);
-//RS     w.str("inputs");
-//RS     w.vec_str(action.inputs.iter().map(BuildPath::as_str));
-//RS     w.str("input-snapshots");
-//RS     let mut snapshots = inputs.iter().collect::<Vec<_>>();
-//RS     snapshots.sort_by(|a, b| a.path.cmp(&b.path));
-//RS     if action.kind.observes_exact_source() {
-//RS         // Exact source bytes stay identity inputs: every declared input must
-//RS         // contribute a content digest when the action surface can observe source.
-//RS         for path in &action.inputs {
-//RS             let present = snapshots.iter().any(|s| s.path.as_str() == path.as_str());
-//RS             w.str(path.as_str());
-//RS             w.bool(present);
-//RS         }
-//RS     }
-//RS     w.bytes
-//RS         .extend_from_slice(&(snapshots.len() as u64).to_be_bytes());
-//RS     for snapshot in snapshots {
-//RS         w.str(snapshot.path.as_str());
-//RS         w.str(snapshot.digest.as_str());
-//RS         w.bytes.extend_from_slice(&snapshot.byte_len.to_be_bytes());
-//RS     }
-//RS     w.str("outputs");
-//RS     w.vec_str(action.outputs.iter().map(BuildPath::as_str));
-//RS     w.str("dep-outputs");
-//RS     let dep_outputs = declared_dep_outputs(plan, action);
-//RS     w.vec_str(dep_outputs.iter().map(String::as_str));
-//RS     w.str("caps");
-//RS     for cap in &action.caps {
-//RS         encode_capability(&mut w, cap);
-//RS     }
-//RS     w.str("cache");
-//RS     encode_action_cache(&mut w, action.cache);
-//RS     w.str("compiler-version");
-//RS     w.str(env!("CARGO_PKG_VERSION"));
-//RS     w.str("helper-versions");
-//RS     w.map_str(&action.helper_versions);
-//RS     w.str("generated-modules");
-//RS     let mut generated = plan.generated_modules.iter().collect::<Vec<_>>();
-//RS     generated.sort_by(|a, b| a.path.cmp(&b.path));
-//RS     for module in generated {
-//RS         w.str(module.path.as_str());
-//RS         w.str(module.source_digest.as_str());
-//RS         // Exact generated source remains an input when any observing action
-//RS         // can surface it through diagnostics / docs / publication.
-//RS         if action.kind.observes_exact_source() {
-//RS             w.str(&module.source);
-//RS         }
-//RS     }
-//RS     w.str("build-fact-contributions");
-//RS     let mut contributions = plan.fact_contributions().iter().collect::<Vec<_>>();
-//RS     contributions.sort_by(|left, right| {
-//RS         left.key
-//RS             .cmp(&right.key)
-//RS             .then_with(|| left.layer.cmp(&right.layer))
-//RS             .then_with(|| left.scope.cmp(&right.scope))
-//RS             .then_with(|| left.source.cmp(&right.source))
-//RS             .then_with(|| left.reason.cmp(&right.reason))
-//RS             .then_with(|| left.force.cmp(&right.force))
-//RS             .then_with(|| left.force_reason.cmp(&right.force_reason))
-//RS     });
-//RS     for contribution in contributions {
-//RS         w.str(&contribution.key);
-//RS         w.str(&format!("{:?}", contribution.value));
-//RS         w.str(contribution.scope.name());
-//RS         w.str(contribution.layer.name());
-//RS         w.str(&contribution.source);
-//RS         w.str(contribution.reason.as_deref().unwrap_or_default());
-//RS         w.bool(contribution.force);
-//RS         w.str(contribution.force_reason.as_deref().unwrap_or_default());
-//RS     }
-//RS     w.str("target");
-//RS     if let Some(target) = plan
-//RS         .action_targets()
-//RS         .get(&action.id)
-//RS         .and_then(|id| plan.targets.get(id.0))
-//RS     {
-//RS         w.bool(true);
-//RS         w.str(&target.name);
-//RS         w.str(&format!("{:?}", target.kind));
-//RS         w.map_str(&target.metadata);
-//RS         w.vec_str(target.sources.iter().map(BuildPath::as_str));
-//RS     } else {
-//RS         w.bool(false);
-//RS     }
-//RS     w.str("toolchain");
-//RS     encode_toolchain(&mut w, &plan.toolchains[action.toolchain.id.0]);
-//RS     w.str("probes");
-//RS     for probe in &action.probes {
-//RS         encode_probe(&mut w, plan, &plan.probes[probe.id.0]);
-//RS     }
-//RS     w.str("signing");
-//RS     match action.signing_identity {
-//RS         Some(identity) => {
-//RS             w.bool(true);
-//RS             encode_signing_identity(&mut w, &plan.signing_identities[identity.id.0]);
-//RS         }
-//RS         None => w.bool(false),
-//RS     }
-//RS     w.str("variant");
-//RS     match &action.variant_identity {
-//RS         Some(identity) => {
-//RS             w.bool(true);
-//RS             w.str(identity);
-//RS         }
-//RS         None => w.bool(false),
-//RS     }
-//RS     w.str("labels");
-//RS     w.map_str(&action.labels);
-//RS     w.str("resource-pools");
-//RS     for pool in action_pools(action) {
-//RS         encode_resource_pool(&mut w, &pool);
-//RS     }
-//RS     w.str("legacy");
-//RS     match action.legacy_wrapper {
-//RS         Some(wrapper) => {
-//RS             w.bool(true);
-//RS             w.str(wrapper.as_str());
-//RS         }
-//RS         None => w.bool(false),
-//RS     }
-//RS     w.str("plugin");
-//RS     match action.plugin {
-//RS         Some(plugin) => {
-//RS             w.bool(true);
-//RS             let plugin = &plan.plugins[plugin.id.0];
-//RS             w.str(&plugin.name);
-//RS             w.str(&plugin.version);
-//RS             w.str(&plugin.api_version);
-//RS             w.str(&plugin.component_digest);
-//RS             for grant in &plugin.grants {
-//RS                 encode_capability(&mut w, grant);
-//RS             }
-//RS         }
-//RS         None => w.bool(false),
-//RS     }
-//RS     ActionKey(format!("act-sha256:{}", SHA256::sha256_hex(&w.bytes)))
-//RS }
-//RS 
-//RS fn allowlisted_env(action: &BuildAction) -> BTreeMap<String, String> {
-//RS     if action.env_allowlist.is_empty() {
-//RS         return action.env.clone();
-//RS     }
-//RS     action
-//RS         .env
-//RS         .iter()
-//RS         .filter(|(key, _)| action.env_allowlist.contains(*key))
-//RS         .map(|(key, value)| (key.clone(), value.clone()))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn declared_dep_outputs(plan: &BuildPlan, action: &BuildAction) -> Vec<String> {
-//RS     let Some(target_id) = plan.action_targets().get(&action.id).copied() else {
-//RS         return Vec::new();
-//RS     };
-//RS     let Some(target) = plan.targets.get(target_id.0) else {
-//RS         return Vec::new();
-//RS     };
-//RS     let mut outs = BTreeSet::new();
-//RS     for dep in &target.deps {
-//RS         let Some(dep_target) = plan.targets.get(dep.id.0) else {
-//RS             continue;
-//RS         };
-//RS         for path in dep_target.outputs.iter().chain(dep_target.inputs.iter()) {
-//RS             outs.insert(path.as_str().to_string());
-//RS         }
-//RS         for dep_action in &dep_target.actions {
-//RS             if let Some(dep_action) = plan.actions.get(dep_action.id.0) {
-//RS                 for path in &dep_action.outputs {
-//RS                     outs.insert(path.as_str().to_string());
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     outs.into_iter().collect()
-//RS }
-//RS 
-//RS pub(super) fn canonical_effective_action_key(
-//RS     plan: &BuildPlan,
-//RS     action: &BuildAction,
-//RS     inputs: &[ActionInputSnapshot],
-//RS     grants: &BTreeSet<BuildCapability>,
-//RS     _executable: &Path,
-//RS     executable_digest: &ContentDigest,
-//RS     probe_facts: &[BuildProbeFact],
-//RS ) -> ActionKey {
-//RS     let base = canonical_action_key(plan, action, inputs);
-//RS     let mut w = KeyWriter::new();
-//RS     w.str("jet.effective-action-key.v1");
-//RS     w.str(base.as_str());
-//RS     w.str("effective-policy");
-//RS     for grant in grants {
-//RS         encode_capability(&mut w, grant);
-//RS     }
-//RS     // The resolved filesystem path is host-local and must not split an
-//RS     // otherwise identical remote action identity. The executable bytes remain
-//RS     // part of the key through their content digest.
-//RS     w.str("resolved-executable-digest");
-//RS     w.str(executable_digest.as_str());
-//RS     w.str("actual-probe-facts");
-//RS     for fact in probe_facts {
-//RS         w.str(&fact.name);
-//RS         w.bool(fact.success);
-//RS         w.str(&fact.detail);
-//RS         w.str(&format!("{:?}", fact.reproducibility));
-//RS         w.str(&format!(
-//RS             "{}:{}",
-//RS             fact.toolchain.context, fact.toolchain.id.0
-//RS         ));
-//RS         w.str(fact.toolchain_provenance.as_str());
-//RS     }
-//RS     w.str("compiler-identity");
-//RS     w.str(concat!(
-//RS         env!("CARGO_PKG_NAME"),
-//RS         "@",
-//RS         env!("CARGO_PKG_VERSION")
-//RS     ));
-//RS     ActionKey(format!("act-sha256:{}", SHA256::sha256_hex(&w.bytes)))
-//RS }
-//RS 
-//RS fn encode_action_cache(w: &mut KeyWriter, cache: ActionCache) {
-//RS     match cache {
-//RS         ActionCache::Cached => w.str("cached"),
-//RS         ActionCache::UncachedPhony => w.str("uncached-phony"),
-//RS     }
-//RS }
-//RS 
-//RS fn encode_capability(w: &mut KeyWriter, cap: &BuildCapability) {
-//RS     w.str(cap.flag());
-//RS }
-//RS 
-//RS fn encode_resource_pool(w: &mut KeyWriter, pool: &BuildResourcePool) {
-//RS     match pool {
-//RS         BuildResourcePool::CPU => w.str("cpu"),
-//RS         BuildResourcePool::Memory => w.str("memory"),
-//RS         BuildResourcePool::Linker => w.str("linker"),
-//RS         BuildResourcePool::Console => w.str("console"),
-//RS         BuildResourcePool::GPU => w.str("gpu"),
-//RS         BuildResourcePool::Custom(name) => {
-//RS             w.str("custom");
-//RS             w.str(name);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn encode_toolchain(w: &mut KeyWriter, toolchain: &BuildToolchain) {
-//RS     w.str(&toolchain.name);
-//RS     match toolchain.role {
-//RS         ToolchainRole::Host => w.str("host"),
-//RS         ToolchainRole::Target => w.str("target"),
-//RS     }
-//RS     w.str(&toolchain.host_triple);
-//RS     w.str(&toolchain.target_triple);
-//RS     match &toolchain.sdk {
-//RS         Some(sdk) => {
-//RS             w.bool(true);
-//RS             w.str(&sdk.name);
-//RS             w.str(&sdk.version);
-//RS             encode_provenance(w, &sdk.provenance);
-//RS         }
-//RS         None => w.bool(false),
-//RS     }
-//RS     match &toolchain.linker {
-//RS         Some(linker) => {
-//RS             w.bool(true);
-//RS             w.str(&linker.name);
-//RS             encode_provenance(w, &linker.provenance);
-//RS         }
-//RS         None => w.bool(false),
-//RS     }
-//RS     match &toolchain.sysroot {
-//RS         Some(sysroot) => {
-//RS             w.bool(true);
-//RS             w.str(&sysroot.name);
-//RS             w.str(&sysroot.path_digest);
-//RS             encode_provenance(w, &sysroot.provenance);
-//RS         }
-//RS         None => w.bool(false),
-//RS     }
-//RS     w.str("tools");
-//RS     w.map_str(&toolchain.tools);
-//RS     w.str("resolution");
-//RS     match toolchain.resolution {
-//RS         ToolchainResolution::Ambient => w.str("ambient"),
-//RS         ToolchainResolution::DeclaredOnly => w.str("declared-only"),
-//RS     }
-//RS     w.str("mounts");
-//RS     for mount in &toolchain.mounts {
-//RS         w.str(&mount.destination);
-//RS         if mount.identity.is_empty() {
-//RS             w.str("path");
-//RS             w.str(&mount.source);
-//RS         } else {
-//RS             w.str("identity");
-//RS             w.str(&mount.identity);
-//RS         }
-//RS     }
-//RS     encode_provenance(w, &toolchain.provenance);
-//RS }
-//RS 
-//RS fn encode_signing_identity(w: &mut KeyWriter, identity: &BuildSigningIdentity) {
-//RS     w.str(&identity.name);
-//RS     w.str(&identity.label);
-//RS     encode_provenance(w, &identity.provenance);
-//RS }
-//RS 
-//RS fn encode_probe(w: &mut KeyWriter, plan: &BuildPlan, probe: &BuildProbe) {
-//RS     w.str(&probe.name);
-//RS     match &probe.kind {
-//RS         ProbeKind::FindProgram { program } => {
-//RS             w.str("find-program");
-//RS             w.str(program);
-//RS         }
-//RS         ProbeKind::PkgConfig {
-//RS             package,
-//RS             min_version,
-//RS         } => {
-//RS             w.str("pkg-config");
-//RS             w.str(package);
-//RS             match min_version {
-//RS                 Some(version) => {
-//RS                     w.bool(true);
-//RS                     w.str(version);
-//RS                 }
-//RS                 None => w.bool(false),
-//RS             }
-//RS         }
-//RS         ProbeKind::HeaderCheck { header } => {
-//RS             w.str("header-check");
-//RS             w.str(header);
-//RS         }
-//RS         ProbeKind::CompileCheck {
-//RS             name,
-//RS             includes,
-//RS             code,
-//RS         } => {
-//RS             w.str("compile-check");
-//RS             w.str(name);
-//RS             w.vec_str(includes.iter().map(String::as_str));
-//RS             w.str(code);
-//RS         }
-//RS     }
-//RS     match probe.reproducibility {
-//RS         ReproducibilityClass::Reproducible => w.str("reproducible"),
-//RS         ReproducibilityClass::Ambient => w.str("ambient"),
-//RS     }
-//RS     encode_provenance(w, &probe.provenance);
-//RS     encode_toolchain(w, &plan.toolchains[probe.toolchain.id.0]);
-//RS }
-//RS 
-//RS fn encode_provenance(w: &mut KeyWriter, provenance: &BuildProvenance) {
-//RS     match &provenance.source {
-//RS         ProvenanceSource::InferredHost => w.str("inferred-host"),
-//RS         ProvenanceSource::JetpackDependency(dep) => {
-//RS             w.str("jetpack-dependency");
-//RS             w.str(dep);
-//RS         }
-//RS         ProvenanceSource::AmbientRecord(record) => {
-//RS             w.str("ambient-record");
-//RS             w.str(record);
-//RS         }
-//RS         ProvenanceSource::UserDeclared(source) => {
-//RS             w.str("user-declared");
-//RS             w.str(source);
-//RS         }
-//RS     }
-//RS     match &provenance.lock {
-//RS         Some(lock) => {
-//RS             w.bool(true);
-//RS             w.str(&lock.key);
-//RS             w.str(&lock.digest);
-//RS         }
-//RS         None => w.bool(false),
-//RS     }
-//RS }
-//RS 
-//RS struct KeyWriter {
-//RS     bytes: Vec<u8>,
-//RS }
-//RS 
-//RS impl KeyWriter {
-//RS     fn new() -> Self {
-//RS         KeyWriter { bytes: Vec::new() }
-//RS     }
-//RS 
-//RS     fn str(&mut self, value: &str) {
-//RS         self.bytes
-//RS             .extend_from_slice(&(value.len() as u64).to_be_bytes());
-//RS         self.bytes.extend_from_slice(value.as_bytes());
-//RS     }
-//RS 
-//RS     fn bool(&mut self, value: bool) {
-//RS         self.bytes.push(u8::from(value));
-//RS     }
-//RS 
-//RS     fn vec_str<'a>(&mut self, values: impl IntoIterator<Item = &'a str>) {
-//RS         let values: Vec<&str> = values.into_iter().collect();
-//RS         self.bytes
-//RS             .extend_from_slice(&(values.len() as u64).to_be_bytes());
-//RS         for value in values {
-//RS             self.str(value);
-//RS         }
-//RS     }
-//RS 
-//RS     fn map_str(&mut self, map: &BTreeMap<String, String>) {
-//RS         self.bytes
-//RS             .extend_from_slice(&(map.len() as u64).to_be_bytes());
-//RS         for (key, value) in map {
-//RS             self.str(key);
-//RS             self.str(value);
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0563 crates/jet-comptime/src/Comptime/Build/errors_keys.rs:1-682
+use jet_comptime.Comptime.Build.ActionsPolicy.[ActionCache, BuildAction, BuildCapability, BuildResourcePool, LegacyWrapperKind, PolicyExplanation]
+use jet_comptime.Comptime.Build.CacheCas.[ActionInputSnapshot, ActionKey, ContentDigest]
+use jet_comptime.Comptime.Build.ExecutionHelpers.action_pools
+use jet_comptime.Comptime.Build.ExecutionRuntime.BuildProbeFact
+use jet_comptime.Comptime.Build.Handles.[ActionId, ProbeId, SigningIdentityId, TargetId, ToolchainId]
+use jet_comptime.Comptime.Build.PlanGraph.BuildPlan
+use jet_comptime.Comptime.Build.ProvenanceToolchains.[BuildProbe, BuildProvenance, BuildSigningIdentity, BuildToolchain, ProbeKind, ProvenanceSource, ReproducibilityClass, ToolchainResolution, ToolchainRole]
+use jet_comptime.Comptime.Build.Targets.BuildPath
+use jet_comptime.SHA256
+use std.collections.BTreeSet
+use core.sys.OSPath
 
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:21
+enum NameKind { Target; Action; Toolchain; SigningIdentity; Probe }
+
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:30
+#Error
+pub enum BuildError {
+    EmptyTargetName
+    EmptyActionName
+    EmptyToolchainName
+    EmptySigningIdentityName
+    EmptyProbeName
+    DuplicateTargetName(String)
+    DuplicateActionName(String)
+    CompilerPackageDependencyMissing { package: String, dependency: String }
+    DuplicateToolchainName(String)
+    DuplicateSigningIdentityName(String)
+    DuplicateProbeName(String)
+    EmptyPath
+    InvalidPath(String)
+    EmptyToolchainTriple(String)
+    EmptyIdentityField(String)
+    MissingLockedProvenance(String)
+    EmptyProbeField(String)
+    EmptyActionArgv(String)
+    EmptyEnvName(String)
+    UndeclaredEnvName { action: String, key: String }
+    CachedActionWithoutOutputs(String)
+    PhonyActionWithoutCaps(String)
+    PhonyActionWithOutputs(String)
+    DuplicateActionOutput { action: String, output: String }
+    DuplicateBuildOutput { output: String, first_action: String, second_action: String }
+    UnknownTarget(TargetId)
+    UnknownAction(ActionId)
+    UnknownToolchain(ToolchainId)
+    UnknownSigningIdentity(SigningIdentityId)
+    UnknownProbe(ProbeId)
+    LegacyWrapperWithoutInputs(LegacyWrapperKind)
+    LegacyWrapperWithoutOutputs(LegacyWrapperKind)
+    LegacyWrapperWithoutCaps(LegacyWrapperKind)
+    LegacyWrapperCommandMismatch { wrapper: LegacyWrapperKind, actual: String }
+    LegacyProjectFileMissing(LegacyWrapperKind)
+    LegacyProjectFileInvalid(String)
+    PolicyDenied(PolicyExplanation)
+    EmptyPluginField(String)
+    InvalidPluginDigest(String)
+    PackagedPlugin(String)
+    PluginVersionMismatch { plugin: String, expected: String, actual: String }
+    EmptyGeneratedModuleField(String)
+    InvalidGeneratedModulePath(String)
+    DuplicateGeneratedModuleName(String)
+    DuplicateGeneratedModulePath(String)
+    GeneratedModuleCycle { module: String, path: String }
+    TargetDependencyCycle(DependencyCycle)
+    ActionDependencyCycle(DependencyCycle)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:105
+// Traversal order, including the repeated node, is the diagnostic.
+pub struct DependencyCycle { names: [String] }
+impl DependencyCycle {
+    // Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:115
+    pub fn nodes(self: &DependencyCycle) -> &[String] { &self.names }
+    // Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:120
+    pub fn chain(self: &DependencyCycle) -> String {
+        self.names.iter().map(fn(node) { "`{node}`" }).collect::<[String]>().join(" -> ")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:130
+impl std.fmt.Debug for DependencyCycle {
+    fn fmt(self: &DependencyCycle, f: &std.fmt.Formatter) -> Unit std.fmt.Error! { f.write_str(self.chain())? }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:139
+fn dependency_cycle_text(kind: &String, cycle: &DependencyCycle) -> String {
+    "{kind} dependency graph contains a cycle: {cycle.chain()}; a cycle has no build order, so no {kind} in it can ever start; remove one dependency from that chain"
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:148
+fn closed_cycle<N>(stack: &[N], repeated: N, name: fn(N) -> String) -> DependencyCycle {
+    start := stack.iter().position(fn(node) { node == repeated }).unwrap_or(0)
+    names: [String] = []
+    for node in stack[start..] { names.push(name(node)) }
+    names.push(name(repeated))
+    DependencyCycle { names: ^names }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:168
+// GATE #4499: ordered user-type set keys retain their native equality and ordering.
+fn stalled_cycle<N>(remaining: &BTreeSet<N>, dependencies: fn(&N) -> [N], name: fn(&N) -> String) -> DependencyCycle {
+    settled := BTreeSet<N>.new()
+    for node in remaining {
+        stack: [N] = []
+        if cycle := walk_stalled(node, remaining, dependencies, &stack, &settled) {
+            return DependencyCycle { names: cycle.iter().map(name).collect() }
+        }
+    }
+    // A non-cycle stall still names every stuck node, as in the Rust fallback.
+    DependencyCycle { names: remaining.iter().map(name).collect() }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:188
+fn walk_stalled<N>(node: &N, remaining: &BTreeSet<N>, dependencies: fn(&N) -> [N], stack: &[N], settled: &BTreeSet<N>) -> [N]? {
+    if settled.contains(node) { return None }
+    if start := stack.iter().position(fn(entry) { entry == node }) {
+        cycle := stack[start..].to_vec()
+        cycle.push(node.clone())
+        return Val(^cycle)
+    }
+    stack.push(node.clone())
+    prerequisites := dependencies(node)
+    prerequisites.sort()
+    for prerequisite in &prerequisites {
+        if !remaining.contains(prerequisite) { continue }
+        if cycle := walk_stalled(prerequisite, remaining, dependencies, stack, settled) { return Val(^cycle) }
+    }
+    _ :: stack.pop()
+    _ :: settled.insert(node.clone())
+    None
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:221
+fn target_cycle_error(plan: &BuildPlan, stack: &[TargetId], repeated: TargetId) -> BuildError {
+    BuildError.TargetDependencyCycle(closed_cycle(stack, repeated, fn(target) {
+        plan.targets.get(target.0).map(fn(t) { t.name.clone() }).unwrap_or_else(fn() { "target#{target.0}" })
+    }))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:236
+fn action_cycle_error(plan: &BuildPlan, remaining: &BTreeSet<ActionId>, prerequisites: &[ActionId:[ActionId]]) -> BuildError {
+    BuildError.ActionDependencyCycle(stalled_cycle(remaining,
+        fn(action) { prerequisites.get(action).cloned().unwrap_or([]) },
+        fn(action) { plan.actions.get(action.0).map(fn(a) { a.name.clone() }).unwrap_or_else(fn() { "action#{action.0}" }) }))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:253
+fn canonical_action_key(plan: &BuildPlan, action: &BuildAction, inputs: &[ActionInputSnapshot]) -> ActionKey {
+    w := KeyWriter.new()
+    w.str("jet.action-key.v2")
+    w.str("kind"); w.str(action.kind.as_str())
+    w.str("observe-exact-source"); w.bool(action.kind.observes_exact_source())
+    w.str("compiler-owned"); w.bool(action.compiler_owned)
+    w.str("argv"); w.vec_str(action.argv.iter())
+    w.str("env-allowlist"); env := allowlisted_env(action); w.map_str(&env)
+    w.str("inputs"); w.vec_str(action.inputs.iter().map(fn(path) { path.as_str() }))
+    w.str("input-snapshots")
+    snapshots := inputs.iter().collect::<[&ActionInputSnapshot]>()
+    snapshots.sort_by(fn(a, b) { a.path.cmp(&b.path) })
+    if action.kind.observes_exact_source() {
+        for path in &action.inputs {
+            present := snapshots.iter().any(fn(s) { s.path.as_str() == path.as_str() })
+            w.str(path.as_str()); w.bool(present)
+        }
+    }
+    w.bytes.extend_from_slice((snapshots.len() as U64).to_be_bytes())
+    for snapshot in snapshots {
+        w.str(snapshot.path.as_str()); w.str(snapshot.digest.as_str())
+        w.bytes.extend_from_slice(snapshot.byte_len.to_be_bytes())
+    }
+    w.str("outputs"); w.vec_str(action.outputs.iter().map(fn(path) { path.as_str() }))
+    w.str("dep-outputs"); dep_outputs := declared_dep_outputs(plan, action); w.vec_str(dep_outputs.iter())
+    w.str("caps")
+    for cap in &action.caps { encode_capability(&w, cap) }
+    w.str("cache"); encode_action_cache(&w, action.cache)
+    w.str("compiler-version"); w.str(env!("CARGO_PKG_VERSION"))
+    w.str("helper-versions"); w.map_str(&action.helper_versions)
+    w.str("generated-modules")
+    generated := plan.generated_modules.iter().collect::<[&_]>()
+    generated.sort_by(fn(a, b) { a.path.cmp(&b.path) })
+    for module in generated {
+        w.str(module.path.as_str()); w.str(module.source_digest.as_str())
+        if action.kind.observes_exact_source() { w.str(&module.source) }
+    }
+    w.str("build-fact-contributions")
+    contributions := plan.fact_contributions().iter().collect::<[&_]>()
+    contributions.sort_by(fn(left, right) {
+        left.key.cmp(&right.key)
+            .then_with(fn() { left.layer.cmp(&right.layer) })
+            .then_with(fn() { left.scope.cmp(&right.scope) })
+            .then_with(fn() { left.source.cmp(&right.source) })
+            .then_with(fn() { left.reason.cmp(&right.reason) })
+            .then_with(fn() { left.force.cmp(&right.force) })
+            .then_with(fn() { left.force_reason.cmp(&right.force_reason) })
+    })
+    for contribution in contributions {
+        w.str(&contribution.key); w.str(&format!("{:?}", contribution.value))
+        w.str(contribution.scope.name()); w.str(contribution.layer.name()); w.str(&contribution.source)
+        w.str(contribution.reason.as_deref().unwrap_or("")); w.bool(contribution.force)
+        w.str(contribution.force_reason.as_deref().unwrap_or(""))
+    }
+    w.str("target")
+    target := plan.action_targets().get(&action.id).and_then(fn(id) { plan.targets.get(id.0) })
+    target == {
+        Val(t) -> {
+            w.bool(true); w.str(&t.name); w.str(&format!("{:?}", t.kind)); w.map_str(&t.metadata)
+            w.vec_str(t.sources.iter().map(fn(path) { path.as_str() }))
+        }
+        None -> w.bool(false)
+    }
+    w.str("toolchain"); encode_toolchain(&w, &plan.toolchains[action.toolchain.id.0])
+    w.str("probes")
+    for probe in &action.probes { encode_probe(&w, plan, &plan.probes[probe.id.0]) }
+    w.str("signing")
+    action.signing_identity == {
+        Val(identity) -> { w.bool(true); encode_signing_identity(&w, &plan.signing_identities[identity.id.0]) }
+        None -> w.bool(false)
+    }
+    w.str("variant")
+    action.variant_identity == { Val(identity) -> { w.bool(true); w.str(identity) }; None -> w.bool(false) }
+    w.str("labels"); w.map_str(&action.labels)
+    w.str("resource-pools")
+    for pool in action_pools(action) { encode_resource_pool(&w, &pool) }
+    w.str("legacy")
+    action.legacy_wrapper == { Val(wrapper) -> { w.bool(true); w.str(wrapper.as_str()) }; None -> w.bool(false) }
+    w.str("plugin")
+    action.plugin == {
+        Val(handle) -> {
+            w.bool(true)
+            plugin := &plan.plugins[handle.id.0]
+            w.str(&plugin.name); w.str(&plugin.version); w.str(&plugin.api_version); w.str(&plugin.component_digest)
+            for grant in &plugin.grants { encode_capability(&w, grant) }
+        }
+        None -> w.bool(false)
+    }
+    ActionKey("act-sha256:{SHA256.sha256_hex(&w.bytes)}")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:409
+fn allowlisted_env(action: &BuildAction) -> [String:String] {
+    if action.env_allowlist.is_empty() { return action.env.clone() }
+    env: [String:String] = [:]
+    for (key, value) in &action.env {
+        if action.env_allowlist.contains(key) { env.insert(key.clone(), value.clone()) }
+    }
+    env
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:421
+fn declared_dep_outputs(plan: &BuildPlan, action: &BuildAction) -> [String] {
+    target_id := plan.action_targets().get(&action.id) == { Val(id) -> id; None -> { return [] } }
+    target := plan.targets.get(target_id.0) == { Val(t) -> t; None -> { return [] } }
+    outs := BTreeSet<String>.new()
+    for dep in &target.deps {
+        dep_target := plan.targets.get(dep.id.0) == { Val(t) -> t; None -> { continue } }
+        for path in dep_target.outputs.iter().chain(dep_target.inputs.iter()) { _ :: outs.insert(path.as_str().to_string()) }
+        for dep_action in &dep_target.actions {
+            if a := plan.actions.get(dep_action.id.0) {
+                for path in &a.outputs { _ :: outs.insert(path.as_str().to_string()) }
+            }
+        }
+    }
+    outs.into_iter().collect()
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:447
+fn canonical_effective_action_key(plan: &BuildPlan, action: &BuildAction, inputs: &[ActionInputSnapshot], grants: &BTreeSet<BuildCapability>, _executable: &OSPath, executable_digest: &ContentDigest, probe_facts: &[BuildProbeFact]) -> ActionKey {
+    base := canonical_action_key(plan, action, inputs)
+    w := KeyWriter.new()
+    w.str("jet.effective-action-key.v1"); w.str(base.as_str())
+    w.str("effective-policy")
+    for grant in grants { encode_capability(&w, grant) }
+    // Filesystem location is host-local; only executable bytes contribute identity.
+    w.str("resolved-executable-digest"); w.str(executable_digest.as_str())
+    w.str("actual-probe-facts")
+    for fact in probe_facts {
+        w.str(&fact.name); w.bool(fact.success); w.str(&fact.detail)
+        w.str(&format!("{:?}", fact.reproducibility))
+        w.str("{fact.toolchain.context}:{fact.toolchain.id.0}")
+        w.str(fact.toolchain_provenance.as_str())
+    }
+    w.str("compiler-identity"); w.str("{env!(\"CARGO_PKG_NAME\")}@{env!(\"CARGO_PKG_VERSION\")}")
+    ActionKey("act-sha256:{SHA256.sha256_hex(&w.bytes)}")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:490
+fn encode_action_cache(w: &KeyWriter, cache: ActionCache) {
+    cache == { Cached -> w.str("cached"); UncachedPhony -> w.str("uncached-phony") }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:497
+fn encode_capability(w: &KeyWriter, cap: &BuildCapability) { w.str(cap.flag()) }
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:501
+fn encode_resource_pool(w: &KeyWriter, pool: &BuildResourcePool) {
+    pool == {
+        CPU -> w.str("cpu"); Memory -> w.str("memory"); Linker -> w.str("linker")
+        Console -> w.str("console"); GPU -> w.str("gpu")
+        Custom(name) -> { w.str("custom"); w.str(name) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:515
+fn encode_toolchain(w: &KeyWriter, toolchain: &BuildToolchain) {
+    w.str(&toolchain.name)
+    toolchain.role == { Host -> w.str("host"); Target -> w.str("target") }
+    w.str(&toolchain.host_triple); w.str(&toolchain.target_triple)
+    toolchain.sdk == {
+        Val(sdk) -> { w.bool(true); w.str(&sdk.name); w.str(&sdk.version); encode_provenance(w, &sdk.provenance) }
+        None -> w.bool(false)
+    }
+    toolchain.linker == {
+        Val(linker) -> { w.bool(true); w.str(&linker.name); encode_provenance(w, &linker.provenance) }
+        None -> w.bool(false)
+    }
+    toolchain.sysroot == {
+        Val(sysroot) -> { w.bool(true); w.str(&sysroot.name); w.str(&sysroot.path_digest); encode_provenance(w, &sysroot.provenance) }
+        None -> w.bool(false)
+    }
+    w.str("tools"); w.map_str(&toolchain.tools)
+    w.str("resolution")
+    toolchain.resolution == { Ambient -> w.str("ambient"); DeclaredOnly -> w.str("declared-only") }
+    w.str("mounts")
+    for mount in &toolchain.mounts {
+        w.str(&mount.destination)
+        if mount.identity.is_empty() { w.str("path"); w.str(&mount.source) }
+        else { w.str("identity"); w.str(&mount.identity) }
+    }
+    encode_provenance(w, &toolchain.provenance)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:570
+fn encode_signing_identity(w: &KeyWriter, identity: &BuildSigningIdentity) {
+    w.str(&identity.name); w.str(&identity.label); encode_provenance(w, &identity.provenance)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:576
+fn encode_probe(w: &KeyWriter, plan: &BuildPlan, probe: &BuildProbe) {
+    w.str(&probe.name)
+    probe.kind == {
+        FindProgram { program } -> { w.str("find-program"); w.str(program) }
+        PkgConfig { package, min_version } -> {
+            w.str("pkg-config"); w.str(package)
+            min_version == { Val(version) -> { w.bool(true); w.str(version) }; None -> w.bool(false) }
+        }
+        HeaderCheck { header } -> { w.str("header-check"); w.str(header) }
+        CompileCheck { name, includes, code } -> { w.str("compile-check"); w.str(name); w.vec_str(includes.iter()); w.str(code) }
+    }
+    probe.reproducibility == { Reproducible -> w.str("reproducible"); Ambient -> w.str("ambient") }
+    encode_provenance(w, &probe.provenance)
+    encode_toolchain(w, &plan.toolchains[probe.toolchain.id.0])
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:620
+fn encode_provenance(w: &KeyWriter, provenance: &BuildProvenance) {
+    provenance.source == {
+        InferredHost -> w.str("inferred-host")
+        JetpackDependency(dep) -> { w.str("jetpack-dependency"); w.str(dep) }
+        AmbientRecord(record) -> { w.str("ambient-record"); w.str(record) }
+        UserDeclared(source) -> { w.str("user-declared"); w.str(source) }
+    }
+    provenance.lock == { Val(lock) -> { w.bool(true); w.str(&lock.key); w.str(&lock.digest) }; None -> w.bool(false) }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:646
+struct KeyWriter { bytes: [U8] }
+impl KeyWriter {
+    // Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:651
+    fn new() -> KeyWriter { KeyWriter { bytes: [] } }
+    // Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:655
+    fn str(self: &KeyWriter, value: &String) {
+        self.bytes.extend_from_slice((value.as_bytes().len() as U64).to_be_bytes())
+        self.bytes.extend_from_slice(value.as_bytes())
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:661
+    fn bool(self: &KeyWriter, value: Bool) { self.bytes.push(if value { 1 } else { 0 }) }
+    // Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:665
+    fn vec_str(self: &KeyWriter, values: impl Iterator<&String>) {
+        collected := values.collect::<[&String]>()
+        self.bytes.extend_from_slice((collected.len() as U64).to_be_bytes())
+        for value in collected { self.str(value) }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/errors_keys.rs:674
+    fn map_str(self: &KeyWriter, map: &[String:String]) {
+        self.bytes.extend_from_slice((map.len() as U64).to_be_bytes())
+        keys := map.keys().collect::<[&String]>()
+        keys.sort()
+        for key in keys { self.str(key); self.str(&map[key]) }
+    }
+}

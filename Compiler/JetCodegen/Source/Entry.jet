@@ -1,365 +1,128 @@
-// PORT-PENDING 0542 crates-jet-codegen-src-schedulerhost-module-group: crates/jet-codegen/src/lib.rs:1-361
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #![allow(non_snake_case)]
-//RS #![deny(warnings)]
-//RS // Re-export lower seams. Sema transitively includes Parser/Lexer/Comptime/Foundation.
-//RS #[allow(unused_imports)]
-//RS pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
-//RS pub use jet_sema::{
-//RS     CanonicalAST, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Policy,
-//RS     Sema, Syntax, TargetMachine, Traits, AST, SHA256,
-//RS };
-//RS pub use jet_foundation::{
-//RS     CLISchema, DataTree, Facts, JSON, Names, Numeric, OSTarget, ResourceSchedule, WebPartition,
-//RS };
-//RS // `EncodingJson.rs` resolves exact-number validation through
-//RS // `super::jet_json_number`; supply it at the root the same way `jet-jit` does.
-//RS #[allow(unused_imports)]
-//RS pub(crate) use jet_foundation::JSONNumber as jet_json_number;
-//RS #[allow(dead_code)]
-//RS pub(crate) mod jet_encoding_json {
-//RS     include!("../../jet-foundation/src/EncodingJson.rs");
-//RS }
-//RS mod BrowserHost;
-//RS pub mod Codegen;
-//RS /// D-FAIL-BREACH1=A: the same task-local runtime stack kernel used by emitted
-//RS /// AOT code. Resident engines marshal source locations into their own report
-//RS /// carrier, but depth policy stays in this Prelude part.
-//RS pub mod runtime_stack {
-//RS     use jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT;
-//RS     include!("Prelude/Core/RuntimeStack.rs");
-//RS }
-//RS /// D-TESTFAULT1=A: the same fault schedule source used by emitted Prelude
-//RS /// code, the TIR evaluator, and the resident JIT adapters.
-//RS #[allow(dead_code)]
-//RS pub mod fault_injection {
-//RS     include!("Prelude/FaultInjection.rs");
-//RS }
-//RS /// D-ALLOC-PROGRAM1=A: canonical whole-program allocator policy compiled from
-//RS /// the same Prelude source that generated AOT programs embed.
-//RS pub mod program_allocator {
-//RS     include!("Prelude/ProgramAllocator.rs");
-//RS }
-//RS /// D-DEVR-LAW1=A / I9: the one development receipt record. AOT embeds the
-//RS /// same source through `Codegen::PRELUDE_PARTS`; resident engines include it
-//RS /// from this seam and only marshal its bytes to their host store.
-//RS pub mod development_receipt {
-//RS     include!("Prelude/DevelopmentReceipt.rs");
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod development_receipt_tests {
-//RS     use super::development_receipt::{
-//RS         is_content_address, jet_development_receipt_render, jet_production_failure_receipt_write,
-//RS         JetDevelopmentReceipt, JetDevelopmentReceiptInput,
-//RS         JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV, JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV,
-//RS         JET_DEVELOPMENT_RECEIPT_ENTRY_ENV, JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV,
-//RS         JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV, JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV,
-//RS         JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV, JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV,
-//RS         JET_DEVELOPMENT_RECEIPT_TARGET_ENV,
-//RS     };
-//RS 
-//RS     fn receipt(inputs: Vec<JetDevelopmentReceiptInput>) -> JetDevelopmentReceipt {
-//RS         JetDevelopmentReceipt {
-//RS             act: "package-realization".into(),
-//RS             locked_closure:
-//RS                 "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-//RS             inputs,
-//RS             planned_action:
-//RS                 "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
-//RS             outputs: vec![JetDevelopmentReceiptInput {
-//RS                 name: "out".into(),
-//RS                 digest: "sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-//RS                     .into(),
-//RS             }],
-//RS             activation_proof: String::new(),
-//RS             parent_generation: String::new(),
-//RS             witness: "jetpack".into(),
-//RS             outcome: "passed".into(),
-//RS             failure_path: None,
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn receipt_identity_is_content_addressed_and_order_stable() {
-//RS         let first = receipt(vec![
-//RS             JetDevelopmentReceiptInput {
-//RS                 name: "source".into(),
-//RS                 digest: "sha256-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-//RS                     .into(),
-//RS             },
-//RS             JetDevelopmentReceiptInput {
-//RS                 name: "toolchain".into(),
-//RS                 digest: "sha256-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-//RS                     .into(),
-//RS             },
-//RS         ]);
-//RS         let second = receipt(vec![
-//RS             JetDevelopmentReceiptInput {
-//RS                 name: "toolchain".into(),
-//RS                 digest: "sha256-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-//RS                     .into(),
-//RS             },
-//RS             JetDevelopmentReceiptInput {
-//RS                 name: "source".into(),
-//RS                 digest: "sha256-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-//RS                     .into(),
-//RS             },
-//RS         ]);
-//RS         assert_eq!(first.identity_bytes(), second.identity_bytes());
-//RS         assert_eq!(
-//RS             jet_development_receipt_render(&first),
-//RS             jet_development_receipt_render(&second)
-//RS         );
-//RS         assert!(is_content_address(&first.locked_closure));
-//RS         assert!(is_content_address(&first.inputs[0].digest));
-//RS         assert!(!is_content_address("source-v1"));
-//RS         assert!(!is_content_address(
-//RS             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn development_receipt_is_one_shared_source_across_tiers() {
-//RS         let codegen = include_str!("Codegen/mod.rs");
-//RS         let jit = include_str!("../../jet-jit/src/lib.rs");
-//RS         assert_eq!(
-//RS             codegen
-//RS                 .matches("include_str!(\"../Prelude/DevelopmentReceipt.rs\")")
-//RS                 .count(),
-//RS             1
-//RS         );
-//RS         assert_eq!(
-//RS             jit.matches("include!(\"../../jet-codegen/src/Prelude/DevelopmentReceipt.rs\")")
-//RS                 .count(),
-//RS             1
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn production_failure_writer_redacts_dynamic_values() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet-production-receipt-unit-{}",
-//RS             std::process::id()
-//RS         ));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         let digest = |byte| format!("sha256-{}", char::from(byte).to_string().repeat(64));
-//RS         std::env::set_var(JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV, &root);
-//RS         std::env::set_var(JET_DEVELOPMENT_RECEIPT_ENTRY_ENV, "service.jet");
-//RS         std::env::set_var(JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV, digest(b'a'));
-//RS         std::env::set_var(JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV, digest(b'b'));
-//RS         std::env::set_var(JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV, digest(b'c'));
-//RS         std::env::set_var(JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV, "1");
-//RS         std::env::set_var(JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV, digest(b'd'));
-//RS         std::env::set_var(JET_DEVELOPMENT_RECEIPT_TARGET_ENV, "native");
-//RS         std::env::set_var(JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV, digest(b'e'));
-//RS 
-//RS         let path = jet_production_failure_receipt_write(
-//RS             "E3001",
-//RS             "/outside/USER_DATA_SECRET.jet",
-//RS             9,
-//RS             "run",
-//RS         )
-//RS         .unwrap();
-//RS         let text = std::fs::read_to_string(path).unwrap();
-//RS         assert!(text.starts_with("jet-development-receipt-v1\n"));
-//RS         assert!(!text.contains("USER_DATA_SECRET"));
-//RS         assert!(!text.contains("argv"));
-//RS         assert!(text.contains("failure-path"));
-//RS         std::fs::remove_dir_all(root).unwrap();
-//RS     }
-//RS }
-//RS /// D-ASYNCRT1=A: the one scheduler. AOT embeds `Prelude/Scheduler.rs` into the
-//RS /// generated program; this module compiles that same source for the Cranelift
-//RS /// JIT and the interpreter's ambient host, so no tier can drift (I9).
-//RS /// `SchedulerHost.rs` adds sibling-prelude bindings and marshalling only.
-//RS ///
-//RS /// The emitted program receives these files concatenated into one flat module,
-//RS /// so the in-crate copy keeps them flat too.
-//RS #[allow(dead_code)] // the emitted-program half of this source has no in-crate caller
-//RS pub mod scheduler {
-//RS     // Emitted programs carry `Prelude/TaskGroup.rs` as `mod jet_std`; in-crate
-//RS     // it is `crate::task_group`. Same source either way.
-//RS     use crate::task_group as jet_std;
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::{
-//RS         jet_render_runtime_stop, jet_stream_record_failure_report,
-//RS         jet_stream_take_failure_report, JetOutcome, JetRuntimeDiagnostic, JetTaskFailure,
-//RS     };
-//RS     include!("Prelude/Deadline.rs");
-//RS     include!("Prelude/WorkflowWait.rs");
-//RS     include!("SchedulerHost.rs");
-//RS     include!("Prelude/Core/TimeMonotonic.rs");
-//RS     include!("Prelude/Core/Duration.rs");
-//RS     include!("Prelude/Core/Time.rs");
-//RS     include!("Prelude/Core/TimeInstant.rs");
-//RS     include!("Prelude/Core/Realtime.rs");
-//RS     include!("Prelude/CoreLib/Top/TimeSleep.rs");
-//RS     include!("Prelude/Scheduler.rs");
-//RS     include!("Prelude/CoreLib/Top/WorkflowSleep.rs");
-//RS     include!("Prelude/Stream.rs");
-//RS     include!("Prelude/Core/Stream.rs");
-//RS     pub use jet_foundation::Devtools::*;
-//RS     // Same policy constants AOT injects before Observe.rs / Devtools.rs.
-//RS     const JET_DEVTOOLS_RUNTIME_ENABLED: bool = true;
-//RS     const JET_DEVTOOLS_LOCAL_RAIL_ENABLED: bool = true;
-//RS     include!("Prelude/Observe.rs");
-//RS }
-//RS /// `Prelude/Scheduler.rs` calls `crate::jet_task_control_trace`. An emitted
-//RS /// program gets it from the flat `StructuralDebug.rs` prelude; this crate gets
-//RS /// it from the same file compiled as a seam dependency.
-//RS pub(crate) use jet_foundation::StructuralDebug::jet_task_control_trace;
-//RS /// D-LOCALCELL1=A: canonical local Cell runtime shared by emitted AOT code and
-//RS /// the TIR evaluator's deopt adapter.
-//RS pub mod local_cell {
-//RS     // The carrier is one type across every tier; the AOT copy of this file gets
-//RS     // it from the flat Prelude, this copy from jet-foundation.
-//RS     include!("Prelude/LocalCell.rs");
-//RS     // Items are order-independent; the import trails the include so a file that
-//RS     // opens with an inner doc comment still compiles as a module.
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS 
-//RS     impl JetCellOptionLike for jet_foundation::MIR::MirRuntimeValue {
-//RS         type Value = jet_foundation::MIR::MirRuntimeValue;
-//RS 
-//RS         fn value(&self) -> Option<&Self::Value> {
-//RS             match self {
-//RS                 jet_foundation::MIR::MirRuntimeValue::Absent { .. }
-//RS                 | jet_foundation::MIR::MirRuntimeValue::Moved => None,
-//RS                 jet_foundation::MIR::MirRuntimeValue::Present(inner) => Some(inner),
-//RS                 other => Some(other),
-//RS             }
-//RS         }
-//RS 
-//RS         fn store(&mut self, value: Self::Value) {
-//RS             *self = jet_foundation::MIR::MirRuntimeValue::Present(Box::new(value));
-//RS         }
-//RS     }
-//RS }
-//RS /// D-HOLE1: one option-lift operation shared by AOT, TIR, JIT, and wasm.
-//RS pub mod option_lift2 {
-//RS     include!("Prelude/Core/Option.rs");
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
-//RS }
-//RS /// D-FIXARR1: checked fixed-list indexing shared by all execution adapters.
-//RS pub mod fixed_list {
-//RS     include!("Prelude/Core/FixedList.rs");
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::jet_list_bounds_message;
-//RS }
-//RS /// D-SOA-TIER1=A: THE shared struct-of-arrays column store and the one gather
-//RS /// read, shared verbatim with emitted AOT code. The interpreter ambient and the
-//RS /// Cranelift host reach a columnar list only through this source, so no engine
-//RS /// carries its own layout, row bookkeeping, or bounds policy (I9).
-//RS pub mod columns {
-//RS     include!("Prelude/Core/Columns.rs");
-//RS     // Items are order-independent; the imports trail the include so a file that
-//RS     // opens with an inner doc comment still compiles as a module. The read reuses
-//RS     // the shared fixed-list bounds stop rather than wording its own.
-//RS     #[allow(unused_imports)]
-//RS     pub use super::fixed_list::{jet_fixed_list_index, JetFixedListIndexError};
-//RS }
-//RS /// D-NUMWIDEN-CROSS1=E: one checked integer-to-float widening policy shared
-//RS /// by AOT emission, TIR evaluation, and the resident JIT adapter.
-//RS pub mod numeric_widen {
-//RS     pub use jet_foundation::NumericConversion::*;
-//RS }
-//RS pub mod embedded_hardware {
-//RS     fn jet_panic(file: &str, line: u32, message: &str) -> ! {
-//RS         let diagnostic = jet_foundation::Outcome::jet_render_runtime_stop(
-//RS             "E3001",
-//RS             file,
-//RS             line,
-//RS             "",
-//RS             "",
-//RS             1,
-//RS             1,
-//RS             message,
-//RS             "",
-//RS         );
-//RS         panic!("{}", diagnostic.rendered);
-//RS     }
-//RS     include!("Prelude/Core/EmbeddedHardware.rs");
-//RS }
-//RS pub mod inline_range {
-//RS     include!("Prelude/Core/InlineRange.rs");
-//RS }
-//RS /// D-TASKGROUP-PARAM1=A: canonical structured task ownership policy. The JIT
-//RS /// compiles the same Prelude source that AOT embeds.
-//RS pub mod task_group {
-//RS     include!("Prelude/TaskGroup.rs");
-//RS     // Items are order-independent; the import trails the include so a file that
-//RS     // opens with an inner doc comment still compiles as a module.
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS }
-//RS /// D-TYPEDTEXT1=D: typed SQL/HTML/Sh semantics shared by AOT and TIR.
-//RS pub mod typed_text {
-//RS     include!("Prelude/TypedText.rs");
-//RS     // Items are order-independent; the import trails the include so a file that
-//RS     // opens with an inner doc comment still compiles as a module.
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS }
-//RS /// D-MEMO1=A: the result-cache substrate compiled from the same Prelude source
-//RS /// used by generated AOT programs and the TIR interpreter.
-//RS pub mod memo {
-//RS     include!("Prelude/Memo.rs");
-//RS }
-//RS /// #2027 (I8 + I9): the one signal-handler mechanism inside the `jet` binary.
-//RS /// `Prelude/CoreLib/Top/Interrupt.rs` owns the pending count, the platform
-//RS /// handler, the arm path and the consumption rule; AOT embeds that same source
-//RS /// in the generated program. This is the single in-binary instance, so the TIR
-//RS /// evaluator ambient (`Codegen/TIR/eval/mod.rs`) and the resident Cranelift host
-//RS /// (`jet-jit/src/CoreHost.rs`) marshal into one count instead of each compiling
-//RS /// a private copy whose `signal(SIGINT, …)` install disarmed the other.
-//RS pub mod interrupt_runtime {
-//RS     include!("Prelude/CoreLib/Top/Interrupt.rs");
-//RS }
-//RS /// D-TERM1 / I9: one in-process terminal key kernel. The TIR evaluator and
-//RS /// resident JIT both call this module; neither includes a private copy.
-//RS #[allow(dead_code)]
-//RS pub mod terminal_runtime {
-//RS     include!("Prelude/Term.rs");
-//RS     include!("Prelude/Core/TermKey.rs");
-//RS }
-//RS #[cfg(unix)]
-//RS pub(crate) use terminal_runtime::jet_term_configure_fd;
-//RS /// D-PROCESS-SESSION1=A / #1181: shared native Unix PTY substrate used by the
-//RS /// emitted process prelude and the resident JIT adapter.
-//RS #[path = "Prelude/CoreLib/ProcessPty.rs"]
-//RS pub mod process_pty;
-//RS /// Card #1751: the one 80x24 terminal default, read by both AOT's
-//RS /// `TerminalPolicy::default` and this crate's `PtyConfig::default`.
-//RS #[path = "Prelude/TerminalDefault.rs"]
-//RS pub mod terminal_default;
-//RS /// D-CMD-OVERRIDE1=C: command-suite values compile from the same Prelude
-//RS /// source that AOT embeds in `mod jet_std`.
-//RS pub mod command_suite {
-//RS     include!("Prelude/CommandSuite.rs");
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS #[test]
-//RS fn unmatched_enum_match_fails_closed() {
-//RS     let lowering = include_str!("Codegen/TIR/tir_to_mir_stmt.rs");
-//RS     assert!(
-//RS         lowering.contains("checked exhaustive match fallthrough"),
-//RS         "a sema-proved exhaustive match must not fall through"
-//RS     );
-//RS     assert!(
-//RS         lowering.contains("MirTerminator::Unreachable"),
-//RS         "exhaustive match fallthrough must be unreachable, not a silent continue"
-//RS     );
-//RS     let eval = include_str!("Codegen/MIREval.rs");
-//RS     assert!(
-//RS         eval.contains("MIR reached an unreachable terminator"),
-//RS         "the evaluator must fail closed when an exhaustive match falls through"
-//RS     );
-//RS }
-//RS // Prelude/ contains include_str-embedded text files, not Rust modules.
-// END-PORT-PENDING 0542 crates/jet-codegen/src/lib.rs:1-361
-
+// Rust: crates/jet-codegen/src/lib.rs:3
+pub use jet_sema.[CanonicalAST, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Policy, Sema, Syntax, TargetMachine, Traits, AST, SHA256]
+pub use jet_foundation.[CLISchema, DataTree, Facts, JSON, Names, Numeric, OSTarget, ResourceSchedule, WebPartition]
+use jet_foundation.EncodingErrors as jet_encoding_errors
+use jet_foundation.JSONNumber as jet_json_number
+// Rust: crates/jet-codegen/src/lib.rs:18
+mod jet_encoding_json { pub use jet_foundation.EncodingJson.* }
+// Rust: crates/jet-codegen/src/lib.rs:21
+use jet_codegen.BrowserHost
+pub use jet_codegen.Codegen
+// Rust: crates/jet-codegen/src/lib.rs:26
+pub mod runtime_stack {
+    use jet_foundation.Outcome.JET_RUNTIME_STACK_LIMIT
+    pub use jet_codegen.Prelude.Core.RuntimeStack.*
+}
+// Rust: crates/jet-codegen/src/lib.rs:33
+pub mod fault_injection { pub use jet_codegen.Prelude.FaultInjection.* }
+// Rust: crates/jet-codegen/src/lib.rs:38
+pub mod program_allocator { pub use jet_codegen.Prelude.ProgramAllocator.* }
+// Rust: crates/jet-codegen/src/lib.rs:44
+pub mod development_receipt { pub use jet_codegen.Prelude.DevelopmentReceipt.* }
+// Rust: crates/jet-codegen/src/lib.rs:179
+// One scheduler source shared with generated programs, not an adapter-owned fork.
+pub mod scheduler {
+    use jet_codegen.Entry.task_group as jet_std
+    pub use jet_foundation.Outcome.[jet_render_runtime_stop, jet_stream_record_failure_report, jet_stream_take_failure_report, JetOutcome, JetRuntimeDiagnostic, JetTaskFailure]
+    pub use jet_codegen.Prelude.Deadline.*
+    pub use jet_codegen.Prelude.WorkflowWait.*
+    pub use jet_codegen.SchedulerHost.*
+    pub use jet_codegen.Prelude.Core.TimeMonotonic.*
+    pub use jet_codegen.Prelude.Core.Duration.*
+    pub use jet_codegen.Prelude.Core.Time.*
+    pub use jet_codegen.Prelude.Core.TimeInstant.*
+    pub use jet_codegen.Prelude.Core.Realtime.*
+    pub use jet_codegen.Prelude.CoreLib.Top.TimeSleep.*
+    pub use jet_codegen.Prelude.Scheduler.*
+    pub use jet_codegen.Prelude.CoreLib.Top.WorkflowSleep.*
+    pub use jet_codegen.Prelude.Stream.*
+    pub use jet_codegen.Prelude.Core.Stream.*
+    pub use jet_foundation.Devtools.*
+    // Rust: crates/jet-codegen/src/lib.rs:203
+    JET_DEVTOOLS_RUNTIME_ENABLED :: true
+    // Rust: crates/jet-codegen/src/lib.rs:204
+    JET_DEVTOOLS_LOCAL_RAIL_ENABLED :: true
+    pub use jet_codegen.Prelude.Observe.*
+}
+// Rust: crates/jet-codegen/src/lib.rs:210
+use jet_foundation.StructuralDebug.jet_task_control_trace
+// Rust: crates/jet-codegen/src/lib.rs:213
+pub mod local_cell {
+    pub use jet_codegen.Prelude.LocalCell.*
+    pub use jet_foundation.Outcome.*
+    use jet_foundation.MIR.MirRuntimeValue
+    // Rust: crates/jet-codegen/src/lib.rs:222
+    impl JetCellOptionLike for MirRuntimeValue {
+        type Value = MirRuntimeValue
+        // Rust: crates/jet-codegen/src/lib.rs:225
+        fn value(self: &MirRuntimeValue) -> &MirRuntimeValue? Never! {
+            if self == {
+                .Absent { .. } -> None
+                .Moved -> None
+                .Present(inner) -> Val(&inner)
+                other -> Val(&other)
+            }
+        }
+        // Rust: crates/jet-codegen/src/lib.rs:234
+        fn store(self: &MirRuntimeValue, value: MirRuntimeValue) -> Unit Never! {
+            self = MirRuntimeValue.Present(Box.new(^value))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/lib.rs:240
+pub mod option_lift2 {
+    pub use jet_codegen.Prelude.Core.Option.*
+    pub use jet_foundation.Outcome.[JetAbsent, JetOutcome]
+}
+// Rust: crates/jet-codegen/src/lib.rs:246
+pub mod fixed_list {
+    pub use jet_codegen.Prelude.Core.FixedList.*
+    pub use jet_foundation.Outcome.jet_list_bounds_message
+}
+// Rust: crates/jet-codegen/src/lib.rs:255
+pub mod columns {
+    pub use jet_codegen.Prelude.Core.Columns.*
+    pub use jet_codegen.Entry.fixed_list.[jet_fixed_list_index, JetFixedListIndexError]
+}
+// Rust: crates/jet-codegen/src/lib.rs:265
+pub mod numeric_widen { pub use jet_foundation.NumericConversion.* }
+// Rust: crates/jet-codegen/src/lib.rs:268
+pub mod embedded_hardware {
+    // Rust: crates/jet-codegen/src/lib.rs:269
+    // GATE #4494: native unwind retains the Foundation-rendered diagnostic.
+    fn jet_panic(file: String, line: U32, message: String) -> Never Never! {
+        diagnostic :: jet_foundation.Outcome.jet_render_runtime_stop("E3001", file, line, "", "", 1, 1, message, "")
+        std.panic.panic_any(diagnostic.rendered)
+    }
+    pub use jet_codegen.Prelude.Core.EmbeddedHardware.*
+}
+// Rust: crates/jet-codegen/src/lib.rs:285
+pub mod inline_range { pub use jet_codegen.Prelude.Core.InlineRange.* }
+// Rust: crates/jet-codegen/src/lib.rs:290
+pub mod task_group {
+    pub use jet_codegen.Prelude.TaskGroup.*
+    pub use jet_foundation.Outcome.*
+}
+// Rust: crates/jet-codegen/src/lib.rs:298
+pub mod typed_text {
+    pub use jet_codegen.Prelude.TypedText.*
+    pub use jet_foundation.Outcome.*
+}
+// Rust: crates/jet-codegen/src/lib.rs:307
+pub mod memo { pub use jet_codegen.Prelude.Memo.* }
+// Rust: crates/jet-codegen/src/lib.rs:317
+pub mod interrupt_runtime { pub use jet_codegen.Prelude.CoreLib.Top.Interrupt.* }
+// Rust: crates/jet-codegen/src/lib.rs:323
+pub mod terminal_runtime {
+    pub use jet_codegen.Prelude.Term.*
+    pub use jet_codegen.Prelude.Core.TermKey.*
+}
+// Rust: crates/jet-codegen/src/lib.rs:327
+// Unix callers select this door with core.sys.target.selected_family() == "unix".
+use jet_codegen.Entry.terminal_runtime.jet_term_configure_fd
+// Rust: crates/jet-codegen/src/lib.rs:332
+pub use jet_codegen.Prelude.CoreLib.ProcessPty as process_pty
+// Rust: crates/jet-codegen/src/lib.rs:336
+pub use jet_codegen.Prelude.TerminalDefault as terminal_default
+// Rust: crates/jet-codegen/src/lib.rs:339
+pub mod command_suite { pub use jet_codegen.Prelude.CommandSuite.* }

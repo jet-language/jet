@@ -1,21 +1,16 @@
-// PORT-PENDING 0910 crates-jetpack-src-remote: crates/jetpack/src/Remote.rs:1-17
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Package-facing view of the canonical remote execution transport.
-//RS //!
-//RS //! Jetpack does not define a second wire protocol, CAS, or scheduler. These
-//RS //! types are the host-owned binding, capability model, deterministic builder
-//RS //! selection, grant policy, and signed result statements used by the canonical
-//RS //! build engine. Result statements use the ratified HMAC-SHA256 transport
-//RS //! envelope; the statement covers the action, outputs, logs, worker proof, and
-//RS //! execution identity before any result can become local truth.
-//RS 
-//RS pub use jet_comptime::Comptime::Build::{
-//RS     remote_execution_identity, ActionInputSnapshot, ActionKey, BuildCapability, BuildPath,
-//RS     BuildResourcePool, ContentDigest, RemoteActionRequest, RemoteAttemptError, RemoteBuildBinding,
-//RS     RemoteBuildRequest, RemoteBuilder, RemoteBuilderCapabilities, RemoteCacheDenied,
-//RS     RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason, RemoteDispatch,
-//RS     RemoteExecutionRequest, RemoteExecutionResult, RemoteSandboxProof, RemoteScheduleError,
-//RS     RemoteScheduler,
-//RS };
-// END-PORT-PENDING 0910 crates/jetpack/src/Remote.rs:1-17
+// Rust: crates/jetpack/src/Remote.rs:1
+// Package-facing view of the canonical remote execution transport.
+// Jetpack owns no second wire protocol, CAS, or scheduler. The canonical build
+// engine owns host bindings, capabilities, deterministic builder selection,
+// grants, and signed result statements. Its HMAC-SHA256 envelope covers actions,
+// outputs, logs, worker proof, and execution identity before accepting results.
+// Rust: crates/jetpack/src/Remote.rs:10
+pub use jet_comptime.Comptime.Build.[
+    remote_execution_identity, ActionInputSnapshot, ActionKey, BuildCapability, BuildPath,
+    BuildResourcePool, ContentDigest, RemoteActionRequest, RemoteAttemptError, RemoteBuildBinding,
+    RemoteBuildRequest, RemoteBuilder, RemoteBuilderCapabilities, RemoteCacheDenied,
+    RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason, RemoteDispatch,
+    RemoteExecutionRequest, RemoteExecutionResult, RemoteSandboxProof, RemoteScheduleError,
+    RemoteScheduler,
+]
 

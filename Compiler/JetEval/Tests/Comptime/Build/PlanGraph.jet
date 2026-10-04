@@ -1,0 +1,13 @@
+use jet_comptime.Comptime.Build.PlanGraph.[BuildNodeKind, BuildPlanNode, compiler_node_key]
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_graph.rs:42-85
+#Test("compiler_node_keys_are_order_independent_and_domain_separated") {
+    a := [("a", "digest-a"), ("b", "digest-b")]
+    b := [("b", "digest-b"), ("a", "digest-a")]
+    assert_eq(compiler_node_key(BuildNodeKind.Check, "pkg", &a), compiler_node_key(BuildNodeKind.Check, "pkg", &b))
+    assert(compiler_node_key(BuildNodeKind.Check, "pkg", &a) != compiler_node_key(BuildNodeKind.Compile, "pkg", &a))
+    assert(compiler_node_key(BuildNodeKind.Check, "pkg", &a) != compiler_node_key(BuildNodeKind.Check, "other", &a))
+    node := BuildPlanNode.new(BuildNodeKind.Check, "pkg", [("b", "digest-b"), ("a", "digest-a"), ("a", "digest-a")])
+    assert_eq(node.inputs, ["a", "b"])
+    assert_eq(node.input_digests.len(), 2)
+    assert_eq(node.key, compiler_node_key(BuildNodeKind.Check, "pkg", &a))
+}

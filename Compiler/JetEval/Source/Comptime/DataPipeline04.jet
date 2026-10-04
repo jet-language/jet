@@ -1,883 +1,370 @@
-// PORT-PENDING 0583 crates-jet-comptime-src-comptime-datapipeline-slice-5496: crates/jet-comptime/src/Comptime/DataPipeline.rs:5496-6374
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS pub fn schema_value(
-//RS     recv: &CtValue,
-//RS     arg0_ty: Option<&Type>,
-//RS     row: SchemaRow<'_>,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let sample = match recv {
-//RS         CtValue::List(xs) => xs.first(),
-//RS         _ => {
-//RS             return Err(unsupported(
-//RS                 "`data.schema()` needs an ordinary typed list",
-//RS                 span,
-//RS             ))
-//RS         }
-//RS     };
-//RS     let columns = match arg0_ty
-//RS         .and_then(data_schema_elem_ty)
-//RS         .and_then(|elem| schema_columns_for_type(elem, true, row))
-//RS     {
-//RS         Some(columns) => columns,
-//RS         None => match sample {
-//RS             Some(CtValue::Struct { fields, .. }) => fields
-//RS                 .iter()
-//RS                 .map(|(name, value)| data_column(name, &ct_value_type_name(value)))
-//RS                 .collect(),
-//RS             Some(value) => vec![data_column("value", &ct_value_type_name(value))],
-//RS             None => Vec::new(),
-//RS         },
-//RS     };
-//RS     Ok(CtValue::List(columns))
-//RS }
-//RS 
-//RS fn add_query_values(
-//RS     left: &mut CtValue,
-//RS     right: CtValue,
-//RS     span: Span,
-//RS ) -> Result<(), Diagnostic> {
-//RS     match (left, right) {
-//RS         (CtValue::Int(left), CtValue::Int(right)) => {
-//RS             *left = left
-//RS                 .checked_add(right)
-//RS                 .ok_or_else(|| unsupported("`Query.sum()` integer overflow", span))?;
-//RS             Ok(())
-//RS         }
-//RS         (CtValue::Float(left), CtValue::Float(right)) => {
-//RS             *left = CtFloat::f64(left.as_f64() + right.as_f64());
-//RS             Ok(())
-//RS         }
-//RS         (CtValue::Float(left), CtValue::Int(right)) => {
-//RS             *left = CtFloat::f64(left.as_f64() + right as f64);
-//RS             Ok(())
-//RS         }
-//RS         (CtValue::Int(_), CtValue::Float(_)) => Err(unsupported(
-//RS             "`Query.sum()` cannot mix Int and Float values",
-//RS             span,
-//RS         )),
-//RS         _ => Err(unsupported(
-//RS             "`Query.sum()` callback must return numeric values",
-//RS             span,
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS /// One callback invocation strategy: the AST interpreter calls through its own
-//RS /// `Interp`, the MIR interpreter through the standalone closure host. The
-//RS /// query semantics below are written once against this seam.
-//RS type QueryCallback<'i> =
-//RS     &'i mut dyn FnMut(&CtValue, Vec<CtValue>, Span) -> Result<CtValue, Diagnostic>;
-//RS 
-//RS fn collect_query_rows(
-//RS     state: &DataPipelineState,
-//RS     query: &ComptimeQuery,
-//RS     call: QueryCallback<'_>,
-//RS     span: Span,
-//RS ) -> Result<Vec<CtValue>, Diagnostic> {
-//RS     let limits = data_kernel_limits_safe();
-//RS     let max_sort_rows = usize::try_from(limits.max_sort_rows).unwrap_or(usize::MAX);
-//RS     let max_join_rows = usize::try_from(limits.max_join_rows).unwrap_or(usize::MAX);
-//RS     let max_output_rows = usize::try_from(limits.max_output_rows).unwrap_or(usize::MAX);
-//RS     let mut rows = match query.tracked {
-//RS         Some(id) => state
-//RS             .tracked
-//RS             .get(id)
-//RS             .and_then(Option::as_ref)
-//RS             .ok_or_else(|| unsupported("`DataTracked` state slot is stale", span))?
-//RS             .rows
-//RS             .iter()
-//RS             .map(|(_, row)| row.clone())
-//RS             .collect(),
-//RS         None => query.rows.clone(),
-//RS     };
-//RS     for operation in &query.operations {
-//RS         match operation {
-//RS             ComptimeQueryOperation::Filter(predicate) => {
-//RS                 let mut filtered = Vec::with_capacity(rows.len());
-//RS                 for row in rows {
-//RS                     if super::Builtins::as_bool(&call(predicate, vec![row.clone()], span)?, span)? {
-//RS                         filtered.push(row);
-//RS                     }
-//RS                 }
-//RS                 rows = filtered;
-//RS             }
-//RS             ComptimeQueryOperation::SortBy(key) => {
-//RS                 if rows.len() > max_sort_rows {
-//RS                     return Err(unsupported(
-//RS                         "`Query.sort_by()` input exceeds max_sort_rows",
-//RS                         span,
-//RS                     ));
-//RS                 }
-//RS                 let mut keyed = Vec::with_capacity(rows.len());
-//RS                 for row in rows {
-//RS                     let value = as_string(&call(key, vec![row.clone()], span)?, span)?.to_string();
-//RS                     keyed.push((value, row));
-//RS                 }
-//RS                 keyed.sort_by(|left, right| left.0.cmp(&right.0));
-//RS                 rows = keyed.into_iter().map(|(_, row)| row).collect();
-//RS             }
-//RS             ComptimeQueryOperation::Map(mapper) => {
-//RS                 rows = rows
-//RS                     .into_iter()
-//RS                     .map(|row| call(mapper, vec![row], span))
-//RS                     .collect::<Result<Vec<_>, _>>()?;
-//RS             }
-//RS             ComptimeQueryOperation::Extreme { key, maximum } => {
-//RS                 let mut selected: Option<(CtValue, CtValue)> = None;
-//RS                 for row in rows {
-//RS                     let value = call(key, vec![row], span)?;
-//RS                     if let CtValue::Float(number) = &value {
-//RS                         if !number.as_f64().is_finite() {
-//RS                             return Err(unsupported(
-//RS                                 "`Query.min()`/`Query.max()` key must be finite",
-//RS                                 span,
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                     let replace = match selected.as_ref() {
-//RS                         None => true,
-//RS                         Some((best, _)) => {
-//RS                             let order =
-//RS                                 super::Builtins::cmp(value.clone(), best.clone(), span)?;
-//RS                             if *maximum {
-//RS                                 order == std::cmp::Ordering::Greater
-//RS                             } else {
-//RS                                 order == std::cmp::Ordering::Less
-//RS                             }
-//RS                         }
-//RS                     };
-//RS                     if replace {
-//RS                         selected = Some((value.clone(), value));
-//RS                     }
-//RS                 }
-//RS                 rows = match selected {
-//RS                     Some((_, value)) => vec![value],
-//RS                     None => {
-//RS                         return Err(unsupported(
-//RS                             if *maximum {
-//RS                                 "`Query.max()` cannot reduce an empty query"
-//RS                             } else {
-//RS                                 "`Query.min()` cannot reduce an empty query"
-//RS                             },
-//RS                             span,
-//RS                         ))
-//RS                     }
-//RS                 };
-//RS             }
-//RS             ComptimeQueryOperation::Join {
-//RS                 right,
-//RS                 left_key,
-//RS                 right_key,
-//RS                 left,
-//RS                 right_type,
-//RS             } => {
-//RS                 let right_query = clone_query(state, right, span)?;
-//RS                 let right_rows = collect_query_rows(state, &right_query, &mut *call, span)?;
-//RS                 if right_rows.len() > max_join_rows {
-//RS                     return Err(unsupported(
-//RS                         "`Query.join()` input exceeds max_join_rows",
-//RS                         span,
-//RS                     ));
-//RS                 }
-//RS                 rows = collect_join_rows(
-//RS                     &rows,
-//RS                     &right_rows,
-//RS                     left_key,
-//RS                     right_key,
-//RS                     *left,
-//RS                     Some(right_type.clone()),
-//RS                     &mut *call,
-//RS                     span,
-//RS                 )?;
-//RS             }
-//RS         }
-//RS     }
-//RS     if rows.len() > max_output_rows {
-//RS         return Err(unsupported(
-//RS             "`Query.collect()` output exceeds max_output_rows",
-//RS             span,
-//RS         ));
-//RS     }
-//RS     Ok(rows)
-//RS }
-//RS 
-//RS fn collect_join_rows(
-//RS     left_rows: &[CtValue],
-//RS     right_rows: &[CtValue],
-//RS     left_key: &CtValue,
-//RS     right_key: &CtValue,
-//RS     left_join: bool,
-//RS     right_type: Option<Type>,
-//RS     call: QueryCallback<'_>,
-//RS     span: Span,
-//RS ) -> Result<Vec<CtValue>, Diagnostic> {
-//RS     let mut right_by_key = BTreeMap::<String, Vec<CtValue>>::new();
-//RS     for row in right_rows {
-//RS         let key = as_string(&call(right_key, vec![row.clone()], span)?, span)?.to_string();
-//RS         right_by_key.entry(key).or_default().push(row.clone());
-//RS     }
-//RS     let mut joined = Vec::new();
-//RS     for left_row in left_rows {
-//RS         let key = as_string(
-//RS             &call(left_key, vec![left_row.clone()], span)?,
-//RS             span,
-//RS         )?
-//RS         .to_string();
-//RS         match right_by_key.get(&key) {
-//RS             Some(matches) => {
-//RS                 for right_row in matches {
-//RS                     joined.push(ct_struct(
-//RS                         "DataJoin",
-//RS                         vec![
-//RS                             ("left", left_row.clone()),
-//RS                             (
-//RS                                 "right",
-//RS                                 if left_join {
-//RS                                     CtValue::Present(Box::new(right_row.clone()))
-//RS                                 } else {
-//RS                                     right_row.clone()
-//RS                                 },
-//RS                             ),
-//RS                         ],
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             None if left_join => {
-//RS                 let right_type = right_type.clone().ok_or_else(|| {
-//RS                     unsupported(
-//RS                         "`data.left_join()` needs a resolved right row type",
-//RS                         span,
-//RS                     )
-//RS                 })?;
-//RS                 joined.push(ct_struct(
-//RS                     "DataJoin",
-//RS                     vec![
-//RS                         ("left", left_row.clone()),
-//RS                         ("right", CtValue::absent(right_type)),
-//RS                     ],
-//RS                 ));
-//RS             }
-//RS             None => {}
-//RS         }
-//RS     }
-//RS     Ok(joined)
-//RS }
-//RS 
-//RS fn store_query_with_operations(
-//RS     state: &mut DataPipelineState,
-//RS     query: ComptimeQuery,
-//RS ) -> CtValue {
-//RS     state.queries.push(Some(query));
-//RS     ct_struct(
-//RS         "Query",
-//RS         vec![(
-//RS             "slot",
-//RS             CtValue::Int(i64::try_from(state.queries.len()).unwrap_or(i64::MAX)),
-//RS         )],
-//RS     )
-//RS }
-//RS 
-//RS /// `Query` / `DataGroupedQuery` receiver methods for both interpreters.
-//RS pub(crate) fn eval_data_query_method_with(
-//RS     state: &mut DataPipelineState,
-//RS     recv: &CtValue,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     resolved_ret: Option<&Type>,
-//RS     call: QueryCallback<'_>,
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     let type_name = match recv {
-//RS         CtValue::Struct { type_name, .. } => type_name.as_str(),
-//RS         _ => return None,
-//RS     };
-//RS     if type_name == "DataTracked" {
-//RS         let tracked = match tracked_id(state, recv, span) {
-//RS             Ok(id) => id,
-//RS             Err(error) => return Some(Err(error)),
-//RS         };
-//RS         match method {
-//RS             "query" => {
-//RS                 if !args.is_empty() {
-//RS                     return Some(Err(unsupported(
-//RS                         "`DataTracked.query()` takes no arguments",
-//RS                         span,
-//RS                     )));
-//RS                 }
-//RS                 let slot = match state.tracked[tracked - 1].as_ref() {
-//RS                     Some(slot) => slot,
-//RS                     None => return Some(Err(unsupported("`DataTracked` state slot is stale", span))),
-//RS                 };
-//RS                 let query = ComptimeQuery {
-//RS                     rows: slot.rows.iter().map(|(_, row)| row.clone()).collect(),
-//RS                     tracked: Some(tracked - 1),
-//RS                     operations: Vec::new(),
-//RS                     plan: vec!["track".to_string()],
-//RS                 };
-//RS                 return Some(Ok(store_query_with_operations(state, query)));
-//RS             }
-//RS             "insert" => {
-//RS                 if args.len() != 1 {
-//RS                     return Some(Err(unsupported(
-//RS                         "`DataTracked.insert()` needs one row",
-//RS                         span,
-//RS                     )));
-//RS                 }
-//RS                 return Some(
-//RS                     tracked_insert(state, recv, args[0].clone(), call, span)
-//RS                         .map(|()| CtValue::Present(Box::new(CtValue::Unit))),
-//RS                 );
-//RS             }
-//RS             "replace" => {
-//RS                 if args.len() != 2 {
-//RS                     return Some(Err(unsupported(
-//RS                         "`DataTracked.replace()` needs a key and row",
-//RS                         span,
-//RS                     )));
-//RS                 }
-//RS                 return Some(
-//RS                     tracked_replace(
-//RS                         state,
-//RS                         recv,
-//RS                         args[0].clone(),
-//RS                         args[1].clone(),
-//RS                         call,
-//RS                         span,
-//RS                     )
-//RS                     .map(|()| CtValue::Present(Box::new(CtValue::Unit))),
-//RS                 );
-//RS             }
-//RS             "remove" => {
-//RS                 if args.len() != 1 {
-//RS                     return Some(Err(unsupported(
-//RS                         "`DataTracked.remove()` needs one key",
-//RS                         span,
-//RS                     )));
-//RS                 }
-//RS                 return Some(
-//RS                     tracked_remove(state, recv, args[0].clone(), call, span)
-//RS                         .map(|()| CtValue::Present(Box::new(CtValue::Unit))),
-//RS                 );
-//RS             }
-//RS             _ => return None,
-//RS         }
-//RS     }
-//RS     if type_name == "DataWatch" {
-//RS         let watch = match watch_id(state, recv, span) {
-//RS             Ok(id) => id,
-//RS             Err(error) => return Some(Err(error)),
-//RS         };
-//RS         match method {
-//RS             "get" => {
-//RS                 if !args.is_empty() {
-//RS                     return Some(Err(unsupported("`DataWatch.get()` takes no arguments", span)));
-//RS                 }
-//RS                 return Some(
-//RS                     watch_refresh(state, recv, call, span)
-//RS                         .map(|rows| CtValue::Present(Box::new(CtValue::List(rows)))),
-//RS                 );
-//RS             }
-//RS             "status" => {
-//RS                 if !args.is_empty() {
-//RS                     return Some(Err(unsupported(
-//RS                         "`DataWatch.status()` takes no arguments",
-//RS                         span,
-//RS                     )));
-//RS                 }
-//RS                 let slot = match state.watches[watch - 1].as_ref() {
-//RS                     Some(slot) => slot,
-//RS                     None => return Some(Err(unsupported("`DataWatch` state slot is stale", span))),
-//RS                 };
-//RS                 let revision = match query_source_revision(state, &slot.query, span) {
-//RS                     Ok(revision) => revision,
-//RS                     Err(error) => return Some(Err(error)),
-//RS                 };
-//RS                 return Some(Ok(ct_struct(
-//RS                     "DataWatchStatus",
-//RS                     vec![
-//RS                         ("mode", CtValue::Str(slot.mode.clone())),
-//RS                         (
-//RS                             "revision",
-//RS                             CtValue::Int(i64::try_from(revision).unwrap_or(i64::MAX)),
-//RS                         ),
-//RS                         (
-//RS                             "retained_rows",
-//RS                             CtValue::Int(
-//RS                                 i64::try_from(slot.retained_rows).unwrap_or(i64::MAX),
-//RS                             ),
-//RS                         ),
-//RS                         (
-//RS                             "recomputations",
-//RS                             CtValue::Int(
-//RS                                 i64::try_from(slot.recomputations).unwrap_or(i64::MAX),
-//RS                             ),
-//RS                         ),
-//RS                         ("active", CtValue::Bool(slot.lifecycle.active)),
-//RS                         (
-//RS                             "generation",
-//RS                             CtValue::Int(
-//RS                                 i64::try_from(slot.lifecycle.generation).unwrap_or(i64::MAX),
-//RS                             ),
-//RS                         ),
-//RS                         ("dirty", CtValue::Bool(slot.lifecycle.dirty)),
-//RS                         ("error", CtValue::Str(slot.lifecycle.error.clone())),
-//RS                         (
-//RS                             "freshness_ms",
-//RS                             CtValue::Int(
-//RS                                 i64::try_from(slot.lifecycle.freshness_ms())
-//RS                                     .unwrap_or(i64::MAX),
-//RS                             ),
-//RS                         ),
-//RS                         (
-//RS                             "invalidation_cause",
-//RS                             CtValue::Str(slot.lifecycle.invalidation_cause.clone()),
-//RS                         ),
-//RS                         ("refreshing", CtValue::Bool(slot.lifecycle.refreshing)),
-//RS                         ("cancelled", CtValue::Bool(slot.lifecycle.cancelled)),
-//RS                     ],
-//RS                 )));
-//RS             }
-//RS             "cancel" => {
-//RS                 if !args.is_empty() {
-//RS                     return Some(Err(unsupported(
-//RS                         "`DataWatch.cancel()` takes no arguments",
-//RS                         span,
-//RS                     )));
-//RS                 }
-//RS                 let slot = match state.watches[watch - 1].as_mut() {
-//RS                     Some(slot) => slot,
-//RS                     None => return Some(Err(unsupported("`DataWatch` state slot is stale", span))),
-//RS                 };
-//RS                 slot.lifecycle.cancel();
-//RS                 return Some(Ok(CtValue::Unit));
-//RS             }
-//RS             _ => return None,
-//RS         }
-//RS     }
-//RS     if type_name == "Query" {
-//RS         let query = match clone_query(state, recv, span) {
-//RS             Ok(query) => query,
-//RS             Err(error) => return Some(Err(error)),
-//RS         };
-//RS         match method {
-//RS             "filter" | "sort_by" | "map" => {
-//RS                 if args.len() != 1 {
-//RS                     return Some(Err(unsupported(
-//RS                         &format!("`Query.{method}()` needs one callback"),
-//RS                         span,
-//RS                     )));
-//RS                 }
-//RS                 let mut next = query;
-//RS                 next.operations.push(match method {
-//RS                     "filter" => ComptimeQueryOperation::Filter(args[0].clone()),
-//RS                     "sort_by" => ComptimeQueryOperation::SortBy(args[0].clone()),
-//RS                     _ => ComptimeQueryOperation::Map(args[0].clone()),
-//RS                 });
-//RS                 next.plan.push(method.to_string());
-//RS                 return Some(Ok(store_query_with_operations(state, next)));
-//RS             }
-//RS             "min" | "max" => {
-//RS                 if args.len() != 1 {
-//RS                     return Some(Err(unsupported(
-//RS                         &format!("`Query.{method}()` needs one callback"),
-//RS                         span,
-//RS                     )));
-//RS                 }
-//RS                 let mut next = query;
-//RS                 next.operations.push(ComptimeQueryOperation::Extreme {
-//RS                     key: args[0].clone(),
-//RS                     maximum: method == "max",
-//RS                 });
-//RS                 next.plan.push(method.to_string());
-//RS                 return Some(Ok(store_query_with_operations(state, next)));
-//RS             }
-//RS             "inner_join" | "left_join" => {
-//RS                 if args.len() != 3 {
-//RS                     return Some(Err(unsupported(
-//RS                         &format!("`Query.{method}()` needs a query and two callbacks"),
-//RS                         span,
-//RS                     )));
-//RS                 }
-//RS                 let right_query = match clone_query(state, &args[0], span) {
-//RS                     Ok(query) => query,
-//RS                     Err(error) => return Some(Err(error)),
-//RS                 };
-//RS                 let right_type = query_join_right_type(resolved_ret)
-//RS                     .or_else(|| right_query.rows.first().map(CtValue::jet_type))
-//RS                     .unwrap_or(Type::Int);
-//RS                 let mut next = query;
-//RS                 next.operations.push(ComptimeQueryOperation::Join {
-//RS                     right: args[0].clone(),
-//RS                     left_key: args[1].clone(),
-//RS                     right_key: args[2].clone(),
-//RS                     left: method == "left_join",
-//RS                     right_type,
-//RS                 });
-//RS                 next.plan.push(method.to_string());
-//RS                 return Some(Ok(store_query_with_operations(state, next)));
-//RS             }
-//RS             "watch" => {
-//RS                 if !args.is_empty() {
-//RS                     return Some(Err(unsupported("`Query.watch()` takes no arguments", span)));
-//RS                 }
-//RS                 if !query_is_maintained(state, &query) {
-//RS                     return Some(Err(unsupported(
-//RS                         "E2476: `Query.watch()` requires a maintained `data.track()` source",
-//RS                         span,
-//RS                     )));
-//RS                 }
-//RS                 let entries = match collect_query_rows(state, &query, call, span) {
-//RS                     Ok(rows) if rows.len() <= data_kernel_limits_safe().max_output_rows as usize => {
-//RS                         rows
-//RS                     }
-//RS                     Ok(_) => {
-//RS                         return Some(Err(unsupported(
-//RS                             "`DataWatch` output exceeds max_output_rows",
-//RS                             span,
-//RS                         )))
-//RS                     }
-//RS                     Err(error) => return Some(Err(error)),
-//RS                 };
-//RS                 let source_revision = match query_source_revision(state, &query, span) {
-//RS                     Ok(revision) => revision,
-//RS                     Err(error) => return Some(Err(error)),
-//RS                 };
-//RS                 let retained_rows = match query_retained_rows(state, &query, span) {
-//RS                     Ok(rows) => rows,
-//RS                     Err(error) => return Some(Err(error)),
-//RS                 };
-//RS                 let mode = query
-//RS                     .plan
-//RS                     .last()
-//RS                     .cloned()
-//RS                     .unwrap_or_else(|| "tracked".to_string());
-//RS                 return Some(Ok(CtValue::Present(Box::new(store_watch(
-//RS                     state,
-//RS                     query,
-//RS                     entries,
-//RS                     source_revision,
-//RS                     retained_rows,
-//RS                     mode,
-//RS                 )))));
-//RS             }
-//RS             "collect" => {
-//RS                 if !args.is_empty() {
-//RS                     return Some(Err(unsupported("`Query.collect()` takes no arguments", span)));
-//RS                 }
-//RS                 return Some(
-//RS                     collect_query_rows(state, &query, call, span)
-//RS                         .map(|rows| CtValue::Present(Box::new(CtValue::List(rows)))),
-//RS                 );
-//RS             }
-//RS             "plan" => {
-//RS                 if !args.is_empty() {
-//RS                     return Some(Err(unsupported("`Query.plan()` takes no arguments", span)));
-//RS                 }
-//RS                 return Some(Ok(CtValue::List(
-//RS                     query.plan.into_iter().map(CtValue::Str).collect(),
-//RS                 )));
-//RS             }
-//RS             "group_by" => {
-//RS                 if args.len() != 1 {
-//RS                     return Some(Err(unsupported("`Query.group_by()` needs one callback", span)));
-//RS                 }
-//RS                 return Some(Ok(ct_struct(
-//RS                     "DataGroupedQuery",
-//RS                     vec![("query", recv.clone()), ("key", args[0].clone())],
-//RS                 )));
-//RS             }
-//RS             _ => return None,
-//RS         }
-//RS     }
-//RS     if type_name != "DataGroupedQuery" {
-//RS         return None;
-//RS     }
-//RS     let grouped_query = match struct_field(recv, "DataGroupedQuery", "query") {
-//RS         Some(query) => match clone_query(state, query, span) {
-//RS             Ok(query) => query,
-//RS             Err(error) => return Some(Err(error)),
-//RS         },
-//RS         None => return Some(Err(unsupported("`DataGroupedQuery` has no query source", span))),
-//RS     };
-//RS     let key = match struct_field(recv, "DataGroupedQuery", "key") {
-//RS         Some(key) => key.clone(),
-//RS         None => return Some(Err(unsupported("`DataGroupedQuery` has no key callback", span))),
-//RS     };
-//RS     let mut plan = grouped_query.plan.clone();
-//RS     plan.push("group_by".to_string());
-//RS     plan.push(method.to_string());
-//RS     if method == "count" {
-//RS         if !args.is_empty() {
-//RS             return Some(Err(unsupported("`DataGroupedQuery.count()` takes no arguments", span)));
-//RS         }
-//RS         let rows = match collect_query_rows(state, &grouped_query, call, span) {
-//RS             Ok(rows) => rows,
-//RS             Err(error) => return Some(Err(error)),
-//RS         };
-//RS         let mut groups: Vec<(CtValue, i64)> = Vec::new();
-//RS         for row in rows {
-//RS             let group_key = match call(&key, vec![row], span) {
-//RS                 Ok(value) => value,
-//RS                 Err(error) => return Some(Err(error)),
-//RS             };
-//RS             if let Some((_, count)) = groups.iter_mut().find(|(existing, _)| *existing == group_key) {
-//RS                 *count += 1;
-//RS             } else {
-//RS                 groups.push((group_key, 1));
-//RS             }
-//RS         }
-//RS         let rows = groups
-//RS             .into_iter()
-//RS             .map(|(key, value)| ct_struct("Group", vec![("key", key), ("value", CtValue::Int(value))]))
-//RS             .collect();
-//RS         return Some(Ok(store_query(state, rows, plan)));
-//RS     }
-//RS     if !matches!(method, "sum" | "mean") || args.len() != 1 {
-//RS         return None;
-//RS     }
-//RS     let value = args[0].clone();
-//RS     let rows = match collect_query_rows(state, &grouped_query, call, span) {
-//RS         Ok(rows) => rows,
-//RS         Err(error) => return Some(Err(error)),
-//RS     };
-//RS     let mut groups: Vec<(CtValue, CtValue, i64)> = Vec::new();
-//RS     for row in rows {
-//RS         let group_key = match call(&key, vec![row.clone()], span) {
-//RS             Ok(value) => value,
-//RS             Err(error) => return Some(Err(error)),
-//RS         };
-//RS         let group_value = match call(&value, vec![row], span) {
-//RS             Ok(value) => value,
-//RS             Err(error) => return Some(Err(error)),
-//RS         };
-//RS         if let Some((_, total, count)) = groups.iter_mut().find(|(existing, _, _)| *existing == group_key) {
-//RS             if method == "mean" {
-//RS                 let (CtValue::Float(total_value), CtValue::Float(next_value)) = (&*total, &group_value) else {
-//RS                     return Some(Err(unsupported("`Query.mean()` callback must return Float", span)));
-//RS                 };
-//RS                 *total = CtValue::Float(CtFloat::f64(total_value.as_f64() + next_value.as_f64()));
-//RS             } else if let Err(error) = add_query_values(total, group_value, span) {
-//RS                 return Some(Err(error));
-//RS             }
-//RS             *count += 1;
-//RS         } else {
-//RS             if method == "mean" && !matches!(group_value, CtValue::Float(_)) {
-//RS                 return Some(Err(unsupported("`Query.mean()` callback must return Float", span)));
-//RS             }
-//RS             groups.push((group_key, group_value, 1));
-//RS         }
-//RS     }
-//RS     let rows = groups
-//RS         .into_iter()
-//RS         .map(|(key, mut value, count)| {
-//RS             if method == "mean" {
-//RS                 if let CtValue::Float(total) = value {
-//RS                     value = CtValue::Float(CtFloat::f64(total.as_f64() / count as f64));
-//RS                 }
-//RS             }
-//RS             ct_struct("Group", vec![("key", key), ("value", value)])
-//RS         })
-//RS         .collect();
-//RS     Some(Ok(store_query(state, rows, plan)))
-//RS }
-//RS 
-//RS impl<'a> Interp<'a> {
-//RS     pub(crate) fn eval_data_query_method(
-//RS         &mut self,
-//RS         recv: &CtValue,
-//RS         method: &str,
-//RS         args: &[CtValue],
-//RS         resolved_ret: Option<&Type>,
-//RS         span: Span,
-//RS     ) -> Option<Result<CtValue, Diagnostic>> {
-//RS         // The query state is lent to the shared kernel while callbacks run
-//RS         // through this evaluator; it is restored before returning so every
-//RS         // slot allocated here stays visible to later calls.
-//RS         let mut state = std::mem::take(&mut self.data_pipeline);
-//RS         let result = eval_data_query_method_with(
-//RS             &mut state,
-//RS             recv,
-//RS             method,
-//RS             args,
-//RS             resolved_ret,
-//RS             &mut |callback, callback_args, span| self.call_closure(callback, callback_args, span),
-//RS             span,
-//RS         );
-//RS         self.data_pipeline = state;
-//RS         result
-//RS     }
-//RS 
-//RS 
-//RS     pub(super) fn eval_data_call(
-//RS         &mut self,
-//RS         method: &str,
-//RS         mut argv: Vec<CtValue>,
-//RS         type_args: &[Type],
-//RS         arg0_ty: Option<&Type>,
-//RS         call_ret: Option<&Type>,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, Diagnostic> {
-//RS         match method {
-//RS             "plot" | "inspect" | "inspect_json" | "text" | "svg" | "show" | "render" => {
-//RS                 plot_static_call(&mut self.data_pipeline, method, &argv, arg0_ty, self.structs, span)
-//RS             }
-//RS             "track" => {
-//RS                 if argv.len() != 2 {
-//RS                     return Err(unsupported(
-//RS                         "`data.track()` expects rows and one key callback",
-//RS                         span,
-//RS                     ));
-//RS                 }
-//RS                 let rows = expect_list(&argv[0], "track", span)?.clone();
-//RS                 let key = argv[1].clone();
-//RS                 let mut state = std::mem::take(&mut self.data_pipeline);
-//RS                 let result = build_tracked(
-//RS                     &mut state,
-//RS                     rows,
-//RS                     key,
-//RS                     &mut |callback, callback_args, span| {
-//RS                         self.call_closure(callback, callback_args, span)
-//RS                     },
-//RS                     span,
-//RS                 )
-//RS                 .map(|tracked| CtValue::Present(Box::new(tracked)));
-//RS                 self.data_pipeline = state;
-//RS                 return result;
-//RS             }
-//RS             "query" => {
-//RS                 let rows = expect_list(
-//RS                     argv.first()
-//RS                         .ok_or_else(|| unsupported("`data.query()`: missing rows", span))?,
-//RS                     "query",
-//RS                     span,
-//RS                 )?
-//RS                 .clone();
-//RS                 if argv.len() == 1 {
-//RS                     return Ok(store_query(
-//RS                         &mut self.data_pipeline,
-//RS                         rows,
-//RS                         vec!["scan".to_string()],
-//RS                     ));
-//RS                 }
-//RS                 let sql = match argv.get(1) {
-//RS                     Some(CtValue::Str(value)) => value,
-//RS                     _ => {
-//RS                         return Err(unsupported(
-//RS                             "`data.query()`: expected SQL text as argument 1",
-//RS                             span,
-//RS                         ))
-//RS                     }
-//RS                 };
-//RS                 let selected = match query_sql_rows(
-//RS                     rows,
-//RS                     sql,
-//RS                     query_declared_fields(arg0_ty, call_ret, self.structs),
-//RS                 ) {
-//RS                     Ok(rows) => rows,
-//RS                     Err(error) => return Ok(CtValue::failed(Box::new(error))),
-//RS                 };
-//RS                 Ok(CtValue::Present(Box::new(store_query(
-//RS                     &mut self.data_pipeline,
-//RS                     selected,
-//RS                     vec!["scan".to_string(), "sql".to_string()],
-//RS                 ))))
-//RS             }
-//RS             "csv" => {
-//RS                 let Some(ty) = type_args.first() else {
-//RS                     return Err(unsupported("`data.csv<T>()` needs a type argument", span));
-//RS                 };
-//RS                 let text = match argv.first() {
-//RS                     Some(CtValue::Str(s)) => s.clone(),
-//RS                     _ => {
-//RS                         return Err(unsupported(
-//RS                             "`data.csv()`: expected a string argument",
-//RS                             span,
-//RS                         ))
-//RS                     }
-//RS                 };
-//RS                 self.eval_typed_csv_decode(&text, ty, span)
-//RS             }
-//RS             "json" => {
-//RS                 let Some(ty) = type_args.first() else {
-//RS                     return Err(unsupported("`data.json<T>()` needs a type argument", span));
-//RS                 };
-//RS                 let text = match argv.first() {
-//RS                     Some(CtValue::Str(s)) => s.clone(),
-//RS                     _ => {
-//RS                         return Err(unsupported(
-//RS                             "`data.json()`: expected a string argument",
-//RS                             span,
-//RS                         ))
-//RS                     }
-//RS                 };
-//RS                 // Array-of-objects → `[T]`, same Decode model as `encoding.json.decode<[T]>`.
-//RS                 self.eval_typed_decode(
-//RS                     "core.encoding.json",
-//RS                     &text,
-//RS                     &Type::List(Box::new(ty.clone())),
-//RS                     span,
-//RS                 )
-//RS             }
-//RS             "count" => {
-//RS                 let recv = argv
-//RS                     .first()
-//RS                     .ok_or_else(|| unsupported("`data.count()`: missing argument", span))?;
-//RS                 Ok(CtValue::Int(
-//RS                     expect_list(recv, "count", span)?.len() as i64,
-//RS                 ))
-//RS             }
-//RS             "schema" => {
-//RS                 let recv = argv
-//RS                     .first()
-//RS                     .ok_or_else(|| unsupported("`data.schema()`: missing argument", span))?;
-//RS                 let structs = self.structs;
-//RS                 let row: SchemaRow<'_> = &|name: &str| {
-//RS                     let def = structs.get(name)?;
-//RS                     Some((
-//RS                         def.type_params
-//RS                             .iter()
-//RS                             .map(|param| param.name.clone())
-//RS                             .collect::<Vec<String>>(),
-//RS                         def.fields
-//RS                             .iter()
-//RS                             .map(|field| (field.name.clone(), field.ty.clone()))
-//RS                             .collect::<Vec<(String, Type)>>(),
-//RS                     ))
-//RS                 };
-//RS                 schema_value(recv, arg0_ty, row, span)
-//RS             }
-//RS             "pivot_sum" => {
-//RS                 super::Methods::eval_data_pivot_sum(&argv, span, |callback, args, span| {
-//RS                     self.call_closure(callback, args, span)
-//RS                 })
-//RS             }
-//RS 
-//RS             "inner_join" | "left_join" => {
-//RS                 let right_key = argv.pop().unwrap();
-//RS                 let left_key = argv.pop().unwrap();
-//RS                 let right = expect_list(&argv[1], method, span)?.clone();
-//RS                 let left = expect_list(&argv[0], method, span)?.clone();
-//RS                 let right_type = data_join_right_type(call_ret);
-//RS                 let mut call = |callback: &CtValue, args: Vec<CtValue>, span: Span| {
-//RS                     self.call_closure(callback, args, span)
-//RS                 };
-//RS                 Ok(CtValue::List(collect_join_rows(
-//RS                     &left,
-//RS                     &right,
-//RS                     &left_key,
-//RS                     &right_key,
-//RS                     method == "left_join",
-//RS                     right_type,
-//RS                     &mut call,
-//RS                     span,
-//RS                 )?))
-//RS             }
-//RS             // I4: the pipeline runs on the runtime evaluator too; name the
-//RS             // call, not a phase.
-//RS             _ => Err(unsupported(&format!("`data.{}()`", method), span)),
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0583 crates/jet-comptime/src/Comptime/DataPipeline.rs:5496-6374
+use jet_foundation.[CtValue, CtFloat, NamedCtValue, Type, Span, Diagnostic]
+use jet_comptime.Interpreter.[Interp]
+use jet_comptime.Builtins.[as_bool, cmp]
+use jet_comptime.Methods.[as_string, eval_data_pivot_sum]
+use jet_comptime.Comptime.DataPipeline.[DataPipelineState, ComptimeQuery, ComptimeQueryOperation, SchemaRow, data_schema_elem_ty, schema_columns_for_type, data_column, ct_value_type_name, data_kernel_limits_safe, clone_query, ct_struct, tracked_id, tracked_insert, tracked_replace, tracked_remove, watch_id, watch_refresh, query_source_revision, query_join_right_type, query_is_maintained, query_retained_rows, store_watch, store_query, struct_field, plot_static_call, expect_list, query_sql_rows, query_declared_fields, data_join_right_type, build_tracked]
 
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5496
+pub fn schema_value(recv: &CtValue, arg0_ty: Type?, row: SchemaRow, span: Span) -> CtValue Diagnostic! {
+    sample :: if recv == { .List(xs) -> if xs.is_empty() -> None else -> Val(xs[0]) else -> fail unsupported("`data.schema()` needs an ordinary typed list", span) }
+    columns := None
+    if arg0_ty == { Val(ty) -> if data_schema_elem_ty(&ty) == { Val(elem) -> columns = schema_columns_for_type(&elem, true, row) else -> {} } else -> {} }
+    if columns == { Val(values) -> return CtValue.List{values: values} else -> {} }
+    out := [CtValue]{}
+    if sample == {
+        Val(.Struct(_, fields)) -> loop field in fields { out.push(data_column(field.name, ct_value_type_name(&field.value))) }
+        Val(value) -> out.push(data_column("value", ct_value_type_name(&value)))
+        else -> {}
+    }
+    CtValue.List{values: ^out}
+}
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5528
+fn add_query_values(left: &CtValue, right: CtValue, span: Span) -> Unit Diagnostic! {
+    if (left, right) == {
+        (.Int(a), .Int(b)) -> { total :: a.checked_add(b) ?? fail unsupported("`Query.sum()` integer overflow", span); left = CtValue.Int{value: total} }
+        (.Float(a), .Float(b)) -> left = CtValue.Float{value: CtFloat.f64(a.as_f64() + b.as_f64())}
+        (.Float(a), .Int(b)) -> left = CtValue.Float{value: CtFloat.f64(a.as_f64() + Float{b})}
+        (.Int(_), .Float(_)) -> fail unsupported("`Query.sum()` cannot mix Int and Float values", span)
+        else -> fail unsupported("`Query.sum()` callback must return numeric values", span)
+    }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5562
+// Shared mutable invocation seam: both evaluators use these same semantics.
+type QueryCallback = &fn(&CtValue, [CtValue], Span) -> CtValue Diagnostic!
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5565
+fn collect_query_rows(state: &DataPipelineState, query: &ComptimeQuery, call: QueryCallback, span: Span) -> [CtValue] Diagnostic! {
+    limits :: data_kernel_limits_safe()
+    // GATE #4483: conversions saturate at selected-target usize::MAX.
+    max_sort_rows :: USize.try_from(limits.max_sort_rows) ?? USize.MAX
+    max_join_rows :: USize.try_from(limits.max_join_rows) ?? USize.MAX
+    max_output_rows :: USize.try_from(limits.max_output_rows) ?? USize.MAX
+    rows := [CtValue]{}
+    if query.tracked == {
+        Val(id) -> {
+            if id >= state.tracked.len() -> fail unsupported("`DataTracked` state slot is stale", span)
+            slot :: state.tracked[id] ?? fail unsupported("`DataTracked` state slot is stale", span)
+            loop (_, row) in slot.rows { rows.push(row.clone()) }
+        }
+        None -> rows = query.rows.clone()
+    }
+    loop operation in query.operations {
+        if operation == {
+            .Filter(predicate) -> {
+                filtered := [CtValue]{}
+                loop row in rows { value :: call(&predicate, [CtValue]{row.clone()}, span)!; if as_bool(&value, span)! -> filtered.push(^row) }
+                rows = ^filtered
+            }
+            .SortBy(key) -> {
+                if rows.len() > max_sort_rows -> fail unsupported("`Query.sort_by()` input exceeds max_sort_rows", span)
+                keyed := [(String, CtValue)]{}
+                loop row in rows { value :: call(&key, [CtValue]{row.clone()}, span)!; text := as_string(&value, span)!.to_string(); keyed.push((text, ^row)) }
+                keyed.sort_by(fn(left: (String, CtValue), right: (String, CtValue)) -> Ordering Never! { left.0.compare(right.0) })
+                rows = [CtValue]{}
+                loop (_, row) in keyed { rows.push(^row) }
+            }
+            .Map(mapper) -> {
+                mapped := [CtValue]{}
+                loop row in rows { mapped.push(call(&mapper, [CtValue]{^row}, span)!) }
+                rows = ^mapped
+            }
+            .Extreme(key, maximum) -> {
+                selected := None
+                loop row in rows {
+                    value :: call(&key, [CtValue]{^row}, span)!
+                    if value == { .Float(number) -> if !number.as_f64().is_finite() -> fail unsupported("`Query.min()`/`Query.max()` key must be finite", span) else -> {} }
+                    replace :: if selected == {
+                        None -> true
+                        Val((best, _)) -> { order :: cmp(value.clone(), best.clone(), span)!; if maximum -> order == Ordering.Greater else -> order == Ordering.Less }
+                    }
+                    // Rust retains the callback value, not its source row.
+                    if replace -> selected = Val((value.clone(), value))
+                }
+                if selected == {
+                    Val((_, value)) -> rows = [CtValue]{value}
+                    None -> fail unsupported(if maximum -> "`Query.max()` cannot reduce an empty query" else -> "`Query.min()` cannot reduce an empty query", span)
+                }
+            }
+            .Join(right, left_key, right_key, left, right_type) -> {
+                right_query :: clone_query(state, &right, span)!
+                right_rows :: collect_query_rows(state, &right_query, call, span)!
+                if right_rows.len() > max_join_rows -> fail unsupported("`Query.join()` input exceeds max_join_rows", span)
+                rows = collect_join_rows(&rows, &right_rows, &left_key, &right_key, left, Val(right_type.clone()), call, span)!
+            }
+        }
+    }
+    if rows.len() > max_output_rows -> fail unsupported("`Query.collect()` output exceeds max_output_rows", span)
+    ^rows
+}
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5698
+fn collect_join_rows(left_rows: &[CtValue], right_rows: &[CtValue], left_key: &CtValue, right_key: &CtValue, left_join: Bool, right_type: Type?, call: QueryCallback, span: Span) -> [CtValue] Diagnostic! {
+    right_by_key := [String:[CtValue]]{}
+    loop row in right_rows {
+        value :: call(right_key, [CtValue]{row.clone()}, span)!
+        key := as_string(&value, span)!.to_string()
+        right_by_key.entry(key).or_insert([CtValue]{}).push(row.clone())
+    }
+    joined := [CtValue]{}
+    loop left_row in left_rows {
+        value :: call(left_key, [CtValue]{left_row.clone()}, span)!
+        key := as_string(&value, span)!.to_string()
+        if right_by_key.get(key) == {
+            Val(matches) -> loop right_row in matches {
+                joined.push(ct_struct("DataJoin", [(String, CtValue)]{("left", left_row.clone()), ("right", if left_join -> CtValue.Present{value: right_row.clone()} else -> right_row.clone())}))
+            }
+            None -> if left_join {
+                ty :: right_type ?? fail unsupported("`data.left_join()` needs a resolved right row type", span)
+                joined.push(ct_struct("DataJoin", [(String, CtValue)]{("left", left_row.clone()), ("right", CtValue.absent(ty))}))
+            }
+        }
+    }
+    ^joined
+}
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5760
+fn store_query_with_operations(state: &DataPipelineState, query: ComptimeQuery) -> CtValue Never! {
+    state.queries.push(Val(^query))
+    ct_struct("Query", [(String, CtValue)]{("slot", CtValue.Int{value: Int.try_from(state.queries.len()) ?? Int.MAX})})
+}
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5775
+pub fn eval_data_query_method_with(state: &DataPipelineState, recv: &CtValue, method: String, args: &[CtValue], resolved_ret: Type?, call: QueryCallback, span: Span) -> (CtValue Diagnostic!)? {
+    type_name :: if recv == { .Struct(name, _) -> name else -> return None }
+    // Keep unknown dispatch None, but stale recognized receiver errors claimed.
+    try {
+        if type_name == "DataTracked" {
+            tracked :: tracked_id(state, recv, span)!
+            if method == {
+                "query" -> {
+                    if !args.is_empty() -> fail unsupported("`DataTracked.query()` takes no arguments", span)
+                    slot :: state.tracked[tracked - 1] ?? fail unsupported("`DataTracked` state slot is stale", span)
+                    rows := [CtValue]{}; loop (_, row) in slot.rows { rows.push(row.clone()) }
+                    query :: ComptimeQuery{rows: ^rows, tracked: Val(tracked - 1), operations: [ComptimeQueryOperation]{}, plan: [String]{"track"}}
+                    return Val(Ok(store_query_with_operations(state, query)))
+                }
+                "insert" -> {
+                    if args.len() != 1 -> fail unsupported("`DataTracked.insert()` needs one row", span)
+                    tracked_insert(state, recv, args[0].clone(), call, span)!
+                    return Val(Ok(CtValue.Present{value: CtValue.Unit}))
+                }
+                "replace" -> {
+                    if args.len() != 2 -> fail unsupported("`DataTracked.replace()` needs a key and row", span)
+                    tracked_replace(state, recv, args[0].clone(), args[1].clone(), call, span)!
+                    return Val(Ok(CtValue.Present{value: CtValue.Unit}))
+                }
+                "remove" -> {
+                    if args.len() != 1 -> fail unsupported("`DataTracked.remove()` needs one key", span)
+                    tracked_remove(state, recv, args[0].clone(), call, span)!
+                    return Val(Ok(CtValue.Present{value: CtValue.Unit}))
+                }
+                else -> return None
+            }
+        }
+        if type_name == "DataWatch" {
+            watch :: watch_id(state, recv, span)!
+            if method == {
+                "get" -> {
+                    if !args.is_empty() -> fail unsupported("`DataWatch.get()` takes no arguments", span)
+                    rows :: watch_refresh(state, recv, call, span)!
+                    return Val(Ok(CtValue.Present{value: CtValue.List{values: rows}}))
+                }
+                "status" -> {
+                    if !args.is_empty() -> fail unsupported("`DataWatch.status()` takes no arguments", span)
+                    slot :: state.watches[watch - 1] ?? fail unsupported("`DataWatch` state slot is stale", span)
+                    revision :: query_source_revision(state, &slot.query, span)!
+                    return Val(Ok(ct_struct("DataWatchStatus", [(String, CtValue)]{
+                        ("mode", CtValue.Str{value: slot.mode.clone()}),
+                        ("revision", CtValue.Int{value: Int.try_from(revision) ?? Int.MAX}),
+                        ("retained_rows", CtValue.Int{value: Int.try_from(slot.retained_rows) ?? Int.MAX}),
+                        ("recomputations", CtValue.Int{value: Int.try_from(slot.recomputations) ?? Int.MAX}),
+                        ("active", CtValue.Bool{value: slot.lifecycle.active}),
+                        ("generation", CtValue.Int{value: Int.try_from(slot.lifecycle.generation) ?? Int.MAX}),
+                        ("dirty", CtValue.Bool{value: slot.lifecycle.dirty}),
+                        ("error", CtValue.Str{value: slot.lifecycle.error.clone()}),
+                        ("freshness_ms", CtValue.Int{value: Int.try_from(slot.lifecycle.freshness_ms()) ?? Int.MAX}),
+                        ("invalidation_cause", CtValue.Str{value: slot.lifecycle.invalidation_cause.clone()}),
+                        ("refreshing", CtValue.Bool{value: slot.lifecycle.refreshing}),
+                        ("cancelled", CtValue.Bool{value: slot.lifecycle.cancelled})
+                    })))
+                }
+                "cancel" -> {
+                    if !args.is_empty() -> fail unsupported("`DataWatch.cancel()` takes no arguments", span)
+                    slot := &state.watches[watch - 1] ?? fail unsupported("`DataWatch` state slot is stale", span)
+                    slot.lifecycle.cancel()
+                    return Val(Ok(CtValue.Unit))
+                }
+                else -> return None
+            }
+        }
+        if type_name == "Query" {
+            query := clone_query(state, recv, span)!
+            if method == {
+                "filter" | "sort_by" | "map" | "min" | "max" -> {
+                    if args.len() != 1 -> fail unsupported("`Query.{method}()` needs one callback", span)
+                    operation :: if method == {
+                        "filter" -> ComptimeQueryOperation.Filter{predicate: args[0].clone()}
+                        "sort_by" -> ComptimeQueryOperation.SortBy{key: args[0].clone()}
+                        "map" -> ComptimeQueryOperation.Map{mapper: args[0].clone()}
+                        else -> ComptimeQueryOperation.Extreme{key: args[0].clone(), maximum: method == "max"}
+                    }
+                    query.operations.push(operation); query.plan.push(method)
+                    return Val(Ok(store_query_with_operations(state, ^query)))
+                }
+                "inner_join" | "left_join" -> {
+                    if args.len() != 3 -> fail unsupported("`Query.{method}()` needs a query and two callbacks", span)
+                    right_query :: clone_query(state, &args[0], span)!
+                    right_type :: query_join_right_type(resolved_ret) ?? (if right_query.rows.is_empty() -> Type.Int else -> right_query.rows[0].jet_type())
+                    query.operations.push(ComptimeQueryOperation.Join{right: args[0].clone(), left_key: args[1].clone(), right_key: args[2].clone(), left: method == "left_join", right_type: right_type})
+                    query.plan.push(method)
+                    return Val(Ok(store_query_with_operations(state, ^query)))
+                }
+                "watch" -> {
+                    if !args.is_empty() -> fail unsupported("`Query.watch()` takes no arguments", span)
+                    if !query_is_maintained(state, &query) -> fail unsupported("E2476: `Query.watch()` requires a maintained `data.track()` source", span)
+                    entries :: collect_query_rows(state, &query, call, span)!
+                    if entries.len() > USize{data_kernel_limits_safe().max_output_rows} -> fail unsupported("`DataWatch` output exceeds max_output_rows", span)
+                    source_revision :: query_source_revision(state, &query, span)!
+                    retained_rows :: query_retained_rows(state, &query, span)!
+                    mode :: if query.plan.is_empty() -> "tracked" else -> query.plan[query.plan.len() - 1].clone()
+                    return Val(Ok(CtValue.Present{value: store_watch(state, ^query, entries, source_revision, retained_rows, mode)}))
+                }
+                "collect" -> {
+                    if !args.is_empty() -> fail unsupported("`Query.collect()` takes no arguments", span)
+                    rows :: collect_query_rows(state, &query, call, span)!
+                    return Val(Ok(CtValue.Present{value: CtValue.List{values: rows}}))
+                }
+                "plan" -> {
+                    if !args.is_empty() -> fail unsupported("`Query.plan()` takes no arguments", span)
+                    values := [CtValue]{}; loop item in query.plan { values.push(CtValue.Str{value: ^item}) }
+                    return Val(Ok(CtValue.List{values: ^values}))
+                }
+                "group_by" -> {
+                    if args.len() != 1 -> fail unsupported("`Query.group_by()` needs one callback", span)
+                    return Val(Ok(ct_struct("DataGroupedQuery", [(String, CtValue)]{("query", recv.clone()), ("key", args[0].clone())})))
+                }
+                else -> return None
+            }
+        }
+        if type_name != "DataGroupedQuery" -> return None
+        source :: struct_field(recv, "DataGroupedQuery", "query") ?? fail unsupported("`DataGroupedQuery` has no query source", span)
+        grouped_query :: clone_query(state, source, span)!
+        key :: (struct_field(recv, "DataGroupedQuery", "key") ?? fail unsupported("`DataGroupedQuery` has no key callback", span)).clone()
+        plan := grouped_query.plan.clone(); plan.push("group_by"); plan.push(method)
+        if method == "count" {
+            if !args.is_empty() -> fail unsupported("`DataGroupedQuery.count()` takes no arguments", span)
+            rows :: collect_query_rows(state, &grouped_query, call, span)!
+            groups := [(CtValue, Int)]{}
+            loop row in rows {
+                group_key :: call(&key, [CtValue]{^row}, span)!
+                index := None
+                loop i in 0..<groups.len() { if groups[i].0 == group_key { index = Val(i); break } }
+                if index == { Val(i) -> groups[i].1 += 1 None -> groups.push((group_key, 1)) }
+            }
+            result := [CtValue]{}
+            loop (group_key, count) in groups { result.push(ct_struct("Group", [(String, CtValue)]{("key", group_key), ("value", CtValue.Int{value: count})})) }
+            return Val(Ok(store_query(state, ^result, ^plan)))
+        }
+        if (method != "sum" && method != "mean") || args.len() != 1 -> return None
+        value :: args[0].clone()
+        rows :: collect_query_rows(state, &grouped_query, call, span)!
+        groups := [(CtValue, CtValue, Int)]{}
+        loop row in rows {
+            group_key :: call(&key, [CtValue]{row.clone()}, span)!
+            group_value :: call(&value, [CtValue]{^row}, span)!
+            index := None
+            loop i in 0..<groups.len() { if groups[i].0 == group_key { index = Val(i); break } }
+            if index == {
+                Val(i) -> {
+                    if method == "mean" {
+                        if (groups[i].1, group_value) == {
+                            (.Float(total), .Float(next)) -> groups[i].1 = CtValue.Float{value: CtFloat.f64(total.as_f64() + next.as_f64())}
+                            else -> fail unsupported("`Query.mean()` callback must return Float", span)
+                        }
+                    } else { add_query_values(&groups[i].1, group_value, span)! }
+                    groups[i].2 += 1
+                }
+                None -> {
+                    if method == "mean" && !(if group_value == { .Float(_) -> true else -> false }) -> fail unsupported("`Query.mean()` callback must return Float", span)
+                    groups.push((group_key, group_value, 1))
+                }
+            }
+        }
+        result := [CtValue]{}
+        loop (group_key, total, count) in groups {
+            value := total
+            if method == "mean" { if value == { .Float(n) -> value = CtValue.Float{value: CtFloat.f64(n.as_f64() / Float{count})} else -> {} } }
+            result.push(ct_struct("Group", [(String, CtValue)]{("key", group_key), ("value", ^value)}))
+        }
+        Val(Ok(store_query(state, ^result, ^plan)))
+    } catch(error) { Val(Err(error)) }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:6179
+pub fn eval_data_query_method(self: &Interp, recv: &CtValue, method: String, args: &[CtValue], resolved_ret: Type?, span: Span) -> (CtValue Diagnostic!)? {
+    state := self.data_pipeline.take()
+    result :: eval_data_query_method_with(&state, recv, method, args, resolved_ret, &fn(callback: &CtValue, callback_args: [CtValue], span: Span) -> CtValue Diagnostic! { self.call_closure(callback, callback_args, span) }, span)
+    self.data_pipeline = ^state
+    result
+}
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:6205
+pub fn eval_data_call(self: &Interp, method: String, argv: [CtValue], type_args: &[Type], arg0_ty: Type?, call_ret: Type?, span: Span) -> CtValue Diagnostic! {
+    if method == {
+        "plot" | "inspect" | "inspect_json" | "text" | "svg" | "show" | "render" -> plot_static_call(&self.data_pipeline, method, &argv, arg0_ty, self.structs, span)
+        "track" -> {
+            if argv.len() != 2 -> fail unsupported("`data.track()` expects rows and one key callback", span)
+            rows :: expect_list(&argv[0], "track", span)!.clone(); key :: argv[1].clone()
+            state := self.data_pipeline.take()
+            result :: (fn() -> CtValue Diagnostic! {
+                tracked :: build_tracked(&state, rows, key, &fn(callback: &CtValue, callback_args: [CtValue], span: Span) -> CtValue Diagnostic! { self.call_closure(callback, callback_args, span) }, span)!
+                CtValue.Present{value: tracked}
+            })()
+            // Restore allocated slots even when callbacks return diagnostics.
+            self.data_pipeline = ^state
+            result!
+        }
+        "query" -> {
+            if argv.is_empty() -> fail unsupported("`data.query()`: missing rows", span)
+            rows :: expect_list(&argv[0], "query", span)!.clone()
+            if argv.len() == 1 -> return store_query(&self.data_pipeline, rows, [String]{"scan"})
+            sql :: if argv[1] == { .Str(text) -> text else -> fail unsupported("`data.query()`: expected SQL text as argument 1", span) }
+            selected :: query_sql_rows(rows, sql, query_declared_fields(arg0_ty, call_ret, self.structs)) catch error -> return CtValue.failed(error)
+            CtValue.Present{value: store_query(&self.data_pipeline, selected, [String]{"scan", "sql"})}
+        }
+        "csv" | "json" -> {
+            if type_args.is_empty() -> fail unsupported("`data.{method}<T>()` needs a type argument", span)
+            if argv.is_empty() -> fail unsupported("`data.{method}()`: expected a string argument", span)
+            text :: if argv[0] == { .Str(s) -> s.clone() else -> fail unsupported("`data.{method}()`: expected a string argument", span) }
+            if method == "csv" -> self.eval_typed_csv_decode(text, &type_args[0], span) else -> self.eval_typed_decode("core.encoding.json", text, &Type.List{inner: type_args[0].clone()}, span)
+        }
+        "count" -> {
+            if argv.is_empty() -> fail unsupported("`data.count()`: missing argument", span)
+            CtValue.Int{value: expect_list(&argv[0], "count", span)!.len()}
+        }
+        "schema" -> {
+            if argv.is_empty() -> fail unsupported("`data.schema()`: missing argument", span)
+            structs :: self.structs
+            row :: &fn(name: String) -> ([String], [(String, Type)])? {
+                def :: structs.get(name) ?? return None
+                params := [String]{}; fields := [(String, Type)]{}
+                loop param in def.type_params { params.push(param.name.clone()) }
+                loop field in def.fields { fields.push((field.name.clone(), field.ty.clone())) }
+                Val((^params, ^fields))
+            }
+            schema_value(&argv[0], arg0_ty, row, span)
+        }
+        "pivot_sum" -> eval_data_pivot_sum(&argv, span, fn(callback: &CtValue, args: [CtValue], span: Span) -> CtValue Diagnostic! { self.call_closure(callback, args, span) })
+        "inner_join" | "left_join" -> {
+            values := argv
+            right_key :: values.pop().unwrap(); left_key :: values.pop().unwrap()
+            right :: expect_list(&values[1], method, span)!.clone(); left :: expect_list(&values[0], method, span)!.clone()
+            right_type :: data_join_right_type(call_ret)
+            call := fn(callback: &CtValue, args: [CtValue], span: Span) -> CtValue Diagnostic! { self.call_closure(callback, args, span) }
+            CtValue.List{values: collect_join_rows(&left, &right, &left_key, &right_key, method == "left_join", right_type, &call, span)!}
+        }
+        else -> fail unsupported("`data.{method}()`", span)
+    }
+}

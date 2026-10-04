@@ -1,1457 +1,624 @@
-// PORT-PENDING 0566 crates-jet-comptime-src-comptime-build-plan-impl: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1-1453
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::actions_policy::{
-//RS     ActionCache, BuildAction, BuildCapability, BuildResourcePool, BuildResourcePoolSpec,
-//RS };
-//RS use super::cache_cas::{
-//RS     ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ContentDigest,
-//RS };
-//RS use super::errors_keys::{
-//RS     canonical_action_key, canonical_effective_action_key, stalled_cycle, target_cycle_error,
-//RS     BuildError,
-//RS };
-//RS use super::execution_helpers::{
-//RS     action_pools, cache_status_reason, collect_target_actions, default_resource_pools,
-//RS     execution_metrics, execution_stages,
-//RS };
-//RS use super::execution_runtime::BuildProbeFact;
-//RS use super::handles::{
-//RS     ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, TargetId, TargetRef,
-//RS     ToolchainHandle, ToolchainId,
-//RS };
-//RS use super::plan_graph::{
-//RS     BuildExecutionEvent, BuildExecutionModel, BuildExecutionNode, BuildExecutionReport,
-//RS     BuildExplanation, BuildGraph, BuildGraphAction, BuildGraphActionKey, BuildGraphCacheDelta,
-//RS     BuildGraphDiff, BuildGraphFile, BuildGraphFileDelta, BuildGraphKeyDelta, BuildGraphSubject,
-//RS     BuildGraphTarget, BuildPlan, CompilerPackageSpec, FileOwnership, RebuildExplanation,
-//RS     MAX_ACTIONS,
-//RS };
-//RS use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
-//RS use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
-//RS use super::targets::{BuildPath, BuildTarget, TargetKind};
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::path::Path;
-//RS 
-//RS impl BuildPlan {
-//RS     pub fn default_target(&self) -> Option<TargetRef> {
-//RS         self.default
-//RS     }
-//RS 
-//RS     pub fn targets(&self) -> &[BuildTarget] {
-//RS         &self.targets
-//RS     }
-//RS 
-//RS     pub fn actions(&self) -> &[BuildAction] {
-//RS         &self.actions
-//RS     }
-//RS 
-//RS     pub fn toolchains(&self) -> &[BuildToolchain] {
-//RS         &self.toolchains
-//RS     }
-//RS 
-//RS     pub fn signing_identities(&self) -> &[BuildSigningIdentity] {
-//RS         &self.signing_identities
-//RS     }
-//RS 
-//RS     pub fn probes(&self) -> &[BuildProbe] {
-//RS         &self.probes
-//RS     }
-//RS 
-//RS     pub fn plugins(&self) -> &[BuildPlugin] {
-//RS         &self.plugins
-//RS     }
-//RS 
-//RS     pub fn generated_modules(&self) -> &[BuildGeneratedModule] {
-//RS         &self.generated_modules
-//RS     }
-//RS 
-//RS     /// Generated modules reachable from the selected target's explicit source
-//RS     /// list or selected action outputs. A plan with no targets augments the
-//RS     /// canonical batteries program, so all of its generated modules are
-//RS     /// selected; once a target exists, unrelated generated modules stay out.
-//RS     pub fn selected_generated_modules(&self) -> Result<Vec<&BuildGeneratedModule>, BuildError> {
-//RS         if self.targets.is_empty() {
-//RS             let mut selected = self.generated_modules.iter().collect::<Vec<_>>();
-//RS             selected.sort_by(|left, right| {
-//RS                 left.path
-//RS                     .as_str()
-//RS                     .cmp(right.path.as_str())
-//RS                     .then_with(|| left.name.cmp(&right.name))
-//RS             });
-//RS             return Ok(selected);
-//RS         }
-//RS         let mut paths = self
-//RS             .selected_sources()?
-//RS             .into_iter()
-//RS             .map(|path| path.as_str().to_string())
-//RS             .collect::<BTreeSet<_>>();
-//RS         let actions = self.selected_action_ids()?;
-//RS         for action in self
-//RS             .actions
-//RS             .iter()
-//RS             .filter(|action| actions.contains(&action.id))
-//RS         {
-//RS             paths.extend(action.outputs.iter().map(|path| path.as_str().to_string()));
-//RS         }
-//RS         let mut selected = self
-//RS             .generated_modules
-//RS             .iter()
-//RS             .filter(|module| paths.contains(module.path.as_str()))
-//RS             .collect::<Vec<_>>();
-//RS         selected.sort_by(|left, right| {
-//RS             left.path
-//RS                 .as_str()
-//RS                 .cmp(right.path.as_str())
-//RS                 .then_with(|| left.name.cmp(&right.name))
-//RS         });
-//RS         Ok(selected)
-//RS     }
-//RS 
-//RS     /// Actions reachable from the selected default target. A plan without a
-//RS     /// default intentionally selects every registered target.
-//RS     pub fn selected_action_ids(&self) -> Result<BTreeSet<ActionId>, BuildError> {
-//RS         let mut selected = BTreeSet::new();
-//RS         if let Some(default) = self.default {
-//RS             collect_target_actions(self, default.id, &mut Vec::new(), &mut selected)?;
-//RS         } else {
-//RS             for target in &self.targets {
-//RS                 collect_target_actions(self, target.id, &mut Vec::new(), &mut selected)?;
-//RS             }
-//RS         }
-//RS         let prereqs = self.action_prereqs()?;
-//RS         let mut pending = selected.iter().copied().collect::<Vec<_>>();
-//RS         while let Some(action) = pending.pop() {
-//RS             for dependency in prereqs.get(&action).into_iter().flatten() {
-//RS                 if selected.insert(*dependency) {
-//RS                     pending.push(*dependency);
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(selected)
-//RS     }
-//RS 
-//RS     /// Source closure compiled for the selected target, including target deps.
-//RS     pub fn selected_sources(&self) -> Result<Vec<BuildPath>, BuildError> {
-//RS         fn collect(
-//RS             plan: &BuildPlan,
-//RS             id: TargetId,
-//RS             visiting: &mut Vec<TargetId>,
-//RS             seen: &mut BTreeSet<String>,
-//RS             out: &mut Vec<BuildPath>,
-//RS         ) -> Result<(), BuildError> {
-//RS             if visiting.contains(&id) {
-//RS                 return Err(target_cycle_error(plan, visiting, id));
-//RS             }
-//RS             visiting.push(id);
-//RS             let target = plan
-//RS                 .targets
-//RS                 .get(id.0)
-//RS                 .ok_or(BuildError::UnknownTarget(id))?;
-//RS             for source in &target.sources {
-//RS                 if seen.insert(source.as_str().to_string()) {
-//RS                     out.push(source.clone());
-//RS                 }
-//RS             }
-//RS             for dep in &target.deps {
-//RS                 collect(plan, dep.id, visiting, seen, out)?;
-//RS             }
-//RS             visiting.pop();
-//RS             Ok(())
-//RS         }
-//RS         let mut out = Vec::new();
-//RS         let mut seen = BTreeSet::new();
-//RS         if let Some(default) = self.default {
-//RS             collect(self, default.id, &mut Vec::new(), &mut seen, &mut out)?;
-//RS         } else {
-//RS             for target in &self.targets {
-//RS                 collect(self, target.id, &mut Vec::new(), &mut seen, &mut out)?;
-//RS             }
-//RS         }
-//RS         Ok(out)
-//RS     }
-//RS 
-//RS     pub fn selected_probe_ids(&self) -> Result<BTreeSet<ProbeId>, BuildError> {
-//RS         let actions = self.selected_action_ids()?;
-//RS         let mut probes = self
-//RS             .actions
-//RS             .iter()
-//RS             .filter(|action| actions.contains(&action.id))
-//RS             .flat_map(|action| action.probes.iter().map(|probe| probe.id))
-//RS             .collect::<BTreeSet<_>>();
-//RS         let selected_targets = if let Some(default) = self.default {
-//RS             let mut targets = BTreeSet::new();
-//RS             fn visit(plan: &BuildPlan, id: TargetId, out: &mut BTreeSet<TargetId>) {
-//RS                 if out.insert(id) {
-//RS                     if let Some(target) = plan.targets.get(id.0) {
-//RS                         for dep in &target.deps {
-//RS                             visit(plan, dep.id, out);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             visit(self, default.id, &mut targets);
-//RS             targets
-//RS         } else {
-//RS             self.targets.iter().map(|target| target.id).collect()
-//RS         };
-//RS         for target in self
-//RS             .targets
-//RS             .iter()
-//RS             .filter(|target| selected_targets.contains(&target.id))
-//RS         {
-//RS             probes.extend(target.probes.iter().map(|probe| probe.id));
-//RS         }
-//RS         Ok(probes)
-//RS     }
-//RS 
-//RS     pub fn default_host_toolchain(&self) -> &BuildToolchain {
-//RS         &self.toolchains[0]
-//RS     }
-//RS 
-//RS     pub fn target(&self, target: impl Into<TargetRef>) -> Option<&BuildTarget> {
-//RS         let target = target.into();
-//RS         if target.context != self.context {
-//RS             return None;
-//RS         }
-//RS         self.targets.get(target.id.0)
-//RS     }
-//RS 
-//RS     pub fn action(&self, action: ActionHandle) -> Option<&BuildAction> {
-//RS         if action.context != self.context {
-//RS             return None;
-//RS         }
-//RS         self.actions.get(action.id.0)
-//RS     }
-//RS 
-//RS     pub fn action_handle(&self, action: ActionId) -> Option<ActionHandle> {
-//RS         self.actions.get(action.0).map(|_| ActionHandle {
-//RS             id: action,
-//RS             context: self.context,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Add the compiler-owned sealed package layer to an already evaluated
-//RS     /// build plan. The generated actions use the same graph, key, and CAS
-//RS     /// machinery as user actions; only their cache-miss execution is supplied
-//RS     /// by the driver.
-//RS     pub fn add_compiler_package_actions(
-//RS         &mut self,
-//RS         packages: &[CompilerPackageSpec],
-//RS         compiler_identity: impl AsRef<str>,
-//RS         target: impl AsRef<str>,
-//RS         profile: impl AsRef<str>,
-//RS     ) -> Result<Vec<ActionHandle>, BuildError> {
-//RS         if packages.is_empty() {
-//RS             return Ok(Vec::new());
-//RS         }
-//RS         if packages.len() > MAX_ACTIONS.saturating_sub(self.actions.len()) {
-//RS             return Err(BuildError::PackagedPlugin(format!(
-//RS                 "action graph exceeds {MAX_ACTIONS} actions"
-//RS             )));
-//RS         }
-//RS 
-//RS         let target_id = self
-//RS             .default
-//RS             .map(|target| target.id)
-//RS             .or_else(|| self.targets.first().map(|target| target.id))
-//RS             .ok_or(BuildError::UnknownTarget(TargetId(0)))?;
-//RS         if self.targets.get(target_id.0).is_none() {
-//RS             return Err(BuildError::UnknownTarget(target_id));
-//RS         }
-//RS         let toolchain_id = self
-//RS             .toolchains
-//RS             .first()
-//RS             .map(|toolchain| toolchain.id)
-//RS             .ok_or(BuildError::UnknownToolchain(ToolchainId(0)))?;
-//RS 
-//RS         let mut output_by_package = BTreeMap::new();
-//RS         let mut package_by_output = BTreeMap::new();
-//RS         let mut dependencies_by_package = BTreeMap::new();
-//RS         for package in packages {
-//RS             if package.name.trim().is_empty() {
-//RS                 return Err(BuildError::EmptyActionName);
-//RS             }
-//RS             if output_by_package.contains_key(&package.name) {
-//RS                 return Err(BuildError::DuplicateActionName(format!(
-//RS                     "compile-package:{}",
-//RS                     package.name
-//RS                 )));
-//RS             }
-//RS             let output = BuildPath::new(format!(
-//RS                 ".jet/package-artifacts/{}.sealed",
-//RS                 compiler_package_path_name(&package.name)
-//RS             ))?;
-//RS             if let Some(previous) = package_by_output.insert(output.clone(), package.name.clone()) {
-//RS                 return Err(BuildError::DuplicateActionName(format!(
-//RS                     "compile-package:{} (output also belongs to {})",
-//RS                     package.name, previous
-//RS                 )));
-//RS             }
-//RS             output_by_package.insert(package.name.clone(), output);
-//RS             dependencies_by_package.insert(
-//RS                 package.name.clone(),
-//RS                 package
-//RS                     .dependencies
-//RS                     .iter()
-//RS                     .cloned()
-//RS                     .collect::<BTreeSet<_>>(),
-//RS             );
-//RS         }
-//RS 
-//RS         for package in packages {
-//RS             let action_name = format!("compile-package:{}", package.name);
-//RS             if self.actions.iter().any(|action| action.name == action_name) {
-//RS                 return Err(BuildError::DuplicateActionName(action_name));
-//RS             }
-//RS 
-//RS             let output = output_by_package
-//RS                 .get(&package.name)
-//RS                 .cloned()
-//RS                 .ok_or_else(|| BuildError::CompilerPackageDependencyMissing {
-//RS                     package: package.name.clone(),
-//RS                     dependency: package.name.clone(),
-//RS                 })?;
-//RS             if let Some(existing) = self.actions.iter().find(|action| {
-//RS                 action
-//RS                     .outputs
-//RS                     .iter()
-//RS                     .any(|existing_output| existing_output == &output)
-//RS             }) {
-//RS                 return Err(BuildError::DuplicateBuildOutput {
-//RS                     output: output.as_str().to_string(),
-//RS                     first_action: existing.name.clone(),
-//RS                     second_action: action_name,
-//RS                 });
-//RS             }
-//RS             if let Some(module) = self
-//RS                 .generated_modules
-//RS                 .iter()
-//RS                 .find(|module| module.path == output)
-//RS             {
-//RS                 return Err(BuildError::GeneratedModuleCycle {
-//RS                     module: module.name.clone(),
-//RS                     path: output.as_str().to_string(),
-//RS                 });
-//RS             }
-//RS         }
-//RS 
-//RS         for (package, dependencies) in &dependencies_by_package {
-//RS             for dependency in dependencies {
-//RS                 if !output_by_package.contains_key(dependency) {
-//RS                     return Err(BuildError::CompilerPackageDependencyMissing {
-//RS                         package: package.clone(),
-//RS                         dependency: dependency.clone(),
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         let mut remaining = dependencies_by_package
-//RS             .keys()
-//RS             .cloned()
-//RS             .collect::<BTreeSet<_>>();
-//RS         while !remaining.is_empty() {
-//RS             let ready = remaining
-//RS                 .iter()
-//RS                 .filter(|package| {
-//RS                     dependencies_by_package
-//RS                         .get(*package)
-//RS                         .expect("compiler package dependency preflight")
-//RS                         .iter()
-//RS                         .all(|dependency| !remaining.contains(dependency))
-//RS                 })
-//RS                 .cloned()
-//RS                 .collect::<Vec<_>>();
-//RS             if ready.is_empty() {
-//RS                 return Err(BuildError::ActionDependencyCycle(stalled_cycle(
-//RS                     &remaining,
-//RS                     |package: &String| {
-//RS                         dependencies_by_package
-//RS                             .get(package)
-//RS                             .into_iter()
-//RS                             .flatten()
-//RS                             .cloned()
-//RS                             .collect()
-//RS                     },
-//RS                     |package: &String| format!("compile-package:{package}"),
-//RS                 )));
-//RS             }
-//RS             for package in ready {
-//RS                 remaining.remove(&package);
-//RS             }
-//RS         }
-//RS 
-//RS         let compiler_identity = compiler_identity.as_ref().to_string();
-//RS         let target = target.as_ref().to_string();
-//RS         let profile = profile.as_ref().to_string();
-//RS         let mut handles = Vec::with_capacity(packages.len());
-//RS         for package in packages {
-//RS             let action_name = format!("compile-package:{}", package.name);
-//RS             let inputs = dependencies_by_package[&package.name]
-//RS                 .iter()
-//RS                 .map(|dependency| {
-//RS                     output_by_package
-//RS                         .get(dependency)
-//RS                         .cloned()
-//RS                         .expect("compiler package dependency output preflight")
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS             let output = output_by_package
-//RS                 .get(&package.name)
-//RS                 .cloned()
-//RS                 .expect("compiler package output preflight");
-//RS             let id = ActionId(self.actions.len());
-//RS             let mut labels = BTreeMap::new();
-//RS             labels.insert("compiler.owner".to_string(), "jet".to_string());
-//RS             labels.insert("compiler.package".to_string(), package.name.clone());
-//RS             labels.insert(
-//RS                 "compiler.source-digest".to_string(),
-//RS                 package.source_digest.as_str().to_string(),
-//RS             );
-//RS             labels.insert("compiler.identity".to_string(), compiler_identity.clone());
-//RS             labels.insert("compiler.target".to_string(), target.clone());
-//RS             labels.insert("compiler.profile".to_string(), profile.clone());
-//RS             self.actions.push(BuildAction {
-//RS                 id,
-//RS                 name: action_name,
-//RS                 inputs,
-//RS                 outputs: vec![output],
-//RS                 argv: vec!["jet-compiler".to_string(), package.name.clone()],
-//RS                 env: BTreeMap::new(),
-//RS                 env_allowlist: BTreeSet::new(),
-//RS                 caps: BTreeSet::new(),
-//RS                 cache: ActionCache::Cached,
-//RS                 kind: super::actions_policy::ActionKind::Compile,
-//RS                 toolchain: ToolchainHandle {
-//RS                     id: toolchain_id,
-//RS                     context: self.context,
-//RS                 },
-//RS                 probes: Vec::new(),
-//RS                 signing_identity: None,
-//RS                 labels,
-//RS                 helper_versions: BTreeMap::new(),
-//RS                 resource_pools: BTreeSet::new(),
-//RS                 legacy_wrapper: None,
-//RS                 plugin: None,
-//RS                 variant_identity: None,
-//RS                 compiler_owned: true,
-//RS             });
-//RS             let handle = ActionHandle {
-//RS                 id,
-//RS                 context: self.context,
-//RS             };
-//RS             self.targets[target_id.0].actions.push(handle);
-//RS             handles.push(handle);
-//RS         }
-//RS         Ok(handles)
-//RS     }
-//RS 
-//RS     pub fn action_key(&self, action: ActionHandle) -> Result<ActionKey, BuildError> {
-//RS         self.action_key_with_inputs(action, &[])
-//RS     }
-//RS 
-//RS     /// Stable fingerprint over every action key in this plan — the complete
-//RS     /// recipe identity for Hangar `CacheIdentity.recipe_fingerprint` (E4-JP2).
-//RS     pub fn complete_recipe_fingerprint(&self) -> Result<String, BuildError> {
-//RS         let mut keys = Vec::new();
-//RS         for action in &self.actions {
-//RS             let key = self.action_key(ActionHandle {
-//RS                 id: action.id,
-//RS                 context: self.context,
-//RS             })?;
-//RS             keys.push(key.as_str().to_string());
-//RS         }
-//RS         keys.sort();
-//RS         let mut bytes = Vec::new();
-//RS         bytes.extend_from_slice(b"jet.plan-fingerprint.v1\0");
-//RS         for key in keys {
-//RS             bytes.extend_from_slice(key.as_bytes());
-//RS             bytes.push(0);
-//RS         }
-//RS         Ok(format!("plan-sha256:{}", crate::SHA256::sha256_hex(&bytes)))
-//RS     }
-//RS 
-//RS     pub fn action_key_with_inputs(
-//RS         &self,
-//RS         action: ActionHandle,
-//RS         inputs: &[ActionInputSnapshot],
-//RS     ) -> Result<ActionKey, BuildError> {
-//RS         if action.context != self.context {
-//RS             return Err(BuildError::UnknownAction(action.id));
-//RS         }
-//RS         let action = self
-//RS             .actions
-//RS             .get(action.id.0)
-//RS             .ok_or(BuildError::UnknownAction(action.id))?;
-//RS         Ok(canonical_action_key(self, action, inputs))
-//RS     }
-//RS 
-//RS     pub fn effective_action_key(
-//RS         &self,
-//RS         action: ActionHandle,
-//RS         inputs: &[ActionInputSnapshot],
-//RS         grants: &BTreeSet<BuildCapability>,
-//RS         executable: &Path,
-//RS         executable_digest: &ContentDigest,
-//RS         probe_facts: &[BuildProbeFact],
-//RS     ) -> Result<ActionKey, BuildError> {
-//RS         let action_ref = self
-//RS             .action(action)
-//RS             .ok_or(BuildError::UnknownAction(action.id))?;
-//RS         Ok(canonical_effective_action_key(
-//RS             self,
-//RS             action_ref,
-//RS             inputs,
-//RS             grants,
-//RS             executable,
-//RS             executable_digest,
-//RS             probe_facts,
-//RS         ))
-//RS     }
-//RS 
-//RS     pub fn toolchain(&self, toolchain: ToolchainHandle) -> Option<&BuildToolchain> {
-//RS         if toolchain.context != self.context {
-//RS             return None;
-//RS         }
-//RS         self.toolchains.get(toolchain.id.0)
-//RS     }
-//RS 
-//RS     pub fn signing_identity(
-//RS         &self,
-//RS         identity: SigningIdentityHandle,
-//RS     ) -> Option<&BuildSigningIdentity> {
-//RS         if identity.context != self.context {
-//RS             return None;
-//RS         }
-//RS         self.signing_identities.get(identity.id.0)
-//RS     }
-//RS 
-//RS     pub fn probe(&self, probe: ProbeHandle) -> Option<&BuildProbe> {
-//RS         if probe.context != self.context {
-//RS             return None;
-//RS         }
-//RS         self.probes.get(probe.id.0)
-//RS     }
-//RS 
-//RS     pub fn targets_by_kind(&self, kind: TargetKind) -> Vec<&BuildTarget> {
-//RS         self.targets.iter().filter(|t| t.kind == kind).collect()
-//RS     }
-//RS 
-//RS     pub fn phony_actions(&self) -> Vec<&BuildAction> {
-//RS         self.actions
-//RS             .iter()
-//RS             .filter(|a| a.cache == ActionCache::UncachedPhony)
-//RS             .collect()
-//RS     }
-//RS 
-//RS     pub fn resource_pools(&self) -> Vec<BuildResourcePoolSpec> {
-//RS         let mut pools = default_resource_pools();
-//RS         let mut custom_pools = Vec::new();
-//RS         for action in &self.actions {
-//RS             for pool in action_pools(action) {
-//RS                 if !pools.iter().any(|spec| spec.pool.as_str() == pool.as_str()) {
-//RS                     // Named pools are deliberately conservative: absent an
-//RS                     // explicit capacity declaration, one action owns the
-//RS                     // pool. This preserves deterministic serialization and
-//RS                     // prevents a custom pool from becoming an unbounded
-//RS                     // host escape.
-//RS                     custom_pools.push(BuildResourcePoolSpec::new(pool, 1));
-//RS                 }
-//RS             }
-//RS         }
-//RS         custom_pools.sort_by(|left, right| left.pool.as_str().cmp(right.pool.as_str()));
-//RS         pools.extend(custom_pools);
-//RS         pools
-//RS     }
-//RS 
-//RS     pub fn graph(&self) -> BuildGraph {
-//RS         let action_targets = self.action_targets();
-//RS         let file_index = self.file_index(&action_targets);
-//RS         BuildGraph {
-//RS             targets: self
-//RS                 .targets
-//RS                 .iter()
-//RS                 .map(|target| BuildGraphTarget {
-//RS                     id: target.id,
-//RS                     name: target.name.clone(),
-//RS                     kind: target.kind,
-//RS                     deps: target.deps.iter().map(|dep| dep.id).collect(),
-//RS                     actions: target.actions.iter().map(|action| action.id).collect(),
-//RS                     files: target
-//RS                         .sources
-//RS                         .iter()
-//RS                         .chain(target.inputs.iter())
-//RS                         .chain(target.outputs.iter())
-//RS                         .map(|path| path.as_str().to_string())
-//RS                         .collect(),
-//RS                     plugin: target.plugin.map(|plugin| plugin.id),
-//RS                 })
-//RS                 .collect(),
-//RS             actions: self
-//RS                 .actions
-//RS                 .iter()
-//RS                 .map(|action| BuildGraphAction {
-//RS                     id: action.id,
-//RS                     name: action.name.clone(),
-//RS                     kind: action.kind,
-//RS                     inputs: action
-//RS                         .inputs
-//RS                         .iter()
-//RS                         .map(|path| path.as_str().to_string())
-//RS                         .collect(),
-//RS                     outputs: action
-//RS                         .outputs
-//RS                         .iter()
-//RS                         .map(|path| path.as_str().to_string())
-//RS                         .collect(),
-//RS                     target: action_targets.get(&action.id).copied(),
-//RS                     caps: action.caps.iter().cloned().collect(),
-//RS                     pools: action_pools(action),
-//RS                     legacy_wrapper: action.legacy_wrapper,
-//RS                     plugin: action.plugin.map(|plugin| plugin.id),
-//RS                     compiler_owned: action.compiler_owned,
-//RS                     key: canonical_action_key(self, action, &[]),
-//RS                     cache_hit: None,
-//RS                 })
-//RS                 .collect(),
-//RS             files: file_index
-//RS                 .into_iter()
-//RS                 .map(|(path, ownership)| BuildGraphFile {
-//RS                     path,
-//RS                     owner: ownership.owner,
-//RS                     consumers: ownership.consumers,
-//RS                     targets: ownership.targets,
-//RS                 })
-//RS                 .collect(),
-//RS             nodes: self.compiler_nodes.clone(),
-//RS         }
-//RS     }
-//RS     /// Add execution receipt facts to the canonical graph projection. A plan
-//RS     /// without a report stays static, preserving `None` for unknown cache
-//RS     /// status instead of inventing a miss.
-//RS     pub fn graph_with_execution(
-//RS         &self,
-//RS         execution: Option<&BuildExecutionReport>,
-//RS     ) -> BuildGraph {
-//RS         let mut graph = self.graph();
-//RS         let Some(execution) = execution else {
-//RS             return graph;
-//RS         };
-//RS         let statuses = execution
-//RS             .events
-//RS             .iter()
-//RS             .filter_map(|event| match event {
-//RS                 BuildExecutionEvent::Finished { action, outcome } => Some((
-//RS                     *action,
-//RS                     matches!(outcome, ActionOutcome::RestoredFromCache),
-//RS                 )),
-//RS                 _ => None,
-//RS             })
-//RS             .collect::<BTreeMap<_, _>>();
-//RS         for action in &mut graph.actions {
-//RS             action.cache_hit = statuses.get(&action.id).copied();
-//RS         }
-//RS         graph
-//RS     }
-//RS 
-//RS     pub fn file_ownership(&self, path: impl AsRef<str>) -> FileOwnership {
-//RS         let path = path.as_ref().to_string();
-//RS         self.file_index(&self.action_targets())
-//RS             .remove(&path)
-//RS             .unwrap_or(FileOwnership {
-//RS                 path,
-//RS                 owner: None,
-//RS                 consumers: Vec::new(),
-//RS                 targets: Vec::new(),
-//RS             })
-//RS     }
-//RS 
-//RS     pub fn explain_target(&self, target: impl Into<TargetRef>) -> Option<BuildExplanation> {
-//RS         let target = self.target(target)?;
-//RS         Some(BuildExplanation {
-//RS             subject: BuildGraphSubject::Target(target.id),
-//RS             label: target.name.clone(),
-//RS             provenance: vec![
-//RS                 format!("kind={:?}", target.kind),
-//RS                 format!("sources={}", target.sources.len()),
-//RS                 format!("deps={}", target.deps.len()),
-//RS                 format!("actions={}", target.actions.len()),
-//RS             ],
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn explain_target_named(&self, name: &str) -> Option<BuildExplanation> {
-//RS         let target = self.targets.iter().find(|target| target.name == name)?;
-//RS         self.explain_target(TargetRef {
-//RS             id: target.id,
-//RS             context: self.context,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn explain_action(&self, action: ActionHandle) -> Option<BuildExplanation> {
-//RS         let action = self.action(action)?;
-//RS         let mut provenance = vec![
-//RS             format!("argv={}", action.argv.join(" ")),
-//RS             format!("inputs={}", action.inputs.len()),
-//RS             format!("outputs={}", action.outputs.len()),
-//RS             format!("cache={:?}", action.cache),
-//RS         ];
-//RS         if let Some(wrapper) = action.legacy_wrapper {
-//RS             provenance.push(format!("legacy={}", wrapper.as_str()));
-//RS         }
-//RS         if let Some(plugin) = action.plugin {
-//RS             provenance.push(format!("plugin={}", self.plugins[plugin.id.0].name));
-//RS         }
-//RS         Some(BuildExplanation {
-//RS             subject: BuildGraphSubject::Action(action.id),
-//RS             label: action.name.clone(),
-//RS             provenance,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn explain_action_named(&self, name: &str) -> Option<BuildExplanation> {
-//RS         let action = self.actions.iter().find(|action| action.name == name)?;
-//RS         self.explain_action(ActionHandle {
-//RS             id: action.id,
-//RS             context: self.context,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn explain_file(&self, path: impl AsRef<str>) -> BuildExplanation {
-//RS         let ownership = self.file_ownership(path.as_ref());
-//RS         let mut provenance = vec![
-//RS             format!("owner={:?}", ownership.owner),
-//RS             format!("consumers={:?}", ownership.consumers),
-//RS             format!("targets={:?}", ownership.targets),
-//RS         ];
-//RS         if let Some(module) = self
-//RS             .generated_modules
-//RS             .iter()
-//RS             .find(|module| module.path.as_str() == ownership.path)
-//RS         {
-//RS             provenance.push(format!("generated={}", module.name));
-//RS             provenance.push(format!("digest={}", module.source_digest.as_str()));
-//RS         }
-//RS         BuildExplanation {
-//RS             subject: BuildGraphSubject::File,
-//RS             label: ownership.path,
-//RS             provenance,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn why_rebuilt(
-//RS         &self,
-//RS         action: ActionHandle,
-//RS         status: ActionCacheStatus,
-//RS     ) -> Result<RebuildExplanation, BuildError> {
-//RS         if action.context != self.context {
-//RS             return Err(BuildError::UnknownAction(action.id));
-//RS         }
-//RS         let action_ref = self
-//RS             .actions
-//RS             .get(action.id.0)
-//RS             .ok_or(BuildError::UnknownAction(action.id))?;
-//RS         Ok(RebuildExplanation {
-//RS             action: action.id,
-//RS             action_name: action_ref.name.clone(),
-//RS             status,
-//RS             reason: cache_status_reason(status).to_string(),
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn execution_model(&self) -> Result<BuildExecutionModel, BuildError> {
-//RS         let selected = self.selected_action_ids()?;
-//RS         let prereqs = self.action_prereqs_for(&selected)?;
-//RS         let stages = execution_stages(self, &prereqs)?;
-//RS         let action_targets = self.action_targets();
-//RS         let nodes = self
-//RS             .actions
-//RS             .iter()
-//RS             .filter(|action| selected.contains(&action.id))
-//RS             .map(|action| BuildExecutionNode {
-//RS                 action: action.id,
-//RS                 name: action.name.clone(),
-//RS                 target: action_targets.get(&action.id).copied(),
-//RS                 prerequisites: prereqs.get(&action.id).cloned().unwrap_or_default(),
-//RS                 pools: action_pools(action),
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let events = stages
-//RS             .iter()
-//RS             .flat_map(|stage| {
-//RS                 stage
-//RS                     .actions
-//RS                     .iter()
-//RS                     .map(move |action| BuildExecutionEvent::Ready {
-//RS                         action: *action,
-//RS                         stage: stage.index,
-//RS                     })
-//RS             })
-//RS             .collect();
-//RS         let selected_actions = self
-//RS             .actions
-//RS             .iter()
-//RS             .filter(|action| selected.contains(&action.id))
-//RS             .cloned()
-//RS             .collect::<Vec<_>>();
-//RS         let metrics = execution_metrics(&selected_actions, &stages);
-//RS         Ok(BuildExecutionModel {
-//RS             pools: self.resource_pools(),
-//RS             nodes,
-//RS             stages,
-//RS             events,
-//RS             console_order: self
-//RS                 .actions
-//RS                 .iter()
-//RS                 .filter(|action| selected.contains(&action.id))
-//RS                 .map(|action| action.id)
-//RS                 .collect(),
-//RS             metrics,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn execution_report(
-//RS         &self,
-//RS         outcomes: &[(ActionHandle, ActionOutcome)],
-//RS     ) -> Result<BuildExecutionReport, BuildError> {
-//RS         let selected = self.selected_action_ids()?;
-//RS         let prereqs = self.action_prereqs_for(&selected)?;
-//RS         let stages = execution_stages(self, &prereqs)?;
-//RS         let mut supplied = BTreeMap::new();
-//RS         for (action, outcome) in outcomes {
-//RS             if action.context != self.context || action.id.0 >= self.actions.len() {
-//RS                 return Err(BuildError::UnknownAction(action.id));
-//RS             }
-//RS             supplied.insert(action.id, *outcome);
-//RS         }
-//RS 
-//RS         let mut failed = BTreeSet::new();
-//RS         let mut finished = BTreeSet::new();
-//RS         let mut events = Vec::new();
-//RS         let selected_actions = self
-//RS             .actions
-//RS             .iter()
-//RS             .filter(|action| selected.contains(&action.id))
-//RS             .cloned()
-//RS             .collect::<Vec<_>>();
-//RS         let mut metrics = execution_metrics(&selected_actions, &stages);
-//RS         for stage in &stages {
-//RS             for action in &stage.actions {
-//RS                 if let Some(failed_prereq) = prereqs
-//RS                     .get(action)
-//RS                     .into_iter()
-//RS                     .flat_map(|deps| deps.iter())
-//RS                     .find(|dep| failed.contains(*dep))
-//RS                 {
-//RS                     failed.insert(*action);
-//RS                     metrics.cancelled_actions += 1;
-//RS                     events.push(BuildExecutionEvent::Cancelled {
-//RS                         action: *action,
-//RS                         failed_prereq: *failed_prereq,
-//RS                     });
-//RS                     continue;
-//RS                 }
-//RS                 match supplied.get(action) {
-//RS                     Some(outcome) => {
-//RS                         finished.insert(*action);
-//RS                         if matches!(outcome, ActionOutcome::Failed { .. }) {
-//RS                             failed.insert(*action);
-//RS                             metrics.failed_actions += 1;
-//RS                         }
-//RS                         if matches!(outcome, ActionOutcome::RestoredFromCache) {
-//RS                             metrics.cache_restored_actions += 1;
-//RS                         }
-//RS                         events.push(BuildExecutionEvent::Finished {
-//RS                             action: *action,
-//RS                             outcome: *outcome,
-//RS                         });
-//RS                     }
-//RS                     None => {
-//RS                         metrics.pending_actions += 1;
-//RS                         events.push(BuildExecutionEvent::Pending { action: *action });
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(BuildExecutionReport { events, metrics })
-//RS     }
-//RS 
-//RS     pub(super) fn action_targets(&self) -> BTreeMap<ActionId, TargetId> {
-//RS         let mut out = BTreeMap::new();
-//RS         for target in &self.targets {
-//RS             for action in &target.actions {
-//RS                 out.entry(action.id).or_insert(target.id);
-//RS             }
-//RS         }
-//RS         out
-//RS     }
-//RS 
-//RS     fn file_index(
-//RS         &self,
-//RS         action_targets: &BTreeMap<ActionId, TargetId>,
-//RS     ) -> BTreeMap<String, FileOwnership> {
-//RS         let mut files = BTreeMap::<String, FileOwnership>::new();
-//RS         for action in &self.actions {
-//RS             for output in &action.outputs {
-//RS                 let entry = files
-//RS                     .entry(output.as_str().to_string())
-//RS                     .or_insert(FileOwnership {
-//RS                         path: output.as_str().to_string(),
-//RS                         owner: None,
-//RS                         consumers: Vec::new(),
-//RS                         targets: Vec::new(),
-//RS                     });
-//RS                 entry.owner = Some(action.id);
-//RS             }
-//RS             for input in &action.inputs {
-//RS                 let entry = files
-//RS                     .entry(input.as_str().to_string())
-//RS                     .or_insert(FileOwnership {
-//RS                         path: input.as_str().to_string(),
-//RS                         owner: None,
-//RS                         consumers: Vec::new(),
-//RS                         targets: Vec::new(),
-//RS                     });
-//RS                 entry.consumers.push(action.id);
-//RS             }
-//RS         }
-//RS         for target in &self.targets {
-//RS             for path in target
-//RS                 .sources
-//RS                 .iter()
-//RS                 .chain(target.inputs.iter())
-//RS                 .chain(target.outputs.iter())
-//RS             {
-//RS                 let entry = files
-//RS                     .entry(path.as_str().to_string())
-//RS                     .or_insert(FileOwnership {
-//RS                         path: path.as_str().to_string(),
-//RS                         owner: None,
-//RS                         consumers: Vec::new(),
-//RS                         targets: Vec::new(),
-//RS                     });
-//RS                 entry.targets.push(target.id);
-//RS             }
-//RS             for action in &target.actions {
-//RS                 if let Some(target_id) = action_targets.get(&action.id) {
-//RS                     for path in self.actions[action.id.0]
-//RS                         .inputs
-//RS                         .iter()
-//RS                         .chain(self.actions[action.id.0].outputs.iter())
-//RS                     {
-//RS                         let entry =
-//RS                             files
-//RS                                 .entry(path.as_str().to_string())
-//RS                                 .or_insert(FileOwnership {
-//RS                                     path: path.as_str().to_string(),
-//RS                                     owner: None,
-//RS                                     consumers: Vec::new(),
-//RS                                     targets: Vec::new(),
-//RS                                 });
-//RS                         if !entry.targets.contains(target_id) {
-//RS                             entry.targets.push(*target_id);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         files
-//RS     }
-//RS 
-//RS     fn action_prereqs(&self) -> Result<BTreeMap<ActionId, Vec<ActionId>>, BuildError> {
-//RS         let mut out = self
-//RS             .actions
-//RS             .iter()
-//RS             .map(|action| (action.id, BTreeSet::<ActionId>::new()))
-//RS             .collect::<BTreeMap<_, _>>();
-//RS         for target in &self.targets {
-//RS             let mut deps = BTreeSet::new();
-//RS             for dep in &target.deps {
-//RS                 collect_target_actions(self, dep.id, &mut Vec::new(), &mut deps)?;
-//RS             }
-//RS             for action in &target.actions {
-//RS                 out.entry(action.id)
-//RS                     .or_default()
-//RS                     .extend(deps.iter().copied());
-//RS             }
-//RS         }
-//RS         let action_targets = self.action_targets();
-//RS         for ownership in self.file_index(&action_targets).values() {
-//RS             let Some(owner) = ownership.owner else {
-//RS                 continue;
-//RS             };
-//RS             for consumer in &ownership.consumers {
-//RS                 if *consumer != owner {
-//RS                     out.entry(*consumer).or_default().insert(owner);
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(out
-//RS             .into_iter()
-//RS             .map(|(action, deps)| (action, deps.into_iter().collect()))
-//RS             .collect())
-//RS     }
-//RS 
-//RS     fn action_prereqs_for(
-//RS         &self,
-//RS         selected: &BTreeSet<ActionId>,
-//RS     ) -> Result<BTreeMap<ActionId, Vec<ActionId>>, BuildError> {
-//RS         Ok(self
-//RS             .action_prereqs()?
-//RS             .into_iter()
-//RS             .filter(|(action, _)| selected.contains(action))
-//RS             .map(|(action, deps)| {
-//RS                 (
-//RS                     action,
-//RS                     deps.into_iter()
-//RS                         .filter(|dep| selected.contains(dep))
-//RS                         .collect(),
-//RS                 )
-//RS             })
-//RS             .collect())
-//RS     }
-//RS     /// Return the deterministic provider facts attached to this build plan.
-//RS     /// The provider owns serialization; comptime only exposes the facts.
-//RS     pub fn provider_plan_facts(&self) -> Result<BTreeMap<String, String>, String> {
-//RS         let mut facts = BTreeMap::new();
-//RS         facts.insert(
-//RS             "plan.recipe_fingerprint".to_string(),
-//RS             self.complete_recipe_fingerprint()
-//RS                 .map_err(|error| format!("cannot fingerprint build plan: {error:?}"))?,
-//RS         );
-//RS         facts.insert(
-//RS             "plan.default".to_string(),
-//RS             self.default_target()
-//RS                 .map(|target| target.id().0.to_string())
-//RS                 .unwrap_or_default(),
-//RS         );
-//RS         facts.insert("plan.targets".to_string(), self.targets().len().to_string());
-//RS         facts.insert("plan.actions".to_string(), self.actions().len().to_string());
-//RS         for (index, contribution) in self.fact_contributions().iter().enumerate() {
-//RS             let prefix = format!("fact_contribution.{index}");
-//RS             facts.insert(format!("{prefix}.key"), contribution.key.clone());
-//RS             facts.insert(
-//RS                 format!("{prefix}.value"),
-//RS                 format!("{:?}", contribution.value),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.scope"),
-//RS                 contribution.scope.name().to_string(),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.layer"),
-//RS                 contribution.layer.name().to_string(),
-//RS             );
-//RS             facts.insert(format!("{prefix}.source"), contribution.source.clone());
-//RS             facts.insert(
-//RS                 format!("{prefix}.reason"),
-//RS                 contribution.reason.clone().unwrap_or_default(),
-//RS             );
-//RS         }
-//RS         for (index, target) in self.targets().iter().enumerate() {
-//RS             let prefix = format!("target.{index}");
-//RS             facts.insert(format!("{prefix}.name"), target.name.clone());
-//RS             facts.insert(format!("{prefix}.kind"), format!("{:?}", target.kind));
-//RS             facts.insert(
-//RS                 format!("{prefix}.sources"),
-//RS                 target
-//RS                     .sources
-//RS                     .iter()
-//RS                     .map(|path| path.as_str())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join("\0"),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.inputs"),
-//RS                 target
-//RS                     .inputs
-//RS                     .iter()
-//RS                     .map(|path| path.as_str())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join("\0"),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.outputs"),
-//RS                 target
-//RS                     .outputs
-//RS                     .iter()
-//RS                     .map(|path| path.as_str())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join("\0"),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.deps"),
-//RS                 target
-//RS                     .deps
-//RS                     .iter()
-//RS                     .map(|dep| dep.id().0.to_string())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(","),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.actions"),
-//RS                 target
-//RS                     .actions
-//RS                     .iter()
-//RS                     .map(|action| action.id().0.to_string())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(","),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.toolchain"),
-//RS                 target.toolchain.id().0.to_string(),
-//RS             );
-//RS             facts.insert(format!("{prefix}.metadata"), map_debug(&target.metadata));
-//RS         }
-//RS         for (index, action) in self.actions().iter().enumerate() {
-//RS             let prefix = format!("action.{index}");
-//RS             facts.insert(format!("{prefix}.name"), action.name.clone());
-//RS             facts.insert(format!("{prefix}.kind"), action.kind.as_str().to_string());
-//RS             facts.insert(format!("{prefix}.cache"), format!("{:?}", action.cache));
-//RS             facts.insert(format!("{prefix}.argv"), action.argv.join("\0"));
-//RS             facts.insert(
-//RS                 format!("{prefix}.inputs"),
-//RS                 action
-//RS                     .inputs
-//RS                     .iter()
-//RS                     .map(|path| path.as_str())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join("\0"),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.outputs"),
-//RS                 action
-//RS                     .outputs
-//RS                     .iter()
-//RS                     .map(|path| path.as_str())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join("\0"),
-//RS             );
-//RS             facts.insert(format!("{prefix}.env"), map_debug(&action.env));
-//RS             facts.insert(
-//RS                 format!("{prefix}.env_allowlist"),
-//RS                 action
-//RS                     .env_allowlist
-//RS                     .iter()
-//RS                     .cloned()
-//RS                     .collect::<Vec<_>>()
-//RS                     .join("\0"),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.caps"),
-//RS                 action
-//RS                     .caps
-//RS                     .iter()
-//RS                     .map(|cap| cap.name().to_string())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join("\0"),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.toolchain"),
-//RS                 action.toolchain.id().0.to_string(),
-//RS             );
-//RS             facts.insert(format!("{prefix}.labels"), map_debug(&action.labels));
-//RS             facts.insert(
-//RS                 format!("{prefix}.helpers"),
-//RS                 map_debug(&action.helper_versions),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.pools"),
-//RS                 action
-//RS                     .resource_pools
-//RS                     .iter()
-//RS                     .map(pool_name)
-//RS                     .collect::<Vec<_>>()
-//RS                     .join("\0"),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.variant"),
-//RS                 action.variant_identity.clone().unwrap_or_default(),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.legacy"),
-//RS                 action
-//RS                     .legacy_wrapper
-//RS                     .map(|wrapper| wrapper.as_str().to_string())
-//RS                     .unwrap_or_default(),
-//RS             );
-//RS             facts.insert(
-//RS                 format!("{prefix}.action_key"),
-//RS                 self.action_key(super::ActionHandle {
-//RS                     id: action.id,
-//RS                     context: self.context,
-//RS                 })
-//RS                 .map_err(|error| format!("cannot key provider plan action: {error:?}"))?
-//RS                 .as_str()
-//RS                 .to_string(),
-//RS             );
-//RS         }
-//RS         for (index, toolchain) in self.toolchains().iter().enumerate() {
-//RS             facts.insert(format!("toolchain.{index}"), format!("{toolchain:?}"));
-//RS         }
-//RS         for (index, identity) in self.signing_identities().iter().enumerate() {
-//RS             facts.insert(format!("signing.{index}"), format!("{identity:?}"));
-//RS         }
-//RS         for (index, probe) in self.probes().iter().enumerate() {
-//RS             facts.insert(format!("probe.{index}"), format!("{probe:?}"));
-//RS         }
-//RS         for (index, plugin) in self.plugins().iter().enumerate() {
-//RS             facts.insert(format!("plugin.{index}"), format!("{plugin:?}"));
-//RS         }
-//RS         for (index, module) in self.generated_modules().iter().enumerate() {
-//RS             facts.insert(format!("generated.{index}"), format!("{module:?}"));
-//RS         }
-//RS         Ok(facts)
-//RS     }
-//RS }
-//RS 
-//RS impl BuildGraph {
-//RS     /// Files declared by the checked graph, in canonical path order.
-//RS     ///
-//RS     /// This is the static file universe, not the rebuild-impact closure in
-//RS     /// [`BuildGraphDiff::affected_files`].
-//RS     pub fn affected_files(&self) -> &[BuildGraphFile] {
-//RS         &self.files
-//RS     }
-//RS 
-//RS     /// Recipe keys for all actions, ordered by stable action name.
-//RS     pub fn action_keys(&self) -> Vec<BuildGraphActionKey> {
-//RS         let mut keys = self
-//RS             .actions
-//RS             .iter()
-//RS             .map(|action| BuildGraphActionKey {
-//RS                 action: action.name.clone(),
-//RS                 key: action.key.clone(),
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         keys.sort_by(|left, right| left.action.cmp(&right.action));
-//RS         keys
-//RS     }
-//RS 
-//RS     /// Return only actions with positive cache evidence.
-//RS     ///
-//RS     /// A static BuildPlan has no execution receipt, so its `cache_hit` values
-//RS     /// are `None`; unknown is intentionally not treated as a miss.
-//RS     pub fn cache_hits(&self) -> Vec<&BuildGraphAction> {
-//RS         let mut hits = self
-//RS             .actions
-//RS             .iter()
-//RS             .filter(|action| action.cache_hit == Some(true))
-//RS             .collect::<Vec<_>>();
-//RS         hits.sort_by(|left, right| left.name.cmp(&right.name));
-//RS         hits
-//RS     }
-//RS 
-//RS     /// Compare two checked graph projections without re-reading source files
-//RS     /// or reconstructing commands. `self` is the before graph and `after` is
-//RS     /// the graph being compared.
-//RS     pub fn diff(&self, after: &BuildGraph) -> BuildGraphDiff {
-//RS         let mut paths = BTreeSet::new();
-//RS         paths.extend(self.files.iter().map(|file| file.path.clone()));
-//RS         paths.extend(after.files.iter().map(|file| file.path.clone()));
-//RS 
-//RS         let file_deltas = paths
-//RS             .into_iter()
-//RS             .filter_map(|path| {
-//RS                 let before_file = self.files.iter().find(|file| file.path == path);
-//RS                 let after_file = after.files.iter().find(|file| file.path == path);
-//RS                 (file_identity(self, before_file) != file_identity(after, after_file)).then(|| {
-//RS                     BuildGraphFileDelta {
-//RS                         path,
-//RS                         before: before_file.cloned(),
-//RS                         after: after_file.cloned(),
-//RS                     }
-//RS                 })
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS 
-//RS         let mut action_names = BTreeSet::new();
-//RS         action_names.extend(self.actions.iter().map(|action| action.name.clone()));
-//RS         action_names.extend(after.actions.iter().map(|action| action.name.clone()));
-//RS 
-//RS         let mut changed_actions = BTreeSet::new();
-//RS         let mut key_deltas = Vec::new();
-//RS         let mut cache_deltas = Vec::new();
-//RS         for action_name in action_names {
-//RS             let before = self
-//RS                 .actions
-//RS                 .iter()
-//RS                 .find(|action| action.name == action_name);
-//RS             let after_action = after
-//RS                 .actions
-//RS                 .iter()
-//RS                 .find(|action| action.name == action_name);
-//RS             let action_changed = match (before, after_action) {
-//RS                 (Some(before), Some(after)) => {
-//RS                     before.key != after.key || before.inputs != after.inputs
-//RS                 }
-//RS                 _ => true,
-//RS             };
-//RS             if action_changed {
-//RS                 changed_actions.insert(action_name.clone());
-//RS             }
-//RS 
-//RS             let before_key = before.map(|action| action.key.clone());
-//RS             let after_key = after_action.map(|action| action.key.clone());
-//RS             if before_key != after_key {
-//RS                 key_deltas.push(BuildGraphKeyDelta {
-//RS                     action: action_name.clone(),
-//RS                     before: before_key,
-//RS                     after: after_key,
-//RS                 });
-//RS             }
-//RS             let before_hit = before.and_then(|action| action.cache_hit);
-//RS             let after_hit = after_action.and_then(|action| action.cache_hit);
-//RS             if before_hit != after_hit {
-//RS                 cache_deltas.push(BuildGraphCacheDelta {
-//RS                     action: action_name,
-//RS                     before: before_hit,
-//RS                     after: after_hit,
-//RS                 });
-//RS             }
-//RS         }
-//RS 
-//RS         let mut affected_files = graph_affected_files(self, &changed_actions);
-//RS         affected_files.extend(graph_affected_files(after, &changed_actions));
-//RS 
-//RS         BuildGraphDiff {
-//RS             file_deltas,
-//RS             affected_files: affected_files.into_iter().collect(),
-//RS             key_deltas,
-//RS             cache_deltas,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn graph_affected_files(
-//RS     graph: &BuildGraph,
-//RS     changed_actions: &BTreeSet<String>,
-//RS ) -> BTreeSet<String> {
-//RS     let mut pending_actions = graph
-//RS         .actions
-//RS         .iter()
-//RS         .filter(|action| changed_actions.contains(&action.name))
-//RS         .map(|action| action.id)
-//RS         .collect::<Vec<_>>();
-//RS     let mut pending_targets = Vec::new();
-//RS     let mut seen_actions = BTreeSet::new();
-//RS     let mut seen_targets = BTreeSet::new();
-//RS     let mut affected = BTreeSet::new();
-//RS 
-//RS     while !pending_actions.is_empty() || !pending_targets.is_empty() {
-//RS         while let Some(action_id) = pending_actions.pop() {
-//RS             if !seen_actions.insert(action_id) {
-//RS                 continue;
-//RS             }
-//RS             let Some(action) = graph
-//RS                 .actions
-//RS                 .iter()
-//RS                 .find(|action| action.id == action_id)
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             for output in &action.outputs {
-//RS                 affected.insert(output.clone());
-//RS                 if let Some(file) = graph.files.iter().find(|file| file.path == *output) {
-//RS                     pending_actions.extend(file.consumers.iter().copied());
-//RS                 }
-//RS             }
-//RS             let target_ids = graph
-//RS                 .targets
-//RS                 .iter()
-//RS                 .filter(|target| target.actions.contains(&action_id))
-//RS                 .map(|target| target.id);
-//RS             pending_targets.extend(target_ids);
-//RS         }
-//RS 
-//RS         while let Some(target_id) = pending_targets.pop() {
-//RS             if !seen_targets.insert(target_id) {
-//RS                 continue;
-//RS             }
-//RS             for target in graph
-//RS                 .targets
-//RS                 .iter()
-//RS                 .filter(|target| target.deps.contains(&target_id))
-//RS             {
-//RS                 pending_actions.extend(target.actions.iter().copied());
-//RS                 pending_targets.push(target.id);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     affected
-//RS }
-//RS 
-//RS 
-//RS fn file_identity(
-//RS     graph: &BuildGraph,
-//RS     file: Option<&BuildGraphFile>,
-//RS ) -> Option<(Option<String>, Vec<String>, Vec<String>)> {
-//RS     let file = file?;
-//RS     let action_name = |id| {
-//RS         graph
-//RS             .actions
-//RS             .iter()
-//RS             .find(|action| action.id == id)
-//RS             .map(|action| action.name.clone())
-//RS     };
-//RS     let target_name = |id| {
-//RS         graph
-//RS             .targets
-//RS             .iter()
-//RS             .find(|target| target.id == id)
-//RS             .map(|target| target.name.clone())
-//RS     };
-//RS     let mut consumers = file
-//RS         .consumers
-//RS         .iter()
-//RS         .filter_map(|id| action_name(*id))
-//RS         .collect::<Vec<_>>();
-//RS     let mut targets = file
-//RS         .targets
-//RS         .iter()
-//RS         .filter_map(|id| target_name(*id))
-//RS         .collect::<Vec<_>>();
-//RS     consumers.sort();
-//RS     consumers.dedup();
-//RS     targets.sort();
-//RS     targets.dedup();
-//RS     Some((
-//RS         file.owner.and_then(action_name),
-//RS         consumers,
-//RS         targets,
-//RS     ))
-//RS }
-//RS 
-//RS fn map_debug(map: &BTreeMap<String, String>) -> String {
-//RS     map.iter()
-//RS         .map(|(key, value)| format!("{}:{}:{}:{}", key.len(), key, value.len(), value))
-//RS         .collect::<Vec<_>>()
-//RS         .join("")
-//RS }
-//RS 
-//RS fn pool_name(pool: &BuildResourcePool) -> String {
-//RS     match pool {
-//RS         BuildResourcePool::Custom(name) => format!("custom:{name}"),
-//RS         _ => pool.as_str().to_string(),
-//RS     }
-//RS }
-//RS 
-//RS fn compiler_package_path_name(name: &str) -> String {
-//RS     let mut out = name
-//RS         .chars()
-//RS         .map(|character| {
-//RS             if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
-//RS                 character
-//RS             } else {
-//RS                 '_'
-//RS             }
-//RS         })
-//RS         .collect::<String>();
-//RS     if out.is_empty() {
-//RS         out.push_str("package");
-//RS     }
-//RS     out
-//RS }
-// END-PORT-PENDING 0566 crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1-1453
+use jet_comptime.Comptime.Build.ActionsPolicy.[ActionCache, ActionKind, BuildAction, BuildCapability, BuildResourcePool, BuildResourcePoolSpec]
+use jet_comptime.Comptime.Build.CacheCas.[ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ContentDigest]
+use jet_comptime.Comptime.Build.ErrorsKeys.[canonical_action_key, canonical_effective_action_key, stalled_cycle, target_cycle_error, BuildError]
+use jet_comptime.Comptime.Build.ExecutionHelpers.[action_pools, cache_status_reason, collect_target_actions, default_resource_pools, execution_metrics, execution_stages]
+use jet_comptime.Comptime.Build.ExecutionRuntime.BuildProbeFact
+use jet_comptime.Comptime.Build.Handles.[ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, TargetId, TargetRef, ToolchainHandle, ToolchainId]
+use jet_comptime.Comptime.Build.PlanGraph.[BuildExecutionEvent, BuildExecutionModel, BuildExecutionNode, BuildExecutionReport, BuildExplanation, BuildGraph, BuildGraphAction, BuildGraphActionKey, BuildGraphCacheDelta, BuildGraphDiff, BuildGraphFile, BuildGraphFileDelta, BuildGraphKeyDelta, BuildGraphSubject, BuildGraphTarget, BuildPlan, CompilerPackageSpec, FileOwnership, RebuildExplanation, MAX_ACTIONS]
+use jet_comptime.Comptime.Build.PluginsModules.[BuildGeneratedModule, BuildPlugin]
+use jet_comptime.Comptime.Build.ProvenanceToolchains.[BuildProbe, BuildSigningIdentity, BuildToolchain]
+use jet_comptime.Comptime.Build.Targets.[BuildPath, BuildTarget, TargetKind]
+use jet_comptime.SHA256
+use jet_foundation.TEXT_NUL
+use std.collections.BTreeSet
+use core.sys.OSPath
 
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:33
+// GATE #4499: composite action/target/path keys retain canonical equality and ordering.
+impl BuildPlan {
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:34
+    pub fn default_target(self: &BuildPlan) -> TargetRef? { self.default }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:38
+    pub fn targets(self: &BuildPlan) -> &[BuildTarget] { &self.targets }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:42
+    pub fn actions(self: &BuildPlan) -> &[BuildAction] { &self.actions }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:46
+    pub fn toolchains(self: &BuildPlan) -> &[BuildToolchain] { &self.toolchains }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:50
+    pub fn signing_identities(self: &BuildPlan) -> &[BuildSigningIdentity] { &self.signing_identities }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:54
+    pub fn probes(self: &BuildPlan) -> &[BuildProbe] { &self.probes }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:58
+    pub fn plugins(self: &BuildPlan) -> &[BuildPlugin] { &self.plugins }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:62
+    pub fn generated_modules(self: &BuildPlan) -> &[BuildGeneratedModule] { &self.generated_modules }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:70
+    pub fn selected_generated_modules(self: &BuildPlan) -> [&BuildGeneratedModule] BuildError! {
+        if self.targets.is_empty() {
+            selected := self.generated_modules.iter().collect::<[&BuildGeneratedModule]>()
+            selected.sort_by(fn(left, right) { left.path.as_str().cmp(right.path.as_str()).then_with(fn() { left.name.cmp(&right.name) }) })
+            return selected
+        }
+        paths := self.selected_sources()?.into_iter().map(fn(path) { path.as_str().to_string() }).collect::<BTreeSet<String>>()
+        actions := self.selected_action_ids()?
+        for action in self.actions.iter().filter(fn(action) { actions.contains(&action.id) }) {
+            paths.extend(action.outputs.iter().map(fn(path) { path.as_str().to_string() }))
+        }
+        selected := self.generated_modules.iter().filter(fn(module) { paths.contains(module.path.as_str()) }).collect::<[&BuildGeneratedModule]>()
+        selected.sort_by(fn(left, right) { left.path.as_str().cmp(right.path.as_str()).then_with(fn() { left.name.cmp(&right.name) }) })
+        selected
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:110
+    pub fn selected_action_ids(self: &BuildPlan) -> BTreeSet<ActionId> BuildError! {
+        selected := BTreeSet<ActionId>.new()
+        self.default == {
+            Val(default) -> { visiting: [TargetId] = []; collect_target_actions(self, default.id, &visiting, &selected)? }
+            None -> { for target in &self.targets { visiting: [TargetId] = []; collect_target_actions(self, target.id, &visiting, &selected)? } }
+        }
+        prereqs := self.action_prereqs()?
+        pending := selected.iter().copied().collect::<[ActionId]>()
+        while action := pending.pop() {
+            if deps := prereqs.get(&action) {
+                for dependency in deps { if selected.insert(dependency) { pending.push(dependency) } }
+            }
+        }
+        selected
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:132
+    pub fn selected_sources(self: &BuildPlan) -> [BuildPath] BuildError! {
+        // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:133
+        fn collect(plan: &BuildPlan, id: TargetId, visiting: &[TargetId], seen: &BTreeSet<String>, out: &[BuildPath]) -> Unit BuildError! {
+            if visiting.contains(&id) { fail target_cycle_error(plan, visiting, id) }
+            visiting.push(id)
+            target := plan.targets.get(id.0) == { Val(t) -> t; None -> { fail BuildError.UnknownTarget(id) } }
+            for source in &target.sources { if seen.insert(source.as_str().to_string()) { out.push(source.clone()) } }
+            for dep in &target.deps { collect(plan, dep.id, visiting, seen, out)? }
+            _ :: visiting.pop()
+        }
+        out: [BuildPath] = []
+        seen := BTreeSet<String>.new()
+        self.default == {
+            Val(default) -> { visiting: [TargetId] = []; collect(self, default.id, &visiting, &seen, &out)? }
+            None -> { for target in &self.targets { visiting: [TargetId] = []; collect(self, target.id, &visiting, &seen, &out)? } }
+        }
+        out
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:171
+    pub fn selected_probe_ids(self: &BuildPlan) -> BTreeSet<ProbeId> BuildError! {
+        actions := self.selected_action_ids()?
+        probes := self.actions.iter().filter(fn(a) { actions.contains(&a.id) }).flat_map(fn(a) { a.probes.iter().map(fn(p) { p.id }) }).collect::<BTreeSet<ProbeId>>()
+        selected_targets := self.default == {
+            Val(default) -> {
+                targets := BTreeSet<TargetId>.new()
+                // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:181
+                fn visit(plan: &BuildPlan, id: TargetId, out: &BTreeSet<TargetId>) {
+                    if out.insert(id) {
+                        if target := plan.targets.get(id.0) { for dep in &target.deps { visit(plan, dep.id, out) } }
+                    }
+                }
+                visit(self, default.id, &targets)
+                targets
+            }
+            None -> self.targets.iter().map(fn(t) { t.id }).collect::<BTreeSet<TargetId>>()
+        }
+        for target in self.targets.iter().filter(fn(t) { selected_targets.contains(&t.id) }) { probes.extend(target.probes.iter().map(fn(p) { p.id })) }
+        probes
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:205
+    pub fn default_host_toolchain(self: &BuildPlan) -> &BuildToolchain { &self.toolchains[0] }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:209
+    pub fn target(self: &BuildPlan, target: impl Into<TargetRef>) -> &BuildTarget? {
+        t := target.into()
+        if t.context != self.context { return None }
+        self.targets.get(t.id.0)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:217
+    pub fn action(self: &BuildPlan, action: ActionHandle) -> &BuildAction? {
+        if action.context != self.context { return None }
+        self.actions.get(action.id.0)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:224
+    pub fn action_handle(self: &BuildPlan, action: ActionId) -> ActionHandle? {
+        self.actions.get(action.0).map(fn(_) { ActionHandle { id: action, context: self.context } })
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:235
+    pub fn add_compiler_package_actions(self: &BuildPlan, packages: &[CompilerPackageSpec], compiler_identity: &String, target: &String, profile: &String) -> [ActionHandle] BuildError! {
+        if packages.is_empty() { return [] }
+        if packages.len() > MAX_ACTIONS.saturating_sub(self.actions.len()) { fail BuildError.PackagedPlugin("action graph exceeds {MAX_ACTIONS} actions") }
+        target_id := self.default.map(fn(t) { t.id }).or_else(fn() { self.targets.first().map(fn(t) { t.id }) }) == {
+            Val(id) -> id; None -> { fail BuildError.UnknownTarget(TargetId(0)) }
+        }
+        if self.targets.get(target_id.0).is_none() { fail BuildError.UnknownTarget(target_id) }
+        toolchain_id := self.toolchains.first().map(fn(t) { t.id }) == { Val(id) -> id; None -> { fail BuildError.UnknownToolchain(ToolchainId(0)) } }
+        output_by_package: [String:BuildPath] = [:]
+        package_by_output: [BuildPath:String] = [:]
+        dependencies_by_package: [String:BTreeSet<String>] = [:]
+        for package in packages {
+            trimmed := package.name.trim() // #4303
+            if trimmed.is_empty() { fail BuildError.EmptyActionName }
+            if output_by_package.contains_key(&package.name) { fail BuildError.DuplicateActionName("compile-package:{package.name}") }
+            output := BuildPath.new(".jet/package-artifacts/{compiler_package_path_name(&package.name)}.sealed")?
+            if previous := package_by_output.insert(output.clone(), package.name.clone()) {
+                fail BuildError.DuplicateActionName("compile-package:{package.name} (output also belongs to {previous})")
+            }
+            output_by_package.insert(package.name.clone(), ^output)
+            dependencies_by_package.insert(package.name.clone(), package.dependencies.iter().cloned().collect::<BTreeSet<String>>())
+        }
+        for package in packages {
+            action_name := "compile-package:{package.name}"
+            if self.actions.iter().any(fn(a) { a.name == action_name }) { fail BuildError.DuplicateActionName(^action_name) }
+            output := output_by_package.get(&package.name) == {
+                Val(o) -> o
+                None -> { fail BuildError.CompilerPackageDependencyMissing { package: package.name.clone(), dependency: package.name.clone() } }
+            }
+            if existing := self.actions.iter().find(fn(a) { a.outputs.iter().any(fn(o) { o == output }) }) {
+                fail BuildError.DuplicateBuildOutput { output: output.as_str().to_string(), first_action: existing.name.clone(), second_action: ^action_name }
+            }
+            if module := self.generated_modules.iter().find(fn(m) { m.path == output }) {
+                fail BuildError.GeneratedModuleCycle { module: module.name.clone(), path: output.as_str().to_string() }
+            }
+        }
+        package_names := dependencies_by_package.keys().collect::<[&String]>()
+        package_names.sort()
+        for package in package_names {
+            for dependency in &dependencies_by_package[package] {
+                if !output_by_package.contains_key(dependency) { fail BuildError.CompilerPackageDependencyMissing { package: package.clone(), dependency: dependency.clone() } }
+            }
+        }
+        remaining := dependencies_by_package.keys().cloned().collect::<BTreeSet<String>>()
+        while !remaining.is_empty() {
+            ready := remaining.iter().filter(fn(package) {
+                dependencies_by_package.get(package).expect("compiler package dependency preflight").iter().all(fn(dep) { !remaining.contains(dep) })
+            }).cloned().collect::<[String]>()
+            if ready.is_empty() {
+                fail BuildError.ActionDependencyCycle(stalled_cycle(&remaining,
+                    fn(package) { dependencies_by_package.get(package).map(fn(deps) { deps.iter().cloned().collect::<[String]>() }).unwrap_or([]) },
+                    fn(package) { "compile-package:{package}" }))
+            }
+            for package in ready { _ :: remaining.remove(&package) }
+        }
+        handles: [ActionHandle] = []
+        for package in packages {
+            inputs := dependencies_by_package[&package.name].iter().map(fn(dependency) {
+                output_by_package.get(dependency).cloned().expect("compiler package dependency output preflight")
+            }).collect::<[BuildPath]>()
+            output := output_by_package.get(&package.name).cloned().expect("compiler package output preflight")
+            id := ActionId(self.actions.len())
+            labels: [String:String] = [
+                "compiler.owner": "jet", "compiler.package": package.name.clone(),
+                "compiler.source-digest": package.source_digest.as_str().to_string(),
+                "compiler.identity": compiler_identity.clone(), "compiler.target": target.clone(), "compiler.profile": profile.clone()]
+            self.actions.push(BuildAction {
+                id: id, name: "compile-package:{package.name}", inputs: ^inputs, outputs: [^output],
+                argv: ["jet-compiler", package.name.clone()], env: [:], env_allowlist: BTreeSet<String>.new(),
+                caps: BTreeSet<BuildCapability>.new(), cache: ActionCache.Cached, kind: ActionKind.Compile,
+                toolchain: ToolchainHandle { id: toolchain_id, context: self.context }, probes: [], signing_identity: None,
+                labels: ^labels, helper_versions: [:], resource_pools: BTreeSet<BuildResourcePool>.new(),
+                legacy_wrapper: None, plugin: None, variant_identity: None, compiler_owned: true })
+            handle := ActionHandle { id: id, context: self.context }
+            self.targets[target_id.0].actions.push(handle)
+            handles.push(handle)
+        }
+        handles
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:447
+    pub fn action_key(self: &BuildPlan, action: ActionHandle) -> ActionKey BuildError! { self.action_key_with_inputs(action, &[])? }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:453
+    pub fn complete_recipe_fingerprint(self: &BuildPlan) -> String BuildError! {
+        keys: [String] = []
+        for action in &self.actions { keys.push(self.action_key(ActionHandle { id: action.id, context: self.context })?.as_str().to_string()) }
+        keys.sort()
+        bytes: [U8] = []
+        bytes.extend_from_slice("jet.plan-fingerprint.v1".as_bytes())
+        bytes.push(0)
+        for key in keys { bytes.extend_from_slice(key.as_bytes()); bytes.push(0) }
+        "plan-sha256:{SHA256.sha256_hex(&bytes)}"
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:472
+    pub fn action_key_with_inputs(self: &BuildPlan, action: ActionHandle, inputs: &[ActionInputSnapshot]) -> ActionKey BuildError! {
+        if action.context != self.context { fail BuildError.UnknownAction(action.id) }
+        a := self.actions.get(action.id.0) == { Val(a) -> a; None -> { fail BuildError.UnknownAction(action.id) } }
+        canonical_action_key(self, a, inputs)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:487
+    pub fn effective_action_key(self: &BuildPlan, action: ActionHandle, inputs: &[ActionInputSnapshot], grants: &BTreeSet<BuildCapability>, executable: &OSPath, executable_digest: &ContentDigest, probe_facts: &[BuildProbeFact]) -> ActionKey BuildError! {
+        a := self.action(action) == { Val(a) -> a; None -> { fail BuildError.UnknownAction(action.id) } }
+        canonical_effective_action_key(self, a, inputs, grants, executable, executable_digest, probe_facts)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:510
+    pub fn toolchain(self: &BuildPlan, toolchain: ToolchainHandle) -> &BuildToolchain? {
+        if toolchain.context != self.context { return None }
+        self.toolchains.get(toolchain.id.0)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:517
+    pub fn signing_identity(self: &BuildPlan, identity: SigningIdentityHandle) -> &BuildSigningIdentity? {
+        if identity.context != self.context { return None }
+        self.signing_identities.get(identity.id.0)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:527
+    pub fn probe(self: &BuildPlan, probe: ProbeHandle) -> &BuildProbe? {
+        if probe.context != self.context { return None }
+        self.probes.get(probe.id.0)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:534
+    pub fn targets_by_kind(self: &BuildPlan, kind: TargetKind) -> [&BuildTarget] { self.targets.iter().filter(fn(t) { t.kind == kind }).collect() }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:538
+    pub fn phony_actions(self: &BuildPlan) -> [&BuildAction] { self.actions.iter().filter(fn(a) { a.cache == ActionCache.UncachedPhony }).collect() }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:545
+    pub fn resource_pools(self: &BuildPlan) -> [BuildResourcePoolSpec] {
+        pools := default_resource_pools()
+        custom_pools: [BuildResourcePoolSpec] = []
+        for action in &self.actions {
+            for pool in action_pools(action) {
+                if !pools.iter().any(fn(spec) { spec.pool.as_str() == pool.as_str() }) {
+                    // Without declared capacity, custom pools serialize deterministically.
+                    custom_pools.push(BuildResourcePoolSpec.new(^pool, 1))
+                }
+            }
+        }
+        custom_pools.sort_by(fn(left, right) { left.pool.as_str().cmp(right.pool.as_str()) })
+        pools.extend(^custom_pools)
+        pools
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:565
+    pub fn graph(self: &BuildPlan) -> BuildGraph {
+        action_targets := self.action_targets()
+        file_index := self.file_index(&action_targets)
+        targets := self.targets.iter().map(fn(target) {
+            BuildGraphTarget { id: target.id, name: target.name.clone(), kind: target.kind,
+                deps: target.deps.iter().map(fn(dep) { dep.id }).collect(),
+                actions: target.actions.iter().map(fn(action) { action.id }).collect(),
+                files: target.sources.iter().chain(target.inputs.iter()).chain(target.outputs.iter()).map(fn(path) { path.as_str().to_string() }).collect(),
+                plugin: target.plugin.map(fn(plugin) { plugin.id }) }
+        }).collect::<[BuildGraphTarget]>()
+        actions := self.actions.iter().map(fn(action) {
+            BuildGraphAction { id: action.id, name: action.name.clone(), kind: action.kind,
+                inputs: action.inputs.iter().map(fn(path) { path.as_str().to_string() }).collect(),
+                outputs: action.outputs.iter().map(fn(path) { path.as_str().to_string() }).collect(),
+                target: action_targets.get(&action.id).copied(), caps: action.caps.iter().cloned().collect(),
+                pools: action_pools(action), legacy_wrapper: action.legacy_wrapper, plugin: action.plugin.map(fn(p) { p.id }),
+                compiler_owned: action.compiler_owned, key: canonical_action_key(self, action, &[]), cache_hit: None }
+        }).collect::<[BuildGraphAction]>()
+        paths := file_index.keys().collect::<[&String]>()
+        paths.sort()
+        files := paths.iter().map(fn(path) {
+            o := &file_index[path]
+            BuildGraphFile { path: path.clone(), owner: o.owner, consumers: o.consumers.clone(), targets: o.targets.clone() }
+        }).collect::<[BuildGraphFile]>()
+        BuildGraph { targets: ^targets, actions: ^actions, files: ^files, nodes: self.compiler_nodes.clone() }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:630
+    pub fn graph_with_execution(self: &BuildPlan, execution: &BuildExecutionReport?) -> BuildGraph {
+        graph := self.graph()
+        report := execution == { Val(report) -> report; None -> { return graph } }
+        statuses: [ActionId:Bool] = [:]
+        for event in &report.events {
+            event == { Finished { action, outcome } -> { statuses.insert(action, outcome == { RestoredFromCache -> true; _ -> false }) }; _ -> {} }
+        }
+        for action in &graph.actions { action.cache_hit = statuses.get(&action.id).copied() }
+        graph
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:655
+    pub fn file_ownership(self: &BuildPlan, path: &String) -> FileOwnership {
+        files := self.file_index(&self.action_targets())
+        files.remove(path).unwrap_or(FileOwnership { path: path.clone(), owner: None, consumers: [], targets: [] })
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:667
+    pub fn explain_target(self: &BuildPlan, target: impl Into<TargetRef>) -> BuildExplanation? {
+        t := self.target(target)?
+        Val(BuildExplanation { subject: BuildGraphSubject.Target(t.id), label: t.name.clone(),
+            provenance: [format!("kind={:?}", t.kind), "sources={t.sources.len()}", "deps={t.deps.len()}", "actions={t.actions.len()}"] })
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:681
+    pub fn explain_target_named(self: &BuildPlan, name: &String) -> BuildExplanation? {
+        t := self.targets.iter().find(fn(target) { target.name == name })?
+        self.explain_target(TargetRef { id: t.id, context: self.context })
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:689
+    pub fn explain_action(self: &BuildPlan, action: ActionHandle) -> BuildExplanation? {
+        a := self.action(action)?
+        provenance := ["argv={a.argv.join(\" \")}", "inputs={a.inputs.len()}", "outputs={a.outputs.len()}", format!("cache={:?}", a.cache)]
+        if wrapper := a.legacy_wrapper { provenance.push("legacy={wrapper.as_str()}") }
+        if plugin := a.plugin { provenance.push("plugin={self.plugins[plugin.id.0].name}") }
+        Val(BuildExplanation { subject: BuildGraphSubject.Action(a.id), label: a.name.clone(), provenance: ^provenance })
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:710
+    pub fn explain_action_named(self: &BuildPlan, name: &String) -> BuildExplanation? {
+        a := self.actions.iter().find(fn(action) { action.name == name })?
+        self.explain_action(ActionHandle { id: a.id, context: self.context })
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:718
+    pub fn explain_file(self: &BuildPlan, path: &String) -> BuildExplanation {
+        ownership := self.file_ownership(path)
+        provenance := [format!("owner={:?}", ownership.owner), format!("consumers={:?}", ownership.consumers), format!("targets={:?}", ownership.targets)]
+        if module := self.generated_modules.iter().find(fn(m) { m.path.as_str() == ownership.path }) {
+            provenance.push("generated={module.name}"); provenance.push("digest={module.source_digest.as_str()}")
+        }
+        BuildExplanation { subject: BuildGraphSubject.File, label: ^ownership.path, provenance: ^provenance }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:740
+    pub fn why_rebuilt(self: &BuildPlan, action: ActionHandle, status: ActionCacheStatus) -> RebuildExplanation BuildError! {
+        if action.context != self.context { fail BuildError.UnknownAction(action.id) }
+        a := self.actions.get(action.id.0) == { Val(a) -> a; None -> { fail BuildError.UnknownAction(action.id) } }
+        RebuildExplanation { action: action.id, action_name: a.name.clone(), status: status, reason: cache_status_reason(status) }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:760
+    pub fn execution_model(self: &BuildPlan) -> BuildExecutionModel BuildError! {
+        selected := self.selected_action_ids()?
+        prereqs := self.action_prereqs_for(&selected)?
+        stages := execution_stages(self, &prereqs)?
+        action_targets := self.action_targets()
+        nodes := self.actions.iter().filter(fn(a) { selected.contains(&a.id) }).map(fn(a) {
+            BuildExecutionNode { action: a.id, name: a.name.clone(), target: action_targets.get(&a.id).copied(),
+                prerequisites: prereqs.get(&a.id).cloned().unwrap_or([]), pools: action_pools(a) }
+        }).collect::<[BuildExecutionNode]>()
+        events := stages.iter().flat_map(fn(stage) { stage.actions.iter().map(fn(action) { BuildExecutionEvent.Ready { action: action, stage: stage.index } }) }).collect::<[BuildExecutionEvent]>()
+        selected_actions := self.actions.iter().filter(fn(a) { selected.contains(&a.id) }).cloned().collect::<[BuildAction]>()
+        metrics := execution_metrics(&selected_actions, &stages)
+        BuildExecutionModel { pools: self.resource_pools(), nodes: ^nodes, stages: ^stages, events: ^events,
+            console_order: self.actions.iter().filter(fn(a) { selected.contains(&a.id) }).map(fn(a) { a.id }).collect(), metrics: ^metrics }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:811
+    pub fn execution_report(self: &BuildPlan, outcomes: &[(ActionHandle, ActionOutcome)]) -> BuildExecutionReport BuildError! {
+        selected := self.selected_action_ids()?
+        prereqs := self.action_prereqs_for(&selected)?
+        stages := execution_stages(self, &prereqs)?
+        supplied: [ActionId:ActionOutcome] = [:]
+        for (action, outcome) in outcomes {
+            if action.context != self.context || action.id.0 >= self.actions.len() { fail BuildError.UnknownAction(action.id) }
+            supplied.insert(action.id, outcome)
+        }
+        failed := BTreeSet<ActionId>.new()
+        finished := BTreeSet<ActionId>.new()
+        events: [BuildExecutionEvent] = []
+        selected_actions := self.actions.iter().filter(fn(a) { selected.contains(&a.id) }).cloned().collect::<[BuildAction]>()
+        metrics := execution_metrics(&selected_actions, &stages)
+        for stage in &stages {
+            for action in &stage.actions {
+                failed_prereq := prereqs.get(action).and_then(fn(deps) { deps.iter().find(fn(dep) { failed.contains(dep) }) })
+                if dep := failed_prereq {
+                    _ :: failed.insert(action)
+                    metrics.cancelled_actions += 1
+                    events.push(BuildExecutionEvent.Cancelled { action: action, failed_prereq: dep })
+                    continue
+                }
+                supplied.get(action) == {
+                    Val(outcome) -> {
+                        _ :: finished.insert(action)
+                        if outcome == { Failed { .. } -> true; _ -> false } { _ :: failed.insert(action); metrics.failed_actions += 1 }
+                        if outcome == { RestoredFromCache -> true; _ -> false } { metrics.cache_restored_actions += 1 }
+                        events.push(BuildExecutionEvent.Finished { action: action, outcome: outcome })
+                    }
+                    None -> { metrics.pending_actions += 1; events.push(BuildExecutionEvent.Pending { action: action }) }
+                }
+            }
+        }
+        BuildExecutionReport { events: ^events, metrics: ^metrics }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:877
+    fn action_targets(self: &BuildPlan) -> [ActionId:TargetId] {
+        out: [ActionId:TargetId] = [:]
+        for target in &self.targets { for action in &target.actions { _ :: out.entry(action.id).or_insert(target.id) } }
+        out
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:887
+    fn file_index(self: &BuildPlan, action_targets: &[ActionId:TargetId]) -> [String:FileOwnership] {
+        files: [String:FileOwnership] = [:]
+        for action in &self.actions {
+            for output in &action.outputs {
+                entry := files.entry(output.as_str().to_string()).or_insert(FileOwnership { path: output.as_str().to_string(), owner: None, consumers: [], targets: [] })
+                entry.owner = Val(action.id)
+            }
+            for input in &action.inputs {
+                entry := files.entry(input.as_str().to_string()).or_insert(FileOwnership { path: input.as_str().to_string(), owner: None, consumers: [], targets: [] })
+                entry.consumers.push(action.id)
+            }
+        }
+        for target in &self.targets {
+            for path in target.sources.iter().chain(target.inputs.iter()).chain(target.outputs.iter()) {
+                entry := files.entry(path.as_str().to_string()).or_insert(FileOwnership { path: path.as_str().to_string(), owner: None, consumers: [], targets: [] })
+                entry.targets.push(target.id)
+            }
+            for action in &target.actions {
+                if target_id := action_targets.get(&action.id) {
+                    for path in self.actions[action.id.0].inputs.iter().chain(self.actions[action.id.0].outputs.iter()) {
+                        entry := files.entry(path.as_str().to_string()).or_insert(FileOwnership { path: path.as_str().to_string(), owner: None, consumers: [], targets: [] })
+                        if !entry.targets.contains(target_id) { entry.targets.push(target_id) }
+                    }
+                }
+            }
+        }
+        files
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:959
+    fn action_prereqs(self: &BuildPlan) -> [ActionId:[ActionId]] BuildError! {
+        out: [ActionId:BTreeSet<ActionId>] = [:]
+        for action in &self.actions { out.insert(action.id, BTreeSet<ActionId>.new()) }
+        for target in &self.targets {
+            deps := BTreeSet<ActionId>.new()
+            for dep in &target.deps { visiting: [TargetId] = []; collect_target_actions(self, dep.id, &visiting, &deps)? }
+            for action in &target.actions { out.entry(action.id).or_default().extend(deps.iter().copied()) }
+        }
+        action_targets := self.action_targets()
+        files := self.file_index(&action_targets)
+        paths := files.keys().collect::<[&String]>()
+        paths.sort()
+        for path in paths {
+            ownership := &files[path]
+            owner := ownership.owner == { Val(owner) -> owner; None -> { continue } }
+            for consumer in &ownership.consumers { if consumer != owner { _ :: out.entry(consumer).or_default().insert(owner) } }
+        }
+        result: [ActionId:[ActionId]] = [:]
+        for (action, deps) in out { result.insert(action, deps.into_iter().collect()) }
+        result
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:993
+    fn action_prereqs_for(self: &BuildPlan, selected: &BTreeSet<ActionId>) -> [ActionId:[ActionId]] BuildError! {
+        result: [ActionId:[ActionId]] = [:]
+        for (action, deps) in self.action_prereqs()? {
+            if selected.contains(&action) { result.insert(action, deps.into_iter().filter(fn(dep) { selected.contains(dep) }).collect()) }
+        }
+        result
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1013
+    pub fn provider_plan_facts(self: &BuildPlan) -> [String:String] Err! {
+        facts: [String:String] = [:]
+        fingerprint := try { self.complete_recipe_fingerprint()? } catch(error) { fail Err(format!("cannot fingerprint build plan: {:?}", error)) }
+        facts.insert("plan.recipe_fingerprint", ^fingerprint)
+        facts.insert("plan.default", self.default_target().map(fn(t) { t.id().0.to_string() }).unwrap_or(""))
+        facts.insert("plan.targets", self.targets().len().to_string())
+        facts.insert("plan.actions", self.actions().len().to_string())
+        for (index, contribution) in self.fact_contributions().iter().enumerate() {
+            prefix := "fact_contribution.{index}"
+            facts.insert("{prefix}.key", contribution.key.clone())
+            facts.insert("{prefix}.value", format!("{:?}", contribution.value))
+            facts.insert("{prefix}.scope", contribution.scope.name().to_string())
+            facts.insert("{prefix}.layer", contribution.layer.name().to_string())
+            facts.insert("{prefix}.source", contribution.source.clone())
+            facts.insert("{prefix}.reason", contribution.reason.clone().unwrap_or(""))
+        }
+        for (index, target) in self.targets().iter().enumerate() {
+            prefix := "target.{index}"
+            facts.insert("{prefix}.name", target.name.clone())
+            facts.insert("{prefix}.kind", format!("{:?}", target.kind))
+            facts.insert("{prefix}.sources", target.sources.iter().map(fn(p) { p.as_str() }).collect::<[&String]>().join(TEXT_NUL))
+            facts.insert("{prefix}.inputs", target.inputs.iter().map(fn(p) { p.as_str() }).collect::<[&String]>().join(TEXT_NUL))
+            facts.insert("{prefix}.outputs", target.outputs.iter().map(fn(p) { p.as_str() }).collect::<[&String]>().join(TEXT_NUL))
+            facts.insert("{prefix}.deps", target.deps.iter().map(fn(d) { d.id().0.to_string() }).collect::<[String]>().join(","))
+            facts.insert("{prefix}.actions", target.actions.iter().map(fn(a) { a.id().0.to_string() }).collect::<[String]>().join(","))
+            facts.insert("{prefix}.toolchain", target.toolchain.id().0.to_string())
+            facts.insert("{prefix}.metadata", map_debug(&target.metadata))
+        }
+        for (index, action) in self.actions().iter().enumerate() {
+            prefix := "action.{index}"
+            facts.insert("{prefix}.name", action.name.clone())
+            facts.insert("{prefix}.kind", action.kind.as_str().to_string())
+            facts.insert("{prefix}.cache", format!("{:?}", action.cache))
+            facts.insert("{prefix}.argv", action.argv.join(TEXT_NUL))
+            facts.insert("{prefix}.inputs", action.inputs.iter().map(fn(p) { p.as_str() }).collect::<[&String]>().join(TEXT_NUL))
+            facts.insert("{prefix}.outputs", action.outputs.iter().map(fn(p) { p.as_str() }).collect::<[&String]>().join(TEXT_NUL))
+            facts.insert("{prefix}.env", map_debug(&action.env))
+            facts.insert("{prefix}.env_allowlist", action.env_allowlist.iter().cloned().collect::<[String]>().join(TEXT_NUL))
+            facts.insert("{prefix}.caps", action.caps.iter().map(fn(c) { c.name().to_string() }).collect::<[String]>().join(TEXT_NUL))
+            facts.insert("{prefix}.toolchain", action.toolchain.id().0.to_string())
+            facts.insert("{prefix}.labels", map_debug(&action.labels))
+            facts.insert("{prefix}.helpers", map_debug(&action.helper_versions))
+            facts.insert("{prefix}.pools", action.resource_pools.iter().map(pool_name).collect::<[String]>().join(TEXT_NUL))
+            facts.insert("{prefix}.variant", action.variant_identity.clone().unwrap_or(""))
+            facts.insert("{prefix}.legacy", action.legacy_wrapper.map(fn(w) { w.as_str().to_string() }).unwrap_or(""))
+            key := try { self.action_key(ActionHandle { id: action.id, context: self.context })? } catch(error) { fail Err(format!("cannot key provider plan action: {:?}", error)) }
+            facts.insert("{prefix}.action_key", key.as_str().to_string())
+        }
+        for (index, toolchain) in self.toolchains().iter().enumerate() { facts.insert("toolchain.{index}", format!("{:?}", toolchain)) }
+        for (index, identity) in self.signing_identities().iter().enumerate() { facts.insert("signing.{index}", format!("{:?}", identity)) }
+        for (index, probe) in self.probes().iter().enumerate() { facts.insert("probe.{index}", format!("{:?}", probe)) }
+        for (index, plugin) in self.plugins().iter().enumerate() { facts.insert("plugin.{index}", format!("{:?}", plugin)) }
+        for (index, module) in self.generated_modules().iter().enumerate() { facts.insert("generated.{index}", format!("{:?}", module)) }
+        facts
+    }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1206
+impl BuildGraph {
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1211
+    pub fn affected_files(self: &BuildGraph) -> &[BuildGraphFile] { &self.files }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1216
+    pub fn action_keys(self: &BuildGraph) -> [BuildGraphActionKey] {
+        keys := self.actions.iter().map(fn(a) { BuildGraphActionKey { action: a.name.clone(), key: a.key.clone() } }).collect::<[BuildGraphActionKey]>()
+        keys.sort_by(fn(left, right) { left.action.cmp(&right.action) })
+        keys
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1233
+    pub fn cache_hits(self: &BuildGraph) -> [&BuildGraphAction] {
+        hits := self.actions.iter().filter(fn(a) { a.cache_hit == Val(true) }).collect::<[&BuildGraphAction]>()
+        hits.sort_by(fn(left, right) { left.name.cmp(&right.name) })
+        hits
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1246
+    pub fn diff(self: &BuildGraph, after: &BuildGraph) -> BuildGraphDiff {
+        paths := BTreeSet<String>.new()
+        paths.extend(self.files.iter().map(fn(f) { f.path.clone() }))
+        paths.extend(after.files.iter().map(fn(f) { f.path.clone() }))
+        file_deltas: [BuildGraphFileDelta] = []
+        for path in paths {
+            before_file := self.files.iter().find(fn(f) { f.path == path })
+            after_file := after.files.iter().find(fn(f) { f.path == path })
+            if file_identity(self, before_file) != file_identity(after, after_file) {
+                file_deltas.push(BuildGraphFileDelta { path: ^path, before: before_file.cloned(), after: after_file.cloned() })
+            }
+        }
+        action_names := BTreeSet<String>.new()
+        action_names.extend(self.actions.iter().map(fn(a) { a.name.clone() }))
+        action_names.extend(after.actions.iter().map(fn(a) { a.name.clone() }))
+        changed_actions := BTreeSet<String>.new()
+        key_deltas: [BuildGraphKeyDelta] = []
+        cache_deltas: [BuildGraphCacheDelta] = []
+        for action_name in action_names {
+            before := self.actions.iter().find(fn(a) { a.name == action_name })
+            after_action := after.actions.iter().find(fn(a) { a.name == action_name })
+            action_changed := (before, after_action) == { (Val(b), Val(a)) -> b.key != a.key || b.inputs != a.inputs; _ -> true }
+            if action_changed { _ :: changed_actions.insert(action_name.clone()) }
+            before_key := before.map(fn(a) { a.key.clone() })
+            after_key := after_action.map(fn(a) { a.key.clone() })
+            if before_key != after_key { key_deltas.push(BuildGraphKeyDelta { action: action_name.clone(), before: ^before_key, after: ^after_key }) }
+            before_hit := before.and_then(fn(a) { a.cache_hit })
+            after_hit := after_action.and_then(fn(a) { a.cache_hit })
+            if before_hit != after_hit { cache_deltas.push(BuildGraphCacheDelta { action: ^action_name, before: before_hit, after: after_hit }) }
+        }
+        affected_files := graph_affected_files(self, &changed_actions)
+        affected_files.extend(graph_affected_files(after, &changed_actions))
+        BuildGraphDiff { file_deltas: ^file_deltas, affected_files: affected_files.into_iter().collect(), key_deltas: ^key_deltas, cache_deltas: ^cache_deltas }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1324
+fn graph_affected_files(graph: &BuildGraph, changed_actions: &BTreeSet<String>) -> BTreeSet<String> {
+    pending_actions := graph.actions.iter().filter(fn(a) { changed_actions.contains(&a.name) }).map(fn(a) { a.id }).collect::<[ActionId]>()
+    pending_targets: [TargetId] = []
+    seen_actions := BTreeSet<ActionId>.new()
+    seen_targets := BTreeSet<TargetId>.new()
+    affected := BTreeSet<String>.new()
+    while !pending_actions.is_empty() || !pending_targets.is_empty() {
+        while action_id := pending_actions.pop() {
+            if !seen_actions.insert(action_id) { continue }
+            action := graph.actions.iter().find(fn(a) { a.id == action_id }) == { Val(a) -> a; None -> { continue } }
+            for output in &action.outputs {
+                _ :: affected.insert(output.clone())
+                if file := graph.files.iter().find(fn(f) { f.path == output }) { pending_actions.extend(file.consumers.iter().copied()) }
+            }
+            pending_targets.extend(graph.targets.iter().filter(fn(t) { t.actions.contains(&action_id) }).map(fn(t) { t.id }))
+        }
+        while target_id := pending_targets.pop() {
+            if !seen_targets.insert(target_id) { continue }
+            for target in graph.targets.iter().filter(fn(t) { t.deps.contains(&target_id) }) {
+                pending_actions.extend(target.actions.iter().copied())
+                pending_targets.push(target.id)
+            }
+        }
+    }
+    affected
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1384
+fn file_identity(graph: &BuildGraph, file: &BuildGraphFile?) -> (String?, [String], [String])? {
+    f := file?
+    action_name := fn(id) { graph.actions.iter().find(fn(a) { a.id == id }).map(fn(a) { a.name.clone() }) }
+    target_name := fn(id) { graph.targets.iter().find(fn(t) { t.id == id }).map(fn(t) { t.name.clone() }) }
+    consumers := f.consumers.iter().filter_map(fn(id) { action_name(id) }).collect::<[String]>()
+    targets := f.targets.iter().filter_map(fn(id) { target_name(id) }).collect::<[String]>()
+    consumers.sort(); consumers.dedup()
+    targets.sort(); targets.dedup()
+    Val((f.owner.and_then(action_name), ^consumers, ^targets))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1424
+fn map_debug(map: &[String:String]) -> String {
+    keys := map.keys().collect::<[&String]>()
+    keys.sort()
+    keys.iter().map(fn(key) { value := &map[key]; "{key.as_bytes().len()}:{key}:{value.as_bytes().len()}:{value}" }).collect::<[String]>().join("")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1431
+fn pool_name(pool: &BuildResourcePool) -> String { pool == { Custom(name) -> "custom:{name}"; _ -> pool.as_str().to_string() } }
+// Rust: crates/jet-comptime/src/Comptime/Build/plan_impl.rs:1438
+fn compiler_package_path_name(name: &String) -> String {
+    out := name.chars().map(fn(character) { if character.is_ascii_alphanumeric() || character == '-' || character == '_' { character } else { '_' } }).collect::<String>()
+    if out.is_empty() { out.push_str("package") }
+    out
+}

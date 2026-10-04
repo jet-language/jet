@@ -1,0 +1,25 @@
+use jet_foundation.MIR.[MirBinaryOp, MirUnaryOp, MirPayloadKind]
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:2927 (behavioral control)
+#Test("web_integer_constant_keeps_full_width_and_unsigned_bits") {
+    assert(js_integer_constant(I64{-1}, Val((false, U8{64}))) == "BigInt.asUintN(64, BigInt(\"18446744073709551615\"))")
+    assert(js_integer_constant(I64{-1}, Val((true, U8{8}))) == "BigInt.asIntN(8, BigInt(\"-1\"))")
+    assert(js_integer_constant(I64{7}, None) == "BigInt(\"7\")")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:3087-3121 (behavioral control)
+#Test("web_primitive_operators_preserve_distinct_remainder_and_modulo") {
+    assert(js_unary_expression(MirUnaryOp.Neg, "x") == "(-(x))")
+    assert(js_unary_expression(MirUnaryOp.Not, "x") == "(!(x))")
+    assert(js_binary_expression(MirBinaryOp.Rem, "x", "y") == "((x) % (y))")
+    assert(js_binary_expression(MirBinaryOp.Mod, "x", "y") == "((((x) % (y)) + (y)) % (y))")
+    assert(js_binary_expression(MirBinaryOp.Compare, "x", "y") == "((x) < (y) ? -1 : ((x) > (y) ? 1 : 0))")
+    assert(js_binary_expression(MirBinaryOp.FloorDiv, "x", "y") == "Math.floor((x) / (y))")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:2272 (behavioral control)
+#Test("web_option_and_result_payloads_use_first_carrier_slot") {
+    assert(js_payload_slot(MirPayloadKind.Option) == 0)
+    assert(js_payload_slot(MirPayloadKind.Result(true)) == 0)
+    assert(js_payload_slot(MirPayloadKind.Result(false)) == 0)
+}

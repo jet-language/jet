@@ -1,1755 +1,619 @@
-// PORT-PENDING 0537 crates-jet-codegen-src-codegen-tir-tir-to-mir-stmt-slice-1: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1-1751
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Statement/control-flow lowering from checked TIR to canonical MIR.
-//RS //!
-//RS //! This module deliberately knows only the checked TIR shapes and the shared
-//RS //! MIR vocabulary.  It never consults AST nodes or chooses a backend spelling.
-//RS 
-//RS use super::mir::{LowerCtx, LowerError, TransactionRestore};
-//RS use super::tir_to_mir_expr::lower_expr;
-//RS use crate::AST::{BinOp, Type};
-//RS use crate::Codegen::TIR::{
-//RS     ScopeMemberKind, TBuiltinOp, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFailureCarrier,
-//RS     TForInMethod, TIfCond, TIndexFieldAssign, TLetTy, TLocal, TMatchArm, TMethodRef, TNumericOp,
-//RS     TPattern, TPlace, TPreludeRoute, TStaticOwner, TStmt, TTryConvert,
-//RS };
-//RS use jet_foundation::CanonicalPass;
-//RS use jet_foundation::MIR::{
-//RS     MirAccess, MirBinaryDispatch, MirBlockId, MirCallSignature, MirConstant, MirDropKind,
-//RS     MirIndexKind, MirLoopSourceKind, MirOperation, MirPreludeAbi, MirPreludeFamily, MirScopeId,
-//RS     MirScopeKind, MirSemanticOp, MirSymbol, MirTerminator, MirTestScopeMember, MirValueId,
-//RS };
-//RS 
-//RS /// Lower a sequence of checked TIR statements in the current MIR block.
-//RS ///
-//RS /// A terminator ends the current path.  The caller owns creation and selection
-//RS /// of any continuation block, so statements after a terminator are unreachable
-//RS pub(super) fn lower_stmts(ctx: &mut LowerCtx, stmts: &[TStmt]) -> Result<(), LowerError> {
-//RS     let before = canonical_statements_before(stmts);
-//RS     for stmt in stmts {
-//RS         if ctx.is_terminated() {
-//RS             break;
-//RS         }
-//RS         lower_stmt(ctx, stmt)?;
-//RS     }
-//RS     record_lowered_statements(ctx, before);
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// The canonical-pass input of one `lower_stmts` call, when tracing is on.
-//RS fn canonical_statements_before(stmts: &[TStmt]) -> Option<(String, String)> {
-//RS     CanonicalPass::enabled().then(|| {
-//RS         (
-//RS             super::canonical_statements_payload(stmts),
-//RS             super::canonical_statements_identity(stmts),
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn record_lowered_statements(ctx: &LowerCtx, before: Option<(String, String)>) {
-//RS     if let Some((before_payload, before_identity)) = before {
-//RS         CanonicalPass::record(
-//RS             "lowering",
-//RS             "mir.lower-statements",
-//RS             "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs",
-//RS             "tir",
-//RS             before_payload,
-//RS             before_identity,
-//RS             "mir",
-//RS             CanonicalPass::debug_payload("mir", "mir.lower-statements", &ctx.blocks),
-//RS             CanonicalPass::debug_identity("mir", "mir.lower-statements", &ctx.blocks),
-//RS             "preserve",
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS /// Lower one checked TIR statement into canonical MIR.
-//RS ///
-//RS /// Every `TStmt` variant is handled here.  Backend-specific presentation facts
-//RS /// remain facts on the TIR node; only executable values, places, scopes, and
-//RS /// control-flow edges are emitted.
-//RS pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerError> {
-//RS     match stmt {
-//RS         TStmt::InvariantViolation { construct, span } => Err(ctx.error(*span, construct.clone())),
-//RS         TStmt::Contract { contract } => ctx.lower_contract(contract),
-//RS         TStmt::ContractScope {
-//RS             pre,
-//RS             body,
-//RS             post,
-//RS             result,
-//RS         } => ctx.lower_contract_scope(pre, body, post, result),
-//RS 
-//RS         TStmt::Let {
-//RS             name,
-//RS             kw,
-//RS             let_ty,
-//RS             init,
-//RS             gc_promotion,
-//RS             gc_transferred: _,
-//RS         } => {
-//RS             let scope_guard_binding = matches!(
-//RS                 &init.kind,
-//RS                 TExprKind::CoreClosureCall {
-//RS                     kind: TCoreClosureKind::Guard { .. },
-//RS                 }
-//RS             ) || matches!(init.ty, Type::Named(ref name) if name == "EventScope");
-//RS             let alias_place = match &init.kind {
-//RS                 TExprKind::Borrow { place, mutable } => Some((
-//RS                     ctx.lower_place(
-//RS                         &TPlace::Expr(Box::new((**place).clone())),
-//RS                         if *mutable { MirAccess::Write } else { MirAccess::Read },
-//RS                     )?,
-//RS                     *mutable,
-//RS                 )),
-//RS                 // D-SHAPE-PLACE1=A: `w := &list[a..b]` aliases the range
-//RS                 // window place, so `w[i] = x` lands in the owner's storage.
-//RS                 TExprKind::BuiltinMethod {
-//RS                     recv,
-//RS                     op: TBuiltinOp::ViewMutNew { .. },
-//RS                     ..
-//RS                 } if matches!(recv.ty.without_user_tags(), Type::List(_)) => {
-//RS                     super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Write)?
-//RS                         .map(|place| (place, true))
-//RS                 }
-//RS                 // D-MEM-COPYSEM1: an immutable binding of a read parameter's
-//RS                 // place (or of its payload past a diverging `??`) aliases the
-//RS                 // place. The parameter cannot change while the function runs,
-//RS                 // so the alias reads exactly what a copy would hold.
-//RS                 _ if !kw.contains("mut")
-//RS                     && !scope_guard_binding
-//RS                     && let_binds_init_type(let_ty, &init.ty)
-//RS                     && gc_promotion.is_none() =>
-//RS                 {
-//RS                     let place = match &init.kind {
-//RS                         TExprKind::OrFallback { value, fallback } => {
-//RS                             super::tir_to_mir_expr::lower_or_fallback_window(
-//RS                                 ctx, init, value, fallback,
-//RS                             )?
-//RS                         }
-//RS                         _ => ctx.read_window_place(init)?,
-//RS                     };
-//RS                     place.map(|place| (place, false))
-//RS                 }
-//RS                 _ => None,
-//RS             };
-//RS             let ty = let_binding_type(let_ty, &init.ty);
-//RS             let is_uninit = matches!(&init.kind, TExprKind::Uninit);
-//RS             let value = if is_uninit || alias_place.is_some() {
-//RS                 None
-//RS             } else {
-//RS                 let value = lower_expr(ctx, init)?;
-//RS                 Some(ctx.trait_box_value(value, &init.ty, &ty)?)
-//RS             };
-//RS             let local = local_for_binding(name, kw);
-//RS             let place = if let Some((alias_place, mutable)) = alias_place {
-//RS                 if mutable {
-//RS                     ctx.window_aliases.insert(local.name.clone());
-//RS                 }
-//RS                 ctx.bind_local_alias(&local, ty, alias_place, mutable)?
-//RS             } else if matches!(let_ty, TLetTy::SendFn(_)) {
-//RS                 ctx.bind_local_send_fn(&local, ty, local.mutable, false, is_uninit)?
-//RS             } else {
-//RS                 ctx.bind_local(&local, ty, local.mutable, false, is_uninit)?
-//RS             };
-//RS             if is_uninit {
-//RS                 ctx.emit(
-//RS                     "stmt.let.initialize-uninit",
-//RS                     None,
-//RS                     MirOperation::InitializeUninit { place },
-//RS                 )?;
-//RS             } else if let Some(value) = value {
-//RS                 ctx.emit(
-//RS                     "stmt.let.write",
-//RS                     None,
-//RS                     MirOperation::WritePlace { place, value },
-//RS                 )?;
-//RS             }
-//RS             if scope_guard_binding && alias_place.is_none() {
-//RS                 ctx.register_scope_guard(place)?;
-//RS             }
-//RS             if alias_place.is_none() {
-//RS                 if let Some(value) = value {
-//RS                     ctx.register_file_owner_binding(place, value)?;
-//RS                 }
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         TStmt::RefutableBind {
-//RS             pattern,
-//RS             init,
-//RS             fallback,
-//RS         } => lower_refutable_bind(ctx, pattern, init, fallback),
-//RS 
-//RS         TStmt::GcEdit {
-//RS             root,
-//RS             slot,
-//RS             edges: _,
-//RS             replace_all: _,
-//RS             index_temp,
-//RS             stmt,
-//RS         } => {
-//RS             // GC edit is a checked authority region.  The collector metadata is
-//RS             // retained by the scope owner; the executable body remains ordinary
-//RS             // place lowering, never a second GC IR.
-//RS             let scope = ctx.enter_scope(
-//RS                 MirScopeKind::Authority,
-//RS                 ctx.span(),
-//RS                 Some(format!("{root}.{slot}")),
-//RS             )?;
-//RS             if let Some((name, init)) = index_temp {
-//RS                 lower_let_like(ctx, name, init, true)?;
-//RS             }
-//RS             lower_stmt(ctx, stmt)?;
-//RS             ctx.exit_scope(scope)?;
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         TStmt::SplitViews {
-//RS             owner,
-//RS             root,
-//RS             len: _,
-//RS             source: _,
-//RS             source_start: _,
-//RS             before: _,
-//RS             split_tail: _,
-//RS             segment: _,
-//RS             after: _,
-//RS             name,
-//RS             start,
-//RS             end,
-//RS             single,
-//RS             write,
-//RS             elem_ty,
-//RS             line,
-//RS         } => lower_split_view(
-//RS             ctx,
-//RS             owner.as_ref(),
-//RS             root,
-//RS             name,
-//RS             *start,
-//RS             *end,
-//RS             *single,
-//RS             *write,
-//RS             *line,
-//RS             elem_ty.as_ref(),
-//RS         ),
-//RS 
-//RS         TStmt::TupleDestructure {
-//RS             tmp,
-//RS             init,
-//RS             kw,
-//RS             move_fields,
-//RS             binds,
-//RS         } => lower_tuple_destructure(ctx, init, tmp, kw, *move_fields, binds),
-//RS 
-//RS         TStmt::StructDestructure {
-//RS             tmp,
-//RS             init,
-//RS             kw,
-//RS             move_fields,
-//RS             binds,
-//RS         } => lower_struct_destructure(ctx, init, tmp, kw, *move_fields, binds),
-//RS 
-//RS         TStmt::ListDestructure {
-//RS             tmp: _,
-//RS             init,
-//RS             kw,
-//RS             want,
-//RS             file: _,
-//RS             line: _,
-//RS             elems,
-//RS         } => lower_list_destructure(ctx, init, kw, *want, elems),
-//RS 
-//RS         TStmt::Assign {
-//RS             place,
-//RS             op,
-//RS             value,
-//RS             clone_value,
-//RS             line,
-//RS         } => lower_assign(ctx, place, *op, value, *clone_value, *line),
-//RS 
-//RS         TStmt::Return(value) => ctx.lower_return(value.as_ref()),
-//RS 
-//RS         TStmt::ExprStmt(expr) => {
-//RS             let value = lower_expr(ctx, expr)?;
-//RS             // Expression lowering already emits the effectful operation.  Keep a
-//RS             // value-producing expression alive in MIR; an unused result is legal
-//RS             // and avoids inventing a discard operation with target policy.
-//RS             let _ = value;
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         TStmt::TaskGroup { group, limit, body } => {
-//RS             let scope = ctx.enter_scope(
-//RS                 MirScopeKind::TaskGroup,
-//RS                 ctx.span(),
-//RS                 Some(group.name.clone()),
-//RS             )?;
-//RS             let call_arg = |value, borrow| TCallArg {
-//RS                 value,
-//RS                 template_items: None,
-//RS                 borrow,
-//RS                 mut_borrow: false,
-//RS                 clone: false,
-//RS                 arc_clone: false,
-//RS                 fn_coerce: None,
-//RS                 widen_to_vec: false,
-//RS                 widen_to_union: None,
-//RS                 box_as_trait: None,
-//RS             };
-//RS             let group_ty = Type::Named(crate::Syntax::TYPE_TASKGROUP.to_string());
-//RS             let constructor_args = if let Some(limit) = limit {
-//RS                 let Some(TNumericOp::TryFrom {
-//RS                     host_kind,
-//RS                     dst_rust,
-//RS                     dst_spelling,
-//RS                 }) = super::resolve_numeric_conversion_op("I64", "Int")
-//RS                 else {
-//RS                     return Err(ctx.error(ctx.span(), "missing task group limit conversion"));
-//RS                 };
-//RS                 let line = ctx
-//RS                     .function_source()
-//RS                     .map(|source| source.lines.line_col(source.text, ctx.span().start).0)
-//RS                     .unwrap_or(ctx.function.line) as u32;
-//RS                 vec![call_arg(
-//RS                     TExpr {
-//RS                         ty: Type::IntN {
-//RS                             signed: true,
-//RS                             bits: 64,
-//RS                         },
-//RS                         kind: TExprKind::NumericMethod {
-//RS                             recv: Box::new(limit.clone()),
-//RS                             op: TNumericOp::CheckedIntToFixed {
-//RS                                 host_kind,
-//RS                                 dst_rust,
-//RS                                 dst_spelling,
-//RS                                 line,
-//RS                             },
-//RS                         },
-//RS                     },
-//RS                     false,
-//RS                 )]
-//RS             } else {
-//RS                 Vec::new()
-//RS             };
-//RS             let owner = TStaticOwner::Prelude {
-//RS                 rooted: true,
-//RS                 path: "jet_std::JetTaskGroup".to_string(),
-//RS                 generics: Vec::new(),
-//RS             };
-//RS             let constructor = TExpr {
-//RS                 ty: group_ty.clone(),
-//RS                 kind: TExprKind::StaticCall {
-//RS                     owner: owner.clone(),
-//RS                     owner_type: None,
-//RS                     method: TMethodRef::bare(if limit.is_some() { "with_limit" } else { "new" }),
-//RS                     type_args: Vec::new(),
-//RS                     args: constructor_args,
-//RS                 },
-//RS             };
-//RS             let group_place =
-//RS                 ctx.bind_local(group, group_ty.clone(), group.mutable, false, false)?;
-//RS             let group_value = lower_expr(ctx, &constructor)?;
-//RS             ctx.emit(
-//RS                 "stmt.task-group.write",
-//RS                 None,
-//RS                 MirOperation::WritePlace {
-//RS                     place: group_place,
-//RS                     value: group_value,
-//RS                 },
-//RS             )?;
-//RS             let close = TExpr {
-//RS                 ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
-//RS                 kind: TExprKind::StaticCall {
-//RS                     owner,
-//RS                     owner_type: None,
-//RS                     method: TMethodRef::bare("close"),
-//RS                     type_args: Vec::new(),
-//RS                     args: vec![call_arg(
-//RS                         TExpr {
-//RS                             ty: group_ty,
-//RS                             kind: TExprKind::Local(group.clone()),
-//RS                         },
-//RS                         true,
-//RS                     )],
-//RS                 },
-//RS             };
-//RS             ctx.register_defer_close(close, group)?;
-//RS             lower_stmts(ctx, body)?;
-//RS             ctx.exit_scope(scope)?;
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         TStmt::DeferClose { close, resource } => ctx.register_defer_close(close.clone(), resource),
-//RS 
-//RS         TStmt::If {
-//RS             cond,
-//RS             then_body,
-//RS             else_body,
-//RS             else_is_elseif: _,
-//RS         } => lower_if(ctx, cond, then_body, else_body.as_deref()),
-//RS 
-//RS         TStmt::Loop { label, body } => lower_loop(ctx, label.as_deref(), body),
-//RS         TStmt::While { label, cond, body } => lower_while(ctx, label.as_deref(), cond, body),
-//RS         TStmt::CountedLoop {
-//RS             label,
-//RS             init,
-//RS             cond,
-//RS             step,
-//RS             auto_vectorization,
-//RS             body,
-//RS         } => lower_counted_loop(
-//RS             ctx,
-//RS             label.as_deref(),
-//RS             init,
-//RS             cond,
-//RS             step.as_deref(),
-//RS             auto_vectorization.as_ref(),
-//RS             body,
-//RS         ),
-//RS         TStmt::Range {
-//RS             label,
-//RS             var,
-//RS             source,
-//RS             start,
-//RS             end,
-//RS             step,
-//RS             exclusive,
-//RS             auto_vectorization,
-//RS             body,
-//RS         } => lower_range_loop(
-//RS             ctx,
-//RS             label.as_deref(),
-//RS             var,
-//RS             source.as_ref(),
-//RS             start,
-//RS             end,
-//RS             step.as_ref(),
-//RS             *exclusive,
-//RS             auto_vectorization.as_ref(),
-//RS             body,
-//RS         ),
-//RS         TStmt::Break(label) => {
-//RS             let target = ctx.resolve_break(label.as_deref())?;
-//RS             let depth = ctx.break_cleanup_depth(label.as_deref())?;
-//RS             ctx.terminate_with_cleanup(
-//RS                 MirTerminator::Break {
-//RS                     target,
-//RS                     value: None,
-//RS                 },
-//RS                 depth,
-//RS             )?;
-//RS             Ok(())
-//RS         }
-//RS         TStmt::BreakValue { label, value } => {
-//RS             let value = lower_expr(ctx, value)?;
-//RS             let target = ctx.resolve_break(label.as_deref())?;
-//RS             let depth = ctx.break_cleanup_depth(label.as_deref())?;
-//RS             ctx.terminate_with_cleanup(
-//RS                 MirTerminator::Break {
-//RS                     target,
-//RS                     value: Some(value),
-//RS                 },
-//RS                 depth,
-//RS             )?;
-//RS             Ok(())
-//RS         }
-//RS         TStmt::Continue(label) => {
-//RS             let target = ctx.resolve_continue(label.as_deref())?;
-//RS             let depth = ctx.continue_cleanup_depth(label.as_deref())?;
-//RS             ctx.terminate_with_cleanup(MirTerminator::Continue { target }, depth)?;
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         TStmt::EnumMatch {
-//RS             scrutinee,
-//RS             clone_subject,
-//RS             arms,
-//RS             else_body,
-//RS             fallthrough,
-//RS         } => lower_enum_match(
-//RS             ctx,
-//RS             scrutinee,
-//RS             *clone_subject,
-//RS             arms,
-//RS             else_body.as_deref(),
-//RS             *fallthrough,
-//RS         ),
-//RS 
-//RS         TStmt::RangeSwitch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS         } => lower_range_switch(ctx, subject, arms, else_body),
-//RS 
-//RS         TStmt::IndexAssign {
-//RS             uninit,
-//RS             base,
-//RS             index,
-//RS             is_map,
-//RS             value,
-//RS         } => {
-//RS             // Match regular assignment: evaluate the RHS before the indexed
-//RS             // place, whose receiver and index expressions may have effects.
-//RS             let expected = match base.ty.without_user_tags() {
-//RS                 Type::Map { value, .. } => Some((**value).clone()),
-//RS                 Type::List(elem) | Type::FixedList { elem, .. } => Some((**elem).clone()),
-//RS                 _ => None,
-//RS             };
-//RS             let source = value.ty.clone();
-//RS             let value = lower_expr(ctx, value)?;
-//RS             let value = if let Some(expected) = expected.as_ref() {
-//RS                 ctx.trait_box_value(value, &source, expected)?
-//RS             } else {
-//RS                 value
-//RS             };
-//RS             let place = ctx.lower_index_place(
-//RS                 base,
-//RS                 index,
-//RS                 if *uninit {
-//RS                     MirIndexKind::FixedListProof
-//RS                 } else if *is_map {
-//RS                     MirIndexKind::Map
-//RS                 } else {
-//RS                     MirIndexKind::List
-//RS                 },
-//RS                 MirAccess::Write,
-//RS             )?;
-//RS             ctx.emit(
-//RS                 "stmt.index.write",
-//RS                 None,
-//RS                 MirOperation::WritePlace { place, value },
-//RS             )?;
-//RS             ctx.drop_temporary_shared_guard(place)?;
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         TStmt::IndexFieldAssign(assign) => lower_index_field_assign(ctx, assign),
-//RS 
-//RS         TStmt::IndexHookAssign {
-//RS             type_name: _,
-//RS             base,
-//RS             index,
-//RS             value,
-//RS         } => {
-//RS             let call = TExpr {
-//RS                 ty: Type::Result {
-//RS                     ok: Box::new(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
-//RS                     err: Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
-//RS                 },
-//RS                 kind: TExprKind::MethodCall {
-//RS                     recv: Box::new(base.clone()),
-//RS                     method: TMethodRef::trait_method(crate::Syntax::TRAIT_INDEX_MUT, "set"),
-//RS                     type_args: Vec::new(),
-//RS                     args: vec![
-//RS                         TCallArg {
-//RS                             value: index.clone(),
-//RS                             template_items: None,
-//RS                             borrow: !index.ty.is_scalar(),
-//RS                             mut_borrow: false,
-//RS                             clone: false,
-//RS                             arc_clone: false,
-//RS                             fn_coerce: None,
-//RS                             widen_to_vec: false,
-//RS                             widen_to_union: None,
-//RS                             box_as_trait: None,
-//RS                         },
-//RS                         TCallArg {
-//RS                             value: value.clone(),
-//RS                             template_items: None,
-//RS                             borrow: !value.ty.is_scalar(),
-//RS                             mut_borrow: false,
-//RS                             clone: false,
-//RS                             arc_clone: false,
-//RS                             fn_coerce: None,
-//RS                             widen_to_vec: false,
-//RS                             widen_to_union: None,
-//RS                             box_as_trait: None,
-//RS                         },
-//RS                     ],
-//RS                     source_first_string_literal: None,
-//RS                     operator_line: None,
-//RS                 },
-//RS             };
-//RS             let _ = lower_expr(ctx, &call)?;
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         TStmt::MathSwizzleAssign {
-//RS             base,
-//RS             type_name: _,
-//RS             lanes,
-//RS             value,
-//RS             clone_value,
-//RS         } => lower_swizzle_assign(ctx, base, lanes, value, *clone_value),
-//RS 
-//RS         TStmt::ForIn {
-//RS             label,
-//RS             var,
-//RS             var2,
-//RS             source,
-//RS             collection,
-//RS             step,
-//RS             method_kind,
-//RS             columnar,
-//RS             by_value,
-//RS             source_stable,
-//RS             body,
-//RS         } => lower_for_in(
-//RS             ctx,
-//RS             label.as_deref(),
-//RS             var,
-//RS             var2.as_deref(),
-//RS             source,
-//RS             collection,
-//RS             step.as_ref(),
-//RS             method_kind.as_ref(),
-//RS             *by_value,
-//RS             *columnar,
-//RS             *source_stable,
-//RS             body,
-//RS         ),
-//RS 
-//RS         TStmt::Inline(body) => lower_stmts(ctx, body),
-//RS         TStmt::DebugOnly(body) => lower_debug_only(ctx, body),
-//RS 
-//RS         TStmt::MixedSwitch {
-//RS             subject,
-//RS             class: _,
-//RS             arms,
-//RS             else_body,
-//RS         } => lower_mixed_switch(ctx, subject, arms, else_body.as_deref()),
-//RS 
-//RS         TStmt::Unsafe { gate, body } => {
-//RS             let scope =
-//RS                 ctx.enter_scope(MirScopeKind::Unsafe, ctx.span(), Some(gate.reason.clone()))?;
-//RS             ctx.set_scope_fact(scope, "sentry_file", gate.file.clone())?;
-//RS             ctx.set_scope_fact(scope, "sentry_enabled", gate.enabled.to_string())?;
-//RS             ctx.set_scope_fact(scope, "sentry_fenced", gate.fenced.to_string())?;
-//RS             ctx.set_scope_fact(scope, "sentry_line", gate.line.to_string())?;
-//RS             lower_stmts(ctx, body)?;
-//RS             ctx.exit_scope(scope)
-//RS         }
-//RS         TStmt::SentryPolicy { enabled, body } => {
-//RS             let scope = ctx.enter_scope(
-//RS                 MirScopeKind::Policy,
-//RS                 ctx.span(),
-//RS                 Some(if *enabled { "enabled" } else { "disabled" }.to_string()),
-//RS             )?;
-//RS             ctx.set_scope_fact(scope, "sentry_enabled", enabled.to_string())?;
-//RS             lower_stmts(ctx, body)?;
-//RS             ctx.exit_scope(scope)
-//RS         }
-//RS         TStmt::Impure(body) => lower_scoped(ctx, MirScopeKind::Impure, None, body),
-//RS 
-//RS         TStmt::Reactive { executable } => {
-//RS             let site = ctx.site_id_for(ctx.span(), "reactive").0 as usize;
-//RS             let expr = TExpr {
-//RS                 ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
-//RS                 kind: TExprKind::CoreClosureCall {
-//RS                     kind: TCoreClosureKind::ReactiveEffect {
-//RS                         executable: executable.clone(),
-//RS                         site,
-//RS                     },
-//RS                 },
-//RS             };
-//RS             let _ = lower_expr(ctx, &expr)?;
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         TStmt::Region(body) => lower_scoped(ctx, MirScopeKind::Region, None, body),
-//RS 
-//RS         TStmt::Layout {
-//RS             handle,
-//RS             label,
-//RS             body,
-//RS         } => {
-//RS             let scope = ctx.enter_scope(MirScopeKind::Layout, ctx.span(), Some(label.clone()))?;
-//RS             let handle_ty = Type::Named(crate::Syntax::LAYOUT_TYPE.to_string());
-//RS             let place = ctx.bind_local(handle, handle_ty.clone(), handle.mutable, false, false)?;
-//RS             let value = ctx.emit(
-//RS                 "stmt.layout.global",
-//RS                 Some(handle_ty),
-//RS                 MirOperation::Global {
-//RS                     name: format!("layout::{label}"),
-//RS                 },
-//RS             )?;
-//RS             ctx.emit(
-//RS                 "stmt.layout.write",
-//RS                 None,
-//RS                 MirOperation::WritePlace { place, value },
-//RS             )?;
-//RS             lower_stmts(ctx, body)?;
-//RS             ctx.exit_scope(scope)?;
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         TStmt::ContextBlock { guards, body } => {
-//RS             let mut deadline = None;
-//RS             for (name, value) in guards {
-//RS                 let value = lower_expr(ctx, value)?;
-//RS                 if name == crate::Syntax::CTX_FIELD_DEADLINE {
-//RS                     deadline = Some(value);
-//RS                 }
-//RS             }
-//RS             let scope = ctx.enter_scope(MirScopeKind::Context, ctx.span(), None)?;
-//RS             if let Some(deadline) = deadline {
-//RS                 ctx.set_scope_deadline(scope, deadline)?;
-//RS             }
-//RS             lower_stmts(ctx, body)?;
-//RS             ctx.exit_scope(scope)?;
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         TStmt::Live { body } => lower_scoped(ctx, MirScopeKind::Live, None, body),
-//RS         TStmt::Shield { body } => lower_scoped(ctx, MirScopeKind::Shield, None, body),
-//RS 
-//RS         TStmt::ScopeMember { kind, body } => lower_scope_member(ctx, kind, body),
-//RS 
-//RS         TStmt::Transact {
-//RS             handle,
-//RS             snapshots,
-//RS             stm,
-//RS             body,
-//RS         } => lower_transaction(ctx, handle.as_ref(), snapshots, stm.as_ref(), body),
-//RS 
-//RS         TStmt::LineMarker(line) => {
-//RS             let line = u32::try_from(*line).map_err(|_| {
-//RS                 LowerError::new(ctx.span(), "checked source line exceeds MIR line range")
-//RS             })?;
-//RS             ctx.set_line_marker(line);
-//RS             Ok(())
-//RS         }
-//RS         TStmt::SourceSpan(span) => {
-//RS             ctx.set_span(*span);
-//RS             Ok(())
-//RS         }
-//RS         TStmt::Erased {
-//RS             construct,
-//RS             span,
-//RS             reason,
-//RS         } => {
-//RS             ctx.record_erasure(construct, *span, *reason);
-//RS             Ok(())
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn let_binding_type(let_ty: &TLetTy, init_ty: &Type) -> Type {
-//RS     match let_ty {
-//RS         TLetTy::Inferred | TLetTy::StrView => init_ty.clone(),
-//RS         TLetTy::Annotated { ty, .. } => ty.clone(),
-//RS         TLetTy::Tuple(types) => Type::Tuple(
-//RS             types
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .map(|(i, ty)| (i.to_string(), Box::new(ty.clone())))
-//RS                 .collect(),
-//RS         ),
-//RS         TLetTy::SendFn(ty) => ty.clone(),
-//RS     }
-//RS }
-//RS 
-//RS /// True when the binding holds its initializer's own type: no annotation, or
-//RS /// sema's recorded binding type with no wrapper. Sema records the inferred
-//RS /// type on every `::` binding, so the annotated form is the common one; a
-//RS /// differing type (a trait box, a union widen) keeps the value path.
-//RS fn let_binds_init_type(let_ty: &TLetTy, init_ty: &Type) -> bool {
-//RS     match let_ty {
-//RS         TLetTy::Inferred => true,
-//RS         TLetTy::Annotated {
-//RS             ty,
-//RS             wrapper: super::TLetWrapper::None,
-//RS         } => ty.without_user_tags() == init_ty.without_user_tags(),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn local_for_binding(name: &str, kw: &str) -> TLocal {
-//RS     if kw.contains("mut") {
-//RS         TLocal::user(name).as_mutable()
-//RS     } else {
-//RS         TLocal::user(name)
-//RS     }
-//RS }
-//RS 
-//RS fn lower_let_like(
-//RS     ctx: &mut LowerCtx,
-//RS     name: &str,
-//RS     init: &TExpr,
-//RS     mutable: bool,
-//RS ) -> Result<(), LowerError> {
-//RS     let is_uninit = matches!(&init.kind, TExprKind::Uninit);
-//RS     let value = if is_uninit {
-//RS         None
-//RS     } else {
-//RS         Some(lower_expr(ctx, init)?)
-//RS     };
-//RS     let local = if mutable {
-//RS         TLocal::user(name).as_mutable()
-//RS     } else {
-//RS         TLocal::user(name)
-//RS     };
-//RS     let place = ctx.bind_local(&local, init.ty.clone(), mutable, false, is_uninit)?;
-//RS     if is_uninit {
-//RS         ctx.emit(
-//RS             "stmt.let-like.initialize-uninit",
-//RS             None,
-//RS             MirOperation::InitializeUninit { place },
-//RS         )?;
-//RS     } else if let Some(value) = value {
-//RS         ctx.emit(
-//RS             "stmt.let-like.write",
-//RS             None,
-//RS             MirOperation::WritePlace { place, value },
-//RS         )?;
-//RS     }
-//RS     if let Some(value) = value {
-//RS         ctx.register_file_owner_binding(place, value)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn maybe_copy(
-//RS     ctx: &mut LowerCtx,
-//RS     value: jet_foundation::MIR::MirValueId,
-//RS     ty: &Type,
-//RS     copy: bool,
-//RS ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-//RS     if copy {
-//RS         ctx.emit(
-//RS             "stmt.copy",
-//RS             Some(ty.clone()),
-//RS             MirOperation::Copy {
-//RS                 value,
-//RS                 fact: jet_foundation::MIR::MirCopyFact::Materialize,
-//RS             },
-//RS         )
-//RS     } else {
-//RS         Ok(value)
-//RS     }
-//RS }
-//RS 
-//RS fn lower_refutable_bind(
-//RS     ctx: &mut LowerCtx,
-//RS     pattern: &TPattern,
-//RS     init: &TExpr,
-//RS     fallback: &[TStmt],
-//RS ) -> Result<(), LowerError> {
-//RS     let subject = match ctx.lower_read_window(init)? {
-//RS         Some(subject) => subject,
-//RS         None => lower_expr(ctx, init)?,
-//RS     };
-//RS     let pattern = ctx.lower_pattern(pattern)?;
-//RS     let shadow_mark = ctx.shadow_mark();
-//RS     let test = ctx.lower_pattern_condition(subject, &pattern)?;
-//RS     let success = ctx.new_block(ctx.span(), "refutable.success")?;
-//RS     let miss = ctx.new_block(ctx.span(), "refutable.miss")?;
-//RS     let join = ctx.new_block(ctx.span(), "refutable.join")?;
-//RS     ctx.terminate(MirTerminator::Branch {
-//RS         condition: test,
-//RS         then_target: success,
-//RS         else_target: miss,
-//RS     });
-//RS 
-//RS     ctx.switch_to(success);
-//RS     // D-CHOOSE-TEST1=A: captures belong to the surrounding scope after the
-//RS     // miss route diverges. Bind them on the success path so later statements
-//RS     // in the join can read the payload locals.
-//RS     ctx.bind_success_pattern(subject, &pattern)?;
-//RS     if !ctx.is_terminated() {
-//RS         ctx.terminate(MirTerminator::Jump { target: join });
-//RS     }
-//RS     // The miss route still reads a same-name subject (`x == .Val(x) ?? …`)
-//RS     // as its outer binding; the payload binding resumes at the join.
-//RS     let payload_bindings = ctx.restore_shadowed_locals(shadow_mark);
-//RS     ctx.switch_to(miss);
-//RS     lower_stmts(ctx, fallback)?;
-//RS     ctx.reinstate_shadowed_locals(payload_bindings);
-//RS     if !ctx.is_terminated() {
-//RS         ctx.terminate(MirTerminator::Jump { target: join });
-//RS     }
-//RS     ctx.switch_to(join);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn lower_split_view(
-//RS     ctx: &mut LowerCtx,
-//RS     owner: Option<&TExpr>,
-//RS     root: &str,
-//RS     name: &str,
-//RS     start: i64,
-//RS     end: i64,
-//RS     single: bool,
-//RS     write: bool,
-//RS     line: usize,
-//RS     elem_ty: Option<&Type>,
-//RS ) -> Result<(), LowerError> {
-//RS     let element = elem_ty.cloned().ok_or_else(|| {
-//RS         LowerError::new(
-//RS             ctx.span(),
-//RS             format!("split view `{name}` has no checked element type"),
-//RS         )
-//RS     })?;
-//RS     let root_expr = TExpr {
-//RS         ty: Type::List(Box::new(element.clone())),
-//RS         kind: TExprKind::Local(TLocal::user(root)),
-//RS     };
-//RS     let base_expr = owner.unwrap_or(&root_expr);
-//RS     let start_expr = TExpr {
-//RS         ty: Type::Int,
-//RS         kind: TExprKind::IntLit(start, None),
-//RS     };
-//RS     let end_expr = TExpr {
-//RS         ty: Type::Int,
-//RS         kind: TExprKind::IntLit(end, None),
-//RS     };
-//RS     if single && write {
-//RS         let place = ctx.lower_index_place(
-//RS             base_expr,
-//RS             &start_expr,
-//RS             MirIndexKind::FixedListProof,
-//RS             MirAccess::Write,
-//RS         )?;
-//RS         let local = TLocal::user(name).as_mutable();
-//RS         ctx.bind_local_alias(&local, element, place, true)?;
-//RS         return Ok(());
-//RS     }
-//RS     let ty = if single {
-//RS         element.clone()
-//RS     } else {
-//RS         Type::Apply {
-//RS             name: if write {
-//RS                 "ViewMut".to_string()
-//RS             } else {
-//RS                 "View".to_string()
-//RS             },
-//RS             args: vec![element.clone()],
-//RS         }
-//RS     };
-//RS     let value = if single {
-//RS         ctx.lower_index_value(
-//RS             base_expr,
-//RS             &start_expr,
-//RS             MirIndexKind::FixedListProof,
-//RS             &element,
-//RS             MirAccess::Read,
-//RS         )?
-//RS     } else {
-//RS         let range_expr = TExpr {
-//RS             ty: Type::Named("Range".to_string()),
-//RS             kind: TExprKind::StructLit {
-//RS                 fields: vec![
-//RS                     ("start".to_string(), start_expr.clone(), false),
-//RS                     ("end".to_string(), end_expr.clone(), false),
-//RS                     (
-//RS                         "exclusive".to_string(),
-//RS                         TExpr {
-//RS                             ty: Type::Bool,
-//RS                             kind: TExprKind::BoolLit(false),
-//RS                         },
-//RS                         false,
-//RS                     ),
-//RS                 ],
-//RS                 extra: None,
-//RS                 as_trait: None,
-//RS             },
-//RS         };
-//RS         let view = TExpr {
-//RS             ty: ty.clone(),
-//RS             kind: TExprKind::BuiltinMethod {
-//RS                 recv: Box::new(base_expr.clone()),
-//RS                 op: if write {
-//RS                     TBuiltinOp::ViewMutNew { line }
-//RS                 } else {
-//RS                     TBuiltinOp::ViewNew { line }
-//RS                 },
-//RS                 args: vec![range_expr],
-//RS             },
-//RS         };
-//RS         lower_expr(ctx, &view)?
-//RS     };
-//RS     let local = if write {
-//RS         TLocal::user(name).as_mutable()
-//RS     } else {
-//RS         TLocal::user(name)
-//RS     };
-//RS     let place = ctx.bind_local(&local, ty, write, false, false)?;
-//RS     ctx.emit(
-//RS         "stmt.split.write",
-//RS         None,
-//RS         MirOperation::WritePlace { place, value },
-//RS     )?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn lower_tuple_destructure(
-//RS     ctx: &mut LowerCtx,
-//RS     init: &TExpr,
-//RS     tmp: &str,
-//RS     kw: &str,
-//RS     move_fields: bool,
-//RS     binds: &[(String, String)],
-//RS ) -> Result<(), LowerError> {
-//RS     let subject = if move_fields {
-//RS         if let Some(place) =
-//RS             super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)?
-//RS         {
-//RS             ctx.emit(
-//RS                 "stmt.tuple.move-source",
-//RS                 Some(init.ty.clone()),
-//RS                 MirOperation::MovePlace { place },
-//RS             )?
-//RS         } else {
-//RS             lower_expr(ctx, init)?
-//RS         }
-//RS     } else {
-//RS         lower_expr(ctx, init)?
-//RS     };
-//RS     let mutable = kw.contains("mut");
-//RS     if !move_fields {
-//RS         for (index, (local_name, _)) in binds.iter().enumerate() {
-//RS             let field_name = ctx.field_name_for_type(&init.ty, index)?;
-//RS             let field_ty = ctx.checked_field_type(&init.ty, &field_name)?;
-//RS             let field_id = ctx.field_id_for_type(&init.ty, &field_name)?;
-//RS             let projected = ctx.emit(
-//RS                 "stmt.tuple.field",
-//RS                 Some(field_ty.clone()),
-//RS                 MirOperation::Field {
-//RS                     base: subject,
-//RS                     field: field_id,
-//RS                 },
-//RS             )?;
-//RS             let value = maybe_copy(ctx, projected, &field_ty, true)?;
-//RS             let local = if mutable {
-//RS                 TLocal::user(local_name).as_mutable()
-//RS             } else {
-//RS                 TLocal::user(local_name)
-//RS             };
-//RS             let place = ctx.bind_local(&local, field_ty, mutable, false, false)?;
-//RS             ctx.emit(
-//RS                 "stmt.tuple.write",
-//RS                 None,
-//RS                 MirOperation::WritePlace { place, value },
-//RS             )?;
-//RS         }
-//RS         return Ok(());
-//RS     }
-//RS 
-//RS     let temp = TLocal::generated(tmp);
-//RS     ctx.bind_local(&temp, init.ty.clone(), true, false, false)?;
-//RS     let temp_place = ctx.place_for_local(&temp, MirAccess::Move)?;
-//RS     ctx.emit(
-//RS         "stmt.tuple.move-temp.write",
-//RS         None,
-//RS         MirOperation::WritePlace {
-//RS             place: temp_place,
-//RS             value: subject,
-//RS         },
-//RS     )?;
-//RS     for (index, (local_name, _)) in binds.iter().enumerate() {
-//RS         let field_name = ctx.field_name_for_type(&init.ty, index)?;
-//RS         let field_ty = ctx.checked_field_type(&init.ty, &field_name)?;
-//RS         let field_place =
-//RS             ctx.project_field_place(temp_place, &field_name, field_ty.clone(), ctx.span())?;
-//RS         let value = ctx.emit(
-//RS             "stmt.tuple.move-field",
-//RS             Some(field_ty.clone()),
-//RS             MirOperation::MovePlace { place: field_place },
-//RS         )?;
-//RS         let local = if mutable {
-//RS             TLocal::user(local_name).as_mutable()
-//RS         } else {
-//RS             TLocal::user(local_name)
-//RS         };
-//RS         let place = ctx.bind_local(&local, field_ty, mutable, false, false)?;
-//RS         ctx.emit(
-//RS             "stmt.tuple.write",
-//RS             None,
-//RS             MirOperation::WritePlace { place, value },
-//RS         )?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn lower_struct_destructure(
-//RS     ctx: &mut LowerCtx,
-//RS     init: &TExpr,
-//RS     tmp: &str,
-//RS     kw: &str,
-//RS     move_fields: bool,
-//RS     binds: &[(String, String)],
-//RS ) -> Result<(), LowerError> {
-//RS     let subject = if move_fields {
-//RS         if let Some(place) =
-//RS             super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)?
-//RS         {
-//RS             ctx.emit(
-//RS                 "stmt.struct.move-source",
-//RS                 Some(init.ty.clone()),
-//RS                 MirOperation::MovePlace { place },
-//RS             )?
-//RS         } else {
-//RS             lower_expr(ctx, init)?
-//RS         }
-//RS     } else {
-//RS         lower_expr(ctx, init)?
-//RS     };
-//RS     let mutable = kw.contains("mut");
-//RS     if !move_fields {
-//RS         for (local_name, field_name) in binds {
-//RS             let field_ty = ctx.checked_field_type(&init.ty, field_name)?;
-//RS             let field_id = ctx.field_id_for_type(&init.ty, field_name)?;
-//RS             let projected = ctx.emit(
-//RS                 "stmt.struct.field",
-//RS                 Some(field_ty.clone()),
-//RS                 MirOperation::Field {
-//RS                     base: subject,
-//RS                     field: field_id,
-//RS                 },
-//RS             )?;
-//RS             let value = maybe_copy(ctx, projected, &field_ty, true)?;
-//RS             let local = if mutable {
-//RS                 TLocal::user(local_name).as_mutable()
-//RS             } else {
-//RS                 TLocal::user(local_name)
-//RS             };
-//RS             let place = ctx.bind_local(&local, field_ty, mutable, false, false)?;
-//RS             ctx.emit(
-//RS                 "stmt.struct.write",
-//RS                 None,
-//RS                 MirOperation::WritePlace { place, value },
-//RS             )?;
-//RS         }
-//RS         return Ok(());
-//RS     }
-//RS 
-//RS     let temp = TLocal::generated(tmp);
-//RS     ctx.bind_local(&temp, init.ty.clone(), true, false, false)?;
-//RS     let temp_place = ctx.place_for_local(&temp, MirAccess::Move)?;
-//RS     ctx.emit(
-//RS         "stmt.struct.move-temp.write",
-//RS         None,
-//RS         MirOperation::WritePlace {
-//RS             place: temp_place,
-//RS             value: subject,
-//RS         },
-//RS     )?;
-//RS     for (local_name, field_name) in binds {
-//RS         let field_ty = ctx.checked_field_type(&init.ty, field_name)?;
-//RS         let field_place =
-//RS             ctx.project_field_place(temp_place, field_name, field_ty.clone(), ctx.span())?;
-//RS         let value = ctx.emit(
-//RS             "stmt.struct.move-field",
-//RS             Some(field_ty.clone()),
-//RS             MirOperation::MovePlace { place: field_place },
-//RS         )?;
-//RS         let local = if mutable {
-//RS             TLocal::user(local_name).as_mutable()
-//RS         } else {
-//RS             TLocal::user(local_name)
-//RS         };
-//RS         let place = ctx.bind_local(&local, field_ty, mutable, false, false)?;
-//RS         ctx.emit(
-//RS             "stmt.struct.write",
-//RS             None,
-//RS             MirOperation::WritePlace { place, value },
-//RS         )?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn lower_list_destructure(
-//RS     ctx: &mut LowerCtx,
-//RS     init: &TExpr,
-//RS     kw: &str,
-//RS     want: usize,
-//RS     elems: &[String],
-//RS ) -> Result<(), LowerError> {
-//RS     let subject = lower_expr(ctx, init)?;
-//RS     let mutable = kw.contains("mut");
-//RS     let element_ty = match &init.ty {
-//RS         Type::List(ty) | Type::FixedList { elem: ty, .. } => (**ty).clone(),
-//RS         _ => init.ty.clone(),
-//RS     };
-//RS     for (index, local_name) in elems.iter().enumerate().take(want) {
-//RS         let index_value = const_int(ctx, index as i64)?;
-//RS         let projected = ctx.emit_index_value(
-//RS             subject,
-//RS             index_value,
-//RS             MirIndexKind::List,
-//RS             &element_ty,
-//RS             MirAccess::Read,
-//RS             "stmt.list-destructure.index",
-//RS         )?;
-//RS         let local = if mutable {
-//RS             TLocal::user(local_name).as_mutable()
-//RS         } else {
-//RS             TLocal::user(local_name)
-//RS         };
-//RS         let place = ctx.bind_local(&local, element_ty.clone(), mutable, false, false)?;
-//RS         ctx.emit(
-//RS             "stmt.list-destructure.write",
-//RS             None,
-//RS             MirOperation::WritePlace {
-//RS                 place,
-//RS                 value: projected,
-//RS             },
-//RS         )?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn assignment_place_type(
-//RS     ctx: &LowerCtx,
-//RS     place: &crate::Codegen::TIR::TPlace,
-//RS ) -> Result<Type, LowerError> {
-//RS     match place {
-//RS         crate::Codegen::TIR::TPlace::Expr(expr) => Ok(expr.ty.clone()),
-//RS         crate::Codegen::TIR::TPlace::Local(local) => ctx
-//RS             .local_types
-//RS             .get(&local.name)
-//RS             .cloned()
-//RS             .or_else(|| local.persist_ty.clone())
-//RS             .ok_or_else(|| {
-//RS                 ctx.error(
-//RS                     ctx.span(),
-//RS                     format!("checked MIR local `{}` has no type", local.name),
-//RS                 )
-//RS             }),
-//RS     }
-//RS }
-//RS 
-//RS fn assignment_binary_overflow(op: BinOp, lhs: &Type, rhs: &Type) -> bool {
-//RS     (matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
-//RS         && (lhs.is_integer() || rhs.is_integer()))
-//RS         || (matches!(op, BinOp::Shl | BinOp::Shr) && lhs.is_integer())
-//RS }
-//RS 
-//RS fn lower_assign(
-//RS     ctx: &mut LowerCtx,
-//RS     place: &crate::Codegen::TIR::TPlace,
-//RS     op: Option<BinOp>,
-//RS     value: &TExpr,
-//RS     clone_value: bool,
-//RS     line: u32,
-//RS ) -> Result<(), LowerError> {
-//RS     let place_ty = assignment_place_type(ctx, place)?;
-//RS     let rhs = lower_expr(ctx, value)?;
-//RS     let rhs = maybe_copy(ctx, rhs, &value.ty, clone_value)?;
-//RS     let place_id = ctx.lower_place(place, MirAccess::Write)?;
-//RS     // A compound assignment `place op= rhs` reads, combines and writes back the
-//RS     // place's own type, exactly like the long form `place = place op rhs`. The
-//RS     // right operand keeps its checked type (a widened `U64{byte}` or an `Int`
-//RS     // shift count), so the route and the result are keyed on the place.
-//RS     let assigned = if let Some(op) = op {
-//RS         let old = ctx.emit(
-//RS             "stmt.assign.read",
-//RS             Some(place_ty.clone()),
-//RS             MirOperation::ReadPlace(place_id),
-//RS         )?;
-//RS         let dispatch = super::tir_to_mir_expr::lower_binary_dispatch(
-//RS             ctx,
-//RS             op,
-//RS             assignment_binary_overflow(op, &place_ty, &value.ty),
-//RS             &place_ty,
-//RS             &value.ty,
-//RS             &place_ty,
-//RS             line,
-//RS         )?;
-//RS         ctx.emit(
-//RS             "stmt.assign.rmw",
-//RS             Some(place_ty.clone()),
-//RS             MirOperation::Binary {
-//RS                 op: super::mir_binary_op(op),
-//RS                 dispatch,
-//RS                 left: old,
-//RS                 right: rhs,
-//RS             },
-//RS         )?
-//RS     } else {
-//RS         ctx.trait_box_value(rhs, &value.ty, &place_ty)?
-//RS     };
-//RS     let owning_file_slot = ctx
-//RS         .places
-//RS         .iter()
-//RS         .find(|candidate| candidate.id == place_id)
-//RS         .and_then(|candidate| candidate.ty.identity)
-//RS         .is_some_and(|identity| ctx.is_core_file_owner(identity));
-//RS     ctx.emit_file_owner_replacement(place_id)?;
-//RS     ctx.emit(
-//RS         "stmt.assign.write",
-//RS         None,
-//RS         if owning_file_slot {
-//RS             MirOperation::ReplacePlace {
-//RS                 place: place_id,
-//RS                 value: assigned,
-//RS             }
-//RS         } else {
-//RS             MirOperation::WritePlace {
-//RS                 place: place_id,
-//RS                 value: assigned,
-//RS             }
-//RS         },
-//RS     )?;
-//RS     ctx.drop_temporary_shared_guard(place_id)?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn lower_index_field_assign(
-//RS     ctx: &mut LowerCtx,
-//RS     assign: &TIndexFieldAssign,
-//RS ) -> Result<(), LowerError> {
-//RS     // Match regular assignment: evaluate the RHS before the indexed field
-//RS     // place, whose receiver and index expressions may have effects.
-//RS     let rhs = lower_expr(ctx, &assign.value)?;
-//RS     let rhs = maybe_copy(ctx, rhs, &assign.value.ty, assign.clone_value)?;
-//RS     let base_place = ctx.lower_index_place(
-//RS         &assign.base,
-//RS         &assign.index,
-//RS         if assign.is_map {
-//RS             MirIndexKind::Map
-//RS         } else {
-//RS             MirIndexKind::List
-//RS         },
-//RS         MirAccess::Write,
-//RS     )?;
-//RS     let place = ctx.project_field_place(
-//RS         base_place,
-//RS         &assign.field,
-//RS         assign.field_ty.clone(),
-//RS         ctx.span(),
-//RS     )?;
-//RS     let assigned = if let Some(op) = assign.op {
-//RS         let old = ctx.emit(
-//RS             "stmt.index-field.read",
-//RS             Some(assign.field_ty.clone()),
-//RS             MirOperation::ReadPlace(place),
-//RS         )?;
-//RS         let dispatch = super::tir_to_mir_expr::lower_binary_dispatch(
-//RS             ctx,
-//RS             op,
-//RS             assignment_binary_overflow(op, &assign.field_ty, &assign.value.ty),
-//RS             &assign.field_ty,
-//RS             &assign.value.ty,
-//RS             &assign.field_ty,
-//RS             assign.line as u32,
-//RS         )?;
-//RS         ctx.emit(
-//RS             "stmt.index-field.rmw",
-//RS             Some(assign.field_ty.clone()),
-//RS             MirOperation::Binary {
-//RS                 op: super::mir_binary_op(op),
-//RS                 dispatch,
-//RS                 left: old,
-//RS                 right: rhs,
-//RS             },
-//RS         )?
-//RS     } else {
-//RS         ctx.trait_box_value(rhs, &assign.value.ty, &assign.field_ty)?
-//RS     };
-//RS     let owning_file_slot = ctx
-//RS         .mir_type(&assign.field_ty)?
-//RS         .identity
-//RS         .is_some_and(|identity| ctx.is_core_file_owner(identity));
-//RS     ctx.emit(
-//RS         "stmt.index-field.write",
-//RS         None,
-//RS         if owning_file_slot {
-//RS             MirOperation::ReplacePlace {
-//RS                 place,
-//RS                 value: assigned,
-//RS             }
-//RS         } else {
-//RS             MirOperation::WritePlace {
-//RS                 place,
-//RS                 value: assigned,
-//RS             }
-//RS         },
-//RS     )?;
-//RS     ctx.drop_temporary_shared_guard(place)?;
-//RS     Ok(())
-//RS }
-//RS fn lower_swizzle_assign(
-//RS     ctx: &mut LowerCtx,
-//RS     base: &TExpr,
-//RS     lanes: &[u8],
-//RS     value: &TExpr,
-//RS     clone_value: bool,
-//RS ) -> Result<(), LowerError> {
-//RS     let rhs = lower_expr(ctx, value)?;
-//RS     let (rhs_values, rhs_ty) = if lanes.len() > 1 {
-//RS         let rhs_type_name = match value.ty.without_user_tags() {
-//RS             Type::Named(name) => name.clone(),
-//RS             _ => {
-//RS                 return Err(ctx.error(
-//RS                     ctx.span(),
-//RS                     "checked multi-lane swizzle assignment has no vector RHS",
-//RS                 ));
-//RS             }
-//RS         };
-//RS         let scalar_ty = crate::Sema::math_scalar_ty(&rhs_type_name);
-//RS         let lane_carrier = TFailureCarrier::from_checked_type(&scalar_ty);
-//RS         let line = ctx.source_line();
-//RS         let mut values = Vec::with_capacity(lanes.len());
-//RS         for ordinal in 0..lanes.len() {
-//RS             let index = ctx.emit(
-//RS                 &format!("math-swizzle-rhs-index-{ordinal}"),
-//RS                 Some(Type::Int),
-//RS                 MirOperation::Constant(MirConstant::Int {
-//RS                     value: ordinal as i64,
-//RS                     width: None,
-//RS                     spelling: None,
-//RS                 }),
-//RS             )?;
-//RS             let call = ctx.intern_prelude_route(super::lane_index_route(
-//RS                 &rhs_type_name,
-//RS                 &scalar_ty,
-//RS                 &lane_carrier,
-//RS             )?)?;
-//RS             let location = ctx.panic_location_at(line);
-//RS             let context = ctx.panic_context_at(line, None);
-//RS             values.push(ctx.emit(
-//RS                 "math-swizzle-rhs-lane",
-//RS                 Some(scalar_ty.clone()),
-//RS                 MirOperation::Index {
-//RS                     call,
-//RS                     base: rhs,
-//RS                     index,
-//RS                     kind: MirIndexKind::Lane,
-//RS                     access: MirAccess::Read,
-//RS                     location,
-//RS                     context,
-//RS                 },
-//RS             )?);
-//RS         }
-//RS         (values, scalar_ty)
-//RS     } else {
-//RS         (vec![rhs], value.ty.clone())
-//RS     };
-//RS     let places = ctx.lower_swizzle_place(base, lanes, MirAccess::Write)?;
-//RS     for (index, place) in places.into_iter().enumerate() {
-//RS         let value = maybe_copy(
-//RS             ctx,
-//RS             rhs_values[index],
-//RS             &rhs_ty,
-//RS             clone_value || index + 1 < lanes.len(),
-//RS         )?;
-//RS         ctx.emit(
-//RS             "stmt.swizzle.write",
-//RS             None,
-//RS             MirOperation::WritePlace { place, value },
-//RS         )?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// One `if` of an else-if chain whose join block is still pending. A link
-//RS /// reached through its parent's `else` also holds that else scope and the
-//RS /// canonical-pass input of the `lower_stmts` call it stands for.
-//RS struct IfChainLink {
-//RS     join: MirBlockId,
-//RS     else_scope: Option<(MirScopeId, Option<(String, String)>)>,
-//RS }
-//RS 
-//RS /// Lower an `if` and its else-if chain (an `else` that is exactly one `if`,
-//RS /// which is how every N-arm decision table reaches TIR) in a loop rather than
-//RS /// one recursion per arm. The loop holds borrowed links, so the walk is linear
-//RS /// in the arm count. Blocks, scopes, shadow restores, and terminators are
-//RS /// emitted in exactly the order the nested `lower_stmts` -> `lower_stmt` ->
-//RS /// `lower_if` calls produced. The Jet compiler's `jet_codegen_lower_if` emits
-//RS /// the same order by direct recursion, since a Jet local holding the rest of
-//RS /// the chain would be a copy of it.
-//RS fn lower_if<'a>(
-//RS     ctx: &mut LowerCtx,
-//RS     cond: &'a TIfCond,
-//RS     then_body: &'a [TStmt],
-//RS     else_body: Option<&'a [TStmt]>,
-//RS ) -> Result<(), LowerError> {
-//RS     let mut links = Vec::new();
-//RS     let (mut cond, mut then_body, mut else_body) = (cond, then_body, else_body);
-//RS     loop {
-//RS         let then_block = ctx.new_block(ctx.span(), "if.then")?;
-//RS         let else_block = ctx.new_block(ctx.span(), "if.else")?;
-//RS         let join = ctx.new_block(ctx.span(), "if.join")?;
-//RS         // Condition bindings (`x == .Val(x)`) hold only on the then path.
-//RS         let shadow_mark = ctx.shadow_mark();
-//RS         lower_cond(ctx, cond, then_block, else_block)?;
-//RS 
-//RS         ctx.switch_to(then_block);
-//RS         {
-//RS             let scope = ctx.enter_scope(MirScopeKind::Live, ctx.span(), None)?;
-//RS             lower_stmts(ctx, then_body)?;
-//RS             ctx.exit_scope(scope)?;
-//RS         }
-//RS         if !ctx.is_terminated() {
-//RS             ctx.terminate(MirTerminator::Jump { target: join });
-//RS         }
-//RS 
-//RS         ctx.restore_shadowed_locals(shadow_mark);
-//RS         ctx.switch_to(else_block);
-//RS         if let Some(body) = else_body {
-//RS             let scope = ctx.enter_scope(MirScopeKind::Live, ctx.span(), None)?;
-//RS             if let [TStmt::If {
-//RS                 cond: next_cond,
-//RS                 then_body: next_then,
-//RS                 else_body: next_else,
-//RS                 ..
-//RS             }] = body
-//RS             {
-//RS                 let before = canonical_statements_before(body);
-//RS                 if !ctx.is_terminated() {
-//RS                     links.push(IfChainLink {
-//RS                         join,
-//RS                         else_scope: Some((scope, before)),
-//RS                     });
-//RS                     cond = next_cond;
-//RS                     then_body = next_then.as_slice();
-//RS                     else_body = next_else.as_deref();
-//RS                     continue;
-//RS                 }
-//RS                 record_lowered_statements(ctx, before);
-//RS             } else {
-//RS                 lower_stmts(ctx, body)?;
-//RS             }
-//RS             ctx.exit_scope(scope)?;
-//RS         }
-//RS         links.push(IfChainLink {
-//RS             join,
-//RS             else_scope: None,
-//RS         });
-//RS         break;
-//RS     }
-//RS     while let Some(link) = links.pop() {
-//RS         if let Some((scope, before)) = link.else_scope {
-//RS             record_lowered_statements(ctx, before);
-//RS             ctx.exit_scope(scope)?;
-//RS         }
-//RS         if !ctx.is_terminated() {
-//RS             ctx.terminate(MirTerminator::Jump { target: link.join });
-//RS         }
-//RS         ctx.switch_to(link.join);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn lower_cond(
-//RS     ctx: &mut LowerCtx,
-//RS     cond: &TIfCond,
-//RS     then_target: MirBlockId,
-//RS     else_target: MirBlockId,
-//RS ) -> Result<(), LowerError> {
-//RS     match cond {
-//RS         TIfCond::Plain(expr) => {
-//RS             let value = lower_expr(ctx, expr)?;
-//RS             ctx.terminate(MirTerminator::Branch {
-//RS                 condition: value,
-//RS                 then_target,
-//RS                 else_target,
-//RS             });
-//RS         }
-//RS         TIfCond::And { left, right } => {
-//RS             let right_block = ctx.new_block(ctx.span(), "if.and.right")?;
-//RS             lower_cond(ctx, left, right_block, else_target)?;
-//RS             ctx.switch_to(right_block);
-//RS             lower_cond(ctx, right, then_target, else_target)?;
-//RS         }
-//RS         TIfCond::IfLet { pattern, subj } => {
-//RS             let subject = ctx.lower_pattern_subject(subj)?;
-//RS             let pattern = ctx.lower_pattern(pattern)?;
-//RS             let test = ctx.lower_pattern_condition(subject, &pattern)?;
-//RS             ctx.terminate(MirTerminator::Branch {
-//RS                 condition: test,
-//RS                 then_target,
-//RS                 else_target,
-//RS             });
-//RS         }
-//RS         TIfCond::IsNone { subj } => {
-//RS             let subject = lower_expr(ctx, subj)?;
-//RS             let present = ctx.emit(
-//RS                 "if.is-none.test",
-//RS                 Some(Type::Bool),
-//RS                 MirOperation::OptionIsSome { subject },
-//RS             )?;
-//RS             ctx.terminate(MirTerminator::Branch {
-//RS                 condition: present,
-//RS                 then_target: else_target,
-//RS                 else_target: then_target,
-//RS             });
-//RS         }
-//RS         TIfCond::Matches { pattern, subj } => {
-//RS             let subject = ctx.lower_pattern_subject(subj)?;
-//RS             let pattern = ctx.lower_pattern(pattern)?;
-//RS             let test = ctx.lower_pattern_condition(subject, &pattern)?;
-//RS             ctx.terminate(MirTerminator::Branch {
-//RS                 condition: test,
-//RS                 then_target,
-//RS                 else_target,
-//RS             });
-//RS         }
-//RS         TIfCond::WithPrelude { prelude, cond } => {
-//RS             lower_stmts(ctx, prelude)?;
-//RS             if !ctx.is_terminated() {
-//RS                 lower_cond(ctx, cond, then_target, else_target)?;
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn lower_loop(ctx: &mut LowerCtx, label: Option<&str>, body: &[TStmt]) -> Result<(), LowerError> {
-//RS     lower_loop_with_exit(ctx, label, body).map(|_| ())
-//RS }
-//RS 
-//RS pub(super) fn lower_loop_value(
-//RS     ctx: &mut LowerCtx,
-//RS     label: Option<&str>,
-//RS     body: &[TStmt],
-//RS     result_ty: &Type,
-//RS ) -> Result<MirValueId, LowerError> {
-//RS     let exit = lower_loop_with_exit(ctx, label, body)?;
-//RS     let mut incoming = Vec::new();
-//RS     let mut value_less_break = false;
-//RS     for block in &ctx.blocks {
-//RS         let MirTerminator::Break { target, value } = &block.terminator else {
-//RS             continue;
-//RS         };
-//RS         if *target != exit {
-//RS             continue;
-//RS         }
-//RS         match value {
-//RS             Some(value) => incoming.push((block.id, *value)),
-//RS             None => value_less_break = true,
-//RS         }
-//RS     }
-//RS     if value_less_break || incoming.is_empty() {
-//RS         return Err(ctx.error(
-//RS             ctx.span(),
-//RS             "TExprKind::InlineBlock result loop has a break exit without a value",
-//RS         ));
-//RS     }
-//RS     ctx.switch_to(exit);
-//RS     ctx.emit(
-//RS         "loop-value-phi",
-//RS         Some(result_ty.clone()),
-//RS         MirOperation::Phi { incoming },
-//RS     )
-//RS }
-//RS 
-//RS fn lower_loop_with_exit(
-//RS     ctx: &mut LowerCtx,
-//RS     label: Option<&str>,
-//RS     body: &[TStmt],
-//RS ) -> Result<MirBlockId, LowerError> {
-//RS     let header = ctx.new_block(ctx.span(), "loop.header")?;
-//RS     let body_block = ctx.new_block(ctx.span(), "loop.body")?;
-//RS     let exit = ctx.new_block(ctx.span(), "loop.exit")?;
-//RS     ctx.terminate(MirTerminator::Jump { target: header });
-//RS     ctx.switch_to(header);
-//RS     ctx.terminate(MirTerminator::Jump { target: body_block });
-//RS     ctx.switch_to(body_block);
-//RS     ctx.push_loop(label.map(str::to_string), exit, header);
-//RS     ctx.push_lexical_frame();
-//RS     lower_stmts(ctx, body)?;
-//RS     ctx.pop_lexical_frame()?;
-//RS     ctx.pop_loop();
-//RS     if !ctx.is_terminated() {
-//RS         ctx.terminate(MirTerminator::Jump { target: header });
-//RS     }
-//RS     ctx.switch_to(exit);
-//RS     Ok(exit)
-//RS }
-//RS 
-//RS fn lower_while(
-//RS     ctx: &mut LowerCtx,
-//RS     label: Option<&str>,
-//RS     cond: &TExpr,
-//RS     body: &[TStmt],
-//RS ) -> Result<(), LowerError> {
-//RS     let header = ctx.new_block(ctx.span(), "while.header")?;
-//RS     let body_block = ctx.new_block(ctx.span(), "while.body")?;
-//RS     let exit = ctx.new_block(ctx.span(), "while.exit")?;
-//RS     ctx.terminate(MirTerminator::Jump { target: header });
-//RS     ctx.switch_to(header);
-//RS     let condition = lower_expr(ctx, cond)?;
-//RS     ctx.terminate(MirTerminator::Branch {
-//RS         condition,
-//RS         then_target: body_block,
-//RS         else_target: exit,
-//RS     });
-//RS     ctx.switch_to(body_block);
-//RS     ctx.push_loop(label.map(str::to_string), exit, header);
-//RS     ctx.push_lexical_frame();
-//RS     lower_stmts(ctx, body)?;
-//RS     ctx.pop_lexical_frame()?;
-//RS     ctx.pop_loop();
-//RS     if !ctx.is_terminated() {
-//RS         ctx.terminate(MirTerminator::Jump { target: header });
-//RS     }
-//RS     ctx.switch_to(exit);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn lower_counted_loop(
-//RS     ctx: &mut LowerCtx,
-//RS     label: Option<&str>,
-//RS     init: &TStmt,
-//RS     cond: &TExpr,
-//RS     step: Option<&TStmt>,
-//RS     auto_vectorization: Option<&crate::AST::AutoVectorizationFacts>,
-//RS     body: &[TStmt],
-//RS ) -> Result<(), LowerError> {
-//RS     let loop_span = ctx.span();
-//RS     lower_stmt(ctx, init)?;
-//RS     if ctx.is_terminated() {
-//RS         return Ok(());
-//RS     }
-//RS     let header = ctx.new_block(ctx.span(), "counted.header")?;
-//RS     let body_block = ctx.new_block(ctx.span(), "counted.body")?;
-//RS     let step_block = ctx.new_block(ctx.span(), "counted.step")?;
-//RS     let exit = ctx.new_block(ctx.span(), "counted.exit")?;
-//RS     ctx.terminate(MirTerminator::Jump { target: header });
-//RS     ctx.switch_to(header);
-//RS     let condition = lower_expr(ctx, cond)?;
-//RS     ctx.terminate(MirTerminator::Branch {
-//RS         condition,
-//RS         then_target: body_block,
-//RS         else_target: exit,
-//RS     });
-//RS     ctx.switch_to(body_block);
-//RS     ctx.push_loop(label.map(str::to_string), exit, step_block);
-//RS     ctx.push_lexical_frame();
-//RS     lower_stmts(ctx, body)?;
-//RS     ctx.pop_lexical_frame()?;
-//RS     ctx.pop_loop();
-//RS     if !ctx.is_terminated() {
-//RS         ctx.terminate(MirTerminator::Jump { target: step_block });
-//RS     }
-//RS     ctx.switch_to(step_block);
-//RS     if let Some(step) = step {
-//RS         lower_stmt(ctx, step)?;
-//RS     }
-//RS     if !ctx.is_terminated() {
-//RS         ctx.terminate(MirTerminator::Jump { target: header });
-//RS     }
-//RS     ctx.switch_to(exit);
-//RS     if let Some(facts) = auto_vectorization {
-//RS         let cursor_place = ctx.loop_cursor_place(cond);
-//RS         let body_blocks = ctx.loop_body_blocks(header, body_block, Some(exit), Some(step_block));
-//RS         let cursor = ctx.checked_loop_cursor(&body_blocks, Some(step_block), cursor_place, None);
-//RS         ctx.record_checked_vector_fact(
-//RS             header,
-//RS             cursor,
-//RS             body_blocks,
-//RS             Some(step_block),
-//RS             cursor_place,
-//RS             facts,
-//RS             loop_span,
-//RS         )?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-// END-PORT-PENDING 0537 crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1-1751
+// Checked TIR statement/control-flow lowering uses only shared MIR vocabulary.
+use JetCodegen.Codegen.TIR.Mir.[LowerCtx, LowerError, TransactionRestore]
+use JetCodegen.Codegen.TIR.TirToMirExpr.[lower_expr, lower_receiver_place, lower_or_fallback_window, lower_binary_dispatch]
+use JetSema.AST.[BinOp, Type, AutoVectorizationFacts]
+use JetSema.[Syntax, Sema]
+use JetCodegen.Codegen.TIR.*
+use jet_foundation.CanonicalPass
+use jet_foundation.MIR.*
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:25
+pub fn lower_stmts(ctx: &LowerCtx, stmts: [TStmt]) -> Unit LowerError! {
+    before := canonical_statements_before(stmts)
+    for stmt in stmts { if ctx.is_terminated() { break }; lower_stmt(ctx, stmt)? }
+    record_lowered_statements(ctx, ^before)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:38
+fn canonical_statements_before(stmts: [TStmt]) -> (String, String)? {
+    if CanonicalPass.enabled() { Val((canonical_statements_payload(stmts), canonical_statements_identity(stmts))) } else { None }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:47
+fn record_lowered_statements(ctx: LowerCtx, before: (String, String)?) {
+    if before == Val((before_payload, before_identity)) {
+        CanonicalPass.record("lowering", "mir.lower-statements", "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs", "tir", ^before_payload, ^before_identity, "mir", CanonicalPass.debug_payload("mir", "mir.lower-statements", ctx.blocks), CanonicalPass.debug_identity("mir", "mir.lower-statements", ctx.blocks), "preserve")
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:69
+pub fn lower_stmt(ctx: &LowerCtx, stmt: TStmt) -> Unit LowerError! {
+    stmt == {
+        InvariantViolation { construct, span } -> fail ctx.error(span, construct.to_string())
+        Contract { contract } -> ctx.lower_contract(contract)?
+        ContractScope { pre, body, post, result } -> ctx.lower_contract_scope(pre, body, post, result)?
+        Let { name, kw, let_ty, init, gc_promotion, gc_transferred: _ } -> {
+            scope_guard_binding := (init.kind == { CoreClosureCall { kind: Guard { .. } } -> true; _ -> false }) || (init.ty == { Named(name) -> name == "EventScope"; _ -> false })
+            alias_place := init.kind == {
+                Borrow { place, mutable } -> Val((ctx.lower_place(TPlace.Expr(place), if mutable { MirAccess.Write } else { MirAccess.Read })?, mutable))
+                BuiltinMethod { recv, op: ViewMutNew { .. }, .. } -> {
+                    if recv.ty.without_user_tags() == { List(_) -> true; _ -> false } {
+                        lower_receiver_place(ctx, init, MirAccess.Write)?.map(fn(place) { (place, true) })
+                    } else if !kw.contains("mut") && !scope_guard_binding && let_binds_init_type(let_ty, init.ty) && gc_promotion.is_none() {
+                        ctx.read_window_place(init)?.map(fn(place) { (place, false) })
+                    } else { None }
+                }
+                _ -> {
+                    if !kw.contains("mut") && !scope_guard_binding && let_binds_init_type(let_ty, init.ty) && gc_promotion.is_none() {
+                        place := init.kind == { OrFallback { value, fallback } -> lower_or_fallback_window(ctx, init, value, fallback)?; _ -> ctx.read_window_place(init)? }
+                        place.map(fn(place) { (place, false) })
+                    } else { None }
+                }
+            }
+            ty := let_binding_type(let_ty, init.ty)
+            is_uninit := init.kind == { Uninit -> true; _ -> false }
+            value := if is_uninit || alias_place.is_some() { None } else {
+                value := lower_expr(ctx, init)?
+                Val(ctx.trait_box_value(value, init.ty, ty)?)
+            }
+            local := local_for_binding(name, kw)
+            place := alias_place == {
+                Val((alias, mutable)) -> {
+                    if mutable { _ :: ctx.window_aliases.insert(local.name.to_string()) }
+                    ctx.bind_local_alias(local, ^ty, alias, mutable)?
+                }
+                None -> if let_ty == { SendFn(_) -> true; _ -> false } { ctx.bind_local_send_fn(local, ^ty, local.mutable, false, is_uninit)? } else { ctx.bind_local(local, ^ty, local.mutable, false, is_uninit)? }
+            }
+            if is_uninit { _ :: ctx.emit("stmt.let.initialize-uninit", None, MirOperation.InitializeUninit { place })? }
+            else if value == Val(value) { _ :: ctx.emit("stmt.let.write", None, MirOperation.WritePlace { place, value })? }
+            if scope_guard_binding && alias_place.is_none() { ctx.register_scope_guard(place)? }
+            if alias_place.is_none() { if value == Val(value) { ctx.register_file_owner_binding(place, value)? } }
+        }
+        RefutableBind { pattern, init, fallback } -> lower_refutable_bind(ctx, pattern, init, fallback)?
+        GcEdit { root, slot, index_temp, stmt, .. } -> {
+            scope := ctx.enter_scope(MirScopeKind.Authority, ctx.span(), Val("{root}.{slot}"))?
+            if index_temp == Val((name, init)) { lower_let_like(ctx, name, init, true)? }
+            lower_stmt(ctx, stmt)?
+            ctx.exit_scope(scope)?
+        }
+        SplitViews { owner, root, name, start, end, single, write, elem_ty, line, .. } -> lower_split_view(ctx, owner, root, name, start, end, single, write, line, elem_ty)?
+        TupleDestructure { tmp, init, kw, move_fields, binds } -> lower_tuple_destructure(ctx, init, tmp, kw, move_fields, binds)?
+        StructDestructure { tmp, init, kw, move_fields, binds } -> lower_struct_destructure(ctx, init, tmp, kw, move_fields, binds)?
+        ListDestructure { init, kw, want, elems, .. } -> lower_list_destructure(ctx, init, kw, want, elems)?
+        Assign { place, op, value, clone_value, line } -> lower_assign(ctx, place, op, value, clone_value, line)?
+        Return(value) -> ctx.lower_return(value)?
+        ExprStmt(expr) -> { _ :: lower_expr(ctx, expr)? }
+        TaskGroup { group, limit, body } -> {
+            scope := ctx.enter_scope(MirScopeKind.TaskGroup, ctx.span(), Val(group.name.to_string()))?
+            call_arg := fn(value: TExpr, borrow: Bool) { TCallArg { value, template_items: None, borrow, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None } }
+            group_ty := Type.Named(Syntax.TYPE_TASKGROUP.to_string())
+            constructor_args := limit == {
+                Val(limit) -> {
+                    conversion := resolve_numeric_conversion_op("I64", "Int") == {
+                        Val(TryFrom { host_kind, dst_rust, dst_spelling }) -> (host_kind, dst_rust, dst_spelling)
+                        _ -> { fail ctx.error(ctx.span(), "missing task group limit conversion") }
+                    }
+                    (host_kind, dst_rust, dst_spelling) := ^conversion
+                    line := ctx.function_source().map(fn(source) { source.lines.line_col(source.text, ctx.span().start).0 }).unwrap_or(ctx.function.line) as U32
+                    [call_arg(TExpr { ty: Type.IntN { signed: true, bits: 64 }, kind: TExprKind.NumericMethod { recv: limit, op: TNumericOp.CheckedIntToFixed { host_kind, dst_rust, dst_spelling, line } } }, false)]
+                }
+                None -> []
+            }
+            owner := TStaticOwner.Prelude { rooted: true, path: "jet_std::JetTaskGroup", generics: [] }
+            constructor := TExpr { ty: group_ty, kind: TExprKind.StaticCall { owner, owner_type: None, method: TMethodRef.bare(if limit.is_some() { "with_limit" } else { "new" }), type_args: [], args: ^constructor_args } }
+            group_place := ctx.bind_local(group, group_ty, group.mutable, false, false)?
+            group_value := lower_expr(ctx, constructor)?
+            _ :: ctx.emit("stmt.task-group.write", None, MirOperation.WritePlace { place: group_place, value: group_value })?
+            close := TExpr { ty: Type.Named(Syntax.INTERNAL_UNIT_TYPE.to_string()), kind: TExprKind.StaticCall { owner, owner_type: None, method: TMethodRef.bare("close"), type_args: [], args: [call_arg(TExpr { ty: group_ty, kind: TExprKind.Local(group) }, true)] } }
+            ctx.register_defer_close(^close, group)?
+            lower_stmts(ctx, body)?
+            ctx.exit_scope(scope)?
+        }
+        DeferClose { close, resource } -> ctx.register_defer_close(close, resource)?
+        If { cond, then_body, else_body, .. } -> lower_if(ctx, cond, then_body, else_body)?
+        Loop { label, body } -> lower_loop(ctx, label, body)?
+        While { label, cond, body } -> lower_while(ctx, label, cond, body)?
+        CountedLoop { label, init, cond, step, auto_vectorization, body } -> lower_counted_loop(ctx, label, init, cond, step, auto_vectorization, body)?
+        Range { label, var, source, start, end, step, exclusive, auto_vectorization, body } -> lower_range_loop(ctx, label, var, source, start, end, step, exclusive, auto_vectorization, body)?
+        Break(label) -> {
+            target := ctx.resolve_break(label)?
+            depth := ctx.break_cleanup_depth(label)?
+            ctx.terminate_with_cleanup(MirTerminator.Break { target, value: None }, depth)?
+        }
+        BreakValue { label, value } -> {
+            value := lower_expr(ctx, value)?
+            target := ctx.resolve_break(label)?
+            depth := ctx.break_cleanup_depth(label)?
+            ctx.terminate_with_cleanup(MirTerminator.Break { target, value: Val(value) }, depth)?
+        }
+        Continue(label) -> {
+            target := ctx.resolve_continue(label)?
+            depth := ctx.continue_cleanup_depth(label)?
+            ctx.terminate_with_cleanup(MirTerminator.Continue { target }, depth)?
+        }
+        EnumMatch { scrutinee, clone_subject, arms, else_body, fallthrough } -> lower_enum_match(ctx, scrutinee, clone_subject, arms, else_body, fallthrough)?
+        RangeSwitch { subject, arms, else_body } -> lower_range_switch(ctx, subject, arms, else_body)?
+        IndexAssign { uninit, base, index, is_map, value } -> {
+            // RHS precedes effectful place evaluation.
+            expected := base.ty.without_user_tags() == { Map { value, .. } -> Val(value); List(elem) | FixedList { elem, .. } -> Val(elem); _ -> None }
+            source := value.ty
+            lowered := lower_expr(ctx, value)?
+            assigned := expected == { Val(expected) -> ctx.trait_box_value(lowered, source, expected)?; None -> lowered }
+            place := ctx.lower_index_place(base, index, if uninit { MirIndexKind.FixedListProof } else if is_map { MirIndexKind.Map } else { MirIndexKind.List }, MirAccess.Write)?
+            _ :: ctx.emit("stmt.index.write", None, MirOperation.WritePlace { place, value: assigned })?
+            ctx.drop_temporary_shared_guard(place)?
+        }
+        IndexFieldAssign(assign) -> lower_index_field_assign(ctx, assign)?
+        IndexHookAssign { base, index, value, .. } -> {
+            call := TExpr {
+                ty: Type.Result { ok: Type.Named(Syntax.INTERNAL_UNIT_TYPE.to_string()), err: Type.Named(Syntax.TYPE_ERR.to_string()) },
+                kind: TExprKind.MethodCall {
+                    recv: base, method: TMethodRef.trait_method(Syntax.TRAIT_INDEX_MUT, "set"), type_args: [],
+                    args: [
+                        TCallArg { value: index, template_items: None, borrow: !index.ty.is_scalar(), mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None },
+                        TCallArg { value, template_items: None, borrow: !value.ty.is_scalar(), mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None }
+                    ], source_first_string_literal: None, operator_line: None
+                }
+            }
+            _ :: lower_expr(ctx, call)?
+        }
+        MathSwizzleAssign { base, lanes, value, clone_value, .. } -> lower_swizzle_assign(ctx, base, lanes, value, clone_value)?
+        ForIn { label, var, var2, source, collection, step, method_kind, columnar, by_value, source_stable, body } -> lower_for_in(ctx, label, var, var2, source, collection, step, method_kind, by_value, columnar, source_stable, body)?
+        Inline(body) -> lower_stmts(ctx, body)?
+        DebugOnly(body) -> lower_debug_only(ctx, body)?
+        MixedSwitch { subject, arms, else_body, .. } -> lower_mixed_switch(ctx, subject, arms, else_body)?
+        Unsafe { gate, body } -> {
+            scope := ctx.enter_scope(MirScopeKind.Unsafe, ctx.span(), Val(gate.reason.to_string()))?
+            ctx.set_scope_fact(scope, "sentry_file", gate.file.to_string())?
+            ctx.set_scope_fact(scope, "sentry_enabled", gate.enabled.to_string())?
+            ctx.set_scope_fact(scope, "sentry_fenced", gate.fenced.to_string())?
+            ctx.set_scope_fact(scope, "sentry_line", gate.line.to_string())?
+            lower_stmts(ctx, body)?
+            ctx.exit_scope(scope)?
+        }
+        SentryPolicy { enabled, body } -> {
+            scope := ctx.enter_scope(MirScopeKind.Policy, ctx.span(), Val(if enabled { "enabled" } else { "disabled" }))?
+            ctx.set_scope_fact(scope, "sentry_enabled", enabled.to_string())?
+            lower_stmts(ctx, body)?
+            ctx.exit_scope(scope)?
+        }
+        Impure(body) -> lower_scoped(ctx, MirScopeKind.Impure, None, body)?
+        Reactive { executable } -> {
+            site := ctx.site_id_for(ctx.span(), "reactive").0 as USize
+            expr := TExpr { ty: Type.Named(Syntax.INTERNAL_UNIT_TYPE.to_string()), kind: TExprKind.CoreClosureCall { kind: TCoreClosureKind.ReactiveEffect { executable, site } } }
+            _ :: lower_expr(ctx, expr)?
+        }
+        Region(body) -> lower_scoped(ctx, MirScopeKind.Region, None, body)?
+        Layout { handle, label, body } -> {
+            scope := ctx.enter_scope(MirScopeKind.Layout, ctx.span(), Val(label.to_string()))?
+            handle_ty := Type.Named(Syntax.LAYOUT_TYPE.to_string())
+            place := ctx.bind_local(handle, handle_ty, handle.mutable, false, false)?
+            value := ctx.emit("stmt.layout.global", Val(handle_ty), MirOperation.Global { name: "layout::{label}" })?
+            _ :: ctx.emit("stmt.layout.write", None, MirOperation.WritePlace { place, value })?
+            lower_stmts(ctx, body)?
+            ctx.exit_scope(scope)?
+        }
+        ContextBlock { guards, body } -> {
+            mut deadline: MirValueId? := None
+            for (name, value) in guards { lowered := lower_expr(ctx, value)?; if name == Syntax.CTX_FIELD_DEADLINE { deadline = Val(lowered) } }
+            scope := ctx.enter_scope(MirScopeKind.Context, ctx.span(), None)?
+            if deadline == Val(deadline) { ctx.set_scope_deadline(scope, deadline)? }
+            lower_stmts(ctx, body)?
+            ctx.exit_scope(scope)?
+        }
+        Live { body } -> lower_scoped(ctx, MirScopeKind.Live, None, body)?
+        Shield { body } -> lower_scoped(ctx, MirScopeKind.Shield, None, body)?
+        ScopeMember { kind, body } -> lower_scope_member(ctx, kind, body)?
+        Transact { handle, snapshots, stm, body } -> lower_transaction(ctx, handle, snapshots, stm, body)?
+        LineMarker(line) -> {
+            checked := U32.try_from(line).map_err(fn(_) { LowerError.new(ctx.span(), "checked source line exceeds MIR line range") })?
+            ctx.set_line_marker(checked)
+        }
+        SourceSpan(span) -> ctx.set_span(span)
+        Erased { construct, span, reason } -> ctx.record_erasure(construct, span, reason)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:737
+fn let_binding_type(let_ty: TLetTy, init_ty: Type) -> Type {
+    let_ty == {
+        Inferred | StrView -> init_ty.clone()
+        Annotated { ty, .. } -> ty.clone()
+        Tuple(types) -> Type.Tuple(types.iter().enumerate().map(fn(entry) { (entry.0.to_string(), entry.1.clone()) }).collect())
+        SendFn(ty) -> ty.clone()
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:756
+fn let_binds_init_type(let_ty: TLetTy, init_ty: Type) -> Bool {
+    let_ty == { Inferred -> true; Annotated { ty, wrapper: None } -> ty.without_user_tags() == init_ty.without_user_tags(); _ -> false }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:767
+fn local_for_binding(name: String, kw: String) -> TLocal { if kw.contains("mut") { TLocal.user(name).as_mutable() } else { TLocal.user(name) } }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:775
+fn lower_let_like(ctx: &LowerCtx, name: String, init: TExpr, mutable: Bool) -> Unit LowerError! {
+    is_uninit := init.kind == { Uninit -> true; _ -> false }
+    value := if is_uninit { None } else { Val(lower_expr(ctx, init)?) }
+    local := if mutable { TLocal.user(name).as_mutable() } else { TLocal.user(name) }
+    place := ctx.bind_local(local, init.ty, mutable, false, is_uninit)?
+    if is_uninit { _ :: ctx.emit("stmt.let-like.initialize-uninit", None, MirOperation.InitializeUninit { place })? }
+    else if value == Val(value) { _ :: ctx.emit("stmt.let-like.write", None, MirOperation.WritePlace { place, value })? }
+    if value == Val(value) { ctx.register_file_owner_binding(place, value)? }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:812
+fn maybe_copy(ctx: &LowerCtx, value: MirValueId, ty: Type, copy: Bool) -> MirValueId LowerError! {
+    if copy { ctx.emit("stmt.copy", Val(ty.clone()), MirOperation.Copy { value, fact: MirCopyFact.Materialize })? } else { value }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:832
+fn lower_refutable_bind(ctx: &LowerCtx, pattern: TPattern, init: TExpr, fallback: [TStmt]) -> Unit LowerError! {
+    subject := ctx.lower_read_window(init)? == { Val(subject) -> subject; None -> lower_expr(ctx, init)? }
+    lowered_pattern := ctx.lower_pattern(pattern)?
+    shadow_mark := ctx.shadow_mark()
+    test := ctx.lower_pattern_condition(subject, lowered_pattern)?
+    success := ctx.new_block(ctx.span(), "refutable.success")?
+    miss := ctx.new_block(ctx.span(), "refutable.miss")?
+    join := ctx.new_block(ctx.span(), "refutable.join")?
+    ctx.terminate(MirTerminator.Branch { condition: test, then_target: success, else_target: miss })
+    ctx.switch_to(success)
+    ctx.bind_success_pattern(subject, lowered_pattern)?
+    if !ctx.is_terminated() { ctx.terminate(MirTerminator.Jump { target: join }) }
+    payload_bindings := ctx.restore_shadowed_locals(shadow_mark)
+    ctx.switch_to(miss)
+    lower_stmts(ctx, fallback)?
+    ctx.reinstate_shadowed_locals(^payload_bindings)
+    if !ctx.is_terminated() { ctx.terminate(MirTerminator.Jump { target: join }) }
+    ctx.switch_to(join)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:875
+fn lower_split_view(ctx: &LowerCtx, owner: TExpr?, root: String, name: String, start: I64, end: I64, single: Bool, write: Bool, line: USize, elem_ty: Type?) -> Unit LowerError! {
+    element := elem_ty == { Val(element) -> element.clone(); None -> { fail LowerError.new(ctx.span(), "split view `{name}` has no checked element type") } }
+    root_expr := TExpr { ty: Type.List(element), kind: TExprKind.Local(TLocal.user(root)) }
+    base_expr := owner.unwrap_or(root_expr)
+    start_expr := TExpr { ty: Type.Int, kind: TExprKind.IntLit(start, None) }
+    end_expr := TExpr { ty: Type.Int, kind: TExprKind.IntLit(end, None) }
+    if single && write {
+        place := ctx.lower_index_place(base_expr, start_expr, MirIndexKind.FixedListProof, MirAccess.Write)?
+        local := TLocal.user(name).as_mutable()
+        _ :: ctx.bind_local_alias(local, ^element, place, true)?
+        return
+    }
+    ty := if single { element.clone() } else { Type.Apply { name: if write { "ViewMut" } else { "View" }, args: [element] } }
+    value := if single { ctx.lower_index_value(base_expr, start_expr, MirIndexKind.FixedListProof, element, MirAccess.Read)? } else {
+        range_expr := TExpr { ty: Type.Named("Range"), kind: TExprKind.StructLit { fields: [("start", start_expr, false), ("end", end_expr, false), ("exclusive", TExpr { ty: Type.Bool, kind: TExprKind.BoolLit(false) }, false)], extra: None, as_trait: None } }
+        view := TExpr { ty, kind: TExprKind.BuiltinMethod { recv: base_expr, op: if write { TBuiltinOp.ViewMutNew { line } } else { TBuiltinOp.ViewNew { line } }, args: [^range_expr] } }
+        lower_expr(ctx, view)?
+    }
+    local := if write { TLocal.user(name).as_mutable() } else { TLocal.user(name) }
+    place := ctx.bind_local(local, ^ty, write, false, false)?
+    _ :: ctx.emit("stmt.split.write", None, MirOperation.WritePlace { place, value })?
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:985
+fn lower_tuple_destructure(ctx: &LowerCtx, init: TExpr, tmp: String, kw: String, move_fields: Bool, binds: [(String, String)]) -> Unit LowerError! {
+    subject := if move_fields {
+        lower_receiver_place(ctx, init, MirAccess.Move)? == { Val(place) -> ctx.emit("stmt.tuple.move-source", Val(init.ty), MirOperation.MovePlace { place })?; None -> lower_expr(ctx, init)? }
+    } else { lower_expr(ctx, init)? }
+    mutable := kw.contains("mut")
+    if !move_fields {
+        for (index, (local_name, _)) in binds.iter().enumerate() {
+            field_name := ctx.field_name_for_type(init.ty, index)?
+            field_ty := ctx.checked_field_type(init.ty, field_name)?
+            field_id := ctx.field_id_for_type(init.ty, field_name)?
+            projected := ctx.emit("stmt.tuple.field", Val(field_ty), MirOperation.Field { base: subject, field: field_id })?
+            value := maybe_copy(ctx, projected, field_ty, true)?
+            local := if mutable { TLocal.user(local_name).as_mutable() } else { TLocal.user(local_name) }
+            place := ctx.bind_local(local, ^field_ty, mutable, false, false)?
+            _ :: ctx.emit("stmt.tuple.write", None, MirOperation.WritePlace { place, value })?
+        }
+        return
+    }
+    temp := TLocal.generated(tmp)
+    _ :: ctx.bind_local(temp, init.ty, true, false, false)?
+    temp_place := ctx.place_for_local(temp, MirAccess.Move)?
+    _ :: ctx.emit("stmt.tuple.move-temp.write", None, MirOperation.WritePlace { place: temp_place, value: subject })?
+    for (index, (local_name, _)) in binds.iter().enumerate() {
+        field_name := ctx.field_name_for_type(init.ty, index)?
+        field_ty := ctx.checked_field_type(init.ty, field_name)?
+        field_place := ctx.project_field_place(temp_place, field_name, field_ty, ctx.span())?
+        value := ctx.emit("stmt.tuple.move-field", Val(field_ty), MirOperation.MovePlace { place: field_place })?
+        local := if mutable { TLocal.user(local_name).as_mutable() } else { TLocal.user(local_name) }
+        place := ctx.bind_local(local, ^field_ty, mutable, false, false)?
+        _ :: ctx.emit("stmt.tuple.write", None, MirOperation.WritePlace { place, value })?
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1074
+fn lower_struct_destructure(ctx: &LowerCtx, init: TExpr, tmp: String, kw: String, move_fields: Bool, binds: [(String, String)]) -> Unit LowerError! {
+    subject := if move_fields {
+        lower_receiver_place(ctx, init, MirAccess.Move)? == { Val(place) -> ctx.emit("stmt.struct.move-source", Val(init.ty), MirOperation.MovePlace { place })?; None -> lower_expr(ctx, init)? }
+    } else { lower_expr(ctx, init)? }
+    mutable := kw.contains("mut")
+    if !move_fields {
+        for (local_name, field_name) in binds {
+            field_ty := ctx.checked_field_type(init.ty, field_name)?
+            field_id := ctx.field_id_for_type(init.ty, field_name)?
+            projected := ctx.emit("stmt.struct.field", Val(field_ty), MirOperation.Field { base: subject, field: field_id })?
+            value := maybe_copy(ctx, projected, field_ty, true)?
+            local := if mutable { TLocal.user(local_name).as_mutable() } else { TLocal.user(local_name) }
+            place := ctx.bind_local(local, ^field_ty, mutable, false, false)?
+            _ :: ctx.emit("stmt.struct.write", None, MirOperation.WritePlace { place, value })?
+        }
+        return
+    }
+    temp := TLocal.generated(tmp)
+    _ :: ctx.bind_local(temp, init.ty, true, false, false)?
+    temp_place := ctx.place_for_local(temp, MirAccess.Move)?
+    _ :: ctx.emit("stmt.struct.move-temp.write", None, MirOperation.WritePlace { place: temp_place, value: subject })?
+    for (local_name, field_name) in binds {
+        field_ty := ctx.checked_field_type(init.ty, field_name)?
+        field_place := ctx.project_field_place(temp_place, field_name, field_ty, ctx.span())?
+        value := ctx.emit("stmt.struct.move-field", Val(field_ty), MirOperation.MovePlace { place: field_place })?
+        local := if mutable { TLocal.user(local_name).as_mutable() } else { TLocal.user(local_name) }
+        place := ctx.bind_local(local, ^field_ty, mutable, false, false)?
+        _ :: ctx.emit("stmt.struct.write", None, MirOperation.WritePlace { place, value })?
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1161
+fn lower_list_destructure(ctx: &LowerCtx, init: TExpr, kw: String, want: USize, elems: [String]) -> Unit LowerError! {
+    subject := lower_expr(ctx, init)?
+    mutable := kw.contains("mut")
+    element_ty := init.ty == { List(ty) | FixedList { elem: ty, .. } -> ty.clone(); _ -> init.ty.clone() }
+    for (index, local_name) in elems.iter().enumerate().take(want) {
+        index_value := const_int(ctx, index as I64)?
+        projected := ctx.emit_index_value(subject, index_value, MirIndexKind.List, element_ty, MirAccess.Read, "stmt.list-destructure.index")?
+        local := if mutable { TLocal.user(local_name).as_mutable() } else { TLocal.user(local_name) }
+        place := ctx.bind_local(local, element_ty, mutable, false, false)?
+        _ :: ctx.emit("stmt.list-destructure.write", None, MirOperation.WritePlace { place, value: projected })?
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1202
+fn assignment_place_type(ctx: LowerCtx, place: TPlace) -> Type LowerError! {
+    place == {
+        Expr(expr) -> expr.ty.clone()
+        Local(local) -> ctx.local_types.get(local.name).cloned().or_else(fn() { local.persist_ty.clone() }) == { Val(ty) -> ^ty; None -> { fail ctx.error(ctx.span(), "checked MIR local `{local.name}` has no type") } }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1222
+fn assignment_binary_overflow(op: BinOp, lhs: Type, rhs: Type) -> Bool {
+    ((op == { Add | Sub | Mul | Div -> true; _ -> false }) && (lhs.is_integer() || rhs.is_integer())) || ((op == { Shl | Shr -> true; _ -> false }) && lhs.is_integer())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1228
+fn lower_assign(ctx: &LowerCtx, place: TPlace, op: BinOp?, value: TExpr, clone_value: Bool, line: U32) -> Unit LowerError! {
+    place_ty := assignment_place_type(ctx, place)?
+    rhs := lower_expr(ctx, value)?
+    rhs_copy := maybe_copy(ctx, rhs, value.ty, clone_value)?
+    place_id := ctx.lower_place(place, MirAccess.Write)?
+    assigned := op == {
+        Val(op) -> {
+            old := ctx.emit("stmt.assign.read", Val(place_ty), MirOperation.ReadPlace(place_id))?
+            dispatch := lower_binary_dispatch(ctx, op, assignment_binary_overflow(op, place_ty, value.ty), place_ty, value.ty, place_ty, line)?
+            ctx.emit("stmt.assign.rmw", Val(place_ty), MirOperation.Binary { op: mir_binary_op(op), dispatch, left: old, right: rhs_copy })?
+        }
+        None -> ctx.trait_box_value(rhs_copy, value.ty, place_ty)?
+    }
+    owning_file_slot := ctx.places.iter().find(fn(candidate) { candidate.id == place_id }).and_then(fn(candidate) { candidate.ty.identity }).is_some_and(fn(identity) { ctx.is_core_file_owner(identity) })
+    ctx.emit_file_owner_replacement(place_id)?
+    _ :: ctx.emit("stmt.assign.write", None, if owning_file_slot { MirOperation.ReplacePlace { place: place_id, value: assigned } } else { MirOperation.WritePlace { place: place_id, value: assigned } })?
+    ctx.drop_temporary_shared_guard(place_id)?
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1298
+fn lower_index_field_assign(ctx: &LowerCtx, assign: TIndexFieldAssign) -> Unit LowerError! {
+    rhs := lower_expr(ctx, assign.value)?
+    rhs_copy := maybe_copy(ctx, rhs, assign.value.ty, assign.clone_value)?
+    base_place := ctx.lower_index_place(assign.base, assign.index, if assign.is_map { MirIndexKind.Map } else { MirIndexKind.List }, MirAccess.Write)?
+    place := ctx.project_field_place(base_place, assign.field, assign.field_ty, ctx.span())?
+    assigned := assign.op == {
+        Val(op) -> {
+            old := ctx.emit("stmt.index-field.read", Val(assign.field_ty), MirOperation.ReadPlace(place))?
+            dispatch := lower_binary_dispatch(ctx, op, assignment_binary_overflow(op, assign.field_ty, assign.value.ty), assign.field_ty, assign.value.ty, assign.field_ty, assign.line as U32)?
+            ctx.emit("stmt.index-field.rmw", Val(assign.field_ty), MirOperation.Binary { op: mir_binary_op(op), dispatch, left: old, right: rhs_copy })?
+        }
+        None -> ctx.trait_box_value(rhs_copy, assign.value.ty, assign.field_ty)?
+    }
+    owning_file_slot := ctx.mir_type(assign.field_ty)?.identity.is_some_and(fn(identity) { ctx.is_core_file_owner(identity) })
+    _ :: ctx.emit("stmt.index-field.write", None, if owning_file_slot { MirOperation.ReplacePlace { place, value: assigned } } else { MirOperation.WritePlace { place, value: assigned } })?
+    ctx.drop_temporary_shared_guard(place)?
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1372
+fn lower_swizzle_assign(ctx: &LowerCtx, base: TExpr, lanes: [U8], value: TExpr, clone_value: Bool) -> Unit LowerError! {
+    rhs := lower_expr(ctx, value)?
+    (rhs_values, rhs_ty) := if lanes.len() > 1 {
+        rhs_type_name := value.ty.without_user_tags() == { Named(name) -> name; _ -> { fail ctx.error(ctx.span(), "checked multi-lane swizzle assignment has no vector RHS") } }
+        scalar_ty := Sema.math_scalar_ty(rhs_type_name)
+        lane_carrier := TFailureCarrier.from_checked_type(scalar_ty)
+        line := ctx.source_line()
+        mut values: [MirValueId] := [].with_capacity(lanes.len())
+        for ordinal in 0..<lanes.len() {
+            index := ctx.emit("math-swizzle-rhs-index-{ordinal}", Val(Type.Int), MirOperation.Constant(MirConstant.Int { value: ordinal as I64, width: None, spelling: None }))?
+            call := ctx.intern_prelude_route(lane_index_route(rhs_type_name, scalar_ty, lane_carrier)?)?
+            location := ctx.panic_location_at(line)
+            context := ctx.panic_context_at(line, None)
+            values.push(ctx.emit("math-swizzle-rhs-lane", Val(scalar_ty), MirOperation.Index { call, base: rhs, index, kind: MirIndexKind.Lane, access: MirAccess.Read, location, context })?)
+        }
+        (^values, scalar_ty)
+    } else { ([rhs], value.ty) }
+    places := ctx.lower_swizzle_place(base, lanes, MirAccess.Write)?
+    for (index, place) in places.iter().enumerate() {
+        value := maybe_copy(ctx, rhs_values[index], rhs_ty, clone_value || index + 1 < lanes.len())?
+        _ :: ctx.emit("stmt.swizzle.write", None, MirOperation.WritePlace { place, value })?
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1449
+struct IfChainLink { join: MirBlockId, else_scope: (MirScopeId, (String, String)?)? }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1462
+fn lower_if(ctx: &LowerCtx, cond: TIfCond, then_body: [TStmt], else_body: [TStmt]?) -> Unit LowerError! {
+    mut links: [IfChainLink] := []
+    // Read windows retain borrowed chain links rather than copying nested arms.
+    mut current_cond := &cond
+    mut current_then := &then_body
+    mut current_else := &else_body
+    loop {
+        then_block := ctx.new_block(ctx.span(), "if.then")?
+        else_block := ctx.new_block(ctx.span(), "if.else")?
+        join := ctx.new_block(ctx.span(), "if.join")?
+        shadow_mark := ctx.shadow_mark()
+        lower_cond(ctx, current_cond, then_block, else_block)?
+        ctx.switch_to(then_block)
+        scope := ctx.enter_scope(MirScopeKind.Live, ctx.span(), None)?
+        lower_stmts(ctx, current_then)?
+        ctx.exit_scope(scope)?
+        if !ctx.is_terminated() { ctx.terminate(MirTerminator.Jump { target: join }) }
+        _ :: ctx.restore_shadowed_locals(shadow_mark)
+        ctx.switch_to(else_block)
+        if current_else == Val(body) {
+            scope := ctx.enter_scope(MirScopeKind.Live, ctx.span(), None)?
+            if body == [If { cond: next_cond, then_body: next_then, else_body: next_else, .. }] {
+                before := canonical_statements_before(body)
+                if !ctx.is_terminated() {
+                    links.push(IfChainLink { join, else_scope: Val((scope, ^before)) })
+                    current_cond = &next_cond
+                    current_then = &next_then
+                    current_else = &next_else
+                    continue
+                }
+                record_lowered_statements(ctx, ^before)
+            } else { lower_stmts(ctx, body)? }
+            ctx.exit_scope(scope)?
+        }
+        links.push(IfChainLink { join, else_scope: None })
+        break
+    }
+    while links.pop() == Val(link) {
+        if link.else_scope == Val((scope, before)) { record_lowered_statements(ctx, ^before); ctx.exit_scope(scope)? }
+        if !ctx.is_terminated() { ctx.terminate(MirTerminator.Jump { target: link.join }) }
+        ctx.switch_to(link.join)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1535
+fn lower_cond(ctx: &LowerCtx, cond: TIfCond, then_target: MirBlockId, else_target: MirBlockId) -> Unit LowerError! {
+    cond == {
+        Plain(expr) -> { value := lower_expr(ctx, expr)?; ctx.terminate(MirTerminator.Branch { condition: value, then_target, else_target }) }
+        And { left, right } -> {
+            right_block := ctx.new_block(ctx.span(), "if.and.right")?
+            lower_cond(ctx, left, right_block, else_target)?
+            ctx.switch_to(right_block)
+            lower_cond(ctx, right, then_target, else_target)?
+        }
+        IfLet { pattern, subj } -> {
+            subject := ctx.lower_pattern_subject(subj)?
+            lowered_pattern := ctx.lower_pattern(pattern)?
+            test := ctx.lower_pattern_condition(subject, lowered_pattern)?
+            ctx.terminate(MirTerminator.Branch { condition: test, then_target, else_target })
+        }
+        IsNone { subj } -> {
+            subject := lower_expr(ctx, subj)?
+            present := ctx.emit("if.is-none.test", Val(Type.Bool), MirOperation.OptionIsSome { subject })?
+            ctx.terminate(MirTerminator.Branch { condition: present, then_target: else_target, else_target: then_target })
+        }
+        Matches { pattern, subj } -> {
+            subject := ctx.lower_pattern_subject(subj)?
+            lowered_pattern := ctx.lower_pattern(pattern)?
+            test := ctx.lower_pattern_condition(subject, lowered_pattern)?
+            ctx.terminate(MirTerminator.Branch { condition: test, then_target, else_target })
+        }
+        WithPrelude { prelude, cond } -> { lower_stmts(ctx, prelude)?; if !ctx.is_terminated() { lower_cond(ctx, cond, then_target, else_target)? } }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1599
+fn lower_loop(ctx: &LowerCtx, label: String?, body: [TStmt]) -> Unit LowerError! { _ :: lower_loop_with_exit(ctx, label, body)? }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1603
+pub fn lower_loop_value(ctx: &LowerCtx, label: String?, body: [TStmt], result_ty: Type) -> MirValueId LowerError! {
+    exit := lower_loop_with_exit(ctx, label, body)?
+    mut incoming: [(MirBlockId, MirValueId)] := []
+    mut value_less_break := false
+    for block in ctx.blocks {
+        if block.terminator == Break { target, value } {
+            if target != exit { continue }
+            if value == Val(value) { incoming.push((block.id, value)) } else { value_less_break = true }
+        }
+    }
+    if value_less_break || incoming.is_empty() { fail ctx.error(ctx.span(), "TExprKind::InlineBlock result loop has a break exit without a value") }
+    ctx.switch_to(exit)
+    ctx.emit("loop-value-phi", Val(result_ty.clone()), MirOperation.Phi { incoming: ^incoming })?
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1638
+fn lower_loop_with_exit(ctx: &LowerCtx, label: String?, body: [TStmt]) -> MirBlockId LowerError! {
+    header := ctx.new_block(ctx.span(), "loop.header")?
+    body_block := ctx.new_block(ctx.span(), "loop.body")?
+    exit := ctx.new_block(ctx.span(), "loop.exit")?
+    ctx.terminate(MirTerminator.Jump { target: header })
+    ctx.switch_to(header)
+    ctx.terminate(MirTerminator.Jump { target: body_block })
+    ctx.switch_to(body_block)
+    ctx.push_loop(label.map(fn(label) { label.to_string() }), exit, header)
+    ctx.push_lexical_frame()
+    lower_stmts(ctx, body)?
+    ctx.pop_lexical_frame()?
+    ctx.pop_loop()
+    if !ctx.is_terminated() { ctx.terminate(MirTerminator.Jump { target: header }) }
+    ctx.switch_to(exit)
+    exit
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1662
+fn lower_while(ctx: &LowerCtx, label: String?, cond: TExpr, body: [TStmt]) -> Unit LowerError! {
+    header := ctx.new_block(ctx.span(), "while.header")?
+    body_block := ctx.new_block(ctx.span(), "while.body")?
+    exit := ctx.new_block(ctx.span(), "while.exit")?
+    ctx.terminate(MirTerminator.Jump { target: header })
+    ctx.switch_to(header)
+    condition := lower_expr(ctx, cond)?
+    ctx.terminate(MirTerminator.Branch { condition, then_target: body_block, else_target: exit })
+    ctx.switch_to(body_block)
+    ctx.push_loop(label.map(fn(label) { label.to_string() }), exit, header)
+    ctx.push_lexical_frame()
+    lower_stmts(ctx, body)?
+    ctx.pop_lexical_frame()?
+    ctx.pop_loop()
+    if !ctx.is_terminated() { ctx.terminate(MirTerminator.Jump { target: header }) }
+    ctx.switch_to(exit)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1692
+fn lower_counted_loop(ctx: &LowerCtx, label: String?, init: TStmt, cond: TExpr, step: TStmt?, auto_vectorization: AutoVectorizationFacts?, body: [TStmt]) -> Unit LowerError! {
+    loop_span := ctx.span()
+    lower_stmt(ctx, init)?
+    if ctx.is_terminated() { return }
+    header := ctx.new_block(ctx.span(), "counted.header")?
+    body_block := ctx.new_block(ctx.span(), "counted.body")?
+    step_block := ctx.new_block(ctx.span(), "counted.step")?
+    exit := ctx.new_block(ctx.span(), "counted.exit")?
+    ctx.terminate(MirTerminator.Jump { target: header })
+    ctx.switch_to(header)
+    condition := lower_expr(ctx, cond)?
+    ctx.terminate(MirTerminator.Branch { condition, then_target: body_block, else_target: exit })
+    ctx.switch_to(body_block)
+    ctx.push_loop(label.map(fn(label) { label.to_string() }), exit, step_block)
+    ctx.push_lexical_frame()
+    lower_stmts(ctx, body)?
+    ctx.pop_lexical_frame()?
+    ctx.pop_loop()
+    if !ctx.is_terminated() { ctx.terminate(MirTerminator.Jump { target: step_block }) }
+    ctx.switch_to(step_block)
+    if step == Val(step) { lower_stmt(ctx, step)? }
+    if !ctx.is_terminated() { ctx.terminate(MirTerminator.Jump { target: header }) }
+    ctx.switch_to(exit)
+    if auto_vectorization == Val(facts) {
+        cursor_place := ctx.loop_cursor_place(cond)
+        body_blocks := ctx.loop_body_blocks(header, body_block, Val(exit), Val(step_block))
+        cursor := ctx.checked_loop_cursor(body_blocks, Val(step_block), cursor_place, None)
+        ctx.record_checked_vector_fact(header, cursor, ^body_blocks, Val(step_block), cursor_place, facts, loop_span)?
+    }
+}

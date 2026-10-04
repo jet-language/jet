@@ -1,289 +1,200 @@
-// PORT-PENDING 0570 crates-jet-comptime-src-comptime-build-targets-module-group: crates/jet-comptime/src/Comptime/Build/validation.rs:1-285
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::actions_policy::{ActionCache, ActionSpec, BuildAction, BuildCapability};
-//RS use super::cache_cas::ContentDigest;
-//RS use super::errors_keys::{BuildError, NameKind};
-//RS use super::plugins_modules::{GeneratedModuleSpec, WasmComponentPluginSpec};
-//RS use super::provenance_toolchains::{
-//RS     BuildProvenance, ProbeKind, ProbeSpec, ProvenanceSource, ToolchainSpec,
-//RS };
-//RS use super::targets::BuildPath;
-//RS use std::collections::{BTreeMap, HashSet};
-//RS use std::io;
-//RS use std::path::{Component, Path, PathBuf};
-//RS 
-//RS pub(super) fn resolve_under(base: &Path, rel: &str) -> io::Result<PathBuf> {
-//RS     let path = Path::new(rel);
-//RS     let mut out = PathBuf::from(base);
-//RS     for component in path.components() {
-//RS         match component {
-//RS             Component::Normal(part) => out.push(part),
-//RS             Component::CurDir => {}
-//RS             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-//RS                 return Err(io::Error::new(
-//RS                     io::ErrorKind::InvalidInput,
-//RS                     "build output path escapes base directory",
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS pub(super) fn cap_name(cap: &BuildCapability) -> String {
-//RS     cap.name().to_string()
-//RS }
-//RS 
-//RS pub(super) fn check_name(name: String, kind: NameKind) -> Result<String, BuildError> {
-//RS     if name.trim().is_empty() {
-//RS         return match kind {
-//RS             NameKind::Target => Err(BuildError::EmptyTargetName),
-//RS             NameKind::Action => Err(BuildError::EmptyActionName),
-//RS             NameKind::Toolchain => Err(BuildError::EmptyToolchainName),
-//RS             NameKind::SigningIdentity => Err(BuildError::EmptySigningIdentityName),
-//RS             NameKind::Probe => Err(BuildError::EmptyProbeName),
-//RS         };
-//RS     }
-//RS     Ok(name)
-//RS }
-//RS 
-//RS pub(super) fn validate_plugin_spec(spec: &WasmComponentPluginSpec) -> Result<(), BuildError> {
-//RS     if spec.name.trim().is_empty() {
-//RS         return Err(BuildError::EmptyPluginField("name".to_string()));
-//RS     }
-//RS     if spec.version.trim().is_empty() {
-//RS         return Err(BuildError::EmptyPluginField(spec.name.clone()));
-//RS     }
-//RS     if spec.api_version.trim().is_empty() {
-//RS         return Err(BuildError::EmptyPluginField(spec.name.clone()));
-//RS     }
-//RS     if spec.component_digest.trim().is_empty() {
-//RS         return Err(BuildError::EmptyPluginField(spec.name.clone()));
-//RS     }
-//RS     ContentDigest::parse(&spec.component_digest)
-//RS         .map_err(|error| BuildError::InvalidPluginDigest(error.to_string()))?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(super) fn validate_generated_module(module: &GeneratedModuleSpec) -> Result<(), BuildError> {
-//RS     if module.name.trim().is_empty()
-//RS         || module.path.as_str().trim().is_empty()
-//RS         || module.source.trim().is_empty()
-//RS     {
-//RS         return Err(BuildError::EmptyGeneratedModuleField(module.name.clone()));
-//RS     }
-//RS     let path = Path::new(module.path.as_str());
-//RS     let components = path.components().collect::<Vec<_>>();
-//RS     let valid_root = components.len() >= 3
-//RS         && matches!(components[0], Component::Normal(part) if part == ".jet")
-//RS         && matches!(components[1], Component::Normal(part) if part == "generated")
-//RS         && components[2..]
-//RS             .iter()
-//RS             .all(|component| matches!(component, Component::Normal(_)));
-//RS     if !valid_root || path.extension().and_then(|extension| extension.to_str()) != Some("jet") {
-//RS         return Err(BuildError::InvalidGeneratedModulePath(
-//RS             module.path.as_str().to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(super) fn validate_toolchain(name: &str, spec: &ToolchainSpec) -> Result<(), BuildError> {
-//RS     if spec.host_triple.trim().is_empty() || spec.target_triple.trim().is_empty() {
-//RS         return Err(BuildError::EmptyToolchainTriple(name.to_string()));
-//RS     }
-//RS     if let Some(sdk) = &spec.sdk {
-//RS         validate_identity(name, &sdk.name, &sdk.provenance)?;
-//RS         validate_identity(name, &sdk.version, &sdk.provenance)?;
-//RS     }
-//RS     if let Some(linker) = &spec.linker {
-//RS         validate_identity(name, &linker.name, &linker.provenance)?;
-//RS     }
-//RS     for (tool, path) in &spec.tools {
-//RS         if tool.trim().is_empty() || path.trim().is_empty() || path.contains('\0') {
-//RS             return Err(BuildError::EmptyIdentityField(name.to_string()));
-//RS         }
-//RS     }
-//RS     for mount in &spec.mounts {
-//RS         let destination = Path::new(&mount.destination);
-//RS         if mount.source.trim().is_empty()
-//RS             || mount.source.contains('\0')
-//RS             || mount.destination.trim().is_empty()
-//RS             || mount.destination.contains('\0')
-//RS             || !destination.is_absolute()
-//RS             || destination
-//RS                 .components()
-//RS                 .any(|component| matches!(component, Component::ParentDir))
-//RS         {
-//RS             return Err(BuildError::InvalidPath(format!(
-//RS                 "toolchain `{name}` has an invalid read-only mount"
-//RS             )));
-//RS         }
-//RS     }
-//RS     validate_provenance(name, &spec.provenance)
-//RS }
-//RS 
-//RS pub(super) fn validate_identity(
-//RS     name: &str,
-//RS     field: &str,
-//RS     provenance: &BuildProvenance,
-//RS ) -> Result<(), BuildError> {
-//RS     if field.trim().is_empty() {
-//RS         return Err(BuildError::EmptyIdentityField(name.to_string()));
-//RS     }
-//RS     validate_provenance(name, provenance)
-//RS }
-//RS 
-//RS pub(super) fn validate_probe(name: &str, spec: &ProbeSpec) -> Result<(), BuildError> {
-//RS     match &spec.kind {
-//RS         ProbeKind::FindProgram { program } if program.trim().is_empty() => {
-//RS             return Err(BuildError::EmptyProbeField(name.to_string()));
-//RS         }
-//RS         ProbeKind::PkgConfig { package, .. } if package.trim().is_empty() => {
-//RS             return Err(BuildError::EmptyProbeField(name.to_string()));
-//RS         }
-//RS         ProbeKind::HeaderCheck { header }
-//RS             if header.trim().is_empty() || !valid_header_name(header) =>
-//RS         {
-//RS             return Err(BuildError::EmptyProbeField(name.to_string()));
-//RS         }
-//RS         ProbeKind::CompileCheck {
-//RS             name: check,
-//RS             includes,
-//RS             code,
-//RS         } if check.trim().is_empty()
-//RS             || code.trim().is_empty()
-//RS             || includes.iter().any(|include| !valid_header_name(include)) =>
-//RS         {
-//RS             return Err(BuildError::EmptyProbeField(name.to_string()));
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS     validate_provenance(name, &spec.provenance)?;
-//RS     if matches!(
-//RS         spec.reproducibility,
-//RS         super::provenance_toolchains::ReproducibilityClass::Reproducible
-//RS     ) && spec.provenance.lock.is_none()
-//RS     {
-//RS         return Err(BuildError::MissingLockedProvenance(name.to_string()));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn valid_header_name(header: &str) -> bool {
-//RS     !header.is_empty()
-//RS         && !header
-//RS             .chars()
-//RS             .any(|character| matches!(character, '\0' | '\n' | '\r' | '"' | '<' | '>'))
-//RS         && Path::new(header).is_relative()
-//RS         && Path::new(header)
-//RS             .components()
-//RS             .all(|component| matches!(component, Component::Normal(_)))
-//RS }
-//RS 
-//RS pub(super) fn validate_provenance(
-//RS     name: &str,
-//RS     provenance: &BuildProvenance,
-//RS ) -> Result<(), BuildError> {
-//RS     match &provenance.source {
-//RS         ProvenanceSource::JetpackDependency(dep)
-//RS         | ProvenanceSource::AmbientRecord(dep)
-//RS         | ProvenanceSource::UserDeclared(dep)
-//RS             if dep.trim().is_empty() =>
-//RS         {
-//RS             return Err(BuildError::EmptyIdentityField(name.to_string()));
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS     if let Some(lock) = &provenance.lock {
-//RS         if lock.key.trim().is_empty() || lock.digest.trim().is_empty() {
-//RS             return Err(BuildError::EmptyIdentityField(name.to_string()));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(super) fn validate_action(name: &str, spec: &ActionSpec) -> Result<(), BuildError> {
-//RS     if spec.argv.is_empty() || spec.argv.iter().any(|arg| arg.trim().is_empty()) {
-//RS         return Err(BuildError::EmptyActionArgv(name.to_string()));
-//RS     }
-//RS     validate_paths(&spec.inputs)?;
-//RS     validate_paths(&spec.outputs)?;
-//RS     for key in spec.env.keys() {
-//RS         if key.trim().is_empty() {
-//RS             return Err(BuildError::EmptyEnvName(name.to_string()));
-//RS         }
-//RS     }
-//RS     for key in &spec.env_allowlist {
-//RS         if key.trim().is_empty() {
-//RS             return Err(BuildError::EmptyEnvName(name.to_string()));
-//RS         }
-//RS         if !spec.env.contains_key(key) {
-//RS             return Err(BuildError::UndeclaredEnvName {
-//RS                 action: name.to_string(),
-//RS                 key: key.clone(),
-//RS             });
-//RS         }
-//RS     }
-//RS     match spec.cache {
-//RS         ActionCache::Cached if spec.outputs.is_empty() => {
-//RS             return Err(BuildError::CachedActionWithoutOutputs(name.to_string()));
-//RS         }
-//RS         ActionCache::UncachedPhony if !spec.outputs.is_empty() => {
-//RS             return Err(BuildError::PhonyActionWithOutputs(name.to_string()));
-//RS         }
-//RS         ActionCache::UncachedPhony if spec.caps.is_empty() => {
-//RS             return Err(BuildError::PhonyActionWithoutCaps(name.to_string()));
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS 
-//RS     let mut outputs = HashSet::new();
-//RS     for output in &spec.outputs {
-//RS         if !outputs.insert(output.as_str()) {
-//RS             return Err(BuildError::DuplicateActionOutput {
-//RS                 action: name.to_string(),
-//RS                 output: output.as_str().to_string(),
-//RS             });
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(super) fn validate_action_output_owners(actions: &[BuildAction]) -> Result<(), BuildError> {
-//RS     let mut owners: BTreeMap<&str, &str> = BTreeMap::new();
-//RS     for action in actions {
-//RS         for output in &action.outputs {
-//RS             if let Some(first_action) = owners.insert(output.as_str(), action.name.as_str()) {
-//RS                 return Err(BuildError::DuplicateBuildOutput {
-//RS                     output: output.as_str().to_string(),
-//RS                     first_action: first_action.to_string(),
-//RS                     second_action: action.name.clone(),
-//RS                 });
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(super) fn validate_paths(paths: &[BuildPath]) -> Result<(), BuildError> {
-//RS     for path in paths {
-//RS         if path.as_str().trim().is_empty() {
-//RS             return Err(BuildError::EmptyPath);
-//RS         }
-//RS         let path_value = Path::new(path.as_str());
-//RS         if path_value.is_absolute()
-//RS             || path_value.components().any(|component| {
-//RS                 matches!(
-//RS                     component,
-//RS                     Component::ParentDir | Component::RootDir | Component::Prefix(_)
-//RS                 )
-//RS             })
-//RS         {
-//RS             return Err(BuildError::InvalidPath(path.as_str().to_string()));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-// END-PORT-PENDING 0570 crates/jet-comptime/src/Comptime/Build/validation.rs:1-285
+use jet_comptime.Comptime.Build.ActionsPolicy.[ActionCache, ActionSpec, BuildAction, BuildCapability]
+use jet_comptime.Comptime.Build.CacheCas.ContentDigest
+use jet_comptime.Comptime.Build.ErrorsKeys.[BuildError, NameKind]
+use jet_comptime.Comptime.Build.PluginsModules.[GeneratedModuleSpec, WasmComponentPluginSpec]
+use jet_comptime.Comptime.Build.ProvenanceToolchains.[BuildProvenance, ProbeKind, ProbeSpec, ProvenanceSource, ToolchainSpec, ReproducibilityClass]
+use jet_comptime.Comptime.Build.Targets.BuildPath
+use jet_foundation.TEXT_NUL
+use std.io
+use std.path.Component
 
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:13
+fn resolve_under(base: &OSPath, rel: String) -> OSPath io.Error! {
+    // GATE #4483 selected-target native path components; #4409 InvalidInput fidelity.
+    path := OSPath.from(rel)
+    out := base.to_path_buf()
+    for component in path.components() {
+        if component == {
+            .Normal(part) -> { out.push(part) }
+            .CurDir -> {}
+            .ParentDir | .RootDir | .Prefix(_) -> return Err(io.Error.new(io.ErrorKind.InvalidInput, "build output path escapes base directory"))
+        }
+    }
+    Ok(^out)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:31
+fn cap_name(cap: &BuildCapability) -> String { cap.name().to_string() }
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:35
+fn check_name(name: String, kind: NameKind) -> String BuildError! {
+    trimmed := name.trim() // #4303
+    if trimmed.is_empty() {
+        return if kind == {
+            .Target -> Err(BuildError.EmptyTargetName)
+            .Action -> Err(BuildError.EmptyActionName)
+            .Toolchain -> Err(BuildError.EmptyToolchainName)
+            .SigningIdentity -> Err(BuildError.EmptySigningIdentityName)
+            .Probe -> Err(BuildError.EmptyProbeName)
+        }
+    }
+    Ok(^name)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:48
+fn validate_plugin_spec(spec: &WasmComponentPluginSpec) -> () BuildError! {
+    name := spec.name.trim() // #4303
+    if name.is_empty() -> return Err(BuildError.EmptyPluginField("name"))
+    version := spec.version.trim() // #4303
+    if version.is_empty() -> return Err(BuildError.EmptyPluginField(spec.name.clone()))
+    api_version := spec.api_version.trim() // #4303
+    if api_version.is_empty() -> return Err(BuildError.EmptyPluginField(spec.name.clone()))
+    digest := spec.component_digest.trim() // #4303
+    if digest.is_empty() -> return Err(BuildError.EmptyPluginField(spec.name.clone()))
+    ContentDigest.parse(spec.component_digest).map_err(fn(error) { BuildError.InvalidPluginDigest(error.to_string()) })?
+    Ok(())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:66
+fn validate_generated_module(module: &GeneratedModuleSpec) -> () BuildError! {
+    name := module.name.trim() // #4303
+    path_text := module.path.as_str().trim() // #4303
+    source := module.source.trim() // #4303
+    if name.is_empty() || path_text.is_empty() || source.is_empty() -> return Err(BuildError.EmptyGeneratedModuleField(module.name.clone()))
+    path := OSPath.from(module.path.as_str())
+    components := path.components().collect::<[Component]>()
+    valid_root := components.len() >= 3
+        && (components[0] is .Normal(part) && part == ".jet")
+        && (components[1] is .Normal(part) && part == "generated")
+        && components[2..].iter().all(fn(component) { component is .Normal })
+    if !valid_root || path.extension().and_then(fn(extension) { extension.to_str() }) != Some("jet") {
+        return Err(BuildError.InvalidGeneratedModulePath(module.path.as_str().to_string()))
+    }
+    Ok(())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:89
+fn validate_toolchain(name: String, spec: &ToolchainSpec) -> () BuildError! {
+    host := spec.host_triple.trim() // #4303
+    target := spec.target_triple.trim() // #4303
+    if host.is_empty() || target.is_empty() -> return Err(BuildError.EmptyToolchainTriple(name.to_string()))
+    if spec.sdk is Some(sdk) {
+        validate_identity(name, sdk.name, &sdk.provenance)?
+        validate_identity(name, sdk.version, &sdk.provenance)?
+    }
+    if spec.linker is Some(linker) { validate_identity(name, linker.name, &linker.provenance)? }
+    tool_names := spec.tools.keys().collect::<[String]>()
+    tool_names.sort()
+    for tool in tool_names {
+        path := spec.tools[tool]
+        tool_text := tool.trim() // #4303
+        path_text := path.trim() // #4303
+        if tool_text.is_empty() || path_text.is_empty() || path.contains(TEXT_NUL) -> return Err(BuildError.EmptyIdentityField(name.to_string()))
+    }
+    for mount in spec.mounts {
+        destination := OSPath.from(mount.destination)
+        source_text := mount.source.trim() // #4303
+        destination_text := mount.destination.trim() // #4303
+        if source_text.is_empty() || mount.source.contains(TEXT_NUL) || destination_text.is_empty() || mount.destination.contains(TEXT_NUL)
+            || !destination.is_absolute() || destination.components().any(fn(component) { component is .ParentDir }) {
+            return Err(BuildError.InvalidPath("toolchain `{name}` has an invalid read-only mount"))
+        }
+    }
+    validate_provenance(name, &spec.provenance)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:124
+fn validate_identity(name: String, field: String, provenance: &BuildProvenance) -> () BuildError! {
+    trimmed := field.trim() // #4303
+    if trimmed.is_empty() -> return Err(BuildError.EmptyIdentityField(name.to_string()))
+    validate_provenance(name, provenance)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:135
+fn validate_probe(name: String, spec: &ProbeSpec) -> () BuildError! {
+    invalid := if spec.kind == {
+        .FindProgram(program) -> { trimmed := program.trim(); trimmed.is_empty() }
+        .PkgConfig(package, ..) -> { trimmed := package.trim(); trimmed.is_empty() }
+        .HeaderCheck(header) -> { trimmed := header.trim(); trimmed.is_empty() || !valid_header_name(header) }
+        .CompileCheck(check, includes, code) -> {
+            check_text := check.trim() // #4303
+            code_text := code.trim() // #4303
+            check_text.is_empty() || code_text.is_empty() || includes.iter().any(fn(include) { !valid_header_name(include) })
+        }
+    }
+    if invalid -> return Err(BuildError.EmptyProbeField(name.to_string()))
+    validate_provenance(name, &spec.provenance)?
+    if spec.reproducibility == ReproducibilityClass.Reproducible && spec.provenance.lock.is_none() -> return Err(BuildError.MissingLockedProvenance(name.to_string()))
+    Ok(())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:171
+fn valid_header_name(header: String) -> Bool {
+    !header.is_empty()
+        && !header.contains(TEXT_NUL)
+        && !header.chars().any(fn(character) { character == '\n' || character == '\r' || character == '"' || character == '<' || character == '>' })
+        && OSPath.from(header).is_relative()
+        && OSPath.from(header).components().all(fn(component) { component is .Normal })
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:182
+fn validate_provenance(name: String, provenance: &BuildProvenance) -> () BuildError! {
+    if provenance.source == {
+        .JetpackDependency(dep) | .AmbientRecord(dep) | .UserDeclared(dep) -> {
+            trimmed := dep.trim() // #4303
+            if trimmed.is_empty() -> return Err(BuildError.EmptyIdentityField(name.to_string()))
+        }
+        _ -> {}
+    }
+    if provenance.lock is Some(lock) {
+        key := lock.key.trim() // #4303
+        digest := lock.digest.trim() // #4303
+        if key.is_empty() || digest.is_empty() -> return Err(BuildError.EmptyIdentityField(name.to_string()))
+    }
+    Ok(())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:204
+fn validate_action(name: String, spec: &ActionSpec) -> () BuildError! {
+    if spec.argv.is_empty() || spec.argv.iter().any(fn(arg) { trimmed := arg.trim(); trimmed.is_empty() }) -> return Err(BuildError.EmptyActionArgv(name.to_string()))
+    validate_paths(&spec.inputs)?
+    validate_paths(&spec.outputs)?
+    env_keys := spec.env.keys().collect::<[String]>()
+    env_keys.sort()
+    for key in env_keys {
+        trimmed := key.trim() // #4303
+        if trimmed.is_empty() -> return Err(BuildError.EmptyEnvName(name.to_string()))
+    }
+    allowlist := spec.env_allowlist.iter().collect::<[String]>()
+    allowlist.sort()
+    for key in allowlist {
+        trimmed := key.trim() // #4303
+        if trimmed.is_empty() -> return Err(BuildError.EmptyEnvName(name.to_string()))
+        if !spec.env.contains_key(key) -> return Err(BuildError.UndeclaredEnvName(action: name.to_string(), key: key.clone()))
+    }
+    if spec.cache == {
+        .Cached if spec.outputs.is_empty() -> return Err(BuildError.CachedActionWithoutOutputs(name.to_string()))
+        .UncachedPhony if !spec.outputs.is_empty() -> return Err(BuildError.PhonyActionWithOutputs(name.to_string()))
+        .UncachedPhony if spec.caps.is_empty() -> return Err(BuildError.PhonyActionWithoutCaps(name.to_string()))
+        _ -> {}
+    }
+    outputs := Set<String>.new()
+    for output in spec.outputs {
+        if !outputs.insert(output.as_str()) -> return Err(BuildError.DuplicateActionOutput(action: name.to_string(), output: output.as_str().to_string()))
+    }
+    Ok(())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:251
+fn validate_action_output_owners(actions: &[BuildAction]) -> () BuildError! {
+    owners := [String:String].new()
+    for action in actions {
+        for output in action.outputs {
+            if owners.insert(output.as_str(), action.name) is Some(first_action) {
+                return Err(BuildError.DuplicateBuildOutput(output: output.as_str().to_string(), first_action: first_action.to_string(), second_action: action.name.clone()))
+            }
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:267
+fn validate_paths(paths: &[BuildPath]) -> () BuildError! {
+    for path in paths {
+        trimmed := path.as_str().trim() // #4303
+        if trimmed.is_empty() -> return Err(BuildError.EmptyPath)
+        path_value := OSPath.from(path.as_str())
+        if path_value.is_absolute() || path_value.components().any(fn(component) { component is .ParentDir || component is .RootDir || component is .Prefix }) {
+            return Err(BuildError.InvalidPath(path.as_str().to_string()))
+        }
+    }
+    Ok(())
+}

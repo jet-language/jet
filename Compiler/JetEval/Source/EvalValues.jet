@@ -1961,3 +1961,36 @@ fn jet_eval_key_from_mir(key: MIRConstKey) -> TComptimeKey Never! {
         .Enum(type_name, variant) -> TComptimeKey.Enum{type_name: type_name, variant: variant}
     }
 }
+
+// Rust: crates/jet-comptime/src/Comptime/Diagnostics.rs:11
+// Pure diagnostic constructors remain separate from machine failure adoption.
+pub fn comptime_panic(msg: String, span: Span) -> Diagnostic Never! {
+    diagnostic_from_registry("E0953", Val(span), "your comptime code stopped the build",
+        "while computing this value at compile time, the program panicked: {msg}",
+        "this is the sanctioned way to validate at compile time — fix the input the check rejects")
+}
+// Rust: crates/jet-comptime/src/Comptime/Diagnostics.rs:25
+fn overflow(verb: String, span: Span) -> Diagnostic Never! {
+    comptime_panic("tried to {verb} two numbers and the result was too big for an Int", span)
+}
+// Rust: crates/jet-comptime/src/Comptime/Diagnostics.rs:35
+fn divide_by_zero(span: Span) -> Diagnostic Never! { comptime_panic("divided by zero", span) }
+// Rust: crates/jet-comptime/src/Comptime/Diagnostics.rs:39
+fn index_oob(len: USize, i: I64, span: Span) -> Diagnostic Never! {
+    comptime_panic("the list has {len} items, so position {i} doesn't exist", span)
+}
+// Rust: crates/jet-comptime/src/Comptime/Diagnostics.rs:49
+fn unsupported(what: String, span: Span) -> Diagnostic Never! {
+    jet_foundation.Prelude.jet_e0956_unsupported(what, span)
+}
+// Rust: crates/jet-comptime/src/Comptime/Diagnostics.rs:53
+fn unsupported_expr(e: &jet_foundation.AST.Expr) -> Diagnostic Never! {
+    unsupported("this expression", e.span())
+}
+// Rust: crates/jet-comptime/src/Comptime/Diagnostics.rs:62
+fn impurity_diag(name: String, path: &[String], span: Span) -> Diagnostic Never! {
+    why :: if path.is_empty() -> "`{name}` touches the outside world, so it can't run while compiling"
+        else -> "{path.join(\" calls \")} calls `{name}`, which touches the outside world — comptime must give the same answer on every machine"
+    diagnostic_from_registry("E3401", Val(span), "`{name}` is not allowed in comptime code", why,
+        "compute this at runtime instead; the exceptions are `embed_file(\"path\")`, `embed_bytes(\"path\")`, and `find(\"glob\")`")
+}

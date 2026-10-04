@@ -1,0 +1,57 @@
+use jet_bootstrap.NativeAdapter.[native_operation, native_operation_arguments, mir_access_expression, emit_native_callback_jobs, emit_native_callback_scope_helpers]
+use jet_codegen.MIRRust.MirRustTraitMethodMetadata
+use jet_foundation.MIR.[MirAccess, MirTraitId, MirTraitMethodId]
+
+// Rust: Compiler/Bootstrap/Host/NativeAdapter.rs:317 (behavioral control; no original inline tests)
+fn adapter_method(name: String) -> MirRustTraitMethodMetadata {
+    MirRustTraitMethodMetadata {
+        trait_id: MirTraitId(1), method_id: MirTraitMethodId(2), key: "adapter.{name}", name,
+        symbol: "method", receiver_access: Val(MirAccess.Read),
+        parameter_types: ["&mut Machine", "&String", "bool"],
+        parameter_access: [MirAccess.Write, MirAccess.Read, MirAccess.Move],
+        return_type: "Option<bool>",
+    }
+}
+
+// Rust: Compiler/Bootstrap/Host/NativeAdapter.rs:317
+#Test("native_adapter_operation_allowlist_and_unavailable_control") {
+    assert(native_operation(adapter_method("host_call")) == (true, "__jet_bootstrap_native_host_call"))
+    assert(native_operation(adapter_method("foreign_call")) == (false, "__jet_bootstrap_native_foreign_call"))
+    assert(native_operation(adapter_method("handle_call")) == (false, "__jet_bootstrap_native_handle_call"))
+    assert(native_operation(adapter_method("unrecognized")) == (false, "__jet_bootstrap_native_unavailable_unrecognized"))
+}
+
+// Rust: Compiler/Bootstrap/Host/NativeAdapter.rs:331
+#Test("native_adapter_arguments_keep_checked_borrows_and_physical_binding_order") {
+    assert(native_operation_arguments(adapter_method("host_call"), false) == ", __jet_arg_1, __jet_arg_2, compiler_program, &physical")
+    assert(native_operation_arguments(adapter_method("host_call"), true) == ", &__jet_arg_1, __jet_arg_2, compiler_program, &physical")
+    assert(native_operation_arguments(adapter_method("foreign_call"), true) == ", &__jet_arg_1, __jet_arg_2")
+    assert(mir_access_expression(MirAccess.Read) == "::jet_foundation::MIR::MirAccess::Read")
+    assert(mir_access_expression(MirAccess.Write) == "::jet_foundation::MIR::MirAccess::Write")
+    assert(mir_access_expression(MirAccess.Move) == "::jet_foundation::MIR::MirAccess::Move")
+}
+
+// Rust: Compiler/Bootstrap/Host/NativeAdapter.rs:383
+#Test("native_adapter_job_template_retains_admission_transition_and_unwind_debt") {
+    source := ""
+    emit_native_callback_jobs(&source)!
+    assert(source.contains("state.admission_closed && state.open_sessions == 0 && state.transitions == 0"))
+    assert(source.contains("state.transitions.checked_add(1)"))
+    assert(source.contains("state.active.try_reserve(reservations)"))
+    assert(source.contains("state.active.push(handle); state.transitions -= 1;"))
+    assert(source.contains("::std::panic::resume_unwind(payload)"))
+    assert(source.contains("native callback-job session registration underflow"))
+    assert(!source.contains("//RS"))
+}
+
+// Rust: Compiler/Bootstrap/Host/NativeAdapter.rs:732
+#Test("native_adapter_scope_template_records_failures_and_requires_live_origin") {
+    source := ""
+    emit_native_callback_scope_helpers(&source)!
+    assert(source.contains("self.failed.store(true, ::std::sync::atomic::Ordering::Release)"))
+    assert(source.contains("Source callback origin has no live completion receiver"))
+    assert(source.contains("Source callback origin has no live job owner"))
+    assert(source.contains("SourceCallbackJobSessionRegistration::start(jobs)?"))
+    assert(source.contains("Source callback session was abandoned with unreleased callbacks or undelivered events"))
+    assert(!source.contains("//RS"))
+}

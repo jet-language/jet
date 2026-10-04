@@ -1,1814 +1,969 @@
-// PORT-PENDING 0419 crates-jet-sema-src-sema-checkerownership-slice-1: crates/jet-sema/src/Sema/CheckerOwnership.rs:1-1810
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS use super::NominalWalk::{NominalQuery, NominalWalk};
-//RS use crate::Collections;
-//RS use crate::Diagnostics::{Diagnostic, FixApplicability, FixSafety, Span, TextEdit};
-//RS use crate::Generics::{is_type_var_name, substitute_type};
-//RS use crate::Sema::Diagnostics::{type_is_copy, type_requires_owned_iteration};
-//RS use crate::Syntax;
-//RS use crate::AST::{
-//RS     AccessConvention, BinOp, Expr, ForKind, LValue, Lambda, LambdaBody, Pattern, Stmt, Type, UnOp,
-//RS     VariantPayload,
-//RS };
-//RS use std::collections::{HashMap, HashSet};
-//RS 
-//RS /// D-FACT-OWN1: the borrow checker is a prover, not a plane. The view plane
-//RS /// stores the windows; deciding when a window dies stays here, with the prover
-//RS /// that opened it.
-//RS pub(crate) fn invalidate_view_owner(
-//RS     views: &mut ViewStore,
-//RS     owner: &ViewOwnerId,
-//RS     verb: &str,
-//RS     span: Span,
-//RS ) {
-//RS     for facts in views.all_mut() {
-//RS         for fact in facts {
-//RS             if &fact.place.owner == owner && fact.invalidated.is_none() {
-//RS                 fact.invalidated = Some((verb.to_string(), span));
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Where a `~` copy edit for this expression goes. A field or index node's
-//RS /// span covers only its selector (`.name`, `[i]`), so the edit starts at the
-//RS /// root of the place: `~result.session`, never `result.~session`.
-//RS pub(crate) fn copy_edit_anchor(expr: &Expr) -> Span {
-//RS     let mut root = expr;
-//RS     while let Expr::Field(base, ..)
-//RS     | Expr::Index { base, .. }
-//RS     | Expr::OptField { base, .. }
-//RS     | Expr::Paren(base, _) = root
-//RS     {
-//RS         root = base;
-//RS     }
-//RS     Span::new(root.span().start.min(expr.span().start), expr.span().end)
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct EvaluatedAccess {
-//RS     place: ViewPlace,
-//RS     capture_place: ViewPlace,
-//RS     capture_ty: Option<Type>,
-//RS     capture_is_view: bool,
-//RS     access: ViewAccess,
-//RS     span: Span,
-//RS     through_call: bool,
-//RS     moves_owner: bool,
-//RS }
-//RS 
-//RS fn carries_lending_view(expr: &Expr, name: &str) -> bool {
-//RS     match expr {
-//RS         Expr::Ident(found, _) => found == name,
-//RS         Expr::Copy(inner, _)
-//RS         | Expr::Place(inner, _, _)
-//RS         | Expr::Paren(inner, _)
-//RS         | Expr::Spread(inner, _) => carries_lending_view(inner, name),
-//RS         Expr::ListLit(items, _) => items.iter().any(|item| carries_lending_view(item, name)),
-//RS         Expr::TupleLit(fields, _, _) => fields
-//RS             .iter()
-//RS             .any(|(_, value)| carries_lending_view(value, name)),
-//RS         Expr::MapLit(entries, _) => entries.iter().any(|(key, value)| {
-//RS             carries_lending_view(key, name) || carries_lending_view(value, name)
-//RS         }),
-//RS         Expr::StructLit { fields, .. } => fields
-//RS             .iter()
-//RS             .any(|(_, _, value)| carries_lending_view(value, name)),
-//RS         Expr::TypedLit { .. } | Expr::If { .. } | Expr::OrFallback { .. } => {
-//RS             crate::Sema::Captures::expr_refs_name(expr, name)
-//RS         }
-//RS         Expr::EnumLit { args, .. } => args.iter().any(|arg| match arg {
-//RS             crate::AST::EnumLitArg::Positional(value) => carries_lending_view(value, name),
-//RS             crate::AST::EnumLitArg::Named { expr, .. } => carries_lending_view(expr, name),
-//RS         }),
-//RS         Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Present(inner, _) => {
-//RS             carries_lending_view(inner, name)
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, PartialEq, Eq)]
-//RS enum AccessWalkMode {
-//RS     EvaluateNow,
-//RS     ConstructCaptures,
-//RS     CaptureRequirements,
-//RS }
-//RS 
-//RS fn const_place_int(expr: &Expr) -> Option<i64> {
-//RS     match expr {
-//RS         Expr::Int(value, _, _, _) => Some(*value),
-//RS         Expr::Unary(UnOp::Neg, inner, _) => const_place_int(inner)?.checked_neg(),
-//RS         Expr::Paren(inner, _) => const_place_int(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn cell_guard_projection_path(expr: &Expr, parameter: &str) -> Option<Vec<String>> {
-//RS     match expr {
-//RS         Expr::Ident(name, _) if name == parameter => Some(Vec::new()),
-//RS         Expr::Field(base, field, _) => {
-//RS             let mut path = cell_guard_projection_path(base, parameter)?;
-//RS             path.push(field.clone());
-//RS             Some(path)
-//RS         }
-//RS         Expr::Paren(base, _) => cell_guard_projection_path(base, parameter),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn cell_guard_projection_path_from_arg(arg: &crate::AST::CallArg) -> Option<Vec<String>> {
-//RS     let Expr::Lambda(lambda) = &arg.expr else {
-//RS         return None;
-//RS     };
-//RS     let [parameter] = lambda.params.as_slice() else {
-//RS         return None;
-//RS     };
-//RS     let crate::AST::LambdaBody::Expr(expr) = &lambda.body else {
-//RS         return None;
-//RS     };
-//RS     cell_guard_projection_path(expr, &parameter.name)
-//RS }
-//RS 
-//RS fn record_cell_guard_projection_path(arg: &mut crate::AST::CallArg, path: Option<Vec<String>>) {
-//RS     if let Expr::Lambda(lambda) = &mut arg.expr {
-//RS         lambda.meta.cell_projection_path = path;
-//RS     }
-//RS }
-//RS 
-//RS fn cell_guard_projection_paths_overlap(first: &[String], second: &[String]) -> bool {
-//RS     first.starts_with(second) || second.starts_with(first)
-//RS }
-//RS 
-//RS fn named_view_field_path(expr: &Expr, fields: &mut Vec<String>) -> Option<String> {
-//RS     match expr {
-//RS         Expr::Ident(name, _) => Some(name.clone()),
-//RS         Expr::Field(base, field, _) => {
-//RS             let name = named_view_field_path(base, fields)?;
-//RS             fields.push(field.clone());
-//RS             Some(name)
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn append_view_source_projections(
-//RS     place: &mut ViewPlace,
-//RS     projections: &[crate::AST::ViewSourceProjection],
-//RS     span: Span,
-//RS ) {
-//RS     for projection in projections {
-//RS         place.projections.push(match projection {
-//RS             crate::AST::ViewSourceProjection::Field(name) => ViewProjection::Field(name.clone()),
-//RS             crate::AST::ViewSourceProjection::Index => ViewProjection::Index { value: None, span },
-//RS             crate::AST::ViewSourceProjection::Range => ViewProjection::Range {
-//RS                 start: None,
-//RS                 end: None,
-//RS                 span,
-//RS             },
-//RS         });
-//RS     }
-//RS }
-//RS /// Recover the borrowed-window kind from a checked method return. The
-//RS /// `ViewIter`/`Result` wrappers are carriers around the same view payload; the
-//RS /// inner argument identifies the existing diagnostic family without making
-//RS /// mapped files a special hard-coded `List` view.
-//RS fn view_kind_from_return_type(ty: &Type) -> Option<ViewKind> {
-//RS     match ty {
-//RS         Type::Result { ok, .. } | Type::Option(ok) | Type::Shared(ok) => {
-//RS             view_kind_from_return_type(ok)
-//RS         }
-//RS         Type::Apply { name, args }
-//RS             if name == Syntax::TYPE_VIEW_ITER && args.len() == 1 =>
-//RS         {
-//RS             view_kind_from_return_type(&args[0])
-//RS         }
-//RS         Type::Apply { name, args }
-//RS             if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
-//RS         {
-//RS             match &args[0] {
-//RS                 Type::Named(name) if name == "str" => Some(ViewKind::String),
-//RS                 Type::Named(name) if name == Syntax::TYPE_BYTES => Some(ViewKind::Buffer),
-//RS                 Type::Named(name) if name == "Tensor" => Some(ViewKind::Matrix),
-//RS                 Type::Apply { name, .. }
-//RS                     if matches!(name.as_str(), "Vec" | "Matrix" | "Tensor") =>
-//RS                 {
-//RS                     Some(ViewKind::Matrix)
-//RS                 }
-//RS                 _ => Some(ViewKind::List),
-//RS             }
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     pub(crate) fn is_resource_type(&self, ty: &Type) -> bool {
-//RS         match ty {
-//RS             Type::Named(name) | Type::Apply { name, .. } => {
-//RS                 self.type_implements_trait_for_name(name, Syntax::TRAIT_CLOSE)
-//RS             }
-//RS             Type::String => self
-//RS                 .trait_reg
-//RS                 .implements_trait(Syntax::TYPE_STRING, Syntax::TRAIT_CLOSE),
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     // ──────────────────────────────────────────────────────────────────────
-//RS     // D-ALLOC2 / D-REGION1 (ratified 2026-06-21): scope-bound arena `view`s.
-//RS     //
-//RS     // `x :: arena.alloc(v)` makes `x` a *view* into `arena`'s storage — Rust
-//RS     // `&'arena mut T`. The view is sound only while it stays inside its region
-//RS     // (the lexical scope of the `arena` binding / an explicit `region`) and only
-//RS     // until `arena` is reset or closed. Two diagnostics enforce that, both
-//RS     // *strictly* at least as strict as Rust's borrow checker, so every
-//RS     // Jet-accepted program is rustc-accepted (I2: Jet rejects first):
-//RS     //   * E0631 — the view escapes its region (returned, stored in a binding /
-//RS     //     ref / struct field, passed where ownership/`mut` is taken, captured by
-//RS     //     an escaping closure).
-//RS     //   * E0632 — the view is used after the backing arena was reset.
-//RS     //
-//RS     // v1 restriction (I8): views are non-reassignable, non-escaping locals; we
-//RS     // reject anything the analysis can't prove with a teaching error rather than
-//RS     // attempt a clever lowering.
-//RS     // ──────────────────────────────────────────────────────────────────────
-//RS 
-//RS     /// If `init` is `arena.alloc(value)` on a name, return the arena's name.
-//RS     pub(crate) fn arena_alloc_source(&self, init: &Expr) -> Option<String> {
-//RS         let Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             recv_type,
-//RS             ..
-//RS         } = init.without_parens()
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         if method != Syntax::MEM_ALLOC_ALLOC {
-//RS             return None;
-//RS         }
-//RS         let Expr::Ident(arena, _) = receiver.as_ref().without_parens() else {
-//RS             return None;
-//RS         };
-//RS         let resolved_allocator = recv_type
-//RS             .as_deref()
-//RS             .is_some_and(|name| matches!(name, "Arena" | "Bump" | "Pool" | "Fixed"));
-//RS         (resolved_allocator || self.lookup(arena).is_some_and(|i| is_allocator_type(&i.ty)))
-//RS             .then(|| arena.clone())
-//RS     }
-//RS 
-//RS     /// Record `name` as a view into `arena`, declared at the current scope depth.
-//RS     pub(crate) fn record_arena_view(&mut self, name: &str, arena: String, span: Span) {
-//RS         let place = ViewPlace {
-//RS             owner: self.owner_id(&arena),
-//RS             projections: vec![ViewProjection::Fresh(span)],
-//RS         };
-//RS         self.record_view(
-//RS             name,
-//RS             Vec::new(),
-//RS             place,
-//RS             ViewKind::Arena,
-//RS             ViewAccess::Write,
-//RS             span,
-//RS         );
-//RS     }
-//RS 
-//RS     /// Return the user buffer borrowed by `Fixed.over`, or a synthetic local
-//RS     /// owner for `Fixed.new`'s compiler-generated inline backing.
-//RS     pub(crate) fn fixed_backing_source(&self, init: &Expr) -> Option<String> {
-//RS         let Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } = init
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         if !matches!(&**receiver, Expr::Field(_, name, _) if name == "Fixed") {
-//RS             return None;
-//RS         }
-//RS         match method.as_str() {
-//RS             "new" => Some("<inline Fixed backing>".to_string()),
-//RS             "over" => args.first().and_then(|arg| match &arg.expr {
-//RS                 Expr::Ident(name, _) => Some(name.clone()),
-//RS                 _ => None,
-//RS             }),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn record_fixed_backing(&mut self, name: &str, owner: String, span: Span) {
-//RS         let place = ViewPlace {
-//RS             owner: if owner == "<inline Fixed backing>" {
-//RS                 ViewOwnerId {
-//RS                     name: owner,
-//RS                     def_span: span,
-//RS                     origin: ViewOwnerOrigin::Local,
-//RS                 }
-//RS             } else {
-//RS                 self.owner_id(&owner)
-//RS             },
-//RS             projections: Vec::new(),
-//RS         };
-//RS         self.record_view(
-//RS             name,
-//RS             Vec::new(),
-//RS             place,
-//RS             ViewKind::FixedBacking,
-//RS             ViewAccess::Write,
-//RS             span,
-//RS         );
-//RS     }
-//RS 
-//RS     /// E0632: when `arena` is reset, every live view into it dies.
-//RS     pub(crate) fn kill_views_of_arena(&mut self, arena: &str, verb: &str, span: Span) {
-//RS         let owner = self.owner_id(arena);
-//RS         invalidate_view_owner(&mut self.flow.views, &owner, verb, span);
-//RS     }
-//RS 
-//RS     /// E0632: reading a view whose arena was already reset.
-//RS     pub(crate) fn check_view_use(&mut self, name: &str, span: Span) {
-//RS         self.views_used_in_stmt.insert(name.to_string());
-//RS         if let Some(info) = self.view_fact(name) {
-//RS             if let Some((verb, _kill_span)) = &info.invalidated {
-//RS                 let arena = info.place.owner.name.clone();
-//RS                 let verb = verb.clone();
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0632",
-//RS                     format!("`{}` was {} here, so the value `{}` points into is gone", arena, verb, name),
-//RS                     format!(
-//RS                         "`{}` is a view into `{}`; `{}.{}()` invalidated everything stored in `{}`, so reading `{}` now would read freed memory",
-//RS                         name, arena, arena, verb, arena, name
-//RS                     ),
-//RS                     format!(
-//RS                         "use `{}` before `{}.{}()`, or re-`alloc` after the {} to get a fresh value",
-//RS                         name, arena, verb, verb
-//RS                     ),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// E0631: a view named `name` is escaping its region (used where it would
-//RS     /// outlive `arena`). `what` describes the escape site for the message.
-//RS     pub(crate) fn report_view_escape(&mut self, name: &str, what: &str, span: Span) {
-//RS         let Some(fact) = self.view_fact(name).cloned() else {
-//RS             return;
-//RS         };
-//RS         match fact.kind {
-//RS             ViewKind::Arena => self.diags.push(Diagnostic::error(
-//RS                 "E0631",
-//RS                 format!("`{}` cannot be shared — it does not live long enough to {}", name, what),
-//RS                 format!(
-//RS                     "`{}` is a view into `{}`; sharing it outside the region would let it outlive `{}` and point into freed memory",
-//RS                     name, fact.place.owner.name, fact.place.owner.name
-//RS                 ),
-//RS                 format!(
-//RS                     "keep `{}` inside the `{}` region, or copy what you need out with `{}` before it leaves",
-//RS                     name, fact.place.owner.name, Syntax::SIGIL_COPY
-//RS                 ),
-//RS                 Some(span),
-//RS             )),
-//RS             ViewKind::FixedBacking => self.diags.push(Diagnostic::error(
-//RS                 "E0631",
-//RS                 format!("`{}` cannot be shared — its fixed backing does not live long enough to {}", name, what),
-//RS                 format!(
-//RS                     "`{}` exclusively borrows `{}`; moving or capturing the handle could outlive that inline storage",
-//RS                     name, fact.place.owner.name
-//RS                 ),
-//RS                 "keep the Fixed handle in its declaring lexical scope and close it after its last allocation view".to_string(),
-//RS                 Some(span),
-//RS             )),
-//RS             ViewKind::String => self.report_string_view_unsupported_use(name, what, span),
-//RS             // D-PIN1=A: the no-move promise ends with the pin. Letting the pin
-//RS             // outlive the pinned place would keep the promise alive after the
-//RS             // storage it describes is gone.
-//RS             ViewKind::Pin => self.diags.push(Diagnostic::error(
-//RS                 "E2305",
-//RS                 format!(
-//RS                     "`{}` cannot be shared — the pin does not live long enough to {}",
-//RS                     name, what
-//RS                 ),
-//RS                 format!(
-//RS                     "`{}` pins `{}`; sharing it outside `{}`'s scope would let the no-move promise outlive the storage it protects",
-//RS                     name, fact.place.owner.name, fact.place.owner.name
-//RS                 ),
-//RS                 format!(
-//RS                     "keep `{}` inside `{}`'s scope, or pin the place again where it is needed",
-//RS                     name, fact.place.owner.name
-//RS                 ),
-//RS                 Some(span),
-//RS             )),
-//RS             ViewKind::List | ViewKind::Buffer | ViewKind::Matrix => {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E2305",
-//RS                     format!(
-//RS                         "`{}` cannot be shared — it does not live long enough to {}",
-//RS                         name, what
-//RS                     ),
-//RS                     format!(
-//RS                         "`{}` is a view into `{}`; sharing it outside `{}`'s scope would let it outlive its owner and point into freed storage",
-//RS                         name, fact.place.owner.name, fact.place.owner.name
-//RS                     ),
-//RS                     format!(
-//RS                         "keep `{}` inside `{}`'s scope, or copy what you need before it leaves",
-//RS                         name, fact.place.owner.name
-//RS                     ),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// True if `name` is currently a live arena view. Used to gate escape checks
-//RS     /// at the use sites (return / bind / move-arg / struct field).
-//RS     pub(crate) fn is_arena_view(&self, name: &str) -> bool {
-//RS         self.view_kind(name) == Some(ViewKind::Arena)
-//RS     }
-//RS 
-//RS     pub(crate) fn is_fixed_backing_view(&self, name: &str) -> bool {
-//RS         self.view_kind(name) == Some(ViewKind::FixedBacking)
-//RS     }
-//RS 
-//RS     pub(crate) fn reject_fixed_storage(&mut self, expr: &Expr, what: &str) {
-//RS         if let Expr::Ident(name, span) = expr {
-//RS             if self.is_fixed_backing_view(name) {
-//RS                 self.report_view_escape(name, what, *span);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn owner_id(&self, owner: &str) -> ViewOwnerId {
-//RS         let def_span = self
-//RS             .lookup(owner)
-//RS             .map(|info| info.def_span)
-//RS             .unwrap_or_else(|| Span::new(0, 0));
-//RS         if owner == Syntax::KW_SELF {
-//RS             ViewOwnerId {
-//RS                 name: owner.to_string(),
-//RS                 def_span,
-//RS                 origin: ViewOwnerOrigin::Receiver,
-//RS             }
-//RS         } else if self.consts.contains_key(owner) {
-//RS             ViewOwnerId {
-//RS                 name: owner.to_string(),
-//RS                 def_span,
-//RS                 origin: ViewOwnerOrigin::Static,
-//RS             }
-//RS         } else if self
-//RS             .lookup(owner)
-//RS             .is_some_and(|info| info.param_conv.is_some())
-//RS         {
-//RS             let index = self
-//RS                 .current_param_names
-//RS                 .iter()
-//RS                 .position(|name| name == owner)
-//RS                 .unwrap_or(0);
-//RS             ViewOwnerId {
-//RS                 name: owner.to_string(),
-//RS                 def_span,
-//RS                 origin: ViewOwnerOrigin::Parameter(index),
-//RS             }
-//RS         } else {
-//RS             ViewOwnerId {
-//RS                 name: owner.to_string(),
-//RS                 def_span,
-//RS                 origin: ViewOwnerOrigin::Local,
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn record_view(
-//RS         &mut self,
-//RS         name: &str,
-//RS         output_path: Vec<String>,
-//RS         place: ViewPlace,
-//RS         kind: ViewKind,
-//RS         access: ViewAccess,
-//RS         span: Span,
-//RS     ) {
-//RS         self.record_view_with_exemptions(name, output_path, place, kind, access, span, None, None);
-//RS     }
-//RS 
-//RS     fn record_view_with_exemptions(
-//RS         &mut self,
-//RS         name: &str,
-//RS         output_path: Vec<String>,
-//RS         place: ViewPlace,
-//RS         kind: ViewKind,
-//RS         access: ViewAccess,
-//RS         span: Span,
-//RS         transfer_from: Option<&str>,
-//RS         enum_variants: Option<&HashSet<String>>,
-//RS     ) {
-//RS         let conflicts = self
-//RS             .flow
-//RS             .views
-//RS             .all()
-//RS             .flat_map(|(existing_name, facts)| facts.iter().map(move |fact| (existing_name, fact)))
-//RS             .any(|(existing_name, fact)| {
-//RS                 if !self.view_is_live_now(existing_name) || fact.invalidated.is_some() {
-//RS                     return false;
-//RS                 }
-//RS                 if transfer_from == Some(existing_name) {
-//RS                     return false;
-//RS                 }
-//RS                 // Several candidates for one logical output slot are alternatives,
-//RS                 // not simultaneous borrows. Enum variants are likewise mutually
-//RS                 // exclusive even though their payload paths differ.
-//RS                 if existing_name == name
-//RS                     && (fact.output_path == output_path
-//RS                         || enum_variants.is_some_and(|variants| {
-//RS                             Self::view_paths_are_enum_alternatives(
-//RS                                 variants,
-//RS                                 &fact.output_path,
-//RS                                 &output_path,
-//RS                             )
-//RS                         }))
-//RS                 {
-//RS                     return false;
-//RS                 }
-//RS                 // D-PIN2=A / D-PIN3=A: reaching a declared `Pin<U>` field through a
-//RS                 // live pin is structural projection, not a second borrow — parent
-//RS                 // and child are one contract. Only nesting is exempt; two pins on
-//RS                 // unrelated-but-overlapping places still conflict.
-//RS                 if kind == ViewKind::Pin
-//RS                     && fact.kind == ViewKind::Pin
-//RS                     && (place.extends(&fact.place) || fact.place.extends(&place))
-//RS                 {
-//RS                     return false;
-//RS                 }
-//RS                 // D-PIN1=A + D-ALLOC2 / D-FIXED-BACKING1: `mem.pin(&alloc)` names the
-//RS                 // same exclusive write window the arena/Fixed alloc already opened.
-//RS                 // The pin binding adds the address-stability promise; it is not a
-//RS                 // second overlapping write into the allocator's storage.
-//RS                 if kind == ViewKind::Pin
-//RS                     && fact.kind == ViewKind::Arena
-//RS                     && fact.place.overlaps(&place)
-//RS                 {
-//RS                     return false;
-//RS                 }
-//RS                 (fact.access == ViewAccess::Write || access == ViewAccess::Write)
-//RS                     && fact.place.overlaps(&place)
-//RS             });
-//RS         if conflicts {
-//RS             let place_name = Self::place_name(&place);
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0212",
-//RS                 format!("`{place_name}` already has a live view that conflicts with `{name}`"),
-//RS                 "many read views may overlap, but an exclusive mutable view cannot overlap any other live view".to_string(),
-//RS                 "finish using the earlier view before creating this one, or make an owned copy".to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS         }
-//RS         let fact = ViewFact {
-//RS             binding_span: span,
-//RS             output_path,
-//RS             place,
-//RS             kind,
-//RS             access,
-//RS             scope_len: self.scope_depth(),
-//RS             seq: 0,
-//RS             invalidated: None,
-//RS         };
-//RS         crate::Sema::push_view_fact(&mut self.flow.views, name, fact);
-//RS     }
-//RS 
-//RS     fn view_paths_are_enum_alternatives(
-//RS         variants: &HashSet<String>,
-//RS         left: &[String],
-//RS         right: &[String],
-//RS     ) -> bool {
-//RS         let (Some(left_variant), Some(right_variant)) = (left.first(), right.first()) else {
-//RS             return false;
-//RS         };
-//RS         if left_variant == right_variant {
-//RS             return false;
-//RS         }
-//RS         variants.contains(left_variant) && variants.contains(right_variant)
-//RS     }
-//RS 
-//RS     pub(crate) fn view_fact(&self, name: &str) -> Option<&ViewFact> {
-//RS         let binding = self.lookup(name)?;
-//RS         crate::Sema::current_view_fact_for_binding(&self.flow.views, name, binding.def_span)
-//RS     }
-//RS 
-//RS     pub(super) fn view_facts(&self, name: &str) -> Vec<&ViewFact> {
-//RS         let Some(binding) = self.lookup(name) else {
-//RS             return Vec::new();
-//RS         };
-//RS         crate::Sema::view_facts_for_binding(&self.flow.views, name, binding.def_span)
-//RS     }
-//RS 
-//RS     fn view_fact_at_path(&self, name: &str, output_path: &[String]) -> Option<&ViewFact> {
-//RS         self.view_facts_at_path(name, output_path)
-//RS             .into_iter()
-//RS             .next()
-//RS     }
-//RS 
-//RS     fn view_facts_at_path(&self, name: &str, output_path: &[String]) -> Vec<&ViewFact> {
-//RS         let candidates: Vec<_> = self
-//RS             .view_facts(name)
-//RS             .into_iter()
-//RS             .filter(|fact| output_path.starts_with(&fact.output_path))
-//RS             .collect();
-//RS         let Some(longest) = candidates.iter().map(|fact| fact.output_path.len()).max() else {
-//RS             return Vec::new();
-//RS         };
-//RS         candidates
-//RS             .into_iter()
-//RS             .filter(|fact| fact.output_path.len() == longest)
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn compose_view_source_places(
-//RS         &self,
-//RS         actual: &Expr,
-//RS         projections: &[crate::AST::ViewSourceProjection],
-//RS         span: Span,
-//RS     ) -> Vec<ViewPlace> {
-//RS         let actual = actual.without_parens();
-//RS         let leading_fields: Vec<String> = projections
-//RS             .iter()
-//RS             .map_while(|projection| match projection {
-//RS                 crate::AST::ViewSourceProjection::Field(name) => Some(name.clone()),
-//RS                 _ => None,
-//RS             })
-//RS             .collect();
-//RS         if let Expr::Ident(name, _) = actual {
-//RS             let facts = self.view_facts_at_path(name, &leading_fields);
-//RS             if !facts.is_empty() {
-//RS                 return facts
-//RS                     .into_iter()
-//RS                     .map(|fact| {
-//RS                         let mut place = fact.place.clone();
-//RS                         append_view_source_projections(
-//RS                             &mut place,
-//RS                             &projections[fact.output_path.len()..],
-//RS                             span,
-//RS                         );
-//RS                         place
-//RS                     })
-//RS                     .collect();
-//RS             }
-//RS         }
-//RS         let Some(mut place) = self.place_from_expr(actual) else {
-//RS             return Vec::new();
-//RS         };
-//RS         append_view_source_projections(&mut place, projections, span);
-//RS         vec![place]
-//RS     }
-//RS 
-//RS     fn view_is_live_now(&self, name: &str) -> bool {
-//RS         if self.view_kind(name) == Some(ViewKind::FixedBacking) {
-//RS             // A Fixed handle still owns cleanup work even after its last source
-//RS             // read. Its exclusive backing borrow ends only on consuming close
-//RS             // (or lexical scope exit), not ordinary last-use shortening.
-//RS             return !self.flow.moved.contains(name);
-//RS         }
-//RS         self.views_used_in_stmt.contains(name) || self.is_name_live_after(name)
-//RS     }
-//RS 
-//RS     pub(crate) fn view_kind(&self, name: &str) -> Option<ViewKind> {
-//RS         self.view_fact(name).map(|fact| fact.kind)
-//RS     }
-//RS 
-//RS     fn view_kind_for_place(&self, place: &ViewPlace) -> ViewKind {
-//RS         if let Some((_, fact)) = crate::Sema::view_facts_newest_first(&self.flow.views)
-//RS             .into_iter()
-//RS             .find(|(_, fact)| {
-//RS                 fact.place.owner.def_span == place.owner.def_span
-//RS                     && fact.place.projections == place.projections
-//RS             })
-//RS         {
-//RS             return fact.kind;
-//RS         }
-//RS         // D-PIN2=A / D-PIN3=A: a place reached through a live pin is still
-//RS         // pinned. Only `Pin` inherits this way — every other window kind keeps
-//RS         // its own owner-shaped classification below.
-//RS         if crate::Sema::view_facts_newest_first(&self.flow.views)
-//RS             .into_iter()
-//RS             .any(|(_, fact)| fact.kind == ViewKind::Pin && place.extends(&fact.place))
-//RS         {
-//RS             return ViewKind::Pin;
-//RS         }
-//RS         match self.lookup(&place.owner.name).map(|info| &info.ty) {
-//RS             Some(Type::Named(name)) if name == Syntax::TYPE_BYTES => ViewKind::Buffer,
-//RS             Some(Type::Apply { name, .. })
-//RS                 if matches!(name.as_str(), "Vec" | "Matrix" | "Tensor") =>
-//RS             {
-//RS                 ViewKind::Matrix
-//RS             }
-//RS             Some(Type::Named(name)) if name == "Tensor" => ViewKind::Matrix,
-//RS             _ => ViewKind::List,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn place_name(place: &ViewPlace) -> String {
-//RS         let mut out = place.owner.name.clone();
-//RS         for projection in &place.projections {
-//RS             match projection {
-//RS                 ViewProjection::Field(field) => {
-//RS                     out.push('.');
-//RS                     out.push_str(field);
-//RS                 }
-//RS                 ViewProjection::Index { span, .. } => {
-//RS                     let _ = span.start;
-//RS                     out.push_str("[…]");
-//RS                 }
-//RS                 ViewProjection::Range { span, .. } => {
-//RS                     let _ = span.start;
-//RS                     out.push_str("[…]");
-//RS                 }
-//RS                 ViewProjection::Fresh(span) => {
-//RS                     let _ = span.start;
-//RS                     out.push_str("[fresh]");
-//RS                 }
-//RS             }
-//RS         }
-//RS         out
-//RS     }
-//RS 
-//RS     pub(crate) fn call_access_frame(&self) -> CallAccessFrame {
-//RS         CallAccessFrame::default()
-//RS     }
-//RS 
-//RS     /// Make one call's accumulated loans visible while its next expression is
-//RS     /// checked. The frame lives in the caller between arguments and is always
-//RS     /// restored by this closure boundary, including ordinary early returns.
-//RS     pub(crate) fn with_call_access<T>(
-//RS         &mut self,
-//RS         frame: &mut CallAccessFrame,
-//RS         check: impl FnOnce(&mut Self) -> T,
-//RS     ) -> T {
-//RS         self.call_access_frames.push(std::mem::take(frame));
-//RS         let result = check(self);
-//RS         *frame = self.call_access_frames.pop().unwrap_or_default();
-//RS         result
-//RS     }
-//RS 
-//RS     /// Lambda bodies are deferred execution. Keep calls inside the body scoped
-//RS     /// to that body; the enclosing call sees the post-inference capture summary.
-//RS     pub(crate) fn with_deferred_call_access<T>(&mut self, check: impl FnOnce(&mut Self) -> T) -> T {
-//RS         let active = std::mem::take(&mut self.call_access_frames);
-//RS         let result = check(self);
-//RS         self.call_access_frames = active;
-//RS         result
-//RS     }
-//RS 
-//RS     fn check_call_place_access(&mut self, place: &ViewPlace, access: ViewAccess, span: Span) {
-//RS         self.check_call_place_access_kind(place, access, false, span);
-//RS     }
-//RS 
-//RS     fn check_call_place_access_kind(
-//RS         &mut self,
-//RS         place: &ViewPlace,
-//RS         access: ViewAccess,
-//RS         reserved: bool,
-//RS         span: Span,
-//RS     ) {
-//RS         let conflict = self
-//RS             .call_access_frames
-//RS             .iter()
-//RS             .flat_map(|frame| frame.accesses.iter())
-//RS             .rev()
-//RS             .find(|active| {
-//RS                 active.place.overlaps(place)
-//RS                     && match (active.access, active.reserved, access, reserved) {
-//RS                         (ViewAccess::Write, true, ViewAccess::Read, false) => false,
-//RS                         (ViewAccess::Write, ..) | (_, _, ViewAccess::Write, _) => true,
-//RS                         _ => false,
-//RS                     }
-//RS             })
-//RS             .map(|active| active.access);
-//RS         let Some(active) = conflict else {
-//RS             return;
-//RS         };
-//RS         let name = Self::place_name(place);
-//RS         self.diags.push(if active == ViewAccess::Write {
-//RS             crate::Sema::Diagnostics::aliasing_while_mut(&name, span)
-//RS         } else {
-//RS             crate::Sema::Diagnostics::aliasing_mut_after_read(&name, span)
-//RS         });
-//RS     }
-//RS 
-//RS     fn record_call_place_access(&mut self, place: ViewPlace, access: ViewAccess) {
-//RS         self.call_access_frames.last_mut().map(|frame| {
-//RS             frame.accesses.push(CallPlaceAccess {
-//RS                 place,
-//RS                 access,
-//RS                 reserved: false,
-//RS             })
-//RS         });
-//RS     }
-//RS 
-//RS     fn record_call_place_reservation(&mut self, place: ViewPlace) {
-//RS         self.call_access_frames.last_mut().map(|frame| {
-//RS             frame.accesses.push(CallPlaceAccess {
-//RS                 place,
-//RS                 access: ViewAccess::Write,
-//RS                 reserved: true,
-//RS             })
-//RS         });
-//RS     }
-//RS 
-//RS     fn push_evaluated_access(
-//RS         &self,
-//RS         expr: &Expr,
-//RS         access: ViewAccess,
-//RS         bound: &HashSet<String>,
-//RS         out: &mut Vec<EvaluatedAccess>,
-//RS     ) {
-//RS         let Some(place) = self.place_from_expr(expr) else {
-//RS             return;
-//RS         };
-//RS         let (capture_place, capture_ty) = self
-//RS             .capture_place_info(expr)
-//RS             .map(|(place, ty, _)| (place, ty))
-//RS             .unwrap_or_else(|| (place.clone(), self.place_expr_type(expr)));
-//RS         if bound.contains(&capture_place.owner.name) {
-//RS             return;
-//RS         }
-//RS         if let Some(existing) = out.iter_mut().find(|existing| {
-//RS             existing.place.owner == place.owner
-//RS                 && existing.place.projections == place.projections
-//RS                 && existing.capture_place.owner == capture_place.owner
-//RS                 && existing.capture_place.projections == capture_place.projections
-//RS         }) {
-//RS             if access == ViewAccess::Write {
-//RS                 existing.access = ViewAccess::Write;
-//RS                 existing.span = expr.span();
-//RS             }
-//RS             return;
-//RS         }
-//RS         out.push(EvaluatedAccess {
-//RS             place,
-//RS             capture_place,
-//RS             capture_ty,
-//RS             capture_is_view: expr_root_ident(expr).is_some_and(|name| self.is_view(name)),
-//RS             access,
-//RS             span: expr.span(),
-//RS             through_call: false,
-//RS             moves_owner: false,
-//RS         });
-//RS     }
-//RS 
-//RS     pub(crate) fn place_expr_type(&self, expr: &Expr) -> Option<Type> {
-//RS         match expr {
-//RS             Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
-//RS             Expr::Paren(inner, _) | Expr::Place(inner, _, _) => self.place_expr_type(inner),
-//RS             Expr::Deref(inner, _) => self
-//RS                 .place_expr_type(inner)
-//RS                 .and_then(|pointer| crate::Sema::ptr_elem(&pointer)),
-//RS             Expr::Field(base, field, _) => self
-//RS                 .place_expr_type(base)
-//RS                 .and_then(|owner| self.projected_field_type(owner, field)),
-//RS             Expr::Index { base, .. } => {
-//RS                 let base_ty = self.place_expr_type(base)?;
-//RS                 if self.is_simd_lane_type(&base_ty) {
-//RS                     Some(crate::Sema::CheckerCoreLib::math_scalar_ty(
-//RS                         base_ty.name().as_str(),
-//RS                     ))
-//RS                 } else {
-//RS                     match base_ty {
-//RS                         Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
-//RS                         Type::Map { value, .. } => Some(*value),
-//RS                         _ => None,
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn is_simd_lane_type(&self, ty: &Type) -> bool {
-//RS         match ty {
-//RS             Type::Tagged { inner, .. } => self.is_simd_lane_type(inner),
-//RS             Type::Named(name) => {
-//RS                 crate::Sema::CheckerCoreLib::is_simd_lane_type(name)
-//RS                     && !self.registry.contains(name)
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn unowned_move_projection(&self, expr: &Expr) -> Option<&'static str> {
-//RS         match expr {
-//RS             Expr::Deref(_, _) => Some("dereference"),
-//RS             Expr::Index { base, .. } if self
-//RS                 .place_expr_type(base)
-//RS                 .is_some_and(|ty| self.is_simd_lane_type(&ty)) =>
-//RS             {
-//RS                 Some("SIMD lane")
-//RS             }
-//RS             Expr::Field(base, _, _)
-//RS             | Expr::Index { base, .. }
-//RS             | Expr::Place(base, _, _)
-//RS             | Expr::Paren(base, _) => self.unowned_move_projection(base),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn reject_noncanonical_move_place(
-//RS         &mut self,
-//RS         expr: &Expr,
-//RS         value_ty: Option<&Type>,
-//RS         consumer: &str,
-//RS         span: Span,
-//RS     ) -> bool {
-//RS         let Some(projection) = self.unowned_move_projection(expr) else {
-//RS             return false;
-//RS         };
-//RS         let is_copy = match value_ty {
-//RS             Some(ty) => type_is_copy(ty),
-//RS             None => self
-//RS                 .place_expr_type(expr)
-//RS                 .is_some_and(|ty| type_is_copy(&ty)),
-//RS         };
-//RS         if is_copy {
-//RS             return false;
-//RS         }
-//RS         let diagnostic = Diagnostic::error(
-//RS             "E0201",
-//RS             format!("`{consumer}` cannot move a non-copy {projection} place"),
-//RS             format!(
-//RS                 "canonical ownership has no owning storage route for a non-copy {projection} place"
-//RS             ),
-//RS             "copy the value first, or move the owning binding instead".to_string(),
-//RS             Some(span),
-//RS         );
-//RS         if !self
-//RS             .diags
-//RS             .iter()
-//RS             .any(|previous| {
-//RS                 previous.code == diagnostic.code
-//RS                     && previous.span == diagnostic.span
-//RS                     && previous.what == diagnostic.what
-//RS             })
-//RS         {
-//RS             self.diags.push(diagnostic);
-//RS         }
-//RS         true
-//RS     }
-//RS 
-//RS 
-//RS     fn projected_field_type(&self, mut owner: Type, field: &str) -> Option<Type> {
-//RS         while let Type::Tagged { inner, .. } = owner {
-//RS             owner = *inner;
-//RS         }
-//RS         let (name, subst) = match owner {
-//RS             Type::Named(name) => (name, HashMap::new()),
-//RS             Type::Apply { name, args } => {
-//RS                 let params = self.trait_reg.struct_params.get(&name)?;
-//RS                 let subst = params
-//RS                     .iter()
-//RS                     .zip(args)
-//RS                     .map(|(param, arg)| (param.name.clone(), arg))
-//RS                     .collect();
-//RS                 (name, subst)
-//RS             }
-//RS             _ => return None,
-//RS         };
-//RS         self.registry
-//RS             .struct_fields(&name)?
-//RS             .iter()
-//RS             .find(|(candidate, _, _)| candidate == field)
-//RS             .map(|(_, _, ty)| substitute_type(ty, &subst))
-//RS     }
-//RS 
-//RS     fn method_receiver_access(&self, receiver: &Expr, method: &str) -> ViewAccess {
-//RS         let Some(ty) = self.place_expr_type(receiver) else {
-//RS             return ViewAccess::Read;
-//RS         };
-//RS         if Collections::builtin_method_mutates(&ty, method) {
-//RS             return ViewAccess::Write;
-//RS         }
-//RS         if let Type::TraitObject(names) = &ty {
-//RS             let receiver = names.iter().find_map(|name| {
-//RS                 self.trait_reg
-//RS                     .traits
-//RS                     .get(name)
-//RS                     .and_then(|trait_info| trait_info.methods.get(method))
-//RS                     .and_then(|sig| sig.params.first())
-//RS             });
-//RS             return if receiver.is_some_and(|receiver| {
-//RS                 receiver.name == Syntax::KW_SELF && receiver.convention == AccessConvention::Write
-//RS             }) {
-//RS                 ViewAccess::Write
-//RS             } else {
-//RS                 ViewAccess::Read
-//RS             };
-//RS         }
-//RS         let type_name = match &ty {
-//RS             Type::Named(name) | Type::Apply { name, .. } => name,
-//RS             _ => return ViewAccess::Read,
-//RS         };
-//RS         if self
-//RS             .resolve_method_sig(type_name, method)
-//RS             .is_some_and(|(_, sig)| sig.self_conv == Some(AccessConvention::Write))
-//RS         {
-//RS             ViewAccess::Write
-//RS         } else {
-//RS             ViewAccess::Read
-//RS         }
-//RS     }
-//RS 
-//RS     fn collect_lvalue_access(
-//RS         &self,
-//RS         target: &LValue,
-//RS         bound: &HashSet<String>,
-//RS         out: &mut Vec<EvaluatedAccess>,
-//RS     ) {
-//RS         match target {
-//RS             LValue::Local { name, name_span } => {
-//RS                 let target = Expr::Ident(name.clone(), *name_span);
-//RS                 self.push_evaluated_access(&target, ViewAccess::Write, bound, out);
-//RS             }
-//RS             LValue::Field { base, field, span } => {
-//RS                 let target = Expr::Field(base.clone(), field.clone(), *span);
-//RS                 self.push_evaluated_access(&target, ViewAccess::Write, bound, out);
-//RS             }
-//RS             LValue::Index {
-//RS                 base, index, span, ..
-//RS             } => {
-//RS                 let target = Expr::Index {
-//RS                     base: base.clone(),
-//RS                     index: index.clone(),
-//RS                     span: *span,
-//RS                     kind: Default::default(),
-//RS                 };
-//RS                 self.push_evaluated_access(&target, ViewAccess::Write, bound, out);
-//RS                 self.collect_evaluated_expr_accesses(
-//RS                     index,
-//RS                     AccessWalkMode::EvaluateNow,
-//RS                     bound,
-//RS                     out,
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn collect_lambda_requirement_events(&self, lambda: &Lambda, out: &mut Vec<EvaluatedAccess>) {
-//RS         let params = lambda
-//RS             .params
-//RS             .iter()
-//RS             .map(|param| param.name.clone())
-//RS             .collect::<HashSet<_>>();
-//RS         let mut events = Vec::new();
-//RS         match &lambda.body {
-//RS             LambdaBody::Expr(body) => self.collect_evaluated_expr_accesses(
-//RS                 body,
-//RS                 AccessWalkMode::CaptureRequirements,
-//RS                 &params,
-//RS                 &mut events,
-//RS             ),
-//RS             LambdaBody::Block(body) => {
-//RS                 let mut bound = params;
-//RS                 self.collect_evaluated_stmt_accesses(
-//RS                     body,
-//RS                     AccessWalkMode::CaptureRequirements,
-//RS                     &mut bound,
-//RS                     &mut events,
-//RS                 );
-//RS             }
-//RS         }
-//RS         // `take` captures move at construction even when the body never names
-//RS         // them. All other capture roots come from the binding-aware semantic
-//RS         // walker above; the legacy name-only collector is not authoritative.
-//RS         for (name, span) in &lambda.take_names {
-//RS             let capture = Expr::Ident(name.clone(), *span);
-//RS             self.push_evaluated_access(&capture, ViewAccess::Read, &HashSet::new(), &mut events);
-//RS         }
-//RS         let taken = lambda
-//RS             .take_names
-//RS             .iter()
-//RS             .map(|(name, _)| name)
-//RS             .collect::<HashSet<_>>();
-//RS         let cloned = lambda.meta.cloned_captures.iter().collect::<HashSet<_>>();
-//RS         let moved = lambda.meta.moved_captures.iter().collect::<HashSet<_>>();
-//RS         let has_capture_write = events.iter().any(|event| event.access == ViewAccess::Write);
-//RS         let retains = !lambda.meta.escapes && has_capture_write;
-//RS         for event in &mut events {
-//RS             let name = &event.capture_place.owner.name;
-//RS             if cloned.contains(name) {
-//RS                 // Lowering clones the whole source root before constructing
-//RS                 // the move closure; body projections and writes target the clone.
-//RS                 event.place.projections.clear();
-//RS                 event.access = ViewAccess::Read;
-//RS             } else if (moved.contains(name) || (!lambda.meta.needs_fn_mut || lambda.meta.escapes))
-//RS                 && !event.capture_is_view
-//RS                 && !event.capture_ty.as_ref().is_some_and(type_is_copy)
-//RS                 && self
-//RS                     .lookup(name)
-//RS                     .is_some_and(|info| info.param_conv.is_none())
-//RS             {
-//RS                 // Rust 2021 move closures capture the syntactic place precisely.
-//RS                 // Keep source-resolved places for loans, but move the field the
-//RS                 // generated closure captures rather than its whole owner.
-//RS                 event.place = event.capture_place.clone();
-//RS                 event.access = ViewAccess::Write;
-//RS                 event.moves_owner = true;
-//RS             }
-//RS             event.through_call =
-//RS                 (event.capture_is_view || (retains && !taken.contains(name))) && !event.moves_owner;
-//RS         }
-//RS         for event in events {
-//RS             if let Some(existing) = out.iter_mut().find(|existing| {
-//RS                 existing.place.owner == event.place.owner
-//RS                     && existing.place.projections == event.place.projections
-//RS             }) {
-//RS                 if event.access == ViewAccess::Write {
-//RS                     existing.access = ViewAccess::Write;
-//RS                     existing.span = event.span;
-//RS                 }
-//RS                 existing.through_call |= event.through_call;
-//RS                 existing.moves_owner |= event.moves_owner;
-//RS             } else {
-//RS                 out.push(event);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn collect_evaluated_expr_accesses(
-//RS         &self,
-//RS         expr: &Expr,
-//RS         mode: AccessWalkMode,
-//RS         bound: &HashSet<String>,
-//RS         out: &mut Vec<EvaluatedAccess>,
-//RS     ) {
-//RS         if let Some(place) = self.place_from_expr(expr) {
-//RS             if mode != AccessWalkMode::ConstructCaptures && !bound.contains(&place.owner.name) {
-//RS                 let access = if matches!(expr, Expr::Place(_, crate::AST::PlaceAccess::Write, _)) {
-//RS                     ViewAccess::Write
-//RS                 } else {
-//RS                     ViewAccess::Read
-//RS                 };
-//RS                 self.push_evaluated_access(expr, access, bound, out);
-//RS             }
-//RS             match expr {
-//RS                 Expr::Index { index, .. } => {
-//RS                     self.collect_evaluated_expr_accesses(index, mode, bound, out);
-//RS                 }
-//RS                 Expr::Slice {
-//RS                     start, end, range, ..
-//RS                 } => {
-//RS                     if let Some(range) = range {
-//RS                         self.collect_evaluated_expr_accesses(range, mode, bound, out);
-//RS                     } else {
-//RS                         self.collect_evaluated_expr_accesses(start, mode, bound, out);
-//RS                         self.collect_evaluated_expr_accesses(end, mode, bound, out);
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS             return;
-//RS         }
-//RS         match expr {
-//RS             Expr::Lambda(lambda) => {
-//RS                 if mode != AccessWalkMode::EvaluateNow {
-//RS                     self.collect_lambda_requirement_events(lambda, out);
-//RS                 }
-//RS             }
-//RS             Expr::Call(call) => {
-//RS                 if mode == AccessWalkMode::CaptureRequirements {
-//RS                     for arg in &call.args {
-//RS                         self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
-//RS                         // D-MEM1: the call marker is carried by CallArg, not
-//RS                         // by the expression node. A write-marked argument
-//RS                         // lends its place for this call; it never moves the
-//RS                         // lambda's captured owner.
-//RS                         if arg.convention == AccessConvention::Write {
-//RS                             self.push_evaluated_access(&arg.expr, ViewAccess::Write, bound, out);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 args,
-//RS                 ..
-//RS             } => {
-//RS                 if mode == AccessWalkMode::CaptureRequirements {
-//RS                     let access = self.method_receiver_access(receiver, method);
-//RS                     self.push_evaluated_access(receiver, access, bound, out);
-//RS                     for arg in args {
-//RS                         self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
-//RS                         if arg.convention == AccessConvention::Write {
-//RS                             self.push_evaluated_access(&arg.expr, ViewAccess::Write, bound, out);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Expr::CallValue { callee, args, .. }
-//RS                 if matches!(
-//RS                     callee.as_ref(),
-//RS                     Expr::Lambda(lambda)
-//RS                         if lambda.meta.collecting_loop || lambda.meta.result_loop
-//RS                 ) =>
-//RS             {
-//RS                 let Expr::Lambda(lambda) = callee.as_ref() else {
-//RS                     unreachable!("collecting loop guard requires a lambda")
-//RS                 };
-//RS                 match &lambda.body {
-//RS                     LambdaBody::Expr(body) => {
-//RS                         self.collect_evaluated_expr_accesses(body, mode, bound, out);
-//RS                     }
-//RS                     LambdaBody::Block(body) => {
-//RS                         let mut body_bound = bound.clone();
-//RS                         self.collect_evaluated_stmt_accesses(body, mode, &mut body_bound, out);
-//RS                     }
-//RS                 }
-//RS                 for arg in args {
-//RS                     self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
-//RS                     if arg.convention == AccessConvention::Write {
-//RS                         self.push_evaluated_access(&arg.expr, ViewAccess::Write, bound, out);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Expr::CallValue { callee, args, .. } => {
-//RS                 if mode == AccessWalkMode::CaptureRequirements {
-//RS                     self.collect_evaluated_expr_accesses(callee, mode, bound, out);
-//RS                     for arg in args {
-//RS                         self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
-//RS                         if arg.convention == AccessConvention::Write {
-//RS                             self.push_evaluated_access(&arg.expr, ViewAccess::Write, bound, out);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Expr::Binary(_, left, right, _) => {
-//RS                 self.collect_evaluated_expr_accesses(left, mode, bound, out);
-//RS                 self.collect_evaluated_expr_accesses(right, mode, bound, out);
-//RS             }
-//RS             Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
-//RS                 for operand in operands {
-//RS                     self.collect_evaluated_expr_accesses(operand, mode, bound, out);
-//RS                 }
-//RS             }
-//RS             Expr::Unary(_, inner, _)
-//RS             | Expr::Spread(inner, _)
-//RS             | Expr::Deref(inner, _)
-//RS             | Expr::RawOf(inner, _)
-//RS             | Expr::Copy(inner, _)
-//RS             | Expr::Place(inner, _, _)
-//RS             | Expr::Tainted(inner, _, _)
-//RS             | Expr::Present(inner, _)
-//RS             | Expr::Ok(inner, _)
-//RS             | Expr::Err(inner, _)
-//RS             | Expr::Paren(inner, _) => {
-//RS                 self.collect_evaluated_expr_accesses(inner, mode, bound, out);
-//RS             }
-//RS             Expr::Try(inner, _, _, note) => {
-//RS                 self.collect_evaluated_expr_accesses(inner, mode, bound, out);
-//RS                 if let Some(note) = note {
-//RS                     self.collect_evaluated_expr_accesses(note, mode, bound, out);
-//RS                 }
-//RS             }
-//RS             Expr::Field(base, _, _) | Expr::OptField { base, .. } => {
-//RS                 self.collect_evaluated_expr_accesses(base, mode, bound, out);
-//RS             }
-//RS             Expr::MemberSpread { base, .. } => {
-//RS                 self.collect_evaluated_expr_accesses(base, mode, bound, out);
-//RS             }
-//RS             Expr::Index { base, index, .. } => {
-//RS                 self.collect_evaluated_expr_accesses(base, mode, bound, out);
-//RS                 self.collect_evaluated_expr_accesses(index, mode, bound, out);
-//RS             }
-//RS             Expr::Slice {
-//RS                 base,
-//RS                 start,
-//RS                 end,
-//RS                 range,
-//RS                 ..
-//RS             } => {
-//RS                 self.collect_evaluated_expr_accesses(base, mode, bound, out);
-//RS                 if let Some(range) = range {
-//RS                     self.collect_evaluated_expr_accesses(range, mode, bound, out);
-//RS                 } else {
-//RS                     self.collect_evaluated_expr_accesses(start, mode, bound, out);
-//RS                     self.collect_evaluated_expr_accesses(end, mode, bound, out);
-//RS                 }
-//RS             }
-//RS             Expr::Range { start, end, .. } => {
-//RS                 self.collect_evaluated_expr_accesses(start, mode, bound, out);
-//RS                 self.collect_evaluated_expr_accesses(end, mode, bound, out);
-//RS             }
-//RS             Expr::MapLit(entries, _) => {
-//RS                 for (key, value) in entries {
-//RS                     self.collect_evaluated_expr_accesses(key, mode, bound, out);
-//RS                     self.collect_evaluated_expr_accesses(value, mode, bound, out);
-//RS                 }
-//RS             }
-//RS             Expr::StructLit { fields, .. } => {
-//RS                 for (_, _, value) in fields {
-//RS                     self.collect_evaluated_expr_accesses(value, mode, bound, out);
-//RS                 }
-//RS             }
-//RS             Expr::TypedLit { body, .. } => {
-//RS                 body.for_each_expr(|value| {
-//RS                     self.collect_evaluated_expr_accesses(value, mode, bound, out)
-//RS                 });
-//RS             }
-//RS             Expr::TupleLit(fields, _, _) => {
-//RS                 for (_, value) in fields {
-//RS                     self.collect_evaluated_expr_accesses(value, mode, bound, out);
-//RS                 }
-//RS             }
-//RS             Expr::EnumLit { args, .. } => {
-//RS                 for arg in args {
-//RS                     let value = match arg {
-//RS                         crate::AST::EnumLitArg::Positional(value)
-//RS                         | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
-//RS                     };
-//RS                     self.collect_evaluated_expr_accesses(value, mode, bound, out);
-//RS                 }
-//RS             }
-//RS             Expr::Str(parts, _) => {
-//RS                 for part in parts {
-//RS                     if let crate::AST::StrPart::Interp(value, _) = part {
-//RS                         self.collect_evaluated_expr_accesses(value, mode, bound, out);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Expr::PatternTest {
-//RS                 subject, pattern, ..
-//RS             } => {
-//RS                 self.collect_evaluated_expr_accesses(subject, mode, bound, out);
-//RS                 self.collect_pattern_value_accesses(pattern, mode, bound, out);
-//RS             }
-//RS             Expr::OrFallback {
-//RS                 value, fallback, ..
-//RS             } => {
-//RS                 self.collect_evaluated_expr_accesses(value, mode, bound, out);
-//RS                 match fallback {
-//RS                     crate::AST::OrFallback::Value(value)
-//RS                     | crate::AST::OrFallback::Return(Some(value), _) => {
-//RS                         self.collect_evaluated_expr_accesses(value, mode, bound, out);
-//RS                     }
-//RS                     crate::AST::OrFallback::Panic { args, .. } => {
-//RS                         for arg in args {
-//RS                             self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
-//RS                         }
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS             Expr::If {
-//RS                 cond,
-//RS                 then_body,
-//RS                 then_value,
-//RS                 else_body,
-//RS                 else_value,
-//RS                 ..
-//RS             } => {
-//RS                 self.collect_evaluated_expr_accesses(cond, mode, bound, out);
-//RS                 let mut then_bound = bound.clone();
-//RS                 if let Expr::PatternTest { pattern, .. } = cond.as_ref() {
-//RS                     Self::bind_pattern_names(pattern, &mut then_bound);
-//RS                 }
-//RS                 self.collect_evaluated_stmt_accesses(then_body, mode, &mut then_bound, out);
-//RS                 self.collect_evaluated_expr_accesses(then_value, mode, &then_bound, out);
-//RS                 let mut else_bound = bound.clone();
-//RS                 self.collect_evaluated_stmt_accesses(else_body, mode, &mut else_bound, out);
-//RS                 self.collect_evaluated_expr_accesses(else_value, mode, &else_bound, out);
-//RS             }
-//RS             Expr::PtrFromAddr { addr, .. } => {
-//RS                 self.collect_evaluated_expr_accesses(addr, mode, bound, out);
-//RS             }
-//RS             Expr::StrMatchLit(..)
-//RS             | Expr::BinMatchLit(..)
-//RS             | Expr::Int(..)
-//RS             | Expr::Float(..)
-//RS             | Expr::Bool(..)
-//RS             | Expr::Unit(..)
-//RS             | Expr::Char(..)
-//RS             | Expr::Ident(..)
-//RS             | Expr::UnitLit { .. }
-//RS             | Expr::Absent(..)
-//RS             | Expr::Todo { .. }
-//RS             | Expr::NoElse(_)
-//RS             | Expr::ReduceMarker(..)
-//RS             | Expr::ComptimeName { .. } => {}
-//RS         }
-//RS     }
-//RS 
-//RS     fn bind_pattern_names(pattern: &Pattern, bound: &mut HashSet<String>) {
-//RS         match pattern {
-//RS             Pattern::Ok {
-//RS                 inner: Some(inner), ..
-//RS             }
-//RS             | Pattern::Err {
-//RS                 inner: Some(inner), ..
-//RS             }
-//RS             | Pattern::Present {
-//RS                 inner: Some(inner), ..
-//RS             } => Self::bind_pattern_names(inner, bound),
-//RS             Pattern::Ok { binding, .. }
-//RS             | Pattern::Err { binding, .. }
-//RS             | Pattern::Present { binding, .. } => {
-//RS                 bound.insert(binding.clone());
-//RS             }
-//RS             Pattern::Variant { bindings, .. } => {
-//RS                 for slot in bindings {
-//RS                     Self::bind_slot_names(slot, bound);
-//RS                 }
-//RS             }
-//RS             Pattern::Struct { fields, .. } => {
-//RS                 for field in fields {
-//RS                     if let crate::AST::StructPatField::Bind { local, .. } = field {
-//RS                         bound.insert(local.clone());
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Pattern::Or(alts, _) => {
-//RS                 if let Some(first) = alts.first() {
-//RS                     Self::bind_pattern_names(first, bound);
-//RS                 }
-//RS             }
-//RS             Pattern::StrMatch { parts, .. } => {
-//RS                 for part in parts {
-//RS                     if let crate::AST::StrMatchPart::Hole { name, .. } = part {
-//RS                         bound.insert(name.clone());
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Pattern::BinMatch { parts, .. } => {
-//RS                 for part in parts {
-//RS                     if let crate::AST::BinMatchPart::Hole { name, .. } = part {
-//RS                         bound.insert(name.clone());
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Pattern::Absent(_) | Pattern::Range { .. } => {}
-//RS         }
-//RS     }
-//RS 
-//RS     fn bind_slot_names(slot: &crate::AST::PatSlot, bound: &mut HashSet<String>) {
-//RS         match slot {
-//RS             crate::AST::PatSlot::Bind { name, .. } => {
-//RS                 bound.insert(name.clone());
-//RS             }
-//RS             crate::AST::PatSlot::Nested(inner) => Self::bind_pattern_names(inner, bound),
-//RS             // D-PAT-NAMED-NEST1=A: `field: slot` binds what its slot binds.
-//RS             crate::AST::PatSlot::Named { slot, .. } => Self::bind_slot_names(slot, bound),
-//RS             crate::AST::PatSlot::Wildcard
-//RS             | crate::AST::PatSlot::Range { .. }
-//RS             | crate::AST::PatSlot::Rest(_) => {}
-//RS         }
-//RS     }
-//RS 
-//RS     fn collect_pattern_value_accesses(
-//RS         &self,
-//RS         pattern: &Pattern,
-//RS         mode: AccessWalkMode,
-//RS         bound: &HashSet<String>,
-//RS         out: &mut Vec<EvaluatedAccess>,
-//RS     ) {
-//RS         match pattern {
-//RS             Pattern::Struct { fields, .. } => {
-//RS                 for field in fields {
-//RS                     if let crate::AST::StructPatField::Value { value, .. } = field {
-//RS                         self.collect_evaluated_expr_accesses(value, mode, bound, out);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Pattern::Or(alternatives, _) => {
-//RS                 for alternative in alternatives {
-//RS                     self.collect_pattern_value_accesses(alternative, mode, bound, out);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS 
-//RS     fn collect_evaluated_stmt_accesses(
-//RS         &self,
-//RS         body: &[Stmt],
-//RS         mode: AccessWalkMode,
-//RS         bound: &mut HashSet<String>,
-//RS         out: &mut Vec<EvaluatedAccess>,
-//RS     ) {
-//RS         for stmt in body {
-//RS             match stmt {
-//RS                 Stmt::Expr(expr) | Stmt::Yield(expr, _) | Stmt::DeferClose { close: expr, .. } => {
-//RS                     self.collect_evaluated_expr_accesses(expr, mode, bound, out);
-//RS                 }
-//RS                 Stmt::Val(binding) => {
-//RS                     self.collect_evaluated_expr_accesses(&binding.init, mode, bound, out);
-//RS                     if let Some(pattern) = &binding.pattern {
-//RS                         for name in pattern.names() {
-//RS                             bound.insert(name.local_name().to_string());
-//RS                         }
-//RS                     } else {
-//RS                         bound.insert(binding.name.clone());
-//RS                     }
-//RS                 }
-//RS                 Stmt::Assign { target, value, .. } => {
-//RS                     self.collect_lvalue_access(target, bound, out);
-//RS                     self.collect_evaluated_expr_accesses(value, mode, bound, out);
-//RS                 }
-//RS                 Stmt::Return(Some(expr), _) => {
-//RS                     self.collect_evaluated_expr_accesses(expr, mode, bound, out);
-//RS                 }
-//RS                 Stmt::BreakValue(expr, _) | Stmt::BreakLabelValue(_, _, expr, _) => {
-//RS                     self.collect_evaluated_expr_accesses(expr, mode, bound, out);
-//RS                 }
-//RS                 Stmt::While { cond, body, .. } => {
-//RS                     self.collect_evaluated_expr_accesses(cond, mode, bound, out);
-//RS                     let mut body_bound = bound.clone();
-//RS                     self.collect_evaluated_stmt_accesses(body, mode, &mut body_bound, out);
-//RS                 }
-//RS                 Stmt::For {
-//RS                     var,
-//RS                     var2,
-//RS                     kind,
-//RS                     body,
-//RS                     ..
-//RS                 } => {
-//RS                     match kind {
-//RS                         ForKind::Range {
-//RS                             start, end, step, ..
-//RS                         } => {
-//RS                             self.collect_evaluated_expr_accesses(start, mode, bound, out);
-//RS                             self.collect_evaluated_expr_accesses(end, mode, bound, out);
-//RS                             if let Some(step) = step {
-//RS                                 self.collect_evaluated_expr_accesses(step, mode, bound, out);
-//RS                             }
-//RS                         }
-//RS                         ForKind::In { collection, step } => {
-//RS                             self.collect_evaluated_expr_accesses(collection, mode, bound, out);
-//RS                             if let Some(step) = step {
-//RS                                 self.collect_evaluated_expr_accesses(step, mode, bound, out);
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     let mut body_bound = bound.clone();
-//RS                     body_bound.insert(var.clone());
-//RS                     if let Some((name, _)) = var2 {
-//RS                         body_bound.insert(name.clone());
-//RS                     }
-//RS                     self.collect_evaluated_stmt_accesses(body, mode, &mut body_bound, out);
-//RS                 }
-//RS                 Stmt::Switch {
-//RS                     subject,
-//RS                     arms,
-//RS                     else_body,
-//RS                     ..
-//RS                 } => {
-//RS                     self.collect_evaluated_expr_accesses(subject, mode, bound, out);
-//RS                     let mut switch_bound = bound.clone();
-//RS                     switch_bound.insert(Syntax::KW_IT.to_string());
-//RS                     for arm in arms {
-//RS                         self.collect_evaluated_expr_accesses(&arm.cond, mode, &switch_bound, out);
-//RS                         let mut arm_bound = switch_bound.clone();
-//RS                         if let Expr::PatternTest { pattern, .. } = &arm.cond {
-//RS                             Self::bind_pattern_names(pattern, &mut arm_bound);
-//RS                         }
-//RS                         self.collect_evaluated_stmt_accesses(&arm.body, mode, &mut arm_bound, out);
-//RS                     }
-//RS                     if let Some(else_body) = else_body {
-//RS                         let mut else_bound = bound.clone();
-//RS                         self.collect_evaluated_stmt_accesses(else_body, mode, &mut else_bound, out);
-//RS                     }
-//RS                 }
-//RS                 Stmt::CountedLoop {
-//RS                     init,
-//RS                     cond,
-//RS                     step,
-//RS                     body,
-//RS                     ..
-//RS                 } => {
-//RS                     self.collect_evaluated_expr_accesses(&init.init, mode, bound, out);
-//RS                     let mut loop_bound = bound.clone();
-//RS                     loop_bound.insert(init.name.clone());
-//RS                     self.collect_evaluated_expr_accesses(cond, mode, &loop_bound, out);
-//RS                     self.collect_evaluated_stmt_accesses(body, mode, &mut loop_bound, out);
-//RS                     if let Some(step) = step {
-//RS                         self.collect_evaluated_stmt_accesses(
-//RS                             std::slice::from_ref(step.as_ref()),
-//RS                             mode,
-//RS                             &mut loop_bound,
-//RS                             out,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 // D-CANVASSTATE1=D: an `#Off` or `#DebugOnly` body never
-//RS                 // reaches the release runtime.
-//RS                 Stmt::Switched { marker, .. }
-//RS                     if crate::AST::switched_off(marker)
-//RS                         || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => {}
-//RS                 Stmt::Loop { body, .. }
-//RS                 | Stmt::Unsafe { body, .. }
-//RS                 | Stmt::Impure { body, .. }
-//RS                 | Stmt::Shield { body, .. }
-//RS                 | Stmt::Switched { body, .. }
-//RS                 | Stmt::Region { body, .. }
-//RS                 | Stmt::Policy { body, .. }
-//RS                 | Stmt::TaskGroup { body, .. }
-//RS                 | Stmt::Layout { body, .. }
-//RS                 | Stmt::AuthorityScope { body, .. }
-//RS                 | Stmt::Transact { body, .. }
-//RS                 | Stmt::AssumeDet { body, .. }
-//RS                 | Stmt::Live { body, .. } => {
-//RS                     let mut body_bound = bound.clone();
-//RS                     self.collect_evaluated_stmt_accesses(body, mode, &mut body_bound, out);
-//RS                 }
-//RS                 Stmt::Reactive { body, .. } => {
-//RS                     let mut body_bound = bound.clone();
-//RS                     let mut captures = Vec::new();
-//RS                     self.collect_evaluated_stmt_accesses(
-//RS                         body,
-//RS                         AccessWalkMode::CaptureRequirements,
-//RS                         &mut body_bound,
-//RS                         &mut captures,
-//RS                     );
-//RS                     // Reactive registration clones every free capture. Body
-//RS                     // writes run later against the clones; construction only
-//RS                     // reads each source value now.
-//RS                     for mut capture in captures {
-//RS                         capture.access = ViewAccess::Read;
-//RS                         capture.through_call = false;
-//RS                         capture.moves_owner = false;
-//RS                         capture.place.projections.clear();
-//RS                         capture.capture_place = capture.place.clone();
-//RS                         capture.capture_ty = self
-//RS                             .lookup(&capture.place.owner.name)
-//RS                             .map(|info| info.ty.clone());
-//RS                         capture.capture_is_view = false;
-//RS                         for existing in out
-//RS                             .iter()
-//RS                             .filter(|event| event.place.owner == capture.place.owner)
-//RS                         {
-//RS                             if existing.access == ViewAccess::Write {
-//RS                                 capture.access = ViewAccess::Write;
-//RS                                 capture.span = existing.span;
-//RS                             }
-//RS                             capture.through_call |= existing.through_call;
-//RS                             capture.moves_owner |= existing.moves_owner;
-//RS                         }
-//RS                         out.retain(|event| event.place.owner != capture.place.owner);
-//RS                         out.push(capture);
-//RS                     }
-//RS                 }
-//RS                 Stmt::ContextBlock { fields, body, .. } => {
-//RS                     for (_, expr, _) in fields {
-//RS                         self.collect_evaluated_expr_accesses(expr, mode, bound, out);
-//RS                     }
-//RS                     let mut body_bound = bound.clone();
-//RS                     self.collect_evaluated_stmt_accesses(body, mode, &mut body_bound, out);
-//RS                 }
-//RS                 Stmt::ScopeMember { args, body, .. } => {
-//RS                     for arg in args {
-//RS                         self.collect_evaluated_expr_accesses(arg, mode, bound, out);
-//RS                     }
-//RS                     let mut body_bound = bound.clone();
-//RS                     self.collect_evaluated_stmt_accesses(body, mode, &mut body_bound, out);
-//RS                 }
-//RS                 // These forms erase before runtime evaluation. `Off` never
-//RS                 // runs; comptime bodies run in the separate interpreter.
-//RS                 Stmt::ComptimeIf { .. }
-//RS                 | Stmt::ComptimeSwitch { .. }
-//RS                 | Stmt::ComptimeBlock { .. }
-//RS                 | Stmt::Break(_)
-//RS                 | Stmt::Continue(_)
-//RS                 | Stmt::BreakLabel(..)
-//RS                 | Stmt::ContinueLabel(..)
-//RS                 | Stmt::Return(None, _) => {}
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn check_transient_accesses(&mut self, accesses: Vec<EvaluatedAccess>) {
-//RS         for access in accesses {
-//RS             self.check_call_place_access(&access.place, access.access, access.span);
-//RS         }
-//RS     }
-//RS 
-//RS     /// Rust activates a two-phase receiver borrow only after its arguments
-//RS     /// finish evaluating. Only loans retained through the call can conflict at
-//RS     /// that point; transient reads have already ended.
-//RS     pub(crate) fn activate_call_reservations(&mut self, frame: &CallAccessFrame, span: Span) {
-//RS         let conflicts: Vec<_> = frame
-//RS             .accesses
-//RS             .iter()
-//RS             .filter(|access| access.reserved)
-//RS             .filter_map(|reservation| {
-//RS                 frame
-//RS                     .accesses
-//RS                     .iter()
-//RS                     .filter(|access| !access.reserved)
-//RS                     .find(|access| access.place.overlaps(&reservation.place))
-//RS                     .map(|access| (reservation.place.clone(), access.access))
-//RS             })
-//RS             .collect();
-//RS         for (place, access) in conflicts {
-//RS             let name = Self::place_name(&place);
-//RS             self.diags.push(if access == ViewAccess::Read {
-//RS                 crate::Sema::Diagnostics::aliasing_mut_after_read(&name, span)
-//RS             } else {
-//RS                 crate::Sema::Diagnostics::aliasing_while_mut(&name, span)
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     /// A nested call's frame ends when it returns, but a returned View keeps
-//RS     /// the source loan alive as an argument of the enclosing call.
-//RS     pub(crate) fn record_call_result_views(&mut self, expr: &Expr) {
-//RS         let direct_place = self.place_from_expr(expr);
-//RS         let mut loans: Vec<(ViewPlace, ViewAccess)> = Vec::new();
-//RS         for (_, place, _, access) in self.view_call_sources(expr) {
-//RS             if let Some((_, seen_access)) = loans.iter_mut().find(|(seen, _)| {
-//RS                 seen.owner == place.owner && seen.projections == place.projections
-//RS             }) {
-//RS                 if access == ViewAccess::Write {
-//RS                     *seen_access = ViewAccess::Write;
-//RS                 }
-//RS             } else {
-//RS                 loans.push((place, access));
-//RS             }
-//RS         }
-//RS         for (place, access) in loans {
-//RS             // A direct named-window argument has already been recorded by
-//RS             // `check_call_argument_access`. Re-recording its source fact would
-//RS             // make the call alias itself and report E0204. Nested call results
-//RS             // have no direct place, so their source loan still goes through
-//RS             // the normal active-frame check below.
-//RS             // The source fact may be exclusive while this call only reads
-//RS             // through the named carrier. The current argument's place, not
-//RS             // its source fact access, identifies the already-recorded loan.
-//RS             let same_direct_argument = direct_place.as_ref().is_some_and(|direct| {
-//RS                 direct.owner == place.owner && direct.projections == place.projections
-//RS             }) && self.call_access_frames.last().is_some_and(|frame| {
-//RS                 frame.accesses.last().is_some_and(|active| {
-//RS                     !active.reserved
-//RS                         && active.place.owner == place.owner
-//RS                         && active.place.projections == place.projections
-//RS                 })
-//RS             });
-//RS             if same_direct_argument {
-//RS                 continue;
-//RS             }
-//RS             self.check_call_place_access(&place, access, expr.span());
-//RS             self.record_call_place_access(place, access);
-//RS         }
-//RS     }
-//RS 
-//RS     fn collect_call_projection_accesses(&self, expr: &Expr, accesses: &mut Vec<EvaluatedAccess>) {
-//RS         match expr {
-//RS             Expr::Index { base, index, .. } => {
-//RS                 self.collect_call_projection_accesses(base, accesses);
-//RS                 self.collect_evaluated_expr_accesses(
-//RS                     index,
-//RS                     AccessWalkMode::EvaluateNow,
-//RS                     &HashSet::new(),
-//RS                     accesses,
-//RS                 );
-//RS             }
-//RS             Expr::Slice {
-//RS                 base,
-//RS                 start,
-//RS                 end,
-//RS                 range,
-//RS                 ..
-//RS             } => {
-//RS                 self.collect_call_projection_accesses(base, accesses);
-//RS                 if let Some(range) = range {
-//RS                     self.collect_evaluated_expr_accesses(
-//RS                         range,
-//RS                         AccessWalkMode::EvaluateNow,
-//RS                         &HashSet::new(),
-//RS                         accesses,
-//RS                     );
-//RS                 } else {
-//RS                     self.collect_evaluated_expr_accesses(
-//RS                         start,
-//RS                         AccessWalkMode::EvaluateNow,
-//RS                         &HashSet::new(),
-//RS                         accesses,
-//RS                     );
-//RS                     self.collect_evaluated_expr_accesses(
-//RS                         end,
-//RS                         AccessWalkMode::EvaluateNow,
-//RS                         &HashSet::new(),
-//RS                         accesses,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             Expr::Field(base, _, _)
-//RS             | Expr::Place(base, _, _)
-//RS             | Expr::Paren(base, _)
-//RS             | Expr::Deref(base, _) => self.collect_call_projection_accesses(base, accesses),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS 
-//RS     /// Check one evaluated argument against every active outer/current call,
-//RS     /// then retain exactly the borrow that generated Rust keeps until this call
-//RS     /// returns. Call-form checkers supply only signature metadata.
-// END-PORT-PENDING 0419 crates/jet-sema/src/Sema/CheckerOwnership.rs:1-1810
+use jet_foundation.[AccessConvention, BinOp, CallArg, Diagnostic, EnumLitArg, Expr, ForKind, IndexKind, LValue, Lambda, LambdaBody, OrFallback, PatSlot, Pattern, PlaceAccess, Span, Stmt, StrPart, StructPatField, Type, ViewSourceProjection, expr_span, bind_pattern_names]
+use jet_sema.[Checker, ViewStore, ViewOwnerId, ViewOwnerOrigin, ViewPlace, ViewProjection, ViewKind, ViewAccess, ViewFact, CallAccessFrame, CallPlaceAccess, Syntax, Collections, push_view_fact, current_view_fact_for_binding, view_facts_for_binding, view_facts_newest_first, expr_root_ident, is_allocator_type, ptr_elem]
+use jet_sema.Generics.[substitute_type]
+use jet_sema.Diagnostics.[type_is_copy, aliasing_while_mut, aliasing_mut_after_read]
+use jet_sema.Captures.[expr_refs_name]
+use jet_sema.CheckerCoreLib.[math_scalar_ty]
 
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:17
+pub fn invalidate_view_owner(views: &ViewStore, owner: &ViewOwnerId, verb: String, span: Span) {
+    loop facts in views.all_mut() {
+        loop fact in &facts {
+            if fact.place.owner == owner && fact.invalidated == None -> fact.invalidated = Val((verb, span))
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:35
+pub fn copy_edit_anchor(expr: &Expr) -> Span {
+    root := expr
+    loop {
+        if root == {
+            .Field(base, _, _) | .Index(base, _, _, _) | .OptField(base, _, _, _, _) | .Paren(base, _) -> root = &base
+            else -> break
+        }
+    }
+    Span.new(min(expr_span(root).start, expr_span(expr).start), expr_span(expr).end)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:48
+struct EvaluatedAccess {
+    place: ViewPlace
+    capture_place: ViewPlace
+    capture_ty: Type?
+    capture_is_view: Bool
+    access: ViewAccess
+    span: Span
+    through_call: Bool
+    moves_owner: Bool
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:59
+fn carries_lending_view(expr: &Expr, name: String) -> Bool {
+    if expr == {
+        .Ident(found, _) -> found == name
+        .Copy(inner, _) | .Place(inner, _, _) | .Paren(inner, _) | .Spread(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Present(inner, _) -> carries_lending_view(&inner, name)
+        .ListLit(items, _) -> items.any(item -> carries_lending_view(&item, name))
+        .TupleLit(fields, _, _) -> fields.any(field -> carries_lending_view(&field.value, name))
+        .MapLit(entries, _) -> entries.any(entry -> carries_lending_view(&entry.key, name) || carries_lending_view(&entry.value, name))
+        .StructLit(_, _, _, _, fields, _, _) -> fields.any(field -> carries_lending_view(&field.value, name))
+        .TypedLit(_, _, _) | .If(_, _, _, _, _, _) | .OrFallback(_, _, _, _) -> expr_refs_name(expr, name)
+        .EnumLit(_, _, _, args, _, _) -> args.any(arg -> if arg == { .Positional(value) | .Named(_, value) -> carries_lending_view(&value, name) })
+        else -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:91
+#Derive(Clone, Copy, PartialEq, Eq)
+enum AccessWalkMode { EvaluateNow; ConstructCaptures; CaptureRequirements }
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:97
+fn const_place_int(expr: &Expr) -> I64? {
+    if expr == {
+        .Int(value, _, _, _) -> Val(value)
+        .Unary(.Neg, inner, _) -> (const_place_int(&inner) ?? return None).checked_neg()
+        .Paren(inner, _) -> const_place_int(&inner)
+        else -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:106
+fn cell_guard_projection_path(expr: &Expr, parameter: String) -> [String]? {
+    if expr == {
+        .Ident(name, _) -> if name == parameter -> Val([String]{}) else -> None
+        .Field(base, field, _) -> {
+            path := cell_guard_projection_path(&base, parameter) ?? return None
+            &path.push(field)
+            Val(^path)
+        }
+        .Paren(base, _) -> cell_guard_projection_path(&base, parameter)
+        else -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:119
+fn cell_guard_projection_path_from_arg(arg: &CallArg) -> [String]? {
+    if arg.expr == .Lambda(lambda) {
+        if lambda.params.len() != 1 -> return None
+        if lambda.body == .Expr(expr) -> return cell_guard_projection_path(&expr, lambda.params[0].name)
+    }
+    None
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:132
+fn record_cell_guard_projection_path(arg: &CallArg, path: [String]?) {
+    if arg.expr == .Lambda(lambda) -> lambda.meta.cell_projection_path = ^path
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:138
+fn cell_guard_projection_paths_overlap(first: &[String], second: &[String]) -> Bool {
+    first.starts_with(second) || second.starts_with(first)
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:142
+fn named_view_field_path(expr: &Expr, fields: &[String]) -> String? {
+    if expr == {
+        .Ident(name, _) -> Val(name)
+        .Field(base, field, _) -> {
+            name :: named_view_field_path(&base, &fields) ?? return None
+            &fields.push(field)
+            Val(name)
+        }
+        else -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:154
+fn append_view_source_projections(place: &ViewPlace, projections: &[ViewSourceProjection], span: Span) {
+    loop projection in projections {
+        &place.projections.push(if projection == {
+            .Field(name) -> ViewProjection.Field(name)
+            .Index -> ViewProjection.Index(None, span)
+            .Range -> ViewProjection.Range(None, None, span)
+        })
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:175
+fn view_kind_from_return_type(ty: &Type) -> ViewKind? {
+    if ty == {
+        .Result(ok, _) | .Option(ok) | .Shared(ok) -> view_kind_from_return_type(&ok)
+        .Apply(name, args) -> {
+            if name == Syntax.TYPE_VIEW_ITER && args.len() == 1 -> return view_kind_from_return_type(&args[0])
+            if (name == "View" || name == "ViewMut") && args.len() == 1 {
+                return Val(if args[0] == {
+                    .Named("str") -> ViewKind.String
+                    .Named(name) -> if name == Syntax.TYPE_BYTES -> ViewKind.Buffer else if name == "Tensor" -> ViewKind.Matrix else -> ViewKind.List
+                    .Apply("Vec" | "Matrix" | "Tensor", _) -> ViewKind.Matrix
+                    else -> ViewKind.List
+                })
+            }
+            None
+        }
+        else -> None
+    }
+}
+
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:205
+    pub fn is_resource_type(self: &Self, ty: &Type) -> Bool {
+        if ty == {
+            .Named(name) | .Apply(name, _) -> self.type_implements_trait_for_name(name, Syntax.TRAIT_CLOSE)
+            .String -> self.trait_reg.implements_trait(Syntax.TYPE_STRING, Syntax.TRAIT_CLOSE)
+            else -> false
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:237
+    pub fn arena_alloc_source(self: &Self, init: &Expr) -> String? {
+        if init.without_parens() == .MethodCall(receiver, method, _, _, _, _, recv_type, _, _, _) {
+            if method != Syntax.MEM_ALLOC_ALLOC -> return None
+            if receiver.without_parens() == .Ident(arena, _) {
+                resolved :: recv_type.is_some_and(name -> name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed")
+                if resolved || self.lookup(arena).is_some_and(info -> is_allocator_type(&info.ty)) -> return Val(arena)
+            }
+        }
+        None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:261
+    pub fn record_arena_view(self: &Self, name: String, arena: String, span: Span) {
+        place :: ViewPlace{owner: self.owner_id(arena), projections: [ViewProjection]{.Fresh(span)}}
+        self.record_view(name, [String]{}, ^place, .Arena, .Write, span)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:278
+    pub fn fixed_backing_source(self: &Self, init: &Expr) -> String? {
+        if init == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+            if receiver != .Field(_, "Fixed", _) -> return None
+            if method == "new" -> return Val("<inline Fixed backing>")
+            if method == "over" && args.len() > 0 {
+                if args[0].expr == .Ident(name, _) -> return Val(name)
+            }
+        }
+        None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:301
+    pub fn record_fixed_backing(self: &Self, name: String, owner: String, span: Span) {
+        place :: ViewPlace{owner: if owner == "<inline Fixed backing>" -> ViewOwnerId{name: owner, def_span: span, origin: .Local} else -> self.owner_id(owner), projections: [ViewProjection]{}}
+        self.record_view(name, [String]{}, ^place, .FixedBacking, .Write, span)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:325
+    pub fn kill_views_of_arena(self: &Self, arena: String, verb: String, span: Span) {
+        owner :: self.owner_id(arena)
+        invalidate_view_owner(&self.flow.views, &owner, verb, span)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:331
+    pub fn check_view_use(self: &Self, name: String, span: Span) {
+        &self.views_used_in_stmt.insert(name, true)
+        if self.view_fact(name) == .Val(info) {
+            if info.invalidated == .Val((verb, _)) {
+                arena :: info.place.owner.name
+                &self.diags.push(Diagnostic.error("E0632", "`{arena}` was {verb} here, so the value `{name}` points into is gone", "`{name}` is a view into `{arena}`; `{arena}.{verb}()` invalidated everything stored in `{arena}`, so reading `{name}` now would read freed memory", "use `{name}` before `{arena}.{verb}()`, or re-`alloc` after the {verb} to get a fresh value", Val(span)))
+            }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:356
+    pub fn report_view_escape(self: &Self, name: String, what: String, span: Span) {
+        fact :: self.view_fact(name) ?? return
+        owner :: fact.place.owner.name
+        if fact.kind == {
+            .Arena -> &self.diags.push(Diagnostic.error("E0631", "`{name}` cannot be shared — it does not live long enough to {what}", "`{name}` is a view into `{owner}`; sharing it outside the region would let it outlive `{owner}` and point into freed memory", "keep `{name}` inside the `{owner}` region, or copy what you need out with `{Syntax.SIGIL_COPY}` before it leaves", Val(span)))
+            .FixedBacking -> &self.diags.push(Diagnostic.error("E0631", "`{name}` cannot be shared — its fixed backing does not live long enough to {what}", "`{name}` exclusively borrows `{owner}`; moving or capturing the handle could outlive that inline storage", "keep the Fixed handle in its declaring lexical scope and close it after its last allocation view", Val(span)))
+            .String -> self.report_string_view_unsupported_use(name, what, span)
+            .Pin -> &self.diags.push(Diagnostic.error("E2305", "`{name}` cannot be shared — the pin does not live long enough to {what}", "`{name}` pins `{owner}`; sharing it outside `{owner}`'s scope would let the no-move promise outlive the storage it protects", "keep `{name}` inside `{owner}`'s scope, or pin the place again where it is needed", Val(span)))
+            .List | .Buffer | .Matrix -> &self.diags.push(Diagnostic.error("E2305", "`{name}` cannot be shared — it does not live long enough to {what}", "`{name}` is a view into `{owner}`; sharing it outside `{owner}`'s scope would let it outlive its owner and point into freed storage", "keep `{name}` inside `{owner}`'s scope, or copy what you need before it leaves", Val(span)))
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:427
+    pub fn is_arena_view(self: &Self, name: String) -> Bool { self.view_kind(name) == Val(ViewKind.Arena) }
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:431
+    pub fn is_fixed_backing_view(self: &Self, name: String) -> Bool { self.view_kind(name) == Val(ViewKind.FixedBacking) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:435
+    pub fn reject_fixed_storage(self: &Self, expr: &Expr, what: String) {
+        if expr == .Ident(name, span) {
+            if self.is_fixed_backing_view(name) -> self.report_view_escape(name, what, span)
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:443
+    fn owner_id(self: &Self, owner: String) -> ViewOwnerId {
+        def_span :: self.lookup(owner).map(info -> info.def_span) ?? Span.new(0, 0)
+        origin := ViewOwnerOrigin.Local
+        if owner == Syntax.KW_SELF -> origin = .Receiver
+        else if self.consts.contains_key(owner) -> origin = .Static
+        else if self.lookup(owner).is_some_and(info -> info.param_conv != None) {
+            index := 0
+            loop i in 0..self.current_param_names.len() {
+                if self.current_param_names[i] == owner { index = i; break }
+            }
+            origin = .Parameter(index)
+        }
+        ViewOwnerId{name: owner, def_span: def_span, origin: ^origin}
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:483
+    fn record_view(self: &Self, name: String, output_path: [String], place: ViewPlace, kind: ViewKind, access: ViewAccess, span: Span) {
+        self.record_view_with_exemptions(name, ^output_path, ^place, kind, access, span, None, None)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:495
+    fn record_view_with_exemptions(self: &Self, name: String, output_path: [String], place: ViewPlace, kind: ViewKind, access: ViewAccess, span: Span, transfer_from: String?, enum_variants: [String:Bool]?) {
+        conflicts := false
+        loop (existing_name, facts) in self.flow.views.all() {
+            if !self.view_is_live_now(existing_name) || transfer_from == Val(existing_name) -> next
+            loop fact in facts {
+                if fact.invalidated != None -> next
+                // Candidates for one output slot and distinct enum variants are alternatives.
+                if existing_name == name && (fact.output_path == output_path || enum_variants.is_some_and(variants -> Self.view_paths_are_enum_alternatives(&variants, &fact.output_path, &output_path))) -> next
+                // Structural parent/child pins share one contract.
+                if kind == .Pin && fact.kind == .Pin && (place.extends(&fact.place) || fact.place.extends(&place)) -> next
+                // Pinning an allocation extends its existing exclusive window.
+                if kind == .Pin && fact.kind == .Arena && fact.place.overlaps(&place) -> next
+                if (fact.access == .Write || access == .Write) && fact.place.overlaps(&place) { conflicts = true; break }
+            }
+            if conflicts -> break
+        }
+        if conflicts {
+            place_name :: Self.place_name(&place)
+            &self.diags.push(Diagnostic.error("E0212", "`{place_name}` already has a live view that conflicts with `{name}`", "many read views may overlap, but an exclusive mutable view cannot overlap any other live view", "finish using the earlier view before creating this one, or make an owned copy", Val(span)))
+        }
+        fact :: ViewFact{binding_span: span, output_path: ^output_path, place: ^place, kind: kind, access: access, scope_len: self.scope_depth(), seq: 0, invalidated: None}
+        push_view_fact(&self.flow.views, name, ^fact)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:579
+    fn view_paths_are_enum_alternatives(variants: &[String:Bool], left: &[String], right: &[String]) -> Bool {
+        if left.len() == 0 || right.len() == 0 || left[0] == right[0] -> return false
+        variants.contains_key(left[0]) && variants.contains_key(right[0])
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:593
+    pub fn view_fact(self: &Self, name: String) -> ViewFact? {
+        binding :: self.lookup(name) ?? return None
+        current_view_fact_for_binding(&self.flow.views, name, binding.def_span)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:598
+    pub fn view_facts(self: &Self, name: String) -> [ViewFact] {
+        binding :: self.lookup(name) ?? return [ViewFact]{}
+        view_facts_for_binding(&self.flow.views, name, binding.def_span)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:605
+    fn view_fact_at_path(self: &Self, name: String, output_path: &[String]) -> ViewFact? {
+        self.view_facts_at_path(name, output_path).first()
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:611
+    fn view_facts_at_path(self: &Self, name: String, output_path: &[String]) -> [ViewFact] {
+        candidates := [ViewFact]{}
+        longest := 0
+        loop fact in self.view_facts(name) {
+            if output_path.starts_with(&fact.output_path) {
+                longest = max(longest, fact.output_path.len())
+                &candidates.push(^fact)
+            }
+        }
+        &candidates.retain(fact -> fact.output_path.len() == longest)
+        ^candidates
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:626
+    fn compose_view_source_places(self: &Self, actual: &Expr, projections: &[ViewSourceProjection], span: Span) -> [ViewPlace] {
+        actual :: actual.without_parens()
+        leading_fields := [String]{}
+        loop projection in projections {
+            if projection == { .Field(name) -> &leading_fields.push(name); else -> break }
+        }
+        if actual == .Ident(name, _) {
+            facts :: self.view_facts_at_path(name, &leading_fields)
+            if facts.len() > 0 {
+                places := [ViewPlace]{}
+                loop fact in facts {
+                    place := fact.place.clone()
+                    append_view_source_projections(&place, &projections[fact.output_path.len()..], span)
+                    &places.push(^place)
+                }
+                return ^places
+            }
+        }
+        place := self.place_from_expr(actual) ?? return [ViewPlace]{}
+        append_view_source_projections(&place, projections, span)
+        [ViewPlace]{^place}
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:664
+    fn view_is_live_now(self: &Self, name: String) -> Bool {
+        // Fixed backing retains cleanup responsibility until consuming close or scope exit.
+        if self.view_kind(name) == Val(ViewKind.FixedBacking) -> return !self.flow.moved.contains(name)
+        self.views_used_in_stmt.contains_key(name) || self.is_name_live_after(name)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:674
+    pub fn view_kind(self: &Self, name: String) -> ViewKind? { self.view_fact(name).map(fact -> fact.kind) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:678
+    fn view_kind_for_place(self: &Self, place: &ViewPlace) -> ViewKind {
+        facts :: view_facts_newest_first(&self.flow.views)
+        loop (_, fact) in facts {
+            if fact.place.owner.def_span == place.owner.def_span && fact.place.projections == place.projections -> return fact.kind
+        }
+        loop (_, fact) in facts {
+            if fact.kind == .Pin && place.extends(&fact.place) -> return .Pin
+        }
+        if self.lookup(place.owner.name) == .Val(info) {
+            if info.ty == {
+                .Named(name) -> {
+                    if name == Syntax.TYPE_BYTES -> return .Buffer
+                    if name == "Tensor" -> return .Matrix
+                }
+                .Apply("Vec" | "Matrix" | "Tensor", _) -> return .Matrix
+                else -> {}
+            }
+        }
+        .List
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:709
+    pub fn place_name(place: &ViewPlace) -> String {
+        out := place.owner.name.clone()
+        loop projection in place.projections {
+            if projection == {
+                .Field(field) -> out += ".{field}"
+                .Index(_, _) | .Range(_, _, _) -> out += "[…]"
+                .Fresh(_) -> out += "[fresh]"
+            }
+        }
+        ^out
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:734
+    pub fn call_access_frame(self: &Self) -> CallAccessFrame { CallAccessFrame.default() }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:741
+    pub fn with_call_access<T>(self: &Self, frame: &CallAccessFrame, check: fn(&Checker) -> T) -> T {
+        &self.call_access_frames.push(replace(&frame, CallAccessFrame.default()))
+        result :: check(&self)
+        frame = &self.call_access_frames.pop() ?? CallAccessFrame.default()
+        ^result
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:754
+    pub fn with_deferred_call_access<T>(self: &Self, check: fn(&Checker) -> T) -> T {
+        active :: replace(&self.call_access_frames, [CallAccessFrame]{})
+        result :: check(&self)
+        self.call_access_frames = ^active
+        ^result
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:761
+    fn check_call_place_access(self: &Self, place: &ViewPlace, access: ViewAccess, span: Span) {
+        self.check_call_place_access_kind(place, access, false, span)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:765
+    fn check_call_place_access_kind(self: &Self, place: &ViewPlace, access: ViewAccess, reserved: Bool, span: Span) {
+        frame_index := self.call_access_frames.len()
+        loop frame_index > 0 {
+            frame_index -= 1
+            frame :: &self.call_access_frames[frame_index]
+            index := frame.accesses.len()
+            loop index > 0 {
+                index -= 1
+                active :: &frame.accesses[index]
+                if !active.place.overlaps(place) -> next
+                if active.access == .Write && active.reserved && access == .Read && !reserved -> next
+                if active.access != .Write && access != .Write -> next
+                name :: Self.place_name(place)
+                &self.diags.push(if active.access == .Write -> aliasing_while_mut(name, span) else -> aliasing_mut_after_read(name, span))
+                return
+            }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:797
+    fn record_call_place_access(self: &Self, place: ViewPlace, access: ViewAccess) {
+        if self.call_access_frames.len() > 0 -> &self.call_access_frames[self.call_access_frames.len() - 1].accesses.push(CallPlaceAccess{place: ^place, access: access, reserved: false})
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:807
+    fn record_call_place_reservation(self: &Self, place: ViewPlace) {
+        if self.call_access_frames.len() > 0 -> &self.call_access_frames[self.call_access_frames.len() - 1].accesses.push(CallPlaceAccess{place: ^place, access: .Write, reserved: true})
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:817
+    fn push_evaluated_access(self: &Self, expr: &Expr, access: ViewAccess, bound: &[String:Bool], out: &[EvaluatedAccess]) {
+        place :: self.place_from_expr(expr) ?? return
+        capture_place := place.clone()
+        capture_ty := self.place_expr_type(expr)
+        if self.capture_place_info(expr) == .Val((found_place, ty, _)) {
+            capture_place = ^found_place
+            capture_ty = ^ty
+        }
+        if bound.contains_key(capture_place.owner.name) -> return
+        loop existing in &out {
+            if existing.place.owner == place.owner && existing.place.projections == place.projections && existing.capture_place.owner == capture_place.owner && existing.capture_place.projections == capture_place.projections {
+                if access == .Write { existing.access = .Write; existing.span = expr_span(expr) }
+                return
+            }
+        }
+        &out.push(EvaluatedAccess{place: ^place, capture_place: ^capture_place, capture_ty: ^capture_ty, capture_is_view: expr_root_ident(expr).is_some_and(name -> self.is_view(name)), access: access, span: expr_span(expr), through_call: false, moves_owner: false})
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:858
+    pub fn place_expr_type(self: &Self, expr: &Expr) -> Type? {
+        if expr == {
+            .Ident(name, _) -> self.lookup(name).map(info -> info.ty.clone())
+            .Paren(inner, _) | .Place(inner, _, _) -> self.place_expr_type(&inner)
+            .Deref(inner, _) -> self.place_expr_type(&inner).and_then(pointer -> ptr_elem(&pointer))
+            .Field(base, field, _) -> self.place_expr_type(&base).and_then(owner -> self.projected_field_type(^owner, field))
+            .Index(base, _, _, _) -> {
+                base_ty :: self.place_expr_type(&base) ?? return None
+                if self.is_simd_lane_type(&base_ty) -> return Val(math_scalar_ty(base_ty.name()))
+                if base_ty == { .List(elem) | .FixedList(elem, _) -> Val(^elem); .Map(_, _, value) -> Val(^value); else -> None }
+            }
+            else -> None
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:886
+    fn is_simd_lane_type(self: &Self, ty: &Type) -> Bool {
+        if ty == {
+            .Tagged(_, inner) -> self.is_simd_lane_type(&inner)
+            .Named(name) -> jet_sema.CheckerCoreLib.is_simd_lane_type(name) && !self.registry.contains(name)
+            else -> false
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:897
+    fn unowned_move_projection(self: &Self, expr: &Expr) -> String? {
+        if expr == {
+            .Deref(_, _) -> Val("dereference")
+            .Index(base, _, _, _) -> {
+                if self.place_expr_type(&base).is_some_and(ty -> self.is_simd_lane_type(&ty)) -> return Val("SIMD lane")
+                self.unowned_move_projection(&base)
+            }
+            .Field(base, _, _) | .Place(base, _, _) | .Paren(base, _) -> self.unowned_move_projection(&base)
+            else -> None
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:914
+    pub fn reject_noncanonical_move_place(self: &Self, expr: &Expr, value_ty: Type?, consumer: String, span: Span) -> Bool {
+        projection :: self.unowned_move_projection(expr) ?? return false
+        is_copy :: if value_ty == { .Val(ty) -> type_is_copy(&ty); .None -> self.place_expr_type(expr).is_some_and(ty -> type_is_copy(&ty)) }
+        if is_copy -> return false
+        diagnostic :: Diagnostic.error("E0201", "`{consumer}` cannot move a non-copy {projection} place", "canonical ownership has no owning storage route for a non-copy {projection} place", "copy the value first, or move the owning binding instead", Val(span))
+        if !self.diags.any(previous -> previous.code == diagnostic.code && previous.span == diagnostic.span && previous.what == diagnostic.what) -> &self.diags.push(^diagnostic)
+        true
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:957
+    fn projected_field_type(self: &Self, owner: Type, field: String) -> Type? {
+        owner := ^owner
+        loop {
+            if owner == { .Tagged(_, inner) -> owner = ^inner; else -> break }
+        }
+        subst := [String:Type]{}
+        name :: if owner == {
+            .Named(name) -> name
+            .Apply(name, args) -> {
+                params :: self.trait_reg.struct_params.get(name) ?? return None
+                loop i in 0..min(params.len(), args.len()) -> &subst.insert(params[i].name, args[i].clone())
+                name
+            }
+            else -> return None
+        }
+        fields :: self.registry.struct_fields(name) ?? return None
+        loop (candidate, _, ty) in fields {
+            if candidate == field -> return Val(substitute_type(&ty, &subst))
+        }
+        None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:981
+    fn method_receiver_access(self: &Self, receiver: &Expr, method: String) -> ViewAccess {
+        ty :: self.place_expr_type(receiver) ?? return .Read
+        if Collections.builtin_method_mutates(&ty, method) -> return .Write
+        if ty == .TraitObject(names) {
+            loop name in names {
+                info :: self.trait_reg.traits.get(name) ?? next
+                sig :: info.methods.get(method) ?? next
+                if sig.params.len() == 0 -> next
+                receiver :: &sig.params[0]
+                return if receiver.name == Syntax.KW_SELF && receiver.convention == .Write -> .Write else -> .Read
+            }
+            return .Read
+        }
+        type_name :: if ty == { .Named(name) | .Apply(name, _) -> name; else -> return .Read }
+        if self.resolve_method_sig(type_name, method).is_some_and(pair -> pair.1.self_conv == Val(AccessConvention.Write)) -> .Write else -> .Read
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1018
+    fn collect_lvalue_access(self: &Self, target: &LValue, bound: &[String:Bool], out: &[EvaluatedAccess]) {
+        if target == {
+            .Local(name, name_span) -> {
+                target :: Expr.Ident(name, name_span)
+                self.push_evaluated_access(&target, .Write, bound, &out)
+            }
+            .Field(base, field, span) -> {
+                target :: Expr.Field(base.clone(), field, span)
+                self.push_evaluated_access(&target, .Write, bound, &out)
+            }
+            .Index(base, index, span, _) -> {
+                target :: Expr.Index(base.clone(), index.clone(), span, IndexKind.default())
+                self.push_evaluated_access(&target, .Write, bound, &out)
+                self.collect_evaluated_expr_accesses(&index, .EvaluateNow, bound, &out)
+            }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1053
+    fn collect_lambda_requirement_events(self: &Self, lambda: &Lambda, out: &[EvaluatedAccess]) {
+        params := [String:Bool]{}
+        loop param in lambda.params -> &params.insert(param.name, true)
+        events := [EvaluatedAccess]{}
+        if lambda.body == {
+            .Expr(body) -> self.collect_evaluated_expr_accesses(&body, .CaptureRequirements, &params, &events)
+            .Block(body) -> self.collect_evaluated_stmt_accesses(&body, .CaptureRequirements, &params, &events)
+        }
+        taken := [String:Bool]{}
+        loop (name, span) in lambda.take_names {
+            capture :: Expr.Ident(name, span)
+            self.push_evaluated_access(&capture, .Read, &[String:Bool]{}, &events)
+            &taken.insert(name, true)
+        }
+        cloned := [String:Bool]{}
+        moved := [String:Bool]{}
+        loop name in lambda.meta.cloned_captures -> &cloned.insert(name, true)
+        loop name in lambda.meta.moved_captures -> &moved.insert(name, true)
+        retains :: !lambda.meta.escapes && events.any(event -> event.access == .Write)
+        loop event in &events {
+            name :: event.capture_place.owner.name
+            if cloned.contains_key(name) {
+                &event.place.projections.clear()
+                event.access = .Read
+            } else if (moved.contains_key(name) || !lambda.meta.needs_fn_mut || lambda.meta.escapes) && !event.capture_is_view && !event.capture_ty.is_some_and(ty -> type_is_copy(&ty)) && self.lookup(name).is_some_and(info -> info.param_conv == None) {
+                event.place = event.capture_place.clone()
+                event.access = .Write
+                event.moves_owner = true
+            }
+            event.through_call = (event.capture_is_view || (retains && !taken.contains_key(name))) && !event.moves_owner
+        }
+        loop event in events {
+            found := false
+            loop existing in &out {
+                if existing.place.owner != event.place.owner || existing.place.projections != event.place.projections -> next
+                if event.access == .Write { existing.access = .Write; existing.span = event.span }
+                existing.through_call = existing.through_call || event.through_call
+                existing.moves_owner = existing.moves_owner || event.moves_owner
+                found = true
+                break
+            }
+            if !found -> &out.push(^event)
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1134
+    fn collect_evaluated_expr_accesses(self: &Self, expr: &Expr, mode: AccessWalkMode, bound: &[String:Bool], out: &[EvaluatedAccess]) {
+        if self.place_from_expr(expr) == .Val(place) {
+            if mode != .ConstructCaptures && !bound.contains_key(place.owner.name) {
+                access :: if expr == .Place(_, .Write, _) -> ViewAccess.Write else -> ViewAccess.Read
+                self.push_evaluated_access(expr, access, bound, &out)
+            }
+            if expr == {
+                .Index(_, index, _, _) -> self.collect_evaluated_expr_accesses(&index, mode, bound, &out)
+                .Slice(_, start, end, range, _) -> {
+                    if range == .Val(range) -> self.collect_evaluated_expr_accesses(&range, mode, bound, &out)
+                    else {
+                        self.collect_evaluated_expr_accesses(&start, mode, bound, &out)
+                        self.collect_evaluated_expr_accesses(&end, mode, bound, &out)
+                    }
+                }
+                else -> {}
+            }
+            return
+        }
+        if expr == {
+            .Lambda(lambda) -> { if mode != .EvaluateNow -> self.collect_lambda_requirement_events(&lambda, &out) }
+            .Call(call) -> {
+                if mode == .CaptureRequirements {
+                    loop arg in call.args {
+                        self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, &out)
+                        if arg.convention == .Write -> self.push_evaluated_access(&arg.expr, .Write, bound, &out)
+                    }
+                }
+            }
+            .MethodCall(receiver, method, _, _, _, args, _, _, _, _) -> {
+                if mode == .CaptureRequirements {
+                    self.push_evaluated_access(&receiver, self.method_receiver_access(&receiver, method), bound, &out)
+                    loop arg in args {
+                        self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, &out)
+                        if arg.convention == .Write -> self.push_evaluated_access(&arg.expr, .Write, bound, &out)
+                    }
+                }
+            }
+            .CallValue(callee, args, _) -> {
+                collecting := false
+                if callee == .Lambda(lambda) {
+                    if lambda.meta.collecting_loop || lambda.meta.result_loop {
+                        collecting = true
+                        if lambda.body == {
+                            .Expr(body) -> self.collect_evaluated_expr_accesses(&body, mode, bound, &out)
+                            .Block(body) -> {
+                                body_bound := bound.clone()
+                                self.collect_evaluated_stmt_accesses(&body, mode, &body_bound, &out)
+                            }
+                        }
+                    }
+                }
+                if collecting || mode == .CaptureRequirements {
+                    if !collecting -> self.collect_evaluated_expr_accesses(&callee, mode, bound, &out)
+                    loop arg in args {
+                        self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, &out)
+                        if arg.convention == .Write -> self.push_evaluated_access(&arg.expr, .Write, bound, &out)
+                    }
+                }
+            }
+            .Binary(_, left, right, _) -> {
+                self.collect_evaluated_expr_accesses(&left, mode, bound, &out)
+                self.collect_evaluated_expr_accesses(&right, mode, bound, &out)
+            }
+            .CompareChain(operands, _, _, _) | .ListLit(operands, _) -> {
+                loop operand in operands -> self.collect_evaluated_expr_accesses(&operand, mode, bound, &out)
+            }
+            .Unary(_, inner, _) | .Spread(inner, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Paren(inner, _) -> self.collect_evaluated_expr_accesses(&inner, mode, bound, &out)
+            .Try(inner, _, _, note) -> {
+                self.collect_evaluated_expr_accesses(&inner, mode, bound, &out)
+                if note == .Val(note) -> self.collect_evaluated_expr_accesses(&note, mode, bound, &out)
+            }
+            .Field(base, _, _) | .OptField(base, _, _, _, _) | .MemberSpread(base, _, _) -> self.collect_evaluated_expr_accesses(&base, mode, bound, &out)
+            .Index(base, index, _, _) -> {
+                self.collect_evaluated_expr_accesses(&base, mode, bound, &out)
+                self.collect_evaluated_expr_accesses(&index, mode, bound, &out)
+            }
+            .Slice(base, start, end, range, _) -> {
+                self.collect_evaluated_expr_accesses(&base, mode, bound, &out)
+                if range == .Val(range) -> self.collect_evaluated_expr_accesses(&range, mode, bound, &out)
+                else {
+                    self.collect_evaluated_expr_accesses(&start, mode, bound, &out)
+                    self.collect_evaluated_expr_accesses(&end, mode, bound, &out)
+                }
+            }
+            .Range(start, end, _, _) -> {
+                self.collect_evaluated_expr_accesses(&start, mode, bound, &out)
+                self.collect_evaluated_expr_accesses(&end, mode, bound, &out)
+            }
+            .MapLit(entries, _) -> {
+                loop entry in entries {
+                    self.collect_evaluated_expr_accesses(&entry.key, mode, bound, &out)
+                    self.collect_evaluated_expr_accesses(&entry.value, mode, bound, &out)
+                }
+            }
+            .StructLit(_, _, _, _, fields, _, _) -> {
+                loop field in fields -> self.collect_evaluated_expr_accesses(&field.value, mode, bound, &out)
+            }
+            .TypedLit(_, body, _) -> body.for_each_expr(value -> self.collect_evaluated_expr_accesses(&value, mode, bound, &out))
+            .TupleLit(fields, _, _) -> {
+                loop field in fields -> self.collect_evaluated_expr_accesses(&field.value, mode, bound, &out)
+            }
+            .EnumLit(_, _, _, args, _, _) -> {
+                loop arg in args {
+                    if arg == { .Positional(value) | .Named(_, value) -> self.collect_evaluated_expr_accesses(&value, mode, bound, &out) }
+                }
+            }
+            .Str(parts, _) -> {
+                loop part in parts {
+                    if part == .Interp(value, _) -> self.collect_evaluated_expr_accesses(&value, mode, bound, &out)
+                }
+            }
+            .PatternTest(subject, pattern, _) -> {
+                self.collect_evaluated_expr_accesses(&subject, mode, bound, &out)
+                self.collect_pattern_value_accesses(&pattern, mode, bound, &out)
+            }
+            .OrFallback(value, fallback, _, _) -> {
+                self.collect_evaluated_expr_accesses(&value, mode, bound, &out)
+                if fallback == {
+                    .Value(value) | .Return(.Val(value), _) -> self.collect_evaluated_expr_accesses(&value, mode, bound, &out)
+                    .Panic(args, _) -> { loop arg in args -> self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, &out) }
+                    else -> {}
+                }
+            }
+            .If(cond, then_body, then_value, else_body, else_value, _) -> {
+                self.collect_evaluated_expr_accesses(&cond, mode, bound, &out)
+                then_bound := bound.clone()
+                if cond == .PatternTest(_, pattern, _) -> Self.bind_pattern_names(&pattern, &then_bound)
+                self.collect_evaluated_stmt_accesses(&then_body, mode, &then_bound, &out)
+                self.collect_evaluated_expr_accesses(&then_value, mode, &then_bound, &out)
+                else_bound := bound.clone()
+                self.collect_evaluated_stmt_accesses(&else_body, mode, &else_bound, &out)
+                self.collect_evaluated_expr_accesses(&else_value, mode, &else_bound, &out)
+            }
+            .PtrFromAddr(_, _, _, addr, _) -> self.collect_evaluated_expr_accesses(&addr, mode, bound, &out)
+            .StrMatchLit(_, _) | .BinMatchLit(_, _) | .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Unit(_) | .Char(_, _) | .Ident(_, _) | .UnitLit(_, _, _, _, _, _) | .Absent(_) | .Todo(_, _) | .NoElse(_) | .ReduceMarker(_, _) | .ComptimeName(_, _, _) -> {}
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1398
+    fn bind_pattern_names(pattern: &Pattern, bound: &[String:Bool]) {
+        if pattern == {
+            .Ok(binding, _, inner, _) | .Err(binding, _, inner, _) | .Present(binding, _, inner, _) -> {
+                if inner == .Val(inner) -> Self.bind_pattern_names(&inner, &bound)
+                else -> &bound.insert(binding, true)
+            }
+            .Variant(_, bindings, _, _) -> { loop slot in bindings -> Self.bind_slot_names(&slot, &bound) }
+            .Struct(fields, _, _) -> {
+                loop field in fields { if field == .Bind(_, _, local, _) -> &bound.insert(local, true) }
+            }
+            .Or(alts, _) -> { if alts.len() > 0 -> Self.bind_pattern_names(&alts[0], &bound) }
+            .StrMatch(parts, _) -> { loop part in parts { if part == .Hole(name, _, _) -> &bound.insert(name, true) } }
+            .BinMatch(parts, _) -> { loop part in parts { if part == .Hole(name, _, _) -> &bound.insert(name, true) } }
+            .Absent(_) | .Range(_, _, _) -> {}
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1449
+    fn bind_slot_names(slot: &PatSlot, bound: &[String:Bool]) {
+        if slot == {
+            .Bind(name, _) -> &bound.insert(name, true)
+            .Nested(inner) -> Self.bind_pattern_names(&inner, &bound)
+            .Named(_, _, slot) -> Self.bind_slot_names(&slot, &bound)
+            .Wildcard | .Range(_, _) | .Rest(_) -> {}
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1463
+    fn collect_pattern_value_accesses(self: &Self, pattern: &Pattern, mode: AccessWalkMode, bound: &[String:Bool], out: &[EvaluatedAccess]) {
+        if pattern == {
+            .Struct(fields, _, _) -> {
+                loop field in fields { if field == .Value(_, _, value) -> self.collect_evaluated_expr_accesses(&value, mode, bound, &out) }
+            }
+            .Or(alternatives, _) -> { loop alternative in alternatives -> self.collect_pattern_value_accesses(&alternative, mode, bound, &out) }
+            else -> {}
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1487
+    fn collect_evaluated_stmt_accesses(self: &Self, body: &[Stmt], mode: AccessWalkMode, bound: &[String:Bool], out: &[EvaluatedAccess]) {
+        loop stmt in body {
+            if stmt == {
+                .Expr(expr) | .Yield(expr, _) | .DeferClose(expr, _) -> self.collect_evaluated_expr_accesses(&expr, mode, bound, &out)
+                .Val(binding) -> {
+                    self.collect_evaluated_expr_accesses(&binding.init, mode, bound, &out)
+                    if binding.pattern == .Val(pattern) {
+                        loop name in bind_pattern_names(pattern) -> &bound.insert(name.local_name(), true)
+                    } else -> &bound.insert(binding.name, true)
+                }
+                .Assign(target, _, _, value) -> {
+                    self.collect_lvalue_access(&target, bound, &out)
+                    self.collect_evaluated_expr_accesses(&value, mode, bound, &out)
+                }
+                .Return(.Val(expr), _) | .BreakValue(expr, _) | .BreakLabelValue(_, _, expr, _) -> self.collect_evaluated_expr_accesses(&expr, mode, bound, &out)
+                .While(cond, body, _, _, _) -> {
+                    self.collect_evaluated_expr_accesses(&cond, mode, bound, &out)
+                    body_bound := bound.clone()
+                    self.collect_evaluated_stmt_accesses(&body, mode, &body_bound, &out)
+                }
+                .For(var, _, var2, kind, body, _, _, _, _) -> {
+                    if kind == {
+                        .Range(start, end, step, _) -> {
+                            self.collect_evaluated_expr_accesses(&start, mode, bound, &out)
+                            self.collect_evaluated_expr_accesses(&end, mode, bound, &out)
+                            if step == .Val(step) -> self.collect_evaluated_expr_accesses(&step, mode, bound, &out)
+                        }
+                        .In(collection, step) -> {
+                            self.collect_evaluated_expr_accesses(&collection, mode, bound, &out)
+                            if step == .Val(step) -> self.collect_evaluated_expr_accesses(&step, mode, bound, &out)
+                        }
+                    }
+                    body_bound := bound.clone()
+                    &body_bound.insert(var, true)
+                    if var2 == .Val(named) -> &body_bound.insert(named.name, true)
+                    self.collect_evaluated_stmt_accesses(&body, mode, &body_bound, &out)
+                }
+                .Switch(subject, arms, else_body, _) -> {
+                    self.collect_evaluated_expr_accesses(&subject, mode, bound, &out)
+                    switch_bound := bound.clone()
+                    &switch_bound.insert(Syntax.KW_IT, true)
+                    loop arm in arms {
+                        self.collect_evaluated_expr_accesses(&arm.cond, mode, &switch_bound, &out)
+                        arm_bound := switch_bound.clone()
+                        if arm.cond == .PatternTest(_, pattern, _) -> Self.bind_pattern_names(&pattern, &arm_bound)
+                        self.collect_evaluated_stmt_accesses(&arm.body, mode, &arm_bound, &out)
+                    }
+                    if else_body == .Val(else_body) {
+                        else_bound := bound.clone()
+                        self.collect_evaluated_stmt_accesses(&else_body, mode, &else_bound, &out)
+                    }
+                }
+                .CountedLoop(init, cond, step, body, _, _, _) -> {
+                    self.collect_evaluated_expr_accesses(&init.init, mode, bound, &out)
+                    loop_bound := bound.clone()
+                    &loop_bound.insert(init.name, true)
+                    self.collect_evaluated_expr_accesses(&cond, mode, &loop_bound, &out)
+                    self.collect_evaluated_stmt_accesses(&body, mode, &loop_bound, &out)
+                    if step == .Val(step) -> self.collect_evaluated_stmt_accesses(&[Stmt]{^step}, mode, &loop_bound, &out)
+                }
+                .Switched(marker, body, _) -> {
+                    if jet_foundation.switched_off(marker) || marker.name == Syntax.MARKER_DEBUG_ONLY -> next
+                    body_bound := bound.clone()
+                    self.collect_evaluated_stmt_accesses(&body, mode, &body_bound, &out)
+                }
+                .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .AssumeDet(_, _, body, _) | .Live(body, _) -> {
+                    body_bound := bound.clone()
+                    self.collect_evaluated_stmt_accesses(&body, mode, &body_bound, &out)
+                }
+                .Reactive(body, _) -> {
+                    body_bound := bound.clone()
+                    captures := [EvaluatedAccess]{}
+                    self.collect_evaluated_stmt_accesses(&body, .CaptureRequirements, &body_bound, &captures)
+                    // Reactive registration clones roots; deferred writes target those clones.
+                    loop capture in &captures {
+                        capture.access = .Read
+                        capture.through_call = false
+                        capture.moves_owner = false
+                        &capture.place.projections.clear()
+                        capture.capture_place = capture.place.clone()
+                        capture.capture_ty = self.lookup(capture.place.owner.name).map(info -> info.ty.clone())
+                        capture.capture_is_view = false
+                        loop existing in out {
+                            if existing.place.owner != capture.place.owner -> next
+                            if existing.access == .Write { capture.access = .Write; capture.span = existing.span }
+                            capture.through_call = capture.through_call || existing.through_call
+                            capture.moves_owner = capture.moves_owner || existing.moves_owner
+                        }
+                        &out.retain(event -> event.place.owner != capture.place.owner)
+                        &out.push(^capture)
+                    }
+                }
+                .ContextBlock(fields, body, _) -> {
+                    loop field in fields -> self.collect_evaluated_expr_accesses(&field.value, mode, bound, &out)
+                    body_bound := bound.clone()
+                    self.collect_evaluated_stmt_accesses(&body, mode, &body_bound, &out)
+                }
+                .ScopeMember(_, _, args, _, body, _, _, _) -> {
+                    loop arg in args -> self.collect_evaluated_expr_accesses(&arg, mode, bound, &out)
+                    body_bound := bound.clone()
+                    self.collect_evaluated_stmt_accesses(&body, mode, &body_bound, &out)
+                }
+                .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) | .Return(.None, _) -> {}
+            }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1684
+    fn check_transient_accesses(self: &Self, accesses: [EvaluatedAccess]) {
+        loop access in accesses -> self.check_call_place_access(&access.place, access.access, access.span)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1693
+    pub fn activate_call_reservations(self: &Self, frame: &CallAccessFrame, span: Span) {
+        loop reservation in frame.accesses {
+            if !reservation.reserved -> next
+            loop access in frame.accesses {
+                if access.reserved || !access.place.overlaps(&reservation.place) -> next
+                name :: Self.place_name(&reservation.place)
+                &self.diags.push(if access.access == .Read -> aliasing_mut_after_read(name, span) else -> aliasing_while_mut(name, span))
+                break
+            }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1719
+    pub fn record_call_result_views(self: &Self, expr: &Expr) {
+        direct_place :: self.place_from_expr(expr)
+        loans := [(ViewPlace, ViewAccess)]{}
+        loop (_, place, _, access) in self.view_call_sources(expr) {
+            seen := false
+            loop loan in &loans {
+                if loan.0.owner != place.owner || loan.0.projections != place.projections -> next
+                if access == .Write -> loan.1 = .Write
+                seen = true
+                break
+            }
+            if !seen -> &loans.push((^place, access))
+        }
+        loop (place, access) in loans {
+            same_direct_argument := false
+            if direct_place == .Val(direct) {
+                if direct.owner == place.owner && direct.projections == place.projections && self.call_access_frames.len() > 0 {
+                    frame :: &self.call_access_frames[self.call_access_frames.len() - 1]
+                    if frame.accesses.len() > 0 {
+                        active :: &frame.accesses[frame.accesses.len() - 1]
+                        same_direct_argument = !active.reserved && active.place.owner == place.owner && active.place.projections == place.projections
+                    }
+                }
+            }
+            if same_direct_argument -> next
+            self.check_call_place_access(&place, access, expr_span(expr))
+            self.record_call_place_access(^place, access)
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:1759
+    fn collect_call_projection_accesses(self: &Self, expr: &Expr, accesses: &[EvaluatedAccess]) {
+        if expr == {
+            .Index(base, index, _, _) -> {
+                self.collect_call_projection_accesses(&base, &accesses)
+                self.collect_evaluated_expr_accesses(&index, .EvaluateNow, &[String:Bool]{}, &accesses)
+            }
+            .Slice(base, start, end, range, _) -> {
+                self.collect_call_projection_accesses(&base, &accesses)
+                if range == .Val(range) -> self.collect_evaluated_expr_accesses(&range, .EvaluateNow, &[String:Bool]{}, &accesses)
+                else {
+                    self.collect_evaluated_expr_accesses(&start, .EvaluateNow, &[String:Bool]{}, &accesses)
+                    self.collect_evaluated_expr_accesses(&end, .EvaluateNow, &[String:Bool]{}, &accesses)
+                }
+            }
+            .Field(base, _, _) | .Place(base, _, _) | .Paren(base, _) | .Deref(base, _) -> self.collect_call_projection_accesses(&base, &accesses)
+            else -> {}
+        }
+    }
+}

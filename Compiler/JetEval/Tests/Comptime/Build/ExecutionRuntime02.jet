@@ -1,0 +1,337 @@
+use std.[fs, env, process, io, thread, Mutex, TcpListener, Duration, Instant]
+use jet_comptime.Comptime.Build.[ActionSpec, BuildCapability, BuildContext, BuildResourcePool, TargetSpec]
+// GATE #4494: tests use real native sandbox/process/network/thread/file providers.
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2307
+#Derive(Default)
+struct TestArtifactStore: BuildArtifactStore {
+    blobs: Mutex<[String:[U8]]>
+    records: Mutex<[String:[U8]]>
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2315
+    fn put_blob(self, bytes: [U8]) -> ContentDigest io.Error! {
+        digest :: ContentDigest.from_bytes(bytes)
+        guard := self.blobs.lock() ?? err.into_inner()
+        guard[digest.as_str().to_string()] = ~bytes
+        Ok(digest)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2324
+    fn get_blob(self, digest: ContentDigest) -> [U8]? io.Error! {
+        guard :: self.blobs.lock() ?? err.into_inner()
+        match guard.get(digest.as_str()) { Val(bytes) => Ok(Val(~bytes)); None => Ok(None) }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2333
+    fn put_record(self, key: String, bytes: [U8]) io.Error! {
+        guard := self.records.lock() ?? err.into_inner()
+        guard[key.to_string()] = ~bytes
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2341
+    fn get_record(self, key: String) -> [U8]? io.Error! {
+        guard :: self.records.lock() ?? err.into_inner()
+        match guard.get(key) { Val(bytes) => Ok(Val(~bytes)); None => Ok(None) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2352
+#Test("shared_hostile_corpus_is_consumable_by_hermetic_execution") {
+    corpus :: include_str("tests/fixtures/build_sandbox/hostile-corpus.tsv") // GATE #4494 compile-time file inclusion.
+    rows := [[String]]{}
+    loop line in corpus.lines() {
+        if line.is_empty() || line.starts_with("#") -> continue
+        fields := [String]{}
+        loop field in line.split('\t') -> &fields.push(field.to_string())
+        &rows.push(^fields)
+    }
+    assert_eq(rows.len(), 7)
+    loop row in rows { assert_eq(row.len(), 4, "malformed hostile corpus row"); assert_eq(row[3], "blocked-or-unsupported") }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2371
+#Test("shared_hostile_corpus_runs_through_hermetic_backend") {
+    if core.sys.target.selected_family() != "unix" -> return // GATE #4483 original cfg(unix).
+    status :: native_sandbox_status()
+    if !status.available {
+        assert_eq(status.policy, "not-enforced")
+        assert(status.mechanism.contains("unavailable") || status.mechanism == "unsupported", "unsupported backend must be named: {status:?}")
+    }
+    corpus :: include_str("tests/fixtures/build_sandbox/hostile-corpus.tsv")
+    cases := [(String, String, String, String)]{}
+    loop line in corpus.lines() {
+        if line.is_empty() || line.starts_with("#") -> continue
+        fields := [String]{}
+        loop field in line.split('\t') -> &fields.push(field.to_string())
+        assert_eq(fields.len(), 4, "malformed hostile corpus row: {line}")
+        &cases.push((fields[0], fields[1], fields[2], fields[3]))
+    }
+    assert_eq(cases.len(), 7, "hostile corpus lost a required case")
+    paths :: env.var_os("PATH") ?? panic("PATH should be available to sandbox tests")
+    shell := OSPath?{None}
+    loop name in ["bash", "sh"] {
+        loop directory in env.split_paths(paths) {
+            candidate :: directory.join(name)
+            if candidate.is_file() { shell = Val(candidate); break }
+        }
+        if shell != None -> break
+    }
+    executable :: shell ?? panic("a shell is required for the hostile corpus")
+    shell_quote :: |path: OSPath| "'{path.to_string_lossy().replace('\'', "'\\''")}'"
+    link_tool := OSPath?{None}
+    loop directory in env.split_paths(paths) { candidate :: directory.join("ln"); if candidate.is_file() { link_tool = Val(candidate); break } }
+    link :: link_tool ?? panic("ln is required for the hostile corpus")
+    fill_name :: "/tmp/jet-hermetic-hostile-fill-{process.id()}"
+    loop (case_id, _, _, _) in cases {
+        attempt :: &REMOTE_ATTEMPT.fetch_add(1, .Relaxed)
+        root :: env.temp_dir().join("jet-hermetic-hostile-{case_id}-{process.id()}-{attempt}")
+        source :: root.join("source")
+        output :: root.join("output")
+        host_secret :: root.with_file_name("jet-hermetic-hostile-{case_id}-{process.id()}-secret")
+        host_marker :: root.with_file_name("jet-hermetic-hostile-{case_id}-{process.id()}-marker")
+        fs.create_dir_all(source) ?? panic("{err}")
+        fs.create_dir_all(output) ?? panic("{err}")
+        fs.write(host_secret, "host-only-secret") ?? panic("{err}")
+        if case_id == "source-symlink" -> std.os.unix.fs.symlink(host_secret, source.join("link")) ?? panic("{err}")
+        network_thread := thread.JoinHandle<Bool>?{None}
+        command :: match case_id {
+            "host-read" => "if test -r {shell_quote(host_secret)}; then printf escaped; else printf blocked; fi"
+            "host-write" => "if printf escaped > {shell_quote(host_marker)}; then printf escaped; else printf blocked; fi"
+            "source-symlink" => "if test -r \"$PWD/link\"; then printf escaped; else printf blocked; fi"
+            "output-symlink" => "if {shell_quote(link)} -s {shell_quote(host_marker)} \"$JET_BUILD_OUTPUT/link\" && printf escaped > \"$JET_BUILD_OUTPUT/link\"; then printf escaped; else printf blocked; fi"
+            "network-exfiltration" => {
+                listener :: TcpListener.bind("127.0.0.1:0") ?? panic("{err}")
+                listener.set_nonblocking(true) ?? panic("{err}")
+                port :: (listener.local_addr() ?? panic("{err}")).port()
+                network_thread = Val(thread.spawn(move || {
+                    deadline :: Instant.now() + Duration.from_millis(750)
+                    loop {
+                        listener.accept() ?? {
+                            if err.kind() == .WouldBlock {
+                                if Instant.now() >= deadline -> return false
+                                thread.sleep(Duration.from_millis(5))
+                                continue
+                            }
+                            return false
+                        }
+                        return true
+                    }
+                }))
+                "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf escaped; else printf blocked; fi"
+            }
+            "child-process" => "(printf escaped > {shell_quote(host_marker)}) & printf blocked"
+            "tmpfs-exhaustion" => "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {fill_name}; then printf blocked; exit 0; fi; i=$((i + 1)); done; printf escaped"
+            other => panic("unmapped hostile corpus case {other}")
+        }
+        result :: Ok(run_native_sandboxed(executable, ["-c", command], source, Val(output), [String:String]{}, false)) ?? Err(err)
+        if !status.available {
+            assert(match result { Err(.Unsupported(_)) => true; _ => false }, "unsupported backend must refuse {case_id} before launch: {result:?}")
+            assert(!host_marker.exists(), "{case_id} wrote the host marker")
+            if network_thread == .Val(handle) -> assert(!(handle.join() ?? panic("{err}")), "{case_id} reached the network")
+            fs.remove_file(host_secret) ?? {}
+            fs.remove_file(host_marker) ?? {}
+            fs.remove_file(OSPath.new(fill_name)) ?? {}
+            fs.remove_dir_all(root) ?? {}
+            continue
+        }
+        enforced :: match result { Ok(value) => value; Err(error) => panic("{case_id} unexpectedly lost enforcement: {error:?}") }
+        assert_eq(enforced.mechanism, status.mechanism, "{case_id} backend receipt")
+        loop policy in ["filesystem=", "process=", "network=", "environment=", "devices=", "resources="] -> assert(enforced.policy.contains(policy), "{case_id} receipt lost {policy}: {enforced.policy}")
+        assert(enforced.output.status.success(), "{case_id} backend failed: stdout={String.from_utf8_lossy(enforced.output.stdout)} stderr={String.from_utf8_lossy(enforced.output.stderr)}")
+        assert_eq(String.from_utf8_lossy(enforced.output.stdout), "blocked", "{case_id} escaped through the hermetic backend")
+        assert(!host_marker.exists(), "{case_id} wrote the host marker")
+        if network_thread == .Val(handle) -> assert(!(handle.join() ?? panic("{err}")), "{case_id} reached the network")
+        if case_id == "child-process" { thread.sleep(Duration.from_millis(100)); assert(!host_marker.exists(), "{case_id} left a hostile child behind") }
+        fs.remove_file(host_secret) ?? {}
+        fs.remove_file(host_marker) ?? {}
+        fs.remove_file(OSPath.new(fill_name)) ?? {}
+        fs.remove_dir_all(root) ?? {}
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2580
+#Test("shared_hostile_corpus_runs_through_hermetic_executor") {
+    if core.sys.target.selected_family() != "unix" -> return // GATE #4483 original cfg(unix).
+    capability :: native_sandbox_status()
+    corpus :: include_str("tests/fixtures/build_sandbox/hostile-corpus.tsv")
+    cases := [(String, String, String, String)]{}
+    loop line in corpus.lines() {
+        if line.is_empty() || line.starts_with("#") -> continue
+        fields := [String]{}
+        loop field in line.split('\t') -> &fields.push(field.to_string())
+        assert_eq(fields.len(), 4, "malformed hostile corpus row: {line}")
+        &cases.push((fields[0], fields[1], fields[2], fields[3]))
+    }
+    assert_eq(cases.len(), 7, "hostile corpus lost a required case")
+    paths :: env.var_os("PATH") ?? panic("PATH should be available to sandbox tests")
+    shell := OSPath?{None}
+    loop directory in env.split_paths(paths) { candidate :: directory.join("bash"); if candidate.is_file() { shell = Val(candidate); break } }
+    executable :: shell ?? panic("bash is required for the hostile corpus")
+    link_tool := OSPath?{None}
+    loop directory in env.split_paths(paths) { candidate :: directory.join("ln"); if candidate.is_file() { link_tool = Val(candidate); break } }
+    link :: link_tool ?? panic("ln is required for the hostile corpus")
+    shell_quote :: |path: OSPath| "'{path.to_string_lossy().replace('\'', "'\\''")}'"
+    loop (case_id, _, _, expected) in cases {
+        assert_eq(expected, "blocked-or-unsupported")
+        attempt :: &REMOTE_ATTEMPT.fetch_add(1, .Relaxed)
+        root :: env.temp_dir().join("jet-hermetic-executor-hostile-{case_id}-{process.id()}-{attempt}")
+        host_secret :: root.with_file_name("jet-hermetic-executor-hostile-{case_id}-{process.id()}-secret")
+        host_marker :: root.with_file_name("jet-hermetic-executor-hostile-{case_id}-{process.id()}-marker")
+        fill_name :: "/tmp/jet-hermetic-executor-hostile-fill-{process.id()}-{case_id}"
+        fs.create_dir_all(root) ?? panic("{err}")
+        fs.write(host_secret, "host-only-secret") ?? panic("{err}")
+        network_thread := thread.JoinHandle<Bool>?{None}
+        command :: match case_id {
+            "host-read" => "if test -r {shell_quote(host_secret)}; then printf leaked > status; else printf blocked > status; fi"
+            "host-write" => "if printf escaped > {shell_quote(host_marker)}; then printf escaped > status; else printf blocked > status; fi"
+            "source-symlink" => "if {shell_quote(link)} -s {shell_quote(host_secret)} link && test -r link; then printf leaked > status; else printf blocked > status; fi"
+            "output-symlink" => "if {shell_quote(link)} -s {shell_quote(host_marker)} link && printf escaped > link; then printf escaped > status; else printf blocked > status; fi"
+            "network-exfiltration" => {
+                listener :: TcpListener.bind("127.0.0.1:0") ?? panic("{err}")
+                listener.set_nonblocking(true) ?? panic("{err}")
+                port :: (listener.local_addr() ?? panic("{err}")).port()
+                network_thread = Val(thread.spawn(move || {
+                    deadline :: Instant.now() + Duration.from_millis(750)
+                    loop {
+                        listener.accept() ?? {
+                            if err.kind() == .WouldBlock {
+                                if Instant.now() >= deadline -> return false
+                                thread.sleep(Duration.from_millis(5))
+                                continue
+                            }
+                            return false
+                        }
+                        return true
+                    }
+                }))
+                "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf leaked > status; else printf blocked > status; fi"
+            }
+            "child-process" => "(printf escaped > {shell_quote(host_marker)}) & child=$!; wait \"$child\"; if test -e {shell_quote(host_marker)}; then printf escaped > status; else printf blocked > status; fi"
+            "tmpfs-exhaustion" => "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {fill_name}; then break; fi; i=$((i + 1)); done; if [ \"$i\" -ge 1025 ]; then printf escaped > status; else printf blocked > status; fi"
+            other => panic("unmapped hostile corpus case {other}")
+        }
+        context := BuildContext.new()
+        action :: &context.action("hostile-{case_id}", ActionSpec.cached([executable.to_string_lossy().to_string(), "-c", command]).with_outputs(["status"]).with_cap(.Exec)) ?? panic("{err}")
+        target :: &context.add_executable("hostile-target-{case_id}", TargetSpec.new().with_action(action)) ?? panic("{err}")
+        plan :: context.plan_with_default(target) ?? panic("{err}")
+        grants :: Set<BuildCapability>{.Exec}
+        artifact_store :: TestArtifactStore.default()
+        result :: Ok(execute_build_plan(plan, root, artifact_store, grants)) ?? Err(err)
+        if capability.available {
+            match result { Ok(_) => {}; Err(error) => panic("{case_id} hermetic executor lost enforcement: {error:?}") }
+            output_text :: fs.read_to_string(root.join("status")) ?? panic("{err}")
+            assert_eq(output_text.trim(), "blocked", "{case_id} escaped through the hermetic BuildPlan executor")
+        } else -> assert(match result { Err(.SandboxUnavailable) => true; _ => false }, "unsupported backend must refuse {case_id} before launch: {result:?}")
+        assert(!host_marker.exists(), "{case_id} wrote the host marker")
+        if network_thread == .Val(handle) -> assert(!(handle.join() ?? panic("{err}")), "{case_id} reached the network")
+        fs.remove_file(host_secret) ?? {}
+        fs.remove_file(host_marker) ?? {}
+        fs.remove_file(OSPath.new(fill_name)) ?? {}
+        fs.remove_dir_all(root) ?? {}
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2749
+#Test("remote_output_restore_rolls_back_until_committed") {
+    attempt :: &REMOTE_ATTEMPT.fetch_add(1, .Relaxed)
+    root :: env.temp_dir().join("jet-remote-restore-guard-{process.id()}-{attempt}")
+    fs.create_dir_all(root) ?? panic("{err}")
+    path :: root.join("build/out")
+    fs.create_dir_all(path.parent() ?? panic("output has a parent")) ?? panic("{err}")
+    fs.write(path, "old".bytes()) ?? panic("{err}")
+    fs.write(path, "new".bytes()) ?? panic("{err}")
+    {
+        restore :: RemoteOutputRestore{project_root: root, backups: [(path, Val("old".bytes()))], committed: false}
+        drop(^restore)
+    }
+    assert_eq(fs.read(path) ?? panic("{err}"), "old".bytes())
+    fs.write(path, "new".bytes()) ?? panic("{err}")
+    restore := RemoteOutputRestore{project_root: root, backups: [(path, Val("old".bytes()))], committed: false}
+    &restore.commit()
+    assert_eq(fs.read(path) ?? panic("{err}"), "new".bytes())
+    fs.remove_dir_all(root) ?? {}
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2782
+#Test("remote_ineligible_builder_honors_declared_local_fallback") {
+    root :: env.temp_dir().join("jet-remote-ineligible-fallback-{process.id()}")
+    context := BuildContext.new()
+    action :: &context.action("gpu-action", ActionSpec.cached(["remote-tool"]).with_outputs(["out/gpu"]).with_cap(.Net).with_pool(.GPU)) ?? panic("{err}")
+    target :: &context.add_executable("gpu-target", TargetSpec.new().with_action(action)) ?? panic("{err}")
+    plan :: context.plan_with_default(target) ?? panic("{err}")
+    binding :: (RemoteBuildBinding.new("cpu-builder", root, "fallback-key".bytes()) ?? panic("{err}")).with_trust_domain("trusted").with_execute(true).with_local_fallback(true)
+    scheduler :: RemoteScheduler.new([RemoteBuilder.from_binding(~binding)]) ?? panic("{err}")
+    grants :: Set<BuildCapability>{.Net}
+    result :: remote_for_action(plan, plan.action(action) ?? panic("action exists"), ActionKey.new("gpu-action-key"), grants, Val(binding), Val(scheduler)) ?? panic("{err}")
+    assert_eq(result, None)
+    fs.remove_dir_all(root) ?? {}
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2826
+fn sandbox_bash() -> OSPath Never! {
+    paths :: env.var_os("PATH") ?? panic("PATH should be available to sandbox tests")
+    loop directory in env.split_paths(paths) { candidate :: directory.join("bash"); if candidate.is_file() -> return candidate }
+    panic("bash is required for sandbox descendant tests")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2835
+fn delayed_descendant_script(marker: String, rest: String) -> String Never! {
+    // Sandbox PATH is /nix/store; bash SECONDS is builtin, unlike sleep.
+    "(start=$SECONDS; while [ $((SECONDS-start)) -lt 2 ]; do :; done; printf leaked > {marker}) & {rest}"
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2843
+fn assert_descendant_reaped(marker: OSPath) Never! {
+    thread.sleep(Duration.from_secs(3))
+    assert(!marker.exists(), "sandbox left a pipe-holding descendant alive")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2853
+#Test("native_sandbox_exit_reaps_pipe_holding_descendant") {
+    if core.sys.target.selected_family() != "unix" -> return
+    shell :: sandbox_bash()
+    attempt :: &REMOTE_ATTEMPT.fetch_add(1, .Relaxed)
+    root :: env.temp_dir().join("jet-build-action-exit-tree-{process.id()}-{attempt}")
+    descendant_marker :: root.join("exit-descendant-marker")
+    fs.create_dir_all(root) ?? panic("{err}")
+    started :: Instant.now()
+    result :: Ok(run_native_sandboxed_with_timeout(shell, ["-c", delayed_descendant_script("exit-descendant-marker", "exit 0")], root, None, [String:String]{}, false, Val(Duration.from_secs(5)))) ?? Err(err)
+    elapsed :: started.elapsed()
+    status :: native_sandbox_status()
+    if !status.available -> assert(match result { Err(.Unsupported(_)) => true; _ => false }, "unsupported backend must refuse the exit action: {result:?}")
+    else {
+        output :: match result { Ok(value) => value; Err(error) => panic("exit cleanup regression should run: {error}") }
+        assert(output.output.status.success(), "exit cleanup regression failed: stdout={String.from_utf8_lossy(output.output.stdout)} stderr={String.from_utf8_lossy(output.output.stderr)}")
+        assert(elapsed < Duration.from_secs(3), "exit cleanup waited for the pipe holder: {elapsed:?}")
+        assert_descendant_reaped(descendant_marker)
+    }
+    fs.remove_dir_all(root) ?? panic("{err}")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2903
+#Test("native_sandbox_timeout_stops_a_hanging_build_action") {
+    if core.sys.target.selected_family() != "unix" -> return
+    shell :: sandbox_bash()
+    attempt :: &REMOTE_ATTEMPT.fetch_add(1, .Relaxed)
+    root :: env.temp_dir().join("jet-build-action-timeout-{process.id()}-{attempt}")
+    descendant_marker :: root.join("timeout-descendant-marker")
+    fs.create_dir_all(root) ?? panic("{err}")
+    started :: Instant.now()
+    result :: Ok(run_native_sandboxed_with_timeout(shell, ["-c", delayed_descendant_script("timeout-descendant-marker", "while :; do :; done")], root, None, [String:String]{}, false, Val(Duration.from_millis(100)))) ?? Err(err)
+    elapsed :: started.elapsed()
+    status :: native_sandbox_status()
+    if !status.available -> assert(match result { Err(.Unsupported(_)) => true; _ => false }, "unsupported backend must refuse the hanging action: {result:?}")
+    else {
+        match result { Err(.Io(detail)) => assert(detail.contains("timed out"), "timeout regression returned the wrong error: {detail}"); other => panic("hanging action was not stopped: {other:?}") }
+        assert(elapsed < Duration.from_secs(3), "timeout took too long: {elapsed:?}")
+        assert_descendant_reaped(descendant_marker)
+    }
+    fs.remove_dir_all(root) ?? panic("{err}")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:2958
+#Test("native_sandbox_output_limit_stops_a_flooding_build_action") {
+    if core.sys.target.selected_family() != "unix" -> return
+    shell :: sandbox_bash()
+    attempt :: &REMOTE_ATTEMPT.fetch_add(1, .Relaxed)
+    root :: env.temp_dir().join("jet-build-action-output-{process.id()}-{attempt}")
+    descendant_marker :: root.join("output-descendant-marker")
+    fs.create_dir_all(root) ?? panic("{err}")
+    started :: Instant.now()
+    // The original command's literal contains exactly 4096 x bytes.
+    flood :: "while :; do printf %s '{"x".repeat(4096)}'; done"
+    result :: Ok(run_native_sandboxed_with_timeout(shell, ["-c", delayed_descendant_script("output-descendant-marker", flood)], root, None, [String:String]{}, false, Val(Duration.from_secs(5)))) ?? Err(err)
+    elapsed :: started.elapsed()
+    status :: native_sandbox_status()
+    if !status.available -> assert(match result { Err(.Unsupported(_)) => true; _ => false }, "unsupported backend must refuse the flooding action: {result:?}")
+    else {
+        match result { Err(.Io(detail)) => assert(detail.contains("output exceeded"), "output-limit regression returned the wrong error: {detail}"); other => panic("flooding action was not stopped: {other:?}") }
+        assert(elapsed < Duration.from_secs(5), "output limit took too long: {elapsed:?}")
+        assert_descendant_reaped(descendant_marker)
+    }
+    fs.remove_dir_all(root) ?? panic("{err}")
+}

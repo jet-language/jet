@@ -1,0 +1,90 @@
+use jet_foundation.[Type, StrFormat, UnitRatio, UnitRoundingMode, Effect, TFailureCarrier, TGCEditKind, TTryConvert, MIRSymbol, MIRPreludeABI, MIRTypedHeadKind]
+use jet_codegen.Codegen.TIR.Routes.[precise_builtin_route, string_format_route, overflow_opt_route, unit_conversion_route, gc_edit_route, host_method_route, host_recv_borrow_mask, typed_text_interp_route, todo_route, try_conversion_route, journey_origin_route, geometry_method_arity]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8551,8674 (behavioral control; no inline Rust tests)
+#Test("precise_and_format_routes_preserve_symbol_and_argument_access") {
+    carrier :: TFailureCarrier.Infallible
+    constructor :: precise_builtin_route("Decimal", "from_parts", 2, Type.Float, carrier).expect("registered constructor")
+    assert(constructor.symbol == MIRSymbol.Prelude("jet_decimal_from_parts"))
+    assert(constructor.signature.borrow_mask == [false, false])
+    parser :: precise_builtin_route("Decimal", "from_str", 1, Type.Float, carrier).expect("registered parser")
+    assert(parser.signature.borrow_mask == [true])
+    measurement :: precise_builtin_route("Measurement", "new", 2, Type.Float, carrier).expect("registered measurement")
+    assert(measurement.symbol == MIRSymbol.Prelude("jet_std::JetMeasurement::new"))
+    integer :: string_format_route(StrFormat.Fixed(2), Type.Int, Type.String, carrier).expect("integer formatting")
+    decimal :: string_format_route(StrFormat.Fixed(2), Type.Float, Type.String, carrier).expect("decimal formatting")
+    assert(integer.symbol == MIRSymbol.Prelude("jet_fmt_decimal_int"))
+    assert(integer.signature.borrow_mask == [true, false])
+    assert(decimal.symbol == MIRSymbol.Prelude("jet_fmt_decimal"))
+    assert(decimal.signature.borrow_mask == [false, false])
+    assert(string_format_route(StrFormat.Unit("m"), Type.Int, Type.String, carrier).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8905 (behavioral control)
+#Test("overflow_routes_validate_payload_and_carrier_before_selecting_row") {
+    input :: Type.IntN(true, 32)
+    optional :: Type.Option(input)
+    carrier :: TFailureCarrier.Optional(input)
+    checked :: overflow_opt_route("checked", "add", 9, input, optional, carrier).expect("checked add")
+    assert(checked.signature.arity == 2)
+    assert(checked.signature.borrow_mask == [false, false])
+    assert(checked.effect == None)
+    assert(overflow_opt_route("checked", "add", 9, input, input, carrier).is_err())
+    assert(overflow_opt_route("checked", "add", 9, input, Type.Option(Type.IntN(false, 32)), carrier).is_err())
+    assert(overflow_opt_route("checked", "add", 9, input, optional, TFailureCarrier.Infallible).is_err())
+    assert(overflow_opt_route("wrapping", "add", 9, input, input, carrier).is_err())
+    assert(overflow_opt_route("wrapping", "rem", 9, input, input, TFailureCarrier.Infallible).is_err())
+    trapping :: overflow_opt_route("checked_policy", "pow", 9, input, input, TFailureCarrier.Infallible).expect("policy pow")
+    assert(trapping.signature.arity == 4 && trapping.effect == Val(Effect.Panic))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9272-9356 (behavioral control)
+#Test("unit_conversion_routes_require_real_measurement_success_shape") {
+    ratio :: UnitRatio{numerator: 1, denominator: 1}
+    zero :: UnitRatio{numerator: 0, denominator: 1}
+    measurement :: Type.Apply("Measurement", [Type.Float])
+    optional :: Type.Option(measurement)
+    carrier :: TFailureCarrier.Optional(measurement)
+    exact :: unit_conversion_route("m", ratio, zero, None, Val(0.01), optional, carrier).expect("measured conversion")
+    rounded :: unit_conversion_route("m", ratio, zero, Val(UnitRoundingMode.Floor), Val(0.01), optional, carrier).expect("rounded measured conversion")
+    assert(exact.member == "conversion_exact_measurement" && exact.signature.arity == 6)
+    assert(rounded.member == "conversion_rounded_measurement" && rounded.signature.arity == 8)
+    plain :: unit_conversion_route("m", ratio, zero, None, None, optional, carrier).expect("no uncertainty")
+    assert(plain.member == "conversion_exact" && plain.signature.arity == 5)
+    wrong :: unit_conversion_route("m", ratio, zero, None, Val(0.01), Type.Option(Type.Apply("Measurement", [Type.Int])), carrier).expect("non-float shape")
+    assert(wrong.member == "conversion_exact")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9408,9496,9700 (behavioral control)
+#Test("gc_typed_text_and_transactional_host_routes_keep_exact_abis") {
+    carrier :: TFailureCarrier.Infallible
+    insert :: gc_edit_route(TGCEditKind.InsertIndex, Type.Int, carrier).expect("GC insert")
+    assert(insert.signature.arity == 4 && insert.signature.borrow_mask == [true, false, true, false])
+    assert(insert.effect == Val(Effect.Mem))
+    html :: typed_text_interp_route(MIRTypedHeadKind.HTML, Type.String, carrier).expect("HTML interpolation")
+    assert(html.signature.arity == 3 && html.signature.borrow_mask == [true, false, true])
+    shared :: Type.Shared(Type.Int)
+    capture :: host_method_route(shared, "capture_txn", 0, Type.Int, carrier).expect("plain transactional capture")
+    assert(capture.symbol == MIRSymbol.Prelude("jet_shared_capture_txn_plain"))
+    assert(capture.signature.arity == 2 && capture.signature.borrow_mask == [true, true])
+    edit :: host_method_route(shared, "edit_txn", 1, Type.Int, carrier).expect("transactional edit")
+    assert(edit.signature.borrow_mask == [true, true, false])
+    assert(host_method_route(shared, "capture_txn", 2, Type.Int, carrier).is_err())
+    assert(host_method_route(Type.Apply("SharedSnapshot", [Type.Int]), "value", 1, Type.Int, carrier).is_err())
+    assert(host_method_route(Type.Named("Unknown"), "get", 0, Type.Int, carrier).is_err())
+    assert(host_recv_borrow_mask(0).len() == 0)
+    assert(host_recv_borrow_mask(16).len() == 16 && host_recv_borrow_mask(25).len() == 16)
+    assert(geometry_method_arity("point_at_depth") == Val(3) && geometry_method_arity("unknown") == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8651,8983,9068 (behavioral control)
+#Test("failure_routes_retain_divergence_and_journey_metadata") {
+    todo :: todo_route(Type.Int, TFailureCarrier.Infallible).expect("todo route")
+    assert(todo.fallibility == TFailureCarrier.Diverges(Type.Named("Never")))
+    exit :: try_conversion_route(TTryConvert.ProtocolExit, Type.Int, Type.Int, TFailureCarrier.Infallible).expect("protocol exit")
+    assert(exit.abi == MIRPreludeABI.Control && exit.effect == Val(Effect.Panic))
+    assert(try_conversion_route(TTryConvert.NoConversion, Type.Int, Type.Int, TFailureCarrier.Infallible).is_err())
+    origin :: journey_origin_route().expect("origin route")
+    assert(origin.signature.arity == 4 && origin.signature.borrow_mask == [true, false, false, true])
+    assert(origin.abi == MIRPreludeABI.Effect)
+}

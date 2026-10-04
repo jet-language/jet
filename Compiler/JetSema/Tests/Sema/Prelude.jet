@@ -1,0 +1,21 @@
+use jet_foundation.[Span]
+use jet_sema.[core_alias_for, shadow_warning]
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:217 (behavioral control, same private module)
+#Test("prelude_identifier_mentions_respect_unicode_and_underscore_boundaries") {
+    assert(source_mentions_identifier("math.sqrt(4)", "math"))
+    assert(source_mentions_identifier("(math)", "math"))
+    assert(!source_mentions_identifier("mymath", "math"))
+    assert(!source_mentions_identifier("math_extra", "math"))
+    assert(!source_mentions_identifier("émath", "math"))
+    assert(!source_mentions_identifier("mathé", "math"))
+    assert(source_mentions_identifier("mymath; math", "math"))
+}
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:194-211 (behavioral control)
+#Test("prelude_alias_lookup_only_uses_compiler_owned_names") {
+    imports :: [String:String]{"math": "core.math", "__jet_prelude_math": "core.math", "__jet_prelude_text": "core.text"}
+    assert(core_alias_for(imports, "core.math") == Val("__jet_prelude_math"))
+    assert(core_alias_for(imports, "core.files") == None)
+    diagnostic :: shadow_warning("math", Span.new(3, 7))
+    assert(diagnostic.code == "L0510")
+    assert(diagnostic.span == Val(Span.new(3, 7)))
+}

@@ -1,1757 +1,777 @@
-// PORT-PENDING 0545 compiler-bootstrap-host-entrycodec-slice-1: Compiler/Bootstrap/Host/EntryCodec.rs:1-1753
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Checked request/result transport for the private generated compiler entry.
-//RS //!
-//RS //! The retained compiler MIR and the emitted binding descriptor are the sole
-//RS //! shape authorities. Ordinary aggregates are copied only as required to cross
-//RS //! the entry ABI. Shared, trait-object, and callable leaves go through the
-//RS //! invocation-local NativeAdapter hook; they are never serialized as IDs or
-//RS //! reconstructed from display text. Helper roots are recursively carried as
-//RS //! checked MIR aggregates; only physical leaves use owner-issued carriers.
-//RS 
-//RS use crate::compiler_bootstrap_host::{
-//RS     BootstrapBindingDescriptor, BootstrapCodecSymbols, BootstrapHostCodecError,
-//RS };
-//RS use jet_foundation::MIR::{
-//RS     MirConstKey, MirCoreOwner, MirFieldId, MirFunctionId, MirFunctionKind, MirNominalRef,
-//RS     MirProgram, MirRuntimeValue, MirTraitMethod, MirType, MirTypeDef, MirTypeDefKind, MirTypeId,
-//RS     MirTypeKind, MirVariantPayload,
-//RS };
-//RS use std::collections::{BTreeSet, HashSet};
-//RS use std::fmt::Write as _;
-//RS 
-//RS const MAX_VALUE_DEPTH: usize = 256;
-//RS 
-//RS pub(crate) type BootstrapEntrySharedPayloadEncoder<T, P> = fn(
-//RS     &T,
-//RS     &MirType,
-//RS     &std::sync::Arc<MirProgram>,
-//RS     &BootstrapEntryHostTypeShape,
-//RS     usize,
-//RS     &[String],
-//RS     &[BootstrapEntryHostProjection],
-//RS     &P,
-//RS ) -> Result<MirRuntimeValue, String>;
-//RS 
-//RS pub(crate) type BootstrapEntrySharedPayloadDecoder<T, P> = fn(
-//RS     MirRuntimeValue,
-//RS     &MirType,
-//RS     &std::sync::Arc<MirProgram>,
-//RS     &BootstrapEntryHostTypeShape,
-//RS     usize,
-//RS     &[String],
-//RS     &[BootstrapEntryHostProjection],
-//RS     &P,
-//RS ) -> Result<T, String>;
-//RS 
-//RS #[cfg(jet_bootstrap_compiler_artifact)]
-//RS pub(crate) trait BootstrapEntrySharedMarshaller<O, T, P>: Clone + Send + Sync + 'static
-//RS where
-//RS     O: crate::JetSharedPhysicalOwnerApi,
-//RS     T: 'static,
-//RS     P: BootstrapEntryPhysicalBindings,
-//RS {
-//RS     fn encode_payload(
-//RS         &self,
-//RS         field_path: &[String],
-//RS         projection_path: &[BootstrapEntryHostProjection],
-//RS         checked_type: &MirType,
-//RS         shape: &BootstrapEntryHostTypeShape,
-//RS         shape_node: usize,
-//RS         source_value: &T,
-//RS     ) -> Result<MirRuntimeValue, String>;
-//RS 
-//RS     fn decode_payload(
-//RS         &self,
-//RS         field_path: &[String],
-//RS         projection_path: &[BootstrapEntryHostProjection],
-//RS         checked_type: &MirType,
-//RS         shape: &BootstrapEntryHostTypeShape,
-//RS         shape_node: usize,
-//RS         runtime_value: MirRuntimeValue,
-//RS     ) -> Result<T, String>;
-//RS }
-//RS 
-//RS pub(crate) trait BootstrapEntryPhysicalBindings: Clone + Send + Sync + 'static {
-//RS     // Shared marshalling is bounded on the generated crate's flat Prelude
-//RS     // owner trait, which exists only inside the compiler artifact.
-//RS     #[cfg(jet_bootstrap_compiler_artifact)]
-//RS     type SharedMarshaller<O, T>: BootstrapEntrySharedMarshaller<O, T, Self>
-//RS     where
-//RS         O: crate::JetSharedPhysicalOwnerApi,
-//RS         T: 'static;
-//RS 
-//RS     /// Exact Source-produced shape for one Shared payload type.
-//RS     fn shared_payload_shape(
-//RS         &self,
-//RS         checked_type: &MirType,
-//RS     ) -> Result<BootstrapEntryHostTypeShape, String>;
-//RS 
-//RS     /// Build a root-scoped, cycle-free marshalling service. It may retain
-//RS     /// `owner` only as its weak physical capability and must not retain this
-//RS     /// invocation binding, an interop root, or a logical alias lease. The
-//RS     /// generated converters are static function pointers; an invocation
-//RS     /// resolver supplies a short-lived binding whenever they run.
-//RS     #[cfg(jet_bootstrap_compiler_artifact)]
-//RS     fn shared_marshaller<O: crate::JetSharedPhysicalOwnerApi, T: 'static>(
-//RS         &self,
-//RS         owner: O,
-//RS         checked_type: &MirType,
-//RS         shape: &BootstrapEntryHostTypeShape,
-//RS         encode: BootstrapEntrySharedPayloadEncoder<T, Self>,
-//RS         decode: BootstrapEntrySharedPayloadDecoder<T, Self>,
-//RS     ) -> Result<Self::SharedMarshaller<O, T>, String>;
-//RS 
-//RS     fn encode<T: 'static>(
-//RS         &self,
-//RS         field_path: &[String],
-//RS         checked_type: &MirType,
-//RS         program: &MirProgram,
-//RS         source_value: &T,
-//RS     ) -> Result<Option<MirRuntimeValue>, String>;
-//RS 
-//RS     fn encode_shared(
-//RS         &self,
-//RS         field_path: &[String],
-//RS         checked_type: &MirType,
-//RS         program: &MirProgram,
-//RS         physical_identity: usize,
-//RS         root: jet_jit::SourceSharedInterop::SourceSharedInterop,
-//RS         payload_shape: &BootstrapEntryHostTypeShape,
-//RS     ) -> Result<Option<MirRuntimeValue>, String>;
-//RS 
-//RS     fn decode<T: 'static>(
-//RS         &self,
-//RS         field_path: &[String],
-//RS         checked_type: &MirType,
-//RS         program: &MirProgram,
-//RS         runtime_value: MirRuntimeValue,
-//RS     ) -> Result<Option<T>, String>;
-//RS 
-//RS     fn encode_shaped<T: 'static>(
-//RS         &self,
-//RS         field_path: &[String],
-//RS         projection_path: &[BootstrapEntryHostProjection],
-//RS         checked_type: &MirType,
-//RS         shape: &BootstrapEntryHostTypeShape,
-//RS         shape_node: usize,
-//RS         source_value: &T,
-//RS     ) -> Result<Option<MirRuntimeValue>, String>;
-//RS 
-//RS     fn decode_shaped<T: 'static>(
-//RS         &self,
-//RS         field_path: &[String],
-//RS         projection_path: &[BootstrapEntryHostProjection],
-//RS         checked_type: &MirType,
-//RS         shape: &BootstrapEntryHostTypeShape,
-//RS         shape_node: usize,
-//RS         runtime_value: MirRuntimeValue,
-//RS     ) -> Result<Option<T>, String>;
-//RS 
-//RS     /// Borrow the checked Source machine carrier in-place for a NativeInterface
-//RS     /// WRITE call. No Source values are cloned, retained, disposed, or moved.
-//RS     fn borrow_interpreter_machine_write<'a>(
-//RS         &self,
-//RS         value: &'a mut MirRuntimeValue,
-//RS         checked_type: &'a MirType,
-//RS         shape: &'a BootstrapEntryHostTypeShape,
-//RS     ) -> Result<BootstrapEntryMachineWriteBorrow<'a>, String>
-//RS     where
-//RS         Self: Sized,
-//RS     {
-//RS         BootstrapEntryMachineWriteBorrow::new(value, checked_type, shape)
-//RS     }
-//RS 
-//RS }
-//RS 
-//RS /// Compiler-independent representation of the exact guest type-shape graph
-//RS /// supplied by the running Source evaluator.
-//RS #[derive(Clone, Debug)]
-//RS pub(crate) struct BootstrapEntryHostTypeShape {
-//RS     pub(crate) root: usize,
-//RS     pub(crate) nodes: Vec<BootstrapEntryHostTypeNode>,
-//RS }
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub(crate) enum BootstrapEntryHostProjection {
-//RS     Present,
-//RS     Failed,
-//RS     List(usize),
-//RS     MapKey(usize),
-//RS     MapValue(usize),
-//RS     StructField(String),
-//RS     EnumArg(usize),
-//RS     HandlePayload,
-//RS     Capture(usize),
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub(crate) struct BootstrapEntryHostTypeField {
-//RS     pub(crate) name: String,
-//RS     pub(crate) node: usize,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub(crate) struct BootstrapEntryHostTypeVariant {
-//RS     pub(crate) name: String,
-//RS     pub(crate) args: Vec<(Option<String>, usize)>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub(crate) enum BootstrapEntryHostOwner {
-//RS     Cursor,
-//RS     Declared(MirType),
-//RS     Core { fact: MirCoreOwner, ty: MirType },
-//RS     NativeCallable { key: String, callable_type: MirType },
-//RS     NativeInterface { receiver_type: MirType },
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub(crate) enum BootstrapEntryHostTypeNode {
-//RS     Scalar(MirType),
-//RS     Option(usize),
-//RS     Result { ok: usize, error: usize },
-//RS     List(usize),
-//RS     Map { key: usize, value: usize },
-//RS     Tuple(Vec<BootstrapEntryHostTypeField>),
-//RS     Struct {
-//RS         type_id: MirTypeId,
-//RS         type_name: String,
-//RS         args: Vec<usize>,
-//RS         fields: Vec<BootstrapEntryHostTypeField>,
-//RS     },
-//RS     Enum {
-//RS         type_id: MirTypeId,
-//RS         type_name: String,
-//RS         args: Vec<usize>,
-//RS         variants: Vec<BootstrapEntryHostTypeVariant>,
-//RS     },
-//RS     Closure {
-//RS         function: MirFunctionId,
-//RS         captures: Vec<usize>,
-//RS         ty: MirType,
-//RS     },
-//RS     Handle { ty: MirType, owner: BootstrapEntryHostOwner },
-//RS }
-//RS pub(crate) trait BootstrapEntryMachineCoreOwnerRows {
-//RS     /// The machine program's registered Core owner rows, as host facts.
-//RS     fn core_owner_rows(&self) -> Result<Vec<MirCoreOwner>, String>;
-//RS }
-//RS 
-//RS pub(crate) enum BootstrapEntryMachineAccess<'a, T> {
-//RS     Typed(&'a mut T),
-//RS     Mir(BootstrapEntryMachineWriteBorrow<'a>),
-//RS }
-//RS 
-//RS impl<'a, T> BootstrapEntryMachineAccess<'a, T> {
-//RS     pub(crate) fn typed_mut(&mut self) -> Option<&mut T> {
-//RS         match self {
-//RS             Self::Typed(machine) => Some(&mut **machine),
-//RS             Self::Mir(_) => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn mir_mut(&mut self) -> Option<&mut BootstrapEntryMachineWriteBorrow<'a>> {
-//RS         match self {
-//RS             Self::Typed(_) => None,
-//RS             Self::Mir(machine) => Some(machine),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Borrowed, checked view of the live Source machine carried in a native
-//RS /// interface call. Every projection refers into the original MIR value.
-//RS pub(crate) struct BootstrapEntryMachineWriteBorrow<'a> {
-//RS     value: &'a mut MirRuntimeValue,
-//RS     checked_type: &'a MirType,
-//RS     shape: &'a BootstrapEntryHostTypeShape,
-//RS     shape_node: usize,
-//RS }
-//RS 
-//RS impl<'a> BootstrapEntryMachineWriteBorrow<'a> {
-//RS     pub(crate) fn new(
-//RS         value: &'a mut MirRuntimeValue,
-//RS         checked_type: &'a MirType,
-//RS         shape: &'a BootstrapEntryHostTypeShape,
-//RS     ) -> Result<Self, String> {
-//RS         bootstrap_entry_validate_shape(shape)?;
-//RS         let shape_type = bootstrap_entry_shape_node_type(shape, shape.root, 0)?;
-//RS         if !bootstrap_entry_shape_type_matches(&shape_type, checked_type) {
-//RS             return Err("borrowed Source machine shape differs from its checked MIR type".to_string());
-//RS         }
-//RS         bootstrap_entry_validate_shaped_runtime(value, checked_type, shape, shape.root, 0)?;
-//RS         Ok(Self {
-//RS             value,
-//RS             checked_type,
-//RS             shape,
-//RS             shape_node: shape.root,
-//RS         })
-//RS     }
-//RS 
-//RS     pub(crate) fn value(&self) -> &MirRuntimeValue {
-//RS         self.value
-//RS     }
-//RS 
-//RS     pub(crate) fn value_mut(&mut self) -> &mut MirRuntimeValue {
-//RS         self.value
-//RS     }
-//RS 
-//RS     pub(crate) fn checked_type(&self) -> &MirType {
-//RS         self.checked_type
-//RS     }
-//RS 
-//RS     pub(crate) fn shape(&self) -> &BootstrapEntryHostTypeShape {
-//RS         self.shape
-//RS     }
-//RS 
-//RS     pub(crate) fn shape_node(&self) -> usize {
-//RS         self.shape_node
-//RS     }
-//RS 
-//RS     pub(crate) fn field_shape_node(&self, name: &str) -> Result<usize, String> {
-//RS         let fields = match self.shape.nodes.get(self.shape_node) {
-//RS             Some(BootstrapEntryHostTypeNode::Tuple(fields))
-//RS             | Some(BootstrapEntryHostTypeNode::Struct { fields, .. }) => fields,
-//RS             _ => return Err("borrowed Source machine is not a checked record".to_string()),
-//RS         };
-//RS         fields
-//RS             .iter()
-//RS             .find(|field| field.name == name)
-//RS             .map(|field| field.node)
-//RS             .ok_or_else(|| format!("checked Source machine has no field `{name}`"))
-//RS     }
-//RS     pub(crate) fn field_type_path(&self, path: &[&str]) -> Result<MirType, String> {
-//RS         let mut node = self.shape_node;
-//RS         for name in path {
-//RS             let fields = match self.shape.nodes.get(node) {
-//RS                 Some(BootstrapEntryHostTypeNode::Tuple(fields))
-//RS                 | Some(BootstrapEntryHostTypeNode::Struct { fields, .. }) => fields,
-//RS                 _ => return Err("borrowed Source field path crosses a non-record".to_string()),
-//RS             };
-//RS             node = fields
-//RS                 .iter()
-//RS                 .find(|field| field.name == *name)
-//RS                 .map(|field| field.node)
-//RS                 .ok_or_else(|| format!("checked Source machine has no field `{name}`"))?;
-//RS         }
-//RS         bootstrap_entry_shape_node_type(self.shape, node, 0)
-//RS     }
-//RS 
-//RS     pub(crate) fn field_mut(&mut self, name: &str) -> Result<&mut MirRuntimeValue, String> {
-//RS         let (_, value) =
-//RS             bootstrap_entry_project_runtime_field_mut(self.shape, &mut *self.value, self.shape_node, name)?;
-//RS         Ok(value)
-//RS     }
-//RS 
-//RS     pub(crate) fn projection_mut_fields(
-//RS         &mut self,
-//RS         path: &[&str],
-//RS     ) -> Result<(usize, &mut MirRuntimeValue), String> {
-//RS         let shape = self.shape;
-//RS         let mut shape_node = self.shape_node;
-//RS         let mut value = &mut *self.value;
-//RS         for name in path {
-//RS             let (next_node, next_value) =
-//RS                 bootstrap_entry_project_runtime_field_mut(shape, value, shape_node, name)?;
-//RS             shape_node = next_node;
-//RS             value = next_value;
-//RS         }
-//RS         Ok((shape_node, value))
-//RS     }
-//RS 
-//RS     pub(crate) fn projection_mut(
-//RS         &mut self,
-//RS         path: &[BootstrapEntryHostProjection],
-//RS     ) -> Result<(usize, &mut MirRuntimeValue), String> {
-//RS         bootstrap_entry_project_runtime_mut(
-//RS             self.shape,
-//RS             &mut *self.value,
-//RS             self.shape_node,
-//RS             path,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS fn bootstrap_entry_project_runtime_field_mut<'a>(
-//RS     shape: &BootstrapEntryHostTypeShape,
-//RS     value: &'a mut MirRuntimeValue,
-//RS     shape_node: usize,
-//RS     name: &str,
-//RS ) -> Result<(usize, &'a mut MirRuntimeValue), String> {
-//RS     let fields = match shape.nodes.get(shape_node) {
-//RS         Some(BootstrapEntryHostTypeNode::Tuple(fields))
-//RS         | Some(BootstrapEntryHostTypeNode::Struct { fields, .. }) => fields,
-//RS         _ => return Err("borrowed Source projection is not a checked record".to_string()),
-//RS     };
-//RS     let Some(index) = fields.iter().position(|field| field.name == name) else {
-//RS         return Err(format!("checked Source record has no field `{name}`"));
-//RS     };
-//RS     let expected_type_name = match &shape.nodes[shape_node] {
-//RS         BootstrapEntryHostTypeNode::Tuple(_) => "Tuple",
-//RS         BootstrapEntryHostTypeNode::Struct { type_name, .. } => type_name,
-//RS         _ => unreachable!(),
-//RS     };
-//RS     let MirRuntimeValue::Struct {
-//RS         type_name,
-//RS         fields: values,
-//RS     } = value
-//RS     else {
-//RS         return Err("borrowed Source value is not a runtime record".to_string());
-//RS     };
-//RS     if type_name != expected_type_name || values.len() != fields.len() {
-//RS         return Err("borrowed Source record shape differs".to_string());
-//RS     }
-//RS     for (expected, (actual_name, _)) in fields.iter().zip(values.iter()) {
-//RS         if expected.name != *actual_name {
-//RS             return Err("borrowed Source record field name/order differs".to_string());
-//RS         }
-//RS     }
-//RS     Ok((fields[index].node, &mut values[index].1))
-//RS }
-//RS 
-//RS fn bootstrap_entry_project_runtime_mut<'a>(
-//RS     shape: &BootstrapEntryHostTypeShape,
-//RS     mut value: &'a mut MirRuntimeValue,
-//RS     mut shape_node: usize,
-//RS     path: &[BootstrapEntryHostProjection],
-//RS ) -> Result<(usize, &'a mut MirRuntimeValue), String> {
-//RS     for projection in path {
-//RS         let node = shape
-//RS             .nodes
-//RS             .get(shape_node)
-//RS             .ok_or_else(|| "borrowed Source projection has an invalid shape node".to_string())?;
-//RS         let (next_node, next_value) = match (node, projection, &mut *value) {
-//RS             (
-//RS                 BootstrapEntryHostTypeNode::Option(child),
-//RS                 BootstrapEntryHostProjection::Present,
-//RS                 MirRuntimeValue::Present(value),
-//RS             )
-//RS             | (
-//RS                 BootstrapEntryHostTypeNode::Result { ok: child, .. },
-//RS                 BootstrapEntryHostProjection::Present,
-//RS                 MirRuntimeValue::Present(value),
-//RS             ) => (*child, value.as_mut()),
-//RS             (
-//RS                 BootstrapEntryHostTypeNode::Result { error: child, .. },
-//RS                 BootstrapEntryHostProjection::Failed,
-//RS                 MirRuntimeValue::FailedTold(value),
-//RS             ) => (*child, value.as_mut()),
-//RS             (
-//RS                 BootstrapEntryHostTypeNode::List(child),
-//RS                 BootstrapEntryHostProjection::List(index),
-//RS                 MirRuntimeValue::List(values),
-//RS             ) => (
-//RS                 *child,
-//RS                 values.get_mut(*index).ok_or_else(|| {
-//RS                     "borrowed Source list projection index is out of range".to_string()
-//RS                 })?,
-//RS             ),
-//RS             (
-//RS                 BootstrapEntryHostTypeNode::Map { value: child, .. },
-//RS                 BootstrapEntryHostProjection::MapValue(index),
-//RS                 MirRuntimeValue::Map(values),
-//RS             ) => (
-//RS                 *child,
-//RS                 &mut values
-//RS                     .get_mut(*index)
-//RS                     .ok_or_else(|| {
-//RS                         "borrowed Source map projection index is out of range".to_string()
-//RS                     })?
-//RS                     .1,
-//RS             ),
-//RS             (
-//RS                 BootstrapEntryHostTypeNode::Map { .. },
-//RS                 BootstrapEntryHostProjection::MapKey(_),
-//RS                 MirRuntimeValue::Map(_),
-//RS             ) => {
-//RS                 return Err("MIR map keys are immutable constants, not borrowed runtime values".to_string());
-//RS             }
-//RS             (
-//RS                 node @ (BootstrapEntryHostTypeNode::Tuple(_)
-//RS                 | BootstrapEntryHostTypeNode::Struct { .. }),
-//RS                 BootstrapEntryHostProjection::StructField(name),
-//RS                 MirRuntimeValue::Struct {
-//RS                     type_name,
-//RS                     fields: values,
-//RS                 },
-//RS             ) => {
-//RS                 let shape_fields = match node {
-//RS                     BootstrapEntryHostTypeNode::Tuple(fields) => fields,
-//RS                     BootstrapEntryHostTypeNode::Struct {
-//RS                         type_name: expected,
-//RS                         fields,
-//RS                         ..
-//RS                     } if expected == type_name => fields,
-//RS                     _ => return Err("borrowed Source record type name differs".to_string()),
-//RS                 };
-//RS                 if values.len() != shape_fields.len() {
-//RS                     return Err("borrowed Source record field count differs".to_string());
-//RS                 }
-//RS                 for (expected, (actual, _)) in shape_fields.iter().zip(values.iter()) {
-//RS                     if expected.name != *actual {
-//RS                         return Err("borrowed Source record field name/order differs".to_string());
-//RS                     }
-//RS                 }
-//RS                 let index = shape_fields
-//RS                     .iter()
-//RS                     .position(|field| field.name == *name)
-//RS                     .ok_or_else(|| format!("borrowed Source record has no field `{name}`"))?;
-//RS                 (shape_fields[index].node, &mut values[index].1)
-//RS             }
-//RS             (
-//RS                 BootstrapEntryHostTypeNode::Enum {
-//RS                     type_name: expected_type,
-//RS                     variants,
-//RS                     ..
-//RS                 },
-//RS                 BootstrapEntryHostProjection::EnumArg(index),
-//RS                 MirRuntimeValue::Enum {
-//RS                     type_name,
-//RS                     variant,
-//RS                     args,
-//RS                 },
-//RS             ) => {
-//RS                 if type_name != expected_type {
-//RS                     return Err("borrowed Source enum type name differs".to_string());
-//RS                 }
-//RS                 let expected = variants
-//RS                     .iter()
-//RS                     .find(|row| row.name == *variant)
-//RS                     .ok_or_else(|| format!("borrowed Source enum variant `{type_name}::{variant}` is absent"))?;
-//RS                 let (expected_name, child) = expected
-//RS                     .args
-//RS                     .get(*index)
-//RS                     .ok_or_else(|| "borrowed Source enum argument is out of range".to_string())?;
-//RS                 if args.len() != expected.args.len() || args[*index].0 != *expected_name {
-//RS                     return Err("borrowed Source enum payload name/order differs".to_string());
-//RS                 }
-//RS                 (*child, &mut args[*index].1)
-//RS             }
-//RS             (
-//RS                 BootstrapEntryHostTypeNode::Closure { function, captures, .. },
-//RS                 BootstrapEntryHostProjection::Capture(index),
-//RS                 MirRuntimeValue::Closure(closure),
-//RS             ) => {
-//RS                 if closure.function != *function || closure.captures.len() != captures.len() {
-//RS                     return Err("borrowed Source closure capture layout differs".to_string());
-//RS                 }
-//RS                 (
-//RS                     *captures.get(*index).ok_or_else(|| {
-//RS                         "borrowed Source closure capture is out of range".to_string()
-//RS                     })?,
-//RS                     closure.captures.get_mut(*index).ok_or_else(|| {
-//RS                         "borrowed Source closure capture is out of range".to_string()
-//RS                     })?,
-//RS                 )
-//RS             }
-//RS             _ => return Err("borrowed Source projection does not match its checked value shape".to_string()),
-//RS         };
-//RS         shape_node = next_node;
-//RS         value = next_value;
-//RS     }
-//RS     Ok((shape_node, value))
-//RS }
-//RS 
-//RS 
-//RS pub(crate) fn bootstrap_entry_shape_node_type(
-//RS     shape: &BootstrapEntryHostTypeShape,
-//RS     node: usize,
-//RS     depth: usize,
-//RS ) -> Result<MirType, String> {
-//RS     if depth >= MAX_VALUE_DEPTH {
-//RS         return Err("compiler-entry host type shape exceeds checked nesting bound".to_string());
-//RS     }
-//RS     let node = shape
-//RS         .nodes
-//RS         .get(node)
-//RS         .ok_or_else(|| "compiler-entry host type shape has an invalid node reference".to_string())?;
-//RS     let child = |node| bootstrap_entry_shape_node_type(shape, node, depth + 1);
-//RS     Ok(match node {
-//RS         BootstrapEntryHostTypeNode::Scalar(ty)
-//RS         | BootstrapEntryHostTypeNode::Handle { ty, .. }
-//RS         | BootstrapEntryHostTypeNode::Closure { ty, .. } => ty.clone(),
-//RS         BootstrapEntryHostTypeNode::Option(inner) => {
-//RS             MirType::from_kind(MirTypeKind::Option(Box::new(child(*inner)?)))
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Result { ok, error } => MirType::from_kind(
-//RS             MirTypeKind::Result {
-//RS                 ok: Box::new(child(*ok)?),
-//RS                 err: Box::new(child(*error)?),
-//RS             },
-//RS         ),
-//RS         BootstrapEntryHostTypeNode::List(inner) => {
-//RS             MirType::from_kind(MirTypeKind::List(Box::new(child(*inner)?)))
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Map { key, value } => MirType::from_kind(
-//RS             MirTypeKind::Map {
-//RS                 key: Box::new(child(*key)?),
-//RS                 value: Box::new(child(*value)?),
-//RS             },
-//RS         ),
-//RS         BootstrapEntryHostTypeNode::Tuple(fields) => MirType::from_kind(MirTypeKind::Tuple(
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|field| Ok((field.name.clone(), child(field.node)?)))
-//RS                 .collect::<Result<Vec<_>, String>>()?,
-//RS         )),
-//RS         BootstrapEntryHostTypeNode::Struct {
-//RS             type_id,
-//RS             type_name,
-//RS             args,
-//RS             ..
-//RS         }
-//RS         | BootstrapEntryHostTypeNode::Enum {
-//RS             type_id,
-//RS             type_name,
-//RS             args,
-//RS             ..
-//RS         } => {
-//RS             let id = type_id.clone();
-//RS             MirType::from_kind(MirTypeKind::Apply {
-//RS                 name: jet_foundation::MIR::MirNominalRef {
-//RS                     id: id.clone(),
-//RS                     name: type_name.clone(),
-//RS                 },
-//RS                 args: args
-//RS                     .iter()
-//RS                     .map(|node| child(*node))
-//RS                     .collect::<Result<Vec<_>, String>>()?,
-//RS             })
-//RS             .with_identity(id)
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn bootstrap_entry_shape_type_matches(shape_type: &MirType, checked: &MirType) -> bool {
-//RS     match (shape_type.kind(), checked.kind()) {
-//RS         (MirTypeKind::List(shape_inner), MirTypeKind::FixedList { elem, .. }) => {
-//RS             shape_inner.same_checked_type(elem)
-//RS         }
-//RS         _ => shape_type.same_checked_type(checked),
-//RS     }
-//RS }
-//RS 
-//RS fn bootstrap_entry_validate_shape_references(
-//RS     shape: &BootstrapEntryHostTypeShape,
-//RS     node: usize,
-//RS     depth: usize,
-//RS     visited: &mut HashSet<usize>,
-//RS ) -> Result<(), String> {
-//RS     if depth >= MAX_VALUE_DEPTH {
-//RS         return Err("compiler-entry host type shape exceeds checked nesting bound".to_string());
-//RS     }
-//RS     if node >= shape.nodes.len() {
-//RS         return Err("compiler-entry host type shape has an invalid node reference".to_string());
-//RS     }
-//RS     if !visited.insert(node) {
-//RS         return Ok(());
-//RS     }
-//RS     let mut children = Vec::new();
-//RS     match &shape.nodes[node] {
-//RS         BootstrapEntryHostTypeNode::Scalar(_)
-//RS         | BootstrapEntryHostTypeNode::Handle { .. } => {}
-//RS         BootstrapEntryHostTypeNode::Option(inner)
-//RS         | BootstrapEntryHostTypeNode::List(inner) => children.push(*inner),
-//RS         BootstrapEntryHostTypeNode::Result { ok, error } => {
-//RS             children.extend([*ok, *error]);
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Map { key, value } => children.extend([*key, *value]),
-//RS         BootstrapEntryHostTypeNode::Tuple(fields) => {
-//RS             children.extend(fields.iter().map(|field| field.node));
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Struct { args, fields, .. } => {
-//RS             children.extend(args.iter().copied());
-//RS             children.extend(fields.iter().map(|field| field.node));
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Enum { args, variants, .. } => {
-//RS             children.extend(args.iter().copied());
-//RS             children.extend(
-//RS                 variants
-//RS                     .iter()
-//RS                     .flat_map(|variant| variant.args.iter().map(|(_, node)| *node)),
-//RS             );
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Closure { captures, .. } => {
-//RS             children.extend(captures.iter().copied());
-//RS         }
-//RS     }
-//RS     for child in children {
-//RS         bootstrap_entry_validate_shape_references(shape, child, depth + 1, visited)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(crate) fn bootstrap_entry_validate_shape(
-//RS     shape: &BootstrapEntryHostTypeShape,
-//RS ) -> Result<(), String> {
-//RS     if shape.nodes.is_empty() || shape.root >= shape.nodes.len() {
-//RS         return Err("compiler-entry host type shape has no valid root node".to_string());
-//RS     }
-//RS     let mut visited = HashSet::new();
-//RS     for node in 0..shape.nodes.len() {
-//RS         bootstrap_entry_validate_shape_references(shape, node, 0, &mut visited)?;
-//RS     }
-//RS     let _ = bootstrap_entry_shape_node_type(shape, shape.root, 0)?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn bootstrap_entry_validate_shaped_runtime(
-//RS     value: &MirRuntimeValue,
-//RS     checked: &MirType,
-//RS     shape: &BootstrapEntryHostTypeShape,
-//RS     shape_node: usize,
-//RS     depth: usize,
-//RS ) -> Result<(), String> {
-//RS     if depth >= MAX_VALUE_DEPTH {
-//RS         return Err("compiler-entry runtime value exceeds checked nesting bound".to_string());
-//RS     }
-//RS     let shape_type = bootstrap_entry_shape_node_type(shape, shape_node, depth)?;
-//RS     if !bootstrap_entry_shape_type_matches(&shape_type, checked) {
-//RS         return Err("compiler-entry guest type shape differs from checked MIR type".to_string());
-//RS     }
-//RS     let child_type = |node| bootstrap_entry_shape_node_type(shape, node, depth + 1);
-//RS     match &shape.nodes[shape_node] {
-//RS         BootstrapEntryHostTypeNode::Option(inner) => match value {
-//RS             MirRuntimeValue::Absent { element } => {
-//RS                 if !element.same_checked_type(&child_type(*inner)?) {
-//RS                     return Err("absent host value changed its exact checked element type".to_string());
-//RS                 }
-//RS             }
-//RS             MirRuntimeValue::Present(value) => bootstrap_entry_validate_shaped_runtime(
-//RS                 value,
-//RS                 &child_type(*inner)?,
-//RS                 shape,
-//RS                 *inner,
-//RS                 depth + 1,
-//RS             )?,
-//RS             _ => return Err("checked Option host value has an invalid runtime carrier".to_string()),
-//RS         },
-//RS         BootstrapEntryHostTypeNode::Result { ok, error } => match value {
-//RS             MirRuntimeValue::Present(value) => bootstrap_entry_validate_shaped_runtime(
-//RS                 value,
-//RS                 &child_type(*ok)?,
-//RS                 shape,
-//RS                 *ok,
-//RS                 depth + 1,
-//RS             )?,
-//RS             MirRuntimeValue::FailedTold(value) => bootstrap_entry_validate_shaped_runtime(
-//RS                 value,
-//RS                 &child_type(*error)?,
-//RS                 shape,
-//RS                 *error,
-//RS                 depth + 1,
-//RS             )?,
-//RS             _ => return Err("checked Result host value has an invalid runtime carrier".to_string()),
-//RS         },
-//RS         BootstrapEntryHostTypeNode::List(inner) => {
-//RS             let MirRuntimeValue::List(values) = value else {
-//RS                 return Err("checked sequence host value has an invalid runtime carrier".to_string());
-//RS             };
-//RS             if let MirTypeKind::FixedList { len, .. } = checked.kind() {
-//RS                 if let jet_foundation::MIR::MirMeasure::Literal { value, .. } = len {
-//RS                     if values.len() as u64 != *value {
-//RS                         return Err("checked fixed-list host value has the wrong length".to_string());
-//RS                     }
-//RS                 }
-//RS             }
-//RS             let child_type = child_type(*inner)?;
-//RS             for value in values {
-//RS                 bootstrap_entry_validate_shaped_runtime(
-//RS                     value,
-//RS                     &child_type,
-//RS                     shape,
-//RS                     *inner,
-//RS                     depth + 1,
-//RS                 )?;
-//RS             }
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Map { value: child, .. } => {
-//RS             let MirRuntimeValue::Map(entries) = value else {
-//RS                 return Err("checked map host value has an invalid runtime carrier".to_string());
-//RS             };
-//RS             let child_type = child_type(*child)?;
-//RS             for (_, value) in entries {
-//RS                 bootstrap_entry_validate_shaped_runtime(
-//RS                     value,
-//RS                     &child_type,
-//RS                     shape,
-//RS                     *child,
-//RS                     depth + 1,
-//RS                 )?;
-//RS             }
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Tuple(fields) => {
-//RS             let MirRuntimeValue::Struct { type_name, fields: values } = value else {
-//RS                 return Err("checked tuple host value has an invalid runtime carrier".to_string());
-//RS             };
-//RS             if type_name != "Tuple" || values.len() != fields.len() {
-//RS                 return Err("checked tuple host value shape differs".to_string());
-//RS             }
-//RS             for (index, (field, (name, value))) in fields.iter().zip(values).enumerate() {
-//RS                 if field.name != *name {
-//RS                     return Err(format!("checked tuple host field {index} differs"));
-//RS                 }
-//RS                 bootstrap_entry_validate_shaped_runtime(
-//RS                     value,
-//RS                     &child_type(field.node)?,
-//RS                     shape,
-//RS                     field.node,
-//RS                     depth + 1,
-//RS                 )?;
-//RS             }
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Struct {
-//RS             type_name,
-//RS             fields,
-//RS             ..
-//RS         } => {
-//RS             let MirRuntimeValue::Struct {
-//RS                 type_name: actual_name,
-//RS                 fields: values,
-//RS             } = value
-//RS             else {
-//RS                 return Err("checked record host value has an invalid runtime carrier".to_string());
-//RS             };
-//RS             if actual_name != type_name || values.len() != fields.len() {
-//RS                 return Err("checked record host value shape differs".to_string());
-//RS             }
-//RS             for (index, (field, (name, value))) in fields.iter().zip(values).enumerate() {
-//RS                 if field.name != *name {
-//RS                     return Err(format!("checked record host field {index} differs"));
-//RS                 }
-//RS                 bootstrap_entry_validate_shaped_runtime(
-//RS                     value,
-//RS                     &child_type(field.node)?,
-//RS                     shape,
-//RS                     field.node,
-//RS                     depth + 1,
-//RS                 )?;
-//RS             }
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Enum {
-//RS             type_name,
-//RS             variants,
-//RS             ..
-//RS         } => {
-//RS             let MirRuntimeValue::Enum {
-//RS                 type_name: actual_name,
-//RS                 variant,
-//RS                 args,
-//RS             } = value
-//RS             else {
-//RS                 return Err("checked enum host value has an invalid runtime carrier".to_string());
-//RS             };
-//RS             let expected = variants
-//RS                 .iter()
-//RS                 .find(|candidate| candidate.name == *variant)
-//RS                 .ok_or_else(|| format!("checked enum variant `{type_name}::{variant}` is absent"))?;
-//RS             if actual_name != type_name || args.len() != expected.args.len() {
-//RS                 return Err("checked enum host value shape differs".to_string());
-//RS             }
-//RS             for (index, ((expected_name, child), (actual_name, value))) in
-//RS                 expected.args.iter().zip(args).enumerate()
-//RS             {
-//RS                 if expected_name != actual_name {
-//RS                     return Err(format!("checked enum host payload {index} differs"));
-//RS                 }
-//RS                 bootstrap_entry_validate_shaped_runtime(
-//RS                     value,
-//RS                     &child_type(*child)?,
-//RS                     shape,
-//RS                     *child,
-//RS                     depth + 1,
-//RS                 )?;
-//RS             }
-//RS         }
-//RS         BootstrapEntryHostTypeNode::Scalar(_)
-//RS         | BootstrapEntryHostTypeNode::Closure { .. }
-//RS         | BootstrapEntryHostTypeNode::Handle { .. } => {}
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// A complete entry result, retained as its checked runtime aggregate until a
-//RS /// tier-specific generated Source projection consumes it.
-//RS #[derive(Debug)]
-//RS pub(crate) struct BootstrapEntryValue {
-//RS     pub(crate) ty: MirType,
-//RS     value: MirRuntimeValue,
-//RS }
-//RS 
-//RS impl BootstrapEntryValue {
-//RS     pub(crate) fn into_value(self) -> MirRuntimeValue {
-//RS         self.value
-//RS     }
-//RS 
-//RS     pub(crate) fn value(&self) -> &MirRuntimeValue {
-//RS         &self.value
-//RS     }
-//RS 
-//RS     pub(crate) fn field(
-//RS         &self,
-//RS         program: &MirProgram,
-//RS         field: MirFieldId,
-//RS     ) -> Option<&MirRuntimeValue> {
-//RS         checked_record_field(program, &self.ty, &self.value, field)
-//RS             .ok()
-//RS             .flatten()
-//RS     }
-//RS }
-//RS 
-//RS /// The exact checked `jet_bootstrap_compile` parameter and result carriers.
-//RS pub(crate) struct BootstrapEntryCodec<'a> {
-//RS     program: &'a MirProgram,
-//RS     entry: MirFunctionId,
-//RS     request_type: MirType,
-//RS     result_type: MirType,
-//RS }
-//RS 
-//RS impl<'a> BootstrapEntryCodec<'a> {
-//RS     pub(crate) fn new(
-//RS         program: &'a MirProgram,
-//RS         bindings: &BootstrapBindingDescriptor,
-//RS         entry: MirFunctionId,
-//RS     ) -> Result<Self, BootstrapHostCodecError> {
-//RS         let symbols = BootstrapCodecSymbols::new(bindings, program)?;
-//RS         let callable = bindings
-//RS             .callables
-//RS             .iter()
-//RS             .find(|row| row.source_name == "jet_bootstrap_compile" && row.metadata.function == entry)
-//RS             .ok_or_else(|| BootstrapHostCodecError::MissingEntry("jet_bootstrap_compile".to_string()))?;
-//RS         let function = program
-//RS             .functions
-//RS             .iter()
-//RS             .find(|function| function.id == entry)
-//RS             .ok_or_else(|| {
-//RS                 BootstrapHostCodecError::InvalidMetadata(
-//RS                     "jet_bootstrap_compile binding is absent from checked compiler MIR".to_string(),
-//RS                 )
-//RS             })?;
-//RS         if function.kind != MirFunctionKind::Jet
-//RS             || function.name != callable.source_name
-//RS             || function.params.len() != 1
-//RS             || callable.metadata.parameter_types.len() != 1
-//RS             || callable.metadata.parameter_access.as_slice() != [function.params[0].access]
-//RS         {
-//RS             return Err(BootstrapHostCodecError::InvalidMetadata(
-//RS                 "jet_bootstrap_compile must retain its exact one-parameter checked ABI".to_string(),
-//RS             ));
-//RS         }
-//RS         let request_type = function.params[0].ty.clone();
-//RS         let result_type = function.return_type.clone();
-//RS         let request = checked_nominal_definition(program, &request_type)?;
-//RS         let result = checked_nominal_definition(program, &result_type)?;
-//RS         if request.name != "JetDriverCompileRequest" || result.name != "JetDriverCompileResult" {
-//RS             return Err(BootstrapHostCodecError::InvalidMetadata(
-//RS                 "jet_bootstrap_compile ABI is not JetDriverCompileRequest -> JetDriverCompileResult"
-//RS                     .to_string(),
-//RS             ));
-//RS         }
-//RS         match entry_rust_type(program, &symbols, &result_type) {
-//RS             Ok(rust_type) if rust_type == callable.metadata.return_type => {}
-//RS             Ok(_) => symbols.record(BootstrapHostCodecError::InvalidMetadata(
-//RS                 "jet_bootstrap_compile return binding disagrees with its checked MIR return type"
-//RS                     .to_string(),
-//RS             )),
-//RS             Err(error) => symbols.record(error),
-//RS         }
-//RS         // Both graphs are walked in full and every drift recorded, so one
-//RS         // packaging run reports all binding failures.
-//RS         validate_binding_graph(program, &symbols, &request_type);
-//RS         validate_binding_graph(program, &symbols, &result_type);
-//RS         symbols.finish(Ok(()))?;
-//RS         Ok(Self {
-//RS             program,
-//RS             entry,
-//RS             request_type,
-//RS             result_type,
-//RS         })
-//RS     }
-//RS 
-//RS     pub(crate) fn entry(&self) -> MirFunctionId {
-//RS         self.entry
-//RS     }
-//RS 
-//RS     pub(crate) fn request_type(&self) -> &MirType {
-//RS         &self.request_type
-//RS     }
-//RS 
-//RS     pub(crate) fn result_type(&self) -> &MirType {
-//RS         &self.result_type
-//RS     }
-//RS 
-//RS     /// Validate and transfer one complete aggregate into the checked factory
-//RS     /// parameter vector. The factory entry has exactly one source argument.
-//RS     pub(crate) fn encode_compile_arguments(
-//RS         &self,
-//RS         request: MirRuntimeValue,
-//RS     ) -> Result<Vec<MirRuntimeValue>, BootstrapHostCodecError> {
-//RS         validate_runtime_value(self.program, &self.request_type, &request, 0)
-//RS             .map_err(BootstrapHostCodecError::InvalidMetadata)?;
-//RS         Ok(vec![request])
-//RS     }
-//RS 
-//RS     /// Validate and transfer the entire result aggregate without dropping
-//RS     /// diagnostics, source MIR, artifact/output metadata, or control results.
-//RS     pub(crate) fn decode_compile_result(
-//RS         &self,
-//RS         value: MirRuntimeValue,
-//RS     ) -> Result<BootstrapEntryValue, BootstrapHostCodecError> {
-//RS         validate_runtime_value(self.program, &self.result_type, &value, 0)
-//RS             .map_err(BootstrapHostCodecError::InvalidMetadata)?;
-//RS         Ok(BootstrapEntryValue {
-//RS             ty: self.result_type.clone(),
-//RS             value,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Build a record from checked field IDs, emitted in checked MIR order.
-//RS     pub(crate) fn record(
-//RS         &self,
-//RS         owner: MirTypeId,
-//RS         fields: Vec<(MirFieldId, MirRuntimeValue)>,
-//RS     ) -> Result<MirRuntimeValue, BootstrapHostCodecError> {
-//RS         let definition = checked_definition_by_id(self.program, owner)?;
-//RS         let declared = match &definition.kind {
-//RS             MirTypeDefKind::Struct { fields, .. } => fields,
-//RS             _ => {
-//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                     "checked type `{}` is not a struct carrier",
-//RS                     definition.name
-//RS                 )))
-//RS             }
-//RS         };
-//RS         let mut supplied = std::collections::BTreeMap::new();
-//RS         for (field, value) in fields {
-//RS             if supplied.insert(field, value).is_some() {
-//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                     "record `{}` repeats checked field ID {}",
-//RS                     definition.name, field.0
-//RS                 )));
-//RS             }
-//RS         }
-//RS         if supplied.len() != declared.len() {
-//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                 "record `{}` has {} values for {} checked fields",
-//RS                 definition.name,
-//RS                 supplied.len(),
-//RS                 declared.len()
-//RS             )));
-//RS         }
-//RS         let mut output = Vec::with_capacity(declared.len());
-//RS         for field in declared {
-//RS             let value = supplied.remove(&field.id).ok_or_else(|| {
-//RS                 BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                     "record `{}` is missing checked field `{}`",
-//RS                     definition.name, field.name
-//RS                 ))
-//RS             })?;
-//RS             validate_runtime_value(self.program, &field.ty, &value, 0)
-//RS                 .map_err(BootstrapHostCodecError::InvalidMetadata)?;
-//RS             output.push((field.name.clone(), value));
-//RS         }
-//RS         if !supplied.is_empty() {
-//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                 "record `{}` contains an undeclared checked field ID",
-//RS                 definition.name
-//RS             )));
-//RS         }
-//RS         Ok(MirRuntimeValue::Struct {
-//RS             type_name: definition.name.clone(),
-//RS             fields: output,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Build an enum from its checked owner, variant, and payload field types.
-//RS     pub(crate) fn enumeration(
-//RS         &self,
-//RS         owner: MirTypeId,
-//RS         variant_name: &str,
-//RS         values: Vec<MirRuntimeValue>,
-//RS     ) -> Result<MirRuntimeValue, BootstrapHostCodecError> {
-//RS         let definition = checked_definition_by_id(self.program, owner)?;
-//RS         let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
-//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                 "checked type `{}` is not an enum carrier",
-//RS                 definition.name
-//RS             )));
-//RS         };
-//RS         let variant = variants
-//RS             .iter()
-//RS             .find(|variant| variant.name == variant_name)
-//RS             .ok_or_else(|| BootstrapHostCodecError::MissingVariant {
-//RS                 owner: definition.name.clone(),
-//RS                 variant: variant_name.to_string(),
-//RS             })?;
-//RS         let expected = match &variant.payload {
-//RS             MirVariantPayload::Unit => Vec::new(),
-//RS             MirVariantPayload::Single(ty) => vec![(None, ty)],
-//RS             MirVariantPayload::Named(fields) => fields
-//RS                 .iter()
-//RS                 .map(|field| (Some(field.name.as_str()), &field.ty))
-//RS                 .collect(),
-//RS         };
-//RS         if values.len() != expected.len() {
-//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                 "enum `{}` variant `{}` has {} values for {} checked fields",
-//RS                 definition.name,
-//RS                 variant_name,
-//RS                 values.len(),
-//RS                 expected.len()
-//RS             )));
-//RS         }
-//RS         let mut args = Vec::with_capacity(values.len());
-//RS         for ((name, ty), value) in expected.into_iter().zip(values) {
-//RS             validate_runtime_value(self.program, ty, &value, 0)
-//RS                 .map_err(BootstrapHostCodecError::InvalidMetadata)?;
-//RS             args.push((name.map(str::to_string), value));
-//RS         }
-//RS         Ok(MirRuntimeValue::Enum {
-//RS             type_name: definition.name.clone(),
-//RS             variant: variant.name.clone(),
-//RS             args,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Build Present/Absent while retaining the checked optional element type.
-//RS     pub(crate) fn option(
-//RS         &self,
-//RS         ty: &MirType,
-//RS         value: Option<MirRuntimeValue>,
-//RS     ) -> Result<MirRuntimeValue, BootstrapHostCodecError> {
-//RS         let MirTypeKind::Option(inner) = ty.kind() else {
-//RS             return Err(BootstrapHostCodecError::InvalidMetadata(
-//RS                 "optional carrier requested for a non-optional checked type".to_string(),
-//RS             ));
-//RS         };
-//RS         match value {
-//RS             Some(value) => {
-//RS                 validate_runtime_value(self.program, inner, &value, 0)
-//RS                     .map_err(BootstrapHostCodecError::InvalidMetadata)?;
-//RS                 Ok(MirRuntimeValue::Present(Box::new(value)))
-//RS             }
-//RS             None => Ok(MirRuntimeValue::Absent {
-//RS                 element: inner.as_ref().clone(),
-//RS             }),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// The checked `JetEvalHostAdapter` methods, taken from the trait itself. A
-//RS /// method with parameters takes the Source machine as its first, WRITE
-//RS /// parameter; the parameterless ones (session, clone, physical binding) do not.
-//RS fn checked_native_adapter_methods(
-//RS     program: &MirProgram,
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS ) -> Result<Vec<MirTraitMethod>, BootstrapHostCodecError> {
-//RS     let rust_methods = symbols.trait_methods("JetEvalHostAdapter")?;
-//RS     let trait_id = rust_methods[0].trait_id;
-//RS     let checked_trait = program
-//RS         .traits
-//RS         .iter()
-//RS         .find(|row| row.id == trait_id && row.name == "JetEvalHostAdapter")
-//RS         .ok_or_else(|| BootstrapHostCodecError::MissingEntry(
-//RS             "checked JetEvalHostAdapter trait".to_string(),
-//RS         ))?;
-//RS     if checked_trait.methods.len() != rust_methods.len() {
-//RS         return Err(BootstrapHostCodecError::InvalidMetadata(
-//RS             "JetEvalHostAdapter Rust metadata and checked MIR list different methods".to_string(),
-//RS         ));
-//RS     }
-//RS     let mut methods = Vec::with_capacity(checked_trait.methods.len());
-//RS     for method in &checked_trait.methods {
-//RS         let name = &method.name;
-//RS         let metadata = rust_methods
-//RS             .iter()
-//RS             .find(|row| row.method_id == method.id && row.name == *name)
-//RS             .ok_or_else(|| BootstrapHostCodecError::MissingEntry(format!(
-//RS                 "Rust metadata for checked JetEvalHostAdapter.{name}"
-//RS             )))?;
-//RS         let arity = method.params.len();
-//RS         if metadata.parameter_types.len() != arity
-//RS             || metadata.parameter_access.len() != arity
-//RS             || metadata.return_type.is_empty()
-//RS             || method.self_access != metadata.receiver_access
-//RS             || method.params.iter().zip(&metadata.parameter_access)
-//RS                 .any(|(parameter, access)| parameter.access != *access)
-//RS         {
-//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                 "JetEvalHostAdapter.{name} Rust metadata differs from its checked MIR parameters"
-//RS             )));
-//RS         }
-//RS         if let Some(machine) = method.params.first() {
-//RS             let definition = checked_nominal_definition(program, &machine.ty)?;
-//RS             if machine.access != jet_foundation::MIR::MirAccess::Write
-//RS                 || definition.name != "JetEvalMachine"
-//RS             {
-//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                     "JetEvalHostAdapter.{name} does not use the checked JetEvalMachine WRITE parameter"
-//RS                 )));
-//RS             }
-//RS         }
-//RS         methods.push(method.clone());
-//RS     }
-//RS     Ok(methods)
-//RS }
-//RS 
-//RS fn entry_rust_type(
-//RS     program: &MirProgram,
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS     ty: &MirType,
-//RS ) -> Result<String, BootstrapHostCodecError> {
-//RS     use MirTypeKind as Kind;
-//RS     Ok(match ty.kind() {
-//RS         Kind::Int => "jet_foundation::Numeric::JetInt".to_string(),
-//RS         Kind::IntN { signed, bits } => format!("{}{bits}", if *signed { 'i' } else { 'u' }),
-//RS         Kind::Float => "f64".to_string(),
-//RS         Kind::Float32 => "f32".to_string(),
-//RS         Kind::Measure(_) => "f64".to_string(),
-//RS         Kind::Bool => "bool".to_string(),
-//RS         Kind::Char => "char".to_string(),
-//RS         Kind::String => "String".to_string(),
-//RS         Kind::List(inner) => format!("Vec<{}>", entry_rust_type(program, symbols, inner)?),
-//RS         Kind::Map { key, value } => format!(
-//RS             "crate::JetMap<{}, {}>",
-//RS             entry_rust_type(program, symbols, key)?,
-//RS             entry_rust_type(program, symbols, value)?,
-//RS         ),
-//RS         Kind::Shared(inner) => format!(
-//RS             "crate::jet_std::JetShared<{}>",
-//RS             entry_rust_type(program, symbols, inner)?,
-//RS         ),
-//RS         Kind::Option(inner) => format!(
-//RS             "crate::JetOutcome<{}, crate::JetAbsent>",
-//RS             entry_rust_type(program, symbols, inner)?,
-//RS         ),
-//RS         Kind::Result { ok, err } => format!(
-//RS             "crate::JetOutcome<{}, {}>",
-//RS             entry_rust_type(program, symbols, ok)?,
-//RS             entry_rust_type(program, symbols, err)?,
-//RS         ),
-//RS         Kind::Apply { name, args } => {
-//RS             if args.is_empty() && name.name == jet_foundation::Syntax::INTERNAL_UNIT_TYPE {
-//RS                 "()".to_string()
-//RS             } else if args.is_empty() && name.name == jet_foundation::Syntax::TYPE_NEVER {
-//RS                 "std::convert::Infallible".to_string()
-//RS             } else if name.name == jet_foundation::Syntax::TYPE_PTR {
-//RS                 let [inner] = args.as_slice() else {
-//RS                     return Err(BootstrapHostCodecError::InvalidMetadata(
-//RS                         "checked Ptr type does not have one element argument".to_string(),
-//RS                     ));
-//RS                 };
-//RS                 format!("*mut {}", entry_rust_type(program, symbols, inner)?)
-//RS             } else {
-//RS                 let definition = checked_definition_by_ref(program, name)?;
-//RS                 if args.len() != definition.generic_params.len() {
-//RS                     return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                         "checked type `{}` has an unexpected generic argument count",
-//RS                         definition.name
-//RS                     )));
-//RS                 }
-//RS                 let symbol = symbols.type_symbol(&definition.name)?;
-//RS                 if args.is_empty() {
-//RS                     symbol.to_string()
-//RS                 } else {
-//RS                     format!(
-//RS                         "{symbol}<{}>",
-//RS                         args.iter()
-//RS                             .map(|arg| entry_rust_type(program, symbols, arg))
-//RS                             .collect::<Result<Vec<_>, _>>()?
-//RS                             .join(", ")
-//RS                     )
-//RS                 }
-//RS             }
-//RS         }
-//RS         Kind::TraitObject(bounds) => {
-//RS             let traits = bounds
-//RS                 .iter()
-//RS                 .map(|bound| symbols.trait_symbol(&bound.name))
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             if traits.is_empty() {
-//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(
-//RS                     "checked trait-object type has no trait bounds".to_string(),
-//RS                 ));
-//RS             }
-//RS             format!("Box<dyn {}>", traits.join(" + "))
-//RS         }
-//RS         Kind::Tuple(fields) => {
-//RS             let fields = fields
-//RS                 .iter()
-//RS                 .map(|(_, field)| entry_rust_type(program, symbols, field))
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             match fields.len() {
-//RS                 0 => "()".to_string(),
-//RS                 1 => format!("({},)", fields[0]),
-//RS                 _ => format!("({})", fields.join(", ")),
-//RS             }
-//RS         }
-//RS         Kind::FixedList { elem, len } => format!(
-//RS             "[{}; {}]",
-//RS             entry_rust_type(program, symbols, elem)?,
-//RS             len.expression()
-//RS         ),
-//RS         Kind::InlineRange { base, .. }
-//RS         | Kind::Tagged { inner: base, .. }
-//RS         | Kind::Quantity { base, .. } => entry_rust_type(program, symbols, base)?,
-//RS         Kind::Union(_) => {
-//RS             let id = ty.identity.ok_or_else(|| BootstrapHostCodecError::InvalidMetadata(
-//RS                 "checked entry union has no nominal identity".to_string(),
-//RS             ))?;
-//RS             let definition = checked_definition_by_id(program, id).map_err(|_| BootstrapHostCodecError::MissingType(format!("`{}` (MIR type ID {})", ty.canonical_key(), id.0)))?;
-//RS             symbols.type_symbol(&definition.name)?.to_string()
-//RS         }
-//RS         Kind::Fn(_) | Kind::SendFn { .. } => {
-//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                 "JetEvalHostAdapter parameter/result unexpectedly uses callable type `{}`",
-//RS                 ty.canonical_key()
-//RS             )));
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS /// Emit the typed argument/result codecs and one dispatch shim per checked
-//RS /// `JetEvalHostAdapter` method. The native adapter's interface handler calls
-//RS /// `__jet_bootstrap_entry_native_interface_{method}` with the live call and a
-//RS /// typed operation; the shim decodes each checked argument (Move arguments are
-//RS /// consumed through the call's transfer ledger), borrows the Source machine in
-//RS /// place, runs the operation, and encodes its typed result. Methods returning
-//RS /// the adapter trait object (sessions and clones) are answered by the adapter
-//RS /// itself and get no shim.
-//RS fn emit_entry_native_interface_codecs(
-//RS     out: &mut String,
-//RS     program: &MirProgram,
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS     methods: &[MirTraitMethod],
-//RS ) -> Result<(), BootstrapHostCodecError> {
-//RS     out.push_str(ENTRY_NATIVE_INTERFACE_ARGUMENT);
-//RS     for method in methods {
-//RS         let machine_parameter = !method.params.is_empty();
-//RS         let mut argument_types = Vec::with_capacity(method.params.len());
-//RS         for (index, parameter) in method.params.iter().enumerate() {
-//RS             if machine_parameter && index == 0 {
-//RS                 continue;
-//RS             }
-//RS             if parameter.access == jet_foundation::MIR::MirAccess::Write {
-//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS                     "JetEvalHostAdapter.{} argument {index} is a WRITE borrow; only the machine may be written back",
-//RS                     method.name
-//RS                 )));
-//RS             }
-//RS             let source_type = entry_rust_type(program, symbols, &parameter.ty)?;
-//RS             argument_types.push(source_type.clone());
-//RS             let checked_key = format!("{:?}", parameter.ty.canonical_key());
-//RS             let path_error = format!(
-//RS                 "checked JetEvalHostAdapter.{} argument {index} has the wrong MIR type",
-//RS                 method.name
-//RS             );
-//RS             let expression = from_runtime_expression(
-//RS                 program,
-//RS                 symbols,
-//RS                 &parameter.ty,
-//RS                 "value",
-//RS                 "checked",
-//RS                 "program",
-//RS                 "path",
-//RS             )?;
-//RS             writeln!(
-//RS                 out,
-//RS                 r#"
-//RS #[doc(hidden)]
-//RS pub(crate) fn __jet_bootstrap_entry_native_interface_{method}_arg_{index}_from_runtime<P: crate::BootstrapEntryPhysicalBindings>(
-//RS     value: ::jet_foundation::MIR::MirRuntimeValue,
-//RS     checked: &::jet_foundation::MIR::MirType,
-//RS     compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
-//RS     path: &[String],
-//RS     physical: &P,
-//RS ) -> Result<{source_type}, String> {{
-//RS     let program = compiler_program.as_ref();
-//RS     if checked.canonical_key() != {checked_key} {{
-//RS         return Err({path_error:?}.to_string());
-//RS     }}
-//RS     crate::compiler_bootstrap_entry_codec::validate_runtime_value(program, checked, &value, 0)?;
-//RS     Ok({expression})
-//RS }}
-//RS "#,
-//RS                 method = method.name,
-//RS             )
-//RS             .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-//RS         }
-//RS 
-//RS         if matches!(method.return_type.kind(), MirTypeKind::TraitObject(_)) {
-//RS             continue;
-//RS         }
-//RS         let source_type = entry_rust_type(program, symbols, &method.return_type)?;
-//RS         let checked_key = format!("{:?}", method.return_type.canonical_key());
-//RS         let path_error = format!(
-//RS             "checked JetEvalHostAdapter.{} result has the wrong MIR type",
-//RS             method.name
-//RS         );
-//RS         let expression = to_runtime_expression(
-//RS             program,
-//RS             symbols,
-//RS             &method.return_type,
-//RS             "source_value",
-//RS             "checked",
-//RS             "compiler_program",
-//RS             "path",
-//RS             "physical",
-//RS         )?;
-//RS         writeln!(
-//RS             out,
-//RS             r#"
-//RS #[doc(hidden)]
-//RS pub(crate) fn __jet_bootstrap_entry_native_interface_{method}_result_to_runtime<P: crate::BootstrapEntryPhysicalBindings>(
-//RS     source_value: &{source_type},
-//RS     checked: &::jet_foundation::MIR::MirType,
-//RS     compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
-//RS     path: &[String],
-//RS     physical: &P,
-//RS ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{
-//RS     let program = compiler_program.as_ref();
-//RS     if checked.canonical_key() != {checked_key} {{
-//RS         return Err({path_error:?}.to_string());
-//RS     }}
-//RS     let value = {expression};
-//RS     crate::compiler_bootstrap_entry_codec::validate_runtime_value(program, checked, &value, 0)?;
-//RS     Ok(value)
-//RS }}
-//RS "#,
-//RS             method = method.name,
-//RS         )
-//RS         .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-//RS         emit_entry_native_interface_shim(out, program, symbols, method, &argument_types, &source_type)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Read one checked non-machine argument of a native interface call. A Read
-//RS /// argument is decoded from the call row. A Move argument is decoded from its
-//RS /// guarded payload first and consumed only after decoding succeeded, so a
-//RS /// decode failure leaves the value with the call for Source cleanup.
-//RS const ENTRY_NATIVE_INTERFACE_ARGUMENT: &str = r#"
-//RS #[doc(hidden)]
-//RS pub(crate) fn __jet_bootstrap_entry_native_interface_argument<P, T>(
-//RS     call: &mut ::jet_jit::SourceInterfaces::NativeInterfaceCall,
-//RS     index: usize,
-//RS     compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
-//RS     physical: &P,
-//RS     decode: fn(
-//RS         ::jet_foundation::MIR::MirRuntimeValue,
-//RS         &::jet_foundation::MIR::MirType,
-//RS         &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
-//RS         &[String],
-//RS         &P,
-//RS     ) -> Result<T, String>,
-//RS ) -> Result<T, String>
-//RS where
-//RS     P: crate::BootstrapEntryPhysicalBindings,
-//RS {
-//RS     let argument = call
-//RS         .argument(index)
-//RS         .ok_or_else(|| format!("native interface argument {index} is missing"))?;
-//RS     let checked = argument.ty.clone();
-//RS     let path = vec![format!("argument {index}")];
-//RS     if argument.access != ::jet_foundation::MIR::MirAccess::Move {
-//RS         let value = argument.value.clone();
-//RS         return decode(value, &checked, compiler_program, &path, physical);
-//RS     }
-//RS     let transfer = call.take_owned_argument(index).map_err(|error| error.to_string())?;
-//RS     let guard = transfer.take_value().map_err(|error| error.to_string())?;
-//RS     let payload = guard.with_value(|value| value.clone()).map_err(|error| error.to_string())?;
-//RS     let decoded = decode(payload, &checked, compiler_program, &path, physical)?;
-//RS     call.consume_owned_argument(transfer, guard, |guard, commit| {
-//RS         guard.commit_and_extract(::jet_foundation::MIR::MirRuntimeValue::Unit, commit)?;
-//RS         Ok(())
-//RS     })
-//RS     .map_err(|error| error.to_string())?;
-//RS     Ok(decoded)
-//RS }
-//RS "#;
-//RS 
-//RS /// Emit `__jet_bootstrap_entry_native_interface_{method}`: decode the checked
-//RS /// arguments, run `operation` with the in-place Source machine borrow (when the
-//RS /// method takes one), and encode the typed result.
-//RS fn emit_entry_native_interface_shim(
-//RS     out: &mut String,
-//RS     program: &MirProgram,
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS     method: &MirTraitMethod,
-//RS     argument_types: &[String],
-//RS     result_type: &str,
-//RS ) -> Result<(), BootstrapHostCodecError> {
-//RS     let name = &method.name;
-//RS     let arity = method.params.len();
-//RS     let first_argument = usize::from(!method.params.is_empty());
-//RS     let argument_names = (first_argument..arity)
-//RS         .map(|index| format!("__jet_arg_{index}"))
-//RS         .collect::<Vec<_>>();
-//RS     let mut argument_lets = String::new();
-//RS     for (index, argument) in (first_argument..arity).zip(&argument_names) {
-//RS         writeln!(
-//RS             argument_lets,
-//RS             "    let {argument} = __jet_bootstrap_entry_native_interface_argument(call, {index}, compiler_program, physical, __jet_bootstrap_entry_native_interface_{name}_arg_{index}_from_runtime::<P>)?;"
-//RS         )
-//RS         .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-//RS     }
-//RS     let arguments = argument_names.join(", ");
-//RS     let (operation_parameters, invoke) = match method.params.first() {
-//RS         Some(machine) => {
-//RS             let machine_type = entry_rust_type(program, symbols, &machine.ty)?;
-//RS             let mut parameters = vec![format!(
-//RS                 "crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, {machine_type}>"
-//RS             )];
-//RS             parameters.extend(argument_types.iter().cloned());
-//RS             let separator = if arguments.is_empty() { "" } else { ", " };
-//RS             let invoke = format!(
-//RS                 "    let __jet_machine_type = call.signature().parameters[0].ty.clone();\n\
-//RS                  \x20   let __jet_result = call\n\
-//RS                  \x20       .with_writeback_argument(0, |__jet_machine_value| {{\n\
-//RS                  \x20           let __jet_machine = physical.borrow_interpreter_machine_write(\n\
-//RS                  \x20               __jet_machine_value,\n\
-//RS                  \x20               &__jet_machine_type,\n\
-//RS                  \x20               machine_abi_shape,\n\
-//RS                  \x20           )?;\n\
-//RS                  \x20           operation(crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Mir(__jet_machine){separator}{arguments})\n\
-//RS                  \x20       }})\n\
-//RS                  \x20       .map_err(|error| error.to_string())??;\n"
-//RS             );
-//RS             (parameters.join(", "), invoke)
-//RS         }
-//RS         None => (
-//RS             String::new(),
-//RS             "    let _ = machine_abi_shape;\n    let __jet_result = operation()?;\n".to_string(),
-//RS         ),
-//RS     };
-//RS     let arity_error = format!("native JetEvalHostAdapter.{name} call does not have {arity} checked arguments");
-//RS     writeln!(
-//RS         out,
-//RS         r#"
-//RS #[doc(hidden)]
-//RS pub(crate) fn __jet_bootstrap_entry_native_interface_{name}<P, F>(
-//RS     call: &mut ::jet_jit::SourceInterfaces::NativeInterfaceCall,
-//RS     compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
-//RS     machine_abi_shape: &crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,
-//RS     physical: &P,
-//RS     operation: F,
-//RS ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String>
-//RS where
-//RS     P: crate::BootstrapEntryPhysicalBindings,
-//RS     F: FnOnce({operation_parameters}) -> Result<{result_type}, String>,
-//RS {{
-//RS     if call.signature().parameters.len() != {arity} || call.arguments().len() != {arity} {{
-//RS         return Err({arity_error:?}.to_string());
-//RS     }}
-//RS     let __jet_result_type = call.signature().return_type.clone();
-//RS {argument_lets}{invoke}    let path = vec![{name:?}.to_string()];
-//RS     __jet_bootstrap_entry_native_interface_{name}_result_to_runtime(&__jet_result, &__jet_result_type, compiler_program, &path, physical)
-//RS }}
-//RS "#
-//RS     )
-//RS     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
-//RS }
-//RS 
-//RS /// Append typed request/result conversion code to the private emitted artifact.
-//RS /// The generated routines use only types/fields/variants reached from the exact
-//RS /// factory signature and resolved through the same binding descriptor.
-//RS pub(crate) fn append_bootstrap_entry_codec(
-//RS     out: &mut String,
-//RS     bindings: &BootstrapBindingDescriptor,
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS     program: &MirProgram,
-//RS     entry: MirFunctionId,
-//RS ) -> Result<(), BootstrapHostCodecError> {
-//RS     let function = program.functions.iter().find(|function| function.id == entry)
-//RS         .ok_or_else(|| BootstrapHostCodecError::InvalidMetadata(
-//RS             "entry codec cannot find the checked compiler factory function".to_string(),
-//RS         ))?;
-//RS     if function.name != "jet_bootstrap_compile" || function.params.len() != 1 {
-//RS         return Err(BootstrapHostCodecError::InvalidMetadata(
-//RS             "entry codec requires the checked one-request factory function".to_string(),
-//RS         ));
-//RS     }
-//RS     let callable = bindings.callables.iter()
-//RS         .find(|row| row.source_name == function.name && row.metadata.function == entry)
-//RS         .ok_or_else(|| BootstrapHostCodecError::MissingEntry(function.name.clone()))?;
-//RS     if callable.metadata.parameter_types.len() != 1
-//RS         || callable.metadata.parameter_access.as_slice() != [function.params[0].access]
-//RS         || callable.metadata.return_type.is_empty()
-//RS     {
-//RS         return Err(BootstrapHostCodecError::InvalidMetadata(
-//RS             "entry callable binding differs from the checked one-request ABI".to_string(),
-//RS         ));
-//RS     }
-//RS     let request = checked_nominal_definition(program, &function.params[0].ty)?;
-//RS     let result = checked_nominal_definition(program, &function.return_type)?;
-//RS     if request.name != "JetDriverCompileRequest" || result.name != "JetDriverCompileResult" {
-//RS         return Err(BootstrapHostCodecError::InvalidMetadata(
-//RS             "factory signature is not the checked compile request/result contract".to_string(),
-//RS         ));
-//RS     }
-//RS     validate_binding_graph(program, symbols, &function.params[0].ty);
-//RS     validate_binding_graph(program, symbols, &function.return_type);
-//RS     let native_methods = checked_native_adapter_methods(program, symbols)?;
-//RS 
-//RS     let mut to_types = Vec::new();
-//RS     let mut from_types = Vec::new();
-//RS     collect_nominal_types(program, &function.params[0].ty, &mut HashSet::new(), &mut to_types)?;
-//RS     collect_nominal_types(program, &function.return_type, &mut HashSet::new(), &mut from_types)?;
-//RS     let mut to_seen: HashSet<_> = to_types.iter().map(|definition| definition.id).collect();
-//RS     let mut from_seen: HashSet<_> = from_types.iter().map(|definition| definition.id).collect();
-//RS     for method in &native_methods {
-//RS         for (index, parameter) in method.params.iter().enumerate() {
-//RS             if index == 0
-//RS                 && parameter.access == jet_foundation::MIR::MirAccess::Write
-//RS                 && checked_nominal_definition(program, &parameter.ty)
-//RS                     .is_ok_and(|definition| definition.name == "JetEvalMachine")
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             validate_binding_graph(program, symbols, &parameter.ty);
-//RS             let mut graph = Vec::new();
-//RS             collect_nominal_types(program, &parameter.ty, &mut HashSet::new(), &mut graph)?;
-//RS             for nested in graph {
-//RS                 if from_seen.insert(nested.id) {
-//RS                     from_types.push(nested);
-//RS                 }
-//RS             }
-//RS         }
-//RS         if !matches!(method.return_type.kind(), MirTypeKind::TraitObject(_)) {
-//RS             validate_binding_graph(program, symbols, &method.return_type);
-//RS             let mut graph = Vec::new();
-//RS             collect_nominal_types(program, &method.return_type, &mut HashSet::new(), &mut graph)?;
-//RS             for nested in graph {
-//RS                 if to_seen.insert(nested.id) {
-//RS                     to_types.push(nested);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     to_types.sort_by_key(|definition| definition.id);
-//RS     from_types.sort_by_key(|definition| definition.id);
-//RS     for definition in &to_types {
-//RS         emit_to_runtime_converter(out, program, symbols, definition)?;
-//RS     }
-//RS     for definition in &from_types {
-//RS         emit_from_runtime_converter(out, program, symbols, definition)?;
-//RS     }
-//RS     emit_entry_native_interface_codecs(out, program, symbols, &native_methods)?;
-//RS     emit_entry_machine_access_helpers(out, program, symbols)?;
-//RS     emit_entry_host_type_shape_from_source(out, symbols)?;
-//RS     emit_entry_conversion_helpers(out)?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// `__jet_bootstrap_entry_host_type_shape_from_source`: the Source
-//RS /// accessor's checked `JetEvalHostTypeShape` as the host shape graph the
-//RS /// native adapter validates machine and Shared payload ABI against.
-//RS fn emit_entry_host_type_shape_from_source(
-//RS     out: &mut String,
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS ) -> Result<(), BootstrapHostCodecError> {
-//RS     let _ = symbols.type_symbol("JetEvalHostTypeShape")?;
-//RS     out.push_str(
-//RS         r#"
-//RS pub(crate) fn __jet_bootstrap_entry_host_type_shape_from_source(
-//RS     source: &@t.JetEvalHostTypeShape@,
-//RS ) -> Result<crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape, String> {
-//RS     use crate::compiler_bootstrap_entry_codec::{
-//RS         BootstrapEntryHostOwner as Owner,
-//RS         BootstrapEntryHostTypeField as Field,
-//RS         BootstrapEntryHostTypeNode as Node,
-//RS         BootstrapEntryHostTypeShape as Shape,
-//RS         BootstrapEntryHostTypeVariant as Variant,
-//RS     };
-//RS     let field_shapes = |fields: &[@t.JetEvalHostTypeFieldShape@], label: &str| {
-//RS         fields.iter().map(|field| {
-//RS             Ok(Field {
-//RS                 name: field.@f.JetEvalHostTypeFieldShape.name@.clone(),
-//RS                 node: __jet_bootstrap_source_index(&field.@f.JetEvalHostTypeFieldShape.node@, label)?,
-//RS             })
-//RS         }).collect::<Result<Vec<_>, String>>()
-//RS     };
-//RS     let indices = |indices: &[jet_foundation::Numeric::JetInt], label: &str| {
-//RS         indices.iter()
-//RS             .map(|index| __jet_bootstrap_source_index(index, label))
-//RS             .collect::<Result<Vec<_>, String>>()
-//RS     };
-//RS     let root = __jet_bootstrap_source_index(&source.@f.JetEvalHostTypeShape.root@, "host result type root")?;
-//RS     let nodes = source.@f.JetEvalHostTypeShape.nodes@.iter().map(|node| {
-//RS         Ok(match node {
-//RS             @p.JetEvalHostTypeNode.Scalar@(ty) => Node::Scalar(__jet_bootstrap_type_to_host(ty)?),
-//RS             @p.JetEvalHostTypeNode.Option@(inner) => Node::Option(
-//RS                 __jet_bootstrap_source_index(inner, "option type node")?,
-//RS             ),
-//RS             @p.JetEvalHostTypeNode.Result@(ok, error) => Node::Result {
-//RS                 ok: __jet_bootstrap_source_index(ok, "result success type node")?,
-//RS                 error: __jet_bootstrap_source_index(error, "result error type node")?,
-//RS             },
-//RS             @p.JetEvalHostTypeNode.List@(inner) => Node::List(
-//RS                 __jet_bootstrap_source_index(inner, "list element type node")?,
-//RS             ),
-//RS             @p.JetEvalHostTypeNode.Map@(key, value) => Node::Map {
-//RS                 key: __jet_bootstrap_source_index(key, "map key type node")?,
-//RS                 value: __jet_bootstrap_source_index(value, "map value type node")?,
-//RS             },
-//RS             @p.JetEvalHostTypeNode.Tuple@(fields) => Node::Tuple(field_shapes(fields, "tuple field type node")?),
-//RS             @p.JetEvalHostTypeNode.Struct@(type_id, type_name, args, fields) => Node::Struct {
-//RS                 type_id: ::jet_foundation::MIR::MirTypeId(type_id.@f.MIRTypeID.value@),
-//RS                 type_name: type_name.clone(),
-//RS                 args: indices(args, "nominal argument type node")?,
-//RS                 fields: field_shapes(fields, "record field type node")?,
-//RS             },
-//RS             @p.JetEvalHostTypeNode.Enum@(type_id, type_name, args, variants) => Node::Enum {
-//RS                 type_id: ::jet_foundation::MIR::MirTypeId(type_id.@f.MIRTypeID.value@),
-//RS                 type_name: type_name.clone(),
-//RS                 args: indices(args, "nominal argument type node")?,
-//RS                 variants: variants.iter().map(|variant| {
-//RS                     Ok(Variant {
-//RS                         name: variant.@f.JetEvalHostTypeVariantShape.name@.clone(),
-//RS                         args: variant.@f.JetEvalHostTypeVariantShape.args@.iter().map(|arg| {
-//RS                             Ok((
-//RS                                 arg.@f.JetEvalHostTypeArgShape.name@.as_ref().ok().cloned(),
-//RS                                 __jet_bootstrap_source_index(&arg.@f.JetEvalHostTypeArgShape.node@, "enum payload type node")?,
-//RS                             ))
-//RS                         }).collect::<Result<Vec<_>, String>>()?,
-//RS                     })
-//RS                 }).collect::<Result<Vec<_>, String>>()?,
-//RS             },
-//RS             @p.JetEvalHostTypeNode.Closure@(ty, function, captures) => Node::Closure {
-//RS                 function: ::jet_foundation::MIR::MirFunctionId(function.@f.MIRFunctionID.value@),
-//RS                 captures: indices(captures, "closure capture type node")?,
-//RS                 ty: __jet_bootstrap_type_to_host(ty)?,
-//RS             },
-//RS             @p.JetEvalHostTypeNode.Handle@(ty, owner) => Node::Handle {
-//RS                 ty: __jet_bootstrap_type_to_host(ty)?,
-//RS                 owner: match &@deref.JetEvalHostTypeNode.Handle.owner@*owner {
-//RS                     @p.JetEvalHostOwner.Cursor@ => Owner::Cursor,
-//RS                     @p.JetEvalHostOwner.Declared@(ty) => Owner::Declared(__jet_bootstrap_type_to_host(ty)?),
-//RS                     @p.JetEvalHostOwner.Core@(owner) => Owner::Core {
-//RS                         fact: __jet_bootstrap_mir_MIRCoreOwner_to_host(&owner.@f.JetEvalHostCoreOwner.fact@)?,
-//RS                         ty: __jet_bootstrap_type_to_host(&owner.@f.JetEvalHostCoreOwner.ty@)?,
-//RS                     },
-//RS                     @p.JetEvalHostOwner.Native@(binding) => match &@deref.JetEvalHostOwner.Native.binding@*binding {
-//RS                         @p.JetEvalNativeBindingIdentity.Callable@(binding) => Owner::NativeCallable {
-//RS                             key: binding.@f.JetEvalNativeCallableBinding.key@.clone(),
-//RS                             callable_type: __jet_bootstrap_type_to_host(&binding.@f.JetEvalNativeCallableBinding.callable_type@)?,
-//RS                         },
-//RS                         @p.JetEvalNativeBindingIdentity.Interface@(receiver_type) => Owner::NativeInterface {
-//RS                             receiver_type: __jet_bootstrap_type_to_host(receiver_type)?,
-//RS                         },
-//RS                     },
-//RS                     @p.JetEvalHostOwner.FixedBackingRoot@(..) => {
-//RS                         return Err("checked host type shape names a fixed-backing root, which has no host owner".to_string());
-//RS                     }
-//RS                 },
-//RS             },
-//RS         })
-//RS     }).collect::<Result<Vec<_>, String>>()?;
-//RS     let shape = Shape { root, nodes };
-//RS     crate::compiler_bootstrap_entry_codec::bootstrap_entry_validate_shape(&shape)?;
-//RS     Ok(shape)
-//RS }
-//RS "#,
-//RS     );
-//RS     Ok(())
-//RS }
-//RS 
-// END-PORT-PENDING 0545 Compiler/Bootstrap/Host/EntryCodec.rs:1-1753
+// Checked request/result transport. MIR and binding descriptors are shape authorities.
+use JetBootstrap.CompilerBootstrapHost.[BootstrapBindingDescriptor, BootstrapCodecSymbols, BootstrapHostCodecError]
+use jet_foundation.MIR.*
+use jet_foundation.Syntax
+use core.collections.Set
+use core.sync.Arc
+use JetBootstrap.JetSharedPhysicalOwnerApi
+use jet_jit.SourceSharedInterop.SourceSharedInterop
 
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:21
+MAX_VALUE_DEPTH :: 256
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:23
+type BootstrapEntrySharedPayloadEncoder<T, P> = fn(T, MirType, Arc<MirProgram>, BootstrapEntryHostTypeShape, USize, [String], [BootstrapEntryHostProjection], P) -> MirRuntimeValue Err!
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:34
+type BootstrapEntrySharedPayloadDecoder<T, P> = fn(MirRuntimeValue, MirType, Arc<MirProgram>, BootstrapEntryHostTypeShape, USize, [String], [BootstrapEntryHostProjection], P) -> T Err!
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:46
+// The compiler-artifact configuration supplies the physical-owner capability.
+trait BootstrapEntrySharedMarshaller<O: JetSharedPhysicalOwnerApi, T, P: BootstrapEntryPhysicalBindings>: Clone + Send + Sync {
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:52
+    fn encode_payload(self, field_path: [String], projection_path: [BootstrapEntryHostProjection], checked_type: MirType, shape: BootstrapEntryHostTypeShape, shape_node: USize, source_value: T) -> MirRuntimeValue Err!
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:62
+    fn decode_payload(self, field_path: [String], projection_path: [BootstrapEntryHostProjection], checked_type: MirType, shape: BootstrapEntryHostTypeShape, shape_node: USize, runtime_value: MirRuntimeValue) -> T Err!
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:73
+trait BootstrapEntryPhysicalBindings: Clone + Send + Sync {
+    type SharedMarshaller<O: JetSharedPhysicalOwnerApi, T>: BootstrapEntrySharedMarshaller<O, T, Self>
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:83
+    fn shared_payload_shape(self, checked_type: MirType) -> BootstrapEntryHostTypeShape Err!
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:94
+    fn shared_marshaller<O: JetSharedPhysicalOwnerApi, T>(self, owner: O, checked_type: MirType, shape: BootstrapEntryHostTypeShape, encode: BootstrapEntrySharedPayloadEncoder<T, Self>, decode: BootstrapEntrySharedPayloadDecoder<T, Self>) -> Self.SharedMarshaller<O, T> Err!
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:103
+    fn encode<T>(self, field_path: [String], checked_type: MirType, program: MirProgram, source_value: T) -> MirRuntimeValue? Err!
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:111
+    fn encode_shared(self, field_path: [String], checked_type: MirType, program: MirProgram, physical_identity: USize, root: SourceSharedInterop, payload_shape: BootstrapEntryHostTypeShape) -> MirRuntimeValue? Err!
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:121
+    fn decode<T>(self, field_path: [String], checked_type: MirType, program: MirProgram, runtime_value: MirRuntimeValue) -> T? Err!
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:129
+    fn encode_shaped<T>(self, field_path: [String], projection_path: [BootstrapEntryHostProjection], checked_type: MirType, shape: BootstrapEntryHostTypeShape, shape_node: USize, source_value: T) -> MirRuntimeValue? Err!
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:139
+    fn decode_shaped<T>(self, field_path: [String], projection_path: [BootstrapEntryHostProjection], checked_type: MirType, shape: BootstrapEntryHostTypeShape, shape_node: USize, runtime_value: MirRuntimeValue) -> T? Err!
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:151
+    fn borrow_interpreter_machine_write(self, value: &MirRuntimeValue, checked_type: MirType, shape: BootstrapEntryHostTypeShape) -> BootstrapEntryMachineWriteBorrow Err! {
+        BootstrapEntryMachineWriteBorrow.new(value, checked_type, shape)?
+    }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:168
+struct BootstrapEntryHostTypeShape { root: USize, nodes: [BootstrapEntryHostTypeNode] }
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:173
+enum BootstrapEntryHostProjection { Present, Failed, List(USize), MapKey(USize), MapValue(USize), StructField(String), EnumArg(USize), HandlePayload, Capture(USize) }
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:186
+struct BootstrapEntryHostTypeField { name: String, node: USize }
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:192
+struct BootstrapEntryHostTypeVariant { name: String, args: [(String?, USize)] }
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:198
+enum BootstrapEntryHostOwner { Cursor, Declared(MirType), Core { fact: MirCoreOwner, ty: MirType }, NativeCallable { key: String, callable_type: MirType }, NativeInterface { receiver_type: MirType } }
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:207
+enum BootstrapEntryHostTypeNode {
+    Scalar(MirType), Option(USize), Result { ok: USize, error: USize }, List(USize), Map { key: USize, value: USize }, Tuple([BootstrapEntryHostTypeField]),
+    Struct { type_id: MirTypeId, type_name: String, args: [USize], fields: [BootstrapEntryHostTypeField] },
+    Enum { type_id: MirTypeId, type_name: String, args: [USize], variants: [BootstrapEntryHostTypeVariant] },
+    Closure { function: MirFunctionId, captures: [USize], ty: MirType }, Handle { ty: MirType, owner: BootstrapEntryHostOwner }
+}
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:233
+trait BootstrapEntryMachineCoreOwnerRows {
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:235
+    fn core_owner_rows(self) -> [MirCoreOwner] Err!
+}
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:238
+enum BootstrapEntryMachineAccess<T> { Typed(&T), Mir(BootstrapEntryMachineWriteBorrow) }
+impl<T> BootstrapEntryMachineAccess<T> {
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:244
+    fn typed_mut(self: &Self) -> &T? { self == { Typed(machine) -> Val(machine); Mir(_) -> None } }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:251
+    fn mir_mut(self: &Self) -> &BootstrapEntryMachineWriteBorrow? { self == { Typed(_) -> None; Mir(machine) -> Val(&machine) } }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:261
+// GATE #4494: retained in-place borrowed machine capability, not a copied value.
+struct BootstrapEntryMachineWriteBorrow { value: &MirRuntimeValue, checked_type: MirType, shape: BootstrapEntryHostTypeShape, shape_node: USize }
+impl BootstrapEntryMachineWriteBorrow {
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:269
+    fn new(value: &MirRuntimeValue, checked_type: MirType, shape: BootstrapEntryHostTypeShape) -> Self Err! {
+        bootstrap_entry_validate_shape(shape)?
+        shape_type := bootstrap_entry_shape_node_type(shape, shape.root, 0)?
+        if !bootstrap_entry_shape_type_matches(shape_type, checked_type) { fail "borrowed Source machine shape differs from its checked MIR type" }
+        bootstrap_entry_validate_shaped_runtime(value, checked_type, shape, shape.root, 0)?
+        Self { value, checked_type, shape, shape_node: shape.root }
+    }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:288
+    fn value(self) -> MirRuntimeValue { self.value }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:292
+    fn value_mut(self: &Self) -> &MirRuntimeValue { self.value }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:296
+    fn checked_type(self) -> MirType { self.checked_type }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:300
+    fn shape(self) -> BootstrapEntryHostTypeShape { self.shape }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:304
+    fn shape_node(self) -> USize { self.shape_node }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:308
+    fn field_shape_node(self, name: String) -> USize Err! {
+        fields := self.shape.nodes.get(self.shape_node) == { Val(Tuple(fields)) | Val(Struct { fields, .. }) -> fields; _ -> { fail "borrowed Source machine is not a checked record" } }
+        fields.iter().find(fn(field) { field.name == name }).map(fn(field) { field.node }) == { Val(node) -> node; None -> { fail "checked Source machine has no field `{name}`" } }
+    }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:320
+    fn field_type_path(self, path: [String]) -> MirType Err! {
+        mut node := self.shape_node
+        for name in path {
+            fields := self.shape.nodes.get(node) == { Val(Tuple(fields)) | Val(Struct { fields, .. }) -> fields; _ -> { fail "borrowed Source field path crosses a non-record" } }
+            node = fields.iter().find(fn(field) { field.name == name }).map(fn(field) { field.node }) == { Val(node) -> node; None -> { fail "checked Source machine has no field `{name}`" } }
+        }
+        bootstrap_entry_shape_node_type(self.shape, node, 0)?
+    }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:337
+    fn field_mut(self: &Self, name: String) -> &MirRuntimeValue Err! {
+        (_, value) := bootstrap_entry_project_runtime_field_mut(self.shape, self.value, self.shape_node, name)?
+        value
+    }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:343
+    fn projection_mut_fields(self: &Self, path: [String]) -> (USize, &MirRuntimeValue) Err! {
+        shape := self.shape
+        mut shape_node := self.shape_node
+        mut value := self.value
+        for name in path { (next_node, next_value) := bootstrap_entry_project_runtime_field_mut(shape, value, shape_node, name)?; shape_node = next_node; value = next_value }
+        (shape_node, value)
+    }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:359
+    fn projection_mut(self: &Self, path: [BootstrapEntryHostProjection]) -> (USize, &MirRuntimeValue) Err! { bootstrap_entry_project_runtime_mut(self.shape, self.value, self.shape_node, path)? }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:372
+fn bootstrap_entry_project_runtime_field_mut(shape: BootstrapEntryHostTypeShape, value: &MirRuntimeValue, shape_node: USize, name: String) -> (USize, &MirRuntimeValue) Err! {
+    fields := shape.nodes.get(shape_node) == { Val(Tuple(fields)) | Val(Struct { fields, .. }) -> fields; _ -> { fail "borrowed Source projection is not a checked record" } }
+    index := fields.iter().position(fn(field) { field.name == name }) == { Val(index) -> index; None -> { fail "checked Source record has no field `{name}`" } }
+    expected_type_name := shape.nodes[shape_node] == { Tuple(_) -> "Tuple"; Struct { type_name, .. } -> type_name; _ -> panic("unreachable") }
+    value == {
+        Struct { type_name, fields: values } -> {
+            if type_name != expected_type_name || values.len() != fields.len() { fail "borrowed Source record shape differs" }
+            for (expected, (actual_name, _)) in fields.iter().zip(values.iter()) { if expected.name != actual_name { fail "borrowed Source record field name/order differs" } }
+            (fields[index].node, &values[index].1)
+        }
+        _ -> { fail "borrowed Source value is not a runtime record" }
+    }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:409
+fn bootstrap_entry_project_runtime_mut(shape: BootstrapEntryHostTypeShape, value: &MirRuntimeValue, shape_node: USize, path: [BootstrapEntryHostProjection]) -> (USize, &MirRuntimeValue) Err! {
+    mut current_value := value
+    mut current_node := shape_node
+    for projection in path {
+        node := shape.nodes.get(current_node) == { Val(node) -> node; None -> { fail "borrowed Source projection has an invalid shape node" } }
+        (next_node, next_value) := (node, projection, current_value) == {
+            (Option(child), Present, Present(value)) | (Result { ok: child, .. }, Present, Present(value)) -> (child, &value)
+            (Result { error: child, .. }, Failed, FailedTold(value)) -> (child, &value)
+            (List(child), List(index), List(values)) -> (child, values.get_mut(index) == { Val(value) -> value; None -> { fail "borrowed Source list projection index is out of range" } })
+            (Map { value: child, .. }, MapValue(index), Map(values)) -> (child, &(values.get_mut(index) == { Val(value) -> value; None -> { fail "borrowed Source map projection index is out of range" } }).1)
+            (Map { .. }, MapKey(_), Map(_)) -> { fail "MIR map keys are immutable constants, not borrowed runtime values" }
+            (record_node, StructField(name), Struct { type_name, fields: values }) -> {
+                shape_fields := record_node == { Tuple(fields) -> fields; Struct { type_name: expected, fields, .. } -> if expected == type_name { fields } else { fail "borrowed Source record type name differs" }; _ -> { fail "borrowed Source projection does not match its checked value shape" } }
+                if values.len() != shape_fields.len() { fail "borrowed Source record field count differs" }
+                for (expected, (actual, _)) in shape_fields.iter().zip(values.iter()) { if expected.name != actual { fail "borrowed Source record field name/order differs" } }
+                index := shape_fields.iter().position(fn(field) { field.name == name }) == { Val(index) -> index; None -> { fail "borrowed Source record has no field `{name}`" } }
+                (shape_fields[index].node, &values[index].1)
+            }
+            (Enum { type_name: expected_type, variants, .. }, EnumArg(index), Enum { type_name, variant, args }) -> {
+                if type_name != expected_type { fail "borrowed Source enum type name differs" }
+                expected := variants.iter().find(fn(row) { row.name == variant }) == { Val(row) -> row; None -> { fail "borrowed Source enum variant `{type_name}::{variant}` is absent" } }
+                (expected_name, child) := expected.args.get(index) == { Val(arg) -> arg; None -> { fail "borrowed Source enum argument is out of range" } }
+                if args.len() != expected.args.len() || args[index].0 != expected_name { fail "borrowed Source enum payload name/order differs" }
+                (child, &args[index].1)
+            }
+            (Closure { function, captures, .. }, Capture(index), Closure(closure)) -> {
+                if closure.function != function || closure.captures.len() != captures.len() { fail "borrowed Source closure capture layout differs" }
+                child := captures.get(index) == { Val(child) -> child; None -> { fail "borrowed Source closure capture is out of range" } }
+                capture := closure.captures.get_mut(index) == { Val(capture) -> capture; None -> { fail "borrowed Source closure capture is out of range" } }
+                (child, capture)
+            }
+            _ -> { fail "borrowed Source projection does not match its checked value shape" }
+        }
+        current_node = next_node
+        current_value = next_value
+    }
+    (current_node, current_value)
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:553
+pub fn bootstrap_entry_shape_node_type(shape: BootstrapEntryHostTypeShape, node: USize, depth: USize) -> MirType Err! {
+    if depth >= MAX_VALUE_DEPTH { fail "compiler-entry host type shape exceeds checked nesting bound" }
+    node_value := shape.nodes.get(node) == { Val(node) -> node; None -> { fail "compiler-entry host type shape has an invalid node reference" } }
+    child := fn(node: USize) -> MirType Err! { bootstrap_entry_shape_node_type(shape, node, depth + 1)? }
+    node_value == {
+        Scalar(ty) | Handle { ty, .. } | Closure { ty, .. } -> ty.clone()
+        Option(inner) -> MirType.from_kind(MirTypeKind.Option(child(inner)?))
+        Result { ok, error } -> MirType.from_kind(MirTypeKind.Result { ok: child(ok)?, err: child(error)? })
+        List(inner) -> MirType.from_kind(MirTypeKind.List(child(inner)?))
+        Map { key, value } -> MirType.from_kind(MirTypeKind.Map { key: child(key)?, value: child(value)? })
+        Tuple(fields) -> {
+            mut output: [(String, MirType)] := [].with_capacity(fields.len())
+            for field in fields { output.push((field.name.to_string(), child(field.node)?)) }
+            MirType.from_kind(MirTypeKind.Tuple(^output))
+        }
+        Struct { type_id, type_name, args, .. } | Enum { type_id, type_name, args, .. } -> {
+            mut output: [MirType] := [].with_capacity(args.len())
+            for node in args { output.push(child(node)?) }
+            MirType.from_kind(MirTypeKind.Apply { name: MirNominalRef { id: type_id, name: type_name.to_string() }, args: ^output }).with_identity(type_id)
+        }
+    }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:622
+pub fn bootstrap_entry_shape_type_matches(shape_type: MirType, checked: MirType) -> Bool {
+    (shape_type.kind(), checked.kind()) == { (List(shape_inner), FixedList { elem, .. }) -> shape_inner.same_checked_type(elem); _ -> shape_type.same_checked_type(checked) }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:631
+fn bootstrap_entry_validate_shape_references(shape: BootstrapEntryHostTypeShape, node: USize, depth: USize, visited: &Set<USize>) -> Unit Err! {
+    if depth >= MAX_VALUE_DEPTH { fail "compiler-entry host type shape exceeds checked nesting bound" }
+    if node >= shape.nodes.len() { fail "compiler-entry host type shape has an invalid node reference" }
+    if !visited.insert(node) { return }
+    mut children: [USize] := []
+    shape.nodes[node] == {
+        Scalar(_) | Handle { .. } -> {}
+        Option(inner) | List(inner) -> children.push(inner)
+        Result { ok, error } -> children.extend([ok, error])
+        Map { key, value } -> children.extend([key, value])
+        Tuple(fields) -> children.extend(fields.iter().map(fn(field) { field.node }))
+        Struct { args, fields, .. } -> { children.extend(args.iter()); children.extend(fields.iter().map(fn(field) { field.node })) }
+        Enum { args, variants, .. } -> { children.extend(args.iter()); children.extend(variants.iter().flat_map(fn(variant) { variant.args.iter().map(fn(arg) { arg.1 }) })) }
+        Closure { captures, .. } -> children.extend(captures.iter())
+    }
+    for child in children { bootstrap_entry_validate_shape_references(shape, child, depth + 1, visited)? }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:681
+pub fn bootstrap_entry_validate_shape(shape: BootstrapEntryHostTypeShape) -> Unit Err! {
+    if shape.nodes.is_empty() || shape.root >= shape.nodes.len() { fail "compiler-entry host type shape has no valid root node" }
+    mut visited: Set<USize> := Set.new()
+    for node in 0..<shape.nodes.len() { bootstrap_entry_validate_shape_references(shape, node, 0, &visited)? }
+    _ :: bootstrap_entry_shape_node_type(shape, shape.root, 0)?
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:695
+fn bootstrap_entry_validate_shaped_runtime(value: MirRuntimeValue, checked: MirType, shape: BootstrapEntryHostTypeShape, shape_node: USize, depth: USize) -> Unit Err! {
+    if depth >= MAX_VALUE_DEPTH { fail "compiler-entry runtime value exceeds checked nesting bound" }
+    shape_type := bootstrap_entry_shape_node_type(shape, shape_node, depth)?
+    if !bootstrap_entry_shape_type_matches(shape_type, checked) { fail "compiler-entry guest type shape differs from checked MIR type" }
+    child_type := fn(node: USize) -> MirType Err! { bootstrap_entry_shape_node_type(shape, node, depth + 1)? }
+    shape.nodes[shape_node] == {
+        Option(inner) -> value == {
+            Absent { element } -> { if !element.same_checked_type(child_type(inner)?) { fail "absent host value changed its exact checked element type" } }
+            Present(value) -> bootstrap_entry_validate_shaped_runtime(value, child_type(inner)?, shape, inner, depth + 1)?
+            _ -> { fail "checked Option host value has an invalid runtime carrier" }
+        }
+        Result { ok, error } -> value == {
+            Present(value) -> bootstrap_entry_validate_shaped_runtime(value, child_type(ok)?, shape, ok, depth + 1)?
+            FailedTold(value) -> bootstrap_entry_validate_shaped_runtime(value, child_type(error)?, shape, error, depth + 1)?
+            _ -> { fail "checked Result host value has an invalid runtime carrier" }
+        }
+        List(inner) -> {
+            values := value == { List(values) -> values; _ -> { fail "checked sequence host value has an invalid runtime carrier" } }
+            if checked.kind() == FixedList { len, .. } { if len == Literal { value: len_value, .. } { if values.len() as U64 != len_value { fail "checked fixed-list host value has the wrong length" } } }
+            ty := child_type(inner)?
+            for value in values { bootstrap_entry_validate_shaped_runtime(value, ty, shape, inner, depth + 1)? }
+        }
+        Map { value: child, .. } -> {
+            entries := value == { Map(entries) -> entries; _ -> { fail "checked map host value has an invalid runtime carrier" } }
+            ty := child_type(child)?
+            for (_, value) in entries { bootstrap_entry_validate_shaped_runtime(value, ty, shape, child, depth + 1)? }
+        }
+        Tuple(fields) -> {
+            (type_name, values) := value == { Struct { type_name, fields: values } -> (type_name, values); _ -> { fail "checked tuple host value has an invalid runtime carrier" } }
+            if type_name != "Tuple" || values.len() != fields.len() { fail "checked tuple host value shape differs" }
+            for (index, (field, (name, value))) in fields.iter().zip(values.iter()).enumerate() {
+                if field.name != name { fail "checked tuple host field {index} differs" }
+                bootstrap_entry_validate_shaped_runtime(value, child_type(field.node)?, shape, field.node, depth + 1)?
+            }
+        }
+        Struct { type_name, fields, .. } -> {
+            (actual_name, values) := value == { Struct { type_name: actual_name, fields: values } -> (actual_name, values); _ -> { fail "checked record host value has an invalid runtime carrier" } }
+            if actual_name != type_name || values.len() != fields.len() { fail "checked record host value shape differs" }
+            for (index, (field, (name, value))) in fields.iter().zip(values.iter()).enumerate() {
+                if field.name != name { fail "checked record host field {index} differs" }
+                bootstrap_entry_validate_shaped_runtime(value, child_type(field.node)?, shape, field.node, depth + 1)?
+            }
+        }
+        Enum { type_name, variants, .. } -> {
+            (actual_name, variant, args) := value == { Enum { type_name: actual_name, variant, args } -> (actual_name, variant, args); _ -> { fail "checked enum host value has an invalid runtime carrier" } }
+            expected := variants.iter().find(fn(candidate) { candidate.name == variant }) == { Val(expected) -> expected; None -> { fail "checked enum variant `{type_name}::{variant}` is absent" } }
+            if actual_name != type_name || args.len() != expected.args.len() { fail "checked enum host value shape differs" }
+            for (index, ((expected_name, child), (actual_name, value))) in expected.args.iter().zip(args.iter()).enumerate() {
+                if expected_name != actual_name { fail "checked enum host payload {index} differs" }
+                bootstrap_entry_validate_shaped_runtime(value, child_type(child)?, shape, child, depth + 1)?
+            }
+        }
+        Scalar(_) | Closure { .. } | Handle { .. } -> {}
+    }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:873
+struct BootstrapEntryValue { ty: MirType, value: MirRuntimeValue }
+impl BootstrapEntryValue {
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:879
+    fn into_value(self: ^Self) -> MirRuntimeValue { ^self.value }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:883
+    fn value(self) -> MirRuntimeValue { self.value }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:887
+    fn field(self, program: MirProgram, field: MirFieldId) -> MirRuntimeValue? { checked_record_field(program, self.ty, self.value, field).ok().flatten() }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:899
+struct BootstrapEntryCodec { program: MirProgram, entry: MirFunctionId, request_type: MirType, result_type: MirType }
+impl BootstrapEntryCodec {
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:907
+    fn new(program: MirProgram, bindings: BootstrapBindingDescriptor, entry: MirFunctionId) -> Self BootstrapHostCodecError! {
+        symbols := BootstrapCodecSymbols.new(bindings, program)?
+        callable := bindings.callables.iter().find(fn(row) { row.source_name == "jet_bootstrap_compile" && row.metadata.function == entry }) == { Val(callable) -> callable; None -> { fail BootstrapHostCodecError.MissingEntry("jet_bootstrap_compile") } }
+        function := program.functions.iter().find(fn(function) { function.id == entry }) == { Val(function) -> function; None -> { fail BootstrapHostCodecError.InvalidMetadata("jet_bootstrap_compile binding is absent from checked compiler MIR") } }
+        if function.kind != MirFunctionKind.Jet || function.name != callable.source_name || function.params.len() != 1 || callable.metadata.parameter_types.len() != 1 || callable.metadata.parameter_access != [function.params[0].access] { fail BootstrapHostCodecError.InvalidMetadata("jet_bootstrap_compile must retain its exact one-parameter checked ABI") }
+        request_type := function.params[0].ty.clone()
+        result_type := function.return_type.clone()
+        request := checked_nominal_definition(program, request_type)?
+        result := checked_nominal_definition(program, result_type)?
+        if request.name != "JetDriverCompileRequest" || result.name != "JetDriverCompileResult" { fail BootstrapHostCodecError.InvalidMetadata("jet_bootstrap_compile ABI is not JetDriverCompileRequest -> JetDriverCompileResult") }
+        try {
+            rust_type := entry_rust_type(program, symbols, result_type)?
+            if rust_type != callable.metadata.return_type { symbols.record(BootstrapHostCodecError.InvalidMetadata("jet_bootstrap_compile return binding disagrees with its checked MIR return type")) }
+        } catch(error) { symbols.record(^error) }
+        validate_binding_graph(program, symbols, request_type)
+        validate_binding_graph(program, symbols, result_type)
+        symbols.finish(Ok(()))?
+        Self { program, entry, request_type: ^request_type, result_type: ^result_type }
+    }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:968
+    fn entry(self) -> MirFunctionId { self.entry }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:972
+    fn request_type(self) -> MirType { self.request_type }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:976
+    fn result_type(self) -> MirType { self.result_type }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:982
+    fn encode_compile_arguments(self, request: ^MirRuntimeValue) -> [MirRuntimeValue] BootstrapHostCodecError! {
+        validate_runtime_value(self.program, self.request_type, request, 0).map_err(fn(error) { BootstrapHostCodecError.InvalidMetadata(^error) })?
+        [^request]
+    }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:993
+    fn decode_compile_result(self, value: ^MirRuntimeValue) -> BootstrapEntryValue BootstrapHostCodecError! {
+        validate_runtime_value(self.program, self.result_type, value, 0).map_err(fn(error) { BootstrapHostCodecError.InvalidMetadata(^error) })?
+        BootstrapEntryValue { ty: self.result_type.clone(), value: ^value }
+    }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1006
+    fn record(self, owner: MirTypeId, fields: ^[(MirFieldId, MirRuntimeValue)]) -> MirRuntimeValue BootstrapHostCodecError! {
+        definition := checked_definition_by_id(self.program, owner)?
+        declared := definition.kind == { Struct { fields, .. } -> fields; _ -> { fail BootstrapHostCodecError.InvalidMetadata("checked type `{definition.name}` is not a struct carrier") } }
+        // GATE #4499: exact checked field-ID keys, not string encodings.
+        mut supplied: [MirFieldId:MirRuntimeValue] := [:]
+        for (field, value) in ^fields { if supplied.insert(field, ^value).is_some() { fail BootstrapHostCodecError.InvalidMetadata("record `{definition.name}` repeats checked field ID {field.0}") } }
+        if supplied.len() != declared.len() { fail BootstrapHostCodecError.InvalidMetadata("record `{definition.name}` has {supplied.len()} values for {declared.len()} checked fields") }
+        mut output: [(String, MirRuntimeValue)] := [].with_capacity(declared.len())
+        for field in declared {
+            value := supplied.remove(field.id) == { Val(value) -> ^value; None -> { fail BootstrapHostCodecError.InvalidMetadata("record `{definition.name}` is missing checked field `{field.name}`") } }
+            validate_runtime_value(self.program, field.ty, value, 0).map_err(fn(error) { BootstrapHostCodecError.InvalidMetadata(^error) })?
+            output.push((field.name.to_string(), ^value))
+        }
+        if !supplied.is_empty() { fail BootstrapHostCodecError.InvalidMetadata("record `{definition.name}` contains an undeclared checked field ID") }
+        MirRuntimeValue.Struct { type_name: definition.name.to_string(), fields: ^output }
+    }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1063
+    fn enumeration(self, owner: MirTypeId, variant_name: String, values: ^[MirRuntimeValue]) -> MirRuntimeValue BootstrapHostCodecError! {
+        definition := checked_definition_by_id(self.program, owner)?
+        variants := definition.kind == { Enum { variants, .. } -> variants; _ -> { fail BootstrapHostCodecError.InvalidMetadata("checked type `{definition.name}` is not an enum carrier") } }
+        variant := variants.iter().find(fn(variant) { variant.name == variant_name }) == { Val(variant) -> variant; None -> { fail BootstrapHostCodecError.MissingVariant { owner: definition.name.to_string(), variant: variant_name.to_string() } } }
+        expected := variant.payload == { Unit -> []; Single(ty) -> [(None, ty)]; Named(fields) -> fields.iter().map(fn(field) { (Val(field.name), field.ty) }).collect() }
+        if values.len() != expected.len() { fail BootstrapHostCodecError.InvalidMetadata("enum `{definition.name}` variant `{variant_name}` has {values.len()} values for {expected.len()} checked fields") }
+        mut args: [(String?, MirRuntimeValue)] := [].with_capacity(values.len())
+        for ((name, ty), value) in expected.iter().zip(^values) {
+            validate_runtime_value(self.program, ty, value, 0).map_err(fn(error) { BootstrapHostCodecError.InvalidMetadata(^error) })?
+            args.push((name.map(fn(name) { name.to_string() }), ^value))
+        }
+        MirRuntimeValue.Enum { type_name: definition.name.to_string(), variant: variant.name.to_string(), args: ^args }
+    }
+    // Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1114
+    fn option(self, ty: MirType, value: ^MirRuntimeValue?) -> MirRuntimeValue BootstrapHostCodecError! {
+        inner := ty.kind() == { Option(inner) -> inner; _ -> { fail BootstrapHostCodecError.InvalidMetadata("optional carrier requested for a non-optional checked type") } }
+        value == { Val(value) -> { validate_runtime_value(self.program, inner, value, 0).map_err(fn(error) { BootstrapHostCodecError.InvalidMetadata(^error) })?; MirRuntimeValue.Present(^value) }; None -> MirRuntimeValue.Absent { element: inner.clone() } }
+    }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1140
+fn checked_native_adapter_methods(program: MirProgram, symbols: BootstrapCodecSymbols) -> [MirTraitMethod] BootstrapHostCodecError! {
+    rust_methods := symbols.trait_methods("JetEvalHostAdapter")?
+    trait_id := rust_methods[0].trait_id
+    checked_trait := program.traits.iter().find(fn(row) { row.id == trait_id && row.name == "JetEvalHostAdapter" }) == { Val(row) -> row; None -> { fail BootstrapHostCodecError.MissingEntry("checked JetEvalHostAdapter trait") } }
+    if checked_trait.methods.len() != rust_methods.len() { fail BootstrapHostCodecError.InvalidMetadata("JetEvalHostAdapter Rust metadata and checked MIR list different methods") }
+    mut methods: [MirTraitMethod] := [].with_capacity(checked_trait.methods.len())
+    for method in checked_trait.methods {
+        name := method.name
+        metadata := rust_methods.iter().find(fn(row) { row.method_id == method.id && row.name == name }) == { Val(row) -> row; None -> { fail BootstrapHostCodecError.MissingEntry("Rust metadata for checked JetEvalHostAdapter.{name}") } }
+        arity := method.params.len()
+        if metadata.parameter_types.len() != arity || metadata.parameter_access.len() != arity || metadata.return_type.is_empty() || method.self_access != metadata.receiver_access || method.params.iter().zip(metadata.parameter_access.iter()).any(fn(entry) { entry.0.access != entry.1 }) { fail BootstrapHostCodecError.InvalidMetadata("JetEvalHostAdapter.{name} Rust metadata differs from its checked MIR parameters") }
+        if method.params.first() == Val(machine) {
+            definition := checked_nominal_definition(program, machine.ty)?
+            if machine.access != MirAccess.Write || definition.name != "JetEvalMachine" { fail BootstrapHostCodecError.InvalidMetadata("JetEvalHostAdapter.{name} does not use the checked JetEvalMachine WRITE parameter") }
+        }
+        methods.push(method.clone())
+    }
+    ^methods
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1194
+fn entry_rust_type(program: MirProgram, symbols: BootstrapCodecSymbols, ty: MirType) -> String BootstrapHostCodecError! {
+    ty.kind() == {
+        Int -> "jet_foundation::Numeric::JetInt"
+        IntN { signed, bits } -> "{if signed { 'i' } else { 'u' }}{bits}"
+        Float -> "f64"
+        Float32 -> "f32"
+        Measure(_) -> "f64"
+        Bool -> "bool"
+        Char -> "char"
+        String -> "String"
+        List(inner) -> "Vec<{entry_rust_type(program, symbols, inner)?}>"
+        Map { key, value } -> "crate::JetMap<{entry_rust_type(program, symbols, key)?}, {entry_rust_type(program, symbols, value)?}>"
+        Shared(inner) -> "crate::jet_std::JetShared<{entry_rust_type(program, symbols, inner)?}>"
+        Option(inner) -> "crate::JetOutcome<{entry_rust_type(program, symbols, inner)?}, crate::JetAbsent>"
+        Result { ok, err } -> "crate::JetOutcome<{entry_rust_type(program, symbols, ok)?}, {entry_rust_type(program, symbols, err)?}>"
+        Apply { name, args } -> {
+            if args.is_empty() && name.name == Syntax.INTERNAL_UNIT_TYPE { "()" }
+            else if args.is_empty() && name.name == Syntax.TYPE_NEVER { "std::convert::Infallible" }
+            else if name.name == Syntax.TYPE_PTR {
+                if args.len() != 1 { fail BootstrapHostCodecError.InvalidMetadata("checked Ptr type does not have one element argument") }
+                "*mut {entry_rust_type(program, symbols, args[0])?}"
+            } else {
+                definition := checked_definition_by_ref(program, name)?
+                if args.len() != definition.generic_params.len() { fail BootstrapHostCodecError.InvalidMetadata("checked type `{definition.name}` has an unexpected generic argument count") }
+                symbol := symbols.type_symbol(definition.name)?
+                if args.is_empty() { symbol.to_string() } else {
+                    mut names: [String] := [].with_capacity(args.len())
+                    for arg in args { names.push(entry_rust_type(program, symbols, arg)?) }
+                    "{symbol}<{names.join(", ")}>"
+                }
+            }
+        }
+        TraitObject(bounds) -> {
+            mut traits: [String] := [].with_capacity(bounds.len())
+            for bound in bounds { traits.push(symbols.trait_symbol(bound.name)?.to_string()) }
+            if traits.is_empty() { fail BootstrapHostCodecError.InvalidMetadata("checked trait-object type has no trait bounds") }
+            "Box<dyn {traits.join(" + ")}>"
+        }
+        Tuple(fields) -> {
+            mut names: [String] := [].with_capacity(fields.len())
+            for (_, field) in fields { names.push(entry_rust_type(program, symbols, field)?) }
+            if names.len() == 0 { "()" } else if names.len() == 1 { "({names[0]},)" } else { "({names.join(", ")})" }
+        }
+        FixedList { elem, len } -> "[{entry_rust_type(program, symbols, elem)?}; {len.expression()}]"
+        InlineRange { base, .. } | Tagged { inner: base, .. } | Quantity { base, .. } -> entry_rust_type(program, symbols, base)?
+        Union(_) -> {
+            id := ty.identity == { Val(id) -> id; None -> { fail BootstrapHostCodecError.InvalidMetadata("checked entry union has no nominal identity") } }
+            definition := checked_definition_by_id(program, id).map_err(fn(_) { BootstrapHostCodecError.MissingType("`{ty.canonical_key()}` (MIR type ID {id.0})") })?
+            symbols.type_symbol(definition.name)?.to_string()
+        }
+        Fn(_) | SendFn { .. } -> { fail BootstrapHostCodecError.InvalidMetadata("JetEvalHostAdapter parameter/result unexpectedly uses callable type `{ty.canonical_key()}`") }
+    }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1317
+fn emit_entry_native_interface_codecs(out: &String, program: MirProgram, symbols: BootstrapCodecSymbols, methods: [MirTraitMethod]) -> Unit BootstrapHostCodecError! {
+    out += ENTRY_NATIVE_INTERFACE_ARGUMENT
+    for method in methods {
+        machine_parameter := !method.params.is_empty()
+        mut argument_types: [String] := [].with_capacity(method.params.len())
+        for (index, parameter) in method.params.iter().enumerate() {
+            if machine_parameter && index == 0 { continue }
+            if parameter.access == MirAccess.Write { fail BootstrapHostCodecError.InvalidMetadata("JetEvalHostAdapter.{method.name} argument {index} is a WRITE borrow; only the machine may be written back") }
+            source_type := entry_rust_type(program, symbols, parameter.ty)?
+            argument_types.push(source_type.clone())
+            checked_key := "{parameter.ty.canonical_key():?}"
+            path_error := "checked JetEvalHostAdapter.{method.name} argument {index} has the wrong MIR type"
+            expression := from_runtime_expression(program, symbols, parameter.ty, "value", "checked", "program", "path")?
+            name := method.name
+            out += "\n" + """
+#[doc(hidden)]
+pub(crate) fn __jet_bootstrap_entry_native_interface_{name}_arg_{index}_from_runtime<P: crate::BootstrapEntryPhysicalBindings>(
+    value: ::jet_foundation::MIR::MirRuntimeValue,
+    checked: &::jet_foundation::MIR::MirType,
+    compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
+    path: &[String],
+    physical: &P,
+) -> Result<{source_type}, String> {{
+    let program = compiler_program.as_ref();
+    if checked.canonical_key() != {checked_key} {{
+        return Err({path_error:?}.to_string());
+    }}
+    crate::compiler_bootstrap_entry_codec::validate_runtime_value(program, checked, &value, 0)?;
+    Ok({expression})
+}}
+""" + "\n\n"
+        }
+        if method.return_type.kind() == { TraitObject(_) -> true; _ -> false } { continue }
+        source_type := entry_rust_type(program, symbols, method.return_type)?
+        checked_key := "{method.return_type.canonical_key():?}"
+        path_error := "checked JetEvalHostAdapter.{method.name} result has the wrong MIR type"
+        expression := to_runtime_expression(program, symbols, method.return_type, "source_value", "checked", "compiler_program", "path", "physical")?
+        name := method.name
+        out += "\n" + """
+#[doc(hidden)]
+pub(crate) fn __jet_bootstrap_entry_native_interface_{name}_result_to_runtime<P: crate::BootstrapEntryPhysicalBindings>(
+    source_value: &{source_type},
+    checked: &::jet_foundation::MIR::MirType,
+    compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
+    path: &[String],
+    physical: &P,
+) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{
+    let program = compiler_program.as_ref();
+    if checked.canonical_key() != {checked_key} {{
+        return Err({path_error:?}.to_string());
+    }}
+    let value = {expression};
+    crate::compiler_bootstrap_entry_codec::validate_runtime_value(program, checked, &value, 0)?;
+    Ok(value)
+}}
+""" + "\n\n"
+        emit_entry_native_interface_shim(out, program, symbols, method, argument_types, source_type)?
+    }
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1428
+// GATE #4494: generated native transfer-ledger ownership and physical ABI.
+ENTRY_NATIVE_INTERFACE_ARGUMENT :: "\n" + """
+#[doc(hidden)]
+pub(crate) fn __jet_bootstrap_entry_native_interface_argument<P, T>(
+    call: &mut ::jet_jit::SourceInterfaces::NativeInterfaceCall,
+    index: usize,
+    compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
+    physical: &P,
+    decode: fn(
+        ::jet_foundation::MIR::MirRuntimeValue,
+        &::jet_foundation::MIR::MirType,
+        &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
+        &[String],
+        &P,
+    ) -> Result<T, String>,
+) -> Result<T, String>
+where
+    P: crate::BootstrapEntryPhysicalBindings,
+{{
+    let argument = call
+        .argument(index)
+        .ok_or_else(|| format!("native interface argument {{index}} is missing"))?;
+    let checked = argument.ty.clone();
+    let path = vec![format!("argument {{index}}")];
+    if argument.access != ::jet_foundation::MIR::MirAccess::Move {{
+        let value = argument.value.clone();
+        return decode(value, &checked, compiler_program, &path, physical);
+    }}
+    let transfer = call.take_owned_argument(index).map_err(|error| error.to_string())?;
+    let guard = transfer.take_value().map_err(|error| error.to_string())?;
+    let payload = guard.with_value(|value| value.clone()).map_err(|error| error.to_string())?;
+    let decoded = decode(payload, &checked, compiler_program, &path, physical)?;
+    call.consume_owned_argument(transfer, guard, |guard, commit| {{
+        guard.commit_and_extract(::jet_foundation::MIR::MirRuntimeValue::Unit, commit)?;
+        Ok(())
+    }})
+    .map_err(|error| error.to_string())?;
+    Ok(decoded)
+}}
+""" + "\n"
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1471
+fn emit_entry_native_interface_shim(out: &String, program: MirProgram, symbols: BootstrapCodecSymbols, method: MirTraitMethod, argument_types: [String], result_type: String) -> Unit BootstrapHostCodecError! {
+    name := method.name
+    arity := method.params.len()
+    first_argument := if method.params.is_empty() { 0 } else { 1 }
+    argument_names := (first_argument..<arity).map(fn(index) { "__jet_arg_{index}" }).collect()
+    mut argument_lets := ""
+    for (index, argument) in (first_argument..<arity).zip(argument_names.iter()) {
+        argument_lets += "    let {argument} = __jet_bootstrap_entry_native_interface_argument(call, {index}, compiler_program, physical, __jet_bootstrap_entry_native_interface_{name}_arg_{index}_from_runtime::<P>)?;\n"
+    }
+    arguments := argument_names.join(", ")
+    (operation_parameters, invoke) := method.params.first() == {
+        Val(machine) -> {
+            machine_type := entry_rust_type(program, symbols, machine.ty)?
+            mut parameters := ["crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, {machine_type}>"]
+            parameters.extend(argument_types.iter().cloned())
+            separator := if arguments.is_empty() { "" } else { ", " }
+            invoke := """
+    let __jet_machine_type = call.signature().parameters[0].ty.clone();
+    let __jet_result = call
+        .with_writeback_argument(0, |__jet_machine_value| {{
+            let __jet_machine = physical.borrow_interpreter_machine_write(
+                __jet_machine_value,
+                &__jet_machine_type,
+                machine_abi_shape,
+            )?;
+            operation(crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Mir(__jet_machine){separator}{arguments})
+        }})
+        .map_err(|error| error.to_string())??;
+""" + "\n"
+            (parameters.join(", "), ^invoke)
+        }
+        None -> ("", "    let _ = machine_abi_shape;\n    let __jet_result = operation()?;\n")
+    }
+    arity_error := "native JetEvalHostAdapter.{name} call does not have {arity} checked arguments"
+    out += "\n" + """
+#[doc(hidden)]
+pub(crate) fn __jet_bootstrap_entry_native_interface_{name}<P, F>(
+    call: &mut ::jet_jit::SourceInterfaces::NativeInterfaceCall,
+    compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
+    machine_abi_shape: &crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,
+    physical: &P,
+    operation: F,
+) -> Result<::jet_foundation::MIR::MirRuntimeValue, String>
+where
+    P: crate::BootstrapEntryPhysicalBindings,
+    F: FnOnce({operation_parameters}) -> Result<{result_type}, String>,
+{{
+    if call.signature().parameters.len() != {arity} || call.arguments().len() != {arity} {{
+        return Err({arity_error:?}.to_string());
+    }}
+    let __jet_result_type = call.signature().return_type.clone();
+{argument_lets}{invoke}    let path = vec![{name:?}.to_string()];
+    __jet_bootstrap_entry_native_interface_{name}_result_to_runtime(&__jet_result, &__jet_result_type, compiler_program, &path, physical)
+}}
+""" + "\n\n"
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1553
+pub fn append_bootstrap_entry_codec(out: &String, bindings: BootstrapBindingDescriptor, symbols: BootstrapCodecSymbols, program: MirProgram, entry: MirFunctionId) -> Unit BootstrapHostCodecError! {
+    function := program.functions.iter().find(fn(function) { function.id == entry }) == { Val(function) -> function; None -> { fail BootstrapHostCodecError.InvalidMetadata("entry codec cannot find the checked compiler factory function") } }
+    if function.name != "jet_bootstrap_compile" || function.params.len() != 1 { fail BootstrapHostCodecError.InvalidMetadata("entry codec requires the checked one-request factory function") }
+    callable := bindings.callables.iter().find(fn(row) { row.source_name == function.name && row.metadata.function == entry }) == { Val(callable) -> callable; None -> { fail BootstrapHostCodecError.MissingEntry(function.name.to_string()) } }
+    if callable.metadata.parameter_types.len() != 1 || callable.metadata.parameter_access != [function.params[0].access] || callable.metadata.return_type.is_empty() { fail BootstrapHostCodecError.InvalidMetadata("entry callable binding differs from the checked one-request ABI") }
+    request := checked_nominal_definition(program, function.params[0].ty)?
+    result := checked_nominal_definition(program, function.return_type)?
+    if request.name != "JetDriverCompileRequest" || result.name != "JetDriverCompileResult" { fail BootstrapHostCodecError.InvalidMetadata("factory signature is not the checked compile request/result contract") }
+    validate_binding_graph(program, symbols, function.params[0].ty)
+    validate_binding_graph(program, symbols, function.return_type)
+    native_methods := checked_native_adapter_methods(program, symbols)?
+    mut to_types: [MirTypeDef] := []
+    mut from_types: [MirTypeDef] := []
+    mut request_seen: Set<MirTypeId> := Set.new()
+    mut result_seen: Set<MirTypeId> := Set.new()
+    collect_nominal_types(program, function.params[0].ty, &request_seen, &to_types)?
+    collect_nominal_types(program, function.return_type, &result_seen, &from_types)?
+    mut to_seen: Set<MirTypeId> := to_types.iter().map(fn(definition) { definition.id }).collect()
+    mut from_seen: Set<MirTypeId> := from_types.iter().map(fn(definition) { definition.id }).collect()
+    for method in native_methods {
+        for (index, parameter) in method.params.iter().enumerate() {
+            if index == 0 && parameter.access == MirAccess.Write && checked_nominal_definition(program, parameter.ty).is_ok_and(fn(definition) { definition.name == "JetEvalMachine" }) { continue }
+            validate_binding_graph(program, symbols, parameter.ty)
+            mut graph: [MirTypeDef] := []
+            mut seen: Set<MirTypeId> := Set.new()
+            collect_nominal_types(program, parameter.ty, &seen, &graph)?
+            for nested in ^graph { if from_seen.insert(nested.id) { from_types.push(^nested) } }
+        }
+        if !(method.return_type.kind() == { TraitObject(_) -> true; _ -> false }) {
+            validate_binding_graph(program, symbols, method.return_type)
+            mut graph: [MirTypeDef] := []
+            mut seen: Set<MirTypeId> := Set.new()
+            collect_nominal_types(program, method.return_type, &seen, &graph)?
+            for nested in ^graph { if to_seen.insert(nested.id) { to_types.push(^nested) } }
+        }
+    }
+    to_types.sort_by_key(fn(definition) { definition.id })
+    from_types.sort_by_key(fn(definition) { definition.id })
+    for definition in to_types { emit_to_runtime_converter(out, program, symbols, definition)? }
+    for definition in from_types { emit_from_runtime_converter(out, program, symbols, definition)? }
+    emit_entry_native_interface_codecs(out, program, symbols, native_methods)?
+    emit_entry_machine_access_helpers(out, program, symbols)?
+    emit_entry_host_type_shape_from_source(out, symbols)?
+    emit_entry_conversion_helpers(out)?
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1644
+fn emit_entry_host_type_shape_from_source(out: &String, symbols: BootstrapCodecSymbols) -> Unit BootstrapHostCodecError! {
+    _ :: symbols.type_symbol("JetEvalHostTypeShape")?
+    out += "\n" + """
+pub(crate) fn __jet_bootstrap_entry_host_type_shape_from_source(
+    source: &@t.JetEvalHostTypeShape@,
+) -> Result<crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape, String> {{
+    use crate::compiler_bootstrap_entry_codec::{{
+        BootstrapEntryHostOwner as Owner,
+        BootstrapEntryHostTypeField as Field,
+        BootstrapEntryHostTypeNode as Node,
+        BootstrapEntryHostTypeShape as Shape,
+        BootstrapEntryHostTypeVariant as Variant,
+    }};
+    let field_shapes = |fields: &[@t.JetEvalHostTypeFieldShape@], label: &str| {{
+        fields.iter().map(|field| {{
+            Ok(Field {{
+                name: field.@f.JetEvalHostTypeFieldShape.name@.clone(),
+                node: __jet_bootstrap_source_index(&field.@f.JetEvalHostTypeFieldShape.node@, label)?,
+            }})
+        }}).collect::<Result<Vec<_>, String>>()
+    }};
+    let indices = |indices: &[jet_foundation::Numeric::JetInt], label: &str| {{
+        indices.iter()
+            .map(|index| __jet_bootstrap_source_index(index, label))
+            .collect::<Result<Vec<_>, String>>()
+    }};
+    let root = __jet_bootstrap_source_index(&source.@f.JetEvalHostTypeShape.root@, "host result type root")?;
+    let nodes = source.@f.JetEvalHostTypeShape.nodes@.iter().map(|node| {{
+        Ok(match node {{
+            @p.JetEvalHostTypeNode.Scalar@(ty) => Node::Scalar(__jet_bootstrap_type_to_host(ty)?),
+            @p.JetEvalHostTypeNode.Option@(inner) => Node::Option(
+                __jet_bootstrap_source_index(inner, "option type node")?,
+            ),
+            @p.JetEvalHostTypeNode.Result@(ok, error) => Node::Result {{
+                ok: __jet_bootstrap_source_index(ok, "result success type node")?,
+                error: __jet_bootstrap_source_index(error, "result error type node")?,
+            }},
+            @p.JetEvalHostTypeNode.List@(inner) => Node::List(
+                __jet_bootstrap_source_index(inner, "list element type node")?,
+            ),
+            @p.JetEvalHostTypeNode.Map@(key, value) => Node::Map {{
+                key: __jet_bootstrap_source_index(key, "map key type node")?,
+                value: __jet_bootstrap_source_index(value, "map value type node")?,
+            }},
+            @p.JetEvalHostTypeNode.Tuple@(fields) => Node::Tuple(field_shapes(fields, "tuple field type node")?),
+            @p.JetEvalHostTypeNode.Struct@(type_id, type_name, args, fields) => Node::Struct {{
+                type_id: ::jet_foundation::MIR::MirTypeId(type_id.@f.MIRTypeID.value@),
+                type_name: type_name.clone(),
+                args: indices(args, "nominal argument type node")?,
+                fields: field_shapes(fields, "record field type node")?,
+            }},
+            @p.JetEvalHostTypeNode.Enum@(type_id, type_name, args, variants) => Node::Enum {{
+                type_id: ::jet_foundation::MIR::MirTypeId(type_id.@f.MIRTypeID.value@),
+                type_name: type_name.clone(),
+                args: indices(args, "nominal argument type node")?,
+                variants: variants.iter().map(|variant| {{
+                    Ok(Variant {{
+                        name: variant.@f.JetEvalHostTypeVariantShape.name@.clone(),
+                        args: variant.@f.JetEvalHostTypeVariantShape.args@.iter().map(|arg| {{
+                            Ok((
+                                arg.@f.JetEvalHostTypeArgShape.name@.as_ref().ok().cloned(),
+                                __jet_bootstrap_source_index(&arg.@f.JetEvalHostTypeArgShape.node@, "enum payload type node")?,
+                            ))
+                        }}).collect::<Result<Vec<_>, String>>()?,
+                    }})
+                }}).collect::<Result<Vec<_>, String>>()?,
+            }},
+            @p.JetEvalHostTypeNode.Closure@(ty, function, captures) => Node::Closure {{
+                function: ::jet_foundation::MIR::MirFunctionId(function.@f.MIRFunctionID.value@),
+                captures: indices(captures, "closure capture type node")?,
+                ty: __jet_bootstrap_type_to_host(ty)?,
+            }},
+            @p.JetEvalHostTypeNode.Handle@(ty, owner) => Node::Handle {{
+                ty: __jet_bootstrap_type_to_host(ty)?,
+                owner: match &@deref.JetEvalHostTypeNode.Handle.owner@*owner {{
+                    @p.JetEvalHostOwner.Cursor@ => Owner::Cursor,
+                    @p.JetEvalHostOwner.Declared@(ty) => Owner::Declared(__jet_bootstrap_type_to_host(ty)?),
+                    @p.JetEvalHostOwner.Core@(owner) => Owner::Core {{
+                        fact: __jet_bootstrap_mir_MIRCoreOwner_to_host(&owner.@f.JetEvalHostCoreOwner.fact@)?,
+                        ty: __jet_bootstrap_type_to_host(&owner.@f.JetEvalHostCoreOwner.ty@)?,
+                    }},
+                    @p.JetEvalHostOwner.Native@(binding) => match &@deref.JetEvalHostOwner.Native.binding@*binding {{
+                        @p.JetEvalNativeBindingIdentity.Callable@(binding) => Owner::NativeCallable {{
+                            key: binding.@f.JetEvalNativeCallableBinding.key@.clone(),
+                            callable_type: __jet_bootstrap_type_to_host(&binding.@f.JetEvalNativeCallableBinding.callable_type@)?,
+                        }},
+                        @p.JetEvalNativeBindingIdentity.Interface@(receiver_type) => Owner::NativeInterface {{
+                            receiver_type: __jet_bootstrap_type_to_host(receiver_type)?,
+                        }},
+                    }},
+                    @p.JetEvalHostOwner.FixedBackingRoot@(..) => {{
+                        return Err("checked host type shape names a fixed-backing root, which has no host owner".to_string());
+                    }}
+                }},
+            }},
+        }})
+    }}).collect::<Result<Vec<_>, String>>()?;
+    let shape = Shape {{ root, nodes }};
+    crate::compiler_bootstrap_entry_codec::bootstrap_entry_validate_shape(&shape)?;
+    Ok(shape)
+}}
+""" + "\n"
+}

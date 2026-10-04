@@ -1,366 +1,208 @@
-// PORT-PENDING 0613 crates-jet-driver-src-pluginexport-module-group: crates/jet-driver/src/Trace.rs:1-362
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Streaming compiler trace.
-//RS //!
-//RS //! `JET_TRACE_FILE=<path>` makes the compiler write Chrome trace-event JSON
-//RS //! to `<path>` while it runs: one event per line, flushed per event, so a
-//RS //! running or killed compile is still a loadable trace (Perfetto and
-//RS //! chrome://tracing accept the JSON array without its closing `]`).
-//RS //! `JET_TRACE_DETAIL=functions` also asks for one span per function.
-//RS //!
-//RS //! This is the one trace writer. The Rust driver opens spans with [`span`];
-//RS //! the bootstrap host hands the same sink to the Jet compiler as its
-//RS //! `CompilerTraceSink`. Unset, every span site costs one check of the
-//RS //! process-wide sink: nothing is formatted or allocated.
-//RS //!
-//RS //! Spans nest per thread. A span's `kind` is its stable event category
-//RS //! (`load`, `sema.check`, ...); `detail` labels one item (a module or a
-//RS //! function) and becomes the label the viewer shows. `end(kind)` closes the
-//RS //! innermost open span of that kind together with any deeper span an early
-//RS //! return left open, and records the items processed and the process's
-//RS //! resident and peak memory (`VmRSS`, `VmHWM`).
-//RS 
-//RS use std::collections::HashMap;
-//RS use std::fmt::Write as _;
-//RS use std::fs::File;
-//RS use std::io::Write as _;
-//RS use std::sync::atomic::{AtomicU64, Ordering};
-//RS use std::sync::{Mutex, MutexGuard, OnceLock};
-//RS use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-//RS 
-//RS /// Path of the trace file; unset or empty traces nothing.
-//RS pub const TRACE_FILE_ENV: &str = "JET_TRACE_FILE";
-//RS /// `functions` adds per-function spans.
-//RS pub const TRACE_DETAIL_ENV: &str = "JET_TRACE_DETAIL";
-//RS 
-//RS /// Minimum spacing of progress events of one kind; the last item is
-//RS /// always written.
-//RS const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
-//RS 
-//RS static SINK: OnceLock<Option<TraceSink>> = OnceLock::new();
-//RS static NEXT_THREAD: AtomicU64 = AtomicU64::new(1);
-//RS 
-//RS thread_local! {
-//RS     static THREAD: u64 = NEXT_THREAD.fetch_add(1, Ordering::Relaxed);
-//RS }
-//RS 
-//RS /// The process's trace sink, opened from the environment on first use.
-//RS pub fn sink() -> Option<&'static TraceSink> {
-//RS     SINK.get_or_init(TraceSink::from_env).as_ref()
-//RS }
-//RS 
-//RS /// Open a phase span of `kind` on this thread; it ends when dropped.
-//RS pub fn span(kind: &'static str) -> Span {
-//RS     let sink = sink();
-//RS     if let Some(sink) = sink {
-//RS         sink.begin(kind, "", -1, -1);
-//RS     }
-//RS     Span { sink, kind, items: -1 }
-//RS }
-//RS 
-//RS /// A phase span that ends when dropped.
-//RS #[must_use = "a trace span ends when it is dropped"]
-//RS pub struct Span {
-//RS     sink: Option<&'static TraceSink>,
-//RS     kind: &'static str,
-//RS     items: i64,
-//RS }
-//RS 
-//RS impl Span {
-//RS     /// Record how many items the span processed.
-//RS     pub fn items(&mut self, items: usize) {
-//RS         self.items = i64::try_from(items).unwrap_or(i64::MAX);
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for Span {
-//RS     fn drop(&mut self) {
-//RS         if let Some(sink) = self.sink {
-//RS             sink.end(self.kind, self.items);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub struct TraceSink {
-//RS     start: Instant,
-//RS     pid: u32,
-//RS     functions: bool,
-//RS     state: Mutex<TraceState>,
-//RS }
-//RS 
-//RS struct TraceState {
-//RS     /// `None` after a failed write: the trace stops, the compile does not.
-//RS     file: Option<File>,
-//RS     /// Open spans per thread, innermost last.
-//RS     stacks: HashMap<u64, Vec<OpenSpan>>,
-//RS     /// When each progress kind was last written.
-//RS     progress_at: HashMap<String, Instant>,
-//RS     line: String,
-//RS }
-//RS 
-//RS struct OpenSpan {
-//RS     kind: String,
-//RS     label: String,
-//RS }
-//RS 
-//RS impl TraceSink {
-//RS     fn from_env() -> Option<Self> {
-//RS         let path = std::env::var_os(TRACE_FILE_ENV).filter(|path| !path.is_empty())?;
-//RS         let functions = std::env::var(TRACE_DETAIL_ENV).is_ok_and(|detail| detail == "functions");
-//RS         match Self::create(std::path::Path::new(&path), functions) {
-//RS             Ok(sink) => Some(sink),
-//RS             Err(error) => {
-//RS                 eprintln!(
-//RS                     "jet: {TRACE_FILE_ENV}: cannot write `{}`: {error}",
-//RS                     std::path::Path::new(&path).display()
-//RS                 );
-//RS                 None
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// Truncate `path` and write the trace header.
-//RS     fn create(path: &std::path::Path, functions: bool) -> std::io::Result<Self> {
-//RS         let mut file = File::create(path)?;
-//RS         let pid = std::process::id();
-//RS         let process = std::env::current_exe()
-//RS             .ok()
-//RS             .and_then(|exe| exe.file_name().map(|name| name.to_string_lossy().into_owned()))
-//RS             .unwrap_or_else(|| "jet".to_string());
-//RS         let unix_ms = SystemTime::now()
-//RS             .duration_since(UNIX_EPOCH)
-//RS             .map_or(0, |since| since.as_millis());
-//RS         let mut header = String::from("[\n");
-//RS         header.push_str("{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":");
-//RS         let _ = write!(header, "{pid},\"tid\":0,\"args\":{{\"name\":");
-//RS         push_json_string(&mut header, &process);
-//RS         let _ = write!(
-//RS             header,
-//RS             "}}}},\n{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{functions}}}}},\n"
-//RS         );
-//RS         file.write_all(header.as_bytes())?;
-//RS         file.flush()?;
-//RS         Ok(Self {
-//RS             start: Instant::now(),
-//RS             pid,
-//RS             functions,
-//RS             state: Mutex::new(TraceState {
-//RS                 file: Some(file),
-//RS                 stacks: HashMap::new(),
-//RS                 progress_at: HashMap::new(),
-//RS                 line: String::new(),
-//RS             }),
-//RS         })
-//RS     }
-//RS 
-//RS     /// Whether per-function spans were requested.
-//RS     pub fn functions(&self) -> bool {
-//RS         self.functions
-//RS     }
-//RS 
-//RS     /// Open a span of `kind`; `detail` labels one item ("" for a phase),
-//RS     /// `index`/`total` place it in its phase (negative when not counted).
-//RS     pub fn begin(&self, kind: &str, detail: &str, index: i64, total: i64) {
-//RS         let ts = self.micros();
-//RS         let thread = current_thread();
-//RS         let mut guard = self.lock();
-//RS         let state = &mut *guard;
-//RS         if state.file.is_none() {
-//RS             return;
-//RS         }
-//RS         let label = if detail.is_empty() { kind } else { detail };
-//RS         state.line.clear();
-//RS         if !state.stacks.contains_key(&thread) {
-//RS             push_thread_name(&mut state.line, self.pid, thread);
-//RS         }
-//RS         push_event_head(&mut state.line, label, Some(kind), 'B', ts, self.pid, thread);
-//RS         if index >= 0 {
-//RS             let _ = write!(state.line, ",\"args\":{{\"index\":{index},\"total\":{total}}}");
-//RS         }
-//RS         state.line.push_str("},\n");
-//RS         state.stacks.entry(thread).or_default().push(OpenSpan {
-//RS             kind: kind.to_string(),
-//RS             label: label.to_string(),
-//RS         });
-//RS         state.write_line();
-//RS     }
-//RS 
-//RS     /// Close the innermost open span of `kind` on this thread, and any
-//RS     /// deeper span left open; `items` < 0 reports no count.
-//RS     pub fn end(&self, kind: &str, items: i64) {
-//RS         let memory = memory_kb();
-//RS         let ts = self.micros();
-//RS         let thread = current_thread();
-//RS         let mut guard = self.lock();
-//RS         let state = &mut *guard;
-//RS         if state.file.is_none() {
-//RS             return;
-//RS         }
-//RS         let Some(stack) = state.stacks.get_mut(&thread) else { return };
-//RS         let Some(position) = stack.iter().rposition(|span| span.kind == kind) else { return };
-//RS         state.line.clear();
-//RS         while stack.len() > position + 1 {
-//RS             let abandoned = stack.pop().expect("open span above the closed one");
-//RS             push_event_head(&mut state.line, &abandoned.label, Some(&abandoned.kind), 'E', ts, self.pid, thread);
-//RS             state.line.push_str("},\n");
-//RS         }
-//RS         let closed = stack.pop().expect("closed span");
-//RS         push_event_head(&mut state.line, &closed.label, Some(&closed.kind), 'E', ts, self.pid, thread);
-//RS         state.line.push_str(",\"args\":{");
-//RS         let mut separator = "";
-//RS         if items >= 0 {
-//RS             let _ = write!(state.line, "\"items\":{items}");
-//RS             separator = ",";
-//RS         }
-//RS         if let Some((rss, peak)) = memory {
-//RS             let _ = write!(state.line, "{separator}\"rss_kb\":{rss},\"peak_rss_kb\":{peak}");
-//RS         }
-//RS         state.line.push_str("}},\n");
-//RS         // Phases (no item label) also feed one memory counter track.
-//RS         if closed.label == closed.kind {
-//RS             if let Some((rss, peak)) = memory {
-//RS                 push_event_head(&mut state.line, "memory", None, 'C', ts, self.pid, thread);
-//RS                 let _ = write!(
-//RS                     state.line,
-//RS                     ",\"args\":{{\"rss_mb\":{},\"peak_rss_mb\":{}}}}},\n",
-//RS                     rss / 1024,
-//RS                     peak / 1024
-//RS                 );
-//RS             }
-//RS         }
-//RS         state.write_line();
-//RS     }
-//RS 
-//RS     /// `done` of `total` items of the open `kind` phase are finished.
-//RS     /// Written at most every 200 ms per kind, and always for the last item.
-//RS     pub fn progress(&self, kind: &str, done: i64, total: i64) {
-//RS         let now = Instant::now();
-//RS         let thread = current_thread();
-//RS         let mut guard = self.lock();
-//RS         let state = &mut *guard;
-//RS         if state.file.is_none() {
-//RS             return;
-//RS         }
-//RS         let last_item = total > 0 && done + 1 >= total;
-//RS         if let Some(previous) = state.progress_at.get_mut(kind) {
-//RS             if !last_item && now.duration_since(*previous) < PROGRESS_INTERVAL {
-//RS                 return;
-//RS             }
-//RS             *previous = now;
-//RS         } else {
-//RS             state.progress_at.insert(kind.to_string(), now);
-//RS         }
-//RS         let ts = u64::try_from(now.saturating_duration_since(self.start).as_micros()).unwrap_or(u64::MAX);
-//RS         state.line.clear();
-//RS         push_event_head(&mut state.line, kind, None, 'C', ts, self.pid, thread);
-//RS         let _ = write!(state.line, ",\"args\":{{\"done\":{done},\"total\":{total}}}}},\n");
-//RS         state.write_line();
-//RS     }
-//RS 
-//RS     fn micros(&self) -> u64 {
-//RS         u64::try_from(self.start.elapsed().as_micros()).unwrap_or(u64::MAX)
-//RS     }
-//RS 
-//RS     fn lock(&self) -> MutexGuard<'_, TraceState> {
-//RS         // A panic while tracing leaves whole lines behind; keep writing.
-//RS         self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS     }
-//RS }
-//RS 
-//RS impl TraceState {
-//RS     fn write_line(&mut self) {
-//RS         let Some(file) = self.file.as_mut() else { return };
-//RS         if let Err(error) = file.write_all(self.line.as_bytes()).and_then(|()| file.flush()) {
-//RS             eprintln!("jet: {TRACE_FILE_ENV}: write failed, trace stopped: {error}");
-//RS             self.file = None;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn current_thread() -> u64 {
-//RS     THREAD.with(|thread| *thread)
-//RS }
-//RS 
-//RS fn push_thread_name(line: &mut String, pid: u32, thread: u64) {
-//RS     let current = std::thread::current();
-//RS     let name = current.name().map_or_else(|| format!("thread {thread}"), str::to_string);
-//RS     let _ = write!(line, "{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{pid},\"tid\":{thread},\"args\":{{\"name\":");
-//RS     push_json_string(line, &name);
-//RS     line.push_str("}},\n");
-//RS }
-//RS 
-//RS /// `{"name":..,"cat":..,"ph":..,"ts":..,"pid":..,"tid":..` without the
-//RS /// closing brace, so the caller can append `args`.
-//RS fn push_event_head(line: &mut String, name: &str, kind: Option<&str>, phase: char, ts: u64, pid: u32, thread: u64) {
-//RS     line.push_str("{\"name\":");
-//RS     push_json_string(line, name);
-//RS     if let Some(kind) = kind {
-//RS         line.push_str(",\"cat\":");
-//RS         push_json_string(line, kind);
-//RS     }
-//RS     let _ = write!(line, ",\"ph\":\"{phase}\",\"ts\":{ts},\"pid\":{pid},\"tid\":{thread}");
-//RS }
-//RS 
-//RS fn push_json_string(line: &mut String, text: &str) {
-//RS     line.push('"');
-//RS     for character in text.chars() {
-//RS         match character {
-//RS             '"' => line.push_str("\\\""),
-//RS             '\\' => line.push_str("\\\\"),
-//RS             '\n' => line.push_str("\\n"),
-//RS             '\r' => line.push_str("\\r"),
-//RS             '\t' => line.push_str("\\t"),
-//RS             control if u32::from(control) < 0x20 => {
-//RS                 let _ = write!(line, "\\u{:04x}", u32::from(control));
-//RS             }
-//RS             other => line.push(other),
-//RS         }
-//RS     }
-//RS     line.push('"');
-//RS }
-//RS 
-//RS /// Resident and peak resident set size in kB (`VmRSS`, `VmHWM`), where
-//RS /// the platform reports them.
-//RS fn memory_kb() -> Option<(u64, u64)> {
-//RS     let status = std::fs::read_to_string("/proc/self/status").ok()?;
-//RS     let field = |name: &str| {
-//RS         status
-//RS             .lines()
-//RS             .find_map(|line| line.strip_prefix(name))
-//RS             .and_then(|rest| rest.trim().strip_suffix("kB"))
-//RS             .and_then(|value| value.trim().parse::<u64>().ok())
-//RS     };
-//RS     Some((field("VmRSS:")?, field("VmHWM:")?))
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::TraceSink;
-//RS 
-//RS     #[test]
-//RS     fn end_closes_abandoned_spans_and_every_line_is_one_event() {
-//RS         let path = std::env::temp_dir().join(format!("jet-trace-test-{}.json", std::process::id()));
-//RS         let sink = TraceSink::create(&path, false).expect("trace file");
-//RS         sink.begin("compile", "", -1, -1);
-//RS         sink.begin("sema.module", "a \"quoted\" module", 0, 2);
-//RS         sink.progress("sema.bodies", 0, 10);
-//RS         sink.progress("sema.bodies", 1, 10);
-//RS         sink.progress("sema.bodies", 9, 10);
-//RS         sink.end("missing", 1);
-//RS         sink.end("compile", 3);
-//RS         let text = std::fs::read_to_string(&path).expect("trace text");
-//RS         let _ = std::fs::remove_file(&path);
-//RS         let lines = text.lines().collect::<Vec<_>>();
-//RS         assert_eq!(lines[0], "[");
-//RS         assert!(lines[1..].iter().all(|line| line.starts_with('{') && line.ends_with("},")));
-//RS         assert!(text.contains("\"name\":\"a \\\"quoted\\\" module\",\"cat\":\"sema.module\",\"ph\":\"B\""));
-//RS         // The first and the last progress events are written; the middle one is throttled.
-//RS         assert_eq!(text.matches("\"name\":\"sema.bodies\",\"ph\":\"C\"").count(), 2);
-//RS         let ends = lines.iter().filter(|line| line.contains("\"ph\":\"E\"")).collect::<Vec<_>>();
-//RS         assert_eq!(ends.len(), 2);
-//RS         assert!(ends[0].contains("\"cat\":\"sema.module\""));
-//RS         assert!(ends[1].contains("\"cat\":\"compile\"") && ends[1].contains("\"items\":3"));
-//RS     }
-//RS }
-// END-PORT-PENDING 0613 crates/jet-driver/src/Trace.rs:1-362
+// Streaming Chrome trace events: one flushed event per line, no work when disabled.
+use std.fs.File
+use std.[env, process, thread, fs]
+use std.sync.[Mutex, MutexGuard, OnceLock]
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.thread_local.ThreadLocal
+use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+use core.path.OSPath
+use jet_foundation.Trace.CompilerTraceSink
 
+// Rust: crates/jet-driver/src/Trace.rs:30
+pub const TRACE_FILE_ENV: String = "JET_TRACE_FILE"
+// Rust: crates/jet-driver/src/Trace.rs:32
+pub const TRACE_DETAIL_ENV: String = "JET_TRACE_DETAIL"
+// Rust: crates/jet-driver/src/Trace.rs:36
+const PROGRESS_INTERVAL: Duration = Duration.from_millis(200)
+// Rust: crates/jet-driver/src/Trace.rs:38
+// GATE #4494: synchronized process sink, relaxed unique thread ids and native TLS.
+const SINK: OnceLock<TraceSink?> = OnceLock.new()
+// Rust: crates/jet-driver/src/Trace.rs:39
+const NEXT_THREAD: AtomicU64 = AtomicU64.new(1)
+// Rust: crates/jet-driver/src/Trace.rs:41
+const THREAD: ThreadLocal<U64> = ThreadLocal.new(fn() { NEXT_THREAD.fetch_add(1, Ordering.Relaxed) })
+
+// Rust: crates/jet-driver/src/Trace.rs:46
+pub fn sink() -> TraceSink? { SINK.get_or_init(TraceSink.from_env).as_ref() }
+// Rust: crates/jet-driver/src/Trace.rs:51
+pub fn span(kind: String) -> Span {
+    active :: sink()
+    if active == Val(value) { value.begin(kind, "", -1, -1) }
+    Span { sink: active, kind: kind, items: -1 }
+}
+// Rust: crates/jet-driver/src/Trace.rs:61
+pub struct Span { sink: TraceSink?, kind: String, items: I64 }
+impl Span {
+    // Rust: crates/jet-driver/src/Trace.rs:69
+    pub fn items(self: &Self, items: USize) { self.items = I64.try_from(items).unwrap_or(I64.MAX) }
+    // Rust: crates/jet-driver/src/Trace.rs:75
+    fn drop(self: &Self) { if self.sink == Val(value) { value.end(self.kind, self.items) } }
+}
+// Rust: crates/jet-driver/src/Trace.rs:82
+pub struct TraceSink { start: Instant, pid: U32, functions: Bool, state: Mutex<TraceState> }
+// Rust: crates/jet-driver/src/Trace.rs:89
+struct TraceState {
+    // Failed writes disable tracing, never the compilation.
+    file: File?, stacks: [U64:[OpenSpan]], progress_at: [String:Instant], line: String
+}
+// Rust: crates/jet-driver/src/Trace.rs:99
+struct OpenSpan { kind: String, label: String }
+impl TraceSink {
+    // Rust: crates/jet-driver/src/Trace.rs:105
+    fn from_env() -> Self? {
+        path :: env.var_os(TRACE_FILE_ENV).filter(fn(path) { !path.is_empty() }) ?? return None
+        functions :: env.var(TRACE_DETAIL_ENV).is_ok_and(fn(detail) { detail == "functions" })
+        if Self.create(OSPath.new(path), functions) == {
+            Ok(value) -> Val(value)
+            Err(error) -> {
+                eprintln("jet: {TRACE_FILE_ENV}: cannot write `{OSPath.new(path).display()}`: {error}")
+                None
+            }
+        }
+    }
+    // Rust: crates/jet-driver/src/Trace.rs:121
+    // GATE #4494: real file/time/process providers own these native operations.
+    fn create(path: &OSPath, functions: Bool) -> Self std.io.Error! {
+        file := File.create(path)!
+        pid :: process.id()
+        process_name :: env.current_exe().ok().and_then(fn(exe) { exe.file_name().map(fn(name) { name.to_string_lossy().into_owned() }) }).unwrap_or("jet")
+        unix_ms :: SystemTime.now().duration_since(UNIX_EPOCH).map_or(0, fn(since) { since.as_millis() })
+        header := String.from("[\n")
+        header.push_str("{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":")
+        header.push_str("{pid},\"tid\":0,\"args\":{{\"name\":")
+        push_json_string(&header, process_name)
+        header.push_str("}}}},\n{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{functions}}}}},\n")
+        file.write_all(header.as_bytes())!
+        file.flush()!
+        Self { start: Instant.now(), pid: pid, functions: functions,
+            state: Mutex.new(TraceState { file: Val(^file), stacks: [:], progress_at: [:], line: String.new() }) }
+    }
+    // Rust: crates/jet-driver/src/Trace.rs:155
+    pub fn functions(self: &Self) -> Bool { self.functions }
+    // Rust: crates/jet-driver/src/Trace.rs:161
+    pub fn begin(self: &Self, kind: String, detail: String, index: I64, total: I64) {
+        ts :: self.micros()
+        thread_id :: current_thread()
+        guard := self.lock()
+        state :: &guard
+        if state.file.is_none() { return }
+        label :: if detail.is_empty() { kind } else { detail }
+        state.line.clear()
+        if !state.stacks.contains_key(thread_id) { push_thread_name(&state.line, self.pid, thread_id) }
+        push_event_head(&state.line, label, Val(kind), 'B', ts, self.pid, thread_id)
+        if index >= 0 { state.line.push_str(",\"args\":{{\"index\":{index},\"total\":{total}}}") }
+        state.line.push_str("},\n")
+        state.stacks.entry(thread_id).or_default().push(OpenSpan { kind: kind, label: label })
+        state.write_line()
+    }
+    // Rust: crates/jet-driver/src/Trace.rs:188
+    pub fn end(self: &Self, kind: String, items: I64) {
+        memory :: memory_kb()
+        ts :: self.micros()
+        thread_id :: current_thread()
+        guard := self.lock()
+        state :: &guard
+        if state.file.is_none() { return }
+        stack :: state.stacks.get_mut(thread_id) ?? return
+        position :: stack.iter().rposition(fn(span) { span.kind == kind }) ?? return
+        state.line.clear()
+        while stack.len() > position + 1 {
+            abandoned :: stack.pop().expect("open span above the closed one")
+            push_event_head(&state.line, abandoned.label, Val(abandoned.kind), 'E', ts, self.pid, thread_id)
+            state.line.push_str("},\n")
+        }
+        closed :: stack.pop().expect("closed span")
+        push_event_head(&state.line, closed.label, Val(closed.kind), 'E', ts, self.pid, thread_id)
+        state.line.push_str(",\"args\":{")
+        separator := ""
+        if items >= 0 { state.line.push_str("\"items\":{items}"); separator = "," }
+        if memory == Val((rss, peak)) { state.line.push_str("{separator}\"rss_kb\":{rss},\"peak_rss_kb\":{peak}") }
+        state.line.push_str("}},\n")
+        if closed.label == closed.kind {
+            if memory == Val((rss, peak)) {
+                push_event_head(&state.line, "memory", None, 'C', ts, self.pid, thread_id)
+                state.line.push_str(",\"args\":{{\"rss_mb\":{rss / 1024},\"peak_rss_mb\":{peak / 1024}}}}},\n")
+            }
+        }
+        state.write_line()
+    }
+    // Rust: crates/jet-driver/src/Trace.rs:234
+    pub fn progress(self: &Self, kind: String, done: I64, total: I64) {
+        now :: Instant.now()
+        thread_id :: current_thread()
+        guard := self.lock()
+        state :: &guard
+        if state.file.is_none() { return }
+        last_item :: total > 0 && done + 1 >= total
+        if state.progress_at.get_mut(kind) == Val(previous) {
+            if !last_item && now.duration_since(previous) < PROGRESS_INTERVAL { return }
+            previous = now
+        } else { state.progress_at.insert(kind, now) }
+        ts :: U64.try_from(now.saturating_duration_since(self.start).as_micros()).unwrap_or(U64.MAX)
+        state.line.clear()
+        push_event_head(&state.line, kind, None, 'C', ts, self.pid, thread_id)
+        state.line.push_str(",\"args\":{{\"done\":{done},\"total\":{total}}}}},\n")
+        state.write_line()
+    }
+    // Rust: crates/jet-driver/src/Trace.rs:258
+    fn micros(self: &Self) -> U64 { U64.try_from(self.start.elapsed().as_micros()).unwrap_or(U64.MAX) }
+    // Rust: crates/jet-driver/src/Trace.rs:262
+    fn lock(self: &Self) -> MutexGuard<TraceState> { self.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) }
+}
+impl TraceState {
+    // Rust: crates/jet-driver/src/Trace.rs:269
+    fn write_line(self: &Self) {
+        file :: self.file.as_mut() ?? return
+        if file.write_all(self.line.as_bytes()).and_then(fn() { file.flush() }) == Err(error) {
+            eprintln("jet: {TRACE_FILE_ENV}: write failed, trace stopped: {error}")
+            self.file = None
+        }
+    }
+}
+// Rust: crates/jet-driver/src/Trace.rs:278
+fn current_thread() -> U64 { THREAD.with(fn(value) { value }) }
+// Rust: crates/jet-driver/src/Trace.rs:282
+fn push_thread_name(line: &String, pid: U32, thread_id: U64) {
+    current :: thread.current()
+    name :: current.name().map_or_else(fn() { "thread {thread_id}" }, fn(name) { name.to_string() })
+    line.push_str("{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{pid},\"tid\":{thread_id},\"args\":{{\"name\":")
+    push_json_string(line, name)
+    line.push_str("}},\n")
+}
+// Rust: crates/jet-driver/src/Trace.rs:292
+fn push_event_head(line: &String, name: String, kind: String?, phase: Char, ts: U64, pid: U32, thread_id: U64) {
+    line.push_str("{\"name\":")
+    push_json_string(line, name)
+    if kind == Val(category) { line.push_str(",\"cat\":"); push_json_string(line, category) }
+    line.push_str(",\"ph\":\"{phase}\",\"ts\":{ts},\"pid\":{pid},\"tid\":{thread_id}")
+}
+// Rust: crates/jet-driver/src/Trace.rs:302
+fn push_json_string(line: &String, text: String) {
+    line.push('"')
+    for character in text.chars() {
+        if character == {
+            '"' -> line.push_str("\\\"")
+            '\\' -> line.push_str("\\\\")
+            '\n' -> line.push_str("\\n")
+            '\r' -> line.push_str("\\r")
+            '\t' -> line.push_str("\\t")
+            control if (control as U32) < 0x20 -> line.push_str("\\u{control as U32:04x}")
+            other -> line.push(other)
+        }
+    }
+    line.push('"')
+}
+// Rust: crates/jet-driver/src/Trace.rs:322
+fn memory_kb() -> (U64,U64)? {
+    status :: fs.read_to_string(OSPath.new("/proc/self/status")).ok() ?? return None
+    field :: fn(name: String) -> U64? {
+        rest :: status.lines().find_map(fn(line) { line.strip_prefix(name) }) ?? return None
+        trimmed := rest.trim() // #4303
+        value :: trimmed.strip_suffix("kB") ?? return None
+        number := value.trim() // #4303
+        number.parse::<U64>().ok()
+    }
+    rss :: field("VmRSS:") ?? return None
+    peak :: field("VmHWM:") ?? return None
+    Val((rss, peak))
+}

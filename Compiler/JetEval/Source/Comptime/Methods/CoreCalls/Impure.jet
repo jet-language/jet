@@ -1,1076 +1,273 @@
-// PORT-PENDING 0591 crates-jet-comptime-src-comptime-methods-core-calls-impure-module-group: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:1-1072
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::super::repl_process::{run_repl_process, REPL_PROCESS_OUTPUT_LIMIT_BYTES};
-//RS use super::*;
-//RS 
-//RS mod process_args_kernel {
-//RS     include!("../../../../../jet-codegen/src/Prelude/Core/ProcessArgs.rs");
-//RS }
-//RS // #1480: use the same line/byte stdin Prelude as AOT and JIT. This adapter
-//RS // supplies only the host-side IOError shape required by that shared source;
-//RS // line ownership and newline policy stay in `Prelude/CoreLib/Top/IoLineStream.rs`.
-//RS #[allow(dead_code)]
-//RS mod io_line_stream {
-//RS     use super::super::term_semantics::{
-//RS         jet_term_read_stdin_line, jet_term_read_text, jet_term_write_stdout,
-//RS     };
-//RS 
-//RS     fn jet_fault_should_fail(_operation: &str) -> bool {
-//RS         false
-//RS     }
-//RS 
-//RS     #[allow(dead_code)]
-//RS     mod jet_std {
-//RS         #[derive(Debug)]
-//RS         pub enum IOOperation {
-//RS             Read,
-//RS             Write,
-//RS             Flush,
-//RS         }
-//RS 
-//RS         #[derive(Debug)]
-//RS         pub struct IOContext {
-//RS             pub operation: IOOperation,
-//RS             pub resource: Option<String>,
-//RS             pub os_code: Option<i64>,
-//RS             pub cause: Option<String>,
-//RS         }
-//RS 
-//RS         #[derive(Debug)]
-//RS         pub enum IOError {
-//RS             Other(IOContext),
-//RS         }
-//RS 
-//RS         impl IOError {
-//RS             pub fn other(
-//RS                 operation: IOOperation,
-//RS                 resource: Option<String>,
-//RS                 cause: impl ToString,
-//RS             ) -> Self {
-//RS                 Self::Other(IOContext {
-//RS                     operation,
-//RS                     resource,
-//RS                     os_code: None,
-//RS                     cause: Some(cause.to_string()),
-//RS                 })
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     include!("../../../../../jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs");
-//RS 
-//RS     pub(super) fn readline() -> Result<String, std::io::Error> {
-//RS         jet_std_io_readline()
-//RS             .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, format!("{error:?}")))
-//RS     }
-//RS 
-//RS     pub(super) fn input(prompt: Option<&String>) -> Result<String, std::io::Error> {
-//RS         jet_std_io_input(prompt)
-//RS             .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, format!("{error:?}")))
-//RS     }
-//RS 
-//RS     pub(super) fn read_all_input() -> Result<String, std::io::Error> {
-//RS         jet_std_io_read_all_input()
-//RS             .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, format!("{error:?}")))
-//RS     }
-//RS }
-//RS fn log_string_arg<'a>(value: &'a CtValue, span: Span) -> Result<&'a String, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Str(value) => Ok(value),
-//RS         _ => Err(unsupported("core.log expects a String argument", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn log_bool_arg(value: &CtValue, span: Span) -> Result<bool, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Bool(value) => Ok(*value),
-//RS         _ => Err(unsupported("core.log expects a Bool argument", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn log_field_arg(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<super::log_kernel::jet_std::LogField, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("core.log expects a LogField", span));
-//RS     };
-//RS     if type_name != "LogField" {
-//RS         return Err(unsupported("core.log expects a LogField", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find_map(|(field_name, value)| (field_name == name).then_some(value))
-//RS             .ok_or_else(|| unsupported("malformed LogField", span))
-//RS     };
-//RS     let key = log_string_arg(field("key")?, span)?.clone();
-//RS     let value = log_string_arg(field("value")?, span)?.clone();
-//RS     let kind = log_string_arg(field("kind")?, span)?.clone();
-//RS     let redacted = log_bool_arg(field("redacted")?, span)?;
-//RS     Ok(super::log_kernel::jet_std::LogField {
-//RS         key,
-//RS         value,
-//RS         kind,
-//RS         redacted,
-//RS     })
-//RS }
-//RS 
-//RS fn log_fields_arg(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<Vec<super::log_kernel::jet_std::LogField>, Diagnostic> {
-//RS     let CtValue::List(values) = value else {
-//RS         return Err(unsupported("core.log expects a List[LogField]", span));
-//RS     };
-//RS     values
-//RS         .iter()
-//RS         .map(|value| log_field_arg(value, span))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn log_span_arg(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<super::log_kernel::jet_std::LogSpan, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("core.log expects a LogSpan", span));
-//RS     };
-//RS     if type_name != "LogSpan" {
-//RS         return Err(unsupported("core.log expects a LogSpan", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find_map(|(field_name, value)| (field_name == name).then_some(value))
-//RS             .ok_or_else(|| unsupported("malformed LogSpan", span))
-//RS     };
-//RS     let id = as_int(field("id")?, span)?;
-//RS     let name = log_string_arg(field("name")?, span)?.clone();
-//RS     Ok(super::log_kernel::jet_std::LogSpan { id, name })
-//RS }
-//RS 
-//RS fn ct_log_field(value: super::log_kernel::jet_std::LogField) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "LogField".to_string(),
-//RS         fields: vec![
-//RS             ("key".to_string(), CtValue::Str(value.key)),
-//RS             ("value".to_string(), CtValue::Str(value.value)),
-//RS             ("kind".to_string(), CtValue::Str(value.kind)),
-//RS             ("redacted".to_string(), CtValue::Bool(value.redacted)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn ct_log_span(value: super::log_kernel::jet_std::LogSpan) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "LogSpan".to_string(),
-//RS         fields: vec![
-//RS             ("id".to_string(), CtValue::Int(value.id)),
-//RS             ("name".to_string(), CtValue::Str(value.name)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS /// D-CTEFFECT1: execute a Tier-2 ambient comptime I/O effect (or REPL sandbox I/O).
-//RS /// Only called when `impure_depth > 0` and `gates` (comptime) or from the
-//RS /// runtime TIR evaluator used by `jet run` deopt (#778).
-//RS pub fn apply_impure_core_call(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     base_dir: &std::path::Path,
-//RS     sink: Option<&mut super::super::super::Interpreter::DevSink>,
-//RS     repl_mode: bool,
-//RS     pinned_executable: Option<&std::fs::File>,
-//RS     verified_root: Option<&std::fs::File>,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     apply_impure_core_call_with_type_args(
-//RS         module,
-//RS         method,
-//RS         args,
-//RS         span,
-//RS         base_dir,
-//RS         sink,
-//RS         repl_mode,
-//RS         pinned_executable,
-//RS         verified_root,
-//RS         &[],
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS pub fn apply_impure_core_call_with_type(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     base_dir: &std::path::Path,
-//RS     sink: Option<&mut super::super::super::Interpreter::DevSink>,
-//RS     repl_mode: bool,
-//RS     pinned_executable: Option<&std::fs::File>,
-//RS     verified_root: Option<&std::fs::File>,
-//RS     resolved_ret: Option<&Type>,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     apply_impure_core_call_with_type_args(
-//RS         module,
-//RS         method,
-//RS         args,
-//RS         span,
-//RS         base_dir,
-//RS         sink,
-//RS         repl_mode,
-//RS         pinned_executable,
-//RS         verified_root,
-//RS         &[],
-//RS         resolved_ret,
-//RS     )
-//RS }
-//RS 
-//RS pub fn apply_impure_core_call_with_type_args(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     base_dir: &std::path::Path,
-//RS     sink: Option<&mut super::super::super::Interpreter::DevSink>,
-//RS     repl_mode: bool,
-//RS     pinned_executable: Option<&std::fs::File>,
-//RS     verified_root: Option<&std::fs::File>,
-//RS     type_args: &[Type],
-//RS     resolved_ret: Option<&Type>,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let args = super::normalize_path_args(module, method, args, span)?;
-//RS     super::validate_core_call_projection(
-//RS         module,
-//RS         method,
-//RS         args.len(),
-//RS         jet_foundation::Syntax::CoreCallCoverage::COMPTIME,
-//RS         span,
-//RS     )?;
-//RS     super::validate_interpreter_route(module, method, span)?;
-//RS     // The registry route selects the adapter. Ambient rows cross the host
-//RS     // boundary; pure and typed-intrinsic rows stay on their shared evaluator
-//RS     // paths. Unknown rows retain the legacy ambient hook.
-//RS     let mut sink = sink;
-//RS     let route = jet_foundation::Syntax::core_call(module, method).map(|row| row.interpreter_route);
-//RS     if route.is_none()
-//RS         || matches!(
-//RS             route,
-//RS             Some(jet_foundation::Syntax::CoreCallInterpreterRoute::Ambient)
-//RS         )
-//RS     {
-//RS         if let Some(result) = crate::Comptime::try_core_call_typed_with_sink(
-//RS             module,
-//RS             method,
-//RS             args.clone(),
-//RS             span,
-//RS             resolved_ret.cloned(),
-//RS             sink.as_deref_mut(),
-//RS         ) {
-//RS             return result;
-//RS         }
-//RS     }
-//RS     // Effects are already approved at this entry point. Reuse registered pure
-//RS     // constructors even when their module carries an ambient effect, such as UI.
-//RS     if let Some(result) = super::apply_core_pure_call(module, method, &args, span) {
-//RS         return result;
-//RS     }
-//RS     if module == "core.handle"
-//RS         && matches!(
-//RS             method,
-//RS             "path.from"
-//RS                 | "path.home"
-//RS                 | "path.join"
-//RS                 | "path.to_string"
-//RS                 | "path.parent"
-//RS                 | "path.extension"
-//RS                 | "path.stem"
-//RS                 | "path.normalize"
-//RS                 | "path.is_within"
-//RS                 | "path.walk"
-//RS         )
-//RS     {
-//RS         return super::apply_path_call(method, &args, span);
-//RS     }
-//RS     let one = |i: usize| {
-//RS         args.get(i).ok_or_else(|| {
-//RS             unsupported(
-//RS                 &format!("`{}.{}` (wrong number of arguments)", module, method),
-//RS                 span,
-//RS             )
-//RS         })
-//RS     };
-//RS     if module == "core.event"
-//RS         && matches!(
-//RS             method,
-//RS             "scope"
-//RS                 | "policy_sync"
-//RS                 | "new"
-//RS                 | "with_policy"
-//RS                 | "hook"
-//RS                 | "decision_hook"
-//RS                 | "async_result"
-//RS         )
-//RS     {
-//RS         return match method {
-//RS             "scope" => Ok(crate::Comptime::core_event_scope()),
-//RS             "policy_sync" => Ok(crate::Comptime::core_event_policy_sync()),
-//RS             "new" => Ok(crate::Comptime::core_event_new()),
-//RS             "with_policy" => Ok(crate::Comptime::core_event_with_policy(one(0)?.clone())),
-//RS             "hook" => Ok(crate::Comptime::core_event_hook(one(0)?.clone())),
-//RS             "decision_hook" => Ok(crate::Comptime::core_event_decision_hook(one(0)?.clone())),
-//RS             "async_result" => {
-//RS                 crate::Comptime::core_event_async_result(one(0)?, one(1)?, span)
-//RS             }
-//RS             _ => unreachable!("core.event constructor route was not selected"),
-//RS         };
-//RS     }
-//RS     if let Some(result) = super::apply_raylib_core_call(module, method, &args, span) {
-//RS         return result;
-//RS     }
-//RS     match (module, method) {
-//RS         // Every registered `core.log` row uses the shared Log.rs kernel. The
-//RS         // adapter only marshals erased CtValues; filtering, sampling, trace
-//RS         // context, formatting, sinks, and telemetry remain in that kernel.
-//RS         ("core.log", "debug" | "info" | "warn" | "error" | "critical" | "fatal") => {
-//RS             let message = log_string_arg(one(0)?, span)?;
-//RS             match method {
-//RS                 "debug" => super::log_kernel::debug(message),
-//RS                 "info" => super::log_kernel::info(message),
-//RS                 "warn" => super::log_kernel::warn(message),
-//RS                 "error" => super::log_kernel::error(message),
-//RS                 "critical" => super::log_kernel::critical(message),
-//RS                 "fatal" => super::log_kernel::fatal(message),
-//RS                 _ => unreachable!("core.log level row was not selected"),
-//RS             }
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.log", "debug_fields" | "info_fields" | "warn_fields" | "error_fields") => {
-//RS             let message = log_string_arg(one(0)?, span)?;
-//RS             let fields = log_fields_arg(one(1)?, span)?;
-//RS             match method {
-//RS                 "debug_fields" => super::log_kernel::debug_fields(message, &fields),
-//RS                 "info_fields" => super::log_kernel::info_fields(message, &fields),
-//RS                 "warn_fields" => super::log_kernel::warn_fields(message, &fields),
-//RS                 "error_fields" => super::log_kernel::error_fields(message, &fields),
-//RS                 _ => unreachable!("core.log fields row was not selected"),
-//RS             }
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.log", "field") => {
-//RS             let key = log_string_arg(one(0)?, span)?;
-//RS             let value = log_string_arg(one(1)?, span)?;
-//RS             Ok(ct_log_field(super::log_kernel::field(key, value)))
-//RS         }
-//RS         ("core.log", "int") => {
-//RS             let key = log_string_arg(one(0)?, span)?;
-//RS             let value = as_int(one(1)?, span)?;
-//RS             Ok(ct_log_field(super::log_kernel::int(key, value)))
-//RS         }
-//RS         ("core.log", "float") => {
-//RS             let key = log_string_arg(one(0)?, span)?;
-//RS             let value = super::as_float(one(1)?, span)?;
-//RS             Ok(ct_log_field(super::log_kernel::float(key, value)))
-//RS         }
-//RS         ("core.log", "bool") => {
-//RS             let key = log_string_arg(one(0)?, span)?;
-//RS             let value = log_bool_arg(one(1)?, span)?;
-//RS             Ok(ct_log_field(super::log_kernel::bool_field(key, value)))
-//RS         }
-//RS         ("core.log", "redact") => {
-//RS             let key = log_string_arg(one(0)?, span)?;
-//RS             Ok(ct_log_field(super::log_kernel::redact(key)))
-//RS         }
-//RS         ("core.log", "counter") => {
-//RS             let name = log_string_arg(one(0)?, span)?;
-//RS             let value = as_int(one(1)?, span)?;
-//RS             Ok(ct_log_field(super::log_kernel::counter(name, value)))
-//RS         }
-//RS         ("core.log", "span") => {
-//RS             let name = log_string_arg(one(0)?, span)?;
-//RS             Ok(ct_log_span(super::log_kernel::span(name)))
-//RS         }
-//RS         ("core.log", "enter" | "close") => {
-//RS             let span_value = log_span_arg(one(0)?, span)?;
-//RS             match method {
-//RS                 "enter" => super::log_kernel::enter(&span_value),
-//RS                 "close" => super::log_kernel::close(&span_value),
-//RS                 _ => unreachable!("core.log span row was not selected"),
-//RS             }
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.log", "enabled") => {
-//RS             let level = log_string_arg(one(0)?, span)?;
-//RS             Ok(CtValue::Bool(super::log_kernel::enabled(level)))
-//RS         }
-//RS         ("core.log", "disable") => {
-//RS             super::log_kernel::disable();
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.log", "flush") => {
-//RS             super::log_kernel::flush();
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.log", "set_sink") => {
-//RS             let kind = log_string_arg(one(0)?, span)?;
-//RS             let path = log_string_arg(one(1)?, span)?;
-//RS             super::log_kernel::set_sink(kind, path);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.log", "sample_every") => {
-//RS             super::log_kernel::sample_every(as_int(one(0)?, span)?);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.log", "otlp_file") => {
-//RS             super::log_kernel::otlp_file(log_string_arg(one(0)?, span)?);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.log", "set_level") => {
-//RS             super::log_kernel::set_level(log_string_arg(one(0)?, span)?);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.log", "setup") => {
-//RS             super::log_kernel::setup(log_string_arg(one(0)?, span)?);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.log", "set_trace_id") => {
-//RS             super::log_kernel::set_trace_id(as_string(one(0)?, span)?);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         // D-FILES-SCOPE1: keep the Authority identity in the opaque handle;
-//RS         // only the shared Prelude read adapter interprets its resource roots.
-//RS         ("core.files", "scope") => {
-//RS             let authority = one(0)?;
-//RS             if super::super::super::Builtins::authority_holds(authority).is_none() {
-//RS                 return Err(unsupported(
-//RS                     "core.files.scope expects an Authority",
-//RS                     span,
-//RS                 ));
-//RS             }
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: "FileScope".to_string(),
-//RS                 fields: vec![("authority".to_string(), authority.clone())],
-//RS             })
-//RS         }
-//RS         // ── D-I9 `core.files`: marshal to the ONE Prelude kernel ───────────
-//RS         // The filesystem Prelude fragments own every operation below — fault
-//RS         // injection, the recursive/non-recursive split, and the `IOError`
-//RS         // shape — through the same `jet_std_fs_*` symbols AOT emits and the
-//RS         // resident Cranelift host calls. Pass the marshalled path through
-//RS         // unchanged: the shared kernel and native tiers resolve relative paths
-//RS         // from the process working directory. The hand-written per-member arms
-//RS         // it replaces are why `create_dir_all` and `remove_all` had no arm at
-//RS         // all: a shipped example (`io/watcher`) passed sema and then died at
-//RS         // run time on E0956 while AOT ran the same source.
-//RS         ("core.files", "absolute") => {
-//RS             let path = as_string(one(0)?, span)?;
-//RS             use crate::Comptime::TextLite as files_kernel;
-//RS             Ok(match files_kernel::fs_absolute(path) {
-//RS                 Ok(path) => CtValue::Present(Box::new(CtValue::Str(path))),
-//RS                 Err(error) => CtValue::failed(Box::new(error)),
-//RS             })
-//RS         }
-//RS         ("core.files", "open" | "create" | "append") => {
-//RS             let path = as_string(one(0)?, span)?;
-//RS             use crate::Comptime::TextLite as files_kernel;
-//RS             let result = match method {
-//RS                 "open" => files_kernel::fs_open(path),
-//RS                 "create" => files_kernel::fs_create(path),
-//RS                 "append" => files_kernel::fs_append_stream(path),
-//RS                 _ => unreachable!("streaming file route is closed"),
-//RS             };
-//RS             Ok(match result {
-//RS                 Ok(value) => CtValue::Present(Box::new(value)),
-//RS                 Err(error) => CtValue::failed(Box::new(error)),
-//RS             })
-//RS         }
-//RS 
-//RS         (
-//RS             "core.files",
-//RS             "read" | "read_bytes" | "write" | "write_bytes" | "append_all" | "exists" | "is_dir"
-//RS             | "create_dir" | "create_dir_all" | "remove" | "remove_dir" | "remove_all"
-//RS             | "list_dir" | "copy" | "copy_dir" | "rename" | "symlink" | "hard_link"
-//RS             | "read_link" | "canonicalize" | "glob" | "walk" | "walk_parallel"
-//RS             | "walk_files" | "stat" | "fsync" | "set_mode",
-//RS         ) => {
-//RS             let path_arg = |value: &CtValue| -> Result<String, Diagnostic> {
-//RS                 Ok(as_string(value, span)?.to_string())
-//RS             };
-//RS             let path = path_arg(one(0)?)?;
-//RS             let ignore_name = if matches!(method, "walk" | "walk_parallel" | "walk_files") {
-//RS                 // `ignore: String?` arrives as the checked Option carrier:
-//RS                 // absent is `Failed(Clean)`, a given name is `Present(Str)`.
-//RS                 match args.get(1) {
-//RS                     None | Some(CtValue::Failed(CtReport::Clean(_))) => None,
-//RS                     Some(CtValue::Present(name)) => Some(as_string(name, span)?.to_string()),
-//RS                     Some(name) => Some(as_string(name, span)?.to_string()),
-//RS                 }
-//RS             } else {
-//RS                 None
-//RS             };
-//RS             let unit = |result: Result<(), CtValue>| match result {
-//RS                 Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-//RS                 Err(error) => CtValue::failed(Box::new(error)),
-//RS             };
-//RS             let present = |result: Result<CtValue, CtValue>| match result {
-//RS                 Ok(value) => CtValue::Present(Box::new(value)),
-//RS                 Err(error) => CtValue::failed(Box::new(error)),
-//RS             };
-//RS             use crate::Comptime::TextLite as files_kernel;
-//RS             Ok(match method {
-//RS                 "read" => present(files_kernel::fs_read(&path).map(CtValue::Str)),
-//RS                 "read_bytes" => present(files_kernel::fs_read_bytes(&path).map(CtValue::Bytes)),
-//RS                 "write_bytes" => {
-//RS                     let bytes = match one(1)? {
-//RS                         CtValue::Bytes(bytes) => bytes.clone(),
-//RS                         CtValue::List(values) => values
-//RS                             .iter()
-//RS                             .map(|value| match value {
-//RS                                 CtValue::Int(byte) => u8::try_from(*byte)
-//RS                                     .map_err(|_| unsupported("core.files.write_bytes received an invalid U8", span)),
-//RS                                 _ => Err(unsupported("core.files.write_bytes expects [U8]", span)),
-//RS                             })
-//RS                             .collect::<Result<Vec<_>, _>>()?,
-//RS                         _ => return Err(unsupported("core.files.write_bytes expects [U8]", span)),
-//RS                     };
-//RS                     unit(files_kernel::fs_write_bytes(&path, &bytes))
-//RS                 }
-//RS                 // D-FILES-APPEND1=A: whole-file one-shot is `append_all` (not
-//RS                 // `append`, which names the streaming handle's method).
-//RS                 "write" => unit(files_kernel::fs_write(&path, as_string(one(1)?, span)?)),
-//RS                 "append_all" => unit(files_kernel::fs_append(&path, as_string(one(1)?, span)?)),
-//RS                 "fsync" => unit(files_kernel::fs_fsync(&path)),
-//RS                 "set_mode" => unit(files_kernel::fs_set_mode(&path, as_int(one(1)?, span)?)),
-//RS                 "exists" => CtValue::Bool(files_kernel::fs_exists(&path)),
-//RS                 "is_dir" => CtValue::Bool(files_kernel::fs_is_dir(&path)),
-//RS                 "stat" => present(files_kernel::fs_stat(&path)),
-//RS                 "create_dir" => unit(files_kernel::fs_create_dir(&path)),
-//RS                 "create_dir_all" => unit(files_kernel::fs_create_dir_all(&path)),
-//RS                 "remove" => unit(files_kernel::fs_remove(&path)),
-//RS                 "remove_dir" => unit(files_kernel::fs_remove_dir(&path)),
-//RS                 "remove_all" => unit(files_kernel::fs_remove_all(&path)),
-//RS                 "copy" => unit(files_kernel::fs_copy(&path, &path_arg(one(1)?)?)),
-//RS                 "copy_dir" => unit(files_kernel::fs_copy_dir(&path, &path_arg(one(1)?)?)),
-//RS                 "rename" => unit(files_kernel::fs_rename(&path, &path_arg(one(1)?)?)),
-//RS                 "symlink" => unit(files_kernel::fs_symlink(&path, &path_arg(one(1)?)?)),
-//RS                 "hard_link" => unit(files_kernel::fs_hard_link(&path, &path_arg(one(1)?)?)),
-//RS                 "read_link" => present(files_kernel::fs_read_link(&path).map(CtValue::Str)),
-//RS                 "canonicalize" => present(files_kernel::fs_canonicalize(&path).map(CtValue::Str)),
-//RS                 "glob" => present(files_kernel::fs_glob(&path).map(|paths| {
-//RS                     CtValue::List(paths.into_iter().map(CtValue::Str).collect())
-//RS                 })),
-//RS                 "walk" | "walk_parallel" => {
-//RS                     let walk_entries = |entries: Vec<(String, String, bool, i64)>| {
-//RS                         CtValue::List(
-//RS                             entries
-//RS                                 .into_iter()
-//RS                                 .map(|(path, relative, is_dir, depth)| CtValue::Struct {
-//RS                                     type_name: "WalkEntry".to_string(),
-//RS                                     fields: vec![
-//RS                                         ("path".to_string(), CtValue::Str(path)),
-//RS                                         ("relative".to_string(), CtValue::Str(relative)),
-//RS                                         ("is_dir".to_string(), CtValue::Bool(is_dir)),
-//RS                                         ("depth".to_string(), CtValue::Int(depth)),
-//RS                                     ],
-//RS                                 })
-//RS                                 .collect(),
-//RS                         )
-//RS                     };
-//RS                     present(
-//RS                         files_kernel::fs_walk_parallel_with_ignore(
-//RS                             &path,
-//RS                             ignore_name.as_deref(),
-//RS                         )
-//RS                         .map(walk_entries),
-//RS                     )
-//RS                 }
-//RS                 "walk_files" => {
-//RS                     let walk_entries = |entries: Vec<(String, String, bool, i64)>| {
-//RS                         CtValue::List(
-//RS                             entries
-//RS                                 .into_iter()
-//RS                                 .map(|(path, relative, is_dir, depth)| CtValue::Struct {
-//RS                                     type_name: "WalkEntry".to_string(),
-//RS                                     fields: vec![
-//RS                                         ("path".to_string(), CtValue::Str(path)),
-//RS                                         ("relative".to_string(), CtValue::Str(relative)),
-//RS                                         ("is_dir".to_string(), CtValue::Bool(is_dir)),
-//RS                                         ("depth".to_string(), CtValue::Int(depth)),
-//RS                                     ],
-//RS                                 })
-//RS                                 .collect(),
-//RS                         )
-//RS                     };
-//RS                     present(
-//RS                         files_kernel::fs_walk_files_parallel_with_ignore(
-//RS                             &path,
-//RS                             ignore_name.as_deref(),
-//RS                         )
-//RS                         .map(walk_entries),
-//RS                     )
-//RS                 }
-//RS                 // D-LSDIR1: the kernel returns rows already sorted by name.
-//RS                 _ => present(files_kernel::fs_list_dir(&path).map(|entries| {
-//RS                     CtValue::List(
-//RS                         entries
-//RS                             .into_iter()
-//RS                             .map(|(name, path, is_dir)| CtValue::Struct {
-//RS                                 type_name: "DirEntry".to_string(),
-//RS                                 fields: vec![
-//RS                                     ("name".to_string(), CtValue::Str(name)),
-//RS                                     ("path".to_string(), CtValue::Str(path)),
-//RS                                     ("is_dir".to_string(), CtValue::Bool(is_dir)),
-//RS                                 ],
-//RS                             })
-//RS                             .collect(),
-//RS                     )
-//RS                 })),
-//RS             })
-//RS         }
-//RS         ("core.sys", "get") => {
-//RS             let key = as_string(one(0)?, span)?;
-//RS             match jet_foundation::CheckReads::env_var(&key) {
-//RS                 Some(v) => Ok(CtValue::Present(Box::new(CtValue::Str(v)))),
-//RS                 None => Ok(CtValue::absent(crate::AST::Type::String)),
-//RS             }
-//RS         }
-//RS         ("core.sys", "set") => {
-//RS             let key = as_string(one(0)?, span)?;
-//RS             let val = as_string(one(1)?, span)?;
-//RS             std::env::set_var(key, val);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.sys", "current_dir") => match std::env::current_dir() {
-//RS             Ok(p) => Ok(CtValue::Present(Box::new(CtValue::Str(
-//RS                 p.to_string_lossy().into_owned(),
-//RS             )))),
-//RS             Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-//RS                 IoErrorOperation::Resolve,
-//RS                 ".",
-//RS                 e,
-//RS             )))),
-//RS         },
-//RS         ("core.sys", "home_dir") => Ok(
-//RS             match jet_foundation::CheckReads::env_var("HOME")
-//RS                 .or_else(|| jet_foundation::CheckReads::env_var("USERPROFILE"))
-//RS             {
-//RS                 Some(v) => CtValue::Present(Box::new(CtValue::Str(v))),
-//RS                 None => CtValue::absent(crate::AST::Type::String),
-//RS             },
-//RS         ),
-//RS         ("core.process", "argv") => {
-//RS             // Prefer argv installed for this jet run/deopt. Never fall back to
-//RS             // the host process argv — `cargo test` flags would leak into output.
-//RS             let argv = super::super::super::Interpreter::runtime_argv()
-//RS                 .unwrap_or_else(|| vec!["jet".to_string()]);
-//RS             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
-//RS         }
-//RS         ("core.process", "args") => {
-//RS             // Keep the projection in the shared Prelude. The returned list is
-//RS             // newly allocated on every call, just like the native adapters.
-//RS             let argv = super::super::super::Interpreter::runtime_argv()
-//RS                 .unwrap_or_else(|| vec!["jet".to_string()]);
-//RS             Ok(CtValue::List(
-//RS                 process_args_kernel::jet_process_args_view(argv)
-//RS                     .into_iter()
-//RS                     .map(CtValue::Str)
-//RS                     .collect(),
-//RS             ))
-//RS         }
-//RS         ("core.term", "progress") => {
-//RS             let Some(source) = args.first() else {
-//RS                 return Err(unsupported("`core.term.progress` needs a source", span));
-//RS             };
-//RS             let CtValue::Str(text) = source else {
-//RS                 return Err(unsupported(
-//RS                     "`core.term.progress` expects a String source",
-//RS                     span,
-//RS                 ));
-//RS             };
-//RS             if args.len() != 1 {
-//RS                 return Err(unsupported(
-//RS                     "`core.term.progress` text form takes one argument",
-//RS                     span,
-//RS                 ));
-//RS             }
-//RS             if let Some(sink) = sink {
-//RS                 if !super::term_semantics::jet_term_progress_enabled() {
-//RS                     return Ok(CtValue::Unit);
-//RS                 }
-//RS                 let tty = super::term_semantics::jet_term_stderr_is_terminal();
-//RS                 let frame = super::term_semantics::jet_term_progress_frame(tty, text);
-//RS                 if super::term_semantics::jet_term_stdout_is_program_stream() {
-//RS                     super::term_semantics::jet_term_write_stderr(&frame, true).map_err(|error| {
-//RS                         unsupported(&format!("write stderr: {error}"), span)
-//RS                     })?;
-//RS                 } else {
-//RS                     sink.stderr.push_str(&frame);
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         // The static Prelude `print` row is `(text, flush)`. Qualified
-//RS         // `core.term.print` calls arrive with one already-joined text value;
-//RS         // preserve their variadic display behavior without treating the
-//RS         // canonical flush control as payload.
-//RS         ("core.term", "print") => {
-//RS             let (text, flush) = match args.as_slice() {
-//RS                 [value, CtValue::Bool(flush)] => (
-//RS                     display_core_pure_value(value).unwrap_or_else(|| value.jet_show()),
-//RS                     *flush,
-//RS                 ),
-//RS                 _ => (
-//RS                     args.iter()
-//RS                         .map(|v| display_core_pure_value(v).unwrap_or_else(|| v.jet_show()))
-//RS                         .collect::<Vec<_>>()
-//RS                         .join("\n"),
-//RS                     true,
-//RS                 ),
-//RS             };
-//RS             if let Some(s) = sink {
-//RS                 let frame = super::term_semantics::jet_term_print_frame(&text);
-//RS                 // A REPL/notebook caller consumes this sink as its transcript
-//RS                 // (a cell projects it into its own output bundle), so the host
-//RS                 // process having a terminal must not divert the frame away from
-//RS                 // it — the same rule the TIR evaluator's `write_print` states.
-//RS                 if !repl_mode && super::term_semantics::jet_term_stdout_is_program_stream() {
-//RS                     let _ = super::term_semantics::jet_term_write_stdout(&frame, flush);
-//RS                 } else {
-//RS                     s.stdout.push_str(&frame);
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.term", "eprint") => {
-//RS             let text = args
-//RS                 .iter()
-//RS                 .map(|v| display_core_pure_value(v).unwrap_or_else(|| v.jet_show()))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join("\n");
-//RS             if let Some(s) = sink {
-//RS                 let frame = super::term_semantics::jet_term_print_frame(&text);
-//RS                 if !repl_mode && super::term_semantics::jet_term_stderr_is_program_stream() {
-//RS                     let _ = super::term_semantics::jet_term_write_stderr(&frame, true);
-//RS                 } else {
-//RS                     s.stderr.push_str(&frame);
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.term", "readline") => {
-//RS             if repl_mode {
-//RS                 Err(repl_native_module_diag("core.term", method, span))
-//RS             } else {
-//RS                 match io_line_stream::readline() {
-//RS                     Ok(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
-//RS                     Err(error) => Ok(CtValue::failed(Box::new(io_error_value(
-//RS                         IoErrorOperation::Read,
-//RS                         "stdin",
-//RS                         error,
-//RS                     )))),
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         ("core.term", "input") => {
-//RS             if repl_mode {
-//RS                 Err(repl_native_module_diag("core.term", method, span))
-//RS             } else {
-//RS                 let prompt = match args.as_slice() {
-//RS                     [CtValue::Failed(CtReport::Clean(_))] => None,
-//RS                     [CtValue::Str(prompt)] => Some(prompt),
-//RS                     _ => {
-//RS                         return Err(unsupported(
-//RS                             "core.term.input expects one optional String prompt",
-//RS                             span,
-//RS                         ))
-//RS                     }
-//RS                 };
-//RS                 match io_line_stream::input(prompt) {
-//RS                     Ok(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
-//RS                     Err(error) => Ok(CtValue::failed(Box::new(io_error_value(
-//RS                         IoErrorOperation::Read,
-//RS                         "stdin",
-//RS                         error,
-//RS                     )))),
-//RS                 }
-//RS             }
-//RS         }
-//RS         ("core.term", "read_all_input") => {
-//RS             if repl_mode {
-//RS                 Err(repl_native_module_diag("core.term", method, span))
-//RS             } else {
-//RS                 if !args.is_empty() {
-//RS                     return Err(unsupported(
-//RS                         "core.term.read_all_input expects no arguments",
-//RS                         span,
-//RS                     ));
-//RS                 }
-//RS                 match io_line_stream::read_all_input() {
-//RS                     Ok(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
-//RS                     Err(error) => Ok(CtValue::failed(Box::new(io_error_value(
-//RS                         IoErrorOperation::Read,
-//RS                         "stdin",
-//RS                         error,
-//RS                     )))),
-//RS                 }
-//RS             }
-//RS         }
-//RS         ("core.term", "stdin") if repl_mode => Err(repl_native_module_diag("core.term", method, span)),
-//RS         ("core.term", "stdin") => Ok(CtValue::Struct {
-//RS             type_name: "StdinHandle".to_string(),
-//RS             fields: vec![],
-//RS         }),
-//RS         // D-COREIO1=A: the process stream handles are tokens; their writes go
-//RS         // through the native `jet_std_io_{stdout,stderr}_*` rows.
-//RS         ("core.term", "stdout" | "stderr") if repl_mode => {
-//RS             Err(repl_native_module_diag("core.term", method, span))
-//RS         }
-//RS         ("core.term", "stdout") => Ok(CtValue::Struct {
-//RS             type_name: "Stdout".to_string(),
-//RS             fields: vec![("fd".to_string(), CtValue::Int(1))],
-//RS         }),
-//RS         ("core.term", "stderr") => Ok(CtValue::Struct {
-//RS             type_name: "Stderr".to_string(),
-//RS             fields: vec![("fd".to_string(), CtValue::Int(2))],
-//RS         }),
-//RS         ("core.process", "exit") => {
-//RS             let code = match one(0)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => 0,
-//RS             };
-//RS             // In-process interpreter/deopt must not kill the host (cargo test,
-//RS             // jet dev). Soft-exit via the sink; bare comptime keeps hard exit.
-//RS             if let Some(s) = sink {
-//RS                 s.exit_code = Some(code as i32);
-//RS                 return Err(Diagnostic::soft_exit(
-//RS                     code.to_string(),
-//RS                     "process.exit requested".to_string(),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS             std::process::exit(code as i32);
-//RS         }
-//RS         ("core.process", "run") => {
-//RS             let cmd = match one(0)? {
-//RS                 CtValue::List(items) => items.iter().map(|v| v.jet_show()).collect::<Vec<_>>(),
-//RS                 _ => {
-//RS                     return Err(unsupported(
-//RS                         "process.run expects a list of command words",
-//RS                         span,
-//RS                     ))
-//RS                 }
-//RS             };
-//RS             if cmd.is_empty() {
-//RS                 return Ok(CtValue::failed(Box::new(CtValue::Struct {
-//RS                     type_name: "IOError".to_string(),
-//RS                     fields: vec![(
-//RS                         "message".to_string(),
-//RS                         CtValue::Str("process.run needs at least one command word".to_string()),
-//RS                     )],
-//RS                 })));
-//RS             }
-//RS             match run_repl_process(
-//RS                 &cmd,
-//RS                 base_dir,
-//RS                 pinned_executable,
-//RS                 verified_root,
-//RS                 std::time::Duration::from_secs(30),
-//RS             ) {
-//RS                 Ok(out) => Ok(CtValue::Present(Box::new(CtValue::Struct {
-//RS                     type_name: "ProcessReceipt".to_string(),
-//RS                     fields: vec![
-//RS                         (
-//RS                             "code".to_string(),
-//RS                             CtValue::Int(out.status.code().unwrap_or(-1) as i64),
-//RS                         ),
-//RS                         (
-//RS                             "output".to_string(),
-//RS                             CtValue::Str(String::from_utf8_lossy(&out.stdout).into_owned()),
-//RS                         ),
-//RS                         (
-//RS                             "errors".to_string(),
-//RS                             CtValue::Str(String::from_utf8_lossy(&out.stderr).into_owned()),
-//RS                         ),
-//RS                         (
-//RS                             "signal".to_string(),
-//RS                             CtValue::absent(Type::Int),
-//RS                         ),
-//RS                         (
-//RS                             "success".to_string(),
-//RS                             CtValue::Bool(out.status.success()),
-//RS                         ),
-//RS                         (
-//RS                             "timed_out".to_string(),
-//RS                             CtValue::Bool(false),
-//RS                         ),
-//RS                         (
-//RS                             "executable_identity".to_string(),
-//RS                             CtValue::Str(cmd.first().cloned().unwrap_or_default()),
-//RS                         ),
-//RS                         (
-//RS                             "argv".to_string(),
-//RS                             CtValue::List(cmd.iter().cloned().map(CtValue::Str).collect()),
-//RS                         ),
-//RS                         ("input_digest".to_string(), CtValue::Str(String::new())),
-//RS                         ("policy_digest".to_string(), CtValue::Str(String::new())),
-//RS                         (
-//RS                             "backend".to_string(),
-//RS                             CtValue::Str("comptime-ambient".to_string()),
-//RS                         ),
-//RS                         (
-//RS                             "authority".to_string(),
-//RS                             CtValue::List(Vec::new()),
-//RS                         ),
-//RS                         (
-//RS                             "descendants".to_string(),
-//RS                             CtValue::Str("direct".to_string()),
-//RS                         ),
-//RS                         (
-//RS                             "limits".to_string(),
-//RS                             CtValue::List(vec![
-//RS                                 CtValue::Str("timeout-ms=30000".to_string()),
-//RS                                 CtValue::Str(format!(
-//RS                                     "output-limit={REPL_PROCESS_OUTPUT_LIMIT_BYTES}"
-//RS                                 )),
-//RS                             ]),
-//RS                         ),
-//RS                         (
-//RS                             "outputs".to_string(),
-//RS                             CtValue::List(vec![
-//RS                                 CtValue::Str("stdout=capture".to_string()),
-//RS                                 CtValue::Str("stderr=capture".to_string()),
-//RS                             ]),
-//RS                         ),
-//RS                         ("redacted".to_string(), CtValue::Bool(false)),
-//RS                         ("pid".to_string(), CtValue::Int(0)),
-//RS                     ],
-//RS                 }))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-//RS                     IoErrorOperation::Resolve,
-//RS                     &cmd[0],
-//RS                     e,
-//RS                 )))),
-//RS             }
-//RS         }
-//RS         ("core.net.tls", _) => Err(Diagnostic::error(
-//RS             "E3412",
-//RS             format!("`core.net.tls.{}()` is not available at comptime", method),
-//RS             "live TLS sessions cannot be opened during compile-time evaluation".to_string(),
-//RS             "move the TLS operation to runtime; use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned build-time downloads"
-//RS                 .to_string(),
-//RS             Some(span),
-//RS         )),
-//RS         // The MIR HandleMethod route enters the impure seam at runtime; this
-//RS         // pure duration read still uses the shared Comptime adapter.
-//RS         ("core.handle", "duration.in") => {
-//RS             super::apply_core_call_without_ambient_with_type(
-//RS                 module,
-//RS                 method,
-//RS                 args,
-//RS                 span,
-//RS                 repl_mode,
-//RS                 resolved_ret,
-//RS             )
-//RS         }
-//RS         // Web Core rows are TypedIntrinsic: enter the shared Prelude/AppLite
-//RS         // dispatcher directly, without a second ambient adapter.
-//RS         (module, _) if module == "core.web" || module.starts_with("core.web.") => {
-//RS             super::apply_core_call_without_ambient_with_type(
-//RS                 module,
-//RS                 method,
-//RS                 args,
-//RS                 span,
-//RS                 repl_mode,
-//RS                 resolved_ret,
-//RS             )
-//RS         }
-//RS         // Pure compress/archive/encoding codecs live on apply_core_call; reuse
-//RS         // them when the runtime evaluator has ambient impure depth open (#778
-//RS         // deopt / #715 default-dev encoding parity). Whole-value encoding must
-//RS         // not die as E0956 impure-tier after silent deopt.
-//RS         ("core.archive.gzip", _)
-//RS         | ("core.archive.zstd", _)
-//RS         | ("core.archive", _)
-//RS         | ("core.perf", _) => {
-//RS             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
-//RS         }
-//RS         (module, _) if module.starts_with("core.encoding.") => {
-//RS             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
-//RS         }
-//RS         // Ambient impure depth must not block pure-tier CorePureParity surfaces
-//RS         // that MirBridge already evaluates (date/math/measurement/testing/…).
-//RS         // Pure style/net helpers share the implementation dispatch so
-//RS         // impure_depth>0 (MirBridge / jet run deopt) still hits CorePureParity.
-//RS         ("core.term", method)
-//RS             if jet_foundation::Effects::core_effect("core.term", method).is_none() =>
-//RS         {
-//RS             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
-//RS         }
-//RS         ("core.testing", "histories") => {
-//RS             super::apply_core_call_without_ambient_with_type_args(
-//RS                 module,
-//RS                 method,
-//RS                 args,
-//RS                 span,
-//RS                 repl_mode,
-//RS                 type_args,
-//RS                 resolved_ret,
-//RS             )
-//RS         }
-//RS         ("core.math.random", _) | ("core.testing", "fake_rng") => {
-//RS             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
-//RS         }
-//RS         ("core.crypto.random", "bytes") => {
-//RS             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
-//RS         }
-//RS         // `core.text.fmt` is pure text rendering; at runtime it carries the
-//RS         // shared Display route every `"{value}"` and `print(value)` lowers to.
-//RS         ("core.builtin", "len_string" | "map_keys" | "map_values")
-//RS         | ("core.reactive.loadable", _)
-//RS         | ("core.time", _)
-//RS         | ("core.math", _)
-//RS         | ("core.testing", _)
-//RS         | ("core.data", _)
-//RS         | ("core.compute", _)
-//RS         | ("core.service", _)
-//RS         | ("core.auth", _)
-//RS         | ("core.sync", _)
-//RS         | ("app", _)
-//RS         | ("core.ui", _)
-//RS         | ("core.crypto", _)
-//RS         | ("core.crypto.expert", _)
-//RS         | ("core.email", _)
-//RS         | ("core.regex", _)
-//RS         | ("core.units", _)
-//RS         | ("core.text.fmt", _)
-//RS         => {
-//RS             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
-//RS         }
-//RS         // Pure net helpers (e.g. ip_addr, socket_addr_parse) — not live sockets.
-//RS         // Keep E3412 for the rest. D-META-EFFECT1: "pure" is what the effect
-//RS         // table says, so both tiers agree without a second list here.
-//RS         ("core.net", method)
-//RS             if jet_foundation::Effects::core_effect("core.net", method).is_none() =>
-//RS         {
-//RS             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
-//RS         }
-//RS         ("core.net", _) => Err(Diagnostic::error(
-//RS             "E3412",
-//RS             format!("`core.net.{}()` is not available at comptime", method),
-//RS             "only `core.net.fetch(url, sha256:)` is supported at compile time".to_string(),
-//RS             "use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned downloads"
-//RS                 .to_string(),
-//RS             Some(span),
-//RS         )),
-//RS         // I4: this adapter is also the runtime TIR evaluator's Core seam (see
-//RS         // the doc comment above: `jet run` deopt, #778), so the `what` names
-//RS         // the call and never a phase. "at comptime" here labelled a plain
-//RS         // runtime IO call site as compile-time work.
-//RS         _ => Err(unsupported(&format!("`{}.{}()`", module, method), span)),
-//RS     }
-//RS }
-// END-PORT-PENDING 0591 crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:1-1072
-
+use jet_comptime.Comptime.Methods.ReplProcess.[run_repl_process, REPL_PROCESS_OUTPUT_LIMIT_BYTES]
+use jet_comptime.Comptime.Methods.CoreCalls.*
+use jet_comptime.Comptime.Methods.CoreCalls.Values.as_string
+use jet_comptime.Comptime.Builtins.[as_int, authority_holds]
+use jet_comptime.Comptime.Diagnostics.unsupported
+use jet_comptime.Comptime.Interpreter.[DevSink, runtime_argv]
+use jet_comptime.Comptime
+use jet_comptime.Comptime.TextLite as files_kernel
+use jet_comptime.Comptime.Methods.CoreCalls.log_kernel
+use jet_comptime.Comptime.Methods.CoreCalls.term_semantics
+use jet_foundation.AST.[CtValue, CtReport, Type]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.Syntax.[core_call, CoreCallCoverage, CoreCallInterpreterRoute]
+use jet_foundation.Effects.core_effect
+use jet_foundation.CheckReads.env_var
+use jet_codegen.Prelude.Core.ProcessArgs.jet_process_args_view
+use jet_codegen.Prelude.CoreLib.Top.IoLineStream.[jet_std_io_readline, jet_std_io_input, jet_std_io_read_all_input]
+use std.io.[Error, ErrorKind]
+use std.fs.File
+use std.time.Duration
+// GATE #4494: shared file/terminal/process adapters use real native providers.
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:16
+fn jet_fault_should_fail(_operation: String) -> Bool { false }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:23
+enum IOOperation { Read, Write, Flush }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:30
+struct IOContext { operation: IOOperation, resource: String?, os_code: I64?, cause: String? }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:38
+#Error
+enum IOError { Other(IOContext) }
+impl IOError {
+    // Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:43
+    fn other(operation: IOOperation, resource: String?, cause: String) -> Self { Self.Other(IOContext { operation, resource, os_code: None, cause: Val(cause.to_string()) }) }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:60
+fn readline() -> String Error! { jet_std_io_readline().map_err(fn(e) { Error.new(ErrorKind.Other, "{e:?}") })? }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:65
+fn input(prompt: &String?) -> String Error! { jet_std_io_input(prompt).map_err(fn(e) { Error.new(ErrorKind.Other, "{e:?}") })? }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:70
+fn read_all_input() -> String Error! { jet_std_io_read_all_input().map_err(fn(e) { Error.new(ErrorKind.Other, "{e:?}") })? }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:75
+fn log_string_arg(value: &CtValue, span: Span) -> &String Diagnostic! { value == { Str(value) -> value; _ -> { fail unsupported("core.log expects a String argument", span) } } }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:82
+fn log_bool_arg(value: &CtValue, span: Span) -> Bool Diagnostic! { value == { Bool(value) -> value; _ -> { fail unsupported("core.log expects a Bool argument", span) } } }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:89
+fn log_field_arg(value: &CtValue, span: Span) -> log_kernel.LogField Diagnostic! {
+    (type_name, fields) := value == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("core.log expects a LogField", span) } }
+    if type_name != "LogField" { fail unsupported("core.log expects a LogField", span) }
+    field := fn(name) { fields.iter().find_map(fn(e) { if e.0 == name { Val(e.1) } else { None } }).ok_or_else(fn() { unsupported("malformed LogField", span) }) }
+    key := log_string_arg(field("key")?, span)?.clone(); value := log_string_arg(field("value")?, span)?.clone()
+    kind := log_string_arg(field("kind")?, span)?.clone(); redacted := log_bool_arg(field("redacted")?, span)?
+    log_kernel.LogField { key, value, kind, redacted }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:117
+fn log_fields_arg(value: &CtValue, span: Span) -> [log_kernel.LogField] Diagnostic! {
+    values := value == { List(values) -> values; _ -> { fail unsupported("core.log expects a List[LogField]", span) } }
+    values.iter().map(fn(v) { log_field_arg(v, span) }).collect()?
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:130
+fn log_span_arg(value: &CtValue, span: Span) -> log_kernel.LogSpan Diagnostic! {
+    (type_name, fields) := value == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("core.log expects a LogSpan", span) } }
+    if type_name != "LogSpan" { fail unsupported("core.log expects a LogSpan", span) }
+    field := fn(name) { fields.iter().find_map(fn(e) { if e.0 == name { Val(e.1) } else { None } }).ok_or_else(fn() { unsupported("malformed LogSpan", span) }) }
+    id := as_int(field("id")?, span)?; name := log_string_arg(field("name")?, span)?.clone()
+    log_kernel.LogSpan { id, name }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:151
+fn ct_log_field(value: log_kernel.LogField) -> CtValue {
+    CtValue.Struct { type_name: "LogField", fields: [("key", CtValue.Str(value.key)), ("value", CtValue.Str(value.value)), ("kind", CtValue.Str(value.kind)), ("redacted", CtValue.Bool(value.redacted))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:163
+fn ct_log_span(value: log_kernel.LogSpan) -> CtValue { CtValue.Struct { type_name: "LogSpan", fields: [("id", CtValue.Int(value.id)), ("name", CtValue.Str(value.name))] } }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:176
+pub fn apply_impure_core_call(module: String, method: String, args: [CtValue], span: Span, base_dir: &OSPath, sink: &DevSink?, repl_mode: Bool, pinned_executable: &File?, verified_root: &File?) -> CtValue Diagnostic! {
+    apply_impure_core_call_with_type_args(module, method, args, span, base_dir, sink, repl_mode, pinned_executable, verified_root, &[], None)?
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:202
+pub fn apply_impure_core_call_with_type(module: String, method: String, args: [CtValue], span: Span, base_dir: &OSPath, sink: &DevSink?, repl_mode: Bool, pinned_executable: &File?, verified_root: &File?, resolved_ret: &Type?) -> CtValue Diagnostic! {
+    apply_impure_core_call_with_type_args(module, method, args, span, base_dir, sink, repl_mode, pinned_executable, verified_root, &[], resolved_ret)?
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs:229
+pub fn apply_impure_core_call_with_type_args(module: String, method: String, args: [CtValue], span: Span, base_dir: &OSPath, sink: &DevSink?, repl_mode: Bool, pinned_executable: &File?, verified_root: &File?, type_args: &[Type], resolved_ret: &Type?) -> CtValue Diagnostic! {
+    args := normalize_path_args(module, method, args, span)?
+    validate_core_call_projection(module, method, args.len(), CoreCallCoverage.COMPTIME, span)?
+    validate_interpreter_route(module, method, span)?
+    route := core_call(module, method).map(fn(row) { row.interpreter_route })
+    if route.is_none() || route == Val(CoreCallInterpreterRoute.Ambient) {
+        if Comptime.try_core_call_typed_with_sink(module, method, args.clone(), span, resolved_ret.cloned(), sink.as_deref_mut()) == Val(result) { return result? }
+    }
+    if apply_core_pure_call(module, method, &args, span) == Val(result) { return result? }
+    if module == "core.handle" && method == { "path.from" | "path.home" | "path.join" | "path.to_string" | "path.parent" | "path.extension" | "path.stem" | "path.normalize" | "path.is_within" | "path.walk" -> true; _ -> false } { return apply_path_call(method, &args, span)? }
+    one := fn(i: USize) { args.get(i).ok_or_else(fn() { unsupported("`{module}.{method}` (wrong number of arguments)", span) }) }
+    if module == "core.event" && method == { "scope" | "policy_sync" | "new" | "with_policy" | "hook" | "decision_hook" | "async_result" -> true; _ -> false } {
+        return method == {
+            "scope" -> Comptime.core_event_scope(); "policy_sync" -> Comptime.core_event_policy_sync(); "new" -> Comptime.core_event_new()
+            "with_policy" -> Comptime.core_event_with_policy(one(0)?.clone()); "hook" -> Comptime.core_event_hook(one(0)?.clone())
+            "decision_hook" -> Comptime.core_event_decision_hook(one(0)?.clone()); "async_result" -> Comptime.core_event_async_result(one(0)?, one(1)?, span)?
+            _ -> unreachable("core.event constructor route was not selected")
+        }
+    }
+    if apply_raylib_core_call(module, method, &args, span) == Val(result) { return result? }
+    (module, method) == {
+        // Shared logging owns filtering/sampling/trace/format/sinks/telemetry.
+        ("core.log", "debug" | "info" | "warn" | "error" | "critical" | "fatal") -> {
+            message := log_string_arg(one(0)?, span)?
+            method == { "debug" -> log_kernel.debug(message); "info" -> log_kernel.info(message); "warn" -> log_kernel.warn(message); "error" -> log_kernel.error(message); "critical" -> log_kernel.critical(message); "fatal" -> log_kernel.fatal(message); _ -> unreachable("core.log level row was not selected") }
+            CtValue.Unit
+        }
+        ("core.log", "debug_fields" | "info_fields" | "warn_fields" | "error_fields") -> {
+            message := log_string_arg(one(0)?, span)?; fields := log_fields_arg(one(1)?, span)?
+            method == { "debug_fields" -> log_kernel.debug_fields(message, &fields); "info_fields" -> log_kernel.info_fields(message, &fields); "warn_fields" -> log_kernel.warn_fields(message, &fields); "error_fields" -> log_kernel.error_fields(message, &fields); _ -> unreachable("core.log fields row was not selected") }
+            CtValue.Unit
+        }
+        ("core.log", "field") -> { key := log_string_arg(one(0)?, span)?; value := log_string_arg(one(1)?, span)?; ct_log_field(log_kernel.field(key, value)) }
+        ("core.log", "int") -> { key := log_string_arg(one(0)?, span)?; value := as_int(one(1)?, span)?; ct_log_field(log_kernel.int(key, value)) }
+        ("core.log", "float") -> { key := log_string_arg(one(0)?, span)?; value := as_float(one(1)?, span)?; ct_log_field(log_kernel.float(key, value)) }
+        ("core.log", "bool") -> { key := log_string_arg(one(0)?, span)?; value := log_bool_arg(one(1)?, span)?; ct_log_field(log_kernel.bool_field(key, value)) }
+        ("core.log", "redact") -> ct_log_field(log_kernel.redact(log_string_arg(one(0)?, span)?))
+        ("core.log", "counter") -> { name := log_string_arg(one(0)?, span)?; value := as_int(one(1)?, span)?; ct_log_field(log_kernel.counter(name, value)) }
+        ("core.log", "span") -> ct_log_span(log_kernel.span(log_string_arg(one(0)?, span)?))
+        ("core.log", "enter" | "close") -> {
+            span_value := log_span_arg(one(0)?, span)?
+            method == { "enter" -> log_kernel.enter(&span_value); "close" -> log_kernel.close(&span_value); _ -> unreachable("core.log span row was not selected") }; CtValue.Unit
+        }
+        ("core.log", "enabled") -> CtValue.Bool(log_kernel.enabled(log_string_arg(one(0)?, span)?))
+        ("core.log", "disable") -> { log_kernel.disable(); CtValue.Unit }; ("core.log", "flush") -> { log_kernel.flush(); CtValue.Unit }
+        ("core.log", "set_sink") -> { kind := log_string_arg(one(0)?, span)?; path := log_string_arg(one(1)?, span)?; log_kernel.set_sink(kind, path); CtValue.Unit }
+        ("core.log", "sample_every") -> { log_kernel.sample_every(as_int(one(0)?, span)?); CtValue.Unit }
+        ("core.log", "otlp_file") -> { log_kernel.otlp_file(log_string_arg(one(0)?, span)?); CtValue.Unit }
+        ("core.log", "set_level") -> { log_kernel.set_level(log_string_arg(one(0)?, span)?); CtValue.Unit }
+        ("core.log", "setup") -> { log_kernel.setup(log_string_arg(one(0)?, span)?); CtValue.Unit }
+        ("core.log", "set_trace_id") -> { log_kernel.set_trace_id(as_string(one(0)?, span)?); CtValue.Unit }
+        ("core.files", "scope") -> {
+            authority := one(0)?; if authority_holds(authority).is_none() { fail unsupported("core.files.scope expects an Authority", span) }
+            CtValue.Struct { type_name: "FileScope", fields: [("authority", authority.clone())] }
+        }
+        ("core.files", "absolute") -> { path := as_string(one(0)?, span)?; files_kernel.fs_absolute(path) == { Ok(p) -> CtValue.Present(Box.new(CtValue.Str(p))); Err(e) -> CtValue.failed(Box.new(e)) } }
+        ("core.files", "open" | "create" | "append") -> {
+            path := as_string(one(0)?, span)?
+            result := method == { "open" -> files_kernel.fs_open(path); "create" -> files_kernel.fs_create(path); "append" -> files_kernel.fs_append_stream(path); _ -> unreachable("streaming file route is closed") }
+            result == { Ok(v) -> CtValue.Present(Box.new(v)); Err(e) -> CtValue.failed(Box.new(e)) }
+        }
+        ("core.files", "read" | "read_bytes" | "write" | "write_bytes" | "append_all" | "exists" | "is_dir" | "create_dir" | "create_dir_all" | "remove" | "remove_dir" | "remove_all" | "list_dir" | "copy" | "copy_dir" | "rename" | "symlink" | "hard_link" | "read_link" | "canonicalize" | "glob" | "walk" | "walk_parallel" | "walk_files" | "stat" | "fsync" | "set_mode") -> {
+            // Paths pass unchanged to the shared kernel, relative to process cwd.
+            path_arg := fn(value) { as_string(value, span)?.to_string() }; path := path_arg(one(0)?)?
+            ignore_name := if method == { "walk" | "walk_parallel" | "walk_files" -> true; _ -> false } {
+                args.get(1) == { None | Val(Failed(Clean(_))) -> None; Val(Present(name)) -> Val(as_string(name, span)?.to_string()); Val(name) -> Val(as_string(name, span)?.to_string()) }
+            } else { None }
+            unit := fn(result) { result == { Ok(()) -> CtValue.Present(Box.new(CtValue.Unit)); Err(error) -> CtValue.failed(Box.new(error)) } }
+            present := fn(result) { result == { Ok(value) -> CtValue.Present(Box.new(value)); Err(error) -> CtValue.failed(Box.new(error)) } }
+            method == {
+                "read" -> present(files_kernel.fs_read(&path).map(CtValue.Str)); "read_bytes" -> present(files_kernel.fs_read_bytes(&path).map(CtValue.Bytes))
+                "write_bytes" -> {
+                    bytes := one(1)? == {
+                        Bytes(bytes) -> bytes.clone()
+                        List(values) -> values.iter().map(fn(v) { v == { Int(byte) -> U8.try_from(byte).map_err(fn(_) { unsupported("core.files.write_bytes received an invalid U8", span) })?; _ -> { fail unsupported("core.files.write_bytes expects [U8]", span) } } }).collect()?
+                        _ -> { fail unsupported("core.files.write_bytes expects [U8]", span) }
+                    }; unit(files_kernel.fs_write_bytes(&path, &bytes))
+                }
+                "write" -> unit(files_kernel.fs_write(&path, as_string(one(1)?, span)?))
+                "append_all" -> unit(files_kernel.fs_append(&path, as_string(one(1)?, span)?))
+                "fsync" -> unit(files_kernel.fs_fsync(&path)); "set_mode" -> unit(files_kernel.fs_set_mode(&path, as_int(one(1)?, span)?))
+                "exists" -> CtValue.Bool(files_kernel.fs_exists(&path)); "is_dir" -> CtValue.Bool(files_kernel.fs_is_dir(&path)); "stat" -> present(files_kernel.fs_stat(&path))
+                "create_dir" -> unit(files_kernel.fs_create_dir(&path)); "create_dir_all" -> unit(files_kernel.fs_create_dir_all(&path))
+                "remove" -> unit(files_kernel.fs_remove(&path)); "remove_dir" -> unit(files_kernel.fs_remove_dir(&path)); "remove_all" -> unit(files_kernel.fs_remove_all(&path))
+                "copy" -> unit(files_kernel.fs_copy(&path, &path_arg(one(1)?)?)); "copy_dir" -> unit(files_kernel.fs_copy_dir(&path, &path_arg(one(1)?)?))
+                "rename" -> unit(files_kernel.fs_rename(&path, &path_arg(one(1)?)?)); "symlink" -> unit(files_kernel.fs_symlink(&path, &path_arg(one(1)?)?))
+                "hard_link" -> unit(files_kernel.fs_hard_link(&path, &path_arg(one(1)?)?))
+                "read_link" -> present(files_kernel.fs_read_link(&path).map(CtValue.Str)); "canonicalize" -> present(files_kernel.fs_canonicalize(&path).map(CtValue.Str))
+                "glob" -> present(files_kernel.fs_glob(&path).map(fn(paths) { CtValue.List(paths.into_iter().map(CtValue.Str).collect()) }))
+                "walk" | "walk_parallel" -> {
+                    walk_entries := fn(entries: [(String, String, Bool, I64)]) { CtValue.List(entries.into_iter().map(fn(e) { (path, relative, is_dir, depth) := e; CtValue.Struct { type_name: "WalkEntry", fields: [("path", CtValue.Str(path)), ("relative", CtValue.Str(relative)), ("is_dir", CtValue.Bool(is_dir)), ("depth", CtValue.Int(depth))] } }).collect()) }
+                    present(files_kernel.fs_walk_parallel_with_ignore(&path, ignore_name.as_deref()).map(walk_entries))
+                }
+                "walk_files" -> {
+                    walk_entries := fn(entries: [(String, String, Bool, I64)]) { CtValue.List(entries.into_iter().map(fn(e) { (path, relative, is_dir, depth) := e; CtValue.Struct { type_name: "WalkEntry", fields: [("path", CtValue.Str(path)), ("relative", CtValue.Str(relative)), ("is_dir", CtValue.Bool(is_dir)), ("depth", CtValue.Int(depth))] } }).collect()) }
+                    present(files_kernel.fs_walk_files_parallel_with_ignore(&path, ignore_name.as_deref()).map(walk_entries))
+                }
+                // Directory rows already sorted by name in the shared kernel.
+                _ -> present(files_kernel.fs_list_dir(&path).map(fn(entries) { CtValue.List(entries.into_iter().map(fn(e) { (name, path, is_dir) := e; CtValue.Struct { type_name: "DirEntry", fields: [("name", CtValue.Str(name)), ("path", CtValue.Str(path)), ("is_dir", CtValue.Bool(is_dir))] } }).collect()) }))
+            }
+        }
+        ("core.sys", "get") -> { key := as_string(one(0)?, span)?; env_var(key) == { Val(v) -> CtValue.Present(Box.new(CtValue.Str(v))); None -> CtValue.absent(Type.String) } }
+        ("core.sys", "set") -> { key := as_string(one(0)?, span)?; val := as_string(one(1)?, span)?; std.env.set_var(key, val); CtValue.Unit }
+        ("core.sys", "current_dir") -> std.env.current_dir() == { Ok(p) -> CtValue.Present(Box.new(CtValue.Str(p.to_string_lossy().into_owned()))); Err(e) -> CtValue.failed(Box.new(io_error_value(IoErrorOperation.Resolve, ".", e))) }
+        ("core.sys", "home_dir") -> env_var("HOME").or_else(fn() { env_var("USERPROFILE") }) == { Val(v) -> CtValue.Present(Box.new(CtValue.Str(v))); None -> CtValue.absent(Type.String) }
+        ("core.process", "argv") -> {
+            // Never leak the compiler process argv into the evaluated program.
+            argv := runtime_argv().unwrap_or_else(fn() { ["jet"] }); CtValue.List(argv.into_iter().map(CtValue.Str).collect())
+        }
+        ("core.process", "args") -> { argv := runtime_argv().unwrap_or_else(fn() { ["jet"] }); CtValue.List(jet_process_args_view(argv).into_iter().map(CtValue.Str).collect()) }
+        ("core.term", "progress") -> {
+            source := args.first().ok_or_else(fn() { unsupported("`core.term.progress` needs a source", span) })?
+            text := source == { Str(text) -> text; _ -> { fail unsupported("`core.term.progress` expects a String source", span) } }
+            if args.len() != 1 { fail unsupported("`core.term.progress` text form takes one argument", span) }
+            if sink == Val(sink) {
+                if !term_semantics.jet_term_progress_enabled() { return CtValue.Unit }
+                tty := term_semantics.jet_term_stderr_is_terminal(); frame := term_semantics.jet_term_progress_frame(tty, text)
+                if term_semantics.jet_term_stdout_is_program_stream() { term_semantics.jet_term_write_stderr(&frame, true).map_err(fn(e) { unsupported("write stderr: {e}", span) })? }
+                else { sink.stderr.push_str(&frame) }
+            }; CtValue.Unit
+        }
+        ("core.term", "print") -> {
+            (text, flush) := args == {
+                [value, Bool(flush)] -> (display_core_pure_value(value).unwrap_or_else(fn() { value.jet_show() }), flush)
+                _ -> (args.iter().map(fn(v) { display_core_pure_value(v).unwrap_or_else(fn() { v.jet_show() }) }).collect<[String]>().join("\n"), true)
+            }
+            if sink == Val(s) {
+                frame := term_semantics.jet_term_print_frame(&text)
+                // REPL transcript always owns its frames, even on a host terminal.
+                if !repl_mode && term_semantics.jet_term_stdout_is_program_stream() { _ :: term_semantics.jet_term_write_stdout(&frame, flush) }
+                else { s.stdout.push_str(&frame) }
+            }; CtValue.Unit
+        }
+        ("core.term", "eprint") -> {
+            text := args.iter().map(fn(v) { display_core_pure_value(v).unwrap_or_else(fn() { v.jet_show() }) }).collect<[String]>().join("\n")
+            if sink == Val(s) { frame := term_semantics.jet_term_print_frame(&text); if !repl_mode && term_semantics.jet_term_stderr_is_program_stream() { _ :: term_semantics.jet_term_write_stderr(&frame, true) } else { s.stderr.push_str(&frame) } }; CtValue.Unit
+        }
+        ("core.term", "readline") -> {
+            if repl_mode { fail repl_native_module_diag("core.term", method, span) }
+            readline() == { Ok(text) -> CtValue.Present(Box.new(CtValue.Str(text))); Err(error) -> CtValue.failed(Box.new(io_error_value(IoErrorOperation.Read, "stdin", error))) }
+        }
+        ("core.term", "input") -> {
+            if repl_mode { fail repl_native_module_diag("core.term", method, span) }
+            prompt := args == { [Failed(Clean(_))] -> None; [Str(prompt)] -> Val(prompt); _ -> { fail unsupported("core.term.input expects one optional String prompt", span) } }
+            input(prompt) == { Ok(text) -> CtValue.Present(Box.new(CtValue.Str(text))); Err(error) -> CtValue.failed(Box.new(io_error_value(IoErrorOperation.Read, "stdin", error))) }
+        }
+        ("core.term", "read_all_input") -> {
+            if repl_mode { fail repl_native_module_diag("core.term", method, span) }
+            if !args.is_empty() { fail unsupported("core.term.read_all_input expects no arguments", span) }
+            read_all_input() == { Ok(text) -> CtValue.Present(Box.new(CtValue.Str(text))); Err(error) -> CtValue.failed(Box.new(io_error_value(IoErrorOperation.Read, "stdin", error))) }
+        }
+        ("core.term", "stdin") if repl_mode -> { fail repl_native_module_diag("core.term", method, span) }
+        ("core.term", "stdin") -> CtValue.Struct { type_name: "StdinHandle", fields: [] }
+        ("core.term", "stdout" | "stderr") if repl_mode -> { fail repl_native_module_diag("core.term", method, span) }
+        ("core.term", "stdout") -> CtValue.Struct { type_name: "Stdout", fields: [("fd", CtValue.Int(1))] }
+        ("core.term", "stderr") -> CtValue.Struct { type_name: "Stderr", fields: [("fd", CtValue.Int(2))] }
+        ("core.process", "exit") -> {
+            code := one(0)? == { Int(n) -> n; _ -> 0 }
+            if sink == Val(s) { s.exit_code = Val(code as I32); fail Diagnostic.soft_exit(code.to_string(), "process.exit requested", Val(span)) }
+            std.process.exit(code as I32)
+        }
+        ("core.process", "run") -> {
+            cmd := one(0)? == { List(items) -> items.iter().map(fn(v) { v.jet_show() }).collect<[String]>(); _ -> { fail unsupported("process.run expects a list of command words", span) } }
+            if cmd.is_empty() { return CtValue.failed(Box.new(CtValue.Struct { type_name: "IOError", fields: [("message", CtValue.Str("process.run needs at least one command word"))] })) }
+            run_repl_process(&cmd, base_dir, pinned_executable, verified_root, Duration.from_secs(30)) == {
+                Ok(out) -> CtValue.Present(Box.new(CtValue.Struct { type_name: "ProcessReceipt", fields: [
+                    ("code", CtValue.Int(out.status.code().unwrap_or(-1) as I64)),
+                    ("output", CtValue.Str(String.from_utf8_lossy(&out.stdout).into_owned())), ("errors", CtValue.Str(String.from_utf8_lossy(&out.stderr).into_owned())),
+                    ("signal", CtValue.absent(Type.Int)), ("success", CtValue.Bool(out.status.success())), ("timed_out", CtValue.Bool(false)),
+                    ("executable_identity", CtValue.Str(cmd.first().cloned().unwrap_or_default())), ("argv", CtValue.List(cmd.iter().cloned().map(CtValue.Str).collect())),
+                    ("input_digest", CtValue.Str("")), ("policy_digest", CtValue.Str("")), ("backend", CtValue.Str("comptime-ambient")), ("authority", CtValue.List([])),
+                    ("descendants", CtValue.Str("direct")), ("limits", CtValue.List([CtValue.Str("timeout-ms=30000"), CtValue.Str("output-limit={REPL_PROCESS_OUTPUT_LIMIT_BYTES}")])),
+                    ("outputs", CtValue.List([CtValue.Str("stdout=capture"), CtValue.Str("stderr=capture")])), ("redacted", CtValue.Bool(false)), ("pid", CtValue.Int(0))
+                ] }))
+                Err(e) -> CtValue.failed(Box.new(io_error_value(IoErrorOperation.Resolve, &cmd[0], e)))
+            }
+        }
+        ("core.net.tls", _) -> { fail Diagnostic.error("E3412", "`core.net.tls.{method}()` is not available at comptime", "live TLS sessions cannot be opened during compile-time evaluation", "move the TLS operation to runtime; use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned build-time downloads", Val(span)) }
+        ("core.handle", "duration.in") -> apply_core_call_without_ambient_with_type(module, method, args, span, repl_mode, resolved_ret)?
+        (module, _) if module == "core.web" || module.starts_with("core.web.") -> apply_core_call_without_ambient_with_type(module, method, args, span, repl_mode, resolved_ret)?
+        ("core.archive.gzip", _) | ("core.archive.zstd", _) | ("core.archive", _) | ("core.perf", _) -> apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)?
+        (module, _) if module.starts_with("core.encoding.") -> apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)?
+        ("core.term", method) if core_effect("core.term", method).is_none() -> apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)?
+        ("core.testing", "histories") -> apply_core_call_without_ambient_with_type_args(module, method, args, span, repl_mode, type_args, resolved_ret)?
+        ("core.math.random", _) | ("core.testing", "fake_rng") -> apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)?
+        ("core.crypto.random", "bytes") -> apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)?
+        ("core.builtin", "len_string" | "map_keys" | "map_values") | ("core.reactive.loadable", _) | ("core.time", _) | ("core.math", _) | ("core.testing", _) | ("core.data", _) | ("core.compute", _) | ("core.service", _) | ("core.auth", _) | ("core.sync", _) | ("app", _) | ("core.ui", _) | ("core.crypto", _) | ("core.crypto.expert", _) | ("core.email", _) | ("core.regex", _) | ("core.units", _) | ("core.text.fmt", _) -> apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)?
+        ("core.net", method) if core_effect("core.net", method).is_none() -> apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)?
+        ("core.net", _) -> { fail Diagnostic.error("E3412", "`core.net.{method}()` is not available at comptime", "only `core.net.fetch(url, sha256:)` is supported at compile time", "use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned downloads", Val(span)) }
+        _ -> { fail unsupported("`{module}.{method}()`", span) }
+    }
+}

@@ -1,0 +1,58 @@
+use jet_comptime.Comptime.Build.PluginsModules.[WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION, validate_component_binary, read_u32_leb, manifest_line_without_comment, manifest_string, wire_list, wire_unlist, wire_map, wire_unmap, wire_scalar, wire_unscalar, wire_optional, hex_decode, decode_build_plugin_response]
+use jet_comptime.Comptime.Build.CacheCas.ContentDigest
+
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:91,118 (controls; no original inline tests)
+#Test("packaged_plugin_manifest_verifies_exact_component_bytes") {
+    component :: [U8]{0, 0x61, 0x73, 0x6d, 0x0d, 0, 1, 0}
+    digest :: ContentDigest.from_bytes(component).as_str().to_string()
+    manifest :: "name = \"demo\"\nversion = \"1\"\napi_version = \"{BUILD_PLUGIN_API_VERSION}\"\ncomponent_digest = \"{digest}\"\ncapabilities = []\n"
+    spec :: WasmComponentPluginSpec.load_packaged_bytes(manifest.as_bytes(), component)!
+    assert(spec.name == "demo")
+    assert(spec.component_digest == digest)
+    assert(spec.requested_caps.is_empty())
+    duplicate :: manifest + "name = \"again\"\n"
+    assert(WasmComponentPluginSpec.from_manifest_text(duplicate) == Err("plugin manifest field name is declared more than once"))
+    assert(manifest_line_without_comment("name = \"a#b\" # note") == "name = \"a#b\" ")
+    assert(manifest_string("\"a\\\"b\\\\c\"", "name")! == "a\"b\\c")
+    assert(manifest_string("\"a\\n\"", "name") == Err("plugin manifest field name contains an unsupported escape"))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:249,281 (controls; no original inline tests)
+#Test("packaged_plugin_component_sections_are_bounded_and_leb_checked") {
+    validate_component_binary([U8]{0, 0x61, 0x73, 0x6d, 0x0d, 0, 1, 0})!
+    assert(validate_component_binary([U8]{0, 0x61, 0x73, 0x6d, 0x0d, 0, 1, 0, 14, 0}) == Err("plugin component uses unknown section id 14"))
+    assert(validate_component_binary([U8]{0, 0x61, 0x73, 0x6d, 0x0d, 0, 1, 0, 0, 1}) == Err("plugin component section is truncated"))
+    offset := 0 as USize
+    assert(read_u32_leb([U8]{0x80}, &offset) == Err("plugin component section length is truncated"))
+    offset = 0
+    assert(read_u32_leb([U8]{0x80, 0x80, 0x80, 0x80, 0x10}, &offset) == Err("plugin component section length overflows u32"))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:709-831 (controls; no original inline tests)
+#Test("packaged_plugin_wire_round_trip_preserves_utf8_empty_items_and_sorted_maps") {
+    items :: [String]{"", "é", "a:b\t\n"}
+    assert(wire_unlist(wire_list(items), "items")! == items)
+    assert(wire_unscalar(wire_scalar("é"), "text")! == "é")
+    assert(wire_optional("", "optional")! == None)
+    assert(wire_unlist("1:1:61trailing", "items") == Err("items list has trailing bytes"))
+    assert(hex_decode("f") == Err("plugin wire hex has odd length"))
+    assert(hex_decode("zz") == Err("plugin wire hex is invalid"))
+    map :: [String: String]{"z": "last", "a": "first"}
+    assert(wire_unmap(wire_map(map), "map")! == map)
+    assert(wire_map(map) == wire_list(["a", "first", "z", "last"]))
+    assert(wire_unmap(wire_list(["a", "x", "a", "y"]), "map") == Err("map map contains a duplicate key"))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/plugins_modules.rs:556 (controls; no original inline tests)
+#Test("packaged_plugin_response_is_complete_or_fails_without_partial_contribution") {
+    valid :: "version=1\nstatus=ok\nactions=0\ntargets=0\ngenerated=0\n"
+    result :: decode_build_plugin_response(valid.as_bytes())!
+    assert(result.actions.is_empty())
+    assert(result.targets.is_empty())
+    assert(result.generated_modules.is_empty())
+    assert(decode_build_plugin_response((valid + "actions=0\n").as_bytes()) == Err("build plugin response field actions is declared more than once"))
+    assert(decode_build_plugin_response("version=1\nstatus=ok\nactions=1\ntargets=0\ngenerated=0\n".as_bytes()) == Err("build plugin response count does not match its entries"))
+    assert(decode_build_plugin_response("version=2\nstatus=fail\n".as_bytes()) == Err("unsupported build plugin response version"))
+    assert(decode_build_plugin_response("version=1\nstatus=fail\nerror=626164\n".as_bytes()) == Err("bad"))
+    assert(decode_build_plugin_response((valid + "error=626164\n").as_bytes()) == Err("build plugin success response contains an error field"))
+}

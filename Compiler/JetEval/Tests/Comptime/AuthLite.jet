@@ -1,0 +1,25 @@
+use jet_comptime.Comptime.AuthLite.[session_to_ct, ct_to_session, auth_to_ct, ct_to_auth]
+use jet_codegen.Prelude.CoreLib.Top.AuthSession.[JetAuthSession, JetAuthApp]
+use jet_foundation.AST.CtValue
+use jet_foundation.Diagnostics.Span
+
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:21
+#Test("auth_session_roundtrip_preserves_all_four_fields") {
+    session := JetAuthSession { id: "id", user_id: "user", expires_at: 123, cookie: "cookie" }
+    decoded := ct_to_session(session_to_ct(session), Span { start: 0, end: 0 })?
+    assert(decoded.id == session.id)
+    assert(decoded.user_id == session.user_id)
+    assert(decoded.expires_at == session.expires_at)
+    assert(decoded.cookie == session.cookie)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/AuthLite.rs:80
+#Test("auth_provider_decode_discards_only_empty_comma_segments") {
+    value := CtValue.Struct { type_name: "Auth", fields: [("users_table", CtValue.Str("users")), ("providers", CtValue.Str(",github,,google,"))] }
+    decoded := ct_to_auth(value, Span { start: 0, end: 0 })?
+    assert(decoded.users_table == "users")
+    assert(decoded.providers == ["github", "google"])
+    encoded := auth_to_ct(JetAuthApp { users_table: "users", providers: ["github", "google"] })
+    decoded_again := ct_to_auth(encoded, Span { start: 0, end: 0 })?
+    assert(decoded_again.providers == decoded.providers)
+}

@@ -1,1799 +1,868 @@
-// PORT-PENDING 0454 crates-jet-codegen-src-codegen-context-slice-1: crates/jet-codegen/src/Codegen/Context.rs:1-1795
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::{mangle, mangle_path, tuple_fields_plain, tuple_struct_name};
-//RS use crate::AST::FfiLink;
-//RS #[cfg(test)]
-//RS use crate::AST::Program;
-//RS use crate::AST::{
-//RS     AccessConvention, ContractClause, CtValue, EnumDef, Expr, FfiHandleFact, Func, Item,
-//RS     ProgramBundle, StructDef, Type, VariantField, VariantPayload,
-//RS };
-//RS use crate::Diagnostics::Span;
-//RS use crate::Generics;
-//RS use crate::Syntax;
-//RS use crate::jet_generated_format as jet_format;
-//RS use std::collections::{HashMap, HashSet};
-//RS 
-//RS #[derive(Clone)]
-//RS pub(crate) struct UnitFact {
-//RS     pub(crate) family: String,
-//RS     /// `None` for a nominal family (D-DIMENSION-OPEN1=D).
-//RS     pub(crate) dimension: Option<crate::AST::Dimension>,
-//RS     pub(crate) kind: crate::AST::QuantityKind,
-//RS     pub(crate) scale: crate::AST::UnitRatio,
-//RS     pub(crate) offset: crate::AST::UnitRatio,
-//RS     pub(crate) scale_provenance: crate::AST::UnitScaleProvenance,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub(crate) struct UnitLabel {
-//RS     pub(crate) symbol: String,
-//RS     pub(crate) name: String,
-//RS     pub(crate) family: String,
-//RS     pub(crate) is_base: bool,
-//RS }
-//RS 
-//RS fn unit_label(
-//RS     family: &crate::AST::UnitFamilyDef,
-//RS     member: &crate::AST::UnitFamilyMember,
-//RS ) -> UnitLabel {
-//RS     let base = family
-//RS         .base
-//RS         .as_ref()
-//RS         .map(|base| base.0.as_str())
-//RS         .or_else(|| family.members.first().map(|member| member.name.as_str()));
-//RS     UnitLabel {
-//RS         symbol: member.name.clone(),
-//RS         name: crate::AST::UnitFamilyDef::type_name(&member.name),
-//RS         family: family.family.clone(),
-//RS         is_base: base == Some(member.name.as_str()),
-//RS     }
-//RS }
-//RS 
-//RS fn unit_family_member_for_type<'a>(
-//RS     family: &'a crate::AST::UnitFamilyDef,
-//RS     type_name: &str,
-//RS     kind: crate::AST::QuantityKind,
-//RS ) -> Option<&'a crate::AST::UnitFamilyMember> {
-//RS     family.members.iter().find(|member| {
-//RS         let stem = crate::AST::UnitFamilyDef::type_name(&member.name);
-//RS         type_name
-//RS             == match kind {
-//RS                 crate::AST::QuantityKind::Linear => stem,
-//RS                 crate::AST::QuantityKind::Point => format!("{stem}Point"),
-//RS                 crate::AST::QuantityKind::Delta => format!("{stem}Delta"),
-//RS             }
-//RS     })
-//RS }
-//RS 
-//RS fn unit_fact(
-//RS     family: &crate::AST::UnitFamilyDef,
-//RS     member: &crate::AST::UnitFamilyMember,
-//RS     dimension: Option<crate::AST::Dimension>,
-//RS     kind: crate::AST::QuantityKind,
-//RS ) -> UnitFact {
-//RS     UnitFact {
-//RS         family: family.family.clone(),
-//RS         dimension,
-//RS         kind,
-//RS         scale: member.scale.clone(),
-//RS         offset: if kind == crate::AST::QuantityKind::Point {
-//RS             member.offset.clone()
-//RS         } else {
-//RS             crate::AST::UnitRatio::zero()
-//RS         },
-//RS         scale_provenance: member.scale_provenance.clone(),
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub(crate) struct ExternFn {
-//RS     pub(crate) wrapper: String,
-//RS     pub(crate) c_abi: bool,
-//RS     pub(crate) component: Option<String>,
-//RS }
-//RS 
-//RS /// D-OPMIX1: one checked operator method keyed by its complete
-//RS /// `(lhs, trait, method, rhs)` identity. The ordinary method tables cannot
-//RS /// represent two RHS pairs with one owner and method spelling.
-//RS #[derive(Clone)]
-//RS pub(crate) struct OperatorMethod {
-//RS     pub(crate) trait_name: String,
-//RS     pub(crate) sig: Vec<(AccessConvention, Type)>,
-//RS     pub(crate) ret: Option<Type>,
-//RS }
-//RS /// D-FOUND-RECEIPT1: declaration-owned facts appended internally to a receipt
-//RS /// Core call. Runtime tiers never infer section meaning from a value.
-//RS #[derive(Clone)]
-//RS pub(crate) struct ReceiptSectionFact {
-//RS     pub(crate) name: String,
-//RS     pub(crate) type_name: String,
-//RS     pub(crate) schema_digest: String,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub(crate) struct CoreSourceFunctionSignature {
-//RS     /// Checked namespace identity of the loaded defining module. Core source
-//RS     /// calls use this owner in the same key as the corresponding TIR function;
-//RS     /// comptime fragments lower the demanded body under the same key.
-//RS     pub(crate) module_identity: String,
-//RS     pub(crate) type_params: Vec<String>,
-//RS     pub(crate) params: Vec<(AccessConvention, Type)>,
-//RS     pub(crate) return_type: Option<Type>,
-//RS }
-//RS 
-//RS pub(crate) struct Cx {
-//RS     /// Top-level function name -> parameter conventions+types.
-//RS     pub(crate) sigs: HashMap<String, Vec<(AccessConvention, Type)>>,
-//RS     /// D-FAIL-TIER1: callable contract clauses, kept beside the callable
-//RS     /// signature so call lowering can place `#Pre` at the caller.
-//RS     pub(crate) contract_sigs: HashMap<String, (Vec<ContractClause>, Vec<ContractClause>)>,
-//RS     /// Top-level function name -> effective function value type (M8).
-//RS     /// The return is the executable failure carrier used by calls.
-//RS     pub(crate) fn_types: HashMap<String, Type>,
-//RS     /// D-NEVER1=C: sema-proved callable names whose bodies have no returning
-//RS     /// path. Codegen consumes this fact; it never re-infers divergence.
-//RS     pub(crate) diverging_functions: HashSet<String>,
-//RS     /// Top-level function name -> source-declared function value type.
-//RS     /// Binding a named function as a value uses this source contract; call
-//RS     /// lowering uses `fn_types`' effective failure carrier instead.
-//RS     pub(crate) fn_source_types: HashMap<String, Type>,
-//RS     /// Checked function bodies retained for route-contract extraction. This
-//RS     /// is compiler metadata copied from the parsed AST, never a source scan by
-//RS     /// a runtime adapter.
-//RS     pub(crate) fn_bodies: HashMap<String, Vec<crate::AST::Stmt>>,
-//RS     /// Function name -> source parameter names for labeled compute transforms.
-//RS     pub(crate) fn_param_names: HashMap<String, Vec<String>>,
-//RS     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
-//RS     pub(crate) method_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
-//RS     /// Method-owned type parameters in declaration order. Owner parameters are
-//RS     /// kept separately in `struct_type_param_order`.
-//RS     pub(crate) method_type_params: HashMap<(String, String), Vec<crate::AST::TypeParam>>,
-//RS     pub(crate) method_self_convs: HashMap<(String, String), AccessConvention>,
-//RS     /// c109 Phase 6 (TIR): `(TypeName, method)` -> resolved return type (or `None`
-//RS     /// for a unit-returning method). Used by TIR lowering to give a method-call
-//RS     /// expression its total result `Type` without re-inferring in codegen.
-//RS     pub(crate) method_rets: HashMap<(String, String), Option<Type>>,
-//RS     pub(crate) consts: HashMap<String, String>,
-//RS     /// Source-level types for every module binding, including immutable
-//RS     /// runtime globals whose value is represented by a MIR global operation.
-//RS     pub(crate) const_types: HashMap<String, Type>,
-//RS     /// Checked local and selectively imported constants mapped to definition keys.
-//RS     pub(crate) const_ref_keys: HashMap<String, String>,
-//RS     /// Checked source-level types paired with canonical constant references.
-//RS     pub(crate) const_ref_types: HashMap<String, Type>,
-//RS     /// Checked module-constant field reads keyed by source span and carrying
-//RS     /// their canonical declaration key and checked source type.
-//RS     pub(crate) checked_const_ref_sites: HashMap<(usize, usize), (String, Type)>,
-//RS     /// D-MODULE-STORAGE1: source-level types for writable module bindings and
-//RS     /// `#Persist` storage. TIR turns these names into owned static slots before
-//RS     /// engine-specific lowering runs.
-//RS     pub(crate) persist_types: HashMap<String, Type>,
-//RS     /// The evaluated value behind each comptime const, so lowering can hand a
-//RS     /// structured literal to every engine instead of the rendered Rust text.
-//RS     pub(crate) const_values: HashMap<String, CtValue>,
-//RS     pub(crate) type_names: HashSet<String>,
-//RS     /// D-SERDE2: source-level names of locally declared imported nominals map to
-//RS     /// their canonical bundle identities while lowering the declaring module.
-//RS     /// This is separate from `local_type_names`: that set controls source lookup
-//RS     /// precedence, while this map gives TIR/JIT shape consumers the one identity
-//RS     /// registered for the imported module's own records and enums.
-//RS     pub(crate) local_type_identities: HashMap<String, String>,
-//RS     /// Nominals declared by the module being emitted. Imported canonical
-//RS     /// identities and convenience leaves also live in `type_names`; this set
-//RS     /// preserves source lookup precedence when a local shadows an import.
-//RS     pub(crate) local_type_names: HashSet<String>,
-//RS     /// D-DIST1 (c109 Phase 23): distinct-type name -> (base type, is_numeric). A
-//RS     /// distinct type renders to a `#[repr(transparent)]` newtype `__jet_<Name>(pub
-//RS     /// Base)`; the TIR reads the base type to give `.raw()` (`(recv).0`) its total
-//RS     /// result type, and `is_numeric` is informational (the arithmetic operator is
-//RS     /// chosen by `ast_operand_is_integer`, which returns `None` for a distinct).
-//RS     pub(crate) distinct_types: HashMap<String, (Type, bool)>,
-//RS     /// D-RANGETYPE1: range-constrained distinct type name -> inclusive bounds.
-//RS     pub(crate) distinct_ranges: HashMap<String, (i64, i64)>,
-//RS     /// D-SHAPE-QUANTITY1=A: the one backend registry for physical unit facts.
-//RS     /// Consulted only while lowering; facts erase from emitted Rust.
-//RS     pub(crate) unit_facts: HashMap<String, UnitFact>,
-//RS     /// D-QUANTITY-PRINT1: labels for all unit-family types.
-//RS     pub(crate) unit_labels: HashMap<String, UnitLabel>,
-//RS     /// D-TYPEALIAS1: transparent generic alias name -> (params, target).
-//RS     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
-//RS     pub(crate) trait_names: HashSet<String>,
-//RS     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
-//RS     /// Checked `#Receipt` declarations keyed by canonical type name.
-//RS     pub(crate) receipt_sections: HashMap<String, ReceiptSectionFact>,
-//RS     /// D-DX-PLUGIN1=D: checked package-wide panel/publication catalog shared
-//RS     /// by TIR and every native/backend projection.
-//RS     pub(crate) devtools_registry: jet_foundation::AST::DevtoolsRegistry,
-//RS     /// Current module's canonical package scope.
-//RS     pub(crate) devtools_package: String,
-//RS     /// Current module's canonical source-module path.
-//RS     pub(crate) devtools_module: String,
-//RS     /// D-METAREFLECT1: the registered field rows shared by comptime and
-//RS     /// runtime reflection. Layout consumers keep their own ABI map, while
-//RS     /// reflection reads this metadata-bearing model.
-//RS     pub(crate) reflection_fields: HashMap<String, Vec<jet_foundation::Reflection::ReflectionField>>,
-//RS     /// D-BOUND-EVOLVE1=A: published records carry one compiler-owned wire
-//RS     /// holder. The holder is not part of the Jet source schema.
-//RS     pub(crate) published_schemas: HashSet<String>,
-//RS     /// Structs carrying both checked serde derives needed for typed HTTP
-//RS     /// request/response schemas.
-//RS     pub(crate) codable_types: HashSet<String>,
-//RS     /// Canonical typeable paths for reflectable nominal types. This is a
-//RS     /// projection cache seeded only from the sema name ledger.
-//RS     pub(crate) reflect_paths: HashMap<String, String>,
-//RS     /// Generic parameters that occur in non-skipped serialized fields.
-//RS     pub(crate) serde_wire_params: HashMap<String, HashSet<String>>,
-//RS     pub(crate) enum_variants: HashMap<String, Vec<(String, VariantPayload)>>,
-//RS     /// variant name -> owning enum type (for pattern lowering)
-//RS     pub(crate) variant_owner: HashMap<String, String>,
-//RS     /// Recursive-type edges that need `Box<…>` in Rust (`(owner, edge_key)`).
-//RS     pub(crate) boxed_edges: HashSet<(String, String)>,
-//RS     pub(crate) cloneable: HashSet<String>,
-//RS     /// D-MIGRATE4: `migration TypeName { … }` blocks per type, in source order
-//RS     /// (the chain, oldest step first). Read by `emit_struct_migration` to lower
-//RS     /// the runtime step functions + silent decode migration chain-walker.
-//RS     pub(crate) migrations: HashMap<String, Vec<crate::AST::MigrationDecl>>,
-//RS     /// D-SOA1 / D-SOA-TIER1=A: struct names declared `#layout(columnar)`. A `[S]`
-//RS     /// of such a struct lowers to the Prelude-owned `JetColumnList<S>` over THE
-//RS     /// shared column store; `rust_type` maps the list type and the list ops route
-//RS     /// to that facade's surface.
-//RS     pub(crate) columnar: HashSet<String>,
-//RS     pub(crate) auto_printable: HashSet<String>,
-//RS     pub(crate) auto_debug: HashSet<String>,
-//RS     pub(crate) auto_equatable: HashSet<String>,
-//RS     /// D-TAG1: types whose fields are all Eq+Hash-capable (comparable minus
-//RS     /// float fields) — gates `derive(Eq, Hash)` for `Tally<T>` keys.
-//RS     pub(crate) hashable: HashSet<String>,
-//RS     pub(crate) patchable: HashSet<String>,
-//RS     /// D-FIELDPOL1: struct name -> computed field names. Sema already
-//RS     /// synthesized a `fn <field>(self) => T` getter for each on `s.methods`
-//RS     /// (`Sema::CheckerFieldPolicy`); this set is consulted at every
-//RS     /// `Expr::Field`/`LValue::Field` lowering site so a read of the field
-//RS     /// emits a call to that getter instead of a struct member access — the
-//RS     /// field simply isn't a Rust struct member (see `emit_struct`).
-//RS     pub(crate) computed_fields: HashMap<String, HashSet<String>>,
-//RS     /// D-FIELDMEMO1=A: stored computed fields and their result types. The
-//RS     /// hidden Rust member is emitted from this one semantic registry.
-//RS     pub(crate) memo_fields: HashMap<String, HashMap<String, Type>>,
-//RS     /// D-FIELDMEMO1=A: stored field -> memo getters that depend on it,
-//RS     /// including transitive computed-field dependencies.
-//RS     pub(crate) memo_dependencies: HashMap<String, HashMap<String, HashSet<String>>>,
-//RS     pub(crate) src: String,
-//RS     /// Line-start index of `src`, built on first use by [`Cx::src_lines`].
-//RS     pub(crate) src_line_index: std::sync::OnceLock<jet_foundation::Diagnostics::LineIndex>,
-//RS     pub(crate) file: String,
-//RS     /// Rust module alias for this loaded source file, when it is emitted as a
-//RS     /// file module.  TIR uses this only to keep the source package's internal
-//RS     /// ABI calls distinct from calls into the package's public surface.
-//RS     pub(crate) module_alias: String,
-//RS     /// Checked namespace identity of this loaded source module
-//RS     /// (`package::path` from the name ledger).  This is the identity every
-//RS     /// TIR/MIR module reference is keyed by; `module_alias` is only a
-//RS     /// Rust-name projection and can collide across packages.
-//RS     pub(crate) module_identity: String,
-//RS     /// Source-owned Core module -> private emitted module alias.
-//RS     pub(crate) core_source_modules: HashMap<String, String>,
-//RS     /// Loaded source signatures for imported source-owned Core functions,
-//RS     /// keyed by canonical Core module path and member.
-//RS     pub(crate) core_source_sigs: HashMap<(String, String), CoreSourceFunctionSignature>,
-//RS     /// Import alias -> Rust module name (`__jet_scoring`).
-//RS     pub(crate) import_mods: HashMap<String, String>,
-//RS     /// Generated C-module functions whose wrappers return their declared C
-//RS     /// value directly. They do not use the hidden Jet `Result` carrier.
-//RS     /// Keys use the emitted module/function path (`__jet_module::function`).
-//RS     pub(crate) direct_c_functions: HashSet<String>,
-//RS     /// Canonical checked foreign identity for each source-level foreign call
-//RS     /// spelling.  The value is the Tir/MIR foreign row key, never a bridge
-//RS     /// wrapper name, so direct CModule calls resolve to typed `MirForeign`
-//RS     /// rows instead of falling through to a user-function lookup.
-//RS     pub(crate) foreign_call_keys: HashMap<String, String>,
-//RS     /// Opaque C handle nominal names whose ABI is a raw pointer at native
-//RS     /// boundaries. This is bundle metadata, not a source-level type heuristic.
-//RS     pub(crate) opaque_handles: HashSet<String>,
-//RS     /// Canonical cross-module nominal identity -> Rust module path. The key
-//RS     /// includes package and source-module identity; import aliases are only
-//RS     /// source lookup projections and never semantic type identities.
-//RS     pub(crate) foreign_types: HashMap<String, String>,
-//RS     /// D-MOD4: `(alias, item)` -> `(real Rust module, real fn)` for `pub use`
-//RS     /// re-exports, so `text.wrap` lowers to the module that actually defines it.
-//RS     pub(crate) reexport_calls: HashMap<(String, String), (String, String)>,
-//RS     /// `(import alias, function)` -> parameter conventions for cross-module calls.
-//RS     pub(crate) import_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
-//RS     /// c109 Phase 14: `(import alias, function)` -> the function's return type, so the
-//RS     /// TIR can carry a total result type for a cross-module call (mirrors `import_sigs`).
-//RS     pub(crate) import_rets: HashMap<(String, String), Option<Type>>,
-//RS     /// Import alias -> compiler-known core module (`core.files`, `core.encoding`, ...).
-//RS     pub(crate) core_imports: HashMap<String, String>,
-//RS     /// M10 helpers proven reachable by sema.
-//RS     pub(crate) used_core: HashSet<String>,
-//RS     /// D-CABI-CALLBACK1: top-level function names sema proved are passed as a
-//RS     /// stable C callback symbol at some `#Import` call site. Emission keeps
-//RS     /// each Jet function's result carrier and gives it a raw `extern "C"`
-//RS     /// trampoline; this set identifies which adapters are needed.
-//RS     pub(crate) ffi_callback_fns: HashSet<String>,
-//RS     /// Empty at the entry module, `super::` inside generated import modules.
-//RS     pub(crate) root_prefix: String,
-//RS     /// M7: rustc crate name for the FFI bridge (`jet_ffi_…`).
-//RS     pub(crate) ffi_crate: Option<String>,
-//RS     /// M7: Jet function name -> wrapper symbol and boundary kind in the FFI crate.
-//RS     pub(crate) extern_funcs: HashMap<String, ExternFn>,
-//RS     /// D-BOUND-UNDO1=A: foreign binding name -> compensating Jet function.
-//RS     /// Lowering reads this fact; engines only marshal the resulting rollback hook.
-//RS     pub(crate) foreign_undos: HashMap<String, String>,
-//RS     /// D-MOD2: inline code module aliases in scope (alias → module name).
-//RS     pub(crate) code_modules: HashSet<String>,
-//RS     /// D-MOD3: unqualified inline-module items (name → canonical member name).
-//RS     pub(crate) unqualified_inline: HashMap<String, String>,
-//RS     /// D-MOD3: unqualified file-module items (name → (rust_mod_name, fn_name)).
-//RS     pub(crate) unqualified_file: HashMap<String, (String, String)>,
-//RS     /// D-NAME-WALK1=A: per-inline-function unqualified import scopes. The key
-//RS     /// is the emitted mangled function name (`module__function`).
-//RS     pub(crate) inline_unqualified: HashMap<String, HashMap<String, String>>,
-//RS     pub(crate) inline_unqualified_file: HashMap<String, HashMap<String, (String, String)>>,
-//RS     /// D-NAME-WALK1=A: per-inline-function Core import scopes. The key is the
-//RS     /// emitted mangled function name (`module__function`).
-//RS     pub(crate) inline_core_imports: HashMap<String, HashMap<String, String>>,
-//RS     /// D-NAME-WALK1=A / D-VERDICT-1867-1: per-inline-function foreign
-//RS     /// namespace scopes. The value is the mounted Rust module name.
-//RS     pub(crate) inline_foreign_imports: HashMap<String, HashMap<String, String>>,
-//RS     /// D-NAME-WALK1=A / D-VERDICT-1867-1: foreign call signatures scoped to
-//RS     /// the emitted inline function that declared the import. Keeping this
-//RS     /// fact local prevents two inline bodies with the same alias and method
-//RS     /// name from overwriting one another.
-//RS     pub(crate) inline_foreign_sigs:
-//RS         HashMap<String, HashMap<(String, String), Vec<(AccessConvention, Type)>>>,
-//RS     pub(crate) inline_foreign_rets: HashMap<String, HashMap<(String, String), Option<Type>>>,
-//RS     /// Signature facts for foreign namespaces re-exported by an inline
-//RS     /// module, keyed by `(inline module, exported alias, method)`.
-//RS     pub(crate) inline_foreign_reexport_sigs:
-//RS         HashMap<(String, String, String), Vec<(AccessConvention, Type)>>,
-//RS     pub(crate) inline_foreign_reexport_rets: HashMap<(String, String, String), Option<Type>>,
-//RS     /// Names from inline scopes used by the conservative TIR coverage gate.
-//RS     /// Lowering still reads the exact per-function map.
-//RS     pub(crate) inline_import_names: HashSet<String>,
-//RS     /// D-NAME-WALK1=A: inline-module pub re-exports of inline functions.
-//RS     pub(crate) inline_reexport_inline: HashMap<(String, String), String>,
-//RS     /// D-NAME-WALK1=A: inline-module pub re-exports of Core items.
-//RS     pub(crate) inline_reexport_core: HashMap<(String, String), (String, String)>,
-//RS     /// D-VERDICT-1867-1: inline-module pub re-exports of foreign namespaces.
-//RS     /// The key is `(inline module, exported namespace alias)`.
-//RS     pub(crate) inline_reexport_foreign: HashMap<(String, String), String>,
-//RS     /// S62/M9: (TypeName, method_name) pairs that come from trait impls — these
-//RS     /// are called without the `__jet_` prefix in Rust (the trait impl owns the name).
-//RS     pub(crate) trait_methods: HashSet<(String, String)>,
-//RS     /// S62/M9: the checked trait identity for each static-capable trait method.
-//RS     /// TIR carries this fact into MIR; adapters never rediscover a trait by
-//RS     /// scanning names or implementation rows.
-//RS     pub(crate) trait_method_traits: HashMap<(String, String), String>,
-//RS     /// D-OPMIX1: exact operator method facts keyed by
-//RS     /// `Traits::operator_method_identity`; unlike `method_sigs`, this table
-//RS     /// retains one entry for every RHS pair.
-//RS     pub(crate) operator_methods: HashMap<String, OperatorMethod>,
-//RS     /// Imported trait definitions Rust method lookup must bring into scope,
-//RS     /// keyed by generated module and trait name.
-//RS     pub(crate) imported_traits: HashSet<(String, String)>,
-//RS     /// D-TXN-ROLLBACK layer 2: user types that implement the `Rollback` trait.
-//RS     /// Populated in `build_cx_items` from `Item::Impl` blocks with
-//RS     /// `trait_name == Some("Rollback")` and from inline `struct { impl Rollback }`.
-//RS     pub(crate) rollback_types: HashSet<String>,
-//RS     /// D-DISPLAYDBG1: user types with an explicit `impl Type.Display`.
-//RS     pub(crate) display_types: HashSet<String>,
-//RS     /// Types with an explicit `impl Type.Debug` (hand `JetDebug` bridged in
-//RS     /// `emit_trait_impl`). Union debug arms consult this beside `auto_debug`.
-//RS     pub(crate) debug_types: HashSet<String>,
-//RS     /// D-SHAPE-RESOURCE2=A: user types with an ordinary nominal `Close` impl.
-//RS     pub(crate) close_types: HashSet<String>,
-//RS     /// D-ITER-HOOK: `loop x in coll` on types implementing `Iterable`.
-//RS     pub(crate) iterable_hooks: HashMap<String, IterableHook>,
-//RS     /// D-INDEX-HOOK: `coll[k]` on types implementing `Index`.
-//RS     pub(crate) index_hooks: HashMap<String, IndexHook>,
-//RS     /// E2-M12 D-OBS1: name of the Jet function currently being emitted, so
-//RS     /// jet_panic_rich can include the function name in the panic report.
-//RS     pub(crate) current_fn: std::cell::RefCell<String>,
-//RS     /// D-MEM-SENTRY1: module/package policy facts carried into TIR lowering.
-//RS     pub(crate) policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
-//RS     /// D-MEM-GUARANTEE1: package hardening is a build-profile fact, not a
-//RS     /// source policy declaration. It enables the shared Prelude sentry in
-//RS     /// release builds after the runtime entry initializes it.
-//RS     pub(crate) package_hardened: bool,
-//RS     /// D-MEM-GUARANTEE1: this module belongs to a dependency named by the
-//RS     /// package `contain` dial, so its unsafe gates use the fenced Prelude
-//RS     /// scope. The root package itself is never marked dependency-fenced.
-//RS     pub(crate) dependency_fenced: bool,
-//RS     /// c148: struct name → its declared type-parameter names. Populated in
-//RS     /// `build_cx_items` from `StructDef.type_params`. Lets `struct_is_generic` and
-//RS     /// field-type checks recognize multi-char type params (`Kind`, `Elem`, …).
-//RS     pub(crate) struct_type_params: HashMap<String, HashSet<String>>,
-//RS     /// The same parameters in declaration order, for substituting a concrete
-//RS     /// `Struct<A, B>` receiver into its declared field types.
-//RS     pub(crate) struct_type_param_order: HashMap<String, Vec<String>>,
-//RS     /// c148: type-parameter names for the function currently being emitted. Set
-//RS     /// from `f.type_params` at the start of `emit_func` so `rust_type` and
-//RS     /// `rust_param_type` can recognize multi-char params without the single-letter
-//RS     /// heuristic. Cleared when emit returns.
-//RS     pub(crate) current_type_params: std::cell::RefCell<HashSet<String>>,
-//RS     /// c139 M4: spawn lambda bodies collected during TIR lowering (JIT order).
-//RS     pub(crate) jit_spawn_lambdas: std::cell::RefCell<Vec<crate::Codegen::TIR::TJitSpawnLambda>>,
-//RS     pub(crate) jit_spawn_sites: std::cell::RefCell<HashMap<(String, usize, usize), usize>>,
-//RS     /// Global offset for spawn sites lowered from an imported module.
-//RS     pub(crate) jit_spawn_site_base: usize,
-//RS     /// Concrete generic owner methods reached while lowering executable TIR.
-//RS     /// The key is `Owner<Args>::method`, keeping discovery deterministic.
-//RS     pub(crate) jit_method_calls:
-//RS         std::cell::RefCell<std::collections::BTreeMap<String, (Type, String, Vec<Type>)>>,
-//RS     /// Concrete argument types at calls to generic free functions. TIR uses
-//RS     /// these facts to admit one native specialization per concrete call shape.
-//RS     pub(crate) jit_generic_calls:
-//RS         std::cell::RefCell<std::collections::BTreeMap<String, Vec<Vec<Type>>>>,
-//RS     /// Concrete instantiations of imported source-owned Core generic calls,
-//RS     /// keyed by their checked canonical module and function identity.
-//RS     pub(crate) jit_core_source_generic_calls: std::cell::RefCell<
-//RS         std::collections::BTreeMap<(String, String), Vec<Vec<Type>>>,
-//RS     >,
-//RS     /// Functions whose typed decode depends on the canonical TIR migration
-//RS     /// plan. The resident codec has no authority to reinterpret that plan.
-//RS     pub(crate) jit_canonical_deopt: std::cell::RefCell<HashSet<String>>,
-//RS     /// Functions whose codec calls must stay on TIR if the function deopts.
-//RS     pub(crate) jit_canonical_calls: std::cell::RefCell<HashSet<String>>,
-//RS     /// Resident-only prefix for calls between functions in an imported module.
-//RS     pub(crate) jit_local_call_prefix: Option<String>,
-//RS     /// Free-function type parameter names, used to give generic call results
-//RS     /// their concrete TIR type at the call site.
-//RS     pub(crate) fn_type_params: HashMap<String, HashSet<String>>,
-//RS     /// The same free-function parameters in declaration order. HashSet is still
-//RS     /// useful for structural binding, but explicit `call<T>(…)` must map each
-//RS     /// source argument to the matching binder deterministically.
-//RS     pub(crate) fn_type_param_order: HashMap<String, Vec<String>>,
-//RS     /// D-DBG3 step 2 (dap-debugger): when true, `lower_stmts` interleaves a
-//RS     /// `TStmt::LineMarker` before every lowered statement, and emission turns each
-//RS     /// into a `// jet:line N` comment. Set ONLY by the native `jet debug` build path
-//RS     /// (`emit_bundle_dbg`); false (the default) is byte-identical to today's output,
-//RS     /// so normal builds, `jet test`, and the JIT tier never see a marker.
-//RS     pub(crate) debug_linemap: bool,
-//RS     /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): trait-bounded variadic function
-//RS     /// name -> (fixed param count, resolved trait-bound list). Populated once
-//RS     /// from each `Item::Func`'s trailing param; call-site lowering
-//RS     /// (`TIR/lower.rs`) reads this to route calls to the typed specialization
-//RS     /// built by `Codegen/VariadicBound.rs` instead of ordinary lowering.
-//RS     pub(crate) variadic_bound_fns: HashMap<String, (usize, Vec<String>)>,
-//RS     /// D-OSTARGET1=A (ratified 2026-07-01, c134): the native OS bucket this
-//RS     /// build is compiling for — an `impl` gated to a different `#Target(OS.*)`
-//RS     /// is skipped entirely (mirrors how `Codegen/Web.rs` filters by
-//RS     /// `WebBucket`). Defaults to the host OS; the real build pipeline
-//RS     /// (`emit_bundle_dbg`) overwrites it from the resolved `--target=<triple>`.
-//RS     pub(crate) active_os: crate::Syntax::OSTarget,
-//RS     /// Web Wasm carries unbounded `Int` in `JetWasmInt`, which is cloneable but
-//RS     /// not `Copy`. Native sema sees the same type as a scalar, so shared TIR
-//RS     /// emission uses this adapter fact when reading an exact-int field.
-//RS     pub(crate) web_wasm_noncopy_int: bool,
-//RS     /// D-ENC712: resolved package edition for encoding surface dispatch.
-//RS     pub(crate) package_edition: String,
-//RS     /// D-DX-PREVIEW1: compiler-owned build/revision facts for inline previews.
-//RS     /// Adapters receive these values from checked bundle metadata; source calls
-//RS     /// never need to expose a public metadata argument.
-//RS     pub(crate) preview_build_id: String,
-//RS     pub(crate) preview_revision: String,
-//RS     /// D-STM1=A (card #506): true while lowering the body of a `#Transact` block,
-//RS     /// so a `Shared<T>.edit(f)` inside it routes to the deferred `edit_txn` (the
-//RS     /// atomic Shared plane) instead of taking a lock immediately. Set/restored
-//RS     /// around the block body in `lower_stmt`'s `Stmt::Transact` arm.
-//RS     pub(crate) in_stm_transact: std::cell::Cell<bool>,
-//RS     /// D-STM1=A (card #506): set true when a `Shared.edit` inside the current
-//RS     /// `#Transact` body routed to `edit_txn` — i.e. the block actually touches the
-//RS     /// Shared plane and so needs the `jet_stm::begin()/commit()` scaffold emitted.
-//RS     /// Save/restored per block so each `#Transact` reports its own use.
-//RS     pub(crate) stm_touched: std::cell::Cell<bool>,
-//RS     /// D-FOUND-BOARD1: selected target profile facts are fixed before TIR lowering.
-//RS     /// Hardware call nodes copy canonical IDs from this immutable sema projection.
-//RS     pub(crate) hardware_profile: Option<jet_foundation::TargetMachine::TargetHardwareFacts>,
-//RS     pub(crate) hardware_profile_id: Option<String>,
-//RS }
-//RS 
-//RS /// D-ITER-HOOK: metadata for zero-copy `loop x in mytype` lowering.
-//RS #[derive(Debug, Clone)]
-//RS pub(crate) struct IterableHook {
-//RS     pub iter_type: String,
-//RS     pub item_type: Type,
-//RS     pub iter_symbol: String,
-//RS     pub next_symbol: String,
-//RS }
-//RS 
-//RS /// D-INDEX-HOOK: metadata for expert `mytype[k]` lowering.
-//RS #[derive(Debug, Clone)]
-//RS pub(crate) struct IndexHook {
-//RS     pub value_type: Type,
-//RS }
-//RS 
-//RS // D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `JSON`/`TOML`/
-//RS // `YAML`/`CSV`) is the user-facing face of `jet_std::DataTree`.
-//RS pub(crate) fn is_json_type_name(name: &str) -> bool {
-//RS     Syntax::is_data_type_name(name)
-//RS }
-//RS 
-//RS /// Whether a checked pattern subject is the dynamic `DataTree` value. User
-//RS /// enums may declare the same variant names (`Int`, `Text`, `Null`, …), so a
-//RS /// variant pattern takes the DataTree owner only from its subject type, never
-//RS /// from the variant name alone.
-//RS pub(crate) fn is_data_tree_subject(cx: &Cx, subject_ty: &Type) -> bool {
-//RS     match subject_ty.without_user_tags() {
-//RS         Type::Named(name) | Type::Apply { name, .. } => {
-//RS             is_json_type_name(name)
-//RS                 || super::TIR::canonical_enum_owner(cx, name) == Syntax::TYPE_DATA
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// Whether a checked pattern subject is the terminal `Key` enum, whose variant
-//RS /// names (`Char`, `Up`, …) user enums may also declare.
-//RS pub(crate) fn is_key_subject(cx: &Cx, subject_ty: &Type) -> bool {
-//RS     match subject_ty.without_user_tags() {
-//RS         Type::Named(name) | Type::Apply { name, .. } => {
-//RS             super::TIR::canonical_enum_owner(cx, name) == Syntax::TYPE_KEY
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS // D-DBDRIVER1: the `DBValue` dynamic tagged SQL value — same construction
-//RS // mechanism as `Data`/`JSON`, mirrored via `jet_std::DBValue`.
-//RS pub(crate) fn is_db_value_type_name(name: &str) -> bool {
-//RS     Syntax::is_db_value_type_name(name)
-//RS }
-//RS /// Core UI runtime carriers are generated at the crate root from the shared
-//RS /// `CoreModuleExports` registry. Result aliases intentionally stay on their
-//RS /// dedicated `JetUiServiceResult<...>` projections below.
-//RS pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
-//RS     const RESULT_ALIASES: &[&str] = &[
-//RS         "UIServiceResult",
-//RS         "UIFileFilterResult",
-//RS         "UIFSGrantResult",
-//RS         "UIShortcutResult",
-//RS         "UiShortcutBindingResult",
-//RS         "UIAccessibilityResult",
-//RS         "UIFileDialogResult",
-//RS         "UIClipboardTextResult",
-//RS         "UIClipboardWriteResult",
-//RS         "UIIMEResult",
-//RS         "UIDragResult",
-//RS         "UIShortcutDispatchResult",
-//RS         "UIAccessibilityNodeResult",
-//RS         "UIAccessibilityAttachResult",
-//RS         "UIAccessibilityProjectionResult",
-//RS     ];
-//RS     if RESULT_ALIASES.contains(&name) {
-//RS         return None;
-//RS     }
-//RS     jet_foundation::CoreModuleExports::core_modules()
-//RS         .iter()
-//RS         .filter(|entry| matches!(entry.module, "core.ui" | "core.ui.host"))
-//RS         .any(|entry| {
-//RS             entry
-//RS                 .type_exports
-//RS                 .iter()
-//RS                 .any(|&(type_name, _)| type_name == name)
-//RS         })
-//RS         .then_some(name)
-//RS }
-//RS 
-//RS /// Prelude values emitted at the generated crate root rather than under
-//RS /// `jet_std`. Keep this separate from `core_rust_type_name`: that table's caller
-//RS /// always inserts `jet_std::`.
-//RS pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
-//RS     match name {
-//RS         n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
-//RS         n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
-//RS         n if n == Syntax::DETERMINISTIC_WORLD_TYPE => Some("JetDeterministicWorld"),
-//RS         n if n == Syntax::TYPE_ERR => Some("JetErr"),
-//RS         "Transaction" => Some("JetTransaction"),
-//RS         "Counter" => Some("JetCounter"),
-//RS         "OrderedMap" => Some("JetOrderedMap"),
-//RS         "Layer" => Some("JetLayer"),
-//RS         "Chain" => Some("JetChain"),
-//RS         "StringSet" => Some("JetStringSet"),
-//RS 
-//RS         "Loadable" => Some("JetLoadable"),
-//RS         n if n == Syntax::TYPE_RANGE => Some("JetRange"),
-//RS         n if n == Syntax::TYPE_ITER => Some("JetIter"),
-//RS         "Point" => Some("JetPoint"),
-//RS         "Size" => Some("JetSize"),
-//RS         "Rect" => Some("JetRect"),
-//RS         "SizeConstraint" => Some("JetSizeConstraint"),
-//RS         "UINode" => Some("JetUiNode"),
-//RS         "FontStyle" => Some("JetFontStyle"),
-//RS         "FontFace" => Some("JetFontFace"),
-//RS         "Glyph" => Some("JetGlyph"),
-//RS         "GlyphRun" => Some("JetGlyphRun"),
-//RS         "GlyphShaper" => Some("JetGlyphShaper"),
-//RS         "UIAriaRole" => Some("JetUiAriaRole"),
-//RS         "InputEvent" => Some("JetInputEvent"),
-//RS         "EventResult" => Some("JetEventResult"),
-//RS         "NullBackend" => Some("JetNullBackend"),
-//RS         "TUIBackend" => Some("JetTuiBackend"),
-//RS         "GtkBackend" => Some("JetGtkBackend"),
-//RS         // D-AUTH1=A: authentication carriers are Prelude-root values.
-//RS         "Session" => Some("JetAuthSession"),
-//RS         "Auth" => Some("JetAuthApp"),
-//RS         // D-DBPOLICY-BIND1: RowPolicy is re-exported by the root Sync carrier.
-//RS         "RowPolicy" => Some("JetRowPolicy"),
-//RS         // D-APPROX1=A: native sketch carriers are Prelude-root values.
-//RS         "HyperLogLog" => Some("JetHyperLogLog"),
-//RS         "TDigest" => Some("JetTDigest"),
-//RS         "CountMinSketch" => Some("JetCountMinSketch"),
-//RS         "ReservoirSampler" => Some("JetReservoirSampler"),
-//RS         "JetDate" | "JetInstant" | "JetLocalTime" | "JetDateTime" | "JetPeriod" | "JetZone"
-//RS         | "JetZonedDateTime" => Some(name),
-//RS         "WebMutationStatus" => Some("JetWebMutationStatus"),
-//RS         "WebMutationState" => Some("JetWebMutationState"),
-//RS         "WebQueryStatus" => Some("JetWebQueryStatus"),
-//RS         "WebQueryNetworkMode" => Some("JetWebQueryNetworkMode"),
-//RS         "WebQueryState" => Some("JetWebQueryState"),
-//RS         "WebQuery" => Some("JetWebQuery"),
-//RS         "WebStore" => Some("JetWebStore"),
-//RS         "WebStoreTransaction" => Some("JetWebStoreTransaction"),
-//RS         "WebStorePatch" => Some("JetWebStorePatch"),
-//RS         "WebStoreInspection" => Some("JetWebStoreInspection"),
-//RS         "WebStoreEvent" => Some("JetWebStoreEvent"),
-//RS         "WebStoreSubscription" => Some("JetWebStoreSubscription"),
-//RS         "WebFormValueType" => Some("JetWebFormValueType"),
-//RS         "WebFormStatus" => Some("JetWebFormStatus"),
-//RS         "WebFormFieldState" => Some("JetWebFormFieldState"),
-//RS         "WebFormState" => Some("JetWebFormState"),
-//RS         "WebForm" => Some("JetWebForm"),
-//RS         "WebFormValidation" => Some("JetWebFormValidation"),
-//RS         "WebFormControl" => Some("JetWebFormControl"),
-//RS         "WebFormValidationTiming" => Some("JetWebFormValidationTiming"),
-//RS         "WebFormFieldSpec" => Some("JetWebFormFieldSpec"),
-//RS         "WebFormInput" => Some("JetWebFormInput"),
-//RS         "WebFormDecodedInput" => Some("JetWebFormDecodedInput"),
-//RS         "WebFormActionError" => Some("JetWebFormActionError"),
-//RS         "WebFormLifecycleStatus" => Some("JetWebFormLifecycleStatus"),
-//RS         "WebFormLifecycle" => Some("JetWebFormLifecycle"),
-//RS         "WebFormErrorState" => Some("JetWebFormErrorState"),
-//RS         "WebFormTypedAction" => Some("JetWebFormTypedAction"),
-//RS         "WebFormTyped" => Some("JetWebFormTyped"),
-//RS         "WebFormTypedValidation" => Some("JetWebFormTypedValidation"),
-//RS         "WebFormTypedSubmission" => Some("JetWebFormTypedSubmission"),
-//RS         "WebTableSortDirection" => Some("JetWebTableSortDirection"),
-//RS         "WebTableSort" => Some("JetWebTableSort"),
-//RS         "WebTableFilter" => Some("JetWebTableFilter"),
-//RS         "WebTablePageMode" => Some("JetWebTablePageMode"),
-//RS         "WebTableStatus" => Some("JetWebTableStatus"),
-//RS         "WebTableProjection" => Some("JetWebTableProjection"),
-//RS         "WebTableState" => Some("JetWebTableState"),
-//RS         "WebTableColumn" => Some("JetWebTableColumn"),
-//RS         "WebTableRow" => Some("JetWebTableRow"),
-//RS         "WebTablePage" => Some("JetWebTablePage"),
-//RS         "WebTable" => Some("JetWebTable"),
-//RS         "WebVirtualViewport" => Some("JetWebVirtualViewport"),
-//RS         "WebVirtualWindow" => Some("JetWebVirtualWindow"),
-//RS         "WebVirtualPlan" => Some("JetWebVirtualPlan"),
-//RS         "WebVirtualPlanViewport" => Some("JetWebVirtualPlanViewport"),
-//RS         "Atomic" => Some("JetAtomic"),
-//RS         "JetDataPlotMark"
-//RS         | "JetDataPlotChannel"
-//RS         | "JetDataPlotAggregate"
-//RS         | "JetDataPlotFilterOp"
-//RS         | "JetDataPlotValue"
-//RS         | "JetDataPlotScaleKind"
-//RS         | "JetDataPlotDomain"
-//RS         | "JetDataPlotLegendPosition"
-//RS         | "JetDataPlotFacetKind"
-//RS         | "JetDataPlotInteraction"
-//RS         | "JetDataPlotBackend"
-//RS         | "JetDataPlotSupport"
-//RS         | "JetDataPlotErrorKind"
-//RS         | "JetDataPlotRenderFormat"
-//RS         | "JetDataPlotField"
-//RS         | "JetDataPlotSchema"
-//RS         | "JetDataPlotSourceFacts"
-//RS         | "JetDataPlotEncoding"
-//RS         | "JetDataPlotScale"
-//RS         | "JetDataPlotAxis"
-//RS         | "JetDataPlotLegend"
-//RS         | "JetDataPlotFacet"
-//RS         | "JetDataPlotLayer"
-//RS         | "JetDataPlotAccessibility"
-//RS         | "JetDataPlotLayout"
-//RS         | "JetDataPlotCapability"
-//RS         | "JetDataPlotError"
-//RS         | "JetDataPlotPlan"
-//RS         | "JetDataPlotSelectedRow"
-//RS         | "JetDataPlotInspection"
-//RS         | "JetDataPlotRender"
-//RS         | "JetDataPlotProjection"
-//RS         | "JetDataPlotColumn"
-//RS         | "JetDataPlot" => Some(name),
-//RS         n if job_queue_rust_type(n).is_some() => job_queue_rust_type(n),
-//RS         _ => net_handle_rust_type(name),
-//RS     }
-//RS }
-//RS 
-//RS /// D-DX-QUEUE1=A: durable job queue values are flat Prelude carriers, not
-//RS /// `jet_std` values. `JobQueue` is opened with the static provider lifetime.
-//RS pub(crate) fn job_queue_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "JobQueue" => Some("JetJobQueue<'static>"),
-//RS         "JobPayload" => Some("JetJobPayload"),
-//RS         "JobResult" => Some("JetJobResult"),
-//RS         "JobError" => Some("JetJobError"),
-//RS         "JobQueueReceipt" => Some("JetJobQueueReceipt"),
-//RS         "JobQueueClaim" => Some("JetJobQueueClaim"),
-//RS         "JobQueueEvent" => Some("JetJobQueueEvent"),
-//RS         "JobQueueRecord" => Some("JetJobQueueRecord"),
-//RS         "JobQueueStatus" => Some("JetJobQueueStatus"),
-//RS         "JobQueueState" => Some("JetJobQueueState"),
-//RS         "JobQueueDeliveryPolicy" => Some("JetJobQueueDeliveryPolicy"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Rust carriers for the public history-testing records. They live beside the
-//RS /// generated program in the embedded Foundation module, not in `jet_std`.
-//RS pub(crate) fn history_rust_type_name(name: &str) -> Option<&'static str> {
-//RS     match name.rsplit_once("::").or_else(|| name.rsplit_once('.')) {
-//RS         Some((prefix, leaf))
-//RS             if prefix == "core" || prefix.starts_with("core.") || prefix.starts_with("core::") =>
-//RS         {
-//RS             history_rust_type_name(leaf)
-//RS         }
-//RS         Some(_) => None,
-//RS         None => match name {
-//RS             "Count" => Some("Count"),
-//RS             "HandleID" => Some("HandleID"),
-//RS             "TaskID" => Some("TaskID"),
-//RS             "EventID" => Some("EventID"),
-//RS             "HistoryRNG" => Some("HistoryRNG"),
-//RS             "HistoryValue" => Some("HistoryValue"),
-//RS             "HistoryPrecondition" => Some("HistoryPrecondition"),
-//RS             "HistoryCase" => Some("HistoryCase"),
-//RS             "HistoryOperation" => Some("HistoryOperation"),
-//RS             "HistoryScheduleChoice" => Some("HistoryScheduleChoice"),
-//RS             "HistoryBounds" => Some("HistoryBounds"),
-//RS             "HistoryDistribution" => Some("HistoryDistribution"),
-//RS             "HistoryStrategy" => Some("HistoryStrategy"),
-//RS             "TypedHistoryCase" => Some("TypedHistoryCase"),
-//RS             _ => None,
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn core_source_type_leaf(name: &str) -> &str {
-//RS     name.strip_prefix("<corelib>/")
-//RS         .and_then(|identity| identity.rsplit("::").next())
-//RS         .unwrap_or(name)
-//RS }
-//RS 
-//RS pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
-//RS     // core.sync's policy list is source-owned (`allow`/`deny`). The root
-//RS     // database row policy is a different native carrier (`table`/`expression`).
-//RS     if name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy") {
-//RS         return None;
-//RS     }
-//RS     // Core source nominals have a canonical <corelib>/...::Leaf identity;
-//RS     // only registered Core owners may use the Prelude's native type rows.
-//RS     // Arbitrary qualified user/import names must not match by leaf.
-//RS     let name = core_source_type_leaf(name);
-//RS     let name = match name.rsplit_once("::").or_else(|| name.rsplit_once('.')) {
-//RS         Some((prefix, leaf))
-//RS             if prefix == "core" || prefix.starts_with("core.") || prefix.starts_with("core::") =>
-//RS         {
-//RS             leaf
-//RS         }
-//RS         Some(_) => return None,
-//RS         None => name,
-//RS     };
-//RS     match name {
-//RS         n if is_json_type_name(n) => Some("DataTree"),
-//RS         n if n == Syntax::TYPE_IO_ERROR || n == "IOError" => Some("IOError"),
-//RS         n if n == Syntax::TYPE_IO_CONTEXT => Some("IOContext"),
-//RS         n if n == Syntax::TYPE_IO_OPERATION => Some("IOOperation"),
-//RS         n if n == Syntax::TYPE_PROCESS_RESOURCE_LIMIT => Some("ProcessResourceLimit"),
-//RS         "EnvError" => Some("EnvError"),
-//RS         n if n == Syntax::TYPE_UTF8_ERROR || n == "UTF8Error" => Some("UTF8Error"),
-//RS         "ProcessResult" | "ProcessReceipt" => Some("ProcessReceipt"),
-//RS         "ProcessPlan" => Some("ProcessPlan"),
-//RS         "ProcessSpec" => Some("ProcessSpec"),
-//RS         "ProcessChild" => Some("ProcessChild"),
-//RS         // D-PROCESS1=A: the core dot-literal stream-mode enum.
-//RS         "ProcessStreamMode" => Some("ProcessStreamMode"),
-//RS         // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: expert terminal
-//RS         // controls on the existing process model.
-//RS         "TerminalPolicy" => Some("TerminalPolicy"),
-//RS         "TerminalSize" => Some("TerminalSize"),
-//RS         "TerminalMode" => Some("TerminalMode"),
-//RS         "TerminalSession" => Some("TerminalSession"),
-//RS         // D-TEXTWIDTH1=B: the `text.display_width` policy value + its two
-//RS         // dot-literal enum fields, plus the reject-path error struct.
-//RS         "TextWidth" => Some("TextWidth"),
-//RS         "TextWidthAmbiguous" => Some("TextWidthAmbiguous"),
-//RS         "TextWidthControls" => Some("TextWidthControls"),
-//RS         "TextError" => Some("TextError"),
-//RS         "Query" => Some("DataQuery"),
-//RS         "DataGroupedQuery" => Some("DataGroupedQuery"),
-//RS         "Group" => Some("GroupValue"),
-//RS         "DataJoin" => Some("DataJoin"),
-//RS         n if n == Syntax::TYPE_SHARED_GUARD => Some("JetSharedGuard"),
-//RS         "Signal" => Some("JetSignal"),
-//RS         "Derived" => Some("JetDerived"),
-//RS         "AsyncPolicy" => Some("JetAsyncPolicy"),
-//RS         "Event" => Some("JetEvent"),
-//RS         "AsyncEvent" => Some("JetAsyncEvent"),
-//RS         "Hook" => Some("JetHook"),
-//RS         "DecisionHook" => Some("JetDecisionHook"),
-//RS         "HookDecision" => Some("JetHookDecision"),
-//RS         "HookOutcome" => Some("JetHookOutcome"),
-//RS         "Subscription" => Some("JetSubscription"),
-//RS         "EventScope" => Some("JetEventScope"),
-//RS         "EventPolicy" => Some("JetEventPolicy"),
-//RS         "EventTrace" => Some("JetEventTrace"),
-//RS         "DispatchReport" => Some("JetDispatchReport"),
-//RS         "DispatchFailure" => Some("JetDispatchFailure"),
-//RS         "Overflow" => Some("JetEventOverflow"),
-//RS         "FailurePolicy" => Some("JetFailurePolicy"),
-//RS         "DispatchState" => Some("JetDispatchState"),
-//RS         "HookPolicy" => Some("JetHookPolicy"),
-//RS         "EventConfigError" => Some("JetEventConfigError"),
-//RS         "TestSuite" => Some("JetTestSuite"),
-//RS         "TestComparison" => Some("JetTestComparison"),
-//RS         // D-DET1: deterministic injected capability handles.
-//RS         "Clock" => Some("Clock"),
-//RS         "RNG" => Some("RNG"),
-//RS         "Fake" => Some("Fake"),
-//RS         // D-SOLVER-LIB1=A: explicit finite solver state.
-//RS         "Solver" => Some("Solver"),
-//RS         // D-SHAPE-DURATION1/D-SHAPE-DURATIONCONVERT1: checked duration values.
-//RS         "Duration" => Some("Duration"),
-//RS         "DurationUnit" => Some("DurationUnit"),
-//RS         // D-FOUND-COREAPI1 / #2853: event-time late-event policy carrier.
-//RS         "LateEventDisposition" => Some("JetLateEventDisposition"),
-//RS         "RangeError" => Some("RangeError"),
-//RS         "Instant" => Some("JetInstant"),
-//RS         "Date" | "LocalDate" => Some("JetDate"),
-//RS         "LocalTime" => Some("JetLocalTime"),
-//RS         "DateTime" => Some("JetDateTime"),
-//RS         "Period" => Some("JetPeriod"),
-//RS         "Zone" => Some("JetZone"),
-//RS         "ZonedDateTime" => Some("JetZonedDateTime"),
-//RS         "URL" => Some("JetURL"),
-//RS         "MIME" => Some("JetMIME"),
-//RS         "DataLoaderKind" => Some("DataLoaderKind"),
-//RS         "DataFormat" => Some("DataFormat"),
-//RS         "DataFreshness" => Some("DataFreshness"),
-//RS         "DataInvalidationCause" => Some("DataInvalidationCause"),
-//RS         "DataAuthority" => Some("DataAuthority"),
-//RS         "DataSourceIdentity" => Some("DataSourceIdentity"),
-//RS         "DataProvenance" => Some("DataProvenance"),
-//RS         "DataSnapshotIdentity" => Some("DataSnapshotIdentity"),
-//RS         "DataLoaderStatus" => Some("DataLoaderStatus"),
-//RS         "DataLoader" => Some("DataLoader"),
-//RS         "DataSnapshot" => Some("DataSnapshot"),
-//RS         "Regex" => Some("JetRegex"),
-//RS         "RegexFlags" => Some("RegexFlags"),
-//RS         "Match" => Some("JetRegexMatch"),
-//RS         // D-DECIMAL1 / D-NUMTYPE1=A: precise numerics.
-//RS         "Decimal" => Some("JetDecimal"),
-//RS         "Fraction" => Some("JetFraction"),
-//RS         // D-CONC-CHAN1=A / D-MEM1 S6: generic runtime handle carriers.
-//RS         n if n == Syntax::TYPE_RECEIVER => Some("JetReceiver"),
-//RS         n if n == Syntax::TYPE_SENDER => Some("JetSender"),
-//RS         "Closed" => Some("Closed"),
-//RS         "Pool" => Some("JetPool"),
-//RS         "ID" => Some("JetId"),
-//RS         n if n == Syntax::TYPE_TASK_FAILURE => Some("JetTaskFailure"),
-//RS         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
-//RS         "DirEntry" => Some("DirEntry"),
-//RS         // D-FSOPS1 / D-WATCH-SCOPE1: typed filesystem and watcher values.
-//RS         "Stat" => Some("Stat"),
-//RS         "WalkEntry" => Some("WalkEntry"),
-//RS         "WatchEvent" => Some("WatchEvent"),
-//RS         // stdlib-api-laws D4: `WatchEvent`'s two closed field enums.
-//RS         "WatchDomain" => Some("WatchDomain"),
-//RS         "WatchKind" => Some("WatchKind"),
-//RS         "WatchHandle" => Some("WatchHandle"),
-//RS         "WatchSet" => Some("WatchSet"),
-//RS         // D-FFI-CALLBACK2=A: generated managed callback carriers.
-//RS         "FfiCallbackEvent" => Some("JetFfiCallbackEventValue"),
-//RS         "FfiCallbackRegistration" => Some("JetFfiCallbackRegistrationHandle"),
-//RS         "TempDir" => Some("TempDir"),
-//RS         "TempFile" => Some("TempFile"),
-//RS         "FileLock" => Some("FileLock"),
-//RS         "MappedFile" => Some("JetMappedFile"),
-//RS         // D-DX-QUEUE1=A: queue values are flat Prelude carriers. The MIR
-//RS         // backend handles these root names without a `jet_std` namespace.
-//RS         n if job_queue_rust_type(n).is_some() => job_queue_rust_type(n),
-//RS         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A / D-DATA-PLOT1=A: core.data values.
-//RS         "DataLineOptions" => Some("DataLineOptions"),
-//RS         "DataColumn" => Some("DataColumn"),
-//RS         "DataStatus" => Some("DataStatus"),
-//RS         "DataSummary" => Some("DataSummary"),
-//RS         // D-DATAFLOW1=A: typed streaming + invalid-data policy values.
-//RS         "DataLimits" => Some("DataLimits"),
-//RS         "DataError" => Some("DataError"),
-//RS         "DataErrorKind" => Some("DataErrorKind"),
-//RS         "DataPivotCell" => Some("DataPivotCell"),
-//RS         "DataStream" => Some("DataStream"),
-//RS         "DataTracked" => Some("DataTracked"),
-//RS         "DataWatch" => Some("DataWatch"),
-//RS         "DataWatchStatus" => Some("DataWatchStatus"),
-//RS         // D-LOGTRACE1=A: structured logging values.
-//RS         "LogField" => Some("LogField"),
-//RS         "LogSpan" => Some("LogSpan"),
-//RS         // D-SERDE2 / D-VALIDATE-DECODE1: the value tree and accumulated typed
-//RS         // decode errors live in jet_std.
-//RS         "DataTree" => Some("DataTree"),
-//RS         "EncodingLimits" => Some("EncodingLimits"),
-//RS         "EncodingError" => Some("EncodingError"),
-//RS         "EncodingCause" => Some("EncodingCause"),
-//RS         "EncodingFormat" => Some("EncodingFormat"),
-//RS         "EncodingErrorKind" => Some("EncodingErrorKind"),
-//RS         // D-VALIDATE1: the accumulated validation error lives in jet_std too.
-//RS         "FieldError" => Some("FieldError"),
-//RS         "CBOROptions" => Some("CBOROptions"),
-//RS         "CBORError" => Some("CBORError"),
-//RS         "CBORErrorKind" => Some("CBORErrorKind"),
-//RS         "XMLLimits" => Some("XMLLimits"),
-//RS         "XMLParseOptions" => Some("XMLParseOptions"),
-//RS         "XMLRenderOptions" => Some("XMLRenderOptions"),
-//RS         "XMLEncoding" => Some("XMLEncoding"),
-//RS         "XMLLexicalPolicy" => Some("XMLLexicalPolicy"),
-//RS         "XMLCanonical" => Some("XMLCanonical"),
-//RS         "XMLCanonicalMode" => Some("XMLCanonicalMode"),
-//RS         "XMLError" => Some("XMLError"),
-//RS         "XMLReason" => Some("XMLReason"),
-//RS         "XMLEntityPolicy" => Some("XMLEntityPolicy"),
-//RS         "DataEvent" => Some("DataEvent"),
-//RS         "JSONReader" => Some("JSONReader"),
-//RS         "JSONWriter" => Some("JSONWriter"),
-//RS         "JSONLReader" => Some("JSONLReader"),
-//RS         "JSONLWriter" => Some("JSONLWriter"),
-//RS         "CSVReader" => Some("CSVReader"),
-//RS         "CSVWriter" => Some("CSVWriter"),
-//RS         "CSVRow" => Some("CSVRow"),
-//RS         "XMLReader" => Some("XMLReader"),
-//RS         "XMLWriter" => Some("XMLWriter"),
-//RS         // D-DBPOLICY-BIND1: the policy carrier is emitted by the shared
-//RS         // Sync/Core prelude and is re-exported from the generated crate root.
-//RS         "RowPolicy" => Some("JetRowPolicy"),
-//RS         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
-//RS         "DBValue" => Some("DBValue"),
-//RS         "DBError" => Some("DBError"),
-//RS         // D-RAYLIB1=A: display-gated graphics bridge types.
-//RS         "RaylibWindow" => Some("RaylibWindow"),
-//RS         "RaylibColor" => Some("RaylibColor"),
-//RS         "RaylibSound" => Some("RaylibSound"),
-//RS         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
-//RS         // D-TYPEDSQL-SINK1=A: `SQL` is a checked `(String, Vec<DBValue>)`
-//RS         // carrier. It remains a known core value type for subset gating; the
-//RS         // explicit Rust spelling comes from the `rust_type` arm below.
-//RS         "SQL" => Some("SQL"),
-//RS         "HTML" => Some("HTML"),
-//RS         "Sh" => Some("Sh"),
-//RS         // D-SIMD1/D-SIMD2/D-SIMD3: built-in math value types (lane + linalg
-//RS         // structs). The explicit arms keep this function's static return type
-//RS         // while Syntax owns the user-facing lane registry.
-//RS         "F32x4" => Some("F32x4"),
-//RS         "F64x2" => Some("F64x2"),
-//RS         "F32x8" => Some("F32x8"),
-//RS         "F64x4" => Some("F64x4"),
-//RS         "I8x16" => Some("I8x16"),
-//RS         "I16x8" => Some("I16x8"),
-//RS         "I32x4" => Some("I32x4"),
-//RS         "I64x2" => Some("I64x2"),
-//RS         "U8x16" => Some("U8x16"),
-//RS         "U16x8" => Some("U16x8"),
-//RS         "U32x4" => Some("U32x4"),
-//RS         "U64x2" => Some("U64x2"),
-//RS         "I8x32" => Some("I8x32"),
-//RS         "I16x16" => Some("I16x16"),
-//RS         "I32x8" => Some("I32x8"),
-//RS         "I64x4" => Some("I64x4"),
-//RS         "U8x32" => Some("U8x32"),
-//RS         "U16x16" => Some("U16x16"),
-//RS         "U32x8" => Some("U32x8"),
-//RS         "U64x4" => Some("U64x4"),
-//RS         "Vec2" => Some("Vec2"),
-//RS         "Vec3" => Some("Vec3"),
-//RS         "Vec4" => Some("Vec4"),
-//RS         "Mat3" => Some("Mat3"),
-//RS         "Mat4" => Some("Mat4"),
-//RS         // D-SPACE-GEOMETRY1=A: coordinate tags erase to compact Prelude
-//RS         // carriers; the nominal space is a sema fact, not a heap object.
-//RS         "Point2" | "Delta2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint"
-//RS         | "DevicePoint" | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta"
-//RS         | "DeviceDelta" => Some("JetCoord2"),
-//RS         "Transform" | "Transform2" => Some("JetTransform2"),
-//RS         "Ray2" => Some("JetRay2"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Core email types are emitted by the `jet_email` Prelude module, not by
-//RS /// `jet_std`. Qualified Core spellings retain their `core.email` owner, while
-//RS /// compiler-owned declaration rows use the bare leaf. Keep both forms on the
-//RS /// same Rust spelling and do not let arbitrary qualified user names acquire
-//RS /// the Core email carrier by leaf coincidence.
-//RS pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
-//RS     let name = name
-//RS         .strip_prefix("<corelib>/Core/email::Core/email/email.jet::")
-//RS         .unwrap_or(name);
-//RS     let leaf = match name.rsplit_once("::").or_else(|| name.rsplit_once('.')) {
-//RS         Some((prefix, leaf)) if matches!(prefix, "email" | "core.email" | "core::email") => leaf,
-//RS         Some(_) => return None,
-//RS         None => name,
-//RS     };
-//RS     match leaf {
-//RS         "Address" => Some("Address"),
-//RS         "Message" => Some("Message"),
-//RS         "Attachment" => Some("Attachment"),
-//RS         "Envelope" => Some("Envelope"),
-//RS         "SMTPSecurity" => Some("SMTPSecurity"),
-//RS         "RecipientPolicy" => Some("RecipientPolicy"),
-//RS         "RecipientReport" => Some("RecipientReport"),
-//RS         "SendReport" => Some("SendReport"),
-//RS         "EmailError" => Some("Error"),
-//RS         "Limits" => Some("Limits"),
-//RS         "SMTPAuth" => Some("SMTPAuth"),
-//RS         "TLSTrust" => Some("TLSTrust"),
-//RS         "DKIMConfig" => Some("DKIMConfig"),
-//RS         "SMTPConfig" => Some("SMTPConfig"),
-//RS         "Mailer" => Some("Mailer"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn core_crypto_type_name(name: &str) -> Option<&'static str> {
-//RS     let name = name
-//RS         .strip_prefix("<corelib>/Core/crypto::Core/crypto/crypto.jet::")
-//RS         .or_else(|| name.strip_prefix("<corelib>/Core/crypto::Core/crypto/expert.jet::"))
-//RS         .unwrap_or(name);
-//RS     let leaf = match name.rsplit_once("::").or_else(|| name.rsplit_once('.')) {
-//RS         Some((prefix, leaf)) if matches!(prefix, "crypto" | "core.crypto" | "core::crypto") => leaf,
-//RS         Some(_) => return None,
-//RS         None => name,
-//RS     };
-//RS     match leaf {
-//RS         "Secret" => Some("Secret"),
-//RS         "SigningKey" => Some("SigningKey"),
-//RS         "VerifyKey" => Some("VerifyKey"),
-//RS         "X25519SecretKey" => Some("X25519SecretKey"),
-//RS         "X25519PublicKey" => Some("X25519PublicKey"),
-//RS         "SharedSecret" => Some("SharedSecret"),
-//RS         "Signature" => Some("Signature"),
-//RS         "Sealed" => Some("Sealed"),
-//RS         "WrappedKey" => Some("WrappedKey"),
-//RS         "WrappedVaultKey" => Some("WrappedVaultKey"),
-//RS         "KeyUnlock" => Some("KeyUnlock"),
-//RS         "PasswordHash" => Some("PasswordHash"),
-//RS         "Digest256" => Some("Digest256"),
-//RS         "Digest512" => Some("Digest512"),
-//RS         "Hasher" => Some("Hasher"),
-//RS         "CryptoError" => Some("CryptoError"),
-//RS         "FileCryptoError" => Some("FileCryptoError"),
-//RS         "KeyWrapError" => Some("KeyWrapError"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Host carriers that remain for the vault key-wrap boundary. Every other
-//RS /// `core.crypto` type is a Jet-declared Core struct or enum on every tier.
-//RS pub(crate) fn core_crypto_rust_type_name(name: &str) -> Option<&'static str> {
-//RS     let name = core_crypto_type_name(name)?;
-//RS     match name {
-//RS         "WrappedVaultKey" => Some("JetWrappedVaultKey"),
-//RS         "KeyUnlock" => Some("JetVaultKeyUnlock<'_>"),
-//RS         "KeyWrapError" => Some("JetVaultKeyWrapError"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-LAYOUT1 / D-LAYOUT-GATES1: `layout` runtime types live in their own
-//RS /// top-level `mod jet_layout` (NOT nested inside `mod jet_std`, unlike
-//RS /// `core_rust_type_name`'s entries) — same reason `alloc_handle_rust_type`/
-//RS /// `file_handle_rust_type`/`net_handle_rust_type` are separate functions
-//RS /// rather than folded into `core_rust_type_name` (that table's caller always
-//RS /// prepends `jet_std::`). `HVar`/`VVar`/`LengthVar` all erase to the SAME
-//RS /// runtime type (`jet_layout::LinExpr`) — the axis distinction is
-//RS /// compile-time-only (sema, GATE 1/2), nothing to represent at runtime.
-//RS pub(crate) fn layout_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "HVar" => Some("jet_layout::LinExpr"),
-//RS         "VVar" => Some("jet_layout::LinExpr"),
-//RS         "LengthVar" => Some("jet_layout::LinExpr"),
-//RS         "Constraint" => Some("jet_layout::Constraint"),
-//RS         "Layout" => Some("jet_layout::Handle"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// E2-M7: file handle types are top-level in the prelude (not in `jet_std`).
-//RS /// The `core.files` and `core.term` source declarations of these handles are
-//RS /// the checked names of the same native carriers.
-//RS pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     let name = if name.starts_with("<corelib>/Core/files::Core/files/files.jet::")
-//RS         || name.starts_with("<corelib>/Core/term::Core/term/term.jet::")
-//RS     {
-//RS         core_source_type_leaf(name)
-//RS     } else {
-//RS         name
-//RS     };
-//RS     match name {
-//RS         "FileReader" => Some("JetFileReader"),
-//RS         "FileWriter" => Some("JetFileWriter"),
-//RS         // FileLines is an internal sema marker; it should never appear in emitted Rust.
-//RS         "FileLines" => Some("()"),
-//RS         // D-STDIN1=A: stdin handle types; StdinLines is an internal sema marker.
-//RS         "StdinHandle" => Some("JetStdinReader"),
-//RS         "StdinLines" => Some("()"),
-//RS         // D-PROCESS1=A: these markers project the concrete shared handles on
-//RS         // ProcessChild. Keep their native storage types in generated Rust so
-//RS         // method receivers match the process prelude helpers.
-//RS         "ProcessStdin" => Some("jet_std::ProcessStdinHandle"),
-//RS         "ProcessStdoutStream" => Some("jet_std::ProcessStdoutStreamHandle"),
-//RS         "ProcessStderrStream" => Some("jet_std::ProcessStderrStreamHandle"),
-//RS         // ProcessLines is the `.lines()` loop-only marker.
-//RS         "ProcessLines" => Some("()"),
-//RS         // D-COREIO1=A: standard stream handles.
-//RS         "Stdout" => Some("JetStdout"),
-//RS         "Stderr" => Some("JetStderr"),
-//RS         // D-PATHFS1: typed path handle.
-//RS         "Path" => Some("JetPath"),
-//RS         // D-FILESCOPE1=A: scoped filesystem handles are top-level prelude
-//RS         // values and are borrowed by scope-bound file operations.
-//RS         "FileScope" => Some("JetFileScope"),
-//RS         // D-DBDRIVER1: the SQLite connection handle wrapper.
-//RS         "DBConnection" => Some("JetDbConnection"),
-//RS         "DBScope" => Some("JetDbScope"),
-//RS         "DBPool" => Some("JetDbPool<JetDbConnection>"),
-//RS         "DBLease" => Some("JetDbLease<JetDbConnection>"),
-//RS         "DBPoolReceipt" => Some("JetDbPoolReceipt"),
-//RS         "DBPoolLifecycle" => Some("JetDbPoolLifecycle"),
-//RS         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
-//RS         "Plugin" => Some("JetPlugin"),
-//RS         // D-LIB-CALLGRANT1=A: loaded libraries are opaque handles; the grant
-//RS         // is a small constructable prelude record.
-//RS         "Mod" => Some("JetMod"),
-//RS         "ModGrant" => Some("JetModGrant"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-RAYLIB1=A: raylib handle/value types are top-level prelude
-//RS /// structs, like file/net handles, not members of `mod jet_std`.
-//RS pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "RaylibWindow" => Some("RaylibWindow"),
-//RS         "RaylibColor" => Some("RaylibColor"),
-//RS         "RaylibSound" => Some("RaylibSound"),
-//RS         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn game_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "GameScene" => Some("GameScene"),
-//RS         "GameAssets" => Some("GameAssets"),
-//RS         "GameInputMap" => Some("GameInputMap"),
-//RS         "GameBackend" => Some("GameBackend"),
-//RS         "GameReplay" => Some("GameReplay"),
-//RS         "GameImage" => Some("GameImage"),
-//RS         "GameSound" => Some("GameSound"),
-//RS         "GameFrame" => Some("GameFrame"),
-//RS         "GameInputSnapshot" => Some("GameInputSnapshot"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-COMPUTE1=D: compute opaque types map to top-level prelude structs.
-//RS pub(crate) fn compute_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "Tensor" => Some("JetTensor"),
-//RS         "ComputeError" => Some("JetComputeError"),
-//RS         "ComputeDevice" => Some("JetComputeDevice"),
-//RS         "ComputeStream" => Some("JetComputeStream"),
-//RS         "VJPRun" => Some("JetComputeVjpRun"),
-//RS         "SparseTensor" => Some("JetSparseCsr"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-SERVICE1=D: service topology opaque types.
-//RS pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "ServiceTree" => Some("JetServiceTree"),
-//RS         "ServiceWorkflow" => Some("JetWorkflowHandle"),
-//RS         "ServiceEndpoint" => Some("JetServiceEndpoint"),
-//RS         "ServiceError" => Some("JetServiceError"),
-//RS         "ServiceRestart" => Some("JetServiceRestart"),
-//RS         "ServiceDelivery" => Some("JetServiceDelivery"),
-//RS         "ServiceRuntime" => Some("JetServiceRuntime"),
-//RS         "ServiceStateStore" => Some("JetServiceStateStore"),
-//RS         "ServiceUpgradeReceipt" => Some("JetServiceUpgradeReceipt"),
-//RS         "Delivery" => Some("JetDelivery"),
-//RS         "DeliveryState" => Some("JetDeliveryState"),
-//RS         "DeliveryReceipt" => Some("JetDeliveryReceipt"),
-//RS         "DeliveryEvent" => Some("JetDeliveryEvent"),
-//RS         "TaskOutcome" => Some("JetTaskOutcome"),
-//RS         "TaskStatus" => Some("JetTaskStatus"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// E2-M10: networking opaque types map to top-level prelude structs.
-//RS pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "TcpListener" | "TCPListener" => Some("JetTCPListener"),
-//RS         "TcpStream" | "TCPStream" => Some("JetTCPStream"),
-//RS         "IPAddr" => Some("JetIpAddr"),
-//RS         "SocketAddr" => Some("JetSocketAddr"),
-//RS         "UdpSocket" => Some("JetUDPSocket"),
-//RS         "UDPPacket" => Some("JetUDPPacket"),
-//RS         "DNSSRV" => Some("JetDNSSrv"),
-//RS         "UnixListener" => Some("JetUnixListener"),
-//RS         "UnixStream" => Some("JetUnixStream"),
-//RS         "TLSStream" => Some("JetTLSStream"),
-//RS         "TLSClientConfig" => Some("JetTLSClientConfig"),
-//RS         "TLSRootCertificates" => Some("JetTLSRootCertificates"),
-//RS         "TLSClientIdentity" => Some("JetTLSClientIdentity"),
-//RS         "TLSClientTrust" => Some("JetTLSTrust"),
-//RS         "TLSVersion" => Some("JetTLSVersion"),
-//RS         "TLSPeerIdentity" => Some("JetTLSPeerIdentity"),
-//RS         "TLSCertificate" => Some("JetTLSCertificate"),
-//RS         "NetError" => Some("JetNetError"),
-//RS         "NetErrorDetail" => Some("JetNetErrorDetail"),
-//RS         "NetDnsError" => Some("JetNetDnsError"),
-//RS         "NetShutdown" => Some("JetNetShutdown"),
-//RS         "NetReadyInterest" => Some("JetNetReadyInterest"),
-//RS         "NetReady" => Some("JetNetReady"),
-//RS         "HTTPRequest" => Some("JetHTTPRequest"),
-//RS         "HTTPResponse" => Some("JetHTTPResponse"),
-//RS         "HTTPBodyChunks" => Some("JetHTTPBodyChunks"),
-//RS         "HTTPClient" => Some("JetHTTPClient"),
-//RS         "HTTPProxy" => Some("JetHTTPProxy"),
-//RS         "HTTPRedirectPolicy" => Some("JetHTTPRedirectPolicy"),
-//RS         "HTTPRetryPolicy" => Some("JetHTTPRetryPolicy"),
-//RS         "HTTPCookieJar" => Some("JetHTTPCookieJar"),
-//RS         "HTTPCorsPolicy" => Some("JetHTTPCorsPolicy"),
-//RS         "HTTPCorsOrigins" => Some("JetHTTPCorsOrigins"),
-//RS         "HTTPCompressEncoding" => Some("JetHTTPCompressEncoding"),
-//RS         "HTTPRouter" => Some("JetHTTPRouter"),
-//RS         "HTTPMethod" => Some("JetHTTPMethod"),
-//RS         "HTTPStatus" => Some("JetHTTPStatus"),
-//RS         "HTTPVersion" => Some("JetHTTPVersion"),
-//RS         "HTTPHeaderName" => Some("JetHTTPHeaderName"),
-//RS         "HTTPHeaderValue" => Some("JetHTTPHeaderValue"),
-//RS         "Body" => Some("JetHTTPBody"),
-//RS         "HTTPError" => Some("JetHTTPError"),
-//RS         "HTTPOperation" => Some("JetHTTPOperation"),
-//RS         "Headers" => Some("JetHTTPHeaders"),
-//RS         "HTTPMux" => Some("JetHTTPMux"),
-//RS         "HTTPHandler" => Some("JetHTTPHandler"),
-//RS         "HTTPServer" => Some("JetHTTPServer"),
-//RS         "HTTPShutdownReport" => Some("JetHTTPShutdownReport"),
-//RS         "HTTPServerTLS" => Some("JetHTTPServerTls"),
-//RS         // D-WS1=B: WebSocket values are Prelude-owned runtime carriers.
-//RS         "WsConn" => Some("JetWsConn"),
-//RS         "WsError" => Some("JetWsError"),
-//RS         "WsMessage" => Some("JetWsMessage"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS // Re-export from Syntax so submodules (lower.rs, subset.rs) find them via `use super::*`.
-//RS pub(crate) use crate::Syntax::alloc_handle_rust_type;
-//RS pub(crate) use crate::Syntax::args_handle_rust_type;
-//RS pub(crate) use crate::Syntax::binary_text_handle_rust_type;
-//RS pub(crate) use crate::Syntax::reflect_handle_rust_type;
-//RS 
-//RS /// Return the leaf of a canonical nominal name. Dotted names remain accepted
-//RS /// only at source lookup boundaries for older Core spellings; foreign nominal
-//RS /// maps themselves contain `::` identities exclusively.
-//RS pub(crate) fn nominal_leaf(name: &str) -> &str {
-//RS     name.rsplit_once("::")
-//RS         .or_else(|| name.rsplit_once('.'))
-//RS         .map_or(name, |(_, leaf)| leaf)
-//RS }
-//RS 
-//RS impl Cx {
-//RS     /// Line-start index of `src`. Lowering asks for positions of nearly every
-//RS     /// expression, so the index is built once instead of scanning from byte 0
-//RS     /// per query (quadratic on large units).
-//RS     pub(crate) fn src_lines(&self) -> &jet_foundation::Diagnostics::LineIndex {
-//RS         self.src_line_index
-//RS             .get_or_init(|| jet_foundation::Diagnostics::LineIndex::new(&self.src))
-//RS     }
-//RS 
-//RS     /// 1-based (line, column) of `offset` in `src`; the same answer as
-//RS     /// `Diagnostics::span_line_col(&self.src, offset)`.
-//RS     pub(crate) fn src_line_col(&self, offset: usize) -> (usize, usize) {
-//RS         self.src_lines().line_col(&self.src, offset)
-//RS     }
-//RS 
-//RS     /// Text of 1-based `line` of `src`, as `self.src.lines().nth(line - 1)`
-//RS     /// yields it ("" past the end).
-//RS     pub(crate) fn src_line_text(&self, line: usize) -> &str {
-//RS         self.src_lines().line_text(&self.src, line)
-//RS     }
-//RS 
-//RS     pub(crate) fn persistent_local(&self, name: &str) -> Option<crate::Codegen::TIR::TLocal> {
-//RS         self.persist_types.get(name).map(|_| {
-//RS             let module = if self.module_identity.is_empty() {
-//RS                 if self.module_alias.is_empty() {
-//RS                     "main"
-//RS                 } else {
-//RS                     self.module_alias.as_str()
-//RS                 }
-//RS             } else {
-//RS                 self.module_identity.as_str()
-//RS             };
-//RS             crate::Codegen::TIR::TLocal::persistent(
-//RS                 name,
-//RS                 module,
-//RS                 self.persist_types
-//RS                     .get(name)
-//RS                     .cloned()
-//RS                     .expect("persist type and slot must agree"),
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     pub(crate) fn foreign_type_identity(&self, alias: &str, leaf: &str) -> Option<String> {
-//RS         // A bare source name resolves to a local nominal before any imported
-//RS         // type with the same leaf. Qualified aliases still select their import.
-//RS         if alias.is_empty() && self.local_type_names.contains(leaf) {
-//RS             return None;
-//RS         }
-//RS         let rust_mod = if alias.is_empty() {
-//RS             None
-//RS         } else if let Some(module) = self.import_mods.get(alias) {
-//RS             Some(module.clone())
-//RS         } else {
-//RS             let core_module = self.core_imports.get(alias)?;
-//RS             let source = jet_foundation::CoreModuleExports::core_source_module(core_module)?;
-//RS             Some(crate::Codegen::mangle(source.alias))
-//RS         };
-//RS         let mut matches = self
-//RS             .foreign_types
-//RS             .iter()
-//RS             .filter(|(name, _)| nominal_leaf(name) == leaf)
-//RS             .filter(|(_, module)| rust_mod.as_ref().is_none_or(|expected| *module == expected))
-//RS             .map(|(name, _)| name.clone());
-//RS         let identity = matches.next()?;
-//RS         matches.next().is_none().then_some(identity)
-//RS     }
-//RS 
-//RS     pub(crate) fn imported_type_metadata_name(&self, name: &str) -> Option<String> {
-//RS         if name.contains("::") {
-//RS             return Some(name.to_string());
-//RS         }
-//RS         if let Some((alias, leaf)) = name.split_once('.') {
-//RS             return self.foreign_type_identity(alias, leaf);
-//RS         }
-//RS         self.foreign_type_identity("", name)
-//RS     }
-//RS 
-//RS     /// Resolve the owner spelling used by method metadata. Local method tables
-//RS     /// are registered by their source leaf, while canonical receiver types may
-//RS     /// carry the NameLedger identity; imported method tables use that identity
-//RS     /// directly. Keep this one checked distinction in the shared lookup path.
-//RS     pub(crate) fn method_metadata_name(&self, name: &str, method: &str) -> String {
-//RS         let exact = (name.to_string(), method.to_string());
-//RS         if self.method_sigs.contains_key(&exact) {
-//RS             return name.to_string();
-//RS         }
-//RS         if let Some((leaf, _)) = self
-//RS             .local_type_identities
-//RS             .iter()
-//RS             .find(|(_, identity)| identity.as_str() == name)
-//RS         {
-//RS             let local = (leaf.clone(), method.to_string());
-//RS             if self.method_sigs.contains_key(&local) {
-//RS                 return leaf.clone();
-//RS             }
-//RS         }
-//RS         self.imported_type_metadata_name(name)
-//RS             .unwrap_or_else(|| name.to_string())
-//RS     }
-//RS 
-//RS 
-//RS     /// Resolve a source-facing type spelling to the ordinary distinct-type
-//RS     /// entry. This is used only for backend representation facts; checked-text
-//RS     /// eligibility is owned by sema's ordinary trait registry.
-//RS     pub(crate) fn distinct_type_identity(&self, name: &str) -> Option<String> {
-//RS         if self.distinct_types.contains_key(name) {
-//RS             return Some(name.to_string());
-//RS         }
-//RS         let (alias, leaf) = name.split_once('.')?;
-//RS         self.foreign_type_identity(alias, leaf)
-//RS             .filter(|identity| self.distinct_types.contains_key(identity))
-//RS     }
-//RS 
-//RS     /// Checked-text ownership may be lowered from a comptime fragment whose
-//RS     /// synthetic impl has no trait label. Keep the exact nominal identity and
-//RS     /// reuse its registered static method signatures rather than recovering an
-//RS     /// owner from a lowered receiver value.
-//RS     pub(crate) fn string_distinct_has_registered_method(&self, name: &str, method: &str) -> bool {
-//RS         let trait_key = (name.to_string(), method.to_string());
-//RS         if self
-//RS             .trait_method_traits
-//RS             .get(&trait_key)
-//RS             .is_some_and(|trait_name| trait_name == crate::Generics::CHECKED_TEXT)
-//RS         {
-//RS             return true;
-//RS         }
-//RS         let encode_key = (name.to_string(), "encode_hole".to_string());
-//RS         let has_checked_text_encoder = self.method_sigs.contains_key(&encode_key);
-//RS         if has_checked_text_encoder && matches!(method, "check" | "encode_hole") {
-//RS             return true;
-//RS         }
-//RS         let Some(identity) = self.distinct_type_identity(name) else {
-//RS             return false;
-//RS         };
-//RS         self.distinct_types
-//RS             .get(&identity)
-//RS             .is_some_and(|(base, _)| matches!(base, Type::String))
-//RS             && self
-//RS                 .method_sigs
-//RS                 .contains_key(&(identity, method.to_string()))
-//RS     }
-//RS 
-//RS     pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
-//RS         ty.quantity_parts()
-//RS             .map(|(_, dimension)| dimension)
-//RS             .or_else(|| {
-//RS                 let Type::Named(name) = ty else {
-//RS                     return None;
-//RS                 };
-//RS                 self.unit_facts
-//RS                     .get(name)
-//RS                     .or_else(|| {
-//RS                         self.imported_type_metadata_name(name)
-//RS                             .and_then(|canonical| self.unit_facts.get(&canonical))
-//RS                     })
-//RS                     .and_then(|fact| fact.dimension.clone())
-//RS             })
-//RS     }
-//RS 
-//RS     pub(crate) fn unit_label(&self, ty: &Type) -> Option<&UnitLabel> {
-//RS         let Type::Named(name) = ty else {
-//RS             return None;
-//RS         };
-//RS         self.unit_labels.get(name).or_else(|| {
-//RS             self.imported_type_metadata_name(name)
-//RS                 .and_then(|canonical| self.unit_labels.get(&canonical))
-//RS         })
-//RS     }
-//RS 
-//RS     pub(crate) fn has_display_type(&self, name: &str) -> bool {
-//RS         self.display_types.contains(name)
-//RS             || self
-//RS                 .imported_type_metadata_name(name)
-//RS                 .is_some_and(|canonical| self.display_types.contains(&canonical))
-//RS     }
-//RS 
-//RS     pub(crate) fn has_close_type(&self, name: &str) -> bool {
-//RS         self.close_types.contains(name)
-//RS             || self
-//RS                 .imported_type_metadata_name(name)
-//RS                 .is_some_and(|canonical| self.close_types.contains(&canonical))
-//RS     }
-//RS 
-//RS     pub(crate) fn is_distinct_type_name(&self, name: &str) -> bool {
-//RS         self.distinct_types.contains_key(name)
-//RS             || self
-//RS                 .imported_type_metadata_name(name)
-//RS                 .is_some_and(|canonical| self.distinct_types.contains_key(&canonical))
-//RS     }
-//RS 
-//RS     pub(crate) fn quantity_unit_label(
-//RS         &self,
-//RS         dimension: crate::AST::Dimension,
-//RS         style: crate::AST::UnitFormat,
-//RS     ) -> String {
-//RS         let mut numerator = Vec::new();
-//RS         let mut denominator = Vec::new();
-//RS         for (axis, exponent) in dimension.axes() {
-//RS             let family = axis.rsplit("::").next().unwrap_or(axis);
-//RS             if exponent == 0 {
-//RS                 continue;
-//RS             }
-//RS             let label = self
-//RS                 .unit_labels
-//RS                 .values()
-//RS                 .filter(|label| label.family == family && label.is_base)
-//RS                 .min_by(|left, right| {
-//RS                     left.symbol
-//RS                         .cmp(&right.symbol)
-//RS                         .then_with(|| left.name.cmp(&right.name))
-//RS                 })
-//RS                 .map(|label| match style {
-//RS                     crate::AST::UnitFormat::Name => label.name.clone(),
-//RS                     crate::AST::UnitFormat::Symbol | crate::AST::UnitFormat::Bare => {
-//RS                         label.symbol.clone()
-//RS                     }
-//RS                 })
-//RS                 .or_else(|| {
-//RS                     (family == "Time").then(|| match style {
-//RS                         crate::AST::UnitFormat::Name => "Nanosecond".to_string(),
-//RS                         crate::AST::UnitFormat::Symbol | crate::AST::UnitFormat::Bare => {
-//RS                             "ns".to_string()
-//RS                         }
-//RS                     })
-//RS                 })
-//RS                 .unwrap_or_else(|| family.to_ascii_lowercase());
-//RS             let part = if exponent.abs() == 1 {
-//RS                 label
-//RS             } else {
-//RS                 format!("{label}^{}", exponent.abs())
-//RS             };
-//RS             if exponent > 0 {
-//RS                 numerator.push(part);
-//RS             } else {
-//RS                 denominator.push(part);
-//RS             }
-//RS         }
-//RS         let numerator = if numerator.is_empty() {
-//RS             "1".to_string()
-//RS         } else {
-//RS             numerator.join("*")
-//RS         };
-//RS         if denominator.is_empty() {
-//RS             numerator
-//RS         } else {
-//RS             format!("{numerator}/{}", denominator.join("*"))
-//RS         }
-//RS     }
-//RS 
-//RS     /// Resolve a Core alias in the exact function scope selected by
-//RS     /// D-NAME-WALK1=A. Inline bindings overlay the enclosing file bindings.
-//RS     pub(crate) fn core_import_module_for_function(
-//RS         &self,
-//RS         fn_name: &str,
-//RS         alias: &str,
-//RS     ) -> Option<&str> {
-//RS         self.inline_core_imports
-//RS             .get(fn_name)
-//RS             .and_then(|scope| scope.get(alias))
-//RS             .or_else(|| self.core_imports.get(alias))
-//RS             .map(String::as_str)
-//RS     }
-//RS 
-//RS     pub(crate) fn import_module_for_function(&self, fn_name: &str, alias: &str) -> Option<&str> {
-//RS         self.inline_foreign_imports
-//RS             .get(fn_name)
-//RS             .and_then(|scope| scope.get(alias))
-//RS             .or_else(|| self.import_mods.get(alias))
-//RS             .map(String::as_str)
-//RS     }
-//RS 
-//RS     pub(crate) fn import_signature_for_function(
-//RS         &self,
-//RS         fn_name: &str,
-//RS         alias: &str,
-//RS         method: &str,
-//RS     ) -> Option<Vec<(AccessConvention, Type)>> {
-//RS         self.inline_foreign_sigs
-//RS             .get(fn_name)
-//RS             .and_then(|scope| scope.get(&(alias.to_string(), method.to_string())))
-//RS             .cloned()
-//RS             .or_else(|| {
-//RS                 self.import_sigs
-//RS                     .get(&(alias.to_string(), method.to_string()))
-//RS                     .cloned()
-//RS             })
-//RS     }
-//RS 
-//RS     pub(crate) fn import_return_for_function(
-//RS         &self,
-//RS         fn_name: &str,
-//RS         alias: &str,
-//RS         method: &str,
-//RS     ) -> Option<Option<Type>> {
-//RS         self.inline_foreign_rets
-//RS             .get(fn_name)
-//RS             .and_then(|scope| scope.get(&(alias.to_string(), method.to_string())))
-//RS             .cloned()
-//RS             .or_else(|| {
-//RS                 self.import_rets
-//RS                     .get(&(alias.to_string(), method.to_string()))
-//RS                     .cloned()
-//RS             })
-//RS     }
-//RS 
-//RS     /// Resolve a Core alias without a function-specific scope. TIR coverage
-//RS     /// predicates have only structural AST facts, so they use the enclosing
-//RS     /// map first and then any inline body map as a conservative reachability
-//RS     /// check. Lowering always uses the exact helper above.
-//RS     pub(crate) fn any_core_import_module(&self, alias: &str) -> Option<&str> {
-//RS         self.core_imports
-//RS             .get(alias)
-//RS             .or_else(|| {
-//RS                 self.inline_core_imports
-//RS                     .iter()
-//RS                     .filter_map(|(scope, imports)| imports.get(alias).map(|module| (scope, module)))
-//RS                     .min_by(|(left_scope, left_module), (right_scope, right_module)| {
-//RS                         left_scope
-//RS                             .cmp(right_scope)
-//RS                             .then_with(|| left_module.cmp(right_module))
-//RS                     })
-//RS                     .map(|(_, module)| module)
-//RS             })
-//RS             .map(String::as_str)
-//RS     }
-//RS 
-//RS     pub(crate) fn any_foreign_import_module(&self, alias: &str) -> Option<&str> {
-//RS         self.import_mods
-//RS             .get(alias)
-//RS             .or_else(|| {
-//RS                 self.inline_foreign_imports
-//RS                     .iter()
-//RS                     .filter_map(|(scope, imports)| imports.get(alias).map(|module| (scope, module)))
-//RS                     .min_by(|(left_scope, left_module), (right_scope, right_module)| {
-//RS                         left_scope
-//RS                             .cmp(right_scope)
-//RS                             .then_with(|| left_module.cmp(right_module))
-//RS                     })
-//RS                     .map(|(_, module)| module)
-//RS             })
-//RS             .map(String::as_str)
-//RS     }
-//RS 
-//RS     pub(crate) fn core_qualified_rust_type_name(&self, name: &str) -> Option<&'static str> {
-//RS         let (alias, leaf) = name.split_once('.')?;
-//RS         if matches!(
-//RS             self.any_core_import_module(alias),
-//RS             Some("core.data") | Some("core.data.plot")
-//RS         ) {
-//RS             return match leaf {
-//RS                 "JetDataPlotMark" => Some("JetDataPlotMark"),
-//RS                 "DataLoaderKind" => Some("DataLoaderKind"),
-//RS                 "DataFormat" => Some("DataFormat"),
-//RS                 "DataFreshness" => Some("DataFreshness"),
-//RS                 "DataInvalidationCause" => Some("DataInvalidationCause"),
-//RS                 "DataAuthority" => Some("DataAuthority"),
-//RS                 "DataSourceIdentity" => Some("DataSourceIdentity"),
-//RS                 "DataProvenance" => Some("DataProvenance"),
-//RS                 "DataSnapshotIdentity" => Some("DataSnapshotIdentity"),
-//RS                 "DataLoaderStatus" => Some("DataLoaderStatus"),
-//RS                 "DataLoader" => Some("DataLoader"),
-//RS                 "DataSnapshot" => Some("DataSnapshot"),
-//RS                 "DataLineOptions" => Some("DataLineOptions"),
-//RS                 "DataColumn" => Some("DataColumn"),
-//RS                 "DataStatus" => Some("DataStatus"),
-//RS                 "DataSummary" => Some("DataSummary"),
-//RS                 "DataLimits" => Some("DataLimits"),
-//RS                 "DataError" => Some("DataError"),
-//RS                 "DataErrorKind" => Some("DataErrorKind"),
-//RS                 "DataPivotCell" => Some("DataPivotCell"),
-//RS                 "DataStream" => Some("DataStream"),
-//RS                 "JetDataPlotAggregate" => Some("JetDataPlotAggregate"),
-//RS                 "JetDataPlotFilterOp" => Some("JetDataPlotFilterOp"),
-//RS                 "JetDataPlotValue" => Some("JetDataPlotValue"),
-//RS                 "JetDataPlotScaleKind" => Some("JetDataPlotScaleKind"),
-//RS                 "JetDataPlotDomain" => Some("JetDataPlotDomain"),
-//RS                 "JetDataPlotLegendPosition" => Some("JetDataPlotLegendPosition"),
-//RS                 "JetDataPlotFacetKind" => Some("JetDataPlotFacetKind"),
-//RS                 "JetDataPlotInteraction" => Some("JetDataPlotInteraction"),
-//RS                 "JetDataPlotBackend" => Some("JetDataPlotBackend"),
-//RS                 "JetDataPlotSupport" => Some("JetDataPlotSupport"),
-//RS                 "JetDataPlotErrorKind" => Some("JetDataPlotErrorKind"),
-//RS                 "JetDataPlotRenderFormat" => Some("JetDataPlotRenderFormat"),
-//RS                 "JetDataPlotField" => Some("JetDataPlotField"),
-//RS                 "JetDataPlotSchema" => Some("JetDataPlotSchema"),
-//RS                 "JetDataPlotSourceFacts" => Some("JetDataPlotSourceFacts"),
-//RS                 "JetDataPlotEncoding" => Some("JetDataPlotEncoding"),
-//RS                 "JetDataPlotScale" => Some("JetDataPlotScale"),
-//RS                 "JetDataPlotAxis" => Some("JetDataPlotAxis"),
-//RS                 "JetDataPlotLegend" => Some("JetDataPlotLegend"),
-//RS                 "JetDataPlotFacet" => Some("JetDataPlotFacet"),
-//RS                 "JetDataPlotLayer" => Some("JetDataPlotLayer"),
-//RS                 "JetDataPlotAccessibility" => Some("JetDataPlotAccessibility"),
-//RS                 "JetDataPlotLayout" => Some("JetDataPlotLayout"),
-//RS                 "JetDataPlotCapability" => Some("JetDataPlotCapability"),
-//RS                 "JetDataPlotError" => Some("JetDataPlotError"),
-//RS                 "JetDataPlotPlan" => Some("JetDataPlotPlan"),
-//RS                 "JetDataPlotSelectedRow" => Some("JetDataPlotSelectedRow"),
-//RS                 "JetDataPlotInspection" => Some("JetDataPlotInspection"),
-//RS                 "JetDataPlotRender" => Some("JetDataPlotRender"),
-//RS                 "JetDataPlotProjection" => Some("JetDataPlotProjection"),
-//RS                 "JetDataPlotColumn" => Some("JetDataPlotColumn"),
-//RS                 "JetDataPlot" => Some("JetDataPlot"),
-//RS                 _ => None,
-//RS             };
-//RS         }
-//RS         match (self.any_core_import_module(alias), leaf) {
-//RS             (Some("core.crypto"), leaf) => core_crypto_type_name(leaf),
-//RS             (Some("core.auth"), "Claims") => Some("Claims"),
-//RS             (Some("core.auth"), "AuthError") => Some("AuthError"),
-//RS             (Some("core.auth"), "Session") => Some("Session"),
-//RS             (Some("core.auth"), "Auth") => Some("Auth"),
-//RS             (Some("core.sync"), "SyncText") => Some("SyncText"),
-//RS             (Some("core.sync"), "SyncCounter") => Some("SyncCounter"),
-//RS             (Some("core.sync"), "SyncMap") => Some("SyncMap"),
-//RS             (Some("core.collections"), "Counter") => Some("Counter"),
-//RS             (Some("core.collections"), "OrderedMap") => Some("OrderedMap"),
-//RS             (Some("core.collections"), "Layer") => Some("Layer"),
-//RS             (Some("core.collections"), "Chain") => Some("Chain"),
-//RS             (Some("core.collections.set"), "StringSet") => Some("StringSet"),
-//RS 
-//RS             (Some("core.sync"), "RowPolicy") => Some("RowPolicy"),
-//RS             (Some("core.http.client"), "Proxy") => Some("HTTPProxy"),
-//RS             (Some("core.http.client"), "RedirectPolicy") => Some("HTTPRedirectPolicy"),
-//RS             (Some("core.http.client"), "RetryPolicy") => Some("HTTPRetryPolicy"),
-//RS             (Some("core.http.client"), "CookieJar") => Some("HTTPCookieJar"),
-//RS             (Some("core.net.tls"), "TLSVersion") => Some("TLSVersion"),
-//RS             (Some("core.net.tls"), "RootCertificates") => Some("TLSRootCertificates"),
-//RS             (Some("core.net.tls"), "ClientIdentity") => Some("TLSClientIdentity"),
-//RS             (Some("core.sys"), "EnvError") => Some("EnvError"),
-//RS             (Some("core.mem"), "AllocError") => Some("AllocError"),
-//RS             (Some("core.encoding"), "DataEvent") => Some("DataEvent"),
-//RS             (Some("core.encoding"), "DataTree") => Some("DataTree"),
-//RS             (Some("core.encoding"), "EncodingLimits") => Some("EncodingLimits"),
-//RS             (Some("core.encoding"), "EncodingError") => Some("EncodingError"),
-//RS             (Some("core.encoding"), "EncodingCause") => Some("EncodingCause"),
-//RS             (Some("core.encoding"), "EncodingFormat") => Some("EncodingFormat"),
-//RS             (Some("core.encoding"), "EncodingErrorKind") => Some("EncodingErrorKind"),
-//RS             (Some("core.email"), "Address") => Some("Address"),
-//RS             (Some("core.email"), "Message") => Some("Message"),
-//RS             (Some("core.email"), "Attachment") => Some("Attachment"),
-//RS             (Some("core.email"), "Envelope") => Some("Envelope"),
-//RS             (Some("core.email"), "SMTPSecurity") => Some("SMTPSecurity"),
-//RS             (Some("core.email"), "Limits") => Some("Limits"),
-//RS             (Some("core.email"), "RecipientPolicy") => Some("RecipientPolicy"),
-//RS             (Some("core.email"), "RecipientReport") => Some("RecipientReport"),
-//RS             (Some("core.email"), "SendReport") => Some("SendReport"),
-//RS             (Some("core.email"), "EmailError") => Some("EmailError"),
-//RS             (Some("core.email"), "SMTPAuth") => Some("SMTPAuth"),
-//RS             (Some("core.email"), "TLSTrust") => Some("TLSTrust"),
-//RS             (Some("core.email"), "SMTPConfig") => Some("SMTPConfig"),
-//RS             (Some("core.email"), "DKIMConfig") => Some("DKIMConfig"),
-//RS             (Some("core.email"), "Mailer") => Some("Mailer"),
-//RS             (Some("core.encoding.json"), "JSONReader") => Some("JSONReader"),
-//RS             (Some("core.encoding.json"), "JSONWriter") => Some("JSONWriter"),
-//RS             (Some("core.encoding.jsonl"), "JSONLReader") => Some("JSONLReader"),
-//RS             (Some("core.encoding.jsonl"), "JSONLWriter") => Some("JSONLWriter"),
-//RS             (Some("core.encoding.csv"), "CSVReader") => Some("CSVReader"),
-//RS             (Some("core.encoding.csv"), "CSVWriter") => Some("CSVWriter"),
-//RS             (Some("core.encoding.csv"), "CSVRow") => Some("CSVRow"),
-//RS             (Some("core.encoding.xml"), "XMLReader") => Some("XMLReader"),
-//RS             (Some("core.encoding.xml"), "XMLWriter") => Some("XMLWriter"),
-//RS             (Some("core.encoding.xml"), "XMLLimits") => Some("XMLLimits"),
-//RS             (Some("core.encoding.xml"), "XMLParseOptions") => Some("XMLParseOptions"),
-//RS             (Some("core.encoding.xml"), "XMLRenderOptions") => Some("XMLRenderOptions"),
-//RS             (Some("core.encoding.xml"), "XMLEncoding") => Some("XMLEncoding"),
-//RS             (Some("core.encoding.xml"), "XMLLexicalPolicy") => Some("XMLLexicalPolicy"),
-//RS             (Some("core.encoding.xml"), "XMLCanonical") => Some("XMLCanonical"),
-//RS             (Some("core.encoding.xml"), "XMLCanonicalMode") => Some("XMLCanonicalMode"),
-//RS             (Some("core.encoding.xml"), "XMLError") => Some("XMLError"),
-//RS             (Some("core.encoding.xml"), "XMLReason") => Some("XMLReason"),
-//RS             (Some("core.encoding.xml"), "XMLEntityPolicy") => Some("XMLEntityPolicy"),
-//RS             (Some("core.encoding.cbor"), "CBORReader") => Some("CBORReader"),
-//RS             (Some("core.encoding.cbor"), "CBOROptions") => Some("CBOROptions"),
-//RS             (Some("core.encoding.cbor"), "CBORError") => Some("CBORError"),
-//RS             (Some("core.encoding.cbor"), "CBORErrorKind") => Some("CBORErrorKind"),
-//RS             (Some("core.encoding.cbor"), "CBORWriter") => Some("CBORWriter"),
-//RS             (Some("core.jobs"), "JobQueue") => Some("JobQueue"),
-//RS             (Some("core.jobs"), "JobPayload") => Some("JobPayload"),
-//RS             (Some("core.jobs"), "JobResult") => Some("JobResult"),
-//RS             (Some("core.jobs"), "JobError") => Some("JobError"),
-//RS             (Some("core.jobs"), "JobQueueReceipt") => Some("JobQueueReceipt"),
-//RS             (Some("core.jobs"), "JobQueueClaim") => Some("JobQueueClaim"),
-//RS             (Some("core.jobs"), "JobQueueEvent") => Some("JobQueueEvent"),
-//RS             (Some("core.jobs"), "JobQueueRecord") => Some("JobQueueRecord"),
-//RS             (Some("core.jobs"), "JobQueueStatus") => Some("JobQueueStatus"),
-//RS             (Some("core.jobs"), "JobQueueState") => Some("JobQueueState"),
-//RS             (Some("core.jobs"), "JobQueueDeliveryPolicy") => Some("JobQueueDeliveryPolicy"),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS     pub(crate) fn type_contains_view(&self, ty: &Type) -> bool {
-//RS         self.type_contains_view_matching(ty, false)
-//RS     }
-//RS 
-//RS     /// A comptime value containing one of these edges cannot use the generic
-//RS     /// `CtValue::serialize` path: serialization has no type context in which
-//RS     /// to insert the `Box::new` required by Rust's recursive layout.
-// END-PORT-PENDING 0454 crates/jet-codegen/src/Codegen/Context.rs:1-1795
+use jet_foundation.[AccessConvention, ContractClause, CtValue, EnumDef, Expr, FfiHandleFact, FfiLink, Func, Item, Program, ProgramBundle, StructDef, Type, TypeParam, VariantField, VariantPayload, Span, Stmt, Dimension, QuantityKind, UnitRatio, UnitScaleProvenance, UnitFamilyDef, UnitFamilyMember, UnitFormat, MigrationDecl, DevtoolsRegistry, ReflectionField, LineIndex, TargetHardwareFacts]
+use jet_foundation.CoreModuleExports.[core_modules, core_source_module]
+use jet_codegen.[mangle, mangle_path, tuple_fields_plain, tuple_struct_name]
+use jet_codegen.TIR.[canonical_enum_owner, TLocal, TJitSpawnLambda]
+use jet_policy.[PolicyDeclaration]
+use jet_generics.[CHECKED_TEXT]
+use jet_syntax as Syntax
+use jet_syntax.[OSTarget, alloc_handle_rust_type, args_handle_rust_type, binary_text_handle_rust_type, reflect_handle_rust_type]
+use std.collections.[HashSet]
+use std.cell.[RefCell, Cell]
+use std.sync.[OnceLock]
 
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:16
+pub struct UnitFact {
+    pub family: String
+    pub dimension: Dimension?
+    pub kind: QuantityKind
+    pub scale: UnitRatio
+    pub offset: UnitRatio
+    pub scale_provenance: UnitScaleProvenance
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:27
+pub struct UnitLabel {
+    pub symbol: String
+    pub name: String
+    pub family: String
+    pub is_base: Bool
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:34
+fn unit_label(family: UnitFamilyDef, member: UnitFamilyMember) -> UnitLabel {
+    base := None as String?
+    if family.base == .Val(value) -> base = Val(value.0)
+    else if !family.members.is_empty() -> base = Val(family.members[0].name)
+    UnitLabel{symbol: member.name, name: UnitFamilyDef.type_name(member.name), family: family.family, is_base: base == Val(member.name)}
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:51
+fn unit_family_member_for_type(family: UnitFamilyDef, type_name: String, kind: QuantityKind) -> UnitFamilyMember? {
+    loop member in family.members {
+        stem :: UnitFamilyDef.type_name(member.name)
+        wanted :: if kind == {
+            .Linear -> stem
+            .Point -> "{stem}Point"
+            .Delta -> "{stem}Delta"
+        }
+        if type_name == wanted -> return Val(member)
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:67
+fn unit_fact(family: UnitFamilyDef, member: UnitFamilyMember, dimension: Dimension?, kind: QuantityKind) -> UnitFact {
+    UnitFact{family: family.family, dimension: ^dimension, kind: kind, scale: ~member.scale,
+        offset: if kind == .Point -> ~member.offset else -> UnitRatio.zero(), scale_provenance: ~member.scale_provenance}
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:88
+pub struct ExternFn {
+    pub wrapper: String
+    pub c_abi: Bool
+    pub component: String?
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:98
+pub struct OperatorMethod {
+    pub trait_name: String
+    pub sig: [(AccessConvention, Type)]
+    pub ret: Type?
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:106
+pub struct ReceiptSectionFact {
+    pub name: String
+    pub type_name: String
+    pub schema_digest: String
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:114
+pub struct CoreSourceFunctionSignature {
+    pub module_identity: String
+    pub type_params: [String]
+    pub params: [(AccessConvention, Type)]
+    pub return_type: Type?
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:123
+// Shared checked lowering facts. Tuple keys require canonical equality/hash (#4499).
+pub struct Cx {
+    pub sigs: [String:[(AccessConvention, Type)]]
+    pub contract_sigs: [String:([ContractClause], [ContractClause])]
+    pub fn_types: [String:Type]
+    pub diverging_functions: HashSet<String>
+    pub fn_source_types: [String:Type]
+    pub fn_bodies: [String:[Stmt]]
+    pub fn_param_names: [String:[String]]
+    pub method_sigs: [(String, String):[(AccessConvention, Type)]]
+    pub method_type_params: [(String, String):[TypeParam]]
+    pub method_self_convs: [(String, String):AccessConvention]
+    pub method_rets: [(String, String):Type?]
+    pub consts: [String:String]
+    pub const_types: [String:Type]
+    pub const_ref_keys: [String:String]
+    pub const_ref_types: [String:Type]
+    pub checked_const_ref_sites: [(USize, USize):(String, Type)]
+    pub persist_types: [String:Type]
+    pub const_values: [String:CtValue]
+    pub type_names: HashSet<String>
+    pub local_type_identities: [String:String]
+    pub local_type_names: HashSet<String>
+    pub distinct_types: [String:(Type, Bool)]
+    pub distinct_ranges: [String:(I64, I64)]
+    pub unit_facts: [String:UnitFact]
+    pub unit_labels: [String:UnitLabel]
+    pub type_aliases: [String:([TypeParam], Type)]
+    pub trait_names: HashSet<String>
+    pub struct_fields: [String:[(String, Type)]]
+    pub receipt_sections: [String:ReceiptSectionFact]
+    pub devtools_registry: DevtoolsRegistry
+    pub devtools_package: String
+    pub devtools_module: String
+    pub reflection_fields: [String:[ReflectionField]]
+    pub published_schemas: HashSet<String>
+    pub codable_types: HashSet<String>
+    pub reflect_paths: [String:String]
+    pub serde_wire_params: [String:HashSet<String>]
+    pub enum_variants: [String:[(String, VariantPayload)]]
+    pub variant_owner: [String:String]
+    pub boxed_edges: HashSet<(String, String)>
+    pub cloneable: HashSet<String>
+    pub migrations: [String:[MigrationDecl]]
+    pub columnar: HashSet<String>
+    pub auto_printable: HashSet<String>
+    pub auto_debug: HashSet<String>
+    pub auto_equatable: HashSet<String>
+    pub hashable: HashSet<String>
+    pub patchable: HashSet<String>
+    pub computed_fields: [String:HashSet<String>]
+    pub memo_fields: [String:[String:Type]]
+    pub memo_dependencies: [String:[String:HashSet<String>]]
+    pub src: String
+    // GATE #4494: canonical once initialization; never rescan src per position query.
+    pub src_line_index: OnceLock<LineIndex>
+    pub file: String
+    pub module_alias: String
+    pub module_identity: String
+    pub core_source_modules: [String:String]
+    pub core_source_sigs: [(String, String):CoreSourceFunctionSignature]
+    pub import_mods: [String:String]
+    pub direct_c_functions: HashSet<String>
+    pub foreign_call_keys: [String:String]
+    pub opaque_handles: HashSet<String>
+    pub foreign_types: [String:String]
+    pub reexport_calls: [(String, String):(String, String)]
+    pub import_sigs: [(String, String):[(AccessConvention, Type)]]
+    pub import_rets: [(String, String):Type?]
+    pub core_imports: [String:String]
+    pub used_core: HashSet<String>
+    pub ffi_callback_fns: HashSet<String>
+    pub root_prefix: String
+    pub ffi_crate: String?
+    pub extern_funcs: [String:ExternFn]
+    pub foreign_undos: [String:String]
+    pub code_modules: HashSet<String>
+    pub unqualified_inline: [String:String]
+    pub unqualified_file: [String:(String, String)]
+    pub inline_unqualified: [String:[String:String]]
+    pub inline_unqualified_file: [String:[String:(String, String)]]
+    pub inline_core_imports: [String:[String:String]]
+    pub inline_foreign_imports: [String:[String:String]]
+    pub inline_foreign_sigs: [String:[(String, String):[(AccessConvention, Type)]]]
+    pub inline_foreign_rets: [String:[(String, String):Type?]]
+    pub inline_foreign_reexport_sigs: [(String, String, String):[(AccessConvention, Type)]]
+    pub inline_foreign_reexport_rets: [(String, String, String):Type?]
+    pub inline_import_names: HashSet<String>
+    pub inline_reexport_inline: [(String, String):String]
+    pub inline_reexport_core: [(String, String):(String, String)]
+    pub inline_reexport_foreign: [(String, String):String]
+    pub trait_methods: HashSet<(String, String)>
+    pub trait_method_traits: [(String, String):String]
+    pub operator_methods: [String:OperatorMethod]
+    pub imported_traits: HashSet<(String, String)>
+    pub rollback_types: HashSet<String>
+    pub display_types: HashSet<String>
+    pub debug_types: HashSet<String>
+    pub close_types: HashSet<String>
+    pub iterable_hooks: [String:IterableHook]
+    pub index_hooks: [String:IndexHook]
+    pub current_fn: RefCell<String>
+    pub policy_declarations: [PolicyDeclaration]
+    pub package_hardened: Bool
+    pub dependency_fenced: Bool
+    pub struct_type_params: [String:HashSet<String>]
+    pub struct_type_param_order: [String:[String]]
+    pub current_type_params: RefCell<HashSet<String>>
+    pub jit_spawn_lambdas: RefCell<[TJitSpawnLambda]>
+    pub jit_spawn_sites: RefCell<[(String, USize, USize):USize]>
+    pub jit_spawn_site_base: USize
+    // BTreeMap projections sort keys once at their iteration consumers.
+    pub jit_method_calls: RefCell<[String:(Type, String, [Type])]>
+    pub jit_generic_calls: RefCell<[String:[[Type]]]>
+    pub jit_core_source_generic_calls: RefCell<[(String, String):[[Type]]]>
+    pub jit_canonical_deopt: RefCell<HashSet<String>>
+    pub jit_canonical_calls: RefCell<HashSet<String>>
+    pub jit_local_call_prefix: String?
+    pub fn_type_params: [String:HashSet<String>]
+    pub fn_type_param_order: [String:[String]]
+    pub debug_linemap: Bool
+    pub variadic_bound_fns: [String:(USize, [String])]
+    // GATE #4483: resolved selected-target OS, not host inference at emission.
+    pub active_os: OSTarget
+    pub web_wasm_noncopy_int: Bool
+    pub package_edition: String
+    pub preview_build_id: String
+    pub preview_revision: String
+    pub in_stm_transact: Cell<Bool>
+    pub stm_touched: Cell<Bool>
+    pub hardware_profile: TargetHardwareFacts?
+    pub hardware_profile_id: String?
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:493
+pub struct IterableHook {
+    pub iter_type: String
+    pub item_type: Type
+    pub iter_symbol: String
+    pub next_symbol: String
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:502
+pub struct IndexHook {
+    pub value_type: Type
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:508
+pub fn is_json_type_name(name: String) -> Bool { Syntax.is_data_type_name(name) }
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:516
+pub fn is_data_tree_subject(cx: Cx, subject_ty: Type) -> Bool {
+    if subject_ty.without_user_tags() == {
+        .Named(name) | .Apply(name, _) -> is_json_type_name(name) || canonical_enum_owner(cx, name) == Syntax.TYPE_DATA
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:528
+pub fn is_key_subject(cx: Cx, subject_ty: Type) -> Bool {
+    if subject_ty.without_user_tags() == {
+        .Named(name) | .Apply(name, _) -> canonical_enum_owner(cx, name) == Syntax.TYPE_KEY
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:539
+pub fn is_db_value_type_name(name: String) -> Bool { Syntax.is_db_value_type_name(name) }
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:545
+pub fn core_ui_rust_type_name(name: String) -> String? {
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:546
+    const RESULT_ALIASES: [String] = ["UIServiceResult", "UIFileFilterResult", "UIFSGrantResult", "UIShortcutResult", "UiShortcutBindingResult", "UIAccessibilityResult", "UIFileDialogResult", "UIClipboardTextResult", "UIClipboardWriteResult", "UIIMEResult", "UIDragResult", "UIShortcutDispatchResult", "UIAccessibilityNodeResult", "UIAccessibilityAttachResult", "UIAccessibilityProjectionResult"]
+    if RESULT_ALIASES.contains(name) -> return None
+    loop entry in core_modules() {
+        if entry.module == "core.ui" || entry.module == "core.ui.host" {
+            loop (type_name, _) in entry.type_exports { if type_name == name -> return Val(name) }
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:581
+pub fn root_prelude_rust_type_name(name: String) -> String? {
+    if name == {
+        n if n == Syntax.TYPE_MEMO_STATS -> Val("JetMemoStats")
+        n if n == Syntax.TYPE_AUTHORITY -> Val("JetAuthority")
+        n if n == Syntax.DETERMINISTIC_WORLD_TYPE -> Val("JetDeterministicWorld")
+        n if n == Syntax.TYPE_ERR -> Val("JetErr")
+        "Transaction" -> Val("JetTransaction")
+        "Counter" -> Val("JetCounter")
+        "OrderedMap" -> Val("JetOrderedMap")
+        "Layer" -> Val("JetLayer")
+        "Chain" -> Val("JetChain")
+        "StringSet" -> Val("JetStringSet")
+        "Loadable" -> Val("JetLoadable")
+        n if n == Syntax.TYPE_RANGE -> Val("JetRange")
+        n if n == Syntax.TYPE_ITER -> Val("JetIter")
+        "Point" -> Val("JetPoint")
+        "Size" -> Val("JetSize")
+        "Rect" -> Val("JetRect")
+        "SizeConstraint" -> Val("JetSizeConstraint")
+        "UINode" -> Val("JetUiNode")
+        "FontStyle" -> Val("JetFontStyle")
+        "FontFace" -> Val("JetFontFace")
+        "Glyph" -> Val("JetGlyph")
+        "GlyphRun" -> Val("JetGlyphRun")
+        "GlyphShaper" -> Val("JetGlyphShaper")
+        "UIAriaRole" -> Val("JetUiAriaRole")
+        "InputEvent" -> Val("JetInputEvent")
+        "EventResult" -> Val("JetEventResult")
+        "NullBackend" -> Val("JetNullBackend")
+        "TUIBackend" -> Val("JetTuiBackend")
+        "GtkBackend" -> Val("JetGtkBackend")
+        "Session" -> Val("JetAuthSession")
+        "Auth" -> Val("JetAuthApp")
+        "RowPolicy" -> Val("JetRowPolicy")
+        "HyperLogLog" -> Val("JetHyperLogLog")
+        "TDigest" -> Val("JetTDigest")
+        "CountMinSketch" -> Val("JetCountMinSketch")
+        "ReservoirSampler" -> Val("JetReservoirSampler")
+        "JetDate" | "JetInstant" | "JetLocalTime" | "JetDateTime" | "JetPeriod" | "JetZone" | "JetZonedDateTime" -> Val(name)
+        "WebMutationStatus" -> Val("JetWebMutationStatus")
+        "WebMutationState" -> Val("JetWebMutationState")
+        "WebQueryStatus" -> Val("JetWebQueryStatus")
+        "WebQueryNetworkMode" -> Val("JetWebQueryNetworkMode")
+        "WebQueryState" -> Val("JetWebQueryState")
+        "WebQuery" -> Val("JetWebQuery")
+        "WebStore" -> Val("JetWebStore")
+        "WebStoreTransaction" -> Val("JetWebStoreTransaction")
+        "WebStorePatch" -> Val("JetWebStorePatch")
+        "WebStoreInspection" -> Val("JetWebStoreInspection")
+        "WebStoreEvent" -> Val("JetWebStoreEvent")
+        "WebStoreSubscription" -> Val("JetWebStoreSubscription")
+        "WebFormValueType" -> Val("JetWebFormValueType")
+        "WebFormStatus" -> Val("JetWebFormStatus")
+        "WebFormFieldState" -> Val("JetWebFormFieldState")
+        "WebFormState" -> Val("JetWebFormState")
+        "WebForm" -> Val("JetWebForm")
+        "WebFormValidation" -> Val("JetWebFormValidation")
+        "WebFormControl" -> Val("JetWebFormControl")
+        "WebFormValidationTiming" -> Val("JetWebFormValidationTiming")
+        "WebFormFieldSpec" -> Val("JetWebFormFieldSpec")
+        "WebFormInput" -> Val("JetWebFormInput")
+        "WebFormDecodedInput" -> Val("JetWebFormDecodedInput")
+        "WebFormActionError" -> Val("JetWebFormActionError")
+        "WebFormLifecycleStatus" -> Val("JetWebFormLifecycleStatus")
+        "WebFormLifecycle" -> Val("JetWebFormLifecycle")
+        "WebFormErrorState" -> Val("JetWebFormErrorState")
+        "WebFormTypedAction" -> Val("JetWebFormTypedAction")
+        "WebFormTyped" -> Val("JetWebFormTyped")
+        "WebFormTypedValidation" -> Val("JetWebFormTypedValidation")
+        "WebFormTypedSubmission" -> Val("JetWebFormTypedSubmission")
+        "WebTableSortDirection" -> Val("JetWebTableSortDirection")
+        "WebTableSort" -> Val("JetWebTableSort")
+        "WebTableFilter" -> Val("JetWebTableFilter")
+        "WebTablePageMode" -> Val("JetWebTablePageMode")
+        "WebTableStatus" -> Val("JetWebTableStatus")
+        "WebTableProjection" -> Val("JetWebTableProjection")
+        "WebTableState" -> Val("JetWebTableState")
+        "WebTableColumn" -> Val("JetWebTableColumn")
+        "WebTableRow" -> Val("JetWebTableRow")
+        "WebTablePage" -> Val("JetWebTablePage")
+        "WebTable" -> Val("JetWebTable")
+        "WebVirtualViewport" -> Val("JetWebVirtualViewport")
+        "WebVirtualWindow" -> Val("JetWebVirtualWindow")
+        "WebVirtualPlan" -> Val("JetWebVirtualPlan")
+        "WebVirtualPlanViewport" -> Val("JetWebVirtualPlanViewport")
+        "Atomic" -> Val("JetAtomic")
+        "JetDataPlotMark" | "JetDataPlotChannel" | "JetDataPlotAggregate" | "JetDataPlotFilterOp" | "JetDataPlotValue" | "JetDataPlotScaleKind" | "JetDataPlotDomain" | "JetDataPlotLegendPosition" | "JetDataPlotFacetKind" | "JetDataPlotInteraction" | "JetDataPlotBackend" | "JetDataPlotSupport" | "JetDataPlotErrorKind" | "JetDataPlotRenderFormat" | "JetDataPlotField" | "JetDataPlotSchema" | "JetDataPlotSourceFacts" | "JetDataPlotEncoding" | "JetDataPlotScale" | "JetDataPlotAxis" | "JetDataPlotLegend" | "JetDataPlotFacet" | "JetDataPlotLayer" | "JetDataPlotAccessibility" | "JetDataPlotLayout" | "JetDataPlotCapability" | "JetDataPlotError" | "JetDataPlotPlan" | "JetDataPlotSelectedRow" | "JetDataPlotInspection" | "JetDataPlotRender" | "JetDataPlotProjection" | "JetDataPlotColumn" | "JetDataPlot" -> Val(name)
+        n if job_queue_rust_type(n) != None -> job_queue_rust_type(n)
+        else -> net_handle_rust_type(name)
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:713
+pub fn job_queue_rust_type(name: String) -> String? {
+    if name == {
+        "JobQueue" -> Val("JetJobQueue<'static>")
+        "JobPayload" -> Val("JetJobPayload")
+        "JobResult" -> Val("JetJobResult")
+        "JobError" -> Val("JetJobError")
+        "JobQueueReceipt" -> Val("JetJobQueueReceipt")
+        "JobQueueClaim" -> Val("JetJobQueueClaim")
+        "JobQueueEvent" -> Val("JetJobQueueEvent")
+        "JobQueueRecord" -> Val("JetJobQueueRecord")
+        "JobQueueStatus" -> Val("JetJobQueueStatus")
+        "JobQueueState" -> Val("JetJobQueueState")
+        "JobQueueDeliveryPolicy" -> Val("JetJobQueueDeliveryPolicy")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:732
+pub fn history_rust_type_name(name: String) -> String? {
+    split :: name.rsplit_once("::") ?? name.rsplit_once(".")
+    if split == .Val((prefix, leaf)) {
+        if prefix == "core" || prefix.starts_with("core.") || prefix.starts_with("core::") -> return history_rust_type_name(leaf)
+        return None
+    }
+    if name == {
+        "Count" | "HandleID" | "TaskID" | "EventID" | "HistoryRNG" | "HistoryValue" | "HistoryPrecondition" | "HistoryCase" | "HistoryOperation" | "HistoryScheduleChoice" | "HistoryBounds" | "HistoryDistribution" | "HistoryStrategy" | "TypedHistoryCase" -> Val(name)
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:760
+pub fn core_source_type_leaf(name: String) -> String {
+    if name.strip_prefix("<corelib>/") == .Val(identity) -> identity.rsplit("::").next() ?? name
+    else -> name
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:766
+pub fn core_rust_type_name(name: String) -> String? {
+    if name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy") -> return None
+    leaf := core_source_type_leaf(name)
+    split :: leaf.rsplit_once("::") ?? leaf.rsplit_once(".")
+    if split == .Val((prefix, value)) {
+        if prefix == "core" || prefix.starts_with("core.") || prefix.starts_with("core::") -> leaf = value
+        else -> return None
+    }
+    if leaf == {
+        n if is_json_type_name(n) -> Val("DataTree")
+        n if n == Syntax.TYPE_IO_ERROR || n == "IOError" -> Val("IOError")
+        n if n == Syntax.TYPE_IO_CONTEXT -> Val("IOContext")
+        n if n == Syntax.TYPE_IO_OPERATION -> Val("IOOperation")
+        n if n == Syntax.TYPE_PROCESS_RESOURCE_LIMIT -> Val("ProcessResourceLimit")
+        "EnvError" -> Val("EnvError")
+        n if n == Syntax.TYPE_UTF8_ERROR || n == "UTF8Error" -> Val("UTF8Error")
+        "ProcessResult" | "ProcessReceipt" -> Val("ProcessReceipt")
+        "ProcessPlan" | "ProcessSpec" | "ProcessChild" | "ProcessStreamMode" | "TerminalPolicy" | "TerminalSize" | "TerminalMode" | "TerminalSession" | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError" -> Val(leaf)
+        "Query" -> Val("DataQuery")
+        "DataGroupedQuery" -> Val("DataGroupedQuery")
+        "Group" -> Val("GroupValue")
+        "DataJoin" -> Val("DataJoin")
+        n if n == Syntax.TYPE_SHARED_GUARD -> Val("JetSharedGuard")
+        "Signal" -> Val("JetSignal")
+        "Derived" -> Val("JetDerived")
+        "AsyncPolicy" -> Val("JetAsyncPolicy")
+        "Event" -> Val("JetEvent")
+        "AsyncEvent" -> Val("JetAsyncEvent")
+        "Hook" -> Val("JetHook")
+        "DecisionHook" -> Val("JetDecisionHook")
+        "HookDecision" -> Val("JetHookDecision")
+        "HookOutcome" -> Val("JetHookOutcome")
+        "Subscription" -> Val("JetSubscription")
+        "EventScope" -> Val("JetEventScope")
+        "EventPolicy" -> Val("JetEventPolicy")
+        "EventTrace" -> Val("JetEventTrace")
+        "DispatchReport" -> Val("JetDispatchReport")
+        "DispatchFailure" -> Val("JetDispatchFailure")
+        "Overflow" -> Val("JetEventOverflow")
+        "FailurePolicy" -> Val("JetFailurePolicy")
+        "DispatchState" -> Val("JetDispatchState")
+        "HookPolicy" -> Val("JetHookPolicy")
+        "EventConfigError" -> Val("JetEventConfigError")
+        "TestSuite" -> Val("JetTestSuite")
+        "TestComparison" -> Val("JetTestComparison")
+        "Clock" | "RNG" | "Fake" | "Solver" | "Duration" | "DurationUnit" -> Val(leaf)
+        "LateEventDisposition" -> Val("JetLateEventDisposition")
+        "RangeError" -> Val("RangeError")
+        "Instant" -> Val("JetInstant")
+        "Date" | "LocalDate" -> Val("JetDate")
+        "LocalTime" -> Val("JetLocalTime")
+        "DateTime" -> Val("JetDateTime")
+        "Period" -> Val("JetPeriod")
+        "Zone" -> Val("JetZone")
+        "ZonedDateTime" -> Val("JetZonedDateTime")
+        "URL" -> Val("JetURL")
+        "MIME" -> Val("JetMIME")
+        "DataLoaderKind" | "DataFormat" | "DataFreshness" | "DataInvalidationCause" | "DataAuthority" | "DataSourceIdentity" | "DataProvenance" | "DataSnapshotIdentity" | "DataLoaderStatus" | "DataLoader" | "DataSnapshot" -> Val(leaf)
+        "Regex" -> Val("JetRegex")
+        "RegexFlags" -> Val("RegexFlags")
+        "Match" -> Val("JetRegexMatch")
+        "Decimal" -> Val("JetDecimal")
+        "Fraction" -> Val("JetFraction")
+        n if n == Syntax.TYPE_RECEIVER -> Val("JetReceiver")
+        n if n == Syntax.TYPE_SENDER -> Val("JetSender")
+        "Closed" -> Val("Closed")
+        "Pool" -> Val("JetPool")
+        "ID" -> Val("JetId")
+        n if n == Syntax.TYPE_TASK_FAILURE -> Val("JetTaskFailure")
+        "DirEntry" | "Stat" | "WalkEntry" | "WatchEvent" | "WatchDomain" | "WatchKind" | "WatchHandle" | "WatchSet" -> Val(leaf)
+        "FfiCallbackEvent" -> Val("JetFfiCallbackEventValue")
+        "FfiCallbackRegistration" -> Val("JetFfiCallbackRegistrationHandle")
+        "TempDir" | "TempFile" | "FileLock" -> Val(leaf)
+        "MappedFile" -> Val("JetMappedFile")
+        n if job_queue_rust_type(n) != None -> job_queue_rust_type(n)
+        "DataLineOptions" | "DataColumn" | "DataStatus" | "DataSummary" | "DataLimits" | "DataError" | "DataErrorKind" | "DataPivotCell" | "DataStream" | "DataTracked" | "DataWatch" | "DataWatchStatus" | "LogField" | "LogSpan" | "DataTree" | "EncodingLimits" | "EncodingError" | "EncodingCause" | "EncodingFormat" | "EncodingErrorKind" | "FieldError" | "CBOROptions" | "CBORError" | "CBORErrorKind" | "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLEncoding" | "XMLLexicalPolicy" | "XMLCanonical" | "XMLCanonicalMode" | "XMLError" | "XMLReason" | "XMLEntityPolicy" | "DataEvent" | "JSONReader" | "JSONWriter" | "JSONLReader" | "JSONLWriter" | "CSVReader" | "CSVWriter" | "CSVRow" | "XMLReader" | "XMLWriter" -> Val(leaf)
+        "RowPolicy" -> Val("JetRowPolicy")
+        "DBValue" | "DBError" | "RaylibWindow" | "RaylibColor" | "RaylibSound" | "RaylibTextureAtlas" | "SQL" | "HTML" | "Sh" -> Val(leaf)
+        "F32x4" | "F64x2" | "F32x8" | "F64x4" | "I8x16" | "I16x8" | "I32x4" | "I64x2" | "U8x16" | "U16x8" | "U32x4" | "U64x2" | "I8x32" | "I16x16" | "I32x8" | "I64x4" | "U8x32" | "U16x16" | "U32x8" | "U64x4" | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4" -> Val(leaf)
+        "Point2" | "Delta2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint" | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta" -> Val("JetCoord2")
+        "Transform" | "Transform2" -> Val("JetTransform2")
+        "Ray2" -> Val("JetRay2")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1015
+pub fn core_email_rust_type_name(name: String) -> String? {
+    leaf := name.strip_prefix("<corelib>/Core/email::Core/email/email.jet::") ?? name
+    split :: leaf.rsplit_once("::") ?? leaf.rsplit_once(".")
+    if split == .Val((prefix, value)) {
+        if prefix == "email" || prefix == "core.email" || prefix == "core::email" -> leaf = value
+        else -> return None
+    }
+    if leaf == {
+        "Address" | "Message" | "Attachment" | "Envelope" | "SMTPSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport" | "Limits" | "SMTPAuth" | "TLSTrust" | "DKIMConfig" | "SMTPConfig" | "Mailer" -> Val(leaf)
+        "EmailError" -> Val("Error")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1044
+pub fn core_crypto_type_name(name: String) -> String? {
+    leaf := name.strip_prefix("<corelib>/Core/crypto::Core/crypto/crypto.jet::") ?? name.strip_prefix("<corelib>/Core/crypto::Core/crypto/expert.jet::") ?? name
+    split :: leaf.rsplit_once("::") ?? leaf.rsplit_once(".")
+    if split == .Val((prefix, value)) {
+        if prefix == "crypto" || prefix == "core.crypto" || prefix == "core::crypto" -> leaf = value
+        else -> return None
+    }
+    if leaf == {
+        "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "KeyUnlock" | "PasswordHash" | "Digest256" | "Digest512" | "Hasher" | "CryptoError" | "FileCryptoError" | "KeyWrapError" -> Val(leaf)
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1079
+pub fn core_crypto_rust_type_name(name: String) -> String? {
+    canonical :: core_crypto_type_name(name) ?? return None
+    if canonical == {
+        "WrappedVaultKey" -> Val("JetWrappedVaultKey")
+        "KeyUnlock" -> Val("JetVaultKeyUnlock<'_>")
+        "KeyWrapError" -> Val("JetVaultKeyWrapError")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1097
+pub fn layout_handle_rust_type(name: String) -> String? {
+    if name == {
+        "HVar" | "VVar" | "LengthVar" -> Val("jet_layout::LinExpr")
+        "Constraint" -> Val("jet_layout::Constraint")
+        "Layout" -> Val("jet_layout::Handle")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1111
+pub fn file_handle_rust_type(name: String) -> String? {
+    leaf :: if name.starts_with("<corelib>/Core/files::Core/files/files.jet::") || name.starts_with("<corelib>/Core/term::Core/term/term.jet::") -> core_source_type_leaf(name) else -> name
+    if leaf == {
+        "FileReader" -> Val("JetFileReader")
+        "FileWriter" -> Val("JetFileWriter")
+        "FileLines" | "StdinLines" | "ProcessLines" -> Val("()")
+        "StdinHandle" -> Val("JetStdinReader")
+        "ProcessStdin" -> Val("jet_std::ProcessStdinHandle")
+        "ProcessStdoutStream" -> Val("jet_std::ProcessStdoutStreamHandle")
+        "ProcessStderrStream" -> Val("jet_std::ProcessStderrStreamHandle")
+        "Stdout" -> Val("JetStdout")
+        "Stderr" -> Val("JetStderr")
+        "Path" -> Val("JetPath")
+        "FileScope" -> Val("JetFileScope")
+        "DBConnection" -> Val("JetDbConnection")
+        "DBScope" -> Val("JetDbScope")
+        "DBPool" -> Val("JetDbPool<JetDbConnection>")
+        "DBLease" -> Val("JetDbLease<JetDbConnection>")
+        "DBPoolReceipt" -> Val("JetDbPoolReceipt")
+        "DBPoolLifecycle" -> Val("JetDbPoolLifecycle")
+        "Plugin" -> Val("JetPlugin")
+        "Mod" -> Val("JetMod")
+        "ModGrant" -> Val("JetModGrant")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1162
+pub fn raylib_handle_rust_type(name: String) -> String? {
+    if name == { "RaylibWindow" | "RaylibColor" | "RaylibSound" | "RaylibTextureAtlas" -> Val(name); else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1172
+pub fn game_handle_rust_type(name: String) -> String? {
+    if name == { "GameScene" | "GameAssets" | "GameInputMap" | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame" | "GameInputSnapshot" -> Val(name); else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1188
+pub fn compute_handle_rust_type(name: String) -> String? {
+    if name == {
+        "Tensor" -> Val("JetTensor")
+        "ComputeError" -> Val("JetComputeError")
+        "ComputeDevice" -> Val("JetComputeDevice")
+        "ComputeStream" -> Val("JetComputeStream")
+        "VJPRun" -> Val("JetComputeVjpRun")
+        "SparseTensor" -> Val("JetSparseCsr")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1201
+pub fn service_handle_rust_type(name: String) -> String? {
+    if name == {
+        "ServiceTree" -> Val("JetServiceTree")
+        "ServiceWorkflow" -> Val("JetWorkflowHandle")
+        "ServiceEndpoint" -> Val("JetServiceEndpoint")
+        "ServiceError" -> Val("JetServiceError")
+        "ServiceRestart" -> Val("JetServiceRestart")
+        "ServiceDelivery" -> Val("JetServiceDelivery")
+        "ServiceRuntime" -> Val("JetServiceRuntime")
+        "ServiceStateStore" -> Val("JetServiceStateStore")
+        "ServiceUpgradeReceipt" -> Val("JetServiceUpgradeReceipt")
+        "Delivery" -> Val("JetDelivery")
+        "DeliveryState" -> Val("JetDeliveryState")
+        "DeliveryReceipt" -> Val("JetDeliveryReceipt")
+        "DeliveryEvent" -> Val("JetDeliveryEvent")
+        "TaskOutcome" -> Val("JetTaskOutcome")
+        "TaskStatus" -> Val("JetTaskStatus")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1223
+pub fn net_handle_rust_type(name: String) -> String? {
+    if name == {
+        "TcpListener" | "TCPListener" -> Val("JetTCPListener")
+        "TcpStream" | "TCPStream" -> Val("JetTCPStream")
+        "IPAddr" -> Val("JetIpAddr")
+        "SocketAddr" -> Val("JetSocketAddr")
+        "UdpSocket" -> Val("JetUDPSocket")
+        "UDPPacket" -> Val("JetUDPPacket")
+        "DNSSRV" -> Val("JetDNSSrv")
+        "UnixListener" -> Val("JetUnixListener")
+        "UnixStream" -> Val("JetUnixStream")
+        "TLSStream" -> Val("JetTLSStream")
+        "TLSClientConfig" -> Val("JetTLSClientConfig")
+        "TLSRootCertificates" -> Val("JetTLSRootCertificates")
+        "TLSClientIdentity" -> Val("JetTLSClientIdentity")
+        "TLSClientTrust" -> Val("JetTLSTrust")
+        "TLSVersion" -> Val("JetTLSVersion")
+        "TLSPeerIdentity" -> Val("JetTLSPeerIdentity")
+        "TLSCertificate" -> Val("JetTLSCertificate")
+        "NetError" -> Val("JetNetError")
+        "NetErrorDetail" -> Val("JetNetErrorDetail")
+        "NetDnsError" -> Val("JetNetDnsError")
+        "NetShutdown" -> Val("JetNetShutdown")
+        "NetReadyInterest" -> Val("JetNetReadyInterest")
+        "NetReady" -> Val("JetNetReady")
+        "HTTPRequest" -> Val("JetHTTPRequest")
+        "HTTPResponse" -> Val("JetHTTPResponse")
+        "HTTPBodyChunks" -> Val("JetHTTPBodyChunks")
+        "HTTPClient" -> Val("JetHTTPClient")
+        "HTTPProxy" -> Val("JetHTTPProxy")
+        "HTTPRedirectPolicy" -> Val("JetHTTPRedirectPolicy")
+        "HTTPRetryPolicy" -> Val("JetHTTPRetryPolicy")
+        "HTTPCookieJar" -> Val("JetHTTPCookieJar")
+        "HTTPCorsPolicy" -> Val("JetHTTPCorsPolicy")
+        "HTTPCorsOrigins" -> Val("JetHTTPCorsOrigins")
+        "HTTPCompressEncoding" -> Val("JetHTTPCompressEncoding")
+        "HTTPRouter" -> Val("JetHTTPRouter")
+        "HTTPMethod" -> Val("JetHTTPMethod")
+        "HTTPStatus" -> Val("JetHTTPStatus")
+        "HTTPVersion" -> Val("JetHTTPVersion")
+        "HTTPHeaderName" -> Val("JetHTTPHeaderName")
+        "HTTPHeaderValue" -> Val("JetHTTPHeaderValue")
+        "Body" -> Val("JetHTTPBody")
+        "HTTPError" -> Val("JetHTTPError")
+        "HTTPOperation" -> Val("JetHTTPOperation")
+        "Headers" -> Val("JetHTTPHeaders")
+        "HTTPMux" -> Val("JetHTTPMux")
+        "HTTPHandler" -> Val("JetHTTPHandler")
+        "HTTPServer" -> Val("JetHTTPServer")
+        "HTTPShutdownReport" -> Val("JetHTTPShutdownReport")
+        "HTTPServerTLS" -> Val("JetHTTPServerTls")
+        "WsConn" -> Val("JetWsConn")
+        "WsError" -> Val("JetWsError")
+        "WsMessage" -> Val("JetWsMessage")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1291
+pub fn nominal_leaf(name: String) -> String {
+    split :: name.rsplit_once("::") ?? name.rsplit_once(".")
+    if split == .Val((_, leaf)) -> leaf else -> name
+}
+
+impl Cx {
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1301
+    pub fn src_lines(self) -> LineIndex {
+        // GATE #4494: OnceLock returns its retained index, not a fresh clone.
+        self.src_line_index.get_or_init(|| LineIndex.new(self.src))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1308
+    pub fn src_line_col(self, offset: USize) -> (USize, USize) { self.src_lines().line_col(self.src, offset) }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1314
+    pub fn src_line_text(self, line: USize) -> String { self.src_lines().line_text(self.src, line) }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1318
+    pub fn persistent_local(self, name: String) -> TLocal? {
+        ty :: self.persist_types.get(name) ?? return None
+        module :: if !self.module_identity.is_empty() -> self.module_identity else if !self.module_alias.is_empty() -> self.module_alias else -> "main"
+        Val(TLocal.persistent(name, module, ~ty))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1340
+    pub fn foreign_type_identity(self, alias: String, leaf: String) -> String? {
+        if alias.is_empty() && self.local_type_names.contains(leaf) -> return None
+        rust_mod := None as String?
+        if !alias.is_empty() {
+            if self.import_mods.get(alias) == .Val(module) -> rust_mod = Val(module)
+            else {
+                core_module :: self.core_imports.get(alias) ?? return None
+                source :: core_source_module(core_module) ?? return None
+                rust_mod = Val(mangle(source.alias))
+            }
+        }
+        identity := None as String?
+        loop (name, module) in self.foreign_types {
+            if nominal_leaf(name) != leaf -> next
+            if rust_mod == .Val(expected) && module != expected -> next
+            if identity != None -> return None
+            identity = Val(name)
+        }
+        identity
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1365
+    pub fn imported_type_metadata_name(self, name: String) -> String? {
+        if name.contains("::") -> return Val(name)
+        if name.split_once(".") == .Val((alias, leaf)) -> return self.foreign_type_identity(alias, leaf)
+        self.foreign_type_identity("", name)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1379
+    pub fn method_metadata_name(self, name: String, method: String) -> String {
+        if self.method_sigs.contains_key((name, method)) -> return name
+        loop (leaf, identity) in self.local_type_identities {
+            if identity == name {
+                if self.method_sigs.contains_key((leaf, method)) -> return leaf
+                break
+            }
+        }
+        self.imported_type_metadata_name(name) ?? name
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1402
+    pub fn distinct_type_identity(self, name: String) -> String? {
+        if self.distinct_types.contains_key(name) -> return Val(name)
+        (alias, leaf) :: name.split_once(".") ?? return None
+        identity :: self.foreign_type_identity(alias, leaf) ?? return None
+        if self.distinct_types.contains_key(identity) -> Val(identity) else -> None
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1415
+    pub fn string_distinct_has_registered_method(self, name: String, method: String) -> Bool {
+        if self.trait_method_traits.get((name, method)) == Val(CHECKED_TEXT) -> return true
+        if self.method_sigs.contains_key((name, "encode_hole")) && (method == "check" || method == "encode_hole") -> return true
+        identity :: self.distinct_type_identity(name) ?? return false
+        if self.distinct_types.get(identity) == .Val((base, _)) -> base == Type.String && self.method_sigs.contains_key((identity, method))
+        else -> false
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1440
+    pub fn quantity_dimension(self, ty: Type) -> Dimension? {
+        if ty.quantity_parts() == .Val((_, dimension)) -> return Val(dimension)
+        if ty != .Named(name) -> return None
+        fact := self.unit_facts.get(name)
+        if fact == None {
+            canonical :: self.imported_type_metadata_name(name) ?? return None
+            fact = self.unit_facts.get(canonical)
+        }
+        if fact == .Val(value) -> ~value.dimension else -> None
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1457
+    pub fn unit_label(self, ty: Type) -> UnitLabel? {
+        if ty != .Named(name) -> return None
+        if self.unit_labels.get(name) == .Val(label) -> return Val(label)
+        canonical :: self.imported_type_metadata_name(name) ?? return None
+        self.unit_labels.get(canonical)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1467
+    pub fn has_display_type(self, name: String) -> Bool {
+        if self.display_types.contains(name) -> return true
+        canonical :: self.imported_type_metadata_name(name) ?? return false
+        self.display_types.contains(canonical)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1474
+    pub fn has_close_type(self, name: String) -> Bool {
+        if self.close_types.contains(name) -> return true
+        canonical :: self.imported_type_metadata_name(name) ?? return false
+        self.close_types.contains(canonical)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1481
+    pub fn is_distinct_type_name(self, name: String) -> Bool {
+        if self.distinct_types.contains_key(name) -> return true
+        canonical :: self.imported_type_metadata_name(name) ?? return false
+        self.distinct_types.contains_key(canonical)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1488
+    pub fn quantity_unit_label(self, dimension: Dimension, style: UnitFormat) -> String {
+        numerator := [String]{}
+        denominator := [String]{}
+        loop (axis, exponent) in dimension.axes() {
+            family :: axis.rsplit("::").next() ?? axis
+            if exponent == 0 -> next
+            best := None as UnitLabel?
+            loop label in self.unit_labels.values() {
+                if label.family != family || !label.is_base -> next
+                if best == .Val(previous) {
+                    if label.symbol > previous.symbol || (label.symbol == previous.symbol && label.name >= previous.name) -> next
+                }
+                best = Val(label)
+            }
+            label :: if best == .Val(value) {
+                if style == .Name -> value.name else -> value.symbol
+            } else if family == "Time" {
+                if style == .Name -> "Nanosecond" else -> "ns"
+            } else -> family.to_ascii_lowercase()
+            part :: if exponent.abs() == 1 -> label else -> "{label}^{exponent.abs()}"
+            if exponent > 0 -> &numerator.push(part) else -> &denominator.push(part)
+        }
+        top :: if numerator.is_empty() -> "1" else -> numerator.join("*")
+        if denominator.is_empty() -> top else -> "{top}/{denominator.join("*")}"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1549
+    pub fn core_import_module_for_function(self, fn_name: String, alias: String) -> String? {
+        if self.inline_core_imports.get(fn_name) == .Val(scope) {
+            if scope.get(alias) == .Val(module) -> return Val(module)
+        }
+        self.core_imports.get(alias)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1561
+    pub fn import_module_for_function(self, fn_name: String, alias: String) -> String? {
+        if self.inline_foreign_imports.get(fn_name) == .Val(scope) {
+            if scope.get(alias) == .Val(module) -> return Val(module)
+        }
+        self.import_mods.get(alias)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1569
+    pub fn import_signature_for_function(self, fn_name: String, alias: String, method: String) -> [(AccessConvention, Type)]? {
+        if self.inline_foreign_sigs.get(fn_name) == .Val(scope) {
+            if scope.get((alias, method)) == .Val(sig) -> return Val(~sig)
+        }
+        if self.import_sigs.get((alias, method)) == .Val(sig) -> Val(~sig) else -> None
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1586
+    pub fn import_return_for_function(self, fn_name: String, alias: String, method: String) -> (Type?)? {
+        if self.inline_foreign_rets.get(fn_name) == .Val(scope) {
+            if scope.get((alias, method)) == .Val(ret) -> return Val(~ret)
+        }
+        if self.import_rets.get((alias, method)) == .Val(ret) -> Val(~ret) else -> None
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1607
+    pub fn any_core_import_module(self, alias: String) -> String? {
+        if self.core_imports.get(alias) == .Val(module) -> return Val(module)
+        best := None as (String, String)?
+        loop (scope, imports) in self.inline_core_imports {
+            if imports.get(alias) == .Val(module) {
+                if best == .Val((old_scope, old_module)) {
+                    if scope > old_scope || (scope == old_scope && module >= old_module) -> next
+                }
+                best = Val((scope, module))
+            }
+        }
+        if best == .Val((_, module)) -> Val(module) else -> None
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1624
+    pub fn any_foreign_import_module(self, alias: String) -> String? {
+        if self.import_mods.get(alias) == .Val(module) -> return Val(module)
+        best := None as (String, String)?
+        loop (scope, imports) in self.inline_foreign_imports {
+            if imports.get(alias) == .Val(module) {
+                if best == .Val((old_scope, old_module)) {
+                    if scope > old_scope || (scope == old_scope && module >= old_module) -> next
+                }
+                best = Val((scope, module))
+            }
+        }
+        if best == .Val((_, module)) -> Val(module) else -> None
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1641
+    pub fn core_qualified_rust_type_name(self, name: String) -> String? {
+        (alias, leaf) :: name.split_once(".") ?? return None
+        module :: self.any_core_import_module(alias) ?? return None
+        if module == "core.data" || module == "core.data.plot" {
+            return if leaf == {
+                "JetDataPlotMark" | "DataLoaderKind" | "DataFormat" | "DataFreshness" | "DataInvalidationCause" | "DataAuthority" | "DataSourceIdentity" | "DataProvenance" | "DataSnapshotIdentity" | "DataLoaderStatus" | "DataLoader" | "DataSnapshot" | "DataLineOptions" | "DataColumn" | "DataStatus" | "DataSummary" | "DataLimits" | "DataError" | "DataErrorKind" | "DataPivotCell" | "DataStream" | "JetDataPlotAggregate" | "JetDataPlotFilterOp" | "JetDataPlotValue" | "JetDataPlotScaleKind" | "JetDataPlotDomain" | "JetDataPlotLegendPosition" | "JetDataPlotFacetKind" | "JetDataPlotInteraction" | "JetDataPlotBackend" | "JetDataPlotSupport" | "JetDataPlotErrorKind" | "JetDataPlotRenderFormat" | "JetDataPlotField" | "JetDataPlotSchema" | "JetDataPlotSourceFacts" | "JetDataPlotEncoding" | "JetDataPlotScale" | "JetDataPlotAxis" | "JetDataPlotLegend" | "JetDataPlotFacet" | "JetDataPlotLayer" | "JetDataPlotAccessibility" | "JetDataPlotLayout" | "JetDataPlotCapability" | "JetDataPlotError" | "JetDataPlotPlan" | "JetDataPlotSelectedRow" | "JetDataPlotInspection" | "JetDataPlotRender" | "JetDataPlotProjection" | "JetDataPlotColumn" | "JetDataPlot" -> Val(leaf)
+                else -> None
+            }
+        }
+        if (module, leaf) == {
+            ("core.crypto", value) -> core_crypto_type_name(value)
+            ("core.auth", "Claims") | ("core.auth", "AuthError") | ("core.auth", "Session") | ("core.auth", "Auth") |
+            ("core.sync", "SyncText") | ("core.sync", "SyncCounter") | ("core.sync", "SyncMap") |
+            ("core.collections", "Counter") | ("core.collections", "OrderedMap") | ("core.collections", "Layer") | ("core.collections", "Chain") | ("core.collections.set", "StringSet") | ("core.sync", "RowPolicy") -> Val(leaf)
+            ("core.http.client", "Proxy") -> Val("HTTPProxy")
+            ("core.http.client", "RedirectPolicy") -> Val("HTTPRedirectPolicy")
+            ("core.http.client", "RetryPolicy") -> Val("HTTPRetryPolicy")
+            ("core.http.client", "CookieJar") -> Val("HTTPCookieJar")
+            ("core.net.tls", "TLSVersion") -> Val("TLSVersion")
+            ("core.net.tls", "RootCertificates") -> Val("TLSRootCertificates")
+            ("core.net.tls", "ClientIdentity") -> Val("TLSClientIdentity")
+            ("core.sys", "EnvError") | ("core.mem", "AllocError") -> Val(leaf)
+            ("core.encoding", "DataEvent") | ("core.encoding", "DataTree") | ("core.encoding", "EncodingLimits") | ("core.encoding", "EncodingError") | ("core.encoding", "EncodingCause") | ("core.encoding", "EncodingFormat") | ("core.encoding", "EncodingErrorKind") -> Val(leaf)
+            ("core.email", "Address") | ("core.email", "Message") | ("core.email", "Attachment") | ("core.email", "Envelope") | ("core.email", "SMTPSecurity") | ("core.email", "Limits") | ("core.email", "RecipientPolicy") | ("core.email", "RecipientReport") | ("core.email", "SendReport") | ("core.email", "EmailError") | ("core.email", "SMTPAuth") | ("core.email", "TLSTrust") | ("core.email", "SMTPConfig") | ("core.email", "DKIMConfig") | ("core.email", "Mailer") -> Val(leaf)
+            ("core.encoding.json", "JSONReader") | ("core.encoding.json", "JSONWriter") | ("core.encoding.jsonl", "JSONLReader") | ("core.encoding.jsonl", "JSONLWriter") | ("core.encoding.csv", "CSVReader") | ("core.encoding.csv", "CSVWriter") | ("core.encoding.csv", "CSVRow") -> Val(leaf)
+            ("core.encoding.xml", "XMLReader") | ("core.encoding.xml", "XMLWriter") | ("core.encoding.xml", "XMLLimits") | ("core.encoding.xml", "XMLParseOptions") | ("core.encoding.xml", "XMLRenderOptions") | ("core.encoding.xml", "XMLEncoding") | ("core.encoding.xml", "XMLLexicalPolicy") | ("core.encoding.xml", "XMLCanonical") | ("core.encoding.xml", "XMLCanonicalMode") | ("core.encoding.xml", "XMLError") | ("core.encoding.xml", "XMLReason") | ("core.encoding.xml", "XMLEntityPolicy") -> Val(leaf)
+            ("core.encoding.cbor", "CBORReader") | ("core.encoding.cbor", "CBOROptions") | ("core.encoding.cbor", "CBORError") | ("core.encoding.cbor", "CBORErrorKind") | ("core.encoding.cbor", "CBORWriter") -> Val(leaf)
+            ("core.jobs", "JobQueue") | ("core.jobs", "JobPayload") | ("core.jobs", "JobResult") | ("core.jobs", "JobError") | ("core.jobs", "JobQueueReceipt") | ("core.jobs", "JobQueueClaim") | ("core.jobs", "JobQueueEvent") | ("core.jobs", "JobQueueRecord") | ("core.jobs", "JobQueueStatus") | ("core.jobs", "JobQueueState") | ("core.jobs", "JobQueueDeliveryPolicy") -> Val(leaf)
+            else -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1789
+    pub fn type_contains_view(self, ty: Type) -> Bool { self.type_contains_view_matching(ty, false) }
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1793
+// Recursive comptime edges cannot serialize without type-context boxing; continued in Context01.

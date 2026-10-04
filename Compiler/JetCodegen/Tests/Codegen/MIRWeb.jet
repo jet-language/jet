@@ -1,0 +1,58 @@
+use jet_foundation.MIR.[MirForeignAbi]
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:30-42 (behavioral control)
+#Test("web_foreign_abi_names_preserve_declared_spelling") {
+    assert(foreign_abi_name(MirForeignAbi.C) == "C")
+    assert(foreign_abi_name(MirForeignAbi.CUnwind) == "C-unwind")
+    assert(foreign_abi_name(MirForeignAbi.System) == "system")
+    assert(foreign_abi_name(MirForeignAbi.Stdcall) == "stdcall")
+    assert(foreign_abi_name(MirForeignAbi.Fastcall) == "fastcall")
+    assert(foreign_abi_name(MirForeignAbi.Vectorcall) == "vectorcall")
+    assert(foreign_abi_name(MirForeignAbi.Rust) == "Rust")
+    assert(foreign_abi_name(MirForeignAbi.Platform("custom")) == "custom")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:77-85,381-398 (behavioral control)
+#Test("web_default_shell_is_a_complete_publication_asset_set") {
+    assets :: MirWebAssets.with_default_shell()
+    validate_assets(assets)
+    assert(!assets.dom_runtime.is_empty())
+    assert(!assets.index_html.is_empty())
+    assert(assets.explicit_html_path == None)
+    assert(assets.source_names.is_empty())
+    assert(assets.source_contents.is_empty())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:381-398 (behavioral control)
+#Test("web_asset_validation_preserves_error_precedence") {
+    assets := MirWebAssets{dom_runtime: "", index_html: "", explicit_html_path: None, source_names: ["main.jet"], source_contents: []}
+    mismatch := false
+    try { validate_assets(assets) } catch error {
+        mismatch = error == MirWebError.InvalidAssets(message: "source_names has 1 rows but source_contents has 0 rows")
+    }
+    assert(mismatch)
+    assets.source_contents.push("fn run() {{}}")
+    empty_dom := false
+    try { validate_assets(assets) } catch error {
+        empty_dom = error == MirWebError.InvalidAssets(message: "dom_runtime is empty")
+    }
+    assert(empty_dom)
+    assets.dom_runtime = "export {{}};"
+    empty_html := false
+    try { validate_assets(assets) } catch error {
+        empty_html = error == MirWebError.InvalidAssets(message: "index_html is empty")
+    }
+    assert(empty_html)
+    assets.index_html = "<!doctype html>"
+    validate_assets(assets)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:166-177,606-613 (behavioral control)
+#Test("web_malformed_hardware_fact_is_not_a_target_policy_redecision") {
+    error :: web_hardware_leak("test detail")
+    assert(error.fmt() == "invalid MIR for Web emission: E3311: Target `Web` lacks the required `Target.Hardware` capability; target validation must reject this hardware use before Web emission (test detail)")
+    assert(MirWebError.MissingCoreCall(call: 12).fmt() == "MIR CoreCallId 12 is not in the Core table")
+    assert(MirWebError.MissingPreludeCall(call: 13).fmt() == "MIR PreludeCallId 13 is not in the Prelude table")
+    assert(MirWebError.MissingUserFunction(function: 14).fmt() == "MIR function id 14 is not in the function table")
+    assert(MirWebError.MissingEntryFunction(function: 15).fmt() == "MIR entry function 15 is not Web-applicable")
+}

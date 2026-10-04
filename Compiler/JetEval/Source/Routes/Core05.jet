@@ -1,2202 +1,827 @@
-// PORT-PENDING 0592 crates-jet-comptime-src-comptime-methods-core-calls-plain-calls: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:1-2198
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS fn apply_duration_in(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let [duration, unit] = args else {
-//RS         return Err(unsupported(
-//RS             "core.handle.duration.in expects a Duration and a DurationUnit",
-//RS             span,
-//RS         ));
-//RS     };
-//RS     crate::Comptime::Builtins::apply_method(
-//RS         duration,
-//RS         crate::Syntax::METHOD_DURATION_IN,
-//RS         vec![unit.clone()],
-//RS         span,
-//RS     )
-//RS }
-//RS 
-//RS 
-//RS /// Evaluate an effect-approved, implemented Core call at comptime / in the REPL.
-//RS /// `module` is the full path (e.g. `"core.math"`, `"core.regex"`).
-//RS pub fn apply_core_call(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     repl_mode: bool,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     apply_core_call_with_type(module, method, args, span, repl_mode, None)
-//RS }
-//RS 
-//RS /// Evaluate one registered pure Core route without consulting its interpreter
-//RS /// adapter. Ambient adapters use this to marshal handles around the same pure
-//RS /// value constructor without recursively re-entering the ambient dispatcher.
-//RS pub fn apply_core_pure_call(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     let row = jet_foundation::Syntax::core_call(module, method).filter(|row| {
-//RS         row.pure_route != jet_foundation::Syntax::CoreCallPureRoute::None && !row.is_receiver()
-//RS     })?;
-//RS     core_pure_parity::evaluate(row, args, span)
-//RS }
-//RS 
-//RS /// Apply a Core call with sema's resolved return type available to erased
-//RS /// adapters. The type is marshalling metadata only; effects and policy remain
-//RS /// owned by the existing registries and Prelude kernels.
-//RS pub fn apply_core_call_with_type(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     repl_mode: bool,
-//RS     resolved_ret: Option<&Type>,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     apply_core_call_with_type_args(
-//RS         module,
-//RS         method,
-//RS         args,
-//RS         span,
-//RS         repl_mode,
-//RS         &[],
-//RS         resolved_ret,
-//RS     )
-//RS }
-//RS 
-//RS /// Apply a Core call while retaining explicit generic type arguments.  The
-//RS /// public Jet call remains five positional values; this slice is checked
-//RS /// compiler metadata used by typed Core adapters.
-//RS pub fn apply_core_call_with_type_args(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     repl_mode: bool,
-//RS     type_args: &[Type],
-//RS     resolved_ret: Option<&Type>,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let args = normalize_path_args(module, method, args, span)?;
-//RS     validate_core_call_projection(
-//RS         module,
-//RS         method,
-//RS         args.len(),
-//RS         jet_foundation::Syntax::CoreCallCoverage::COMPTIME,
-//RS         span,
-//RS     )?;
-//RS     validate_interpreter_route(module, method, span)?;
-//RS     // Ambient rows cross the host boundary once. If no installed adapter owns
-//RS     // the row, continue through the direct shared Comptime dispatcher below.
-//RS     let route = jet_foundation::Syntax::core_call(module, method).map(|row| row.interpreter_route);
-//RS     if route.is_none()
-//RS         || matches!(
-//RS             route,
-//RS             Some(jet_foundation::Syntax::CoreCallInterpreterRoute::Ambient)
-//RS         )
-//RS     {
-//RS         if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
-//RS             module,
-//RS             method,
-//RS             args.clone(),
-//RS             span,
-//RS             resolved_ret.cloned(),
-//RS         ) {
-//RS             return result;
-//RS         }
-//RS     }
-//RS     apply_core_call_without_ambient_with_type_args(
-//RS         module,
-//RS         method,
-//RS         args,
-//RS         span,
-//RS         repl_mode,
-//RS         type_args,
-//RS         resolved_ret,
-//RS     )
-//RS }
-//RS 
-//RS /// Evaluate a Core call directly through the shared Comptime implementation.
-//RS /// This entry point never consults an ambient adapter; MIR evaluation uses it
-//RS /// after its one explicit ambient attempt so a declining hook cannot recurse.
-//RS pub fn apply_core_call_without_ambient(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     repl_mode: bool,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     apply_core_call_without_ambient_with_type(module, method, args, span, repl_mode, None)
-//RS }
-//RS 
-//RS /// Typed variant of [`apply_core_call_without_ambient`]. The resolved return
-//RS /// type is available only as metadata for precise constructors and adapters.
-//RS pub fn apply_core_call_without_ambient_with_type(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     repl_mode: bool,
-//RS     resolved_ret: Option<&Type>,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     apply_core_call_without_ambient_with_type_args(
-//RS         module,
-//RS         method,
-//RS         args,
-//RS         span,
-//RS         repl_mode,
-//RS         &[],
-//RS         resolved_ret,
-//RS     )
-//RS }
-//RS 
-//RS /// Typed Core evaluation retaining explicit generic type arguments for the
-//RS /// selected adapter. The canonical history call carries six arguments:
-//RS /// seed, cases, optional strategy, model, actual, and observe.
-//RS pub fn apply_core_call_without_ambient_with_type_args(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     repl_mode: bool,
-//RS     type_args: &[Type],
-//RS     resolved_ret: Option<&Type>,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     apply_core_call_without_ambient_with_type_args_and_history_schema(
-//RS         module,
-//RS         method,
-//RS         args,
-//RS         span,
-//RS         repl_mode,
-//RS         type_args,
-//RS         resolved_ret,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Typed Core evaluation with the checked command schema retained for
-//RS /// `testing.histories<T>` on the canonical comptime evaluator path.
-//RS pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     repl_mode: bool,
-//RS     type_args: &[Type],
-//RS     resolved_ret: Option<&Type>,
-//RS     history_schema: Option<&HistoryCommandSchema>,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let args = normalize_path_args(module, method, args, span)?;
-//RS     validate_core_call_projection(
-//RS         module,
-//RS         method,
-//RS         args.len(),
-//RS         jet_foundation::Syntax::CoreCallCoverage::COMPTIME,
-//RS         span,
-//RS     )?;
-//RS     // The foundation row owns the effect classification for every plain
-//RS     // symbol call. Only effect-free rows may enter the pure parity evaluator;
-//RS     // this prevents a new effectful row from accidentally gaining a second
-//RS     // comptime implementation.
-//RS     if let Some(row) = jet_foundation::Syntax::core_call(module, method)
-//RS         .filter(|row| core_call_allows_pure_parity(row))
-//RS     {
-//RS         if let Some(result) = core_pure_parity::evaluate(row, &args, span) {
-//RS             return result;
-//RS         }
-//RS     }
-//RS 
-//RS     if repl_mode {
-//RS         if let Some(_) = repl_native_only_module(module) {
-//RS             return Err(repl_native_module_diag(module, method, span));
-//RS         }
-//RS     }
-//RS 
-//RS     if module == "core.testing" && method == "histories" {
-//RS         return apply_testing_histories(args, type_args, span, history_schema);
-//RS     }
-//RS     if let Some(result) = apply_raylib_core_call(module, method, &args, span) {
-//RS         return result;
-//RS     }
-//RS     if module == "core.handle"
-//RS         && matches!(
-//RS             method,
-//RS             "path.from" | "path.join" | "path.to_string" | "path.parent" | "path.extension"
-//RS                 | "path.stem" | "path.normalize" | "path.is_within"
-//RS         )
-//RS     {
-//RS         return apply_path_call(method, &args, span);
-//RS     }
-//RS     let one = |i: usize| {
-//RS         args.get(i).ok_or_else(|| {
-//RS             unsupported(&format!("{}.{}(): missing arg {}", module, method, i), span)
-//RS         })
-//RS     };
-//RS     let args_bool = |index: usize, default: bool| -> Result<bool, Diagnostic> {
-//RS         match args.get(index) {
-//RS             Some(CtValue::Bool(value)) => Ok(*value),
-//RS             Some(_) => Err(unsupported(
-//RS                 &format!(
-//RS                     "{}.{}(): argument {} must be Bool",
-//RS                     module,
-//RS                     method,
-//RS                     index + 1
-//RS                 ),
-//RS                 span,
-//RS             )),
-//RS             None => Ok(default),
-//RS         }
-//RS     };
-//RS     let csv_options = || -> Result<(String, bool, bool), Diagnostic> {
-//RS         let delimiter = args
-//RS             .get(1)
-//RS             .map(|value| as_string(value, span).map(str::to_owned))
-//RS             .transpose()?
-//RS             .unwrap_or_else(|| ",".to_string());
-//RS         Ok((delimiter, args_bool(2, false)?, args_bool(3, false)?))
-//RS     };
-//RS 
-//RS     match (module, method) {
-//RS         // D-BENCH-KEEP1=A: comptime binds the same generic identity behavior;
-//RS         // the AOT-only black-box effect has no observable CtValue equivalent.
-//RS         // D-OBS3: retain trace context in the shared log Prelude state even
-//RS         // when the default evaluator executes a service call.
-//RS         ("core.log", "set_trace_id") => {
-//RS             log_kernel::set_trace_id(as_string(one(0)?, span)?);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS 
-//RS         ("core.prelude", "keep") => Ok(args.first().cloned().unwrap_or(CtValue::Unit)),
-//RS         ("core.builtin", "len_string") => {
-//RS             Ok(CtValue::Int(as_string(one(0)?, span)?.chars().count() as i64))
-//RS         }
-//RS         ("core.builtin", "map_keys" | "map_values") => {
-//RS             let member = if method == "map_keys" { "keys" } else { "values" };
-//RS             crate::Comptime::Builtins::apply_method(one(0)?, member, Vec::new(), span)
-//RS         }
-//RS         ("jet.unit", "magnitude") => Ok(CtValue::Str(as_float(one(0)?, span)?.to_string())),
-//RS         // D-PENDING1=B: the same four enum variants AOT lowers to JetLoadable.
-//RS         ("core.reactive.loadable", state @ ("idle" | "loading")) => Ok(CtValue::Enum {
-//RS             type_name: "Loadable".to_string(),
-//RS             variant: loadable_variant(state).to_string(),
-//RS             args: Vec::new(),
-//RS         }),
-//RS         ("core.reactive.loadable", state @ ("loaded" | "failed")) => Ok(CtValue::Enum {
-//RS             type_name: "Loadable".to_string(),
-//RS             variant: loadable_variant(state).to_string(),
-//RS             args: vec![(None, one(0)?.clone())],
-//RS         }),
-//RS         // D-FIDELITY-API1=A: explicit runtime-global signal. Interpreter owns
-//RS         // same f32-backed range and validation contract as AOT/JIT.
-//RS         ("core.perf", "fidelity") => Ok(CtValue::Float(CtFloat::f64(f32::from_bits(
-//RS             PERF_FIDELITY.with(Cell::get),
-//RS         ) as f64))),
-//RS         ("core.perf", "default_fidelity") => Ok(CtValue::Float(CtFloat::f64(f32::from_bits(
-//RS             PERF_DEFAULT_FIDELITY_BITS,
-//RS         ) as f64))),
-//RS         ("core.perf", "override_fidelity") => {
-//RS             let value = as_float(one(0)?, span)?;
-//RS             if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-//RS                 return Ok(CtValue::failed(Box::new(CtValue::Str(format!(
-//RS                     "core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {}",
-//RS                     value
-//RS                 )))));
-//RS             }
-//RS             PERF_FIDELITY.with(|c| c.set((value as f32).to_bits()));
-//RS             Ok(CtValue::Present(Box::new(CtValue::Unit)))
-//RS         }
-//RS         ("core.perf", "reset_fidelity") => {
-//RS             PERF_FIDELITY.with(|c| c.set(PERF_DEFAULT_FIDELITY_BITS));
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         // --- core.math implementation surface ---
-//RS         ("core.math", "sqrt") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.sqrt())),
-//RS         ("core.math", "floor") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.floor())),
-//RS         ("core.math", "ceil") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ceil())),
-//RS         ("core.math", "round") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.round_i64())),
-//RS         ("core.math", "abs") => match one(0)? {
-//RS             value if exact_big(&value).is_some() => {
-//RS                 let value = exact_big(&value).expect("whole-number abs");
-//RS                 Ok(exact_int_value(value.abs()))
-//RS             }
-//RS             CtValue::Float(f) => Ok(CtValue::Float(core_math_float_abs(*f))),
-//RS             value
-//RS                 if matches!(
-//RS                     &value,
-//RS                     CtValue::Struct { type_name, .. }
-//RS                         if type_name == crate::Syntax::TYPE_COMPLEX
-//RS                 ) =>
-//RS             {
-//RS                 crate::Comptime::ComplexParity::abs(&value)
-//RS                     .map(|magnitude| CtValue::Float(CtFloat::f64(magnitude)))
-//RS                     .ok_or_else(|| unsupported("malformed Complex value", span))
-//RS             }
-//RS             _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
-//RS         },
-//RS         ("core.math", "fabs") => Ok(CtValue::Float(core_math_float_abs(as_ct_float(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         ("core.math", "pow") => {
-//RS             let a = as_ct_float(one(0)?, span)?;
-//RS             let b = as_ct_float(one(1)?, span)?;
-//RS             Ok(CtValue::Float(
-//RS                 a.powf(b)
-//RS                     .ok_or_else(|| unsupported("mixing float widths", span))?,
-//RS             ))
-//RS         }
-//RS         ("core.math", "min") => {
-//RS             let left = one(0)?;
-//RS             let right = one(1)?;
-//RS             match (&left, &right) {
-//RS                 (CtValue::Int(left), CtValue::Int(right)) => Ok(CtValue::Int(
-//RS                     math_lib_pure::jet_std_math_min_i64(*left, *right),
-//RS                 )),
-//RS                 (CtValue::Float(left), CtValue::Float(right)) => {
-//RS                     Ok(CtValue::Float(core_math_float_min(*left, *right, span)?))
-//RS                 }
-//RS                 _ => Ok(CtValue::Float(core_math_float_min(
-//RS                     as_ct_float(&left, span)
-//RS                         .map_err(|_| unsupported("core.math.min: non-numeric arguments", span))?,
-//RS                     as_ct_float(&right, span)
-//RS                         .map_err(|_| unsupported("core.math.min: non-numeric arguments", span))?,
-//RS                     span,
-//RS                 )?)),
-//RS             }
-//RS         }
-//RS         ("core.math", "max") => {
-//RS             let left = one(0)?;
-//RS             let right = one(1)?;
-//RS             match (&left, &right) {
-//RS                 (CtValue::Int(left), CtValue::Int(right)) => Ok(CtValue::Int(
-//RS                     math_lib_pure::jet_std_math_max_i64(*left, *right),
-//RS                 )),
-//RS                 (CtValue::Float(left), CtValue::Float(right)) => {
-//RS                     Ok(CtValue::Float(core_math_float_max(*left, *right, span)?))
-//RS                 }
-//RS                 _ => Ok(CtValue::Float(core_math_float_max(
-//RS                     as_ct_float(&left, span)
-//RS                         .map_err(|_| unsupported("core.math.max: non-numeric arguments", span))?,
-//RS                     as_ct_float(&right, span)
-//RS                         .map_err(|_| unsupported("core.math.max: non-numeric arguments", span))?,
-//RS                     span,
-//RS                 )?)),
-//RS             }
-//RS         }
-//RS         ("core.math", "clamp") => match (one(0)?, one(1)?, one(2)?) {
-//RS             (CtValue::Int(value), CtValue::Int(low), CtValue::Int(high)) => Ok(CtValue::Int(
-//RS                 math_lib_pure::jet_std_math_clamp_i64(*value, *low, *high),
-//RS             )),
-//RS             (CtValue::Float(value), CtValue::Float(low), CtValue::Float(high)) => Ok(
-//RS                 CtValue::Float(core_math_float_clamp(*value, *low, *high, span)?),
-//RS             ),
-//RS             _ => Err(unsupported("core.math.clamp: non-numeric arguments", span)),
-//RS         },
-//RS         ("core.math", "log2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log2())),
-//RS         ("core.math", "log10") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log10())),
-//RS         // card #392 gap fix: the rest of `core.math` — mechanical ports of
-//RS         // the same one-line Rust std calls AOT's codegen emits
-//RS         // (`Codegen/TIR/emit/core_calls.rs`), so results match exactly.
-//RS         ("core.math", "sin") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.sin())),
-//RS         ("core.math", "cos") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.cos())),
-//RS         ("core.math", "tan") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.tan())),
-//RS         ("core.math", "asin") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.asin())),
-//RS         ("core.math", "acos") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.acos())),
-//RS         ("core.math", "atan") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.atan())),
-//RS         ("core.math", "sinh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.sinh())),
-//RS         ("core.math", "cosh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.cosh())),
-//RS         ("core.math", "tanh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.tanh())),
-//RS         ("core.math", "exp") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp())),
-//RS         ("core.math", "ln") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ln())),
-//RS         ("core.math", "acosh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.acosh())),
-//RS         ("core.math", "asinh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.asinh())),
-//RS         ("core.math", "atanh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.atanh())),
-//RS         ("core.math", "cbrt") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.cbrt())),
-//RS         ("core.math", "exp2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp2())),
-//RS         ("core.math", "exp_m1") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp_m1())),
-//RS         ("core.math", "ln_1p") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ln_1p())),
-//RS         ("core.math", "signum") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.signum())),
-//RS         ("core.math", "trunc") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.trunc())),
-//RS         ("core.math", "fract") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.fract())),
-//RS         ("core.math", "degrees") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.to_degrees())),
-//RS         ("core.math", "radians") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.to_radians())),
-//RS         ("core.math", "atan2") => {
-//RS             let left = as_ct_float(one(0)?, span)?;
-//RS             let right = as_ct_float(one(1)?, span)?;
-//RS             Ok(CtValue::Float(
-//RS                 left.atan2(right)
-//RS                     .ok_or_else(|| unsupported("mixing float widths", span))?,
-//RS             ))
-//RS         }
-//RS         ("core.math", "copysign") => {
-//RS             let left = as_ct_float(one(0)?, span)?;
-//RS             let right = as_ct_float(one(1)?, span)?;
-//RS             Ok(CtValue::Float(
-//RS                 left.copysign(right)
-//RS                     .ok_or_else(|| unsupported("mixing float widths", span))?,
-//RS             ))
-//RS         }
-//RS         ("core.math", "log") => {
-//RS             let left = as_ct_float(one(0)?, span)?;
-//RS             let right = as_ct_float(one(1)?, span)?;
-//RS             Ok(CtValue::Float(
-//RS                 left.log(right)
-//RS                     .ok_or_else(|| unsupported("mixing float widths", span))?,
-//RS             ))
-//RS         }
-//RS         ("core.math", "fma") => {
-//RS             let a = as_ct_float(one(0)?, span)?;
-//RS             let b = as_ct_float(one(1)?, span)?;
-//RS             let c = as_ct_float(one(2)?, span)?;
-//RS             Ok(CtValue::Float(
-//RS                 a.mul_add(b, c)
-//RS                     .ok_or_else(|| unsupported("mixing float widths", span))?,
-//RS             ))
-//RS         }
-//RS         ("core.math", "factorial") => {
-//RS             let value = exact_big(one(0)?).ok_or_else(|| {
-//RS                 unsupported("this operation on a value that is not a whole number", span)
-//RS             })?;
-//RS             if value.negative {
-//RS                 return Ok(CtValue::absent(Type::Int));
-//RS             }
-//RS             let mut current = crate::Numeric::CtBigInt::from_int(2);
-//RS             let mut result = crate::Numeric::CtBigInt::from_int(1);
-//RS             while current.compare(&value) != std::cmp::Ordering::Greater {
-//RS                 result = result.mul(&current);
-//RS                 current = current.add(&crate::Numeric::CtBigInt::from_int(1));
-//RS             }
-//RS             Ok(CtValue::Present(Box::new(exact_int_value(result))))
-//RS         }
-//RS         ("core.math", method @ ("isqrt" | "checked_abs" | "checked_neg")) => {
-//RS             let value = exact_big(one(0)?).ok_or_else(|| {
-//RS                 unsupported("this operation on a value that is not a whole number", span)
-//RS             })?;
-//RS             let result = match method {
-//RS                 "isqrt" => value.isqrt(),
-//RS                 "checked_abs" => Some(value.abs()),
-//RS                 _ => Some(value.neg()),
-//RS             };
-//RS             Ok(match result {
-//RS                 Some(value) => CtValue::Present(Box::new(exact_int_value(value))),
-//RS                 None => CtValue::absent(Type::Int),
-//RS             })
-//RS         }
-//RS         ("core.math", method @ ("is_even" | "is_odd")) => {
-//RS             let value = exact_big(one(0)?)
-//RS                 .ok_or_else(|| unsupported("parity of a value that is not a whole number", span))?;
-//RS             Ok(CtValue::Bool(if method == "is_even" {
-//RS                 value.is_even()
-//RS             } else {
-//RS                 value.is_odd()
-//RS             }))
-//RS         }
-//RS         ("core.math", method @ ("leading_ones" | "trailing_ones" | "digits")) => {
-//RS             let value = exact_big(one(0)?)
-//RS                 .ok_or_else(|| unsupported("this operation needs a whole number", span))?;
-//RS             Ok(CtValue::Int(if method == "leading_ones" {
-//RS                 value.leading_ones()
-//RS             } else if method == "trailing_ones" {
-//RS                 value.trailing_ones()
-//RS             } else {
-//RS                 value.digits()
-//RS             }))
-//RS         }
-//RS         ("core.math", "binomial") => {
-//RS             let n = exact_big(one(0)?)
-//RS                 .ok_or_else(|| unsupported("binomial needs whole numbers", span))?;
-//RS             let k = exact_big(one(1)?)
-//RS                 .ok_or_else(|| unsupported("binomial needs whole numbers", span))?;
-//RS             Ok(match crate::Numeric::CtBigInt::binomial(&n, &k) {
-//RS                 Some(value) => CtValue::Present(Box::new(exact_int_value(value))),
-//RS                 None => CtValue::absent(Type::Int),
-//RS             })
-//RS         }
-//RS         ("core.math", method @ ("checked_add" | "checked_sub" | "checked_mul")) => {
-//RS             let left = exact_big(one(0)?)
-//RS                 .ok_or_else(|| unsupported("checked arithmetic needs whole numbers", span))?;
-//RS             let right = exact_big(one(1)?)
-//RS                 .ok_or_else(|| unsupported("checked arithmetic needs whole numbers", span))?;
-//RS             let value = match method {
-//RS                 "checked_add" => left.add(&right),
-//RS                 "checked_sub" => left.sub(&right),
-//RS                 _ => left.mul(&right),
-//RS             };
-//RS             Ok(CtValue::Present(Box::new(exact_int_value(value))))
-//RS         }
-//RS         ("core.math", method @ ("checked_div" | "checked_rem")) => {
-//RS             let left = exact_big(one(0)?)
-//RS                 .ok_or_else(|| unsupported("checked division needs whole numbers", span))?;
-//RS             let right = exact_big(one(1)?)
-//RS                 .ok_or_else(|| unsupported("checked division needs whole numbers", span))?;
-//RS             Ok(match left.div_rem(&right) {
-//RS                 Some((quotient, remainder)) => {
-//RS                     CtValue::Present(Box::new(exact_int_value(if method == "checked_div" {
-//RS                         quotient
-//RS                     } else {
-//RS                         remainder
-//RS                     })))
-//RS                 }
-//RS                 None => CtValue::absent(Type::Int),
-//RS             })
-//RS         }
-//RS         ("core.math", "checked_pow") => {
-//RS             let base = exact_big(one(0)?)
-//RS                 .ok_or_else(|| unsupported("checked power needs whole numbers", span))?;
-//RS             let exponent = exact_big(one(1)?)
-//RS                 .ok_or_else(|| unsupported("checked power needs whole numbers", span))?;
-//RS             Ok(match base.pow(&exponent) {
-//RS                 Some(value) => CtValue::Present(Box::new(exact_int_value(value))),
-//RS                 None => CtValue::absent(Type::Int),
-//RS             })
-//RS         }
-//RS         ("core.math", method @ ("saturating_add" | "saturating_sub" | "saturating_mul")) => {
-//RS             let left = exact_big(one(0)?)
-//RS                 .ok_or_else(|| unsupported("arithmetic needs whole numbers", span))?;
-//RS             let right = exact_big(one(1)?)
-//RS                 .ok_or_else(|| unsupported("arithmetic needs whole numbers", span))?;
-//RS             let value = match method {
-//RS                 "saturating_add" => left.add(&right),
-//RS                 "saturating_sub" => left.sub(&right),
-//RS                 "saturating_mul" => left.mul(&right),
-//RS                 _ => unreachable!("whole-number arithmetic guard"),
-//RS             };
-//RS             Ok(exact_int_value(value))
-//RS         }
-//RS         ("core.math", "int_pow") => {
-//RS             let base = exact_big(one(0)?)
-//RS                 .ok_or_else(|| unsupported("integer power needs whole numbers", span))?;
-//RS             let exponent = exact_big(one(1)?)
-//RS                 .ok_or_else(|| unsupported("integer power needs whole numbers", span))?;
-//RS             Ok(exact_int_value(
-//RS                 base.pow(&exponent)
-//RS                     .unwrap_or_else(|| crate::Numeric::CtBigInt::from_int(0)),
-//RS             ))
-//RS         }
-//RS         ("core.math", method @ ("gcd" | "lcm")) => {
-//RS             let left = exact_big(one(0)?)
-//RS                 .ok_or_else(|| unsupported("number theory needs whole numbers", span))?;
-//RS             let right = exact_big(one(1)?)
-//RS                 .ok_or_else(|| unsupported("number theory needs whole numbers", span))?;
-//RS             Ok(exact_int_value(if method == "gcd" {
-//RS                 crate::Numeric::CtBigInt::gcd(&left, &right)
-//RS             } else {
-//RS                 crate::Numeric::CtBigInt::lcm(&left, &right)
-//RS             }))
-//RS         }
-//RS         ("core.math", "div_mod" | "div_rem") => {
-//RS             let left = exact_big(one(0)?)
-//RS                 .ok_or_else(|| unsupported("division needs whole numbers", span))?;
-//RS             let right = exact_big(one(1)?)
-//RS                 .ok_or_else(|| unsupported("division needs whole numbers", span))?;
-//RS             let Some((mut quotient, mut remainder)) = left.div_rem(&right) else {
-//RS                 return Err(unsupported("division by zero", span));
-//RS             };
-//RS             if method == "div_mod" && !remainder.is_zero() && left.negative != right.negative {
-//RS                 quotient = quotient.sub(&crate::Numeric::CtBigInt::from_int(1));
-//RS                 remainder = remainder.add(&right);
-//RS             }
-//RS             Ok(named_tuple(&[
-//RS                 ("quot", exact_int_value(quotient)),
-//RS                 ("rem", exact_int_value(remainder)),
-//RS             ]))
-//RS         }
-//RS         ("core.math", "is_normal") => Ok(CtValue::Bool(
-//RS             as_ct_float(one(0)?, span)?.as_f64().is_normal(),
-//RS         )),
-//RS         ("core.math", "is_subnormal") => Ok(CtValue::Bool(
-//RS             as_ct_float(one(0)?, span)?.as_f64().is_subnormal(),
-//RS         )),
-//RS         ("core.math", "is_canonical") => {
-//RS             let x = as_ct_float(one(0)?, span)?;
-//RS             Ok(CtValue::Bool(x.is_finite() || x.is_nan()))
-//RS         }
-//RS         ("core.math", "is_signed" | "sign_bit") => Ok(CtValue::Bool(
-//RS             as_ct_float(one(0)?, span)?.as_f64().is_sign_negative(),
-//RS         )),
-//RS         ("core.math", "is_zero") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64() == 0.0)),
-//RS         ("core.math", "is_integer") => {
-//RS             let x = as_ct_float(one(0)?, span)?;
-//RS             Ok(CtValue::Bool(x.is_finite() && x.as_f64().fract() == 0.0))
-//RS         }
-//RS         ("core.math", "next_up") => Ok(CtValue::Float(CtFloat::f64(
-//RS             as_ct_float(one(0)?, span)?.as_f64().next_up(),
-//RS         ))),
-//RS         ("core.math", "next_down") => Ok(CtValue::Float(CtFloat::f64(
-//RS             as_ct_float(one(0)?, span)?.as_f64().next_down(),
-//RS         ))),
-//RS         ("core.math", "copy") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?)),
-//RS         ("core.math", "cot") => {
-//RS             let x = as_ct_float(one(0)?, span)?.as_f64();
-//RS             Ok(CtValue::Float(CtFloat::f64(1.0 / x.tan())))
-//RS         }
-//RS         ("core.math", "inv") => {
-//RS             let x = as_ct_float(one(0)?, span)?.as_f64();
-//RS             Ok(CtValue::Float(CtFloat::f64(1.0 / x)))
-//RS         }
-//RS         ("core.math", "zero") => Ok(CtValue::Float(CtFloat::f64(0.0))),
-//RS         ("core.math", "radix") => Ok(CtValue::Int(2)),
-//RS         ("core.math", "cmp") => {
-//RS             let a = as_ct_float(one(0)?, span)?.as_f64();
-//RS             let b = as_ct_float(one(1)?, span)?.as_f64();
-//RS             Ok(CtValue::Int(math_lib_pure::jet_std_math_cmp(a, b)))
-//RS         }
-//RS         ("core.math", "next_after") => {
-//RS             let a = as_ct_float(one(0)?, span)?.as_f64();
-//RS             let b = as_ct_float(one(1)?, span)?.as_f64();
-//RS             Ok(CtValue::Float(CtFloat::f64(
-//RS                 math_lib_pure::jet_std_math_next_after(a, b),
-//RS             )))
-//RS         }
-//RS         ("core.math", "ldexp" | "scaleb") => {
-//RS             let x = as_ct_float(one(0)?, span)?.as_f64();
-//RS             let exp = match one(1)? {
-//RS                 CtValue::Int(v) => *v,
-//RS                 _ => return Err(unsupported("ldexp needs a whole-number exponent", span)),
-//RS             };
-//RS             Ok(CtValue::Float(CtFloat::f64(
-//RS                 math_lib_pure::jet_std_math_ldexp(x, exp),
-//RS             )))
-//RS         }
-//RS         ("core.math", "ilogb") => {
-//RS             let x = as_ct_float(one(0)?, span)?.as_f64();
-//RS             Ok(match math_lib_pure::jet_std_math_ilogb(x) {
-//RS                 Some(e) => CtValue::Present(Box::new(CtValue::Int(e))),
-//RS                 None => CtValue::absent(Type::Int),
-//RS             })
-//RS         }
-//RS         ("core.math", "logb") => Ok(CtValue::Float(CtFloat::f64(
-//RS             math_lib_pure::jet_std_math_logb(as_ct_float(one(0)?, span)?.as_f64()),
-//RS         ))),
-//RS         ("core.math", "significand") => Ok(CtValue::Float(CtFloat::f64(
-//RS             math_lib_pure::jet_std_math_significand(as_ct_float(one(0)?, span)?.as_f64()),
-//RS         ))),
-//RS         ("core.math", "ulp") => Ok(CtValue::Float(CtFloat::f64(
-//RS             math_lib_pure::jet_std_math_ulp(as_ct_float(one(0)?, span)?.as_f64()),
-//RS         ))),
-//RS         ("core.math", "erf") => Ok(CtValue::Float(CtFloat::f64(
-//RS             math_lib_pure::jet_std_math_erf(as_ct_float(one(0)?, span)?.as_f64()),
-//RS         ))),
-//RS         ("core.math", "erfc") => Ok(CtValue::Float(CtFloat::f64(
-//RS             math_lib_pure::jet_std_math_erfc(as_ct_float(one(0)?, span)?.as_f64()),
-//RS         ))),
-//RS         ("core.math", "gamma") => Ok(CtValue::Float(CtFloat::f64(
-//RS             math_lib_pure::jet_std_math_gamma(as_ct_float(one(0)?, span)?.as_f64()),
-//RS         ))),
-//RS         ("core.math", "lgamma") => Ok(CtValue::Float(CtFloat::f64(
-//RS             math_lib_pure::jet_std_math_lgamma(as_ct_float(one(0)?, span)?.as_f64()),
-//RS         ))),
-//RS         ("core.math", "sin_cos") => {
-//RS             let x = as_ct_float(one(0)?, span)?.as_f64();
-//RS             let (s, c) = x.sin_cos();
-//RS             Ok(named_tuple(&[
-//RS                 ("sin", CtValue::Float(CtFloat::f64(s))),
-//RS                 ("cos", CtValue::Float(CtFloat::f64(c))),
-//RS             ]))
-//RS         }
-//RS         ("core.math", "modf") => {
-//RS             let x = as_ct_float(one(0)?, span)?;
-//RS             Ok(named_tuple(&[
-//RS                 ("fract", CtValue::Float(x.fract())),
-//RS                 ("whole", CtValue::Float(x.trunc())),
-//RS             ]))
-//RS         }
-//RS         ("core.math", "frexp") => {
-//RS             let x = as_ct_float(one(0)?, span)?.as_f64();
-//RS             let exp = math_lib_pure::jet_std_math_ilogb(x).unwrap_or(0);
-//RS             let frac = if x == 0.0 || !x.is_finite() {
-//RS                 x
-//RS             } else {
-//RS                 math_lib_pure::jet_std_math_ldexp(x, -exp)
-//RS             };
-//RS             Ok(named_tuple(&[
-//RS                 ("frac", CtValue::Float(CtFloat::f64(frac))),
-//RS                 ("exp", CtValue::Int(exp)),
-//RS             ]))
-//RS         }
-//RS         ("core.math", "hypot") => {
-//RS             let left = as_ct_float(one(0)?, span)?;
-//RS             let right = as_ct_float(one(1)?, span)?;
-//RS             Ok(CtValue::Float(
-//RS                 left.hypot(right)
-//RS                     .ok_or_else(|| unsupported("mixing float widths", span))?,
-//RS             ))
-//RS         }
-//RS         ("core.math", "lerp") => {
-//RS             let left = as_ct_float(one(0)?, span)?;
-//RS             let right = as_ct_float(one(1)?, span)?;
-//RS             let t = as_ct_float(one(2)?, span)?;
-//RS             Ok(CtValue::Float(
-//RS                 left.lerp(right, t)
-//RS                     .ok_or_else(|| unsupported("mixing float widths", span))?,
-//RS             ))
-//RS         }
-//RS         ("core.math", "is_nan") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_nan())),
-//RS         ("core.math", "is_inf") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_infinite())),
-//RS         ("core.math", "is_finite") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_finite())),
-//RS         ("core.math", "sign") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.sign())),
-//RS         // --- core.text module implementation surface (card #392: `"core.string"` was a
-//RS         // dead key here — no import ever resolves to it, `core.text` is the
-//RS         // only ratified spelling (KNOWN_CORE_MODULES), so every arm below was
-//RS         // unreachable and every `use core.text as t; t.trim(s)`-style call
-//RS         // hit the E0956 fallback. Logic ported verbatim from AOT's
-//RS         // `jet_text_*` prelude fns via `TextLite` — R12 parity. ---
-//RS         ("core.text", "nfc") => Ok(CtValue::Str(crate::Comptime::TextLite::nfc(as_string(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         ("core.text", "nfd") => Ok(CtValue::Str(crate::Comptime::TextLite::nfd(as_string(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         ("core.text", "nfkc") => Ok(CtValue::Str(crate::Comptime::TextLite::nfkc(as_string(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         ("core.text", "nfkd") => Ok(CtValue::Str(crate::Comptime::TextLite::nfkd(as_string(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         ("core.text", "casefold") => Ok(CtValue::Str(crate::Comptime::TextLite::casefold(as_string(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         ("core.text", "lower") => Ok(CtValue::Str(crate::Comptime::TextLite::lower(as_string(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         ("core.text", "upper") => Ok(CtValue::Str(crate::Comptime::TextLite::upper(as_string(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         ("core.text", "caseless_eq") => Ok(CtValue::Bool(crate::Comptime::TextLite::caseless_eq(
-//RS             as_string(one(0)?, span)?,
-//RS             as_string(one(1)?, span)?,
-//RS         ))),
-//RS         ("core.text", "graphemes") => Ok(CtValue::List(
-//RS             crate::Comptime::TextLite::graphemes(as_string(one(0)?, span)?)
-//RS                 .into_iter()
-//RS                 .map(CtValue::Str)
-//RS                 .collect(),
-//RS         )),
-//RS         ("core.text", "words") => Ok(CtValue::List(
-//RS             crate::Comptime::TextLite::words(as_string(one(0)?, span)?)
-//RS                 .into_iter()
-//RS                 .map(CtValue::Str)
-//RS                 .collect(),
-//RS         )),
-//RS         ("core.text", "sentences") => Ok(CtValue::List(
-//RS             crate::Comptime::TextLite::sentences(as_string(one(0)?, span)?)
-//RS                 .into_iter()
-//RS                 .map(CtValue::Str)
-//RS                 .collect(),
-//RS         )),
-//RS         ("core.text", "scalars") => Ok(CtValue::List(
-//RS             as_string(one(0)?, span)?
-//RS                 .chars()
-//RS                 .map(|c| CtValue::Str(c.to_string()))
-//RS                 .collect(),
-//RS         )),
-//RS         ("core.text", "inspect") => Ok(CtValue::List(
-//RS             crate::Comptime::TextLite::inspect(as_string(one(0)?, span)?)
-//RS                 .into_iter()
-//RS                 .map(CtValue::Str)
-//RS                 .collect(),
-//RS         )),
-//RS         // D-TEXTWIDTH1=B: 1-arg call uses the portable default policy and
-//RS         // returns a bare `Int`; the 2-arg (`policy:`) call can reject a
-//RS         // control character under `.Reject`, so it returns `Int !TextError`.
-//RS         // `TextWidth`'s two enum fields evaluate generically (`CtValue::Struct`/
-//RS         // `CtValue::Enum`, no per-type interpreter code needed) — this arm
-//RS         // just reads them back out.
-//RS         ("core.text", "display_width") => {
-//RS             let s = as_string(one(0)?, span)?;
-//RS             if let Some(policy) = args.get(1) {
-//RS                 let (ambiguous_wide, controls_reject) = text_width_policy_flags(policy);
-//RS                 match crate::Comptime::TextLite::display_width_policy(
-//RS                     s,
-//RS                     ambiguous_wide,
-//RS                     controls_reject,
-//RS                 ) {
-//RS                     Ok(n) => Ok(CtValue::Present(Box::new(CtValue::Int(n)))),
-//RS                     Err(message) => Ok(CtValue::failed(Box::new(CtValue::Struct {
-//RS                         type_name: "TextError".to_string(),
-//RS                         fields: vec![("message".to_string(), CtValue::Str(message))],
-//RS                     }))),
-//RS                 }
-//RS             } else {
-//RS                 Ok(CtValue::Int(crate::Comptime::TextLite::display_width_default(
-//RS                     s,
-//RS                 )))
-//RS             }
-//RS         }
-//RS         ("core.text", "scalar_count") => Ok(CtValue::Int(
-//RS             as_string(one(0)?, span)?.chars().count() as i64,
-//RS         )),
-//RS         ("core.text", "byte_count") => Ok(CtValue::Int(as_string(one(0)?, span)?.len() as i64)),
-//RS         ("core.text", "is_alphabetic") => Ok(CtValue::Bool(crate::Comptime::TextLite::is_alphabetic(
-//RS             as_string(one(0)?, span)?,
-//RS         ))),
-//RS         ("core.text", "is_numeric") => Ok(CtValue::Bool(crate::Comptime::TextLite::is_numeric(
-//RS             as_string(one(0)?, span)?,
-//RS         ))),
-//RS         ("core.text", "is_whitespace") => Ok(CtValue::Bool(crate::Comptime::TextLite::is_whitespace(
-//RS             as_string(one(0)?, span)?,
-//RS         ))),
-//RS         ("core.text", "is_ascii") => Ok(CtValue::Bool(as_string(one(0)?, span)?.is_ascii())),
-//RS         ("core.text", "splitn") => {
-//RS             let s = as_string(one(0)?, span)?.to_string();
-//RS             let pat = as_string(one(1)?, span)?.to_string();
-//RS             let n = as_int(one(2)?, span)?;
-//RS             Ok(CtValue::List(
-//RS                 crate::Comptime::TextLite::splitn(&s, &pat, n)
-//RS                     .into_iter()
-//RS                     .map(CtValue::Str)
-//RS                     .collect(),
-//RS             ))
-//RS         }
-//RS         ("core.text", "rsplitn") => {
-//RS             let s = as_string(one(0)?, span)?.to_string();
-//RS             let pat = as_string(one(1)?, span)?.to_string();
-//RS             let n = as_int(one(2)?, span)?;
-//RS             Ok(CtValue::List(
-//RS                 crate::Comptime::TextLite::rsplitn(&s, &pat, n)
-//RS                     .into_iter()
-//RS                     .map(CtValue::Str)
-//RS                     .collect(),
-//RS             ))
-//RS         }
-//RS         ("core.text", "trim") => Ok(CtValue::Str(crate::Comptime::TextLite::trim(as_string(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         ("core.text", "trim_start") => Ok(CtValue::Str(crate::Comptime::TextLite::trim_start(
-//RS             as_string(one(0)?, span)?,
-//RS         ))),
-//RS         ("core.text", "trim_end") => Ok(CtValue::Str(crate::Comptime::TextLite::trim_end(as_string(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         ("core.text", "pad_start") => {
-//RS             let s = as_string(one(0)?, span)?.to_string();
-//RS             let w = as_int(one(1)?, span)?;
-//RS             let fill = as_string(one(2)?, span)?.to_string();
-//RS             Ok(CtValue::Str(crate::Comptime::TextLite::pad_start(
-//RS                 &s, w, &fill,
-//RS             )))
-//RS         }
-//RS         ("core.text", "pad_end") => {
-//RS             let s = as_string(one(0)?, span)?.to_string();
-//RS             let w = as_int(one(1)?, span)?;
-//RS             let fill = as_string(one(2)?, span)?.to_string();
-//RS             Ok(CtValue::Str(crate::Comptime::TextLite::pad_end(&s, w, &fill)))
-//RS         }
-//RS         ("core.text", "center") => {
-//RS             let s = as_string(one(0)?, span)?.to_string();
-//RS             let w = as_int(one(1)?, span)?;
-//RS             let fill = as_string(one(2)?, span)?.to_string();
-//RS             Ok(CtValue::Str(crate::Comptime::TextLite::center(&s, w, &fill)))
-//RS         }
-//RS         ("core.text", "starts_any") => {
-//RS             let s = as_string(one(0)?, span)?.to_string();
-//RS             let prefixes = match one(1)? {
-//RS                 CtValue::List(xs) => xs
-//RS                     .iter()
-//RS                     .map(|v| as_string(v, span).map(|s| s.to_string()))
-//RS                     .collect::<Result<Vec<_>, _>>()?,
-//RS                 _ => return Err(unsupported("core.text.starts_any: non-list argument", span)),
-//RS             };
-//RS             Ok(CtValue::Bool(crate::Comptime::TextLite::starts_any(
-//RS                 &s, &prefixes,
-//RS             )))
-//RS         }
-//RS         ("core.text", "ends_any") => {
-//RS             let s = as_string(one(0)?, span)?.to_string();
-//RS             let suffixes = match one(1)? {
-//RS                 CtValue::List(xs) => xs
-//RS                     .iter()
-//RS                     .map(|v| as_string(v, span).map(|s| s.to_string()))
-//RS                     .collect::<Result<Vec<_>, _>>()?,
-//RS                 _ => return Err(unsupported("core.text.ends_any: non-list argument", span)),
-//RS             };
-//RS             Ok(CtValue::Bool(crate::Comptime::TextLite::ends_any(
-//RS                 &s, &suffixes,
-//RS             )))
-//RS         }
-//RS         ("core.text", "char_indices") => Ok(CtValue::List(
-//RS             crate::Comptime::TextLite::char_indices(as_string(one(0)?, span)?)
-//RS                 .into_iter()
-//RS                 .map(CtValue::Str)
-//RS                 .collect(),
-//RS         )),
-//RS         // D-ARGS1 / runtime-tier: empty ArgsSpec builder (same as AOT jet_args_spec).
-//RS         ("core.args", "spec") => Ok(crate::Comptime::core_args_spec()),
-//RS         // --- core.event (shared TIR evaluator / deopt; mirrors AOT JetEvent*) ---
-//RS         // parity: guard tests/event_hooks.rs::decision_hook_outcomes_transform_and_short_circuit
-//RS         ("core.event", "scope") => Ok(crate::Comptime::core_event_scope()),
-//RS         ("core.event", "policy_sync") => Ok(crate::Comptime::core_event_policy_sync()),
-//RS         ("core.event", "new") => Ok(crate::Comptime::core_event_new()),
-//RS         ("core.event", "with_policy") => {
-//RS             Ok(crate::Comptime::core_event_with_policy(one(0)?.clone()))
-//RS         }
-//RS         ("core.event", "hook") => Ok(crate::Comptime::core_event_hook(one(0)?.clone())),
-//RS         ("core.event", "decision_hook") => {
-//RS             Ok(crate::Comptime::core_event_decision_hook(one(0)?.clone()))
-//RS         }
-//RS         ("core.event", "async_result") => {
-//RS             crate::Comptime::core_event_async_result(one(0)?, one(1)?, span)
-//RS         }
-//RS         // --- core.encoding.json ---
-//RS         ("core.encoding.json", "parse" | "loads") => {
-//RS             let text = as_string(one(0)?, span)?;
-//RS             match crate::Comptime::JSONInterp::parse_json(text) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(
-//RS                     crate::Comptime::JSONInterp::encoding_error_value(e),
-//RS                 ))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.json", "decode") => {
-//RS             // D-JSON3's lenient coercions emit structured audit records. The
-//RS             // comptime interpreter has no runtime log-effect seam, so claiming
-//RS             // this call would silently drop observable behavior. Stop at the
-//RS             // honest boundary; default dev transparently executes the AOT TIR.
-//RS             Err(unsupported(
-//RS                 "JSON lenient decode coercion audit effects",
-//RS                 span,
-//RS             ))
-//RS         }
-//RS         ("core.encoding.json", "to_string" | "dumps") => {
-//RS             let v = one(0)?;
-//RS             Ok(CtValue::Str(crate::Comptime::JSONInterp::render_json_pretty(
-//RS                 v, false, 0,
-//RS             )))
-//RS         }
-//RS         ("core.encoding.json", "to_string_pretty") => {
-//RS             let v = one(0)?;
-//RS             Ok(CtValue::Str(crate::Comptime::JSONInterp::render_json_pretty(
-//RS                 v, true, 0,
-//RS             )))
-//RS         }
-//RS         // --- card #392 pass 4 / #1394: core.encoding.json.canonical/events ---
-//RS         ("core.encoding.json", "canonical") => {
-//RS             let v = one(0)?;
-//RS             if jet_foundation::PackageEdition::package_edition_at_least("2027") {
-//RS                 let limits = if args.len() >= 2 {
-//RS                     match crate::Comptime::EncodingLite::encoding_limits_from_value(one(1)?) {
-//RS                         Ok(limits) => limits,
-//RS                         Err(message) => {
-//RS                             return Err(unsupported(&message, span));
-//RS                         }
-//RS                     }
-//RS                 } else {
-//RS                     crate::Comptime::EncodingLite::EncodingLimitsLite::safe()
-//RS                 };
-//RS                 match crate::Comptime::EncodingLite::json_canonical_jcs(v, &limits) {
-//RS                     Ok(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
-//RS                     Err(error) => Ok(CtValue::failed(Box::new(error))),
-//RS                 }
-//RS             } else {
-//RS                 Ok(CtValue::Str(crate::Comptime::EncodingLite::json_canonical(v)))
-//RS             }
-//RS         }
-//RS         ("core.encoding.json", "events") => Ok(CtValue::Str(
-//RS             crate::Comptime::EncodingLite::json_events(one(0)?),
-//RS         )),
-//RS         // --- core.encoding.jsonl (ported verbatim, `EncodingLite.rs`) ---
-//RS         ("core.encoding.jsonl", "parse") => {
-//RS             let text = as_string(one(0)?, span)?;
-//RS             match crate::Comptime::EncodingLite::jsonl_parse(text) {
-//RS                 Ok(rows) => Ok(CtValue::Present(Box::new(CtValue::List(rows)))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(e))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.jsonl", "to_string") => {
-//RS             let rows = match one(0)? {
-//RS                 CtValue::List(xs) => xs.clone(),
-//RS                 _ => {
-//RS                     return Err(unsupported(
-//RS                         "core.encoding.jsonl.to_string: expected a list",
-//RS                         span,
-//RS                     ))
-//RS                 }
-//RS             };
-//RS             Ok(CtValue::Str(crate::Comptime::EncodingLite::jsonl_render(
-//RS                 &rows,
-//RS             )))
-//RS         }
-//RS         // --- core.encoding.csv (ported verbatim, `EncodingLite.rs`) ---
-//RS         ("core.encoding.csv", "parse") => {
-//RS             let text = as_string(one(0)?, span)?;
-//RS             let (delimiter, header, skip_blank) = csv_options()?;
-//RS             match crate::Comptime::EncodingLite::csv_parse(text, &delimiter, header, skip_blank) {
-//RS                 Ok(rows) => Ok(CtValue::Present(Box::new(CtValue::List(
-//RS                     rows.into_iter()
-//RS                         .map(|row| {
-//RS                             CtValue::List(row.fields.into_iter().map(CtValue::Str).collect())
-//RS                         })
-//RS                         .collect(),
-//RS                 )))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e)))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.csv", "rows") => {
-//RS             let text = as_string(one(0)?, span)?;
-//RS             let (delimiter, header, skip_blank) = csv_options()?;
-//RS             match crate::Comptime::EncodingLite::csv_parse(text, &delimiter, header, skip_blank) {
-//RS                 Ok(rows) => Ok(CtValue::Present(Box::new(CtValue::List(
-//RS                     rows.into_iter().map(csv_row_value).collect(),
-//RS                 )))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e)))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.csv", "to_string") => {
-//RS             // Two shapes, same as AOT and the resident JIT: dynamic `[[String]]`
-//RS             // rows, or a typed `[T]` list of `#Codable` values (#1269).
-//RS             let arg = one(0)?;
-//RS             let rows = match csv_rows_from_records(arg) {
-//RS                 Some(rows) => rows,
-//RS                 None => as_string_rows(arg, span)?,
-//RS             };
-//RS             Ok(CtValue::Str(crate::Comptime::EncodingLite::csv_render(&rows)))
-//RS         }
-//RS         // --- core.encoding.toml (ported verbatim, `EncodingLite.rs`) ---
-//RS         ("core.encoding.toml", "parse") => {
-//RS             let text = as_string(one(0)?, span)?;
-//RS             match crate::Comptime::EncodingLite::toml_parse(text) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(e))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.toml", "to_string") => Ok(CtValue::Str(
-//RS             crate::Comptime::EncodingLite::toml_render(one(0)?),
-//RS         )),
-//RS         // --- core.encoding.yaml (ported verbatim, `EncodingLite.rs`) ---
-//RS         ("core.encoding.yaml", "parse") => {
-//RS             let text = as_string(one(0)?, span)?;
-//RS             match crate::Comptime::EncodingLite::yaml_parse(text) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(e))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.yaml", "to_string") => Ok(CtValue::Str(
-//RS             crate::Comptime::EncodingLite::yaml_render(one(0)?),
-//RS         )),
-//RS         // --- core.encoding.xml (CtValue adapters over XmlKernel) ---
-//RS         ("core.encoding.xml", "parse") => {
-//RS             let text = as_string(one(0)?, span)?;
-//RS             match crate::Comptime::EncodingLite::xml_parse(text) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(
-//RS                     crate::Comptime::EncodingLite::xml_error_value(e),
-//RS                 ))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.xml", "parse_with") => {
-//RS             let text = as_string(one(0)?, span)?;
-//RS             match crate::Comptime::EncodingLite::xml_parse_with(text, one(1)?) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(
-//RS                     crate::Comptime::EncodingLite::xml_error_value(e),
-//RS                 ))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.xml", "parse_bytes") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             match crate::Comptime::EncodingLite::xml_parse_bytes(&bytes, args.get(1)) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(
-//RS                     crate::Comptime::EncodingLite::xml_source_error_value(e),
-//RS                 ))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.xml", "to_string") => Ok(CtValue::Str(
-//RS             crate::Comptime::EncodingLite::xml_render(one(0)?),
-//RS         )),
-//RS         ("core.encoding.xml", "to_bytes") => {
-//RS             match crate::Comptime::EncodingLite::xml_to_bytes(one(0)?, args.get(1)) {
-//RS                 Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
-//RS                 Err(error) => Ok(CtValue::failed(Box::new(error))),
-//RS             }
-//RS         }
-//RS         // D-ENCXML-PROJECTION1=A: focused helpers (shared foundation projection).
-//RS         ("core.encoding.xml", "root") => match crate::Comptime::EncodingLite::xml_root(one(0)?) {
-//RS             Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS             Err(e) => Ok(CtValue::failed(Box::new(e))),
-//RS         },
-//RS         ("core.encoding.xml", "expanded_name") => {
-//RS             match crate::Comptime::EncodingLite::xml_expanded_name(one(0)?) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(e))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.xml", "attribute") => {
-//RS             let name = as_string(one(1)?, span)?;
-//RS             match crate::Comptime::EncodingLite::xml_attribute(one(0)?, name) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(e))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.xml", "content") => {
-//RS             match crate::Comptime::EncodingLite::xml_content(one(0)?) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(e))),
-//RS             }
-//RS         }
-//RS         // --- core.encoding.cbor (shared Foundation kernel adapter) ---
-//RS         // D-ENC-CBOR-SURFACE1: current whole-value names return the same
-//RS         // Result shape as AOT. Edition compatibility names remain below.
-//RS         ("core.encoding.cbor", "to_bytes") => {
-//RS             match crate::Comptime::EncodingLite::cbor_encode(one(0)?) {
-//RS                 Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
-//RS                 Err(error) => Ok(CtValue::failed(Box::new(
-//RS                     crate::Comptime::EncodingLite::cbor_encoding_error_value(error),
-//RS                 ))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.cbor", "to_bytes_canonical") => {
-//RS             match crate::Comptime::EncodingLite::cbor_encode_canonical(one(0)?) {
-//RS                 Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
-//RS                 Err(error) => Ok(CtValue::failed(Box::new(
-//RS                     crate::Comptime::EncodingLite::cbor_encoding_error_value(error),
-//RS                 ))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.cbor", "parse") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             let options = match crate::Comptime::EncodingLite::cbor_options(args.get(1)) {
-//RS                 Ok(options) => options,
-//RS                 Err(error) => {
-//RS                     return Ok(CtValue::failed(Box::new(
-//RS                         crate::Comptime::EncodingLite::cbor_encoding_error_value(error),
-//RS                     )))
-//RS                 }
-//RS             };
-//RS             match crate::Comptime::EncodingLite::cbor_decode(&bytes, &options, false) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(error) => Ok(CtValue::failed(Box::new(
-//RS                     crate::Comptime::EncodingLite::cbor_encoding_error_value(error),
-//RS                 ))),
-//RS             }
-//RS         }
-//RS         ("core.encoding.cbor", "encode") => crate::Comptime::EncodingLite::cbor_encode(one(0)?)
-//RS             .map(CtValue::Bytes)
-//RS             .map_err(|error| unsupported(&error.reason, span)),
-//RS         ("core.encoding.cbor", "decode") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             let options = crate::Comptime::EncodingLite::cbor_safe_options();
-//RS             match crate::Comptime::EncodingLite::cbor_decode(&bytes, &options, false) {
-//RS                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-//RS                 Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e.reason)))),
-//RS             }
-//RS         }
-//RS         // --- core.time pure constructors ---
-//RS         // Runtime-only clock reads stay on the same Prelude time kernel as
-//RS         // AOT/JIT. The fold gate rejects them before this adapter is reached.
-//RS         ("core.time", "now") => Ok(CtValue::Int(time_deadline_kernel::jet_std_time_now())),
-//RS         ("core.time", "now_utc") => Ok(runtime_datetime_value(time_kernel::JetDateTime::now())),
-//RS         ("core.time", "today") => Ok(runtime_date_value(time_kernel::JetDate::today_utc())),
-//RS         ("core.time", "instant") => Ok(CtValue::Struct {
-//RS             type_name: "Instant".to_string(),
-//RS             fields: vec![(
-//RS                 "start_ns".to_string(),
-//RS                 CtValue::Int(time_kernel::jet_time_monotonic_now_ns()),
-//RS             )],
-//RS         }),
-//RS         ("core.time", "sleep") => {
-//RS             let nanos = match one(0)? {
-//RS                 CtValue::Struct { type_name, fields }
-//RS                     if type_name == crate::Syntax::DURATION_TYPE =>
-//RS                 {
-//RS                     fields
-//RS                         .iter()
-//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
-//RS                             ("ns", CtValue::Int(value)) => Some(*value),
-//RS                             _ => None,
-//RS                         })
-//RS                         .ok_or_else(|| unsupported("malformed Duration value", span))?
-//RS                 }
-//RS                 _ => return Err(unsupported("time.sleep expects a Duration", span)),
-//RS             };
-//RS             time_deadline_kernel::jet_std_time_sleep_duration_ns(nanos);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.time", "sleep_until") => {
-//RS             let deadline = match one(0)? {
-//RS                 CtValue::Struct { type_name, fields } if type_name == "Instant" => fields
-//RS                     .iter()
-//RS                     .find_map(|(name, value)| match (name.as_str(), value) {
-//RS                         ("start_ns", CtValue::Int(value)) => Some(*value),
-//RS                         _ => None,
-//RS                     })
-//RS                     .ok_or_else(|| unsupported("malformed Instant value", span))?,
-//RS                 _ => return Err(unsupported("time.sleep_until expects an Instant", span)),
-//RS             };
-//RS             time_deadline_kernel::jet_time_sleep_until(deadline);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.handle", "duration.in") => apply_duration_in(&args, span),
-//RS         ("core.handle", "realtime.next_deadline") => {
-//RS             Ok(realtime_stream_field(one(0)?, "next_deadline", span)?.clone())
-//RS         }
-//RS         ("core.handle", "realtime.receipt") => {
-//RS             let stream = one(0)?;
-//RS             let field = |name| realtime_stream_field(stream, name, span).map(Clone::clone);
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: "RealtimeReceipt".to_string(),
-//RS                 fields: vec![
-//RS                     ("requested_rate_hz".to_string(), field("requested_rate_hz")?),
-//RS                     ("requested_frames".to_string(), field("requested_frames")?),
-//RS                     ("completed_callbacks".to_string(), field("completed_callbacks")?),
-//RS                     ("completed_frames".to_string(), field("completed_frames")?),
-//RS                     ("missed".to_string(), field("missed")?),
-//RS                     ("max_lateness_ns".to_string(), field("max_lateness_ns")?),
-//RS                     ("start_identity".to_string(), field("start_identity")?),
-//RS                     ("end_identity".to_string(), field("end_identity")?),
-//RS                 ],
-//RS             })
-//RS         }
-//RS         ("core.handle", "realtime.cancel") => Ok(CtValue::Unit),
-//RS         ("core.handle", "realtime.is_cancelled") => {
-//RS             Ok(realtime_stream_field(one(0)?, "cancelled", span)?.clone())
-//RS         }
-//RS         ("core.tasks", "timeout") => {
-//RS             let nanos = match one(0)? {
-//RS                 CtValue::Struct { type_name, fields }
-//RS                     if type_name == crate::Syntax::DURATION_TYPE =>
-//RS                 {
-//RS                     fields
-//RS                         .iter()
-//RS                         .find_map(|(name, value)| match (name.as_str(), value) {
-//RS                             ("ns", CtValue::Int(value)) => Some(*value),
-//RS                             _ => None,
-//RS                         })
-//RS                         .ok_or_else(|| unsupported("malformed Duration value", span))?
-//RS                 }
-//RS                 _ => return Err(unsupported("task.timeout expects a Duration", span)),
-//RS             };
-//RS             time_deadline_kernel::jet_task_timeout_duration_ns(nanos);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.time", "start") => Ok(CtValue::Struct {
-//RS             type_name: "Stopwatch".to_string(),
-//RS             fields: vec![(
-//RS                 "start_ms".to_string(),
-//RS                 CtValue::Int(time_kernel::jet_time_monotonic_now_ns() / 1_000_000),
-//RS             )],
-//RS         }),
-//RS         // D-DET1: testing.fake_clock is the test-facing spelling of the
-//RS         // caller-seeded deterministic Clock capability built by Clock.new.
-//RS         ("core.testing", "fake_clock") => {
-//RS             let seed = match one(0)? {
-//RS                 CtValue::Int(v) => *v,
-//RS                 _ => {
-//RS                     return Err(unsupported("testing.fake_clock expects an Int seed", span));
-//RS                 }
-//RS             };
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: crate::Syntax::CLOCK_TYPE.to_string(),
-//RS                 fields: vec![("now".to_string(), CtValue::Int(seed))],
-//RS             })
-//RS         }
-//RS         // --- core.regex / core.regex (D-REGEXENGINE1) ---
-//RS         ("core.regex", "flags") => regex_flags(args, span),
-//RS         ("core.regex", "compile" | "compile_with") => regex_compile(args, span),
-//RS         ("core.regex", "literal") => {
-//RS             let pattern = as_string(one(0)?, span)?;
-//RS             jet_foundation::RegexSyntax::validate(pattern).map_err(|error| {
-//RS                 Diagnostic::error(
-//RS                     "E0152",
-//RS                     format!("this regex pattern is invalid at position {}", error.offset),
-//RS                     error.reason,
-//RS                     "fix the pattern at the reported position".to_string(),
-//RS                     Some(span),
-//RS                 )
-//RS             })?;
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: "__JetRegex".to_string(),
-//RS                 fields: vec![("pattern".to_string(), CtValue::Str(pattern.to_string()))],
-//RS             })
-//RS         }
-//RS         ("core.regex", "escape") => regex_escape(args, span),
-//RS         ("core.regex", "is_match") => regex_is_match(args, span),
-//RS         ("core.regex", "full_match") => regex_full_match(args, span),
-//RS         ("core.regex", "find") => regex_find(args, span),
-//RS         ("core.regex", "find_all") => regex_find_all(args, span),
-//RS         ("core.regex", "matches") => regex_matches(args, span),
-//RS         ("core.regex", "split") => regex_split(args, span),
-//RS         ("core.regex", "split_limit") => regex_split_limit(args, span),
-//RS         ("core.regex", "replace") => regex_replace(args, span),
-//RS         ("core.regex", "replace_first") => regex_replace_first(args, span),
-//RS         ("core.regex", "match") => regex_match(args, span),
-//RS         // Ambient random public draws are Jet-owned. These provider leaves
-//RS         // only seed the shared stream and expose bounded source bits.
-//RS         ("core.math.random", "seed") => {
-//RS             let seed = as_int(one(0)?, span)?;
-//RS             ambient_random_kernel::seed(seed);
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         ("core.math.random", "getrandbits") => {
-//RS             let bits = as_int(one(0)?, span)?;
-//RS             Ok(CtValue::Int(ambient_random_kernel::getrandbits(bits)))
-//RS         }
-//RS         // D-DET1: testing.fake_rng is source-owned; only random.rng remains
-//RS         // as the explicit provider capability constructor.
-//RS         ("core.math.random", "rng") => {
-//RS             let seed = as_int(one(0)?, span)? as u64;
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: crate::Syntax::RNG_TYPE.to_string(),
-//RS                 fields: vec![("state".to_string(), CtValue::Int(seed as i64))],
-//RS             })
-//RS         }
-//RS         ("core.testing", "fake_data") => {
-//RS             let seed = match one(0)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("testing.fake_data expects an Int seed", span)),
-//RS             };
-//RS             let fake = fake_data_kernel::jet_testing_fake_new(seed);
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: crate::Syntax::FAKE_TYPE.to_string(),
-//RS                 fields: vec![
-//RS                     ("state".to_string(), CtValue::Int(fake.state as i64)),
-//RS                     ("locale".to_string(), CtValue::Int(fake.locale as i64)),
-//RS                 ],
-//RS             })
-//RS         }
-//RS         ("core.testing", "compare") => {
-//RS             let cases = match one(0)? {
-//RS                 CtValue::List(values) => values.clone(),
-//RS                 _ => return Err(unsupported("testing.compare expects a List of cases", span)),
-//RS             };
-//RS             let reference = one(1)?.clone();
-//RS             let candidate = one(2)?.clone();
-//RS             let relation = as_string(one(3)?, span)?.to_string();
-//RS             let mut reference_values = Vec::with_capacity(cases.len());
-//RS             let mut candidate_values = Vec::with_capacity(cases.len());
-//RS             let mut case_ids = Vec::with_capacity(cases.len());
-//RS             let mut first_difference = -1_i64;
-//RS             let mut unavailable = None;
-//RS             for (index, input) in cases.iter().enumerate() {
-//RS                 let reference_value =
-//RS                     match crate::Comptime::try_ambient_standalone_closure(
-//RS                         &reference,
-//RS                         vec![input.clone()],
-//RS                         span,
-//RS                     ) {
-//RS                         Some(Ok(value)) => value,
-//RS                         Some(Err(error)) => {
-//RS                             unavailable = Some(error.what.clone());
-//RS                             break;
-//RS                         }
-//RS                         None => {
-//RS                             unavailable = Some(
-//RS                                 "reference callback has no interpreter callable owner".to_string(),
-//RS                             );
-//RS                             break;
-//RS                         }
-//RS                     };
-//RS                 let candidate_value =
-//RS                     match crate::Comptime::try_ambient_standalone_closure(
-//RS                         &candidate,
-//RS                         vec![input.clone()],
-//RS                         span,
-//RS                     ) {
-//RS                         Some(Ok(value)) => value,
-//RS                         Some(Err(error)) => {
-//RS                             unavailable = Some(error.what.clone());
-//RS                             break;
-//RS                         }
-//RS                         None => {
-//RS                             unavailable = Some(
-//RS                                 "candidate callback has no interpreter callable owner".to_string(),
-//RS                             );
-//RS                             break;
-//RS                         }
-//RS                     };
-//RS                 if !matches!(
-//RS                     relation.as_str(),
-//RS                     "typed_equality" | "typed_failure" | "ordered_effects"
-//RS                 ) {
-//RS                     unavailable = Some(format!("unknown observation relation `{relation}`"));
-//RS                     break;
-//RS                 }
-//RS                 if reference_value != candidate_value && first_difference < 0 {
-//RS                     first_difference = index as i64;
-//RS                 }
-//RS                 case_ids.push(CtValue::Str(format!("case-{index}")));
-//RS                 reference_values.push(reference_value);
-//RS                 candidate_values.push(candidate_value);
-//RS             }
-//RS             let (status, reason) = if let Some(error) = unavailable {
-//RS                 ("unavailable".to_string(), error)
-//RS             } else if cases.is_empty() {
-//RS                 ("empty".to_string(), "comparison corpus is empty".to_string())
-//RS             } else if first_difference >= 0 {
-//RS                 (
-//RS                     "mismatch".to_string(),
-//RS                     format!("first differing observation is case-{first_difference}"),
-//RS                 )
-//RS             } else {
-//RS                 (
-//RS                     "matched".to_string(),
-//RS                     format!("{} observed case(s) matched", cases.len()),
-//RS                 )
-//RS             };
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: "TestComparison".to_string(),
-//RS                 fields: vec![
-//RS                     ("status".to_string(), CtValue::Str(status)),
-//RS                     ("relation".to_string(), CtValue::Str(relation)),
-//RS                     ("source".to_string(), CtValue::Str("core.testing".to_string())),
-//RS                     ("tool".to_string(), CtValue::Str("interpreter".to_string())),
-//RS                     ("target".to_string(), CtValue::Str("comptime".to_string())),
-//RS                     ("case_ids".to_string(), CtValue::List(case_ids)),
-//RS                     ("inputs".to_string(), CtValue::List(cases)),
-//RS                     ("reference".to_string(), CtValue::List(reference_values)),
-//RS                     ("candidate".to_string(), CtValue::List(candidate_values)),
-//RS                     ("first_difference".to_string(), CtValue::Int(first_difference)),
-//RS                     ("reason".to_string(), CtValue::Str(reason)),
-//RS                     ("universal_proof".to_string(), CtValue::Bool(false)),
-//RS                     ("seed".to_string(), CtValue::absent(Type::Int)),
-//RS                 ],
-//RS             })
-//RS         }
-//RS         ("core.testing", "assert_equal") => {
-//RS             let CtValue::Struct { fields, .. } = one(0)? else {
-//RS                 return Err(unsupported("testing.assert_equal expects TestComparison", span));
-//RS             };
-//RS             let status = fields.iter().find_map(|(name, value)| {
-//RS                 (name == "status").then(|| matches!(value, CtValue::Str(status) if status == "matched"))
-//RS             });
-//RS             let universal = fields.iter().find_map(|(name, value)| {
-//RS                 (name == "universal_proof").then(|| matches!(value, CtValue::Bool(true)))
-//RS             });
-//RS             let nonempty = fields.iter().find_map(|(name, value)| {
-//RS                 (name == "inputs").then(|| matches!(value, CtValue::List(values) if !values.is_empty()))
-//RS             });
-//RS             Ok(CtValue::Bool(status == Some(true) && universal != Some(true) && nonempty == Some(true)))
-//RS         }
-//RS         ("core.testing", "status") => {
-//RS             let CtValue::Struct { fields, .. } = one(0)? else {
-//RS                 return Err(unsupported("testing.status expects TestComparison", span));
-//RS             };
-//RS             fields
-//RS                 .iter()
-//RS                 .find_map(|(name, value)| (name == "status").then(|| value.clone()))
-//RS                 .ok_or_else(|| unsupported("malformed TestComparison status", span))
-//RS         }
-//RS         ("core.math.random", "split") => {
-//RS             let seed = match one(0)? {
-//RS                 CtValue::Int(n) => *n as u64,
-//RS                 _ => return Err(unsupported("random.split expects an Int seed", span)),
-//RS             };
-//RS             let mixed = ambient_random_kernel::split(seed as i64);
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: crate::Syntax::RNG_TYPE.to_string(),
-//RS                 fields: vec![("state".to_string(), CtValue::Int(mixed as i64))],
-//RS             })
-//RS         }
-//RS         // D-CRYPTO-RNG1=A: a missing or rejected provider is `None`; the Jet
-//RS         // wrapper in `Core/crypto/random.jet` reports it as `Unavailable`.
-//RS         ("core.crypto.random", "bytes") => {
-//RS             let count = match one(0)? {
-//RS                 CtValue::Int(value) => *value,
-//RS                 _ => return Err(unsupported("crypto.random.bytes expects an Int", span)),
-//RS             };
-//RS             Ok(match crypto_entropy_kernel::jet_crypto_entropy_bytes(count) {
-//RS                 Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-//RS                 Err(_) => CtValue::absent(Type::List(Box::new(Type::IntN {
-//RS                     signed: false,
-//RS                     bits: 8,
-//RS                 }))),
-//RS             })
-//RS         }
-//RS         // --- core.text.fmt: CtValue adapters over the shared Prelude kernel ---
-//RS         // The Display route `"{value}"` / `print(value)` lower to on every
-//RS         // tier: the same value-to-text rule `core.term.print` applies.
-//RS         ("core.text.fmt", "display") => {
-//RS             let value = one(0)?;
-//RS             Ok(CtValue::Str(
-//RS                 display_core_pure_value(value).unwrap_or_else(|| value.jet_show()),
-//RS             ))
-//RS         }
-//RS         ("core.text.fmt", "debug") => {
-//RS             let value = one(0)?;
-//RS             let text = core_pure_parity::debug(value).ok_or_else(|| {
-//RS                 unsupported("value has no checked Debug representation", span)
-//RS             })?;
-//RS             Ok(CtValue::Str(text))
-//RS         }
-//RS         ("core.text.fmt", "pretty") => {
-//RS             let value = as_string(one(0)?, span)?;
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_pretty(value)))
-//RS         }
-//RS         ("core.text.fmt", "number") => {
-//RS             let n = match one(0)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.number expects an Int", span)),
-//RS             };
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_number(n)))
-//RS         }
-//RS         ("core.text.fmt", "quantity") => {
-//RS             let value = as_float(one(0)?, span)?;
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_quantity(value)))
-//RS         }
-//RS         ("core.text.fmt", "decimal" | "grouped") => {
-//RS             let value = one(0)?;
-//RS             let precision = match one(1)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.decimal precision must be Int", span)),
-//RS             };
-//RS             let formatted = match value {
-//RS                 CtValue::Float(value) if method == "grouped" => {
-//RS                     fmt_kernel::jet_fmt_grouped(value.as_f64(), precision)
-//RS                 }
-//RS                 CtValue::Float(value) => fmt_kernel::jet_fmt_decimal(value.as_f64(), precision),
-//RS                 CtValue::Int(value) => {
-//RS                     let value = value.to_string();
-//RS                     if method == "grouped" {
-//RS                         fmt_kernel::jet_fmt_grouped_int(&value, precision)
-//RS                     } else {
-//RS                         fmt_kernel::jet_fmt_decimal_int(&value, precision)
-//RS                     }
-//RS                 }
-//RS                 CtValue::BigInt(value) => {
-//RS                     let value = value.to_string_rep();
-//RS                     if method == "grouped" {
-//RS                         fmt_kernel::jet_fmt_grouped_int(&value, precision)
-//RS                     } else {
-//RS                         fmt_kernel::jet_fmt_decimal_int(&value, precision)
-//RS                     }
-//RS                 }
-//RS                 _ => return Err(unsupported("fmt.decimal expects a Float or Int", span)),
-//RS             };
-//RS             Ok(CtValue::Str(formatted))
-//RS         }
-//RS         ("core.text.fmt", "hex") => {
-//RS             let value = match one(0)? {
-//RS                 CtValue::Int(value) => value.to_string(),
-//RS                 CtValue::BigInt(value) => value.to_string_rep(),
-//RS                 _ => return Err(unsupported("fmt.hex expects an Int", span)),
-//RS             };
-//RS             let width = match one(1)? {
-//RS                 CtValue::Int(width) => *width,
-//RS                 _ => return Err(unsupported("fmt.hex width must be Int", span)),
-//RS             };
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_hex_decimal(&value, width)))
-//RS         }
-//RS         ("core.text.fmt", "sci") => {
-//RS             let value = as_float(one(0)?, span)?;
-//RS             let precision = match one(1)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.sci precision must be Int", span)),
-//RS             };
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_sci(value, precision)))
-//RS         }
-//RS         ("core.text.fmt", "percent") => {
-//RS             let value = as_float(one(0)?, span)?;
-//RS             let precision = match one(1)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.percent precision must be Int", span)),
-//RS             };
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_percent(value, precision)))
-//RS         }
-//RS         ("core.text.fmt", "bin" | "oct") => {
-//RS             let value = match one(0)? {
-//RS                 CtValue::Int(value) => value.to_string(),
-//RS                 CtValue::BigInt(value) => value.to_string_rep(),
-//RS                 _ => return Err(unsupported("fmt radix selectors expect an Int", span)),
-//RS             };
-//RS             let formatted = if method == "bin" {
-//RS                 fmt_kernel::jet_fmt_bin_decimal(&value)
-//RS             } else {
-//RS                 fmt_kernel::jet_fmt_oct_decimal(&value)
-//RS             };
-//RS             Ok(CtValue::Str(formatted))
-//RS         }
-//RS         ("core.text.fmt", "bytes") => {
-//RS             let n = match one(0)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.bytes expects an Int", span)),
-//RS             };
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_bytes(n)))
-//RS         }
-//RS         ("core.text.fmt", "duration") => {
-//RS             let ms = match one(0)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.duration expects an Int (ms)", span)),
-//RS             };
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_duration(ms)))
-//RS         }
-//RS         ("core.text.fmt", "ordinal") => {
-//RS             let n = match one(0)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.ordinal expects an Int", span)),
-//RS             };
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_ordinal(n)))
-//RS         }
-//RS         ("core.text.fmt", "plural") => {
-//RS             let count = match one(0)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.plural count must be Int", span)),
-//RS             };
-//RS             let singular = as_string(one(1)?, span)?.to_string();
-//RS             let plural = as_string(one(2)?, span)?.to_string();
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_plural(
-//RS                 count, &singular, &plural,
-//RS             )))
-//RS         }
-//RS         ("core.text.fmt", "pad") => {
-//RS             let text = as_string(one(0)?, span)?.to_string();
-//RS             let width = match one(1)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.pad width must be Int", span)),
-//RS             };
-//RS             let fill = as_string(one(2)?, span)?.to_string();
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_pad(&text, width, &fill)))
-//RS         }
-//RS         ("core.text.fmt", "pad_left") => {
-//RS             let text = as_string(one(0)?, span)?.to_string();
-//RS             let width = match one(1)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.pad_left width must be Int", span)),
-//RS             };
-//RS             let fill = as_string(one(2)?, span)?.to_string();
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_pad_left(
-//RS                 &text, width, &fill,
-//RS             )))
-//RS         }
-//RS         ("core.text.fmt", "pad_right") => {
-//RS             let text = as_string(one(0)?, span)?.to_string();
-//RS             let width = match one(1)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.pad_right width must be Int", span)),
-//RS             };
-//RS             let fill = as_string(one(2)?, span)?.to_string();
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_pad_right(
-//RS                 &text, width, &fill,
-//RS             )))
-//RS         }
-//RS         ("core.text.fmt", "pad_center") => {
-//RS             let text = as_string(one(0)?, span)?.to_string();
-//RS             let width = match one(1)? {
-//RS                 CtValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("fmt.pad_center width must be Int", span)),
-//RS             };
-//RS             let fill = as_string(one(2)?, span)?.to_string();
-//RS             Ok(CtValue::Str(fmt_kernel::jet_fmt_pad_center(
-//RS                 &text, width, &fill,
-//RS             )))
-//RS         }
-//RS         // --- core.encoding.hex / base64 / base32 rows (pure). These are the
-//RS         // host kernels the Core wrappers forward to; the evaluator binds the
-//RS         // same Rust kernels AOT and the JIT call (EncodingBase.rs,
-//RS         // BaseEncodingDispatch.rs). ---
-//RS         ("core.encoding.hex", "encode") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             Ok(CtValue::Str(hex_encode(bytes)))
-//RS         }
-//RS         ("core.encoding.hex", "encode_upper") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_encode_upper(&bytes)))
-//RS         }
-//RS         ("core.encoding.hex", "decode") => {
-//RS             let s = as_string(one(0)?, span)?;
-//RS             Ok(match hex_decode(s) {
-//RS                 Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-//RS                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-//RS             })
-//RS         }
-//RS         ("core.encoding.hex", "is_hex") => {
-//RS             let s = as_string(one(0)?, span)?.to_string();
-//RS             Ok(CtValue::Bool(encoding_base_kernel::jet_std_hex_is_hex(&s)))
-//RS         }
-//RS         ("core.encoding.hex", "crc_hqx") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             let value = as_int(one(1)?, span)?;
-//RS             Ok(CtValue::Int(encoding_base_kernel::jet_std_crc_hqx(&bytes, value)))
-//RS         }
-//RS         ("core.encoding.hex", "crc32") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             Ok(CtValue::Int(encoding_base_kernel::jet_std_crc32(&bytes)))
-//RS         }
-//RS         ("core.encoding.hex", "encode_sep") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             let separator = as_string(one(1)?, span)?.to_string();
-//RS             Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_encode_sep(
-//RS                 &bytes, &separator,
-//RS             )))
-//RS         }
-//RS         ("core.encoding.hex", "dump") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_dump(&bytes)))
-//RS         }
-//RS         ("core.encoding.hex", "b2a_base64") | ("core.encoding.base64", "encode") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             Ok(CtValue::Str(base64_encode(bytes)))
-//RS         }
-//RS         ("core.encoding.base64", "encodebytes") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_encodebytes(&bytes)))
-//RS         }
-//RS         ("core.encoding.base64", "decode") | ("core.encoding.base64", "decodebytes")
-//RS         | ("core.encoding.hex", "a2b_base64") => {
-//RS             let s = as_string(one(0)?, span)?;
-//RS             // `decodebytes` is the MIME form: whitespace between quanta is allowed.
-//RS             let allow_whitespace = method != "decode" || args_bool(1, false)?;
-//RS             let allow_missing_padding = method == "decode" && args_bool(2, false)?;
-//RS             let edition = jet_foundation::PackageEdition::package_edition();
-//RS             Ok(
-//RS                 match jet_foundation::base_encoding_dispatch::decode_base64(
-//RS                     &edition,
-//RS                     s,
-//RS                     allow_whitespace,
-//RS                     allow_missing_padding,
-//RS                 ) {
-//RS                     Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-//RS                     Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-//RS                 },
-//RS             )
-//RS         }
-//RS         ("core.encoding.base64", "encode_url") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             Ok(CtValue::Str(encoding_base_kernel::jet_std_b64url_encode(
-//RS                 &bytes,
-//RS             )))
-//RS         }
-//RS         ("core.encoding.base64", "encode_url_padded") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             Ok(CtValue::Str(encoding_base_kernel::jet_std_b64url_encode_padded(
-//RS                 &bytes,
-//RS             )))
-//RS         }
-//RS         ("core.encoding.base64", "pad") => {
-//RS             let s = as_string(one(0)?, span)?.to_string();
-//RS             Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_pad(&s)))
-//RS         }
-//RS         ("core.encoding.base64", "unpad") => {
-//RS             let s = as_string(one(0)?, span)?.to_string();
-//RS             Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_unpad(&s)))
-//RS         }
-//RS         ("core.encoding.base64", "decode_url") => {
-//RS             let s = as_string(one(0)?, span)?;
-//RS             let allow_whitespace = args_bool(1, false)?;
-//RS             let allow_padding = args_bool(2, false)?;
-//RS             let edition = jet_foundation::PackageEdition::package_edition();
-//RS             Ok(
-//RS                 match jet_foundation::base_encoding_dispatch::decode_base64url(
-//RS                     &edition,
-//RS                     s,
-//RS                     allow_whitespace,
-//RS                     allow_padding,
-//RS                 ) {
-//RS                     Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-//RS                     Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-//RS                 },
-//RS             )
-//RS         }
-//RS         ("core.encoding.base32", "encode" | "b32encode") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             Ok(CtValue::Str(base32_encode(&bytes)))
-//RS         }
-//RS         ("core.encoding.base32", "b32hexencode") => {
-//RS             let bytes = as_bytes(one(0)?, span)?;
-//RS             Ok(CtValue::Str(encoding_base_kernel::jet_std_base32hex_encode(&bytes)))
-//RS         }
-//RS         ("core.encoding.base32", "decode" | "b32decode") => {
-//RS             let s = as_string(one(0)?, span)?;
-//RS             let allow_whitespace = args_bool(1, false)?;
-//RS             let allow_missing_padding = args_bool(2, false)?;
-//RS             let allow_lowercase = args_bool(3, false)?;
-//RS             let edition = jet_foundation::PackageEdition::package_edition();
-//RS             Ok(
-//RS                 match jet_foundation::base_encoding_dispatch::decode_base32(
-//RS                     &edition,
-//RS                     s,
-//RS                     allow_whitespace,
-//RS                     allow_missing_padding,
-//RS                     allow_lowercase,
-//RS                 ) {
-//RS                     Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-//RS                     Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-//RS                 },
-//RS             )
-//RS         }
-//RS         ("core.encoding.base32", "b32hexdecode") => {
-//RS             let s = as_string(one(0)?, span)?;
-//RS             let edition = jet_foundation::PackageEdition::package_edition();
-//RS             Ok(
-//RS                 match jet_foundation::base_encoding_dispatch::decode_base32hex(&edition, s) {
-//RS                     Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-//RS                     Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-//RS                 },
-//RS             )
-//RS         }
-//RS         // --- D-URL1=A: core.net.url (pure RFC-3986-shaped parser, ported
-//RS         // verbatim from AOT's `JetURL`/`jet_url_*` in `UrlMime.rs` — see
-//RS         // `UrlLite.rs`) ---
-//RS         ("core.net.url", "parse") => {
-//RS             let s = as_string(one(0)?, span)?;
-//RS             Ok(match crate::Comptime::UrlLite::parse(s) {
-//RS                 Ok(u) => CtValue::Present(Box::new(url_parts_to_ct(&u))),
-//RS                 Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-//RS             })
-//RS         }
-//RS         ("core.net.url", "from_parts") => {
-//RS             let scheme = as_string(one(0)?, span)?.to_string();
-//RS             let host = as_string(one(1)?, span)?.to_string();
-//RS             let path = as_string(one(2)?, span)?.to_string();
-//RS             let query = as_string_rows(one(3)?, span)?;
-//RS             let fragment = as_string(one(4)?, span)?.to_string();
-//RS             Ok(
-//RS                 match crate::Comptime::UrlLite::from_parts(&scheme, &host, &path, &query, &fragment) {
-//RS                     Ok(u) => CtValue::Present(Box::new(url_parts_to_ct(&u))),
-//RS                     Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-//RS                 },
-//RS             )
-//RS         }
-//RS         ("core.net.url", "file") => {
-//RS             let path = as_string(one(0)?, span)?;
-//RS             Ok(url_parts_to_ct(&crate::Comptime::UrlLite::file(path)))
-//RS         }
-//RS         ("core.net.url", "data") => {
-//RS             // `mime` arg is the `core.net.mime.MIME` record (`top`/`sub`/
-//RS             // `parameters`); render its essence + parameters the same way
-//RS             // AOT's `JetMIME::to_string_value` does, matching field-for-field.
-//RS             let mime = one(0)?;
-//RS             let text = as_string(one(1)?, span)?;
-//RS             let rendered = match mime {
-//RS                 CtValue::Struct { type_name, fields } if type_name == "MIME" => {
-//RS                     let get = |name: &str| {
-//RS                         fields
-//RS                             .iter()
-//RS                             .find(|(n, _)| n == name)
-//RS                             .map(|(_, v)| v.clone())
-//RS                     };
-//RS                     let top = match get("top") {
-//RS                         Some(CtValue::Str(s)) => s,
-//RS                         _ => {
-//RS                             return Err(unsupported(
-//RS                                 "core.net.url.data: mime.top must be String",
-//RS                                 span,
-//RS                             ))
-//RS                         }
-//RS                     };
-//RS                     let sub = match get("sub") {
-//RS                         Some(CtValue::Str(s)) => s,
-//RS                         _ => {
-//RS                             return Err(unsupported(
-//RS                                 "core.net.url.data: mime.sub must be String",
-//RS                                 span,
-//RS                             ))
-//RS                         }
-//RS                     };
-//RS                     let mut out = format!("{}/{}", top, sub);
-//RS                     if let Some(CtValue::List(params)) = get("parameters") {
-//RS                         for p in params {
-//RS                             if let CtValue::List(kv) = p {
-//RS                                 if let [CtValue::Str(k), CtValue::Str(v)] = &kv[..] {
-//RS                                     out.push_str("; ");
-//RS                                     out.push_str(k);
-//RS                                     out.push('=');
-//RS                                     out.push_str(v);
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     out
-//RS                 }
-//RS                 _ => {
-//RS                     return Err(unsupported(
-//RS                         "core.net.url.data: first argument must be a MIME",
-//RS                         span,
-//RS                     ))
-//RS                 }
-//RS             };
-//RS             Ok(url_parts_to_ct(&crate::Comptime::UrlLite::data(
-//RS                 &rendered, text,
-//RS             )))
-//RS         }
-//RS         ("core.net.url", "query") => {
-//RS             let rows = as_string_rows(one(0)?, span)?;
-//RS             let pairs: Vec<(String, String)> = rows
-//RS                 .iter()
-//RS                 .filter(|r| !r.is_empty())
-//RS                 .map(|r| {
-//RS                     (
-//RS                         r.get(0).cloned().unwrap_or_default(),
-//RS                         r.get(1).cloned().unwrap_or_default(),
-//RS                     )
-//RS                 })
-//RS                 .collect();
-//RS             Ok(CtValue::Str(crate::Comptime::UrlLite::url_render_query(
-//RS                 &pairs,
-//RS             )))
-//RS         }
-//RS         ("core.net.url", "percent_encode") => {
-//RS             let s = as_string(one(0)?, span)?;
-//RS             Ok(CtValue::Str(crate::Comptime::UrlLite::url_percent_encode(
-//RS                 s, false,
-//RS             )))
-//RS         }
-//RS         ("core.net.url", "percent_decode") => {
-//RS             let s = as_string(one(0)?, span)?;
-//RS             Ok(match crate::Comptime::UrlLite::url_percent_decode_str(s) {
-//RS                 Ok(v) => CtValue::Present(Box::new(CtValue::Str(v))),
-//RS                 Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-//RS             })
-//RS         }
-//RS         // D-COMPUTE1=D / I9: same Prelude as AOT (`ComputeLite` includes Compute.rs).
-//RS         ("core.compute", method) => crate::Comptime::ComputeLite::apply(method, &args, span),
-//RS         // D-SERVICE1=D / I9: typed `core.service` constructors use the same
-//RS         // Prelude adapter as tree methods; only the public module path differs.
-//RS         ("core.service", "tree") => crate::Comptime::ServicesLite::apply("tree", &args, span),
-//RS         ("core.service", "runtime") => crate::Comptime::ServicesLite::apply("runtime", &args, span),
-//RS         ("core.service", "state_store") => {
-//RS             crate::Comptime::ServicesLite::apply("state_store", &args, span)
-//RS         }
-//RS         ("core.service", "restart_one_for_one") => {
-//RS             crate::Comptime::ServicesLite::apply("restart_one_for_one", &args, span)
-//RS         }
-//RS         ("core.service", "restart_one_for_all") => {
-//RS             crate::Comptime::ServicesLite::apply("restart_one_for_all", &args, span)
-//RS         }
-//RS         ("core.service", "restart_rest_for_one") => {
-//RS             crate::Comptime::ServicesLite::apply("restart_rest_for_one", &args, span)
-//RS         }
-//RS         ("core.service", "delivery_at_most_once") => {
-//RS             crate::Comptime::ServicesLite::apply("delivery_at_most_once", &args, span)
-//RS         }
-//RS         ("core.service", "delivery_durable") => {
-//RS             crate::Comptime::ServicesLite::apply("delivery_durable", &args, span)
-//RS         }
-//RS         ("core.service", method) => crate::Comptime::ServicesLite::apply(method, &args, span),
-//RS         // D-JOBS1=D / I9: queue construction uses the provider-owned
-//RS         // dispatcher. The queue provider owns authority, request, and receipt
-//RS         // marshalling; this tier only forwards the registered Core call.
-//RS         ("core.jobs", method) => crate::Comptime::ServicesLite::apply_jobs(method, &args, span),
-//RS         // D-AUTH1=A / I9: session batteries (JWT/PASETO stay on AOT/subset path).
-//RS         // Stateful store ops are Tier-2 (`is_tier2_core_call`) so pure
-//RS         // `evaluate_constant` cannot fold them into Ok(literals) while leaving
-//RS         // the runtime `JET_AUTH_STORE` empty. AuthLite still serves impure /
-//RS         // interpreter ambient via `apply_impure_core_call` → here.
-//RS         ("core.auth", method)
-//RS             if matches!(
-//RS                 method,
-//RS                 "register_user"
-//RS                     | "password_login"
-//RS                     | "session_validate"
-//RS                     | "session_show"
-//RS                     | "session_user"
-//RS                     | "session_cookie"
-//RS                     | "session_id"
-//RS                     | "magic_link_issue"
-//RS                     | "magic_link_consume"
-//RS                     | "oauth_begin"
-//RS                     | "oauth_finish"
-//RS             ) =>
-//RS         {
-//RS             crate::Comptime::AuthLite::apply(method, &args, span)
-//RS         }
-//RS         // D-SYNC1=A / D-DBPOLICY1=A / I9.
-//RS         ("core.sync", method) => crate::Comptime::SyncLite::apply(method, &args, span),
-//RS         // D-CORE-COLLECTIONS1=A / I9: nominal collection calls marshal through
-//RS         // the shared Prelude kernel used by AOT.
-//RS         ("core.collections" | "core.collections.set", method) => {
-//RS             crate::Comptime::CollectionEval::apply_core_collections(module, method, &args, span)
-//RS         }
-//RS         ("core.reactive", "signal" | "derived" | "computed" | "effect") => {
-//RS             crate::Comptime::AppLite::apply_suite(module, method, &args, span, resolved_ret)
-//RS         }
-//RS         ("core.web", "openapi" | "page" | "form") => {
-//RS             crate::Comptime::AppLite::apply_suite(module, method, &args, span, resolved_ret)
-//RS         }
-//RS         // D-DX-SUITE1=C / I9: every first-party web module crosses the same
-//RS         // Prelude kernel boundary; AppLite only marshals CtValues.
-//RS         (module, method) if module.starts_with("core.web.") => {
-//RS             crate::Comptime::AppLite::apply_suite(module, method, &args, span, resolved_ret)
-//RS         }
-//RS         // D-LIVEQUERY1=A / I9: same Prelude as AOT (`AppLite` includes LiveQuery.rs).
-//RS         ("app" | "core.web", method)
-//RS             if matches!(
-//RS                 method,
-//RS                 "live"
-//RS                     | "subscribe"
-//RS                     | "invalidate"
-//RS                     | "transact_invalidate"
-//RS                     | "signal_push"
-//RS                     | "live_get"
-//RS                     | "live_show"
-//RS                     | "live_stats"
-//RS                     | "auth"
-//RS                     | "auth_oauth"
-//RS                     | "auth_routes"
-//RS                     | "auth_show"
-//RS                     | "sync"
-//RS             ) =>
-//RS         {
-//RS             if matches!(method, "auth" | "auth_oauth" | "auth_routes" | "auth_show") {
-//RS                 crate::Comptime::AuthLite::apply(method, &args, span)
-//RS             } else if method == "sync" {
-//RS                 crate::Comptime::SyncLite::apply(method, &args, span)
-//RS             } else {
-//RS                 crate::Comptime::AppLite::apply(method, &args, span)
-//RS             }
-//RS         }
-//RS         // --- D-DATA-SURFACE1/PLOT1/STATUS1: fixed-signature data kernels.
-//RS         // Stats stay on `data_kernel`; table/lazy/query calls are dispatched by
-//RS         // the typed evaluator, while loader and stream rows cross the
-//RS         // DataPipeline carrier boundary below.
-//RS         ("core.data", "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev") => {
-//RS             let values = as_float_list(one(0)?, span)?;
-//RS             let (checked, unchecked): (_, fn(&Vec<f64>) -> f64) = match method {
-//RS                 "sum" => (
-//RS                     data_kernel::jet_data_sum_checked(&values),
-//RS                     data_kernel::jet_data_sum,
-//RS                 ),
-//RS                 "mean" => (
-//RS                     data_kernel::jet_data_mean_checked(&values),
-//RS                     data_kernel::jet_data_mean,
-//RS                 ),
-//RS                 "min" => (
-//RS                     data_kernel::jet_data_min_checked(&values),
-//RS                     data_kernel::jet_data_min,
-//RS                 ),
-//RS                 "max" => (
-//RS                     data_kernel::jet_data_max_checked(&values),
-//RS                     data_kernel::jet_data_max,
-//RS                 ),
-//RS                 "median" => (
-//RS                     data_kernel::jet_data_median_checked(&values),
-//RS                     data_kernel::jet_data_median,
-//RS                 ),
-//RS                 "variance" => (
-//RS                     data_kernel::jet_data_variance_checked(&values),
-//RS                     data_kernel::jet_data_variance,
-//RS                 ),
-//RS                 _ => (
-//RS                     data_kernel::jet_data_stddev_checked(&values),
-//RS                     data_kernel::jet_data_stddev,
-//RS                 ),
-//RS             };
-//RS             Ok(data_result_value(
-//RS                 checked,
-//RS                 || unchecked(&values),
-//RS                 data_float_value,
-//RS             ))
-//RS         }
-//RS         ("core.data", "quantile") => {
-//RS             let values = as_float_list(one(0)?, span)?;
-//RS             let q = as_float(one(1)?, span)?;
-//RS             Ok(data_result_value(
-//RS                 data_kernel::jet_data_quantile_checked(&values, q),
-//RS                 || data_kernel::jet_data_quantile(&values, q),
-//RS                 data_float_value,
-//RS             ))
-//RS         }
-//RS         ("core.data", "rolling_mean") => {
-//RS             let values = as_float_list(one(0)?, span)?;
-//RS             let width = as_int(one(1)?, span)?;
-//RS             Ok(data_result_value(
-//RS                 data_kernel::jet_data_rolling_mean_checked(&values, width),
-//RS                 || data_kernel::jet_data_rolling_mean(&values, width),
-//RS                 |means| CtValue::List(means.into_iter().map(data_float_value).collect()),
-//RS             ))
-//RS         }
-//RS         ("core.data", "describe") => {
-//RS             let values = as_float_list(one(0)?, span)?;
-//RS             Ok(data_result_value_for_type(
-//RS                 data_kernel::jet_data_describe_checked(&values),
-//RS                 || data_kernel::jet_data_describe(&values),
-//RS                 data_summary_value,
-//RS                 resolved_ret,
-//RS             ))
-//RS         }
-//RS         ("core.data", "status") => Ok(CtValue::List(
-//RS             data_kernel::jet_data_status()
-//RS                 .into_iter()
-//RS                 .map(|row| CtValue::Struct {
-//RS                     type_name: "DataStatus".to_string(),
-//RS                     fields: vec![
-//RS                         ("step".to_string(), CtValue::Str(row.step)),
-//RS                         ("path".to_string(), CtValue::Str(row.path)),
-//RS                         ("clone_value".to_string(), CtValue::Str(row.clone_value)),
-//RS                         ("ownership".to_string(), CtValue::Str(row.ownership)),
-//RS                         ("trust".to_string(), CtValue::Str(row.trust)),
-//RS                         ("fallback".to_string(), CtValue::Str(row.fallback)),
-//RS                         ("replacement".to_string(), CtValue::Str(row.replacement)),
-//RS                     ],
-//RS                 })
-//RS                 .collect(),
-//RS         )),
-//RS         ("core.data", "require_bridge") => {
-//RS             let provider = as_string(one(0)?, span)?.to_string();
-//RS             Ok(match data_kernel::jet_data_require_bridge(&provider) {
-//RS                 Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-//RS                 Err(error) => CtValue::failed(Box::new(data_error_value(&error))),
-//RS             })
-//RS         }
-//RS         ("core.data", "bar_text") => {
-//RS             let groups = as_data_bar_groups(one(0)?, span)?;
-//RS             Ok(data_result_value_for_type(
-//RS                 data_kernel::jet_data_bar_text_checked(&groups),
-//RS                 || data_kernel::jet_data_bar_text(&groups),
-//RS                 CtValue::Str,
-//RS                 resolved_ret,
-//RS             ))
-//RS         }
-//RS         ("core.data", "bar_svg") => {
-//RS             let groups = as_data_bar_groups(one(0)?, span)?;
-//RS             Ok(data_result_value_for_type(
-//RS                 data_kernel::jet_data_bar_svg_checked(&groups),
-//RS                 || data_kernel::jet_data_bar_svg(&groups),
-//RS                 CtValue::Str,
-//RS                 resolved_ret,
-//RS             ))
-//RS         }
-//RS         ("core.data", "line_text" | "line_svg") => {
-//RS             apply_data_line_call(method, args, resolved_ret, span)
-//RS         }
-//RS         // --- impure / build-time I/O → teaching diagnostic (reached only when
-//RS         // no #Impure gate intercepts first in eval_method) ---
-//RS         ("core.files", _)
-//RS         | ("core.sys", _)
-//RS         | ("core.term", _)
-//RS         | ("core.net", _)
-//RS         | ("core.net.tls", _) => Err(Diagnostic::error(
-//RS             "E3410",
-//RS             format!(
-//RS                 "`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate",
-//RS                 module, method
-//RS             ),
-//RS             "ambient I/O (filesystem, environment, process) is not allowed in \
-//RS                  pure comptime evaluation"
-//RS                 .to_string(),
-//RS             format!(
-//RS                 "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and \
-//RS                          pass `--gate impure=allow` to the build"
-//RS             ),
-//RS             Some(span),
-//RS         )),
-//RS         // --- unknown / not yet implemented ---
-//RS         //
-//RS         // I4: this adapter serves BOTH comptime folding and the runtime TIR
-//RS         // evaluator that default `jet run` deopts into, so the `what` names the
-//RS         // construct and never the phase. Saying "at comptime" here described a
-//RS         // runtime call site as a compile-time one, which sent readers looking
-//RS         // for a `comptime` block that was not in their program. E0956 already
-//RS         // renders "isn't supported by the current evaluator yet"; a genuinely
-//RS         // compile-time-only refusal is a different row (E3410/E3412).
-//RS         _ => {
-//RS             if repl_mode {
-//RS                 if let Some(_) = repl_native_only_module(module) {
-//RS                     return Err(repl_native_module_diag(module, method, span));
-//RS                 }
-//RS             }
-//RS             Err(unsupported(&format!("`{}.{}()`", module, method), span))
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0592 crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:1-2198
+use jet_comptime.Comptime.Methods.CoreCalls.*
+use jet_comptime.Comptime.CorePureParity as core_pure_parity
+use jet_foundation.AST.[CtValue, CtFloat, Type, HistoryCommandSchema]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.Syntax
+use jet_foundation.Numeric.CtBigInt
+use jet_comptime.Comptime.Builtins
+use jet_comptime.Comptime.TextLite
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:2
+fn apply_duration_in(args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    if args.len() != 2 -> return Err(unsupported("core.handle.duration.in expects a Duration and a DurationUnit", span))
+    Builtins.apply_method(&args[0], Syntax.METHOD_DURATION_IN, [args[1].clone()], span)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:20
+pub fn apply_core_call(module: String, method: String, args: [CtValue], span: Span, repl_mode: Bool) -> CtValue Diagnostic! {
+    apply_core_call_with_type(module, method, ^args, span, repl_mode, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:33
+pub fn apply_core_pure_call(module: String, method: String, args: &[CtValue], span: Span) -> (CtValue Diagnostic!)? {
+    row := match Syntax.core_call(module, method).filter(fn(row) { row.pure_route != Syntax.CoreCallPureRoute.None && !row.is_receiver() }) { Some(row) => row, None => return None }
+    core_pure_parity.evaluate(row, args, span)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:48
+pub fn apply_core_call_with_type(module: String, method: String, args: [CtValue], span: Span, repl_mode: Bool, resolved_ret: (&Type)?) -> CtValue Diagnostic! {
+    apply_core_call_with_type_args(module, method, ^args, span, repl_mode, &[], resolved_ret)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:70
+pub fn apply_core_call_with_type_args(module: String, method: String, args: [CtValue], span: Span, repl_mode: Bool, type_args: &[Type], resolved_ret: (&Type)?) -> CtValue Diagnostic! {
+    args := normalize_path_args(module, method, ^args, span)?
+    validate_core_call_projection(module, method, args.len(), Syntax.CoreCallCoverage.COMPTIME, span)?
+    validate_interpreter_route(module, method, span)?
+    route := Syntax.core_call(module, method).map(fn(row) { row.interpreter_route })
+    if route.is_none() || route == Some(Syntax.CoreCallInterpreterRoute.Ambient) {
+        if jet_comptime.Comptime.try_ambient_core_call_typed(module, method, args.clone(), span, resolved_ret.cloned()) is Some(result) -> return result
+    }
+    apply_core_call_without_ambient_with_type_args(module, method, ^args, span, repl_mode, type_args, resolved_ret)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:121
+pub fn apply_core_call_without_ambient(module: String, method: String, args: [CtValue], span: Span, repl_mode: Bool) -> CtValue Diagnostic! {
+    apply_core_call_without_ambient_with_type(module, method, ^args, span, repl_mode, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:133
+pub fn apply_core_call_without_ambient_with_type(module: String, method: String, args: [CtValue], span: Span, repl_mode: Bool, resolved_ret: (&Type)?) -> CtValue Diagnostic! {
+    apply_core_call_without_ambient_with_type_args(module, method, ^args, span, repl_mode, &[], resolved_ret)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:155
+pub fn apply_core_call_without_ambient_with_type_args(module: String, method: String, args: [CtValue], span: Span, repl_mode: Bool, type_args: &[Type], resolved_ret: (&Type)?) -> CtValue Diagnostic! {
+    apply_core_call_without_ambient_with_type_args_and_history_schema(module, method, ^args, span, repl_mode, type_args, resolved_ret, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs:178
+pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(module: String, method: String, args: [CtValue], span: Span, repl_mode: Bool, type_args: &[Type], resolved_ret: (&Type)?, history_schema: (&HistoryCommandSchema)?) -> CtValue Diagnostic! {
+    args := normalize_path_args(module, method, ^args, span)?
+    validate_core_call_projection(module, method, args.len(), Syntax.CoreCallCoverage.COMPTIME, span)?
+    if Syntax.core_call(module, method).filter(core_call_allows_pure_parity) is Some(row) {
+        if core_pure_parity.evaluate(row, &args, span) is Some(result) -> return result
+    }
+    if repl_mode && repl_native_only_module(module).is_some() -> return Err(repl_native_module_diag(module, method, span))
+    if module == "core.testing" && method == "histories" -> return apply_testing_histories(^args, type_args, span, history_schema)
+    if apply_raylib_core_call(module, method, &args, span) is Some(result) -> return result
+    if module == "core.handle" && ["path.from", "path.join", "path.to_string", "path.parent", "path.extension", "path.stem", "path.normalize", "path.is_within"].contains(method) -> return apply_path_call(method, &args, span)
+    one := fn(i: USize) { args.get(i).ok_or_else(fn() { unsupported("{module}.{method}(): missing arg {i}", span) }) }
+    args_bool := fn(index: USize, default: Bool) -> Bool Diagnostic! {
+        match args.get(index) {
+            Some(CtValue.Bool(value)) => Ok(value),
+            Some(_) => Err(unsupported("{module}.{method}(): argument {index + 1} must be Bool", span)),
+            None => Ok(default)
+        }
+    }
+    csv_options := fn() -> (String,Bool,Bool) Diagnostic! {
+        delimiter := args.get(1).map(fn(value) { as_string(value, span).map(fn(s) { s.to_owned() }) }).transpose()?.unwrap_or(",")
+        Ok((^delimiter, args_bool(2, false)?, args_bool(3, false)?))
+    }
+    match (module, method) {
+        ("core.log", "set_trace_id") => { log_kernel.set_trace_id(as_string(one(0)?, span)?); Ok(CtValue.Unit) },
+        ("core.prelude", "keep") => Ok(args.first().cloned().unwrap_or(CtValue.Unit)),
+        ("core.builtin", "len_string") => Ok(CtValue.Int(as_string(one(0)?, span)?.chars().count() as I64)),
+        ("core.builtin", "map_keys" | "map_values") => Builtins.apply_method(one(0)?, if method == "map_keys" { "keys" } else { "values" }, [], span),
+        ("jet.unit", "magnitude") => Ok(CtValue.Str(as_float(one(0)?, span)?.to_string())),
+        ("core.reactive.loadable", "idle" | "loading") => Ok(CtValue.Enum{type_name: "Loadable", variant: loadable_variant(method), args: []}),
+        ("core.reactive.loadable", "loaded" | "failed") => Ok(CtValue.Enum{type_name: "Loadable", variant: loadable_variant(method), args: [(None, one(0)?.clone())]}),
+        // GATE #4494: evaluator-local fidelity TLS remains a real Cell-backed slot.
+        ("core.perf", "fidelity") => Ok(CtValue.Float(CtFloat.f64(F32.from_bits(PERF_FIDELITY.with(Cell.get)) as F64))),
+        ("core.perf", "default_fidelity") => Ok(CtValue.Float(CtFloat.f64(F32.from_bits(PERF_DEFAULT_FIDELITY_BITS) as F64))),
+        ("core.perf", "override_fidelity") => {
+            value := as_float(one(0)?, span)?
+            if !value.is_finite() || value < 0.0 || value > 1.0 -> return Ok(CtValue.failed(Box.new(CtValue.Str("core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {value}"))))
+            PERF_FIDELITY.with(fn(c) { c.set((value as F32).to_bits()) })
+            Ok(CtValue.Present(Box.new(CtValue.Unit)))
+        },
+        ("core.perf", "reset_fidelity") => { PERF_FIDELITY.with(fn(c) { c.set(PERF_DEFAULT_FIDELITY_BITS) }); Ok(CtValue.Unit) },
+        ("core.math", "sqrt") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.sqrt())),
+        ("core.math", "floor") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.floor())),
+        ("core.math", "ceil") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.ceil())),
+        ("core.math", "round") => Ok(CtValue.Int(as_ct_float(one(0)?, span)?.round_i64())),
+        ("core.math", "abs") => match one(0)? {
+            value if exact_big(value).is_some() => Ok(exact_int_value(exact_big(value).expect("whole-number abs").abs())),
+            CtValue.Float(f) => Ok(CtValue.Float(core_math_float_abs(f))),
+            value if value is CtValue.Struct{type_name, ..} && type_name == Syntax.TYPE_COMPLEX => jet_comptime.Comptime.ComplexParity.abs(value).map(fn(magnitude) { CtValue.Float(CtFloat.f64(magnitude)) }).ok_or_else(fn() { unsupported("malformed Complex value", span) }),
+            _ => Err(unsupported("core.math.abs: non-numeric argument", span))
+        },
+        ("core.math", "fabs") => Ok(CtValue.Float(core_math_float_abs(as_ct_float(one(0)?, span)?))),
+        ("core.math", "pow") => {
+            a := as_ct_float(one(0)?, span)?; b := as_ct_float(one(1)?, span)?
+            Ok(CtValue.Float(a.powf(b).ok_or_else(fn() { unsupported("mixing float widths", span) })?))
+        },
+        ("core.math", "min") => {
+            left := one(0)?; right := one(1)?
+            match (left, right) {
+                (CtValue.Int(left), CtValue.Int(right)) => Ok(CtValue.Int(math_lib_pure.jet_std_math_min_i64(left, right))),
+                (CtValue.Float(left), CtValue.Float(right)) => Ok(CtValue.Float(core_math_float_min(left, right, span)?)),
+                _ => Ok(CtValue.Float(core_math_float_min(as_ct_float(left, span).map_err(fn(_) { unsupported("core.math.min: non-numeric arguments", span) })?, as_ct_float(right, span).map_err(fn(_) { unsupported("core.math.min: non-numeric arguments", span) })?, span)?))
+            }
+        },
+        ("core.math", "max") => {
+            left := one(0)?; right := one(1)?
+            match (left, right) {
+                (CtValue.Int(left), CtValue.Int(right)) => Ok(CtValue.Int(math_lib_pure.jet_std_math_max_i64(left, right))),
+                (CtValue.Float(left), CtValue.Float(right)) => Ok(CtValue.Float(core_math_float_max(left, right, span)?)),
+                _ => Ok(CtValue.Float(core_math_float_max(as_ct_float(left, span).map_err(fn(_) { unsupported("core.math.max: non-numeric arguments", span) })?, as_ct_float(right, span).map_err(fn(_) { unsupported("core.math.max: non-numeric arguments", span) })?, span)?))
+            }
+        },
+        ("core.math", "clamp") => match (one(0)?, one(1)?, one(2)?) {
+            (CtValue.Int(value), CtValue.Int(low), CtValue.Int(high)) => Ok(CtValue.Int(math_lib_pure.jet_std_math_clamp_i64(value, low, high))),
+            (CtValue.Float(value), CtValue.Float(low), CtValue.Float(high)) => Ok(CtValue.Float(core_math_float_clamp(value, low, high, span)?)),
+            _ => Err(unsupported("core.math.clamp: non-numeric arguments", span))
+        },
+        ("core.math", "log2") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.log2())),
+        ("core.math", "log10") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.log10())),
+        ("core.math", "sin") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.sin())),
+        ("core.math", "cos") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.cos())),
+        ("core.math", "tan") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.tan())),
+        ("core.math", "asin") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.asin())),
+        ("core.math", "acos") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.acos())),
+        ("core.math", "atan") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.atan())),
+        ("core.math", "sinh") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.sinh())),
+        ("core.math", "cosh") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.cosh())),
+        ("core.math", "tanh") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.tanh())),
+        ("core.math", "exp") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.exp())),
+        ("core.math", "ln") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.ln())),
+        ("core.math", "acosh") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.acosh())),
+        ("core.math", "asinh") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.asinh())),
+        ("core.math", "atanh") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.atanh())),
+        ("core.math", "cbrt") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.cbrt())),
+        ("core.math", "exp2") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.exp2())),
+        ("core.math", "exp_m1") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.exp_m1())),
+        ("core.math", "ln_1p") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.ln_1p())),
+        ("core.math", "signum") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.signum())),
+        ("core.math", "trunc") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.trunc())),
+        ("core.math", "fract") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.fract())),
+        ("core.math", "degrees") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.to_degrees())),
+        ("core.math", "radians") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?.to_radians())),
+        ("core.math", "atan2") => {
+            left := as_ct_float(one(0)?, span)?; right := as_ct_float(one(1)?, span)?
+            Ok(CtValue.Float(left.atan2(right).ok_or_else(fn() { unsupported("mixing float widths", span) })?))
+        },
+        ("core.math", "copysign") => {
+            left := as_ct_float(one(0)?, span)?; right := as_ct_float(one(1)?, span)?
+            Ok(CtValue.Float(left.copysign(right).ok_or_else(fn() { unsupported("mixing float widths", span) })?))
+        },
+        ("core.math", "log") => {
+            left := as_ct_float(one(0)?, span)?; right := as_ct_float(one(1)?, span)?
+            Ok(CtValue.Float(left.log(right).ok_or_else(fn() { unsupported("mixing float widths", span) })?))
+        },
+        ("core.math", "fma") => {
+            a := as_ct_float(one(0)?, span)?; b := as_ct_float(one(1)?, span)?; c := as_ct_float(one(2)?, span)?
+            Ok(CtValue.Float(a.mul_add(b, c).ok_or_else(fn() { unsupported("mixing float widths", span) })?))
+        },
+        ("core.math", "factorial") => {
+            value := exact_big(one(0)?).ok_or_else(fn() { unsupported("this operation on a value that is not a whole number", span) })?
+            if value.negative -> return Ok(CtValue.absent(Type.Int))
+            current := CtBigInt.from_int(2); result := CtBigInt.from_int(1)
+            while current.compare(&value) != Ordering.Greater { result = result.mul(&current); current = current.add(&CtBigInt.from_int(1)) }
+            Ok(CtValue.Present(Box.new(exact_int_value(^result))))
+        },
+        ("core.math", "isqrt" | "checked_abs" | "checked_neg") => {
+            value := exact_big(one(0)?).ok_or_else(fn() { unsupported("this operation on a value that is not a whole number", span) })?
+            result := match method { "isqrt" => value.isqrt(), "checked_abs" => Some(value.abs()), _ => Some(value.neg()) }
+            Ok(match result { Some(value) => CtValue.Present(Box.new(exact_int_value(^value))), None => CtValue.absent(Type.Int) })
+        },
+        ("core.math", "is_even" | "is_odd") => {
+            value := exact_big(one(0)?).ok_or_else(fn() { unsupported("parity of a value that is not a whole number", span) })?
+            Ok(CtValue.Bool(if method == "is_even" { value.is_even() } else { value.is_odd() }))
+        },
+        ("core.math", "leading_ones" | "trailing_ones" | "digits") => {
+            value := exact_big(one(0)?).ok_or_else(fn() { unsupported("this operation needs a whole number", span) })?
+            Ok(CtValue.Int(if method == "leading_ones" { value.leading_ones() } else if method == "trailing_ones" { value.trailing_ones() } else { value.digits() }))
+        },
+        ("core.math", "binomial") => {
+            n := exact_big(one(0)?).ok_or_else(fn() { unsupported("binomial needs whole numbers", span) })?
+            k := exact_big(one(1)?).ok_or_else(fn() { unsupported("binomial needs whole numbers", span) })?
+            Ok(match CtBigInt.binomial(&n, &k) { Some(value) => CtValue.Present(Box.new(exact_int_value(^value))), None => CtValue.absent(Type.Int) })
+        },
+        ("core.math", "checked_add" | "checked_sub" | "checked_mul") => {
+            left := exact_big(one(0)?).ok_or_else(fn() { unsupported("checked arithmetic needs whole numbers", span) })?
+            right := exact_big(one(1)?).ok_or_else(fn() { unsupported("checked arithmetic needs whole numbers", span) })?
+            value := match method { "checked_add" => left.add(&right), "checked_sub" => left.sub(&right), _ => left.mul(&right) }
+            Ok(CtValue.Present(Box.new(exact_int_value(^value))))
+        },
+        ("core.math", "checked_div" | "checked_rem") => {
+            left := exact_big(one(0)?).ok_or_else(fn() { unsupported("checked division needs whole numbers", span) })?
+            right := exact_big(one(1)?).ok_or_else(fn() { unsupported("checked division needs whole numbers", span) })?
+            Ok(match left.div_rem(&right) { Some((quotient, remainder)) => CtValue.Present(Box.new(exact_int_value(if method == "checked_div" { ^quotient } else { ^remainder }))), None => CtValue.absent(Type.Int) })
+        },
+        ("core.math", "checked_pow") => {
+            base := exact_big(one(0)?).ok_or_else(fn() { unsupported("checked power needs whole numbers", span) })?
+            exponent := exact_big(one(1)?).ok_or_else(fn() { unsupported("checked power needs whole numbers", span) })?
+            Ok(match base.pow(&exponent) { Some(value) => CtValue.Present(Box.new(exact_int_value(^value))), None => CtValue.absent(Type.Int) })
+        },
+        ("core.math", "saturating_add" | "saturating_sub" | "saturating_mul") => {
+            left := exact_big(one(0)?).ok_or_else(fn() { unsupported("arithmetic needs whole numbers", span) })?
+            right := exact_big(one(1)?).ok_or_else(fn() { unsupported("arithmetic needs whole numbers", span) })?
+            value := match method { "saturating_add" => left.add(&right), "saturating_sub" => left.sub(&right), "saturating_mul" => left.mul(&right), _ => unreachable("whole-number arithmetic guard") }
+            Ok(exact_int_value(^value))
+        },
+        ("core.math", "int_pow") => {
+            base := exact_big(one(0)?).ok_or_else(fn() { unsupported("integer power needs whole numbers", span) })?
+            exponent := exact_big(one(1)?).ok_or_else(fn() { unsupported("integer power needs whole numbers", span) })?
+            Ok(exact_int_value(base.pow(&exponent).unwrap_or_else(fn() { CtBigInt.from_int(0) })))
+        },
+        ("core.math", "gcd" | "lcm") => {
+            left := exact_big(one(0)?).ok_or_else(fn() { unsupported("number theory needs whole numbers", span) })?
+            right := exact_big(one(1)?).ok_or_else(fn() { unsupported("number theory needs whole numbers", span) })?
+            Ok(exact_int_value(if method == "gcd" { CtBigInt.gcd(&left, &right) } else { CtBigInt.lcm(&left, &right) }))
+        },
+        ("core.math", "div_mod" | "div_rem") => {
+            left := exact_big(one(0)?).ok_or_else(fn() { unsupported("division needs whole numbers", span) })?
+            right := exact_big(one(1)?).ok_or_else(fn() { unsupported("division needs whole numbers", span) })?
+            (quotient, remainder) := match left.div_rem(&right) { Some(pair) => pair, None => return Err(unsupported("division by zero", span)) }
+            if method == "div_mod" && !remainder.is_zero() && left.negative != right.negative { quotient = quotient.sub(&CtBigInt.from_int(1)); remainder = remainder.add(&right) }
+            Ok(named_tuple(&[("quot", exact_int_value(^quotient)), ("rem", exact_int_value(^remainder))]))
+        },
+        ("core.math", "is_normal") => Ok(CtValue.Bool(as_ct_float(one(0)?, span)?.as_f64().is_normal())),
+        ("core.math", "is_subnormal") => Ok(CtValue.Bool(as_ct_float(one(0)?, span)?.as_f64().is_subnormal())),
+        ("core.math", "is_canonical") => { x := as_ct_float(one(0)?, span)?; Ok(CtValue.Bool(x.is_finite() || x.is_nan())) },
+        ("core.math", "is_signed" | "sign_bit") => Ok(CtValue.Bool(as_ct_float(one(0)?, span)?.as_f64().is_sign_negative())),
+        ("core.math", "is_zero") => Ok(CtValue.Bool(as_ct_float(one(0)?, span)?.as_f64() == 0.0)),
+        ("core.math", "is_integer") => { x := as_ct_float(one(0)?, span)?; Ok(CtValue.Bool(x.is_finite() && x.as_f64().fract() == 0.0)) },
+        ("core.math", "next_up") => Ok(CtValue.Float(CtFloat.f64(as_ct_float(one(0)?, span)?.as_f64().next_up()))),
+        ("core.math", "next_down") => Ok(CtValue.Float(CtFloat.f64(as_ct_float(one(0)?, span)?.as_f64().next_down()))),
+        ("core.math", "copy") => Ok(CtValue.Float(as_ct_float(one(0)?, span)?)),
+        ("core.math", "cot") => { x := as_ct_float(one(0)?, span)?.as_f64(); Ok(CtValue.Float(CtFloat.f64(1.0 / x.tan()))) },
+        ("core.math", "inv") => { x := as_ct_float(one(0)?, span)?.as_f64(); Ok(CtValue.Float(CtFloat.f64(1.0 / x))) },
+        ("core.math", "zero") => Ok(CtValue.Float(CtFloat.f64(0.0))),
+        ("core.math", "radix") => Ok(CtValue.Int(2)),
+        ("core.math", "cmp") => { a := as_ct_float(one(0)?, span)?.as_f64(); b := as_ct_float(one(1)?, span)?.as_f64(); Ok(CtValue.Int(math_lib_pure.jet_std_math_cmp(a, b))) },
+        ("core.math", "next_after") => { a := as_ct_float(one(0)?, span)?.as_f64(); b := as_ct_float(one(1)?, span)?.as_f64(); Ok(CtValue.Float(CtFloat.f64(math_lib_pure.jet_std_math_next_after(a, b)))) },
+        ("core.math", "ldexp" | "scaleb") => {
+            x := as_ct_float(one(0)?, span)?.as_f64()
+            exp := match one(1)? { CtValue.Int(v) => v, _ => return Err(unsupported("ldexp needs a whole-number exponent", span)) }
+            Ok(CtValue.Float(CtFloat.f64(math_lib_pure.jet_std_math_ldexp(x, exp))))
+        },
+        ("core.math", "ilogb") => { x := as_ct_float(one(0)?, span)?.as_f64(); Ok(match math_lib_pure.jet_std_math_ilogb(x) { Some(e) => CtValue.Present(Box.new(CtValue.Int(e))), None => CtValue.absent(Type.Int) }) },
+        ("core.math", "logb") => Ok(CtValue.Float(CtFloat.f64(math_lib_pure.jet_std_math_logb(as_ct_float(one(0)?, span)?.as_f64())))),
+        ("core.math", "significand") => Ok(CtValue.Float(CtFloat.f64(math_lib_pure.jet_std_math_significand(as_ct_float(one(0)?, span)?.as_f64())))),
+        ("core.math", "ulp") => Ok(CtValue.Float(CtFloat.f64(math_lib_pure.jet_std_math_ulp(as_ct_float(one(0)?, span)?.as_f64())))),
+        ("core.math", "erf") => Ok(CtValue.Float(CtFloat.f64(math_lib_pure.jet_std_math_erf(as_ct_float(one(0)?, span)?.as_f64())))),
+        ("core.math", "erfc") => Ok(CtValue.Float(CtFloat.f64(math_lib_pure.jet_std_math_erfc(as_ct_float(one(0)?, span)?.as_f64())))),
+        ("core.math", "gamma") => Ok(CtValue.Float(CtFloat.f64(math_lib_pure.jet_std_math_gamma(as_ct_float(one(0)?, span)?.as_f64())))),
+        ("core.math", "lgamma") => Ok(CtValue.Float(CtFloat.f64(math_lib_pure.jet_std_math_lgamma(as_ct_float(one(0)?, span)?.as_f64())))),
+        ("core.math", "sin_cos") => { x := as_ct_float(one(0)?, span)?.as_f64(); (s,c) := x.sin_cos(); Ok(named_tuple(&[("sin", CtValue.Float(CtFloat.f64(s))), ("cos", CtValue.Float(CtFloat.f64(c)))])) },
+        ("core.math", "modf") => { x := as_ct_float(one(0)?, span)?; Ok(named_tuple(&[("fract", CtValue.Float(x.fract())), ("whole", CtValue.Float(x.trunc()))])) },
+        ("core.math", "frexp") => {
+            x := as_ct_float(one(0)?, span)?.as_f64(); exp := math_lib_pure.jet_std_math_ilogb(x).unwrap_or(0)
+            frac := if x == 0.0 || !x.is_finite() { x } else { math_lib_pure.jet_std_math_ldexp(x, -exp) }
+            Ok(named_tuple(&[("frac", CtValue.Float(CtFloat.f64(frac))), ("exp", CtValue.Int(exp))]))
+        },
+        ("core.math", "hypot") => { left := as_ct_float(one(0)?, span)?; right := as_ct_float(one(1)?, span)?; Ok(CtValue.Float(left.hypot(right).ok_or_else(fn() { unsupported("mixing float widths", span) })?)) },
+        ("core.math", "lerp") => { left := as_ct_float(one(0)?, span)?; right := as_ct_float(one(1)?, span)?; t := as_ct_float(one(2)?, span)?; Ok(CtValue.Float(left.lerp(right, t).ok_or_else(fn() { unsupported("mixing float widths", span) })?)) },
+        ("core.math", "is_nan") => Ok(CtValue.Bool(as_ct_float(one(0)?, span)?.is_nan())),
+        ("core.math", "is_inf") => Ok(CtValue.Bool(as_ct_float(one(0)?, span)?.is_infinite())),
+        ("core.math", "is_finite") => Ok(CtValue.Bool(as_ct_float(one(0)?, span)?.is_finite())),
+        ("core.math", "sign") => Ok(CtValue.Int(as_ct_float(one(0)?, span)?.sign())),
+        ("core.text", "nfc") => Ok(CtValue.Str(TextLite.nfc(as_string(one(0)?, span)?))),
+        ("core.text", "nfd") => Ok(CtValue.Str(TextLite.nfd(as_string(one(0)?, span)?))),
+        ("core.text", "nfkc") => Ok(CtValue.Str(TextLite.nfkc(as_string(one(0)?, span)?))),
+        ("core.text", "nfkd") => Ok(CtValue.Str(TextLite.nfkd(as_string(one(0)?, span)?))),
+        ("core.text", "casefold") => Ok(CtValue.Str(TextLite.casefold(as_string(one(0)?, span)?))),
+        ("core.text", "lower") => Ok(CtValue.Str(TextLite.lower(as_string(one(0)?, span)?))),
+        ("core.text", "upper") => Ok(CtValue.Str(TextLite.upper(as_string(one(0)?, span)?))),
+        ("core.text", "caseless_eq") => Ok(CtValue.Bool(TextLite.caseless_eq(as_string(one(0)?, span)?, as_string(one(1)?, span)?))),
+        ("core.text", "graphemes") => Ok(CtValue.List(TextLite.graphemes(as_string(one(0)?, span)?).into_iter().map(CtValue.Str).collect())),
+        ("core.text", "words") => Ok(CtValue.List(TextLite.words(as_string(one(0)?, span)?).into_iter().map(CtValue.Str).collect())),
+        ("core.text", "sentences") => Ok(CtValue.List(TextLite.sentences(as_string(one(0)?, span)?).into_iter().map(CtValue.Str).collect())),
+        ("core.text", "scalars") => Ok(CtValue.List(as_string(one(0)?, span)?.chars().map(fn(c) { CtValue.Str(c.to_string()) }).collect())),
+        ("core.text", "inspect") => Ok(CtValue.List(TextLite.inspect(as_string(one(0)?, span)?).into_iter().map(CtValue.Str).collect())),
+        ("core.text", "display_width") => {
+            s := as_string(one(0)?, span)?
+            if args.get(1) is Some(policy) {
+                (ambiguous_wide, controls_reject) := text_width_policy_flags(policy)
+                match TextLite.display_width_policy(s, ambiguous_wide, controls_reject) {
+                    Ok(n) => Ok(CtValue.Present(Box.new(CtValue.Int(n)))),
+                    Err(message) => Ok(CtValue.failed(Box.new(CtValue.Struct{type_name: "TextError", fields: [("message", CtValue.Str(^message))]})))
+                }
+            } else { Ok(CtValue.Int(TextLite.display_width_default(s))) }
+        },
+        ("core.text", "scalar_count") => Ok(CtValue.Int(as_string(one(0)?, span)?.chars().count() as I64)),
+        ("core.text", "byte_count") => Ok(CtValue.Int(as_string(one(0)?, span)?.len() as I64)),
+        ("core.text", "is_alphabetic") => Ok(CtValue.Bool(TextLite.is_alphabetic(as_string(one(0)?, span)?))),
+        ("core.text", "is_numeric") => Ok(CtValue.Bool(TextLite.is_numeric(as_string(one(0)?, span)?))),
+        ("core.text", "is_whitespace") => Ok(CtValue.Bool(TextLite.is_whitespace(as_string(one(0)?, span)?))),
+        ("core.text", "is_ascii") => Ok(CtValue.Bool(as_string(one(0)?, span)?.is_ascii())),
+        ("core.text", "splitn") => {
+            s := as_string(one(0)?, span)?.to_string(); pat := as_string(one(1)?, span)?.to_string(); n := as_int(one(2)?, span)?
+            Ok(CtValue.List(TextLite.splitn(&s, &pat, n).into_iter().map(CtValue.Str).collect()))
+        },
+        ("core.text", "rsplitn") => {
+            s := as_string(one(0)?, span)?.to_string(); pat := as_string(one(1)?, span)?.to_string(); n := as_int(one(2)?, span)?
+            Ok(CtValue.List(TextLite.rsplitn(&s, &pat, n).into_iter().map(CtValue.Str).collect()))
+        },
+        ("core.text", "trim") => Ok(CtValue.Str(TextLite.trim(as_string(one(0)?, span)?))),
+        ("core.text", "trim_start") => Ok(CtValue.Str(TextLite.trim_start(as_string(one(0)?, span)?))),
+        ("core.text", "trim_end") => Ok(CtValue.Str(TextLite.trim_end(as_string(one(0)?, span)?))),
+        ("core.text", "pad_start") => {
+            s := as_string(one(0)?, span)?.to_string(); w := as_int(one(1)?, span)?; fill := as_string(one(2)?, span)?.to_string()
+            Ok(CtValue.Str(TextLite.pad_start(&s, w, &fill)))
+        },
+        ("core.text", "pad_end") => {
+            s := as_string(one(0)?, span)?.to_string(); w := as_int(one(1)?, span)?; fill := as_string(one(2)?, span)?.to_string()
+            Ok(CtValue.Str(TextLite.pad_end(&s, w, &fill)))
+        },
+        ("core.text", "center") => {
+            s := as_string(one(0)?, span)?.to_string(); w := as_int(one(1)?, span)?; fill := as_string(one(2)?, span)?.to_string()
+            Ok(CtValue.Str(TextLite.center(&s, w, &fill)))
+        },
+        ("core.text", "starts_any") => {
+            s := as_string(one(0)?, span)?.to_string()
+            prefixes := match one(1)? {
+                CtValue.List(xs) => jet_comptime.Comptime.CollectionEval.try_collect(xs.iter().map(fn(v) { as_string(v, span).map(fn(s) { s.to_string() }) }))?,
+                _ => return Err(unsupported("core.text.starts_any: non-list argument", span))
+            }
+            Ok(CtValue.Bool(TextLite.starts_any(&s, &prefixes)))
+        },
+        ("core.text", "ends_any") => {
+            s := as_string(one(0)?, span)?.to_string()
+            suffixes := match one(1)? {
+                CtValue.List(xs) => jet_comptime.Comptime.CollectionEval.try_collect(xs.iter().map(fn(v) { as_string(v, span).map(fn(s) { s.to_string() }) }))?,
+                _ => return Err(unsupported("core.text.ends_any: non-list argument", span))
+            }
+            Ok(CtValue.Bool(TextLite.ends_any(&s, &suffixes)))
+        },
+        ("core.text", "char_indices") => Ok(CtValue.List(TextLite.char_indices(as_string(one(0)?, span)?).into_iter().map(CtValue.Str).collect())),
+        ("core.args", "spec") => Ok(jet_comptime.Comptime.core_args_spec()),
+        ("core.event", "scope") => Ok(jet_comptime.Comptime.core_event_scope()),
+        ("core.event", "policy_sync") => Ok(jet_comptime.Comptime.core_event_policy_sync()),
+        ("core.event", "new") => Ok(jet_comptime.Comptime.core_event_new()),
+        ("core.event", "with_policy") => Ok(jet_comptime.Comptime.core_event_with_policy(one(0)?.clone())),
+        ("core.event", "hook") => Ok(jet_comptime.Comptime.core_event_hook(one(0)?.clone())),
+        ("core.event", "decision_hook") => Ok(jet_comptime.Comptime.core_event_decision_hook(one(0)?.clone())),
+        ("core.event", "async_result") => jet_comptime.Comptime.core_event_async_result(one(0)?, one(1)?, span),
+        ("core.encoding.json", "parse" | "loads") => {
+            text := as_string(one(0)?, span)?
+            match jet_comptime.Comptime.JSONInterp.parse_json(text) {
+                Ok(v) => Ok(CtValue.Present(Box.new(^v))),
+                Err(e) => Ok(CtValue.failed(Box.new(jet_comptime.Comptime.JSONInterp.encoding_error_value(e))))
+            }
+        },
+        ("core.encoding.json", "decode") => Err(unsupported("JSON lenient decode coercion audit effects", span)),
+        ("core.encoding.json", "to_string" | "dumps") => Ok(CtValue.Str(jet_comptime.Comptime.JSONInterp.render_json_pretty(one(0)?, false, 0))),
+        ("core.encoding.json", "to_string_pretty") => Ok(CtValue.Str(jet_comptime.Comptime.JSONInterp.render_json_pretty(one(0)?, true, 0))),
+        ("core.encoding.json", "canonical") => {
+            v := one(0)?
+            if jet_foundation.PackageEdition.package_edition_at_least("2027") {
+                limits := if args.len() >= 2 {
+                    match jet_comptime.Comptime.EncodingLite.encoding_limits_from_value(one(1)?) { Ok(limits) => limits, Err(message) => return Err(unsupported(&message, span)) }
+                } else { jet_comptime.Comptime.EncodingLite.EncodingLimitsLite.safe() }
+                match jet_comptime.Comptime.EncodingLite.json_canonical_jcs(v, &limits) {
+                    Ok(text) => Ok(CtValue.Present(Box.new(CtValue.Str(^text)))),
+                    Err(error) => Ok(CtValue.failed(Box.new(^error)))
+                }
+            } else { Ok(CtValue.Str(jet_comptime.Comptime.EncodingLite.json_canonical(v))) }
+        },
+        ("core.encoding.json", "events") => Ok(CtValue.Str(jet_comptime.Comptime.EncodingLite.json_events(one(0)?))),
+        ("core.encoding.jsonl", "parse") => {
+            text := as_string(one(0)?, span)?
+            match jet_comptime.Comptime.EncodingLite.jsonl_parse(text) { Ok(rows) => Ok(CtValue.Present(Box.new(CtValue.List(^rows)))), Err(e) => Ok(CtValue.failed(Box.new(^e))) }
+        },
+        ("core.encoding.jsonl", "to_string") => {
+            rows := match one(0)? { CtValue.List(xs) => xs.clone(), _ => return Err(unsupported("core.encoding.jsonl.to_string: expected a list", span)) }
+            Ok(CtValue.Str(jet_comptime.Comptime.EncodingLite.jsonl_render(&rows)))
+        },
+        ("core.encoding.csv", "parse") => {
+            text := as_string(one(0)?, span)?; (delimiter, header, skip_blank) := csv_options()?
+            match jet_comptime.Comptime.EncodingLite.csv_parse(text, &delimiter, header, skip_blank) {
+                Ok(rows) => Ok(CtValue.Present(Box.new(CtValue.List(rows.into_iter().map(fn(row) { CtValue.List(row.fields.into_iter().map(CtValue.Str).collect()) }).collect())))),
+                Err(e) => Ok(CtValue.failed(Box.new(CtValue.Str(^e))))
+            }
+        },
+        ("core.encoding.csv", "rows") => {
+            text := as_string(one(0)?, span)?; (delimiter, header, skip_blank) := csv_options()?
+            match jet_comptime.Comptime.EncodingLite.csv_parse(text, &delimiter, header, skip_blank) {
+                Ok(rows) => Ok(CtValue.Present(Box.new(CtValue.List(rows.into_iter().map(csv_row_value).collect())))),
+                Err(e) => Ok(CtValue.failed(Box.new(CtValue.Str(^e))))
+            }
+        },
+        ("core.encoding.csv", "to_string") => {
+            arg := one(0)?
+            rows := match csv_rows_from_records(arg) { Some(rows) => rows, None => as_string_rows(arg, span)? }
+            Ok(CtValue.Str(jet_comptime.Comptime.EncodingLite.csv_render(&rows)))
+        },
+        ("core.encoding.toml", "parse") => {
+            text := as_string(one(0)?, span)?
+            match jet_comptime.Comptime.EncodingLite.toml_parse(text) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(e) => Ok(CtValue.failed(Box.new(^e))) }
+        },
+        ("core.encoding.toml", "to_string") => Ok(CtValue.Str(jet_comptime.Comptime.EncodingLite.toml_render(one(0)?))),
+        ("core.encoding.yaml", "parse") => {
+            text := as_string(one(0)?, span)?
+            match jet_comptime.Comptime.EncodingLite.yaml_parse(text) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(e) => Ok(CtValue.failed(Box.new(^e))) }
+        },
+        ("core.encoding.yaml", "to_string") => Ok(CtValue.Str(jet_comptime.Comptime.EncodingLite.yaml_render(one(0)?))),
+        ("core.encoding.xml", "parse") => {
+            text := as_string(one(0)?, span)?
+            match jet_comptime.Comptime.EncodingLite.xml_parse(text) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(e) => Ok(CtValue.failed(Box.new(jet_comptime.Comptime.EncodingLite.xml_error_value(e)))) }
+        },
+        ("core.encoding.xml", "parse_with") => {
+            text := as_string(one(0)?, span)?
+            match jet_comptime.Comptime.EncodingLite.xml_parse_with(text, one(1)?) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(e) => Ok(CtValue.failed(Box.new(jet_comptime.Comptime.EncodingLite.xml_error_value(e)))) }
+        },
+        ("core.encoding.xml", "parse_bytes") => {
+            bytes := as_bytes(one(0)?, span)?
+            match jet_comptime.Comptime.EncodingLite.xml_parse_bytes(&bytes, args.get(1)) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(e) => Ok(CtValue.failed(Box.new(jet_comptime.Comptime.EncodingLite.xml_source_error_value(e)))) }
+        },
+        ("core.encoding.xml", "to_string") => Ok(CtValue.Str(jet_comptime.Comptime.EncodingLite.xml_render(one(0)?))),
+        ("core.encoding.xml", "to_bytes") => match jet_comptime.Comptime.EncodingLite.xml_to_bytes(one(0)?, args.get(1)) { Ok(bytes) => Ok(CtValue.Present(Box.new(CtValue.Bytes(^bytes)))), Err(error) => Ok(CtValue.failed(Box.new(^error))) },
+        ("core.encoding.xml", "root") => match jet_comptime.Comptime.EncodingLite.xml_root(one(0)?) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(e) => Ok(CtValue.failed(Box.new(^e))) },
+        ("core.encoding.xml", "expanded_name") => match jet_comptime.Comptime.EncodingLite.xml_expanded_name(one(0)?) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(e) => Ok(CtValue.failed(Box.new(^e))) },
+        ("core.encoding.xml", "attribute") => {
+            name := as_string(one(1)?, span)?
+            match jet_comptime.Comptime.EncodingLite.xml_attribute(one(0)?, name) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(e) => Ok(CtValue.failed(Box.new(^e))) }
+        },
+        ("core.encoding.xml", "content") => match jet_comptime.Comptime.EncodingLite.xml_content(one(0)?) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(e) => Ok(CtValue.failed(Box.new(^e))) },
+        ("core.encoding.cbor", "to_bytes") => match jet_comptime.Comptime.EncodingLite.cbor_encode(one(0)?) { Ok(bytes) => Ok(CtValue.Present(Box.new(CtValue.Bytes(^bytes)))), Err(error) => Ok(CtValue.failed(Box.new(jet_comptime.Comptime.EncodingLite.cbor_encoding_error_value(error)))) },
+        ("core.encoding.cbor", "to_bytes_canonical") => match jet_comptime.Comptime.EncodingLite.cbor_encode_canonical(one(0)?) { Ok(bytes) => Ok(CtValue.Present(Box.new(CtValue.Bytes(^bytes)))), Err(error) => Ok(CtValue.failed(Box.new(jet_comptime.Comptime.EncodingLite.cbor_encoding_error_value(error)))) },
+        ("core.encoding.cbor", "parse") => {
+            bytes := as_bytes(one(0)?, span)?
+            options := match jet_comptime.Comptime.EncodingLite.cbor_options(args.get(1)) { Ok(options) => options, Err(error) => return Ok(CtValue.failed(Box.new(jet_comptime.Comptime.EncodingLite.cbor_encoding_error_value(error)))) }
+            match jet_comptime.Comptime.EncodingLite.cbor_decode(&bytes, &options, false) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(error) => Ok(CtValue.failed(Box.new(jet_comptime.Comptime.EncodingLite.cbor_encoding_error_value(error)))) }
+        },
+        ("core.encoding.cbor", "encode") => jet_comptime.Comptime.EncodingLite.cbor_encode(one(0)?).map(CtValue.Bytes).map_err(fn(error) { unsupported(&error.reason, span) }),
+        ("core.encoding.cbor", "decode") => {
+            bytes := as_bytes(one(0)?, span)?; options := jet_comptime.Comptime.EncodingLite.cbor_safe_options()
+            match jet_comptime.Comptime.EncodingLite.cbor_decode(&bytes, &options, false) { Ok(v) => Ok(CtValue.Present(Box.new(^v))), Err(e) => Ok(CtValue.failed(Box.new(CtValue.Str(e.reason)))) }
+        },
+        // GATE #4494: clocks, sleeping and entropy use the actual shared native providers.
+        ("core.time", "now") => Ok(CtValue.Int(time_deadline_kernel.jet_std_time_now())),
+        ("core.time", "now_utc") => Ok(runtime_datetime_value(time_kernel.JetDateTime.now())),
+        ("core.time", "today") => Ok(runtime_date_value(time_kernel.JetDate.today_utc())),
+        ("core.time", "instant") => Ok(CtValue.Struct{type_name: "Instant", fields: [("start_ns", CtValue.Int(time_kernel.jet_time_monotonic_now_ns()))]}),
+        ("core.time", "sleep") => {
+            nanos := match one(0)? {
+                CtValue.Struct{type_name, fields} if type_name == Syntax.DURATION_TYPE => fields.iter().find_map(fn(pair) { match pair { ("ns", CtValue.Int(value)) => Some(value), _ => None } }).ok_or_else(fn() { unsupported("malformed Duration value", span) })?,
+                _ => return Err(unsupported("time.sleep expects a Duration", span))
+            }
+            time_deadline_kernel.jet_std_time_sleep_duration_ns(nanos)
+            Ok(CtValue.Unit)
+        },
+        ("core.time", "sleep_until") => {
+            deadline := match one(0)? {
+                CtValue.Struct{type_name, fields} if type_name == "Instant" => fields.iter().find_map(fn(pair) { match pair { ("start_ns", CtValue.Int(value)) => Some(value), _ => None } }).ok_or_else(fn() { unsupported("malformed Instant value", span) })?,
+                _ => return Err(unsupported("time.sleep_until expects an Instant", span))
+            }
+            time_deadline_kernel.jet_time_sleep_until(deadline)
+            Ok(CtValue.Unit)
+        },
+        ("core.handle", "duration.in") => apply_duration_in(&args, span),
+        ("core.handle", "realtime.next_deadline") => Ok(realtime_stream_field(one(0)?, "next_deadline", span)?.clone()),
+        ("core.handle", "realtime.receipt") => {
+            stream := one(0)?
+            field := fn(name) { realtime_stream_field(stream, name, span).map(Clone.clone) }
+            Ok(CtValue.Struct{type_name: "RealtimeReceipt", fields: [
+                ("requested_rate_hz", field("requested_rate_hz")?), ("requested_frames", field("requested_frames")?),
+                ("completed_callbacks", field("completed_callbacks")?), ("completed_frames", field("completed_frames")?),
+                ("missed", field("missed")?), ("max_lateness_ns", field("max_lateness_ns")?),
+                ("start_identity", field("start_identity")?), ("end_identity", field("end_identity")?)
+            ]})
+        },
+        ("core.handle", "realtime.cancel") => Ok(CtValue.Unit),
+        ("core.handle", "realtime.is_cancelled") => Ok(realtime_stream_field(one(0)?, "cancelled", span)?.clone()),
+        ("core.tasks", "timeout") => {
+            nanos := match one(0)? {
+                CtValue.Struct{type_name, fields} if type_name == Syntax.DURATION_TYPE => fields.iter().find_map(fn(pair) { match pair { ("ns", CtValue.Int(value)) => Some(value), _ => None } }).ok_or_else(fn() { unsupported("malformed Duration value", span) })?,
+                _ => return Err(unsupported("task.timeout expects a Duration", span))
+            }
+            time_deadline_kernel.jet_task_timeout_duration_ns(nanos)
+            Ok(CtValue.Unit)
+        },
+        ("core.time", "start") => Ok(CtValue.Struct{type_name: "Stopwatch", fields: [("start_ms", CtValue.Int(time_kernel.jet_time_monotonic_now_ns() / 1_000_000))]}),
+        ("core.testing", "fake_clock") => {
+            seed := match one(0)? { CtValue.Int(v) => v, _ => return Err(unsupported("testing.fake_clock expects an Int seed", span)) }
+            Ok(CtValue.Struct{type_name: Syntax.CLOCK_TYPE, fields: [("now", CtValue.Int(seed))]})
+        },
+        ("core.regex", "flags") => regex_flags(^args, span),
+        ("core.regex", "compile" | "compile_with") => regex_compile(^args, span),
+        ("core.regex", "literal") => {
+            pattern := as_string(one(0)?, span)?
+            jet_foundation.RegexSyntax.validate(pattern).map_err(fn(error) { Diagnostic.error("E0152", "this regex pattern is invalid at position {error.offset}", error.reason, "fix the pattern at the reported position", Some(span)) })?
+            Ok(CtValue.Struct{type_name: "__JetRegex", fields: [("pattern", CtValue.Str(pattern.to_string()))]})
+        },
+        ("core.regex", "escape") => regex_escape(^args, span),
+        ("core.regex", "is_match") => regex_is_match(^args, span),
+        ("core.regex", "full_match") => regex_full_match(^args, span),
+        ("core.regex", "find") => regex_find(^args, span),
+        ("core.regex", "find_all") => regex_find_all(^args, span),
+        ("core.regex", "matches") => regex_matches(^args, span),
+        ("core.regex", "split") => regex_split(^args, span),
+        ("core.regex", "split_limit") => regex_split_limit(^args, span),
+        ("core.regex", "replace") => regex_replace(^args, span),
+        ("core.regex", "replace_first") => regex_replace_first(^args, span),
+        ("core.regex", "match") => regex_match(^args, span),
+        ("core.math.random", "seed") => { seed := as_int(one(0)?, span)?; ambient_random_kernel.seed(seed); Ok(CtValue.Unit) },
+        ("core.math.random", "getrandbits") => { bits := as_int(one(0)?, span)?; Ok(CtValue.Int(ambient_random_kernel.getrandbits(bits))) },
+        ("core.math.random", "rng") => { seed := as_int(one(0)?, span)? as U64; Ok(CtValue.Struct{type_name: Syntax.RNG_TYPE, fields: [("state", CtValue.Int(seed as I64))]}) },
+        ("core.testing", "fake_data") => {
+            seed := match one(0)? { CtValue.Int(n) => n, _ => return Err(unsupported("testing.fake_data expects an Int seed", span)) }
+            fake := fake_data_kernel.jet_testing_fake_new(seed)
+            Ok(CtValue.Struct{type_name: Syntax.FAKE_TYPE, fields: [("state", CtValue.Int(fake.state as I64)), ("locale", CtValue.Int(fake.locale as I64))]})
+        },
+        ("core.testing", "compare") => {
+            cases := match one(0)? { CtValue.List(values) => values.clone(), _ => return Err(unsupported("testing.compare expects a List of cases", span)) }
+            reference := one(1)?.clone(); candidate := one(2)?.clone(); relation := as_string(one(3)?, span)?.to_string()
+            reference_values: [CtValue] = [].with_capacity(cases.len())
+            candidate_values: [CtValue] = [].with_capacity(cases.len())
+            case_ids: [CtValue] = [].with_capacity(cases.len())
+            first_difference: I64 = -1
+            unavailable: String? = None
+            for (index, input) in cases.iter().enumerate() {
+                reference_value := match jet_comptime.Comptime.try_ambient_standalone_closure(&reference, [input.clone()], span) {
+                    Some(Ok(value)) => value,
+                    Some(Err(error)) => { unavailable = Some(error.what.clone()); break },
+                    None => { unavailable = Some("reference callback has no interpreter callable owner"); break }
+                }
+                candidate_value := match jet_comptime.Comptime.try_ambient_standalone_closure(&candidate, [input.clone()], span) {
+                    Some(Ok(value)) => value,
+                    Some(Err(error)) => { unavailable = Some(error.what.clone()); break },
+                    None => { unavailable = Some("candidate callback has no interpreter callable owner"); break }
+                }
+                if !["typed_equality", "typed_failure", "ordered_effects"].contains(&relation) { unavailable = Some("unknown observation relation `{relation}`"); break }
+                if reference_value != candidate_value && first_difference < 0 { first_difference = index as I64 }
+                case_ids.push(CtValue.Str("case-{index}"))
+                reference_values.push(^reference_value)
+                candidate_values.push(^candidate_value)
+            }
+            (status, reason) := if unavailable is Some(error) { ("unavailable", ^error) }
+                else if cases.is_empty() { ("empty", "comparison corpus is empty") }
+                else if first_difference >= 0 { ("mismatch", "first differing observation is case-{first_difference}") }
+                else { ("matched", "{cases.len()} observed case(s) matched") }
+            Ok(CtValue.Struct{type_name: "TestComparison", fields: [
+                ("status", CtValue.Str(status)), ("relation", CtValue.Str(^relation)), ("source", CtValue.Str("core.testing")),
+                ("tool", CtValue.Str("interpreter")), ("target", CtValue.Str("comptime")), ("case_ids", CtValue.List(^case_ids)),
+                ("inputs", CtValue.List(^cases)), ("reference", CtValue.List(^reference_values)), ("candidate", CtValue.List(^candidate_values)),
+                ("first_difference", CtValue.Int(first_difference)), ("reason", CtValue.Str(^reason)), ("universal_proof", CtValue.Bool(false)), ("seed", CtValue.absent(Type.Int))
+            ]})
+        },
+        ("core.testing", "assert_equal") => {
+            fields := match one(0)? { CtValue.Struct{fields, ..} => fields, _ => return Err(unsupported("testing.assert_equal expects TestComparison", span)) }
+            status := fields.iter().find_map(fn(pair) { if pair.0 == "status" { Some(match pair.1 { CtValue.Str(status) => status == "matched", _ => false }) } else { None } })
+            universal := fields.iter().find_map(fn(pair) { if pair.0 == "universal_proof" { Some(pair.1 == CtValue.Bool(true)) } else { None } })
+            nonempty := fields.iter().find_map(fn(pair) { if pair.0 == "inputs" { Some(match pair.1 { CtValue.List(values) => !values.is_empty(), _ => false }) } else { None } })
+            Ok(CtValue.Bool(status == Some(true) && universal != Some(true) && nonempty == Some(true)))
+        },
+        ("core.testing", "status") => {
+            fields := match one(0)? { CtValue.Struct{fields, ..} => fields, _ => return Err(unsupported("testing.status expects TestComparison", span)) }
+            fields.iter().find_map(fn(pair) { if pair.0 == "status" { Some(pair.1.clone()) } else { None } }).ok_or_else(fn() { unsupported("malformed TestComparison status", span) })
+        },
+        ("core.math.random", "split") => {
+            seed := match one(0)? { CtValue.Int(n) => n as U64, _ => return Err(unsupported("random.split expects an Int seed", span)) }
+            mixed := ambient_random_kernel.split(seed as I64)
+            Ok(CtValue.Struct{type_name: Syntax.RNG_TYPE, fields: [("state", CtValue.Int(mixed as I64))]})
+        },
+        ("core.crypto.random", "bytes") => {
+            count := match one(0)? { CtValue.Int(value) => value, _ => return Err(unsupported("crypto.random.bytes expects an Int", span)) }
+            Ok(match crypto_entropy_kernel.jet_crypto_entropy_bytes(count) {
+                Ok(bytes) => CtValue.Present(Box.new(CtValue.Bytes(^bytes))),
+                Err(_) => CtValue.absent(Type.List(Box.new(Type.IntN{signed: false, bits: 8})))
+            })
+        },
+        ("core.text.fmt", "display") => { value := one(0)?; Ok(CtValue.Str(display_core_pure_value(value).unwrap_or_else(fn() { value.jet_show() }))) },
+        ("core.text.fmt", "debug") => { value := one(0)?; text := core_pure_parity.debug(value).ok_or_else(fn() { unsupported("value has no checked Debug representation", span) })?; Ok(CtValue.Str(^text)) },
+        ("core.text.fmt", "pretty") => Ok(CtValue.Str(fmt_kernel.jet_fmt_pretty(as_string(one(0)?, span)?))),
+        ("core.text.fmt", "number") => {
+            n := match one(0)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.number expects an Int", span)) }
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_number(n)))
+        },
+        ("core.text.fmt", "quantity") => Ok(CtValue.Str(fmt_kernel.jet_fmt_quantity(as_float(one(0)?, span)?))),
+        ("core.text.fmt", "decimal" | "grouped") => {
+            value := one(0)?
+            precision := match one(1)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.decimal precision must be Int", span)) }
+            formatted := match value {
+                CtValue.Float(value) if method == "grouped" => fmt_kernel.jet_fmt_grouped(value.as_f64(), precision),
+                CtValue.Float(value) => fmt_kernel.jet_fmt_decimal(value.as_f64(), precision),
+                CtValue.Int(value) => { text := value.to_string(); if method == "grouped" { fmt_kernel.jet_fmt_grouped_int(&text, precision) } else { fmt_kernel.jet_fmt_decimal_int(&text, precision) } },
+                CtValue.BigInt(value) => { text := value.to_string_rep(); if method == "grouped" { fmt_kernel.jet_fmt_grouped_int(&text, precision) } else { fmt_kernel.jet_fmt_decimal_int(&text, precision) } },
+                _ => return Err(unsupported("fmt.decimal expects a Float or Int", span))
+            }
+            Ok(CtValue.Str(^formatted))
+        },
+        ("core.text.fmt", "hex") => {
+            value := match one(0)? { CtValue.Int(value) => value.to_string(), CtValue.BigInt(value) => value.to_string_rep(), _ => return Err(unsupported("fmt.hex expects an Int", span)) }
+            width := match one(1)? { CtValue.Int(width) => width, _ => return Err(unsupported("fmt.hex width must be Int", span)) }
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_hex_decimal(&value, width)))
+        },
+        ("core.text.fmt", "sci") => {
+            value := as_float(one(0)?, span)?
+            precision := match one(1)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.sci precision must be Int", span)) }
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_sci(value, precision)))
+        },
+        ("core.text.fmt", "percent") => {
+            value := as_float(one(0)?, span)?
+            precision := match one(1)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.percent precision must be Int", span)) }
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_percent(value, precision)))
+        },
+        ("core.text.fmt", "bin" | "oct") => {
+            value := match one(0)? { CtValue.Int(value) => value.to_string(), CtValue.BigInt(value) => value.to_string_rep(), _ => return Err(unsupported("fmt radix selectors expect an Int", span)) }
+            Ok(CtValue.Str(if method == "bin" { fmt_kernel.jet_fmt_bin_decimal(&value) } else { fmt_kernel.jet_fmt_oct_decimal(&value) }))
+        },
+        ("core.text.fmt", "bytes") => {
+            n := match one(0)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.bytes expects an Int", span)) }
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_bytes(n)))
+        },
+        ("core.text.fmt", "duration") => {
+            ms := match one(0)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.duration expects an Int (ms)", span)) }
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_duration(ms)))
+        },
+        ("core.text.fmt", "ordinal") => {
+            n := match one(0)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.ordinal expects an Int", span)) }
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_ordinal(n)))
+        },
+        ("core.text.fmt", "plural") => {
+            count := match one(0)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.plural count must be Int", span)) }
+            singular := as_string(one(1)?, span)?.to_string(); plural := as_string(one(2)?, span)?.to_string()
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_plural(count, &singular, &plural)))
+        },
+        ("core.text.fmt", "pad") => {
+            text := as_string(one(0)?, span)?.to_string()
+            width := match one(1)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.pad width must be Int", span)) }
+            fill := as_string(one(2)?, span)?.to_string()
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_pad(&text, width, &fill)))
+        },
+        ("core.text.fmt", "pad_left") => {
+            text := as_string(one(0)?, span)?.to_string()
+            width := match one(1)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.pad_left width must be Int", span)) }
+            fill := as_string(one(2)?, span)?.to_string()
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_pad_left(&text, width, &fill)))
+        },
+        ("core.text.fmt", "pad_right") => {
+            text := as_string(one(0)?, span)?.to_string()
+            width := match one(1)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.pad_right width must be Int", span)) }
+            fill := as_string(one(2)?, span)?.to_string()
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_pad_right(&text, width, &fill)))
+        },
+        ("core.text.fmt", "pad_center") => {
+            text := as_string(one(0)?, span)?.to_string()
+            width := match one(1)? { CtValue.Int(n) => n, _ => return Err(unsupported("fmt.pad_center width must be Int", span)) }
+            fill := as_string(one(2)?, span)?.to_string()
+            Ok(CtValue.Str(fmt_kernel.jet_fmt_pad_center(&text, width, &fill)))
+        },
+        ("core.encoding.hex", "encode") => { bytes := as_bytes(one(0)?, span)?; Ok(CtValue.Str(hex_encode(^bytes))) },
+        ("core.encoding.hex", "encode_upper") => { bytes := as_bytes(one(0)?, span)?; Ok(CtValue.Str(encoding_base_kernel.jet_std_hex_encode_upper(&bytes))) },
+        ("core.encoding.hex", "decode") => {
+            s := as_string(one(0)?, span)?
+            Ok(match hex_decode(s) { Ok(bytes) => CtValue.Present(Box.new(CtValue.Bytes(^bytes))), Err(error) => CtValue.failed(Box.new(CtValue.Str(^error))) })
+        },
+        ("core.encoding.hex", "is_hex") => { s := as_string(one(0)?, span)?.to_string(); Ok(CtValue.Bool(encoding_base_kernel.jet_std_hex_is_hex(&s))) },
+        ("core.encoding.hex", "crc_hqx") => { bytes := as_bytes(one(0)?, span)?; value := as_int(one(1)?, span)?; Ok(CtValue.Int(encoding_base_kernel.jet_std_crc_hqx(&bytes, value))) },
+        ("core.encoding.hex", "crc32") => { bytes := as_bytes(one(0)?, span)?; Ok(CtValue.Int(encoding_base_kernel.jet_std_crc32(&bytes))) },
+        ("core.encoding.hex", "encode_sep") => { bytes := as_bytes(one(0)?, span)?; separator := as_string(one(1)?, span)?.to_string(); Ok(CtValue.Str(encoding_base_kernel.jet_std_hex_encode_sep(&bytes, &separator))) },
+        ("core.encoding.hex", "dump") => { bytes := as_bytes(one(0)?, span)?; Ok(CtValue.Str(encoding_base_kernel.jet_std_hex_dump(&bytes))) },
+        ("core.encoding.hex", "b2a_base64") | ("core.encoding.base64", "encode") => { bytes := as_bytes(one(0)?, span)?; Ok(CtValue.Str(base64_encode(^bytes))) },
+        ("core.encoding.base64", "encodebytes") => { bytes := as_bytes(one(0)?, span)?; Ok(CtValue.Str(encoding_base_kernel.jet_std_b64_encodebytes(&bytes))) },
+        ("core.encoding.base64", "decode" | "decodebytes") | ("core.encoding.hex", "a2b_base64") => {
+            s := as_string(one(0)?, span)?
+            allow_whitespace := method != "decode" || args_bool(1, false)?
+            allow_missing_padding := method == "decode" && args_bool(2, false)?
+            edition := jet_foundation.PackageEdition.package_edition()
+            Ok(match jet_foundation.base_encoding_dispatch.decode_base64(&edition, s, allow_whitespace, allow_missing_padding) {
+                Ok(bytes) => CtValue.Present(Box.new(CtValue.Bytes(^bytes))), Err(error) => CtValue.failed(Box.new(CtValue.Str(^error)))
+            })
+        },
+        ("core.encoding.base64", "encode_url") => { bytes := as_bytes(one(0)?, span)?; Ok(CtValue.Str(encoding_base_kernel.jet_std_b64url_encode(&bytes))) },
+        ("core.encoding.base64", "encode_url_padded") => { bytes := as_bytes(one(0)?, span)?; Ok(CtValue.Str(encoding_base_kernel.jet_std_b64url_encode_padded(&bytes))) },
+        ("core.encoding.base64", "pad") => { s := as_string(one(0)?, span)?.to_string(); Ok(CtValue.Str(encoding_base_kernel.jet_std_b64_pad(&s))) },
+        ("core.encoding.base64", "unpad") => { s := as_string(one(0)?, span)?.to_string(); Ok(CtValue.Str(encoding_base_kernel.jet_std_b64_unpad(&s))) },
+        ("core.encoding.base64", "decode_url") => {
+            s := as_string(one(0)?, span)?; allow_whitespace := args_bool(1, false)?; allow_padding := args_bool(2, false)?
+            edition := jet_foundation.PackageEdition.package_edition()
+            Ok(match jet_foundation.base_encoding_dispatch.decode_base64url(&edition, s, allow_whitespace, allow_padding) {
+                Ok(bytes) => CtValue.Present(Box.new(CtValue.Bytes(^bytes))), Err(error) => CtValue.failed(Box.new(CtValue.Str(^error)))
+            })
+        },
+        ("core.encoding.base32", "encode" | "b32encode") => { bytes := as_bytes(one(0)?, span)?; Ok(CtValue.Str(base32_encode(&bytes))) },
+        ("core.encoding.base32", "b32hexencode") => { bytes := as_bytes(one(0)?, span)?; Ok(CtValue.Str(encoding_base_kernel.jet_std_base32hex_encode(&bytes))) },
+        ("core.encoding.base32", "decode" | "b32decode") => {
+            s := as_string(one(0)?, span)?; allow_whitespace := args_bool(1, false)?; allow_missing_padding := args_bool(2, false)?; allow_lowercase := args_bool(3, false)?
+            edition := jet_foundation.PackageEdition.package_edition()
+            Ok(match jet_foundation.base_encoding_dispatch.decode_base32(&edition, s, allow_whitespace, allow_missing_padding, allow_lowercase) {
+                Ok(bytes) => CtValue.Present(Box.new(CtValue.Bytes(^bytes))), Err(e) => CtValue.failed(Box.new(CtValue.Str(^e)))
+            })
+        },
+        ("core.encoding.base32", "b32hexdecode") => {
+            s := as_string(one(0)?, span)?; edition := jet_foundation.PackageEdition.package_edition()
+            Ok(match jet_foundation.base_encoding_dispatch.decode_base32hex(&edition, s) { Ok(bytes) => CtValue.Present(Box.new(CtValue.Bytes(^bytes))), Err(e) => CtValue.failed(Box.new(CtValue.Str(^e))) })
+        },
+        ("core.net.url", "parse") => {
+            s := as_string(one(0)?, span)?
+            Ok(match jet_comptime.Comptime.UrlLite.parse(s) { Ok(u) => CtValue.Present(Box.new(url_parts_to_ct(&u))), Err(e) => CtValue.failed(Box.new(CtValue.Str(^e))) })
+        },
+        ("core.net.url", "from_parts") => {
+            scheme := as_string(one(0)?, span)?.to_string(); host := as_string(one(1)?, span)?.to_string(); path := as_string(one(2)?, span)?.to_string()
+            query := as_string_rows(one(3)?, span)?; fragment := as_string(one(4)?, span)?.to_string()
+            Ok(match jet_comptime.Comptime.UrlLite.from_parts(&scheme, &host, &path, &query, &fragment) { Ok(u) => CtValue.Present(Box.new(url_parts_to_ct(&u))), Err(e) => CtValue.failed(Box.new(CtValue.Str(^e))) })
+        },
+        ("core.net.url", "file") => { path := as_string(one(0)?, span)?; Ok(url_parts_to_ct(&jet_comptime.Comptime.UrlLite.file(path))) },
+        ("core.net.url", "data") => {
+            mime := one(0)?; text := as_string(one(1)?, span)?
+            rendered := match mime {
+                CtValue.Struct{type_name, fields} if type_name == "MIME" => {
+                    get := fn(name: String) { fields.iter().find(fn(pair) { pair.0 == name }).map(fn(pair) { pair.1.clone() }) }
+                    top := match get("top") { Some(CtValue.Str(s)) => s, _ => return Err(unsupported("core.net.url.data: mime.top must be String", span)) }
+                    sub := match get("sub") { Some(CtValue.Str(s)) => s, _ => return Err(unsupported("core.net.url.data: mime.sub must be String", span)) }
+                    out := "{top}/{sub}"
+                    if get("parameters") is Some(CtValue.List(params)) {
+                        for p in params {
+                            match p {
+                                CtValue.List(kv) if kv.len() == 2 => match (&kv[0], &kv[1]) {
+                                    (CtValue.Str(k), CtValue.Str(v)) => { out.push_str("; "); out.push_str(k); out.push('='); out.push_str(v) },
+                                    _ => {}
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
+                    ^out
+                },
+                _ => return Err(unsupported("core.net.url.data: first argument must be a MIME", span))
+            }
+            Ok(url_parts_to_ct(&jet_comptime.Comptime.UrlLite.data(&rendered, text)))
+        },
+        ("core.net.url", "query") => {
+            rows := as_string_rows(one(0)?, span)?
+            pairs: [(String,String)] = rows.iter().filter(fn(r) { !r.is_empty() }).map(fn(r) { (r.get(0).cloned().unwrap_or_default(), r.get(1).cloned().unwrap_or_default()) }).collect()
+            Ok(CtValue.Str(jet_comptime.Comptime.UrlLite.url_render_query(&pairs)))
+        },
+        ("core.net.url", "percent_encode") => { s := as_string(one(0)?, span)?; Ok(CtValue.Str(jet_comptime.Comptime.UrlLite.url_percent_encode(s, false))) },
+        ("core.net.url", "percent_decode") => {
+            s := as_string(one(0)?, span)?
+            Ok(match jet_comptime.Comptime.UrlLite.url_percent_decode_str(s) { Ok(v) => CtValue.Present(Box.new(CtValue.Str(^v))), Err(e) => CtValue.failed(Box.new(CtValue.Str(^e))) })
+        },
+        ("core.compute", _) => jet_comptime.Comptime.ComputeLite.apply(method, &args, span),
+        ("core.service", "tree") => jet_comptime.Comptime.ServicesLite.apply("tree", &args, span),
+        ("core.service", "runtime") => jet_comptime.Comptime.ServicesLite.apply("runtime", &args, span),
+        ("core.service", "state_store") => jet_comptime.Comptime.ServicesLite.apply("state_store", &args, span),
+        ("core.service", "restart_one_for_one") => jet_comptime.Comptime.ServicesLite.apply("restart_one_for_one", &args, span),
+        ("core.service", "restart_one_for_all") => jet_comptime.Comptime.ServicesLite.apply("restart_one_for_all", &args, span),
+        ("core.service", "restart_rest_for_one") => jet_comptime.Comptime.ServicesLite.apply("restart_rest_for_one", &args, span),
+        ("core.service", "delivery_at_most_once") => jet_comptime.Comptime.ServicesLite.apply("delivery_at_most_once", &args, span),
+        ("core.service", "delivery_durable") => jet_comptime.Comptime.ServicesLite.apply("delivery_durable", &args, span),
+        ("core.service", _) => jet_comptime.Comptime.ServicesLite.apply(method, &args, span),
+        ("core.jobs", _) => jet_comptime.Comptime.ServicesLite.apply_jobs(method, &args, span),
+        ("core.auth", _) if ["register_user", "password_login", "session_validate", "session_show", "session_user", "session_cookie", "session_id", "magic_link_issue", "magic_link_consume", "oauth_begin", "oauth_finish"].contains(method) => jet_comptime.Comptime.AuthLite.apply(method, &args, span),
+        ("core.sync", _) => jet_comptime.Comptime.SyncLite.apply(method, &args, span),
+        ("core.collections" | "core.collections.set", _) => jet_comptime.Comptime.CollectionEval.apply_core_collections(module, method, &args, span),
+        ("core.reactive", "signal" | "derived" | "computed" | "effect") => jet_comptime.Comptime.AppLite.apply_suite(module, method, &args, span, resolved_ret),
+        ("core.web", "openapi" | "page" | "form") => jet_comptime.Comptime.AppLite.apply_suite(module, method, &args, span, resolved_ret),
+        (_, _) if module.starts_with("core.web.") => jet_comptime.Comptime.AppLite.apply_suite(module, method, &args, span, resolved_ret),
+        ("app" | "core.web", _) if ["live", "subscribe", "invalidate", "transact_invalidate", "signal_push", "live_get", "live_show", "live_stats", "auth", "auth_oauth", "auth_routes", "auth_show", "sync"].contains(method) => {
+            if ["auth", "auth_oauth", "auth_routes", "auth_show"].contains(method) { jet_comptime.Comptime.AuthLite.apply(method, &args, span) }
+            else if method == "sync" { jet_comptime.Comptime.SyncLite.apply(method, &args, span) }
+            else { jet_comptime.Comptime.AppLite.apply(method, &args, span) }
+        },
+        ("core.data", "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev") => {
+            values := as_float_list(one(0)?, span)?
+            (checked, unchecked) := match method {
+                "sum" => (data_kernel.jet_data_sum_checked(&values), data_kernel.jet_data_sum),
+                "mean" => (data_kernel.jet_data_mean_checked(&values), data_kernel.jet_data_mean),
+                "min" => (data_kernel.jet_data_min_checked(&values), data_kernel.jet_data_min),
+                "max" => (data_kernel.jet_data_max_checked(&values), data_kernel.jet_data_max),
+                "median" => (data_kernel.jet_data_median_checked(&values), data_kernel.jet_data_median),
+                "variance" => (data_kernel.jet_data_variance_checked(&values), data_kernel.jet_data_variance),
+                _ => (data_kernel.jet_data_stddev_checked(&values), data_kernel.jet_data_stddev)
+            }
+            Ok(data_result_value(checked, fn() { unchecked(&values) }, data_float_value))
+        },
+        ("core.data", "quantile") => {
+            values := as_float_list(one(0)?, span)?; q := as_float(one(1)?, span)?
+            Ok(data_result_value(data_kernel.jet_data_quantile_checked(&values, q), fn() { data_kernel.jet_data_quantile(&values, q) }, data_float_value))
+        },
+        ("core.data", "rolling_mean") => {
+            values := as_float_list(one(0)?, span)?; width := as_int(one(1)?, span)?
+            Ok(data_result_value(data_kernel.jet_data_rolling_mean_checked(&values, width), fn() { data_kernel.jet_data_rolling_mean(&values, width) }, fn(means) { CtValue.List(means.into_iter().map(data_float_value).collect()) }))
+        },
+        ("core.data", "describe") => {
+            values := as_float_list(one(0)?, span)?
+            Ok(data_result_value_for_type(data_kernel.jet_data_describe_checked(&values), fn() { data_kernel.jet_data_describe(&values) }, data_summary_value, resolved_ret))
+        },
+        ("core.data", "status") => Ok(CtValue.List(data_kernel.jet_data_status().into_iter().map(fn(row) {
+            CtValue.Struct{type_name: "DataStatus", fields: [
+                ("step", CtValue.Str(row.step)), ("path", CtValue.Str(row.path)), ("clone_value", CtValue.Str(row.clone_value)),
+                ("ownership", CtValue.Str(row.ownership)), ("trust", CtValue.Str(row.trust)), ("fallback", CtValue.Str(row.fallback)), ("replacement", CtValue.Str(row.replacement))
+            ]}
+        }).collect())),
+        ("core.data", "require_bridge") => {
+            provider := as_string(one(0)?, span)?.to_string()
+            Ok(match data_kernel.jet_data_require_bridge(&provider) { Ok(()) => CtValue.Present(Box.new(CtValue.Unit)), Err(error) => CtValue.failed(Box.new(data_error_value(&error))) })
+        },
+        ("core.data", "bar_text") => {
+            groups := as_data_bar_groups(one(0)?, span)?
+            Ok(data_result_value_for_type(data_kernel.jet_data_bar_text_checked(&groups), fn() { data_kernel.jet_data_bar_text(&groups) }, CtValue.Str, resolved_ret))
+        },
+        ("core.data", "bar_svg") => {
+            groups := as_data_bar_groups(one(0)?, span)?
+            Ok(data_result_value_for_type(data_kernel.jet_data_bar_svg_checked(&groups), fn() { data_kernel.jet_data_bar_svg(&groups) }, CtValue.Str, resolved_ret))
+        },
+        ("core.data", "line_text" | "line_svg") => apply_data_line_call(method, ^args, resolved_ret, span),
+        ("core.files", _) | ("core.sys", _) | ("core.term", _) | ("core.net", _) | ("core.net.tls", _) => Err(Diagnostic.error(
+            "E3410",
+            "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate",
+            "ambient I/O (filesystem, environment, process) is not allowed in pure comptime evaluation",
+            "wrap the comptime binding in `#Impure(\"reason\") \{ … \}` and pass `--gate impure=allow` to the build",
+            Some(span)
+        )),
+        _ => {
+            if repl_mode && repl_native_only_module(module).is_some() -> return Err(repl_native_module_diag(module, method, span))
+            Err(unsupported("`{module}.{method}()`", span))
+        }
+    }
+}
 

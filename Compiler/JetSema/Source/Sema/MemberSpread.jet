@@ -1,408 +1,188 @@
-// PORT-PENDING 0434 crates-jet-sema-src-sema-hotswap-module-group: crates/jet-sema/src/Sema/MemberSpread.rs:1-404
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-SPREAD1=A: desugar `prefix.[a, b]` to field lists before inference.
-//RS 
-//RS use crate::Diagnostics::Span;
-//RS use crate::AST::{
-//RS     EnumLitArg, Expr, ForKind, Item, LambdaBody, ProgramBundle, Stmt, StrPart, TypedLitBody,
-//RS };
-//RS 
-//RS /// Expand every `MemberSpread` in the bundle before registration/checking.
-//RS pub fn desugar_member_spreads(bundle: &mut ProgramBundle) {
-//RS     for module in &mut bundle.modules {
-//RS         for item in &mut module.items {
-//RS             match item {
-//RS                 Item::Func(f) => desugar_stmts(&mut f.body),
-//RS                 Item::Const(c) => desugar_expr(&mut c.value),
-//RS                 Item::Test(t) => {
-//RS                     if let Some(e) = &mut t.name_expr {
-//RS                         desugar_expr(e);
-//RS                     }
-//RS                     if let Some(e) = &mut t.faults_expr {
-//RS                         desugar_expr(e);
-//RS                     }
-//RS                     if let Some(e) = &mut t.expected_fail_expr {
-//RS                         desugar_expr(e);
-//RS                     }
-//RS                     desugar_stmts(&mut t.body);
-//RS                 }
-//RS                 Item::Struct(s) => {
-//RS                     for m in &mut s.methods {
-//RS                         desugar_stmts(&mut m.body);
-//RS                     }
-//RS                     for b in &mut s.trait_impls {
-//RS                         for m in &mut b.methods {
-//RS                             desugar_stmts(&mut m.body);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Item::Enum(e) => {
-//RS                     for m in &mut e.methods {
-//RS                         desugar_stmts(&mut m.body);
-//RS                     }
-//RS                 }
-//RS                 Item::Impl(i) => {
-//RS                     for m in &mut i.methods {
-//RS                         desugar_stmts(&mut m.body);
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn desugar_stmts(stmts: &mut [Stmt]) {
-//RS     for stmt in stmts.iter_mut() {
-//RS         desugar_stmt(stmt);
-//RS     }
-//RS }
-//RS 
-//RS fn desugar_stmt(stmt: &mut Stmt) {
-//RS     match stmt {
-//RS         Stmt::Expr(e)
-//RS         | Stmt::Yield(e, _)
-//RS         | Stmt::DeferClose { close: e, .. }
-//RS         | Stmt::BreakValue(e, _) => desugar_expr(e),
-//RS         Stmt::BreakLabelValue(_, _, e, _) => desugar_expr(e),
-//RS         Stmt::Val(b) => desugar_expr(&mut b.init),
-//RS         Stmt::Assign { value, .. } => desugar_expr(value),
-//RS         Stmt::Return(Some(e), _) => desugar_expr(e),
-//RS         Stmt::While { cond, body, .. } => {
-//RS             desugar_expr(cond);
-//RS             desugar_stmts(body);
-//RS         }
-//RS         Stmt::For { kind, body, .. } => {
-//RS             match kind {
-//RS                 ForKind::Range {
-//RS                     start, end, step, ..
-//RS                 } => {
-//RS                     desugar_expr(start);
-//RS                     desugar_expr(end);
-//RS                     if let Some(s) = step {
-//RS                         desugar_expr(s);
-//RS                     }
-//RS                 }
-//RS                 ForKind::In { collection, step } => {
-//RS                     desugar_expr(collection);
-//RS                     if let Some(s) = step {
-//RS                         desugar_expr(s);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             desugar_stmts(body);
-//RS         }
-//RS         Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             desugar_expr(subject);
-//RS             for arm in arms {
-//RS                 desugar_expr(&mut arm.cond);
-//RS                 desugar_stmts(&mut arm.body);
-//RS             }
-//RS             if let Some(eb) = else_body {
-//RS                 desugar_stmts(eb);
-//RS             }
-//RS         }
-//RS         Stmt::CountedLoop {
-//RS             init,
-//RS             cond,
-//RS             step,
-//RS             body,
-//RS             ..
-//RS         } => {
-//RS             desugar_expr(&mut init.init);
-//RS             desugar_expr(cond);
-//RS             if let Some(s) = step {
-//RS                 desugar_stmt(s);
-//RS             }
-//RS             desugar_stmts(body);
-//RS         }
-//RS         Stmt::Loop { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::Live { body, .. } => desugar_stmts(body),
-//RS         Stmt::Unsafe {
-//RS             audit_expr, body, ..
-//RS         } => {
-//RS             if let Some(e) = audit_expr {
-//RS                 desugar_expr(e);
-//RS             }
-//RS             desugar_stmts(body);
-//RS         }
-//RS         Stmt::Impure {
-//RS             reason_expr, body, ..
-//RS         } => {
-//RS             if let Some(e) = reason_expr {
-//RS                 desugar_expr(e);
-//RS             }
-//RS             desugar_stmts(body);
-//RS         }
-//RS         Stmt::AssumeDet {
-//RS             reason_expr, body, ..
-//RS         } => {
-//RS             desugar_expr(reason_expr);
-//RS             desugar_stmts(body);
-//RS         }
-//RS         Stmt::ComptimeIf {
-//RS             cond,
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             desugar_expr(cond);
-//RS             desugar_stmts(then_body);
-//RS             if let Some(eb) = else_body {
-//RS                 desugar_stmts(eb);
-//RS             }
-//RS         }
-//RS         Stmt::ContextBlock { fields, body, .. } => {
-//RS             for (_, value, _) in fields {
-//RS                 desugar_expr(value);
-//RS             }
-//RS             desugar_stmts(body);
-//RS         }
-//RS         Stmt::ScopeMember { args, body, .. } => {
-//RS             for a in args {
-//RS                 desugar_expr(a);
-//RS             }
-//RS             desugar_stmts(body);
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn fields_from_spread(base: &Expr, members: &[(String, Span)], span: Span) -> Vec<Expr> {
-//RS     members
-//RS         .iter()
-//RS         .map(|(name, member_span)| {
-//RS             Expr::Field(
-//RS                 Box::new(base.clone()),
-//RS                 name.clone(),
-//RS                 Span::new(span.start, member_span.end),
-//RS             )
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Expand `MemberSpread`; splice fields into parent lists.
-//RS fn desugar_expr(expr: &mut Expr) {
-//RS     // List splice must see MemberSpread before it is rewritten to ListLit.
-//RS     if let Expr::ListLit(elems, _) = expr {
-//RS         let mut out = Vec::new();
-//RS         for elem in std::mem::take(elems) {
-//RS             match elem {
-//RS                 Expr::MemberSpread {
-//RS                     mut base,
-//RS                     members,
-//RS                     span,
-//RS                 } => {
-//RS                     desugar_expr(&mut base);
-//RS                     out.extend(fields_from_spread(&base, &members, span));
-//RS                 }
-//RS                 mut other => {
-//RS                     desugar_expr(&mut other);
-//RS                     out.push(other);
-//RS                 }
-//RS             }
-//RS         }
-//RS         *elems = out;
-//RS         return;
-//RS     }
-//RS 
-//RS     if let Expr::MemberSpread {
-//RS         base,
-//RS         members,
-//RS         span,
-//RS     } = expr
-//RS     {
-//RS         desugar_expr(base);
-//RS         let fields = fields_from_spread(base, members, *span);
-//RS         *expr = Expr::ListLit(fields, *span);
-//RS         return;
-//RS     }
-//RS 
-//RS     match expr {
-//RS         Expr::Spread(inner, _)
-//RS         | Expr::Paren(inner, _)
-//RS         | Expr::Copy(inner, _)
-//RS         | Expr::Unary(_, inner, _)
-//RS         | Expr::Deref(inner, _)
-//RS         | Expr::RawOf(inner, _)
-//RS         | Expr::Present(inner, _)
-//RS         | Expr::Ok(inner, _)
-//RS         | Expr::Err(inner, _)
-//RS         | Expr::Tainted(inner, _, _)
-//RS         | Expr::Field(inner, _, _)
-//RS         | Expr::Place(inner, _, _) => desugar_expr(inner),
-//RS         Expr::Try(inner, _, _, note) => {
-//RS             desugar_expr(inner);
-//RS             if let Some(note) = note {
-//RS                 desugar_expr(note);
-//RS             }
-//RS         }
-//RS         Expr::Binary(_, a, b, _) => {
-//RS             desugar_expr(a);
-//RS             desugar_expr(b);
-//RS         }
-//RS         Expr::CompareChain { operands, .. } => {
-//RS             for op in operands {
-//RS                 desugar_expr(op);
-//RS             }
-//RS         }
-//RS         Expr::OptField { base, .. } => desugar_expr(base),
-//RS         Expr::Call(call) => {
-//RS             for arg in &mut call.args {
-//RS                 desugar_expr(&mut arg.expr);
-//RS             }
-//RS         }
-//RS         Expr::MethodCall { receiver, args, .. } => {
-//RS             desugar_expr(receiver);
-//RS             for arg in args {
-//RS                 desugar_expr(&mut arg.expr);
-//RS             }
-//RS         }
-//RS         Expr::CallValue { callee, args, .. } => {
-//RS             desugar_expr(callee);
-//RS             for arg in args {
-//RS                 desugar_expr(&mut arg.expr);
-//RS             }
-//RS         }
-//RS         Expr::Index { base, index, .. } => {
-//RS             desugar_expr(base);
-//RS             desugar_expr(index);
-//RS         }
-//RS         Expr::Slice {
-//RS             base,
-//RS             start,
-//RS             end,
-//RS             range,
-//RS             ..
-//RS         } => {
-//RS             desugar_expr(base);
-//RS             desugar_expr(start);
-//RS             desugar_expr(end);
-//RS             if let Some(r) = range {
-//RS                 desugar_expr(r);
-//RS             }
-//RS         }
-//RS         Expr::Range { start, end, .. } => {
-//RS             desugar_expr(start);
-//RS             desugar_expr(end);
-//RS         }
-//RS         Expr::StructLit { fields, .. } => {
-//RS             for (_, _, value) in fields {
-//RS                 desugar_expr(value);
-//RS             }
-//RS         }
-//RS         Expr::TypedLit { body, .. } => match body {
-//RS             TypedLitBody::Fields(fields) => {
-//RS                 for (_, _, value) in fields {
-//RS                     desugar_expr(value);
-//RS                 }
-//RS             }
-//RS             TypedLitBody::Elements(elems) => {
-//RS                 for e in elems {
-//RS                     desugar_expr(e);
-//RS                 }
-//RS             }
-//RS             TypedLitBody::Entries(entries) => {
-//RS                 for (k, v) in entries {
-//RS                     desugar_expr(k);
-//RS                     desugar_expr(v);
-//RS                 }
-//RS             }
-//RS             TypedLitBody::Value(inner) => desugar_expr(inner),
-//RS             TypedLitBody::ByteText(_) => {}
-//RS             TypedLitBody::Empty => {}
-//RS         },
-//RS         Expr::EnumLit { args, .. } => {
-//RS             for arg in args {
-//RS                 match arg {
-//RS                     EnumLitArg::Positional(e) => desugar_expr(e),
-//RS                     EnumLitArg::Named { expr, .. } => desugar_expr(expr),
-//RS                 }
-//RS             }
-//RS         }
-//RS         Expr::MapLit(entries, _) => {
-//RS             for (k, v) in entries {
-//RS                 desugar_expr(k);
-//RS                 desugar_expr(v);
-//RS             }
-//RS         }
-//RS         Expr::TupleLit(fields, _, _) => {
-//RS             for (_, value) in fields {
-//RS                 desugar_expr(value);
-//RS             }
-//RS         }
-//RS         Expr::Lambda(lam) => match &mut lam.body {
-//RS             LambdaBody::Block(body) => desugar_stmts(body),
-//RS             LambdaBody::Expr(e) => desugar_expr(e),
-//RS         },
-//RS         Expr::If {
-//RS             cond,
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS             ..
-//RS         } => {
-//RS             desugar_expr(cond);
-//RS             desugar_stmts(then_body);
-//RS             desugar_expr(then_value);
-//RS             desugar_stmts(else_body);
-//RS             desugar_expr(else_value);
-//RS         }
-//RS         Expr::OrFallback {
-//RS             value, fallback, ..
-//RS         } => {
-//RS             desugar_expr(value);
-//RS             match fallback {
-//RS                 crate::AST::OrFallback::Value(e) | crate::AST::OrFallback::Return(Some(e), _) => {
-//RS                     desugar_expr(e);
-//RS                 }
-//RS                 crate::AST::OrFallback::Block { body, value, .. } => {
-//RS                     desugar_stmts(body);
-//RS                     if let Some(value) = value {
-//RS                         desugar_expr(value);
-//RS                     }
-//RS                 }
-//RS                 crate::AST::OrFallback::Panic { args, .. } => {
-//RS                     for arg in args {
-//RS                         desugar_expr(&mut arg.expr);
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         Expr::PatternTest { subject, .. } => desugar_expr(subject),
-//RS         Expr::Str(parts, _) => {
-//RS             for part in parts {
-//RS                 if let StrPart::Interp(inner, _) = part {
-//RS                     desugar_expr(inner);
-//RS                 }
-//RS             }
-//RS         }
-//RS         Expr::PtrFromAddr { addr, .. } => desugar_expr(addr),
-//RS         _ => {}
-//RS     }
-//RS }
-// END-PORT-PENDING 0434 crates/jet-sema/src/Sema/MemberSpread.rs:1-404
+// D-SPREAD1=A: expand prefix.[a, b] before inference.
+use jet_foundation.[Span, EnumLitArg, Expr, ForKind, Item, LambdaBody, ProgramBundle, Stmt, StrPart, TypedLitBody]
 
+// Rust: crates/jet-sema/src/Sema/MemberSpread.rs:9
+pub fn desugar_member_spreads(bundle: &ProgramBundle) {
+    loop &module in bundle.modules {
+        loop &item in module.items {
+            if item == {
+                .Func(f) -> desugar_stmts(&f.body)
+                .Const(c) -> desugar_expr(&c.value)
+                .Test(t) -> {
+                    if t.name_expr == .Val(e) { desugar_expr(&e) }
+                    if t.faults_expr == .Val(e) { desugar_expr(&e) }
+                    if t.expected_fail_expr == .Val(e) { desugar_expr(&e) }
+                    desugar_stmts(&t.body)
+                }
+                .Struct(s) -> {
+                    loop &m in s.methods { desugar_stmts(&m.body) }
+                    loop &b in s.trait_impls { loop &m in b.methods { desugar_stmts(&m.body) } }
+                }
+                .Enum(e) -> { loop &m in e.methods { desugar_stmts(&m.body) } }
+                .Impl(i) -> { loop &m in i.methods { desugar_stmts(&m.body) } }
+                _ -> {}
+            }
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/MemberSpread.rs:53
+fn desugar_stmts(stmts: &[Stmt]) { loop &stmt in stmts { desugar_stmt(&stmt) } }
+// Rust: crates/jet-sema/src/Sema/MemberSpread.rs:59
+fn desugar_stmt(stmt: &Stmt) {
+    if stmt == {
+        .Expr(e) | .Yield(e, _) | .DeferClose(close: e, ..) | .BreakValue(e, _) -> desugar_expr(&e)
+        .BreakLabelValue(_, _, e, _) -> desugar_expr(&e)
+        .Val(b) -> desugar_expr(&b.init)
+        .Assign(value: value, ..) -> desugar_expr(&value)
+        .Return(.Val(e), _) -> desugar_expr(&e)
+        .While(cond: cond, body: body, ..) -> { desugar_expr(&cond); desugar_stmts(&body) }
+        .For(kind: kind, body: body, ..) -> {
+            if kind == {
+                .Range(start: start, end: end, step: step, ..) -> {
+                    desugar_expr(&start); desugar_expr(&end)
+                    if step == .Val(s) { desugar_expr(&s) }
+                }
+                .In(collection: collection, step: step) -> {
+                    desugar_expr(&collection)
+                    if step == .Val(s) { desugar_expr(&s) }
+                }
+            }
+            desugar_stmts(&body)
+        }
+        .Switch(subject: subject, arms: arms, else_body: else_body, ..)
+            | .ComptimeSwitch(subject: subject, arms: arms, else_body: else_body, ..) -> {
+            desugar_expr(&subject)
+            loop &arm in arms { desugar_expr(&arm.cond); desugar_stmts(&arm.body) }
+            if else_body == .Val(eb) { desugar_stmts(&eb) }
+        }
+        .CountedLoop(init: init, cond: cond, step: step, body: body, ..) -> {
+            desugar_expr(&init.init); desugar_expr(&cond)
+            if step == .Val(s) { desugar_stmt(&s) }
+            desugar_stmts(&body)
+        }
+        .Loop(body: body, ..) | .Reactive(body: body, ..) | .Shield(body: body, ..) | .Switched(body: body, ..)
+            | .Region(body: body, ..) | .Policy(body: body, ..) | .TaskGroup(body: body, ..) | .Layout(body: body, ..)
+            | .AuthorityScope(body: body, ..) | .Transact(body: body, ..) | .ComptimeBlock(body: body, ..)
+            | .Live(body: body, ..) -> desugar_stmts(&body)
+        .Unsafe(audit_expr: audit_expr, body: body, ..) -> {
+            if audit_expr == .Val(e) { desugar_expr(&e) }
+            desugar_stmts(&body)
+        }
+        .Impure(reason_expr: reason_expr, body: body, ..) -> {
+            if reason_expr == .Val(e) { desugar_expr(&e) }
+            desugar_stmts(&body)
+        }
+        .AssumeDet(reason_expr: reason_expr, body: body, ..) -> { desugar_expr(&reason_expr); desugar_stmts(&body) }
+        .ComptimeIf(cond: cond, then_body: then_body, else_body: else_body, ..) -> {
+            desugar_expr(&cond); desugar_stmts(&then_body)
+            if else_body == .Val(eb) { desugar_stmts(&eb) }
+        }
+        .ContextBlock(fields: fields, body: body, ..) -> {
+            loop &(_, value, _) in fields { desugar_expr(&value) }
+            desugar_stmts(&body)
+        }
+        .ScopeMember(args: args, body: body, ..) -> {
+            loop &a in args { desugar_expr(&a) }
+            desugar_stmts(&body)
+        }
+        _ -> {}
+    }
+}
+// Rust: crates/jet-sema/src/Sema/MemberSpread.rs:190
+fn fields_from_spread(base: Expr, members: [(String, Span)], span: Span) -> [Expr] {
+    fields := [Expr]{}
+    loop (name, member_span) in members {
+        fields.push(Expr.Field(base.clone(), name.clone(), Span.new(span.start, member_span.end)))
+    }
+    ^fields
+}
+// Rust: crates/jet-sema/src/Sema/MemberSpread.rs:204
+fn desugar_expr(expr: &Expr) {
+    // Splice lists before a spread becomes its own ListLit.
+    if expr == .ListLit(elems, _) {
+        input :: ^elems
+        out := [Expr]{}
+        loop &elem in input {
+            if elem == .MemberSpread(base: base, members: members, span: span) {
+                desugar_expr(&base)
+                out.extend(fields_from_spread(base, members, span))
+            } else {
+                desugar_expr(&elem)
+                out.push(^elem)
+            }
+        }
+        elems = ^out
+        return
+    }
+    if expr == .MemberSpread(base: base, members: members, span: span) {
+        desugar_expr(&base)
+        fields :: fields_from_spread(base, members, span)
+        expr = Expr.ListLit(fields, span)
+        return
+    }
+    if expr == {
+        .Spread(inner, _) | .Paren(inner, _) | .Copy(inner, _) | .Unary(_, inner, _) | .Deref(inner, _)
+            | .RawOf(inner, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Tainted(inner, _, _)
+            | .Field(inner, _, _) | .Place(inner, _, _) -> desugar_expr(&inner)
+        .Try(inner, _, _, note) -> {
+            desugar_expr(&inner)
+            if note == .Val(note) { desugar_expr(&note) }
+        }
+        .Binary(_, a, b, _) -> { desugar_expr(&a); desugar_expr(&b) }
+        .CompareChain(operands: operands, ..) -> { loop &op in operands { desugar_expr(&op) } }
+        .OptField(base: base, ..) -> desugar_expr(&base)
+        .Call(call) -> { loop &arg in call.args { desugar_expr(&arg.expr) } }
+        .MethodCall(receiver: receiver, args: args, ..) -> {
+            desugar_expr(&receiver)
+            loop &arg in args { desugar_expr(&arg.expr) }
+        }
+        .CallValue(callee: callee, args: args, ..) -> {
+            desugar_expr(&callee)
+            loop &arg in args { desugar_expr(&arg.expr) }
+        }
+        .Index(base: base, index: index, ..) -> { desugar_expr(&base); desugar_expr(&index) }
+        .Slice(base: base, start: start, end: end, range: range, ..) -> {
+            desugar_expr(&base); desugar_expr(&start); desugar_expr(&end)
+            if range == .Val(r) { desugar_expr(&r) }
+        }
+        .Range(start: start, end: end, ..) -> { desugar_expr(&start); desugar_expr(&end) }
+        .StructLit(fields: fields, ..) -> { loop &(_, _, value) in fields { desugar_expr(&value) } }
+        .TypedLit(body: body, ..) -> {
+            if body == {
+                .Fields(fields) -> { loop &(_, _, value) in fields { desugar_expr(&value) } }
+                .Elements(elems) -> { loop &e in elems { desugar_expr(&e) } }
+                .Entries(entries) -> { loop &(k, v) in entries { desugar_expr(&k); desugar_expr(&v) } }
+                .Value(inner) -> desugar_expr(&inner)
+                .ByteText(_) | .Empty -> {}
+            }
+        }
+        .EnumLit(args: args, ..) -> {
+            loop &arg in args {
+                if arg == { .Positional(e) -> desugar_expr(&e) .Named(expr: e, ..) -> desugar_expr(&e) }
+            }
+        }
+        .MapLit(entries, _) -> { loop &(k, v) in entries { desugar_expr(&k); desugar_expr(&v) } }
+        .TupleLit(fields, _, _) -> { loop &(_, value) in fields { desugar_expr(&value) } }
+        .Lambda(lam) -> { if lam.body == { .Block(body) -> desugar_stmts(&body) .Expr(e) -> desugar_expr(&e) } }
+        .If(cond: cond, then_body: then_body, then_value: then_value, else_body: else_body, else_value: else_value, ..) -> {
+            desugar_expr(&cond); desugar_stmts(&then_body); desugar_expr(&then_value)
+            desugar_stmts(&else_body); desugar_expr(&else_value)
+        }
+        .OrFallback(value: value, fallback: fallback, ..) -> {
+            desugar_expr(&value)
+            if fallback == {
+                .Value(e) | .Return(.Val(e), _) -> desugar_expr(&e)
+                .Block(body: body, value: value, ..) -> {
+                    desugar_stmts(&body)
+                    if value == .Val(value) { desugar_expr(&value) }
+                }
+                .Panic(args: args, ..) -> { loop &arg in args { desugar_expr(&arg.expr) } }
+                _ -> {}
+            }
+        }
+        .PatternTest(subject: subject, ..) -> desugar_expr(&subject)
+        .Str(parts, _) -> { loop &part in parts { if part == .Interp(inner, _) { desugar_expr(&inner) } } }
+        .PtrFromAddr(addr: addr, ..) -> desugar_expr(&addr)
+        _ -> {}
+    }
+}

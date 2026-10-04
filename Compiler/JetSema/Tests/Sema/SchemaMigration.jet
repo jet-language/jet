@@ -1,0 +1,121 @@
+use jet_sema.Sema.SchemaMigration.[check_schema_migrations]
+use jet_sema.Traits.[TraitRegistry]
+use jet_sema.Generics.[DECODE]
+use jet_foundation.[Span, Field, StructDef, Type, Item, MigrationDecl, MigrationOp, Expr]
+use std.sync.[Mutex]
+use core.files as files
+use std.env as env
+use std.process as process
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:818
+// GATE #4494: native mutex serializes process-global environment fixtures.
+ENV_LOCK :: Mutex.new(())
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:820
+fn zero() -> Span Never! { Span.new(0, 0) }
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:824
+fn field(name: String, ty: Type) -> Field Never! {
+    Field{is_pub: false, is_package_pub: false, name: name, name_span: zero(), ty: ty, ty_span: zero(), serde_markers: [], redact: false, computed: None, default: None, default_ct: None}
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:840
+fn published_struct(name: String, fields: [Field]) -> Item Never! {
+    Item.Struct(StructDef{span: zero(), is_pub: false, is_package_pub: false, name: name, name_span: zero(), type_params: [], fields: fields, state: None, methods: [], cli_bindings: [], trait_impls: [], derives: [], auto_derive_default: true, is_published_schema: true, published_schema_span: Val(zero()), is_single_use: false, single_use_span: None, is_must_use: false, must_use_span: None, layout: None, layout_span: None, serde_markers: [], type_markers: [], validate_block: [], validate_span: None})
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:870
+fn migration(type_name: String, ops: [MigrationOp]) -> Item Never! {
+    Item.Migration(MigrationDecl{type_name: type_name, type_span: zero(), ops: ops, span: zero()})
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:881
+fn run_with_snapshot(snapshot: String, items: [Item]) -> [String] -[Env, FS]> {
+    run_with_snapshot_and_registry(snapshot, items, TraitRegistry.default())
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:888
+fn run_with_snapshot_and_registry(snapshot: String, items: [Item], reg: TraitRegistry) -> [String] -[Env, FS]> {
+    guard :: ENV_LOCK.lock().unwrap()
+    // GATE #4494: process id and process environment use native std primitives.
+    dir :: env.temp_dir().join("jet_schema_unit_{process.id()}_{snapshot.len()}")
+    files.mkdir(dir, true).unwrap()
+    type_line :: snapshot.lines().find_map(fn(line) { line.strip_prefix("type = ") }).unwrap()
+    type_name := type_line.trim() // #4303
+    files.write(dir.join("{type_name}.snapshot"), snapshot).unwrap()
+    env.set_var("JET_SCHEMA_CACHE_DIR", dir)
+    diags :: check_schema_migrations(items, OSPath.from("."), reg)
+    env.remove_var("JET_SCHEMA_CACHE_DIR")
+    _ :: files.remove_dir_all(dir).ok()
+    loop diagnostic in diags -> diagnostic.code
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:915
+SNAP_ONE :: "schema_version = 1\ntype = Rec\npublished_version = 1.0.0\nfield name: String\n"
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:919
+#Test("unchanged_struct_is_clean") {
+    items :: [published_struct("Rec", [field("name", Type.String)])]
+    assert(run_with_snapshot(SNAP_ONE, items).is_empty())
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:925
+#Test("reorder_is_not_a_break") {
+    snap :: "schema_version = 1\ntype = Rec\npublished_version = 1.0.0\nfield name: String\nfield age: Int\n"
+    items :: [published_struct("Rec", [field("age", Type.Int), field("name", Type.String)])]
+    assert(run_with_snapshot(snap, items).is_empty())
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:936
+#Test("dropped_field_without_migration_is_e0910") {
+    items :: [published_struct("Rec", [field("kept", Type.Int)])]
+    snap :: "schema_version = 1\ntype = Rec\npublished_version = 1.0.0\nfield name: String\nfield kept: Int\n"
+    assert(run_with_snapshot(snap, items) == ["E0910"])
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:944
+#Test("remove_op_bridges_a_drop") {
+    items :: [published_struct("Rec", []), migration("Rec", [MigrationOp.Remove{field: "name", field_span: zero()}])]
+    assert(run_with_snapshot(SNAP_ONE, items).is_empty())
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:959
+#Test("added_field_needs_add_op") {
+    items :: [published_struct("Rec", [field("name", Type.String), field("extra", Type.Bool)])]
+    assert(run_with_snapshot(SNAP_ONE, items) == ["E0910"])
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:969
+#Test("add_op_bridges_a_new_field") {
+    items :: [published_struct("Rec", [field("name", Type.String), field("extra", Type.Bool)]), migration("Rec", [MigrationOp.Add{field: "extra", field_span: zero(), ty: Type.Bool, ty_span: zero(), default: Expr.Bool(false, zero()), default_span: zero(), default_fn: None}])]
+    assert(run_with_snapshot(SNAP_ONE, items).is_empty())
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:997
+#Test("add_op_on_decode_only_struct_needs_decodable_field_type") {
+    item :: published_struct("Rec", [field("name", Type.String), field("payload", Type.Named("EncodeOnlyType"))])
+    structure := if item == { .Struct(s) -> s; else -> panic("expected struct") }
+    structure.derives = [(DECODE, zero())]
+    items :: [Item.Struct(structure), migration("Rec", [MigrationOp.Add{field: "payload", field_span: zero(), ty: Type.Named("EncodeOnlyType"), ty_span: zero(), default: Expr.Bool(false, zero()), default_span: zero(), default_fn: None}])]
+    reg := TraitRegistry.default()
+    &reg.local_types.insert("EncodeOnlyType")
+    assert(run_with_snapshot_and_registry(SNAP_ONE, items, reg) == ["E0910"])
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:1034
+#Test("type_change_without_op_is_e0910") {
+    items :: [published_struct("Rec", [field("name", Type.Int)])]
+    assert(run_with_snapshot(SNAP_ONE, items) == ["E0910"])
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:1041
+#Test("change_op_with_inline_via_bridges") {
+    items :: [published_struct("Rec", [field("name", Type.Int)]), migration("Rec", [MigrationOp.Change{field: "name", field_span: zero(), from_ty: Type.String, from_span: zero(), to_ty: Type.Int, to_span: zero(), converter: Val(Expr.Int(0, zero(), None, None)), converter_span: Val(zero()), conv_fn: None}])]
+    assert(run_with_snapshot(SNAP_ONE, items).is_empty())
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:1063
+#Test("change_op_without_converter_is_e0910") {
+    items :: [published_struct("Rec", [field("name", Type.Int)]), migration("Rec", [MigrationOp.Change{field: "name", field_span: zero(), from_ty: Type.String, from_span: zero(), to_ty: Type.Int, to_span: zero(), converter: None, converter_span: None, conv_fn: None}])]
+    assert(run_with_snapshot(SNAP_ONE, items) == ["E0910"])
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:1086
+#Test("remove_op_on_present_field_is_e0910") {
+    items :: [published_struct("Rec", [field("name", Type.String)]), migration("Rec", [MigrationOp.Remove{field: "name", field_span: zero()}])]
+    assert(run_with_snapshot(SNAP_ONE, items) == ["E0910"])
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:1102
+#Test("no_prior_snapshot_is_clean") {
+    guard :: ENV_LOCK.lock().unwrap()
+    dir :: env.temp_dir().join("jet_schema_unit_empty_{process.id()}")
+    files.mkdir(dir, true).unwrap()
+    env.set_var("JET_SCHEMA_CACHE_DIR", dir)
+    items :: [published_struct("Brand", [field("x", Type.Int)])]
+    reg :: TraitRegistry.default()
+    diags :: check_schema_migrations(items, OSPath.from("."), reg)
+    env.remove_var("JET_SCHEMA_CACHE_DIR")
+    _ :: files.remove_dir_all(dir).ok()
+    assert(diags.is_empty())
+}

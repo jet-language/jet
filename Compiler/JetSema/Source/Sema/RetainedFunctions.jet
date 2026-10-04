@@ -1,6 +1,6 @@
 // The Loader owner is shared by every graph snapshot. Callable locations are
 // indices of its actual AST, not another function store or a publication replay.
-use jet_foundation.[Func, Item, ProgramBundle, Span, SymbolID, SymbolKind, TFuncKind, Diagnostic, foundation_member_name, symbol_id]
+use jet_foundation.[Func, Item, ProgramBundle, Span, SymbolID, SymbolKind, TFuncKind, Diagnostic, ast_program, foundation_member_name, symbol_id]
 struct SemaRetainedFunctionLocation { module: Int, path: [Int], method: Int?, trait_block: Int? }
 fn sema_retained_input_owner(inputs: [SemaRegistrationModuleInput]) -> Shared<ProgramBundle> Never! {
     loop input in inputs { if input.bundle_owner == .Val(owner) -> return owner }
@@ -23,6 +23,46 @@ fn sema_retained_publish_prepared_input(input: SemaRegistrationModuleInput) Neve
     permit.value.modules[index].imports = input.program.imports
     permit.value.modules[index].items = input.program.items
     permit.value.modules[index].rule_facts = input.program.rule_facts
+}
+fn sema_retained_erase_templates(items: [Item]) -> [Item] Never! {
+    kept := [Item]{}
+    loop item in items {
+        if item == {
+            .GenericModule(_) | .ModuleAlias(_) -> {}
+            .CodeModule(module) -> {
+                prepared := module
+                if module.body == .Val(body) -> prepared.body = Val(sema_retained_erase_templates(body))
+                &kept.push(Item.CodeModule{value: ^prepared})
+            }
+            else -> &kept.push(item)
+        }
+    }
+    kept
+}
+fn sema_retained_has_generic_items(items: [Item]) -> Bool Never! {
+    loop item in items {
+        if item == {
+            .GenericModule(_) | .ModuleAlias(_) -> return true
+            .CodeModule(module) -> {
+                if module.instance_identity != None -> return true
+                if module.body == .Val(body) && sema_retained_has_generic_items(body) -> return true
+            }
+            else -> {}
+        }
+    }
+    false
+}
+fn sema_retained_finish_generics(owner: Shared<ProgramBundle>, registry: SemaGenericModuleRegistry) Never! {
+    permit := owner.guard_edit()
+    loop index in 0..<permit.value.modules.len() {
+        if !sema_retained_has_generic_items(permit.value.modules[index].items) -> next
+        // This is the actual pre-check generic identity/template pass on the
+        // retained items. It is not a writable registration-body replacement.
+        prepared := ast_program()
+        prepared.items = permit.value.modules[index].items
+        finished :: sema_generic_modules_finish(prepared, registry)
+        permit.value.modules[index].items = sema_retained_erase_templates(finished.items)
+    }
 }
 fn sema_retained_qualified_name(scope: String, name: String) -> String Never! {
     if scope == "" || name.starts_with("__jet_") -> return name

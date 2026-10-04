@@ -1,1741 +1,759 @@
-// PORT-PENDING 0600 crates-jet-comptime-src-comptime-serviceslite-slice-1795: crates/jet-comptime/src/Comptime/ServicesLite.rs:1795-3531
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn runtime_to_queue_payload(
-//RS     value: &MirRuntimeValue,
-//RS     span: Span,
-//RS ) -> Result<JetJobPayload, Diagnostic> {
-//RS     let MirRuntimeValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("JobPayload", span));
-//RS     };
-//RS     if type_name != "JobPayload" {
-//RS         return Err(unsupported("JobPayload", span));
-//RS     }
-//RS     let type_id = queue_text(queue_field(fields, type_name, "type_id", span)?, type_name, "type_id", span)?;
-//RS     let bytes = match queue_field(fields, type_name, "bytes", span)? {
-//RS         MirRuntimeValue::Bytes(bytes) => bytes.clone(),
-//RS         _ => return Err(unsupported("JobPayload.bytes", span)),
-//RS     };
-//RS     let publish = queue_bool(queue_field(fields, type_name, "publish", span)?, type_name, "publish", span)?;
-//RS     JetJobPayload::new(type_id, bytes, publish).map_err(|_| unsupported("JobPayload", span))
-//RS }
-//RS 
-//RS fn queue_result_to_runtime(result: JetJobResult) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "JobResult".to_string(),
-//RS         fields: vec![
-//RS             ("type_id".to_string(), MirRuntimeValue::String(result.type_id)),
-//RS             ("bytes".to_string(), MirRuntimeValue::Bytes(result.bytes)),
-//RS             ("publish".to_string(), MirRuntimeValue::Bool(result.publish)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn runtime_to_queue_result(
-//RS     value: &MirRuntimeValue,
-//RS     span: Span,
-//RS ) -> Result<JetJobResult, Diagnostic> {
-//RS     let MirRuntimeValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("JobResult", span));
-//RS     };
-//RS     if type_name != "JobResult" {
-//RS         return Err(unsupported("JobResult", span));
-//RS     }
-//RS     let type_id = queue_text(queue_field(fields, type_name, "type_id", span)?, type_name, "type_id", span)?;
-//RS     let bytes = match queue_field(fields, type_name, "bytes", span)? {
-//RS         MirRuntimeValue::Bytes(bytes) => bytes.clone(),
-//RS         _ => return Err(unsupported("JobResult.bytes", span)),
-//RS     };
-//RS     let publish = queue_bool(queue_field(fields, type_name, "publish", span)?, type_name, "publish", span)?;
-//RS     JetJobResult::new(type_id, bytes, publish).map_err(|_| unsupported("JobResult", span))
-//RS }
-//RS 
-//RS fn queue_error_to_runtime(error: JetJobError) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "JobError".to_string(),
-//RS         fields: vec![
-//RS             ("type_id".to_string(), MirRuntimeValue::String(error.type_id)),
-//RS             ("reason".to_string(), MirRuntimeValue::String(error.reason)),
-//RS             ("detail".to_string(), queue_optional_string(error.detail, "String")),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn runtime_to_queue_error(
-//RS     value: &MirRuntimeValue,
-//RS     span: Span,
-//RS ) -> Result<JetJobError, Diagnostic> {
-//RS     let MirRuntimeValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("JobError", span));
-//RS     };
-//RS     if type_name != "JobError" {
-//RS         return Err(unsupported("JobError", span));
-//RS     }
-//RS     let detail = match queue_field(fields, type_name, "detail", span)? {
-//RS         MirRuntimeValue::Absent { .. } => None,
-//RS         MirRuntimeValue::Present(value) => match value.as_ref() {
-//RS             MirRuntimeValue::String(value) => Some(value.clone()),
-//RS             _ => return Err(unsupported("JobError.detail", span)),
-//RS         },
-//RS         MirRuntimeValue::String(value) => Some(value.clone()),
-//RS         _ => return Err(unsupported("JobError.detail", span)),
-//RS     };
-//RS     JetJobError::new(
-//RS         queue_text(queue_field(fields, type_name, "type_id", span)?, type_name, "type_id", span)?,
-//RS         queue_text(queue_field(fields, type_name, "reason", span)?, type_name, "reason", span)?,
-//RS         detail,
-//RS     )
-//RS     .map_err(|_| unsupported("JobError", span))
-//RS }
-//RS 
-//RS fn queue_claim_to_runtime(claim: JetJobQueueClaim) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "JobQueueClaim".to_string(),
-//RS         fields: vec![
-//RS             ("receipt".to_string(), queue_receipt_to_runtime(claim.receipt)),
-//RS             ("payload".to_string(), queue_payload_to_runtime(claim.payload)),
-//RS             ("worker".to_string(), MirRuntimeValue::String(claim.worker)),
-//RS             ("lease_token".to_string(), MirRuntimeValue::String(claim.lease_token)),
-//RS             ("lease_until_ms".to_string(), MirRuntimeValue::Int(claim.lease_until_ms)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn runtime_to_queue_claim(
-//RS     value: &MirRuntimeValue,
-//RS     span: Span,
-//RS ) -> Result<JetJobQueueClaim, Diagnostic> {
-//RS     let MirRuntimeValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("JobQueueClaim", span));
-//RS     };
-//RS     if type_name != "JobQueueClaim" {
-//RS         return Err(unsupported("JobQueueClaim", span));
-//RS     }
-//RS     Ok(JetJobQueueClaim {
-//RS         receipt: runtime_to_queue_receipt(queue_field(fields, type_name, "receipt", span)?, span)?,
-//RS         payload: runtime_to_queue_payload(queue_field(fields, type_name, "payload", span)?, span)?,
-//RS         worker: queue_text(queue_field(fields, type_name, "worker", span)?, type_name, "worker", span)?,
-//RS         lease_token: queue_text(queue_field(fields, type_name, "lease_token", span)?, type_name, "lease_token", span)?,
-//RS         lease_until_ms: queue_int(
-//RS             queue_field(fields, type_name, "lease_until_ms", span)?,
-//RS             type_name,
-//RS             "lease_until_ms",
-//RS             span,
-//RS         )?,
-//RS     })
-//RS }
-//RS 
-//RS fn queue_event_to_runtime(event: JetJobQueueEvent) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "JobQueueEvent".to_string(),
-//RS         fields: vec![
-//RS             ("sequence".to_string(), MirRuntimeValue::Int(event.sequence)),
-//RS             ("state".to_string(), queue_state_to_runtime(event.state)),
-//RS             ("attempts".to_string(), MirRuntimeValue::Int(event.attempts as i64)),
-//RS             ("timestamp_ms".to_string(), MirRuntimeValue::Int(event.timestamp_ms)),
-//RS             ("reason".to_string(), queue_optional_string(event.reason, "String")),
-//RS             ("duration_ms".to_string(), queue_optional_int(event.duration_ms)),
-//RS             ("worker".to_string(), queue_optional_string(event.worker, "String")),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn queue_record_to_runtime(record: JetJobQueueRecord) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "JobQueueRecord".to_string(),
-//RS         fields: vec![
-//RS             ("receipt".to_string(), queue_receipt_to_runtime(record.receipt)),
-//RS             (
-//RS                 "payload".to_string(),
-//RS                 record
-//RS                     .payload
-//RS                     .map(queue_payload_to_runtime)
-//RS                     .map(|value| MirRuntimeValue::Present(Box::new(value)))
-//RS                     .unwrap_or_else(|| mir_absent("JobPayload")),
-//RS             ),
-//RS             (
-//RS                 "result".to_string(),
-//RS                 record
-//RS                     .result
-//RS                     .map(queue_result_to_runtime)
-//RS                     .map(|value| MirRuntimeValue::Present(Box::new(value)))
-//RS                     .unwrap_or_else(|| mir_absent("JobResult")),
-//RS             ),
-//RS             (
-//RS                 "error".to_string(),
-//RS                 record
-//RS                     .error
-//RS                     .map(queue_error_to_runtime)
-//RS                     .map(|value| MirRuntimeValue::Present(Box::new(value)))
-//RS                     .unwrap_or_else(|| mir_absent("JobError")),
-//RS             ),
-//RS             ("started_at_ms".to_string(), queue_optional_int(record.started_at_ms)),
-//RS             ("finished_at_ms".to_string(), queue_optional_int(record.finished_at_ms)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn queue_status_to_runtime(status: JetJobQueueStatus) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "JobQueueStatus".to_string(),
-//RS         fields: vec![
-//RS             ("queue".to_string(), MirRuntimeValue::String(status.queue)),
-//RS             ("authority".to_string(), MirRuntimeValue::String(status.authority)),
-//RS             ("queued".to_string(), MirRuntimeValue::Int(status.queued as i64)),
-//RS             ("running".to_string(), MirRuntimeValue::Int(status.running as i64)),
-//RS             ("retrying".to_string(), MirRuntimeValue::Int(status.retrying as i64)),
-//RS             ("completed".to_string(), MirRuntimeValue::Int(status.completed as i64)),
-//RS             ("failed".to_string(), MirRuntimeValue::Int(status.failed as i64)),
-//RS             ("dead_lettered".to_string(), MirRuntimeValue::Int(status.dead_lettered as i64)),
-//RS             ("cancelled".to_string(), MirRuntimeValue::Int(status.cancelled as i64)),
-//RS             ("depth".to_string(), MirRuntimeValue::Int(status.depth as i64)),
-//RS             ("wait_ms".to_string(), MirRuntimeValue::Int(status.wait_ms as i64)),
-//RS             ("throughput".to_string(), MirRuntimeValue::Int(status.throughput as i64)),
-//RS             ("capacity".to_string(), MirRuntimeValue::Int(status.capacity as i64)),
-//RS             ("paused".to_string(), MirRuntimeValue::Bool(status.paused)),
-//RS             ("freshness_ms".to_string(), MirRuntimeValue::Int(status.freshness_ms as i64)),
-//RS         ],
-//RS     }
-//RS }
-//RS fn queue_open(
-//RS     endpoint: &JetServiceEndpoint,
-//RS     name: &str,
-//RS ) -> Result<JetJobQueue<'static>, JetServiceError> {
-//RS     JetJobQueue::open_default(endpoint, name.to_string(), JetJobQueuePolicy::default())
-//RS }
-//RS 
-//RS fn map_err(err: JetServiceError) -> MirRuntimeValue {
-//RS     let (variant, message) = match err {
-//RS         JetServiceError::Full(m) => ("Full", m),
-//RS         JetServiceError::Ambiguous(m) => ("Ambiguous", m),
-//RS         JetServiceError::Unknown(m) => ("Unknown", m),
-//RS         JetServiceError::NotStarted(m) => ("NotStarted", m),
-//RS         JetServiceError::Policy(m) => ("Policy", m),
-//RS         JetServiceError::Unavailable(m) => ("Unavailable", m),
-//RS         JetServiceError::Partitioned(m) => ("Partitioned", m),
-//RS         JetServiceError::Revoked(m) => ("Revoked", m),
-//RS         JetServiceError::Stale(m) => ("Stale", m),
-//RS         JetServiceError::Expired(m) => ("Expired", m),
-//RS     };
-//RS     MirRuntimeValue::Enum {
-//RS         type_name: "ServiceError".to_string(),
-//RS         variant: variant.to_string(),
-//RS         args: vec![(None, MirRuntimeValue::String(message))],
-//RS     }
-//RS }
-//RS 
-//RS fn delivery_state_to_runtime(state: JetDeliveryState) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Enum {
-//RS         type_name: "DeliveryState".to_string(),
-//RS         variant: state.jet_show(),
-//RS         args: Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn delivery_record_to_runtime(delivery: JetDelivery) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "Delivery".to_string(),
-//RS         fields: vec![
-//RS             ("id".to_string(), MirRuntimeValue::String(delivery.id)),
-//RS             ("store".to_string(), MirRuntimeValue::String(delivery.store)),
-//RS             ("duplicate".to_string(), MirRuntimeValue::Bool(delivery.duplicate)),
-//RS             ("authority".to_string(), MirRuntimeValue::String(delivery.authority)),
-//RS             ("generation".to_string(), MirRuntimeValue::Int(delivery.generation)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn runtime_to_delivery_record(value: &MirRuntimeValue, span: Span) -> Result<JetDelivery, Diagnostic> {
-//RS     let MirRuntimeValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("Delivery", span));
-//RS     };
-//RS     if type_name != "Delivery" {
-//RS         return Err(unsupported("Delivery", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find_map(|(field, value)| (field == name).then_some(value))
-//RS             .ok_or_else(|| unsupported(&format!("Delivery.{name}"), span))
-//RS     };
-//RS     let id = match field("id")? {
-//RS         MirRuntimeValue::String(value) => value.clone(),
-//RS         _ => return Err(unsupported("Delivery.id", span)),
-//RS     };
-//RS     let store = match field("store")? {
-//RS         MirRuntimeValue::String(value) => value.clone(),
-//RS         _ => return Err(unsupported("Delivery.store", span)),
-//RS     };
-//RS     let duplicate = match field("duplicate")? {
-//RS         MirRuntimeValue::Bool(value) => *value,
-//RS         _ => return Err(unsupported("Delivery.duplicate", span)),
-//RS     };
-//RS     let authority = match field("authority")? {
-//RS         MirRuntimeValue::String(value) => value.clone(),
-//RS         _ => return Err(unsupported("Delivery.authority", span)),
-//RS     };
-//RS     let generation = match field("generation")? {
-//RS         MirRuntimeValue::Int(value) => *value,
-//RS         _ => return Err(unsupported("Delivery.generation", span)),
-//RS     };
-//RS     Ok(JetDelivery {
-//RS         id,
-//RS         store,
-//RS         duplicate,
-//RS         authority,
-//RS         generation,
-//RS     })
-//RS }
-//RS 
-//RS fn delivery_receipt_to_runtime(receipt: JetDeliveryReceipt) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "DeliveryReceipt".to_string(),
-//RS         fields: vec![
-//RS             ("id".to_string(), MirRuntimeValue::String(receipt.id)),
-//RS             ("state".to_string(), delivery_state_to_runtime(receipt.state)),
-//RS             ("attempts".to_string(), MirRuntimeValue::Int(receipt.attempts)),
-//RS             (
-//RS                 "retention_until".to_string(),
-//RS                 MirRuntimeValue::Int(receipt.retention_until),
-//RS             ),
-//RS             ("deadline".to_string(), MirRuntimeValue::Int(receipt.deadline)),
-//RS             (
-//RS                 "idempotency_key".to_string(),
-//RS                 MirRuntimeValue::String(receipt.idempotency_key),
-//RS             ),
-//RS             ("duplicate".to_string(), MirRuntimeValue::Bool(receipt.duplicate)),
-//RS             ("authority".to_string(), MirRuntimeValue::String(receipt.authority)),
-//RS             ("generation".to_string(), MirRuntimeValue::Int(receipt.generation)),
-//RS             ("signature".to_string(), MirRuntimeValue::String(receipt.signature)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn delivery_event_to_runtime(event: JetDeliveryEvent) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "DeliveryEvent".to_string(),
-//RS         fields: vec![
-//RS             ("sequence".to_string(), MirRuntimeValue::Int(event.sequence)),
-//RS             ("state".to_string(), delivery_state_to_runtime(event.state)),
-//RS             ("attempts".to_string(), MirRuntimeValue::Int(event.attempts)),
-//RS             ("timestamp".to_string(), MirRuntimeValue::Int(event.timestamp)),
-//RS             ("signature".to_string(), MirRuntimeValue::String(event.signature)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn service_runtime_field<'a>(
-//RS     fields: &'a [(String, MirRuntimeValue)],
-//RS     type_name: &str,
-//RS     name: &str,
-//RS     span: Span,
-//RS ) -> Result<&'a MirRuntimeValue, Diagnostic> {
-//RS     fields
-//RS         .iter()
-//RS         .find_map(|(field, value)| (field == name).then_some(value))
-//RS         .ok_or_else(|| unsupported(&format!("{type_name}.{name}"), span))
-//RS }
-//RS 
-//RS fn service_runtime_text(
-//RS     fields: &[(String, MirRuntimeValue)],
-//RS     type_name: &str,
-//RS     name: &str,
-//RS     span: Span,
-//RS ) -> Result<String, Diagnostic> {
-//RS     match service_runtime_field(fields, type_name, name, span)? {
-//RS         MirRuntimeValue::String(value) => Ok(value.clone()),
-//RS         _ => Err(unsupported(&format!("{type_name}.{name}"), span)),
-//RS     }
-//RS }
-//RS 
-//RS fn service_runtime_int(
-//RS     fields: &[(String, MirRuntimeValue)],
-//RS     type_name: &str,
-//RS     name: &str,
-//RS     span: Span,
-//RS ) -> Result<i64, Diagnostic> {
-//RS     match service_runtime_field(fields, type_name, name, span)? {
-//RS         MirRuntimeValue::Int(value) => Ok(*value),
-//RS         _ => Err(unsupported(&format!("{type_name}.{name}"), span)),
-//RS     }
-//RS }
-//RS 
-//RS fn service_runtime_bool(
-//RS     fields: &[(String, MirRuntimeValue)],
-//RS     type_name: &str,
-//RS     name: &str,
-//RS     span: Span,
-//RS ) -> Result<bool, Diagnostic> {
-//RS     match service_runtime_field(fields, type_name, name, span)? {
-//RS         MirRuntimeValue::Bool(value) => Ok(*value),
-//RS         _ => Err(unsupported(&format!("{type_name}.{name}"), span)),
-//RS     }
-//RS }
-//RS 
-//RS fn runtime_to_delivery_state(value: &MirRuntimeValue, span: Span) -> Result<JetDeliveryState, Diagnostic> {
-//RS     let MirRuntimeValue::Enum {
-//RS         type_name,
-//RS         variant,
-//RS         args,
-//RS     } = value
-//RS     else {
-//RS         return Err(unsupported("DeliveryState", span));
-//RS     };
-//RS     if type_name != "DeliveryState" || !args.is_empty() {
-//RS         return Err(unsupported("DeliveryState", span));
-//RS     }
-//RS     match variant.as_str() {
-//RS         "Pending" => Ok(JetDeliveryState::Pending),
-//RS         "Accepted" => Ok(JetDeliveryState::Accepted),
-//RS         "Delivering" => Ok(JetDeliveryState::Delivering),
-//RS         "Delivered" => Ok(JetDeliveryState::Delivered),
-//RS         "DeadLettered" => Ok(JetDeliveryState::DeadLettered),
-//RS         "Cancelled" => Ok(JetDeliveryState::Cancelled),
-//RS         _ => Err(unsupported("DeliveryState variant", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn runtime_to_delivery_receipt(value: &MirRuntimeValue, span: Span) -> Result<JetDeliveryReceipt, Diagnostic> {
-//RS     let MirRuntimeValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("DeliveryReceipt", span));
-//RS     };
-//RS     if type_name != "DeliveryReceipt" {
-//RS         return Err(unsupported("DeliveryReceipt", span));
-//RS     }
-//RS     Ok(JetDeliveryReceipt {
-//RS         id: service_runtime_text(fields, "DeliveryReceipt", "id", span)?,
-//RS         state: runtime_to_delivery_state(
-//RS             service_runtime_field(fields, "DeliveryReceipt", "state", span)?,
-//RS             span,
-//RS         )?,
-//RS         attempts: service_runtime_int(fields, "DeliveryReceipt", "attempts", span)?,
-//RS         retention_until: service_runtime_int(fields, "DeliveryReceipt", "retention_until", span)?,
-//RS         deadline: service_runtime_int(fields, "DeliveryReceipt", "deadline", span)?,
-//RS         idempotency_key: service_runtime_text(fields, "DeliveryReceipt", "idempotency_key", span)?,
-//RS         duplicate: service_runtime_bool(fields, "DeliveryReceipt", "duplicate", span)?,
-//RS         authority: service_runtime_text(fields, "DeliveryReceipt", "authority", span)?,
-//RS         generation: service_runtime_int(fields, "DeliveryReceipt", "generation", span)?,
-//RS         signature: service_runtime_text(fields, "DeliveryReceipt", "signature", span)?,
-//RS     })
-//RS }
-//RS 
-//RS fn runtime_to_delivery_event(value: &MirRuntimeValue, span: Span) -> Result<JetDeliveryEvent, Diagnostic> {
-//RS     let MirRuntimeValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("DeliveryEvent", span));
-//RS     };
-//RS     if type_name != "DeliveryEvent" {
-//RS         return Err(unsupported("DeliveryEvent", span));
-//RS     }
-//RS     Ok(JetDeliveryEvent {
-//RS         sequence: service_runtime_int(fields, "DeliveryEvent", "sequence", span)?,
-//RS         state: runtime_to_delivery_state(
-//RS             service_runtime_field(fields, "DeliveryEvent", "state", span)?,
-//RS             span,
-//RS         )?,
-//RS         attempts: service_runtime_int(fields, "DeliveryEvent", "attempts", span)?,
-//RS         timestamp: service_runtime_int(fields, "DeliveryEvent", "timestamp", span)?,
-//RS         signature: service_runtime_text(fields, "DeliveryEvent", "signature", span)?,
-//RS     })
-//RS }
-//RS 
-//RS fn runtime_to_service_error(value: &MirRuntimeValue, span: Span) -> Result<JetServiceError, Diagnostic> {
-//RS     let MirRuntimeValue::Enum {
-//RS         type_name,
-//RS         variant,
-//RS         args,
-//RS     } = value
-//RS     else {
-//RS         return Err(unsupported("ServiceError", span));
-//RS     };
-//RS     if type_name != "ServiceError" || args.len() != 1 {
-//RS         return Err(unsupported("ServiceError", span));
-//RS     }
-//RS     let MirRuntimeValue::String(message) = &args[0].1 else {
-//RS         return Err(unsupported("ServiceError message", span));
-//RS     };
-//RS     let message = message.clone();
-//RS     Ok(match variant.as_str() {
-//RS         "Full" => JetServiceError::Full(message),
-//RS         "Ambiguous" => JetServiceError::Ambiguous(message),
-//RS         "Unknown" => JetServiceError::Unknown(message),
-//RS         "NotStarted" => JetServiceError::NotStarted(message),
-//RS         "Policy" => JetServiceError::Policy(message),
-//RS         "Unavailable" => JetServiceError::Unavailable(message),
-//RS         "Partitioned" => JetServiceError::Partitioned(message),
-//RS         "Revoked" => JetServiceError::Revoked(message),
-//RS         "Stale" => JetServiceError::Stale(message),
-//RS         "Expired" => JetServiceError::Expired(message),
-//RS         _ => return Err(unsupported("ServiceError variant", span)),
-//RS     })
-//RS }
-//RS 
-//RS /// D-SERVICE-RECEIPT2=A / I9: the evaluator and resident JIT marshal service
-//RS /// values back into the Prelude types and call the same `JetShow` impls as AOT.
-//RS pub fn service_display_value_runtime(value: &MirRuntimeValue) -> Option<String> {
-//RS     let span = Span::new(0, 0);
-//RS     match value {
-//RS         MirRuntimeValue::Enum { type_name, .. } if type_name == "DeliveryState" => {
-//RS             Some(runtime_to_delivery_state(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Enum { type_name, .. } if type_name == "ServiceError" => {
-//RS             Some(runtime_to_service_error(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Struct { type_name, .. } if type_name == "Delivery" => {
-//RS             Some(runtime_to_delivery_record(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Struct { type_name, .. } if type_name == "DeliveryReceipt" => {
-//RS             Some(runtime_to_delivery_receipt(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Struct { type_name, .. } if type_name == "DeliveryEvent" => {
-//RS             Some(runtime_to_delivery_event(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Struct { type_name, .. } if type_name == "ServiceEndpoint" => {
-//RS             Some(runtime_to_endpoint(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Struct { type_name, .. } if type_name == "ServiceRuntime" => {
-//RS             Some(runtime_value_to_service_runtime(value, span).ok()?.jet_show())
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// I9: extend the service display bridge for every named service value whose
-//RS /// Prelude `JetShow` implementation crosses a resident handle boundary.
-//RS pub fn service_show_value_runtime(value: &MirRuntimeValue) -> Option<String> {
-//RS     let span = Span::new(0, 0);
-//RS     match value {
-//RS         MirRuntimeValue::Enum { type_name, .. } if type_name == "ServiceRestart" => {
-//RS             Some(runtime_to_restart(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Enum { type_name, .. } if type_name == "ServiceDelivery" => {
-//RS             Some(runtime_to_delivery(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Enum { type_name, .. } if type_name == "TaskOutcome" => {
-//RS             Some(runtime_to_task_outcome(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Enum { type_name, .. } if type_name == "TaskStatus" => {
-//RS             Some(runtime_to_task_status(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Struct { type_name, .. } if type_name == "ServiceStateStore" => {
-//RS             Some(runtime_to_state_store(value, span).ok()?.jet_show())
-//RS         }
-//RS         MirRuntimeValue::Struct { type_name, .. } if type_name == "ServiceUpgradeReceipt" => {
-//RS             Some(runtime_to_upgrade_receipt(value, span).ok()?.jet_show())
-//RS         }
-//RS         _ => service_display_value_runtime(value),
-//RS     }
-//RS }
-//RS 
-//RS fn runtime_value_to_service_runtime(value: &MirRuntimeValue, span: Span) -> Result<JetServiceRuntime, Diagnostic> {
-//RS     let MirRuntimeValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("ServiceRuntime", span));
-//RS     };
-//RS     if type_name != "ServiceRuntime" {
-//RS         return Err(unsupported("ServiceRuntime", span));
-//RS     }
-//RS     let store = fields
-//RS         .iter()
-//RS         .find_map(|(name, value)| (name == "store").then_some(value))
-//RS         .ok_or_else(|| unsupported("ServiceRuntime.store", span))
-//RS         .and_then(|value| {
-//RS             runtime_to_service_string(value, SERVICE_AUTH_MAX_STORE, "ServiceRuntime.store", span)
-//RS         })?;
-//RS     let retention_ms = fields
-//RS         .iter()
-//RS         .find_map(|(name, value)| (name == "retention_ms").then_some(value))
-//RS         .ok_or_else(|| unsupported("ServiceRuntime.retention_ms", span))
-//RS         .and_then(|value| match value {
-//RS             MirRuntimeValue::Int(value) => Ok(*value),
-//RS             _ => Err(unsupported("ServiceRuntime.retention_ms", span)),
-//RS         })?;
-//RS     Ok(jet_services_runtime(store, retention_ms))
-//RS }
-//RS 
-//RS fn service_runtime_to_value(runtime: &JetServiceRuntime) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "ServiceRuntime".to_string(),
-//RS         fields: vec![
-//RS             ("store".to_string(), MirRuntimeValue::String(runtime.store.clone())),
-//RS             (
-//RS                 "retention_ms".to_string(),
-//RS                 MirRuntimeValue::Int(runtime.retention_ms),
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS /// Apply a `ServiceRuntime` handle method through the same Prelude authority
-//RS /// functions used by AOT and the runtime ambient adapter. The TIR evaluator is
-//RS /// only responsible for MirRuntimeValue conversion at this boundary.
-//RS pub fn apply_runtime_method_mir(
-//RS     receiver: &MirRuntimeValue,
-//RS     method: &str,
-//RS     args: &[MirRuntimeValue],
-//RS     span: Span,
-//RS ) -> Result<MirRuntimeValue, Diagnostic> {
-//RS     let runtime = runtime_value_to_service_runtime(receiver, span)?;
-//RS     let one = |index: usize| {
-//RS         args.get(index)
-//RS             .ok_or_else(|| unsupported(&format!("ServiceRuntime.{method} arg {index}"), span))
-//RS     };
-//RS     match method {
-//RS         "send" => {
-//RS             let endpoint = runtime_to_endpoint(one(0)?, span)?;
-//RS             let message = runtime_to_service_string(
-//RS                 one(1)?,
-//RS                 SERVICE_AUTH_MAX_MESSAGE,
-//RS                 "ServiceRuntime.send message",
-//RS                 span,
-//RS             )?;
-//RS             let key = runtime_to_service_string(
-//RS                 one(2)?,
-//RS                 SERVICE_AUTH_MAX_KEY,
-//RS                 "ServiceRuntime.send key",
-//RS                 span,
-//RS             )?;
-//RS             Ok(
-//RS                 match jet_services_runtime_send(&runtime, &endpoint, &message, &key) {
-//RS                     Ok(delivery) => MirRuntimeValue::Present(Box::new(delivery_record_to_runtime(delivery))),
-//RS                     Err(error) => MirRuntimeValue::FailedTold(Box::new(map_err(error))),
-//RS                 },
-//RS             )
-//RS         }
-//RS         "retry" | "dead_letter" | "retain" => {
-//RS             let delivery = runtime_to_delivery_record(one(0)?, span)?;
-//RS             let result = match method {
-//RS                 "retry" => jet_services_runtime_retry(&runtime, &delivery),
-//RS                 "dead_letter" => jet_services_runtime_dead_letter(&runtime, &delivery),
-//RS                 "retain" => jet_services_runtime_retain(&runtime, &delivery),
-//RS                 _ => unreachable!(),
-//RS             };
-//RS             Ok(match result {
-//RS                 Ok(delivery) => MirRuntimeValue::Present(Box::new(delivery_record_to_runtime(delivery))),
-//RS                 Err(error) => MirRuntimeValue::FailedTold(Box::new(map_err(error))),
-//RS             })
-//RS         }
-//RS         "commit" => {
-//RS             let delivery = runtime_to_delivery_record(one(0)?, span)?;
-//RS             Ok(match jet_services_runtime_commit(&runtime, &delivery) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Unit)),
-//RS                 Err(error) => MirRuntimeValue::FailedTold(Box::new(map_err(error))),
-//RS             })
-//RS         }
-//RS         _ => Err(unsupported(&format!("ServiceRuntime.{method}"), span)),
-//RS     }
-//RS }
-//RS 
-//RS fn mutate_ok(tree: JetServiceTree, value: MirRuntimeValue) -> MirRuntimeValue {
-//RS     MirRuntimeValue::Struct {
-//RS         type_name: "__JetServiceMut".to_string(),
-//RS         fields: vec![
-//RS             ("tree".to_string(), tree_to_runtime(&tree)),
-//RS             ("value".to_string(), value),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn mutate_err(tree: JetServiceTree, error: MirRuntimeValue) -> MirRuntimeValue {
-//RS     MirRuntimeValue::FailedTold(Box::new(MirRuntimeValue::Struct {
-//RS         type_name: "__JetServiceMutErr".to_string(),
-//RS         fields: vec![
-//RS             ("tree".to_string(), tree_to_runtime(&tree)),
-//RS             ("error".to_string(), error),
-//RS         ],
-//RS     }))
-//RS }
-//RS 
-//RS fn mutate_handle_ok(
-//RS     handle: &JetWorkflowHandle,
-//RS     value: MirRuntimeValue,
-//RS     span: Span,
-//RS ) -> Result<MirRuntimeValue, Diagnostic> {
-//RS     Ok(MirRuntimeValue::Struct {
-//RS         type_name: "__JetServiceMut".to_string(),
-//RS         fields: vec![
-//RS             ("tree".to_string(), workflow_handle_to_runtime(handle, span)?),
-//RS             ("value".to_string(), value),
-//RS         ],
-//RS     })
-//RS }
-//RS 
-//RS fn mutate_handle_err(
-//RS     handle: &JetWorkflowHandle,
-//RS     error: MirRuntimeValue,
-//RS     span: Span,
-//RS ) -> Result<MirRuntimeValue, Diagnostic> {
-//RS     Ok(MirRuntimeValue::FailedTold(Box::new(MirRuntimeValue::Struct {
-//RS         type_name: "__JetServiceMutErr".to_string(),
-//RS         fields: vec![
-//RS             ("tree".to_string(), workflow_handle_to_runtime(handle, span)?),
-//RS             ("error".to_string(), error),
-//RS         ],
-//RS     })))
-//RS }
-//RS 
-//RS pub fn take_mut_runtime(value: MirRuntimeValue) -> Result<(MirRuntimeValue, MirRuntimeValue), MirRuntimeValue> {
-//RS     match value {
-//RS         MirRuntimeValue::Present(inner) => match *inner {
-//RS 
-//RS             MirRuntimeValue::Struct { type_name, fields } if type_name == "__JetServiceMut" => {
-//RS                 let tree = fields
-//RS                     .iter()
-//RS                     .find(|(n, _)| n == "tree")
-//RS                     .map(|(_, v)| v.clone())
-//RS                     .ok_or_else(|| {
-//RS                         MirRuntimeValue::FailedTold(Box::new(MirRuntimeValue::String(
-//RS                             "core.service: missing tree write-back".to_string(),
-//RS                         )))
-//RS                     })?;
-//RS                 let val = fields
-//RS                     .iter()
-//RS                     .find(|(n, _)| n == "value")
-//RS                     .map(|(_, v)| v.clone())
-//RS                     .ok_or_else(|| {
-//RS                         MirRuntimeValue::FailedTold(Box::new(MirRuntimeValue::String(
-//RS                             "core.service: missing value write-back".to_string(),
-//RS                         )))
-//RS                     })?;
-//RS                 Ok((tree, MirRuntimeValue::Present(Box::new(val))))
-//RS             }
-//RS             other => Ok((MirRuntimeValue::Unit, MirRuntimeValue::Present(Box::new(other)))),
-//RS         },
-//RS         MirRuntimeValue::FailedTold(inner) => match *inner {
-//RS             MirRuntimeValue::Struct { type_name, fields } if type_name == "__JetServiceMutErr" => {
-//RS                 let tree = fields
-//RS                     .iter()
-//RS                     .find(|(n, _)| n == "tree")
-//RS                     .map(|(_, v)| v.clone())
-//RS                     .ok_or_else(|| {
-//RS                         MirRuntimeValue::FailedTold(Box::new(MirRuntimeValue::String(
-//RS                             "core.service: missing tree write-back".to_string(),
-//RS                         )))
-//RS                     })?;
-//RS                 let error = fields
-//RS                     .iter()
-//RS                     .find(|(n, _)| n == "error")
-//RS                     .map(|(_, v)| v.clone())
-//RS                     .ok_or_else(|| {
-//RS                         MirRuntimeValue::FailedTold(Box::new(MirRuntimeValue::String(
-//RS                             "core.service: missing error write-back".to_string(),
-//RS                         )))
-//RS                     })?;
-//RS                 Ok((tree, MirRuntimeValue::FailedTold(Box::new(error))))
-//RS             }
-//RS             other => Err(MirRuntimeValue::FailedTold(Box::new(other))),
-//RS         },
-//RS         other => Err(other),
-//RS     }
-//RS }
-//RS 
-//RS pub fn apply_runtime_start_with_dispatcher<F>(
-//RS     value: &MirRuntimeValue,
-//RS     span: Span,
-//RS     dispatch: F,
-//RS ) -> Result<MirRuntimeValue, Diagnostic>
-//RS where
-//RS     F: FnMut(&str, &JetServiceEndpoint) -> Result<(), JetServiceError>,
-//RS {
-//RS     let mut tree = runtime_to_tree(value, span)?;
-//RS     match jet_services_start_with_queue_dispatcher(&mut tree, dispatch) {
-//RS         Ok(()) => Ok(MirRuntimeValue::Present(Box::new(mutate_ok(
-//RS             tree,
-//RS             MirRuntimeValue::Unit,
-//RS         )))),
-//RS         Err(error) => Ok(mutate_err(tree, map_err(error))),
-//RS     }
-//RS }
-//RS pub fn apply_runtime(
-//RS     method: &str,
-//RS     args: &[MirRuntimeValue],
-//RS     span: Span,
-//RS ) -> Result<MirRuntimeValue, Diagnostic> {
-//RS     let one = |i: usize| {
-//RS         args.get(i)
-//RS             .ok_or_else(|| unsupported(&format!("core.service.{method} arg {i}"), span))
-//RS     };
-//RS     match method {
-//RS         "tree" => {
-//RS             let name = runtime_to_service_string(one(0)?, MAX_SERVICE_NAME, "tree name", span)?;
-//RS             Ok(tree_to_runtime(&jet_services_tree(name)))
-//RS         }
-//RS         "runtime" => {
-//RS             let store = runtime_to_service_string(
-//RS                 one(0)?,
-//RS                 SERVICE_AUTH_MAX_STORE,
-//RS                 "ServiceRuntime.store",
-//RS                 span,
-//RS             )?;
-//RS             let retention_ms = match one(1)? {
-//RS                 MirRuntimeValue::Struct { type_name, fields } if type_name == "Duration" => fields
-//RS                     .iter()
-//RS                     .find_map(|(name, value)| match (name.as_str(), value) {
-//RS                         ("ns", MirRuntimeValue::Int(ns)) => Some(*ns / 1_000_000),
-//RS                         _ => None,
-//RS                     })
-//RS                     .ok_or_else(|| unsupported("ServiceRuntime.retention_ms", span))?,
-//RS                 _ => return Err(unsupported("ServiceRuntime.retention_ms", span)),
-//RS             };
-//RS             Ok(service_runtime_to_value(&jet_services_runtime(store, retention_ms)))
-//RS         }
-//RS         "restart_one_for_one" => Ok(restart_to_runtime(jet_services_restart_one_for_one())),
-//RS         "restart_one_for_all" => Ok(restart_to_runtime(jet_services_restart_one_for_all())),
-//RS         "restart_rest_for_one" => Ok(restart_to_runtime(jet_services_restart_rest_for_one())),
-//RS         "delivery_at_most_once" => Ok(delivery_to_runtime(jet_services_delivery_at_most_once())),
-//RS         "delivery_durable" => Ok(delivery_to_runtime(jet_services_delivery_durable())),
-//RS         "state_store" => {
-//RS             let path = runtime_to_service_string(
-//RS                 one(0)?,
-//RS                 MAX_SERVICE_STATE_STORE,
-//RS                 "service state store",
-//RS                 span,
-//RS             )?;
-//RS             Ok(match jet_services_state_store(path) {
-//RS                 Ok(store) => MirRuntimeValue::Present(Box::new(state_store_to_runtime(&store))),
-//RS                 Err(error) => MirRuntimeValue::FailedTold(Box::new(map_err(error))),
-//RS             })
-//RS         }
-//RS         "set_restart" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let restart = runtime_to_restart(one(1)?, span)?;
-//RS             Ok(match jet_services_set_restart(&mut tree, restart) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "set_delivery" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let delivery = runtime_to_delivery(one(1)?, span)?;
-//RS             Ok(match jet_services_set_delivery(&mut tree, delivery) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "worker" => {
-//RS             if args.len() != 5 {
-//RS                 return Err(unsupported("core.service.worker expects five arguments", span));
-//RS             }
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let name = runtime_to_service_string(one(1)?, MAX_SERVICE_NAME, "worker name", span)?;
-//RS             let handler_name =
-//RS                 runtime_to_service_string(one(3)?, MAX_SERVICE_NAME, "worker handler", span)?;
-//RS             let capacity = match one(4)? {
-//RS                 MirRuntimeValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("capacity", span)),
-//RS             };
-//RS             Ok(match jet_services_worker(
-//RS                 &mut tree,
-//RS                 name,
-//RS                 jet_services_noop_worker,
-//RS                 handler_name,
-//RS                 capacity,
-//RS             ) {
-//RS                 Ok(ep) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, endpoint_to_runtime(&ep)))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "group" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let name = match one(1)? {
-//RS                 value => runtime_to_service_string(value, MAX_SERVICE_NAME, "group name", span)?,
-//RS             };
-//RS             let workers = match one(2)? {
-//RS                 MirRuntimeValue::List(xs) => {
-//RS                     if xs.len() > MAX_SERVICE_WORKERS {
-//RS                         return Err(unsupported("group worker limit", span));
-//RS                     }
-//RS                     xs.iter()
-//RS                         .map(|x| runtime_to_service_string(x, MAX_SERVICE_NAME, "group worker", span))
-//RS                         .collect::<Result<Vec<_>, _>>()?
-//RS                 }
-//RS                 _ => return Err(unsupported("group workers", span)),
-//RS             };
-//RS             Ok(match jet_services_group(&mut tree, name, workers) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "stop" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             Ok(match jet_services_stop(&mut tree) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "send" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let endpoint = runtime_to_endpoint(one(1)?, span)?;
-//RS             let message = match one(2)? {
-//RS                 value => runtime_to_service_string(value, MAX_SERVICE_MESSAGE, "message", span)?,
-//RS             };
-//RS             Ok(match jet_services_send(&mut tree, &endpoint, message) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "receive" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let endpoint = runtime_to_endpoint(one(1)?, span)?;
-//RS             Ok(match jet_services_receive(&mut tree, &endpoint) {
-//RS                 Ok(msg) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::String(msg)))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "endpoint_send" => {
-//RS             let endpoint = runtime_to_endpoint(one(0)?, span)?;
-//RS             let message = runtime_to_service_string(one(1)?, MAX_SERVICE_MESSAGE, "message", span)?;
-//RS             Ok(match jet_services_endpoint_send(&endpoint, message) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Unit)),
-//RS                 Err(error) => MirRuntimeValue::FailedTold(Box::new(map_err(error))),
-//RS             })
-//RS         }
-//RS         "endpoint_receive" => {
-//RS             let endpoint = runtime_to_endpoint(one(0)?, span)?;
-//RS             Ok(match jet_services_endpoint_receive(&endpoint) {
-//RS                 Ok(message) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::String(message))),
-//RS                 Err(error) => MirRuntimeValue::FailedTold(Box::new(map_err(error))),
-//RS             })
-//RS         }
-//RS         "mailbox_depth" => {
-//RS             let tree = runtime_to_tree(one(0)?, span)?;
-//RS             let endpoint = runtime_to_endpoint(one(1)?, span)?;
-//RS             Ok(match jet_services_mailbox_depth(&tree, &endpoint) {
-//RS                 Ok(n) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Int(n))),
-//RS                 Err(e) => MirRuntimeValue::FailedTold(Box::new(map_err(e))),
-//RS             })
-//RS         }
-//RS         "restarts" => {
-//RS             let tree = runtime_to_tree(one(0)?, span)?;
-//RS             let endpoint = runtime_to_endpoint(one(1)?, span)?;
-//RS             Ok(match jet_services_restarts(&tree, &endpoint) {
-//RS                 Ok(n) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Int(n))),
-//RS                 Err(e) => MirRuntimeValue::FailedTold(Box::new(map_err(e))),
-//RS             })
-//RS         }
-//RS         "fail_worker" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let endpoint = runtime_to_endpoint(one(1)?, span)?;
-//RS             Ok(match jet_services_fail_worker(&mut tree, &endpoint) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "endpoint_show" => Ok(MirRuntimeValue::String(jet_services_endpoint_show(&runtime_to_endpoint(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "delivery_state_show" => Ok(MirRuntimeValue::String(jet_services_delivery_state_show(
-//RS             &runtime_to_delivery_state(one(0)?, span)?,
-//RS         ))),
-//RS         "tree_show" => Ok(MirRuntimeValue::String(jet_services_tree_show(&runtime_to_tree(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "send_durable" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let endpoint = runtime_to_endpoint(one(1)?, span)?;
-//RS             let message = match one(2)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("message", span)),
-//RS             };
-//RS             let key = match one(3)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("idempotency key", span)),
-//RS             };
-//RS             Ok(
-//RS                 match jet_services_send_durable(&mut tree, &endpoint, message, key) {
-//RS                     Ok(receipt) => {
-//RS                         MirRuntimeValue::Present(Box::new(mutate_ok(tree, delivery_record_to_runtime(receipt))))
-//RS                     }
-//RS                     Err(e) => mutate_err(tree, map_err(e)),
-//RS                 },
-//RS             )
-//RS         }
-//RS         "delivery_wait" | "delivery_status" | "delivery_retry" | "delivery_cancel"
-//RS         | "delivery_receipt" | "delivery_events" => {
-//RS             let delivery = runtime_to_delivery_record(one(0)?, span)?;
-//RS             let result = match method {
-//RS                 "delivery_wait" => jet_services_delivery_wait(&delivery).map(delivery_state_to_runtime),
-//RS                 "delivery_status" => {
-//RS                     jet_services_delivery_status(&delivery).map(delivery_state_to_runtime)
-//RS                 }
-//RS                 "delivery_retry" => {
-//RS                     jet_services_delivery_retry(&delivery).map(delivery_record_to_runtime)
-//RS                 }
-//RS                 "delivery_cancel" => {
-//RS                     jet_services_delivery_cancel(&delivery).map(delivery_record_to_runtime)
-//RS                 }
-//RS                 "delivery_receipt" => {
-//RS                     jet_services_delivery_receipt(&delivery).map(delivery_receipt_to_runtime)
-//RS                 }
-//RS                 "delivery_events" => jet_services_delivery_events(&delivery).map(|events| {
-//RS                     MirRuntimeValue::List(events.into_iter().map(delivery_event_to_runtime).collect())
-//RS                 }),
-//RS                 _ => unreachable!(),
-//RS             };
-//RS             Ok(match result {
-//RS                 Ok(value) => MirRuntimeValue::Present(Box::new(value)),
-//RS                 Err(error) => MirRuntimeValue::FailedTold(Box::new(map_err(error))),
-//RS             })
-//RS         }
-//RS         "dead_letter_count" => Ok(MirRuntimeValue::Int(jet_services_dead_letter_count(&runtime_to_tree(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "drain_dead_letters" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             Ok(match jet_services_drain_dead_letters(&mut tree) {
-//RS                 Ok(n) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Int(n)))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "set_state_empty" | "set_state_snapshot" | "set_state_event_log" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let result = match method {
-//RS                 "set_state_empty" => jet_services_set_state_empty(&mut tree),
-//RS                 "set_state_snapshot" => {
-//RS                     let store = runtime_to_state_store(one(1)?, span)?;
-//RS                     let schema = runtime_to_service_string(
-//RS                         one(2)?,
-//RS                         MAX_SERVICE_STATE_SCHEMA,
-//RS                         "service state schema",
-//RS                         span,
-//RS                     )?;
-//RS                     let version = match one(3)? {
-//RS                         MirRuntimeValue::Int(version) => *version,
-//RS                         _ => return Err(unsupported("service state version", span)),
-//RS                     };
-//RS                     let migration = runtime_to_service_string(
-//RS                         one(4)?,
-//RS                         MAX_SERVICE_STATE_SCHEMA,
-//RS                         "service state migration policy",
-//RS                         span,
-//RS                     )?;
-//RS                     jet_services_set_state_snapshot(&mut tree, store, schema, version, migration)
-//RS                 }
-//RS                 _ => {
-//RS                     let store = runtime_to_state_store(one(1)?, span)?;
-//RS                     let schema = runtime_to_service_string(
-//RS                         one(2)?,
-//RS                         MAX_SERVICE_STATE_SCHEMA,
-//RS                         "service state schema",
-//RS                         span,
-//RS                     )?;
-//RS                     let version = match one(3)? {
-//RS                         MirRuntimeValue::Int(version) => *version,
-//RS                         _ => return Err(unsupported("service state version", span)),
-//RS                     };
-//RS                     let migration = runtime_to_service_string(
-//RS                         one(4)?,
-//RS                         MAX_SERVICE_STATE_SCHEMA,
-//RS                         "service state migration policy",
-//RS                         span,
-//RS                     )?;
-//RS                     jet_services_set_state_event_log(&mut tree, store, schema, version, migration)
-//RS                 }
-//RS             };
-//RS             Ok(match result {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "commit_snapshot" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let payload = match one(1)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("snapshot payload", span)),
-//RS             };
-//RS             Ok(match jet_services_commit_snapshot(&mut tree, payload) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "restore_snapshot" => {
-//RS             let tree = runtime_to_tree(one(0)?, span)?;
-//RS             Ok(match jet_services_restore_snapshot(&tree) {
-//RS                 Ok(s) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::String(s))),
-//RS                 Err(e) => MirRuntimeValue::FailedTold(Box::new(map_err(e))),
-//RS             })
-//RS         }
-//RS         "append_event" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let event = match one(1)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("event", span)),
-//RS             };
-//RS             Ok(match jet_services_append_event(&mut tree, event) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "event_count" => Ok(MirRuntimeValue::Int(jet_services_event_count(&runtime_to_tree(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "replay_events" => Ok(MirRuntimeValue::String(jet_services_replay_events(&runtime_to_tree(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "workflow_start" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let id = match one(1)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("workflow id", span)),
-//RS             };
-//RS             let version = match one(2)? {
-//RS                 MirRuntimeValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("workflow version", span)),
-//RS             };
-//RS             Ok(match jet_services_workflow_start(&mut tree, id, version) {
-//RS                 Ok(handle) => MirRuntimeValue::Present(Box::new(mutate_ok(
-//RS                     tree,
-//RS                     workflow_handle_to_runtime(&handle, span)?,
-//RS                 ))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "workflow_sleep" => {
-//RS             let handle = runtime_to_workflow_handle(one(0)?, span)?;
-//RS             let nanos = match one(1)? {
-//RS                 MirRuntimeValue::Struct { type_name, fields } if type_name == "Duration" => fields
-//RS                     .iter()
-//RS                     .find_map(|(name, value)| match (name.as_str(), value) {
-//RS                         ("ns", MirRuntimeValue::Int(ns)) => Some(*ns),
-//RS                         _ => None,
-//RS                     })
-//RS                     .ok_or_else(|| unsupported("workflow sleep duration", span))?,
-//RS                 _ => return Err(unsupported("workflow sleep duration", span)),
-//RS             };
-//RS             Ok(match jet_services_workflow_sleep(&handle, nanos) {
-//RS                 Ok(()) => {
-//RS                     MirRuntimeValue::Present(Box::new(mutate_handle_ok(&handle, MirRuntimeValue::Unit, span)?))
-//RS                 }
-//RS                 Err(e) => mutate_handle_err(&handle, map_err(e), span)?,
-//RS             })
-//RS         }
-//RS         "workflow_activity_wait" => {
-//RS             let handle = runtime_to_workflow_handle(one(0)?, span)?;
-//RS             let activity =
-//RS                 runtime_to_service_string(one(1)?, MAX_SERVICE_NAME, "workflow activity", span)?;
-//RS             let argument = runtime_to_service_string(
-//RS                 one(2)?,
-//RS                 MAX_SERVICE_MESSAGE,
-//RS                 "workflow activity argument",
-//RS                 span,
-//RS             )?;
-//RS             Ok(
-//RS                 match jet_services_workflow_activity_wait(&handle, activity, argument) {
-//RS                     Ok(value) => MirRuntimeValue::Present(Box::new(mutate_handle_ok(
-//RS                         &handle,
-//RS                         MirRuntimeValue::String(value),
-//RS                         span,
-//RS                     )?)),
-//RS                     Err(e) => mutate_handle_err(&handle, map_err(e), span)?,
-//RS                 },
-//RS             )
-//RS         }
-//RS         "workflow_all" => {
-//RS             let handle = runtime_to_workflow_handle(one(0)?, span)?;
-//RS             let values = match one(1)? {
-//RS                 MirRuntimeValue::List(values) => values
-//RS                     .iter()
-//RS                     .map(|value| {
-//RS                         runtime_to_service_string(value, MAX_SERVICE_MESSAGE, "workflow all value", span)
-//RS                     })
-//RS                     .collect::<Result<Vec<_>, _>>()?,
-//RS                 _ => return Err(unsupported("workflow all values", span)),
-//RS             };
-//RS             Ok(match jet_services_workflow_all(&handle, values) {
-//RS                 Ok(values) => MirRuntimeValue::Present(Box::new(mutate_handle_ok(
-//RS                     &handle,
-//RS                     MirRuntimeValue::List(values.into_iter().map(MirRuntimeValue::String).collect()),
-//RS                     span,
-//RS                 )?)),
-//RS                 Err(e) => mutate_handle_err(&handle, map_err(e), span)?,
-//RS             })
-//RS         }
-//RS         "workflow_step" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let run_id = runtime_to_workflow_run_id(one(1)?, span)?;
-//RS             let step = match one(2)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("step", span)),
-//RS             };
-//RS             Ok(match jet_services_workflow_step(&mut tree, run_id, step) {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "workflow_activity" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let run_id = runtime_to_workflow_run_id(one(1)?, span)?;
-//RS             let activity = match one(2)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("workflow activity", span)),
-//RS             };
-//RS             let key = match one(3)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("activity idempotency key", span)),
-//RS             };
-//RS             let max_attempts = match one(4)? {
-//RS                 MirRuntimeValue::Int(n) => *n,
-//RS                 _ => return Err(unsupported("activity retry limit", span)),
-//RS             };
-//RS             Ok(
-//RS                 match jet_services_workflow_activity(&mut tree, run_id, activity, key, max_attempts)
-//RS                 {
-//RS                     Ok(status) => {
-//RS                         MirRuntimeValue::Present(Box::new(mutate_ok(tree, task_status_to_runtime(&status))))
-//RS                     }
-//RS                     Err(e) => mutate_err(tree, map_err(e)),
-//RS                 },
-//RS             )
-//RS         }
-//RS         "workflow_activity_retry" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let run_id = runtime_to_workflow_run_id(one(1)?, span)?;
-//RS             let key = match one(2)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("activity idempotency key", span)),
-//RS             };
-//RS             let outcome = runtime_to_task_outcome(one(3)?, span)?;
-//RS             Ok(
-//RS                 match jet_services_workflow_activity_retry(&mut tree, run_id, key, outcome) {
-//RS                     Ok(status) => {
-//RS                         MirRuntimeValue::Present(Box::new(mutate_ok(tree, task_status_to_runtime(&status))))
-//RS                     }
-//RS                     Err(e) => mutate_err(tree, map_err(e)),
-//RS                 },
-//RS             )
-//RS         }
-//RS         "workflow_activity_complete" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let run_id = runtime_to_workflow_run_id(one(1)?, span)?;
-//RS             let key = match one(2)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("activity idempotency key", span)),
-//RS             };
-//RS             let outcome = runtime_to_task_outcome(one(3)?, span)?;
-//RS             Ok(
-//RS                 match jet_services_workflow_activity_complete(&mut tree, run_id, key, outcome) {
-//RS                     Ok(outcome) => {
-//RS                         MirRuntimeValue::Present(Box::new(mutate_ok(tree, task_outcome_to_runtime(&outcome))))
-//RS                     }
-//RS                     Err(e) => mutate_err(tree, map_err(e)),
-//RS                 },
-//RS             )
-//RS         }
-//RS         "workflow_history" => {
-//RS             let tree = runtime_to_tree(one(0)?, span)?;
-//RS             let run_id = runtime_to_workflow_run_id(one(1)?, span)?;
-//RS             Ok(match jet_services_workflow_history(&tree, run_id) {
-//RS                 Ok(s) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::String(s))),
-//RS                 Err(e) => MirRuntimeValue::FailedTold(Box::new(map_err(e))),
-//RS             })
-//RS         }
-//RS         "workflow_outcome" => {
-//RS             let tree = runtime_to_tree(one(0)?, span)?;
-//RS             let run_id = runtime_to_workflow_run_id(one(1)?, span)?;
-//RS             Ok(match jet_services_workflow_outcome(&tree, run_id) {
-//RS                 Ok(outcome) => MirRuntimeValue::Present(Box::new(task_outcome_to_runtime(&outcome))),
-//RS                 Err(e) => MirRuntimeValue::FailedTold(Box::new(map_err(e))),
-//RS             })
-//RS         }
-//RS         "directory_register" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let name = match one(1)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("directory name", span)),
-//RS             };
-//RS             let endpoint = runtime_to_endpoint(one(2)?, span)?;
-//RS             Ok(
-//RS                 match jet_services_directory_register(&mut tree, name, endpoint) {
-//RS                     Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                     Err(e) => mutate_err(tree, map_err(e)),
-//RS                 },
-//RS             )
-//RS         }
-//RS         "directory_resolve" => {
-//RS             let tree = runtime_to_tree(one(0)?, span)?;
-//RS             let name = match one(1)? {
-//RS                 MirRuntimeValue::String(s) => s.clone(),
-//RS                 _ => return Err(unsupported("directory name", span)),
-//RS             };
-//RS             Ok(match jet_services_directory_resolve(&tree, &name) {
-//RS                 Ok(ep) => MirRuntimeValue::Present(Box::new(endpoint_to_runtime(&ep))),
-//RS                 Err(e) => MirRuntimeValue::FailedTold(Box::new(map_err(e))),
-//RS             })
-//RS         }
-//RS         "directory_generation" => Ok(MirRuntimeValue::Int(jet_services_directory_generation(
-//RS             &runtime_to_tree(one(0)?, span)?,
-//RS         ))),
-//RS         "drain_worker" | "partition_worker" | "reconcile_worker" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let endpoint = runtime_to_endpoint(one(1)?, span)?;
-//RS             let result = match method {
-//RS                 "drain_worker" => jet_services_drain_worker(&mut tree, &endpoint),
-//RS                 "partition_worker" => jet_services_partition_worker(&mut tree, &endpoint),
-//RS                 _ => jet_services_reconcile_worker(&mut tree, &endpoint),
-//RS             };
-//RS             Ok(match result {
-//RS                 Ok(()) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Unit))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "handoff_generation" | "rollback_generation" | "chaos_fail" => {
-//RS             let mut tree = runtime_to_tree(one(0)?, span)?;
-//RS             let result = match method {
-//RS                 "handoff_generation" => jet_services_handoff_generation(&mut tree),
-//RS                 "rollback_generation" => jet_services_rollback_generation(&mut tree),
-//RS                 _ => jet_services_chaos_fail(&mut tree),
-//RS             };
-//RS             Ok(match result {
-//RS                 Ok(n) => MirRuntimeValue::Present(Box::new(mutate_ok(tree, MirRuntimeValue::Int(n)))),
-//RS                 Err(e) => mutate_err(tree, map_err(e)),
-//RS             })
-//RS         }
-//RS         "upgrade_receipt" => Ok(
-//RS             match jet_services_upgrade_receipt(&runtime_to_tree(one(0)?, span)?) {
-//RS                 Ok(receipt) => MirRuntimeValue::Present(Box::new(upgrade_receipt_to_runtime(&receipt))),
-//RS                 Err(error) => MirRuntimeValue::FailedTold(Box::new(map_err(error))),
-//RS             },
-//RS         ),
-//RS         "observe" => Ok(MirRuntimeValue::String(jet_services_observe(&runtime_to_tree(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         _ => Err(unsupported(&format!("`core.service.{method}()`"), span)),
-//RS     }
-//RS }
-//RS fn legacy_conversion_error(label: &str) -> Diagnostic {
-//RS     unsupported(label, Span::new(0, 0))
-//RS }
-//RS 
-//RS pub fn ct_to_runtime_value(value: &CtValue) -> Result<MirRuntimeValue, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Int(value) => Ok(MirRuntimeValue::Int(*value)),
-//RS         CtValue::Float(CtFloat::F32(value)) => Ok(MirRuntimeValue::Float {
-//RS             value: f64::from(*value),
-//RS             f32: true,
-//RS         }),
-//RS         CtValue::Float(CtFloat::F64(value)) => Ok(MirRuntimeValue::Float {
-//RS             value: *value,
-//RS             f32: false,
-//RS         }),
-//RS         CtValue::Bool(value) => Ok(MirRuntimeValue::Bool(*value)),
-//RS         CtValue::Char(value) => Ok(MirRuntimeValue::Char(*value)),
-//RS         CtValue::Str(value) => Ok(MirRuntimeValue::String(value.clone())),
-//RS         CtValue::BigInt(value) => Ok(MirRuntimeValue::BigInt(value.to_string_rep())),
-//RS         CtValue::Bytes(values) => Ok(MirRuntimeValue::Bytes(values.clone())),
-//RS         CtValue::List(values) => values
-//RS             .iter()
-//RS             .map(ct_to_runtime_value)
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .map(MirRuntimeValue::List),
-//RS         CtValue::Map(values) => values
-//RS             .iter()
-//RS             .map(|(key, value)| {
-//RS                 let key = super::MirBridge::ct_to_mir_key(key.clone());
-//RS                 Ok((key, ct_to_runtime_value(value)?))
-//RS             })
-//RS             .collect::<Result<Vec<_>, Diagnostic>>()
-//RS             .map(MirRuntimeValue::Map),
-//RS         CtValue::Struct { type_name, fields } => Ok(MirRuntimeValue::Struct {
-//RS             type_name: type_name.clone(),
-//RS             fields: fields
-//RS                 .iter()
-//RS                 .map(|(name, value)| Ok((name.clone(), ct_to_runtime_value(value)?)))
-//RS                 .collect::<Result<Vec<_>, Diagnostic>>()?,
-//RS         }),
-//RS         CtValue::Enum {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS         } => Ok(MirRuntimeValue::Enum {
-//RS             type_name: type_name.clone(),
-//RS             variant: variant.clone(),
-//RS             args: args
-//RS                 .iter()
-//RS                 .map(|(name, value)| Ok((name.clone(), ct_to_runtime_value(value)?)))
-//RS                 .collect::<Result<Vec<_>, Diagnostic>>()?,
-//RS         }),
-//RS         CtValue::Present(value) => Ok(MirRuntimeValue::Present(Box::new(ct_to_runtime_value(value)?))),
-//RS         CtValue::Failed(CtReport::Clean(ty)) => Ok(MirRuntimeValue::Absent {
-//RS             element: mir_compat_type(ty),
-//RS         }),
-//RS         CtValue::Failed(CtReport::Told(value)) => {
-//RS             Ok(MirRuntimeValue::FailedTold(Box::new(ct_to_runtime_value(value)?)))
-//RS         }
-//RS         CtValue::Unit => Ok(MirRuntimeValue::Unit),
-//RS         CtValue::Closure(_) => Err(legacy_conversion_error("legacy closure service value")),
-//RS     }
-//RS }
-//RS 
-//RS pub fn runtime_to_ct_value(value: &MirRuntimeValue) -> Result<CtValue, Diagnostic> {
-//RS     match value {
-//RS         MirRuntimeValue::Int(value) => Ok(CtValue::Int(*value)),
-//RS         MirRuntimeValue::BigInt(value) => crate::Numeric::CtBigInt::from_str(value)
-//RS             .map(CtValue::BigInt)
-//RS             .map_err(|_| legacy_conversion_error("runtime BigInt service value")),
-//RS         MirRuntimeValue::Float { value, f32 } => Ok(CtValue::Float(if *f32 {
-//RS             CtFloat::F32(*value as f32)
-//RS         } else {
-//RS             CtFloat::F64(*value)
-//RS         })),
-//RS         MirRuntimeValue::Bool(value) => Ok(CtValue::Bool(*value)),
-//RS         MirRuntimeValue::Char(value) => Ok(CtValue::Char(*value)),
-//RS         MirRuntimeValue::String(value) => Ok(CtValue::Str(value.clone())),
-//RS         MirRuntimeValue::Bytes(values) => Ok(CtValue::Bytes(values.clone())),
-//RS         MirRuntimeValue::List(values) => values
-//RS             .iter()
-//RS             .map(runtime_to_ct_value)
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .map(CtValue::List),
-//RS         MirRuntimeValue::Map(values) => values
-//RS             .iter()
-//RS             .map(|(key, value)| {
-//RS                 let key = super::MirBridge::mir_to_ct_key(key);
-//RS                 Ok((key, runtime_to_ct_value(value)?))
-//RS             })
-//RS             .collect::<Result<std::collections::BTreeMap<_, _>, Diagnostic>>()
-//RS             .map(CtValue::Map),
-//RS         MirRuntimeValue::Struct { type_name, fields } => Ok(CtValue::Struct {
-//RS             type_name: type_name.clone(),
-//RS             fields: fields
-//RS                 .iter()
-//RS                 .map(|(name, value)| Ok((name.clone(), runtime_to_ct_value(value)?)))
-//RS                 .collect::<Result<Vec<_>, Diagnostic>>()?,
-//RS         }),
-//RS         MirRuntimeValue::Enum {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS         } => Ok(CtValue::Enum {
-//RS             type_name: type_name.clone(),
-//RS             variant: variant.clone(),
-//RS             args: args
-//RS                 .iter()
-//RS                 .map(|(name, value)| Ok((name.clone(), runtime_to_ct_value(value)?)))
-//RS                 .collect::<Result<Vec<_>, Diagnostic>>()?,
-//RS         }),
-//RS         MirRuntimeValue::Present(value) => Ok(CtValue::Present(Box::new(runtime_to_ct_value(value)?))),
-//RS         MirRuntimeValue::FailedTold(value) => Ok(CtValue::Failed(CtReport::Told(Box::new(
-//RS             runtime_to_ct_value(value)?,
-//RS         )))),
-//RS         MirRuntimeValue::Absent { element } => Ok(CtValue::Failed(CtReport::Clean(Box::new(
-//RS             Type::Named(element.display_name()),
-//RS         )))),
-//RS         MirRuntimeValue::Unit => Ok(CtValue::Unit),
-//RS         MirRuntimeValue::Moved => Err(legacy_conversion_error("internal moved service value")),
-//RS         MirRuntimeValue::NativeCursor(_) => Err(legacy_conversion_error("native cursor service value")),
-//RS         MirRuntimeValue::NativeOwned(_) => Err(legacy_conversion_error("native-owned service value")),
-//RS         MirRuntimeValue::Closure(_) => Err(legacy_conversion_error("runtime closure service value")),
-//RS     }
-//RS }
-//RS /// Encode an interpreter job value with the same canonical CBOR kernel used by
-//RS /// generated queue adapters. Queue payloads retain their checked runtime shape
-//RS /// instead of falling back to a display-oriented AST fragment.
-//RS pub fn interpreter_job_cbor_bytes(
-//RS     value: &MirRuntimeValue,
-//RS     span: Span,
-//RS ) -> Result<Vec<u8>, Diagnostic> {
-//RS     let value = runtime_to_ct_value(value)?;
-//RS     crate::Comptime::EncodingLite::cbor_encode_canonical(&value)
-//RS         .map_err(|error| unsupported(&format!("Job payload CBOR encoding: {error:?}"), span))
-//RS }
-//RS 
-//RS 
-//RS pub fn service_runtime_value(store: String, retention_ms: i64) -> MirRuntimeValue {
-//RS     service_runtime_to_value(&jet_services_runtime(store, retention_ms))
-//RS }
-//RS 
-//RS pub fn service_show_value(value: &CtValue) -> Option<String> {
-//RS     ct_to_runtime_value(value)
-//RS         .ok()
-//RS         .and_then(|value| service_show_value_runtime(&value))
-//RS }
-//RS 
-//RS pub fn apply_runtime_method(
-//RS     receiver: &CtValue,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let receiver = ct_to_runtime_value(receiver)?;
-//RS     let args = args
-//RS         .iter()
-//RS         .map(ct_to_runtime_value)
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     apply_runtime_method_mir(&receiver, method, &args, span).and_then(|value| runtime_to_ct_value(&value))
-//RS }
-//RS 
-//RS pub fn take_mut_ok(value: CtValue) -> Result<(CtValue, CtValue), CtValue> {
-//RS     let runtime = match ct_to_runtime_value(&value) {
-//RS         Ok(value) => value,
-//RS         Err(_) => return Err(value),
-//RS     };
-//RS     match take_mut_runtime(runtime) {
-//RS         Ok((tree, result)) => match (runtime_to_ct_value(&tree), runtime_to_ct_value(&result)) {
-//RS             (Ok(tree), Ok(value)) => Ok((tree, value)),
-//RS             _ => Err(value),
-//RS         },
-//RS         Err(result) => runtime_to_ct_value(&result).map_or_else(|_| Err(value), Err),
-//RS     }
-//RS }
-//RS 
-//RS pub fn apply(
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let mut args = args
-//RS         .iter()
-//RS         .map(|value| match (method, value) {
-//RS             // Engines keep the callback in `service_callbacks`. The kernel
-//RS             // only needs arity plus the handler identity at args[3].
-//RS             ("worker", CtValue::Closure(_)) => Ok(MirRuntimeValue::Unit),
-//RS             _ => ct_to_runtime_value(value),
-//RS         })
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     if let Some(tree) = args.first_mut() {
-//RS         *tree = intern_resolve(std::mem::replace(tree, MirRuntimeValue::Unit));
-//RS     }
-//RS     let slot = args.first().and_then(intern_slot);
-//RS     apply_runtime(method, &args, span)
-//RS         .map(|value| intern_commit(slot, value))
-//RS         .and_then(|value| runtime_to_ct_value(&value))
-//RS }
-//RS 
-//RS fn queue_failed(error: JetServiceError) -> MirRuntimeValue {
-//RS     MirRuntimeValue::FailedTold(Box::new(map_err(error)))
-//RS }
-//RS 
-//RS fn queue_one<'a>(
-//RS     args: &'a [MirRuntimeValue],
-//RS     index: usize,
-//RS     method: &str,
-//RS     span: Span,
-//RS ) -> Result<&'a MirRuntimeValue, Diagnostic> {
-//RS     args.get(index)
-//RS         .ok_or_else(|| unsupported(&format!("core.jobs.{method} arg {index}"), span))
-//RS }
-//RS 
-//RS fn queue_timeout_ms(value: &MirRuntimeValue, span: Span) -> Result<i64, Diagnostic> {
-//RS     match value {
-//RS         MirRuntimeValue::Struct { type_name, .. } if type_name == "Duration" => {
-//RS             queue_duration_ms(value, span)
-//RS         }
-//RS         _ => Err(unsupported("JobQueue.wait timeout", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn apply_jobs_runtime_for_endpoint(
-//RS     endpoint: &JetServiceEndpoint,
-//RS     method: &str,
-//RS     args: &[MirRuntimeValue],
-//RS     span: Span,
-//RS ) -> Result<MirRuntimeValue, Diagnostic> {
-//RS     match method {
-//RS         "queue" => {
-//RS             if !args.is_empty() {
-//RS                 return Err(unsupported("`core.jobs.queue()` takes no arguments", span));
-//RS             }
-//RS             Ok(queue_result_value(
-//RS                 queue_open(endpoint, JOB_QUEUE_DEFAULT_NAME)
-//RS                     .map(|_| queue_to_runtime(endpoint, JOB_QUEUE_DEFAULT_NAME)),
-//RS                 |value| value,
-//RS             ))
-//RS         }
-//RS         _ => Err(unsupported(&format!("`core.jobs.{method}()`"), span)),
-//RS     }
-//RS }
-//RS 
-//RS /// Apply a direct `core.jobs` call for an explicitly checked endpoint.
-//RS /// Runtime adapters use this form when the graph entry has an endpoint value;
-//RS /// the ordinary wrapper below obtains the same endpoint from the active scope.
-//RS pub fn apply_jobs_runtime(
-//RS     method: &str,
-//RS     args: &[MirRuntimeValue],
-//RS     span: Span,
-//RS ) -> Result<MirRuntimeValue, Diagnostic> {
-//RS     let endpoint = match jet_services_active_execution_endpoint() {
-//RS         Ok(endpoint) => endpoint,
-//RS         Err(error) => return Ok(queue_failed(error)),
-//RS     };
-//RS     apply_jobs_runtime_for_endpoint(&endpoint, method, args, span)
-//RS }
-//RS 
-//RS /// Apply a `JobQueue` receiver method. The receiver retains the checked
-//RS /// endpoint identity and queue name; every method revalidates that endpoint
-//RS /// before opening the selected durable provider.
-//RS pub fn apply_jobs_method_mir(
-//RS     receiver: &MirRuntimeValue,
-//RS     method: &str,
-//RS     args: &[MirRuntimeValue],
-//RS     span: Span,
-//RS ) -> Result<MirRuntimeValue, Diagnostic> {
-//RS     let (endpoint, name) = runtime_to_queue(receiver, span)?;
-//RS     jet_services_authority_validate(&endpoint)
-//RS         .map_err(|_| unsupported("JobQueue endpoint authority", span))?;
-//RS     let mut queue = match queue_open(&endpoint, &name) {
-//RS         Ok(queue) => queue,
-//RS         Err(error) => return Ok(queue_failed(error)),
-//RS     };
-//RS     let exact = |expected: usize| {
-//RS         if args.len() == expected {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(unsupported(&format!("JobQueue.{method} argument count"), span))
-//RS         }
-//RS     };
-//RS     match method {
-//RS         "enqueue" => {
-//RS             if !(2..=3).contains(&args.len()) {
-//RS                 return Err(unsupported("JobQueue.enqueue(Job, payload, key?)", span));
-//RS             }
-//RS             let job_type = queue_job_type(queue_one(args, 0, "enqueue", span)?, span)?;
-//RS             let payload = queue_payload(&job_type, queue_one(args, 1, "enqueue", span)?, span)?;
-//RS             let request = queue_request(job_type, payload, args, span)?;
-//RS             Ok(queue_result_value(queue.enqueue(request), queue_receipt_to_runtime))
-//RS         }
-//RS         "delay" => {
-//RS             exact(3)?;
-//RS             let job_type = queue_job_type(queue_one(args, 0, "delay", span)?, span)?;
-//RS             let payload = queue_payload(&job_type, queue_one(args, 1, "delay", span)?, span)?;
-//RS             let delay_ms = queue_duration_ms(queue_one(args, 2, "delay", span)?, span)?;
-//RS             Ok(queue_result_value(
-//RS                 queue.enqueue_delayed(job_type, payload, delay_ms, None, None),
-//RS                 queue_receipt_to_runtime,
-//RS             ))
-//RS         }
-//RS         "receipt" => {
-//RS             exact(1)?;
-//RS             let id = queue_text(queue_one(args, 0, "receipt", span)?, "JobQueue", "id", span)?;
-//RS             Ok(queue_result_value(queue.receipt(&id), queue_receipt_to_runtime))
-//RS         }
-//RS         "inspect" => {
-//RS             exact(2)?;
-//RS             let limit = queue_int(queue_one(args, 0, "inspect", span)?, "JobQueue", "limit", span)?
-//RS                 .try_into()
-//RS                 .map_err(|_| unsupported("JobQueue.inspect limit", span))?;
-//RS             let include_payload =
-//RS                 queue_bool(queue_one(args, 1, "inspect", span)?, "JobQueue", "include_payload", span)?;
-//RS             Ok(queue_result_value(
-//RS                 queue.inspect(limit, include_payload),
-//RS                 |records| MirRuntimeValue::List(records.into_iter().map(queue_record_to_runtime).collect()),
-//RS             ))
-//RS         }
-//RS         "events" => {
-//RS             exact(1)?;
-//RS             let id = queue_text(queue_one(args, 0, "events", span)?, "JobQueue", "id", span)?;
-//RS             Ok(queue_result_value(
-//RS                 queue.events(&id),
-//RS                 |events| MirRuntimeValue::List(events.into_iter().map(queue_event_to_runtime).collect()),
-//RS             ))
-//RS         }
-//RS         "claim" => {
-//RS             exact(2)?;
-//RS             let worker = queue_text(queue_one(args, 0, "claim", span)?, "JobQueue", "worker", span)?;
-//RS             let limit = queue_int(queue_one(args, 1, "claim", span)?, "JobQueue", "limit", span)?
-//RS                 .try_into()
-//RS                 .map_err(|_| unsupported("JobQueue.claim limit", span))?;
-//RS             Ok(queue_result_value(
-//RS                 queue.claim(&worker, limit),
-//RS                 |claims| MirRuntimeValue::List(claims.into_iter().map(queue_claim_to_runtime).collect()),
-//RS             ))
-//RS         }
-//RS         "heartbeat" => {
-//RS             exact(1)?;
-//RS             let claim = runtime_to_queue_claim(queue_one(args, 0, "heartbeat", span)?, span)?;
-//RS             Ok(queue_result_value(queue.heartbeat(&claim), queue_receipt_to_runtime))
-//RS         }
-//RS         "acknowledge" => {
-//RS             exact(2)?;
-//RS             let claim = runtime_to_queue_claim(queue_one(args, 0, "acknowledge", span)?, span)?;
-//RS             let result = runtime_to_queue_result(queue_one(args, 1, "acknowledge", span)?, span)?;
-//RS             Ok(queue_result_value(
-//RS                 queue.acknowledge(&claim, result),
-//RS                 queue_receipt_to_runtime,
-//RS             ))
-//RS         }
-//RS         "fail" => {
-//RS             exact(2)?;
-//RS             let claim = runtime_to_queue_claim(queue_one(args, 0, "fail", span)?, span)?;
-//RS             let error = runtime_to_queue_error(queue_one(args, 1, "fail", span)?, span)?;
-//RS             Ok(queue_result_value(queue.fail(&claim, error), queue_receipt_to_runtime))
-//RS         }
-//RS         "cancel" | "dead_letter" => {
-//RS             if !(2..=3).contains(&args.len()) {
-//RS                 return Err(unsupported(
-//RS                     &format!("JobQueue.{method}(id, reason, lease_token?)"),
-//RS                     span,
-//RS                 ));
-//RS             }
-//RS             let id = queue_text(queue_one(args, 0, method, span)?, "JobQueue", "id", span)?;
-//RS             let reason = queue_text(queue_one(args, 1, method, span)?, "JobQueue", "reason", span)?;
-//RS             let lease_token = queue_optional_text(args, 2, "JobQueue", "lease_token", span)?;
-//RS             let result = if method == "cancel" {
-//RS                 queue.cancel(&id, reason, lease_token.as_deref())
-//RS             } else {
-//RS                 queue.dead_letter(&id, reason, lease_token.as_deref())
-//RS             };
-//RS             Ok(queue_result_value(result, queue_receipt_to_runtime))
-//RS         }
-//RS         "recover_expired" => {
-//RS             exact(0)?;
-//RS             Ok(queue_result_value(queue.recover_expired(), |_| MirRuntimeValue::Unit))
-//RS         }
-//RS         "status" => {
-//RS             exact(0)?;
-//RS             Ok(queue_result_value(queue.status(), queue_status_to_runtime))
-//RS         }
-//RS         "pause" | "resume" => {
-//RS             exact(0)?;
-//RS             let result = if method == "pause" {
-//RS                 queue.pause()
-//RS             } else {
-//RS                 queue.resume()
-//RS             };
-//RS             Ok(queue_result_value(result, queue_status_to_runtime))
-//RS         }
-//RS         "wait" => {
-//RS             exact(1)?;
-//RS             let timeout_ms = queue_timeout_ms(queue_one(args, 0, "wait", span)?, span)?;
-//RS             Ok(queue_result_value(queue.wait(timeout_ms), queue_status_to_runtime))
-//RS         }
-//RS         "prune" => {
-//RS             exact(0)?;
-//RS             Ok(queue_result_value(queue.prune(), |count| MirRuntimeValue::Int(
-//RS                 count.try_into().unwrap_or(i64::MAX),
-//RS             )))
-//RS         }
-//RS         _ => Err(unsupported(&format!("`JobQueue.{method}()`"), span)),
-//RS     }
-//RS }
-//RS pub fn apply_jobs_method(
-//RS     receiver: &CtValue,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let receiver = ct_to_runtime_value(receiver)?;
-//RS     let args = args
-//RS         .iter()
-//RS         .map(ct_to_runtime_value)
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     apply_jobs_method_mir(&receiver, method, &args, span).and_then(|value| runtime_to_ct_value(&value))
-//RS }
-//RS 
-//RS pub fn apply_jobs(
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let args = args
-//RS         .iter()
-//RS         .map(ct_to_runtime_value)
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     apply_jobs_runtime(method, &args, span).and_then(|value| runtime_to_ct_value(&value))
-//RS }
-//RS 
-//RS 
-// END-PORT-PENDING 0600 crates/jet-comptime/src/Comptime/ServicesLite.rs:1795-3531
+use crate.Comptime.ServicesLite.*
+use crate.Comptime.Diagnostics.unsupported
+use crate.Diagnostics.[Diagnostic, Span]
+use crate.AST.[CtValue, CtFloat, CtReport, Type, CtKey]
+use crate.MIR.[MirRuntimeValue, MirKey]
+use crate.Comptime.MirBridge.[ct_to_mir_key, mir_to_ct_key, mir_compat_type]
 
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1795
+fn runtime_to_queue_payload(value: &MirRuntimeValue, span: Span) -> JetJobPayload Diagnostic! {
+    if value != .Struct(type_name, fields) -> return Err(unsupported("JobPayload", span))
+    if type_name != "JobPayload" -> return Err(unsupported("JobPayload", span))
+    type_id :: queue_text(queue_field(fields, type_name, "type_id", span)?, type_name, "type_id", span)?
+    bytes :: if queue_field(fields, type_name, "bytes", span)? == { .Bytes(bytes) -> bytes.clone(); _ -> return Err(unsupported("JobPayload.bytes", span)) }
+    publish :: queue_bool(queue_field(fields, type_name, "publish", span)?, type_name, "publish", span)?
+    JetJobPayload.new(type_id, bytes, publish).map_err(fn(_) { unsupported("JobPayload", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1814
+fn queue_result_to_runtime(result: JetJobResult) -> MirRuntimeValue {
+    MirRuntimeValue.Struct{type_name: "JobResult", fields: [("type_id", MirRuntimeValue.String(result.type_id)), ("bytes", MirRuntimeValue.Bytes(result.bytes)), ("publish", MirRuntimeValue.Bool(result.publish))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1825
+fn runtime_to_queue_result(value: &MirRuntimeValue, span: Span) -> JetJobResult Diagnostic! {
+    if value != .Struct(type_name, fields) -> return Err(unsupported("JobResult", span))
+    if type_name != "JobResult" -> return Err(unsupported("JobResult", span))
+    type_id :: queue_text(queue_field(fields, type_name, "type_id", span)?, type_name, "type_id", span)?
+    bytes :: if queue_field(fields, type_name, "bytes", span)? == { .Bytes(bytes) -> bytes.clone(); _ -> return Err(unsupported("JobResult.bytes", span)) }
+    publish :: queue_bool(queue_field(fields, type_name, "publish", span)?, type_name, "publish", span)?
+    JetJobResult.new(type_id, bytes, publish).map_err(fn(_) { unsupported("JobResult", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1844
+fn queue_error_to_runtime(error: JetJobError) -> MirRuntimeValue {
+    MirRuntimeValue.Struct{type_name: "JobError", fields: [("type_id", MirRuntimeValue.String(error.type_id)), ("reason", MirRuntimeValue.String(error.reason)), ("detail", queue_optional_string(error.detail, "String"))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1855
+fn runtime_to_queue_error(value: &MirRuntimeValue, span: Span) -> JetJobError Diagnostic! {
+    if value != .Struct(type_name, fields) -> return Err(unsupported("JobError", span))
+    if type_name != "JobError" -> return Err(unsupported("JobError", span))
+    detail :: if queue_field(fields, type_name, "detail", span)? == {
+        .Absent(_) -> None
+        .Present(value) -> if value == { .String(value) -> Val(value.clone()); _ -> return Err(unsupported("JobError.detail", span)) }
+        .String(value) -> Val(value.clone())
+        _ -> return Err(unsupported("JobError.detail", span))
+    }
+    JetJobError.new(queue_text(queue_field(fields, type_name, "type_id", span)?, type_name, "type_id", span)?, queue_text(queue_field(fields, type_name, "reason", span)?, type_name, "reason", span)?, detail).map_err(fn(_) { unsupported("JobError", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1882
+fn queue_claim_to_runtime(claim: JetJobQueueClaim) -> MirRuntimeValue {
+    MirRuntimeValue.Struct{type_name: "JobQueueClaim", fields: [("receipt", queue_receipt_to_runtime(claim.receipt)), ("payload", queue_payload_to_runtime(claim.payload)), ("worker", MirRuntimeValue.String(claim.worker)), ("lease_token", MirRuntimeValue.String(claim.lease_token)), ("lease_until_ms", MirRuntimeValue.Int(claim.lease_until_ms))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1895
+fn runtime_to_queue_claim(value: &MirRuntimeValue, span: Span) -> JetJobQueueClaim Diagnostic! {
+    if value != .Struct(type_name, fields) -> return Err(unsupported("JobQueueClaim", span))
+    if type_name != "JobQueueClaim" -> return Err(unsupported("JobQueueClaim", span))
+    JetJobQueueClaim{receipt: runtime_to_queue_receipt(queue_field(fields, type_name, "receipt", span)?, span)?, payload: runtime_to_queue_payload(queue_field(fields, type_name, "payload", span)?, span)?, worker: queue_text(queue_field(fields, type_name, "worker", span)?, type_name, "worker", span)?, lease_token: queue_text(queue_field(fields, type_name, "lease_token", span)?, type_name, "lease_token", span)?, lease_until_ms: queue_int(queue_field(fields, type_name, "lease_until_ms", span)?, type_name, "lease_until_ms", span)?}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1919
+fn queue_event_to_runtime(event: JetJobQueueEvent) -> MirRuntimeValue {
+    MirRuntimeValue.Struct{type_name: "JobQueueEvent", fields: [("sequence", MirRuntimeValue.Int(event.sequence)), ("state", queue_state_to_runtime(event.state)), ("attempts", MirRuntimeValue.Int(event.attempts as I64)), ("timestamp_ms", MirRuntimeValue.Int(event.timestamp_ms)), ("reason", queue_optional_string(event.reason, "String")), ("duration_ms", queue_optional_int(event.duration_ms)), ("worker", queue_optional_string(event.worker, "String"))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1934
+fn queue_record_to_runtime(record: JetJobQueueRecord) -> MirRuntimeValue {
+    MirRuntimeValue.Struct{type_name: "JobQueueRecord", fields: [
+        ("receipt", queue_receipt_to_runtime(record.receipt)),
+        ("payload", record.payload.map(queue_payload_to_runtime).map(fn(value) { MirRuntimeValue.Present(value) }).unwrap_or_else(fn() { mir_absent("JobPayload") })),
+        ("result", record.result.map(queue_result_to_runtime).map(fn(value) { MirRuntimeValue.Present(value) }).unwrap_or_else(fn() { mir_absent("JobResult") })),
+        ("error", record.error.map(queue_error_to_runtime).map(fn(value) { MirRuntimeValue.Present(value) }).unwrap_or_else(fn() { mir_absent("JobError") })),
+        ("started_at_ms", queue_optional_int(record.started_at_ms)), ("finished_at_ms", queue_optional_int(record.finished_at_ms))
+    ]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1969
+fn queue_status_to_runtime(status: JetJobQueueStatus) -> MirRuntimeValue {
+    MirRuntimeValue.Struct{type_name: "JobQueueStatus", fields: [
+        ("queue", MirRuntimeValue.String(status.queue)), ("authority", MirRuntimeValue.String(status.authority)),
+        ("queued", MirRuntimeValue.Int(status.queued as I64)), ("running", MirRuntimeValue.Int(status.running as I64)),
+        ("retrying", MirRuntimeValue.Int(status.retrying as I64)), ("completed", MirRuntimeValue.Int(status.completed as I64)),
+        ("failed", MirRuntimeValue.Int(status.failed as I64)), ("dead_lettered", MirRuntimeValue.Int(status.dead_lettered as I64)),
+        ("cancelled", MirRuntimeValue.Int(status.cancelled as I64)), ("depth", MirRuntimeValue.Int(status.depth as I64)),
+        ("wait_ms", MirRuntimeValue.Int(status.wait_ms as I64)), ("throughput", MirRuntimeValue.Int(status.throughput as I64)),
+        ("capacity", MirRuntimeValue.Int(status.capacity as I64)), ("paused", MirRuntimeValue.Bool(status.paused)),
+        ("freshness_ms", MirRuntimeValue.Int(status.freshness_ms as I64))
+    ]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1991
+fn queue_open(endpoint: &JetServiceEndpoint, name: String) -> JetJobQueue JetServiceError! {
+    // GATE #4494: the canonical durable queue owns its retained native provider.
+    JetJobQueue.open_default(endpoint, name.to_string(), JetJobQueuePolicy.default())
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1998
+fn map_err(err: JetServiceError) -> MirRuntimeValue {
+    (variant, message) :: if err == {
+        .Full(m) -> ("Full", m); .Ambiguous(m) -> ("Ambiguous", m); .Unknown(m) -> ("Unknown", m)
+        .NotStarted(m) -> ("NotStarted", m); .Policy(m) -> ("Policy", m); .Unavailable(m) -> ("Unavailable", m)
+        .Partitioned(m) -> ("Partitioned", m); .Revoked(m) -> ("Revoked", m); .Stale(m) -> ("Stale", m); .Expired(m) -> ("Expired", m)
+    }
+    MirRuntimeValue.Enum{type_name: "ServiceError", variant: variant, args: [(None, MirRuntimeValue.String(message))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2018
+fn delivery_state_to_runtime(state: JetDeliveryState) -> MirRuntimeValue { MirRuntimeValue.Enum{type_name: "DeliveryState", variant: state.jet_show(), args: []} }
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2026
+fn delivery_record_to_runtime(delivery: JetDelivery) -> MirRuntimeValue {
+    MirRuntimeValue.Struct{type_name: "Delivery", fields: [("id", MirRuntimeValue.String(delivery.id)), ("store", MirRuntimeValue.String(delivery.store)), ("duplicate", MirRuntimeValue.Bool(delivery.duplicate)), ("authority", MirRuntimeValue.String(delivery.authority)), ("generation", MirRuntimeValue.Int(delivery.generation))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2039
+fn runtime_to_delivery_record(value: &MirRuntimeValue, span: Span) -> JetDelivery Diagnostic! {
+    if value != .Struct(type_name, fields) -> return Err(unsupported("Delivery", span))
+    if type_name != "Delivery" -> return Err(unsupported("Delivery", span))
+    field :: fn(name: String) -> &MirRuntimeValue Diagnostic! { fields.iter().find_map(fn(pair) { if pair.0 == name -> Val(&pair.1) else -> None }) ?? return Err(unsupported("Delivery.{name}", span)) }
+    id :: if field("id")? == { .String(value) -> value.clone(); _ -> return Err(unsupported("Delivery.id", span)) }
+    store :: if field("store")? == { .String(value) -> value.clone(); _ -> return Err(unsupported("Delivery.store", span)) }
+    duplicate :: if field("duplicate")? == { .Bool(value) -> value; _ -> return Err(unsupported("Delivery.duplicate", span)) }
+    authority :: if field("authority")? == { .String(value) -> value.clone(); _ -> return Err(unsupported("Delivery.authority", span)) }
+    generation :: if field("generation")? == { .Int(value) -> value; _ -> return Err(unsupported("Delivery.generation", span)) }
+    JetDelivery{id: id, store: store, duplicate: duplicate, authority: authority, generation: generation}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2081
+fn delivery_receipt_to_runtime(receipt: JetDeliveryReceipt) -> MirRuntimeValue {
+    MirRuntimeValue.Struct{type_name: "DeliveryReceipt", fields: [("id", MirRuntimeValue.String(receipt.id)), ("state", delivery_state_to_runtime(receipt.state)), ("attempts", MirRuntimeValue.Int(receipt.attempts)), ("retention_until", MirRuntimeValue.Int(receipt.retention_until)), ("deadline", MirRuntimeValue.Int(receipt.deadline)), ("idempotency_key", MirRuntimeValue.String(receipt.idempotency_key)), ("duplicate", MirRuntimeValue.Bool(receipt.duplicate)), ("authority", MirRuntimeValue.String(receipt.authority)), ("generation", MirRuntimeValue.Int(receipt.generation)), ("signature", MirRuntimeValue.String(receipt.signature))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2105
+fn delivery_event_to_runtime(event: JetDeliveryEvent) -> MirRuntimeValue {
+    MirRuntimeValue.Struct{type_name: "DeliveryEvent", fields: [("sequence", MirRuntimeValue.Int(event.sequence)), ("state", delivery_state_to_runtime(event.state)), ("attempts", MirRuntimeValue.Int(event.attempts)), ("timestamp", MirRuntimeValue.Int(event.timestamp)), ("signature", MirRuntimeValue.String(event.signature))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2118
+fn service_runtime_field(fields: &[(String, MirRuntimeValue)], type_name: String, name: String, span: Span) -> &MirRuntimeValue Diagnostic! {
+    fields.iter().find_map(fn(pair) { if pair.0 == name -> Val(&pair.1) else -> None }) ?? return Err(unsupported("{type_name}.{name}", span))
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2130
+fn service_runtime_text(fields: &[(String, MirRuntimeValue)], type_name: String, name: String, span: Span) -> String Diagnostic! {
+    if service_runtime_field(fields, type_name, name, span)? == { .String(value) -> value.clone(); _ -> return Err(unsupported("{type_name}.{name}", span)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2142
+fn service_runtime_int(fields: &[(String, MirRuntimeValue)], type_name: String, name: String, span: Span) -> I64 Diagnostic! {
+    if service_runtime_field(fields, type_name, name, span)? == { .Int(value) -> value; _ -> return Err(unsupported("{type_name}.{name}", span)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2154
+fn service_runtime_bool(fields: &[(String, MirRuntimeValue)], type_name: String, name: String, span: Span) -> Bool Diagnostic! {
+    if service_runtime_field(fields, type_name, name, span)? == { .Bool(value) -> value; _ -> return Err(unsupported("{type_name}.{name}", span)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2166
+fn runtime_to_delivery_state(value: &MirRuntimeValue, span: Span) -> JetDeliveryState Diagnostic! {
+    if value != .Enum(type_name, variant, args) -> return Err(unsupported("DeliveryState", span))
+    if type_name != "DeliveryState" || !args.is_empty() -> return Err(unsupported("DeliveryState", span))
+    if variant == { "Pending" -> .Pending; "Accepted" -> .Accepted; "Delivering" -> .Delivering; "Delivered" -> .Delivered; "DeadLettered" -> .DeadLettered; "Cancelled" -> .Cancelled; _ -> return Err(unsupported("DeliveryState variant", span)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2189
+fn runtime_to_delivery_receipt(value: &MirRuntimeValue, span: Span) -> JetDeliveryReceipt Diagnostic! {
+    if value != .Struct(type_name, fields) -> return Err(unsupported("DeliveryReceipt", span))
+    if type_name != "DeliveryReceipt" -> return Err(unsupported("DeliveryReceipt", span))
+    JetDeliveryReceipt{id: service_runtime_text(fields, "DeliveryReceipt", "id", span)?, state: runtime_to_delivery_state(service_runtime_field(fields, "DeliveryReceipt", "state", span)?, span)?, attempts: service_runtime_int(fields, "DeliveryReceipt", "attempts", span)?, retention_until: service_runtime_int(fields, "DeliveryReceipt", "retention_until", span)?, deadline: service_runtime_int(fields, "DeliveryReceipt", "deadline", span)?, idempotency_key: service_runtime_text(fields, "DeliveryReceipt", "idempotency_key", span)?, duplicate: service_runtime_bool(fields, "DeliveryReceipt", "duplicate", span)?, authority: service_runtime_text(fields, "DeliveryReceipt", "authority", span)?, generation: service_runtime_int(fields, "DeliveryReceipt", "generation", span)?, signature: service_runtime_text(fields, "DeliveryReceipt", "signature", span)?}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2213
+fn runtime_to_delivery_event(value: &MirRuntimeValue, span: Span) -> JetDeliveryEvent Diagnostic! {
+    if value != .Struct(type_name, fields) -> return Err(unsupported("DeliveryEvent", span))
+    if type_name != "DeliveryEvent" -> return Err(unsupported("DeliveryEvent", span))
+    JetDeliveryEvent{sequence: service_runtime_int(fields, "DeliveryEvent", "sequence", span)?, state: runtime_to_delivery_state(service_runtime_field(fields, "DeliveryEvent", "state", span)?, span)?, attempts: service_runtime_int(fields, "DeliveryEvent", "attempts", span)?, timestamp: service_runtime_int(fields, "DeliveryEvent", "timestamp", span)?, signature: service_runtime_text(fields, "DeliveryEvent", "signature", span)?}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2232
+fn runtime_to_service_error(value: &MirRuntimeValue, span: Span) -> JetServiceError Diagnostic! {
+    if value != .Enum(type_name, variant, args) -> return Err(unsupported("ServiceError", span))
+    if type_name != "ServiceError" || args.len() != 1 -> return Err(unsupported("ServiceError", span))
+    if args[0].1 != .String(message) -> return Err(unsupported("ServiceError message", span))
+    message :: message.clone()
+    if variant == {
+        "Full" -> .Full(message); "Ambiguous" -> .Ambiguous(message); "Unknown" -> .Unknown(message)
+        "NotStarted" -> .NotStarted(message); "Policy" -> .Policy(message); "Unavailable" -> .Unavailable(message)
+        "Partitioned" -> .Partitioned(message); "Revoked" -> .Revoked(message); "Stale" -> .Stale(message); "Expired" -> .Expired(message)
+        _ -> return Err(unsupported("ServiceError variant", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2265
+pub fn service_display_value_runtime(value: &MirRuntimeValue) -> String? {
+    span :: Span.new(0, 0)
+    if value == {
+        .Enum(type_name, _, _) -> if type_name == {
+            "DeliveryState" -> Val((runtime_to_delivery_state(value, span).ok() ?? return None).jet_show())
+            "ServiceError" -> Val((runtime_to_service_error(value, span).ok() ?? return None).jet_show())
+            _ -> None
+        }
+        .Struct(type_name, _) -> if type_name == {
+            "Delivery" -> Val((runtime_to_delivery_record(value, span).ok() ?? return None).jet_show())
+            "DeliveryReceipt" -> Val((runtime_to_delivery_receipt(value, span).ok() ?? return None).jet_show())
+            "DeliveryEvent" -> Val((runtime_to_delivery_event(value, span).ok() ?? return None).jet_show())
+            "ServiceEndpoint" -> Val((runtime_to_endpoint(value, span).ok() ?? return None).jet_show())
+            "ServiceRuntime" -> Val((runtime_value_to_service_runtime(value, span).ok() ?? return None).jet_show())
+            _ -> None
+        }
+        _ -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2295
+pub fn service_show_value_runtime(value: &MirRuntimeValue) -> String? {
+    span :: Span.new(0, 0)
+    if value == {
+        .Enum(type_name, _, _) -> if type_name == {
+            "ServiceRestart" -> Val((runtime_to_restart(value, span).ok() ?? return None).jet_show())
+            "ServiceDelivery" -> Val((runtime_to_delivery(value, span).ok() ?? return None).jet_show())
+            "TaskOutcome" -> Val((runtime_to_task_outcome(value, span).ok() ?? return None).jet_show())
+            "TaskStatus" -> Val((runtime_to_task_status(value, span).ok() ?? return None).jet_show())
+            _ -> service_display_value_runtime(value)
+        }
+        .Struct(type_name, _) -> if type_name == {
+            "ServiceStateStore" -> Val((runtime_to_state_store(value, span).ok() ?? return None).jet_show())
+            "ServiceUpgradeReceipt" -> Val((runtime_to_upgrade_receipt(value, span).ok() ?? return None).jet_show())
+            _ -> service_display_value_runtime(value)
+        }
+        _ -> service_display_value_runtime(value)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2320
+fn runtime_value_to_service_runtime(value: &MirRuntimeValue, span: Span) -> JetServiceRuntime Diagnostic! {
+    if value != .Struct(type_name, fields) -> return Err(unsupported("ServiceRuntime", span))
+    if type_name != "ServiceRuntime" -> return Err(unsupported("ServiceRuntime", span))
+    store :: runtime_to_service_string(service_runtime_field(fields, "ServiceRuntime", "store", span)?, SERVICE_AUTH_MAX_STORE, "ServiceRuntime.store", span)?
+    retention_ms :: service_runtime_int(fields, "ServiceRuntime", "retention_ms", span)?
+    jet_services_runtime(store, retention_ms)
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2345
+fn service_runtime_to_value(runtime: &JetServiceRuntime) -> MirRuntimeValue {
+    MirRuntimeValue.Struct{type_name: "ServiceRuntime", fields: [("store", MirRuntimeValue.String(runtime.store.clone())), ("retention_ms", MirRuntimeValue.Int(runtime.retention_ms))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2361
+pub fn apply_runtime_method_mir(receiver: &MirRuntimeValue, method: String, args: &[MirRuntimeValue], span: Span) -> MirRuntimeValue Diagnostic! {
+    runtime :: runtime_value_to_service_runtime(receiver, span)?
+    one :: fn(index: USize) -> &MirRuntimeValue Diagnostic! { args.get(index) ?? return Err(unsupported("ServiceRuntime.{method} arg {index}", span)) }
+    if method == {
+        "send" -> {
+            endpoint :: runtime_to_endpoint(one(0)?, span)?
+            message :: runtime_to_service_string(one(1)?, SERVICE_AUTH_MAX_MESSAGE, "ServiceRuntime.send message", span)?
+            key :: runtime_to_service_string(one(2)?, SERVICE_AUTH_MAX_KEY, "ServiceRuntime.send key", span)?
+            if jet_services_runtime_send(runtime, endpoint, message, key) == { Ok(delivery) -> MirRuntimeValue.Present(delivery_record_to_runtime(delivery)); Err(error) -> MirRuntimeValue.FailedTold(map_err(error)) }
+        }
+        "retry" | "dead_letter" | "retain" -> {
+            delivery :: runtime_to_delivery_record(one(0)?, span)?
+            result :: if method == { "retry" -> jet_services_runtime_retry(runtime, delivery); "dead_letter" -> jet_services_runtime_dead_letter(runtime, delivery); _ -> jet_services_runtime_retain(runtime, delivery) }
+            if result == { Ok(delivery) -> MirRuntimeValue.Present(delivery_record_to_runtime(delivery)); Err(error) -> MirRuntimeValue.FailedTold(map_err(error)) }
+        }
+        "commit" -> {
+            delivery :: runtime_to_delivery_record(one(0)?, span)?
+            if jet_services_runtime_commit(runtime, delivery) == { Ok(_) -> MirRuntimeValue.Present(MirRuntimeValue.Unit); Err(error) -> MirRuntimeValue.FailedTold(map_err(error)) }
+        }
+        _ -> return Err(unsupported("ServiceRuntime.{method}", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2418
+fn mutate_ok(tree: JetServiceTree, value: MirRuntimeValue) -> MirRuntimeValue { MirRuntimeValue.Struct{type_name: "__JetServiceMut", fields: [("tree", tree_to_runtime(tree)), ("value", value)]} }
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2428
+fn mutate_err(tree: JetServiceTree, error: MirRuntimeValue) -> MirRuntimeValue { MirRuntimeValue.FailedTold(MirRuntimeValue.Struct{type_name: "__JetServiceMutErr", fields: [("tree", tree_to_runtime(tree)), ("error", error)]}) }
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2438
+fn mutate_handle_ok(handle: &JetWorkflowHandle, value: MirRuntimeValue, span: Span) -> MirRuntimeValue Diagnostic! { MirRuntimeValue.Struct{type_name: "__JetServiceMut", fields: [("tree", workflow_handle_to_runtime(handle, span)?), ("value", value)]} }
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2452
+fn mutate_handle_err(handle: &JetWorkflowHandle, error: MirRuntimeValue, span: Span) -> MirRuntimeValue Diagnostic! { MirRuntimeValue.FailedTold(MirRuntimeValue.Struct{type_name: "__JetServiceMutErr", fields: [("tree", workflow_handle_to_runtime(handle, span)?), ("error", error)]}) }
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2466
+pub fn take_mut_runtime(value: MirRuntimeValue) -> (MirRuntimeValue, MirRuntimeValue) MirRuntimeValue! {
+    if value == {
+        .Present(inner) -> if inner == {
+            .Struct(type_name, fields) -> {
+                if type_name != "__JetServiceMut" -> return (MirRuntimeValue.Unit, MirRuntimeValue.Present(inner))
+                tree :: fields.iter().find(fn(pair) { pair.0 == "tree" }).map(fn(pair) { pair.1.clone() }) ?? return Err(MirRuntimeValue.FailedTold(MirRuntimeValue.String("core.service: missing tree write-back")))
+                val :: fields.iter().find(fn(pair) { pair.0 == "value" }).map(fn(pair) { pair.1.clone() }) ?? return Err(MirRuntimeValue.FailedTold(MirRuntimeValue.String("core.service: missing value write-back")))
+                (tree, MirRuntimeValue.Present(val))
+            }
+            other -> (MirRuntimeValue.Unit, MirRuntimeValue.Present(other))
+        }
+        .FailedTold(inner) -> if inner == {
+            .Struct(type_name, fields) -> {
+                if type_name != "__JetServiceMutErr" -> return Err(MirRuntimeValue.FailedTold(inner))
+                tree :: fields.iter().find(fn(pair) { pair.0 == "tree" }).map(fn(pair) { pair.1.clone() }) ?? return Err(MirRuntimeValue.FailedTold(MirRuntimeValue.String("core.service: missing tree write-back")))
+                error :: fields.iter().find(fn(pair) { pair.0 == "error" }).map(fn(pair) { pair.1.clone() }) ?? return Err(MirRuntimeValue.FailedTold(MirRuntimeValue.String("core.service: missing error write-back")))
+                (tree, MirRuntimeValue.FailedTold(error))
+            }
+            other -> return Err(MirRuntimeValue.FailedTold(other))
+        }
+        other -> return Err(other)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2521
+pub fn apply_runtime_start_with_dispatcher(value: &MirRuntimeValue, span: Span, dispatch: fn(String, &JetServiceEndpoint) -> Unit JetServiceError!) -> MirRuntimeValue Diagnostic! {
+    tree := runtime_to_tree(value, span)?
+    if jet_services_start_with_queue_dispatcher(&tree, dispatch) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(error) -> mutate_err(tree, map_err(error)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2538
+pub fn apply_runtime(method: String, args: &[MirRuntimeValue], span: Span) -> MirRuntimeValue Diagnostic! {
+    one :: fn(i: USize) -> &MirRuntimeValue Diagnostic! { args.get(i) ?? return Err(unsupported("core.service.{method} arg {i}", span)) }
+    if method == {
+        "tree" -> tree_to_runtime(jet_services_tree(runtime_to_service_string(one(0)?, MAX_SERVICE_NAME, "tree name", span)?))
+        "runtime" -> {
+            store :: runtime_to_service_string(one(0)?, SERVICE_AUTH_MAX_STORE, "ServiceRuntime.store", span)?
+            if one(1)? != .Struct(type_name, fields) -> return Err(unsupported("ServiceRuntime.retention_ms", span))
+            if type_name != "Duration" -> return Err(unsupported("ServiceRuntime.retention_ms", span))
+            retention_ms :: fields.iter().find_map(fn(pair) { if (pair.0, pair.1) == { ("ns", .Int(ns)) -> Val(ns / 1000000); _ -> None } }) ?? return Err(unsupported("ServiceRuntime.retention_ms", span))
+            service_runtime_to_value(jet_services_runtime(store, retention_ms))
+        }
+        "restart_one_for_one" -> restart_to_runtime(jet_services_restart_one_for_one())
+        "restart_one_for_all" -> restart_to_runtime(jet_services_restart_one_for_all())
+        "restart_rest_for_one" -> restart_to_runtime(jet_services_restart_rest_for_one())
+        "delivery_at_most_once" -> delivery_to_runtime(jet_services_delivery_at_most_once())
+        "delivery_durable" -> delivery_to_runtime(jet_services_delivery_durable())
+        "state_store" -> {
+            path :: runtime_to_service_string(one(0)?, MAX_SERVICE_STATE_STORE, "service state store", span)?
+            if jet_services_state_store(path) == { Ok(store) -> MirRuntimeValue.Present(state_store_to_runtime(store)); Err(error) -> MirRuntimeValue.FailedTold(map_err(error)) }
+        }
+        "set_restart" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            restart :: runtime_to_restart(one(1)?, span)?
+            if jet_services_set_restart(&tree, restart) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "set_delivery" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            delivery :: runtime_to_delivery(one(1)?, span)?
+            if jet_services_set_delivery(&tree, delivery) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "worker" -> {
+            if args.len() != 5 -> return Err(unsupported("core.service.worker expects five arguments", span))
+            tree := runtime_to_tree(one(0)?, span)?
+            name :: runtime_to_service_string(one(1)?, MAX_SERVICE_NAME, "worker name", span)?
+            handler_name :: runtime_to_service_string(one(3)?, MAX_SERVICE_NAME, "worker handler", span)?
+            capacity :: if one(4)? == { .Int(n) -> n; _ -> return Err(unsupported("capacity", span)) }
+            // Callback is retained by the engine; kernel stores its checked handler identity.
+            if jet_services_worker(&tree, name, jet_services_noop_worker, handler_name, capacity) == { Ok(ep) -> MirRuntimeValue.Present(mutate_ok(tree, endpoint_to_runtime(ep))); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "group" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            name :: runtime_to_service_string(one(1)?, MAX_SERVICE_NAME, "group name", span)?
+            if one(2)? != .List(xs) -> return Err(unsupported("group workers", span))
+            if xs.len() > MAX_SERVICE_WORKERS -> return Err(unsupported("group worker limit", span))
+            workers := [String]{}
+            loop x in xs -> &workers.push(runtime_to_service_string(x, MAX_SERVICE_NAME, "group worker", span)?)
+            if jet_services_group(&tree, name, workers) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "stop" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            if jet_services_stop(&tree) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "send" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            endpoint :: runtime_to_endpoint(one(1)?, span)?
+            message :: runtime_to_service_string(one(2)?, MAX_SERVICE_MESSAGE, "message", span)?
+            if jet_services_send(&tree, endpoint, message) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "receive" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            endpoint :: runtime_to_endpoint(one(1)?, span)?
+            if jet_services_receive(&tree, endpoint) == { Ok(msg) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.String(msg))); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "endpoint_send" -> {
+            endpoint :: runtime_to_endpoint(one(0)?, span)?
+            message :: runtime_to_service_string(one(1)?, MAX_SERVICE_MESSAGE, "message", span)?
+            if jet_services_endpoint_send(endpoint, message) == { Ok(_) -> MirRuntimeValue.Present(MirRuntimeValue.Unit); Err(error) -> MirRuntimeValue.FailedTold(map_err(error)) }
+        }
+        "endpoint_receive" -> {
+            endpoint :: runtime_to_endpoint(one(0)?, span)?
+            if jet_services_endpoint_receive(endpoint) == { Ok(message) -> MirRuntimeValue.Present(MirRuntimeValue.String(message)); Err(error) -> MirRuntimeValue.FailedTold(map_err(error)) }
+        }
+        "mailbox_depth" -> {
+            tree :: runtime_to_tree(one(0)?, span)?
+            endpoint :: runtime_to_endpoint(one(1)?, span)?
+            if jet_services_mailbox_depth(tree, endpoint) == { Ok(n) -> MirRuntimeValue.Present(MirRuntimeValue.Int(n)); Err(e) -> MirRuntimeValue.FailedTold(map_err(e)) }
+        }
+        "restarts" -> {
+            tree :: runtime_to_tree(one(0)?, span)?
+            endpoint :: runtime_to_endpoint(one(1)?, span)?
+            if jet_services_restarts(tree, endpoint) == { Ok(n) -> MirRuntimeValue.Present(MirRuntimeValue.Int(n)); Err(e) -> MirRuntimeValue.FailedTold(map_err(e)) }
+        }
+        "fail_worker" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            endpoint :: runtime_to_endpoint(one(1)?, span)?
+            if jet_services_fail_worker(&tree, endpoint) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "endpoint_show" -> MirRuntimeValue.String(jet_services_endpoint_show(runtime_to_endpoint(one(0)?, span)?))
+        "delivery_state_show" -> MirRuntimeValue.String(jet_services_delivery_state_show(runtime_to_delivery_state(one(0)?, span)?))
+        "tree_show" -> MirRuntimeValue.String(jet_services_tree_show(runtime_to_tree(one(0)?, span)?))
+        "send_durable" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            endpoint :: runtime_to_endpoint(one(1)?, span)?
+            message :: if one(2)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("message", span)) }
+            key :: if one(3)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("idempotency key", span)) }
+            if jet_services_send_durable(&tree, endpoint, message, key) == { Ok(receipt) -> MirRuntimeValue.Present(mutate_ok(tree, delivery_record_to_runtime(receipt))); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "delivery_wait" | "delivery_status" | "delivery_retry" | "delivery_cancel" | "delivery_receipt" | "delivery_events" -> {
+            delivery :: runtime_to_delivery_record(one(0)?, span)?
+            result :: if method == {
+                "delivery_wait" -> jet_services_delivery_wait(delivery).map(delivery_state_to_runtime)
+                "delivery_status" -> jet_services_delivery_status(delivery).map(delivery_state_to_runtime)
+                "delivery_retry" -> jet_services_delivery_retry(delivery).map(delivery_record_to_runtime)
+                "delivery_cancel" -> jet_services_delivery_cancel(delivery).map(delivery_record_to_runtime)
+                "delivery_receipt" -> jet_services_delivery_receipt(delivery).map(delivery_receipt_to_runtime)
+                _ -> jet_services_delivery_events(delivery).map(fn(events) { MirRuntimeValue.List(events.into_iter().map(delivery_event_to_runtime).collect()) })
+            }
+            if result == { Ok(value) -> MirRuntimeValue.Present(value); Err(error) -> MirRuntimeValue.FailedTold(map_err(error)) }
+        }
+        "dead_letter_count" -> MirRuntimeValue.Int(jet_services_dead_letter_count(runtime_to_tree(one(0)?, span)?))
+        "drain_dead_letters" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            if jet_services_drain_dead_letters(&tree) == { Ok(n) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Int(n))); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "set_state_empty" | "set_state_snapshot" | "set_state_event_log" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            result :: if method == "set_state_empty" -> jet_services_set_state_empty(&tree) else {
+                store :: runtime_to_state_store(one(1)?, span)?
+                schema :: runtime_to_service_string(one(2)?, MAX_SERVICE_STATE_SCHEMA, "service state schema", span)?
+                version :: if one(3)? == { .Int(version) -> version; _ -> return Err(unsupported("service state version", span)) }
+                migration :: runtime_to_service_string(one(4)?, MAX_SERVICE_STATE_SCHEMA, "service state migration policy", span)?
+                if method == "set_state_snapshot" -> jet_services_set_state_snapshot(&tree, store, schema, version, migration)
+                else -> jet_services_set_state_event_log(&tree, store, schema, version, migration)
+            }
+            if result == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "commit_snapshot" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            payload :: if one(1)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("snapshot payload", span)) }
+            if jet_services_commit_snapshot(&tree, payload) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "restore_snapshot" -> {
+            tree :: runtime_to_tree(one(0)?, span)?
+            if jet_services_restore_snapshot(tree) == { Ok(s) -> MirRuntimeValue.Present(MirRuntimeValue.String(s)); Err(e) -> MirRuntimeValue.FailedTold(map_err(e)) }
+        }
+        "append_event" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            event :: if one(1)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("event", span)) }
+            if jet_services_append_event(&tree, event) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "event_count" -> MirRuntimeValue.Int(jet_services_event_count(runtime_to_tree(one(0)?, span)?))
+        "replay_events" -> MirRuntimeValue.String(jet_services_replay_events(runtime_to_tree(one(0)?, span)?))
+        "workflow_start" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            id :: if one(1)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("workflow id", span)) }
+            version :: if one(2)? == { .Int(n) -> n; _ -> return Err(unsupported("workflow version", span)) }
+            if jet_services_workflow_start(&tree, id, version) == { Ok(handle) -> MirRuntimeValue.Present(mutate_ok(tree, workflow_handle_to_runtime(handle, span)?)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "workflow_sleep" -> {
+            handle :: runtime_to_workflow_handle(one(0)?, span)?
+            if one(1)? != .Struct(type_name, fields) -> return Err(unsupported("workflow sleep duration", span))
+            if type_name != "Duration" -> return Err(unsupported("workflow sleep duration", span))
+            nanos :: fields.iter().find_map(fn(pair) { if (pair.0, pair.1) == { ("ns", .Int(ns)) -> Val(ns); _ -> None } }) ?? return Err(unsupported("workflow sleep duration", span))
+            if jet_services_workflow_sleep(handle, nanos) == { Ok(_) -> MirRuntimeValue.Present(mutate_handle_ok(handle, MirRuntimeValue.Unit, span)?); Err(e) -> mutate_handle_err(handle, map_err(e), span)? }
+        }
+        "workflow_activity_wait" -> {
+            handle :: runtime_to_workflow_handle(one(0)?, span)?
+            activity :: runtime_to_service_string(one(1)?, MAX_SERVICE_NAME, "workflow activity", span)?
+            argument :: runtime_to_service_string(one(2)?, MAX_SERVICE_MESSAGE, "workflow activity argument", span)?
+            if jet_services_workflow_activity_wait(handle, activity, argument) == { Ok(value) -> MirRuntimeValue.Present(mutate_handle_ok(handle, MirRuntimeValue.String(value), span)?); Err(e) -> mutate_handle_err(handle, map_err(e), span)? }
+        }
+        "workflow_all" -> {
+            handle :: runtime_to_workflow_handle(one(0)?, span)?
+            if one(1)? != .List(items) -> return Err(unsupported("workflow all values", span))
+            values := [String]{}
+            loop item in items -> &values.push(runtime_to_service_string(item, MAX_SERVICE_MESSAGE, "workflow all value", span)?)
+            if jet_services_workflow_all(handle, values) == { Ok(values) -> MirRuntimeValue.Present(mutate_handle_ok(handle, MirRuntimeValue.List(values.into_iter().map(fn(value) { MirRuntimeValue.String(value) }).collect()), span)?); Err(e) -> mutate_handle_err(handle, map_err(e), span)? }
+        }
+        "workflow_step" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            run_id :: runtime_to_workflow_run_id(one(1)?, span)?
+            step :: if one(2)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("step", span)) }
+            if jet_services_workflow_step(&tree, run_id, step) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "workflow_activity" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            run_id :: runtime_to_workflow_run_id(one(1)?, span)?
+            activity :: if one(2)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("workflow activity", span)) }
+            key :: if one(3)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("activity idempotency key", span)) }
+            max_attempts :: if one(4)? == { .Int(n) -> n; _ -> return Err(unsupported("activity retry limit", span)) }
+            if jet_services_workflow_activity(&tree, run_id, activity, key, max_attempts) == { Ok(status) -> MirRuntimeValue.Present(mutate_ok(tree, task_status_to_runtime(status))); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "workflow_activity_retry" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            run_id :: runtime_to_workflow_run_id(one(1)?, span)?
+            key :: if one(2)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("activity idempotency key", span)) }
+            outcome :: runtime_to_task_outcome(one(3)?, span)?
+            if jet_services_workflow_activity_retry(&tree, run_id, key, outcome) == { Ok(status) -> MirRuntimeValue.Present(mutate_ok(tree, task_status_to_runtime(status))); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "workflow_activity_complete" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            run_id :: runtime_to_workflow_run_id(one(1)?, span)?
+            key :: if one(2)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("activity idempotency key", span)) }
+            outcome :: runtime_to_task_outcome(one(3)?, span)?
+            if jet_services_workflow_activity_complete(&tree, run_id, key, outcome) == { Ok(outcome) -> MirRuntimeValue.Present(mutate_ok(tree, task_outcome_to_runtime(outcome))); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "workflow_history" -> {
+            tree :: runtime_to_tree(one(0)?, span)?
+            run_id :: runtime_to_workflow_run_id(one(1)?, span)?
+            if jet_services_workflow_history(tree, run_id) == { Ok(s) -> MirRuntimeValue.Present(MirRuntimeValue.String(s)); Err(e) -> MirRuntimeValue.FailedTold(map_err(e)) }
+        }
+        "workflow_outcome" -> {
+            tree :: runtime_to_tree(one(0)?, span)?
+            run_id :: runtime_to_workflow_run_id(one(1)?, span)?
+            if jet_services_workflow_outcome(tree, run_id) == { Ok(outcome) -> MirRuntimeValue.Present(task_outcome_to_runtime(outcome)); Err(e) -> MirRuntimeValue.FailedTold(map_err(e)) }
+        }
+        "directory_register" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            name :: if one(1)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("directory name", span)) }
+            endpoint :: runtime_to_endpoint(one(2)?, span)?
+            if jet_services_directory_register(&tree, name, endpoint) == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "directory_resolve" -> {
+            tree :: runtime_to_tree(one(0)?, span)?
+            name :: if one(1)? == { .String(s) -> s.clone(); _ -> return Err(unsupported("directory name", span)) }
+            if jet_services_directory_resolve(tree, name) == { Ok(ep) -> MirRuntimeValue.Present(endpoint_to_runtime(ep)); Err(e) -> MirRuntimeValue.FailedTold(map_err(e)) }
+        }
+        "directory_generation" -> MirRuntimeValue.Int(jet_services_directory_generation(runtime_to_tree(one(0)?, span)?))
+        "drain_worker" | "partition_worker" | "reconcile_worker" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            endpoint :: runtime_to_endpoint(one(1)?, span)?
+            result :: if method == { "drain_worker" -> jet_services_drain_worker(&tree, endpoint); "partition_worker" -> jet_services_partition_worker(&tree, endpoint); _ -> jet_services_reconcile_worker(&tree, endpoint) }
+            if result == { Ok(_) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Unit)); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "handoff_generation" | "rollback_generation" | "chaos_fail" -> {
+            tree := runtime_to_tree(one(0)?, span)?
+            result :: if method == { "handoff_generation" -> jet_services_handoff_generation(&tree); "rollback_generation" -> jet_services_rollback_generation(&tree); _ -> jet_services_chaos_fail(&tree) }
+            if result == { Ok(n) -> MirRuntimeValue.Present(mutate_ok(tree, MirRuntimeValue.Int(n))); Err(e) -> mutate_err(tree, map_err(e)) }
+        }
+        "upgrade_receipt" -> if jet_services_upgrade_receipt(runtime_to_tree(one(0)?, span)?) == { Ok(receipt) -> MirRuntimeValue.Present(upgrade_receipt_to_runtime(receipt)); Err(error) -> MirRuntimeValue.FailedTold(map_err(error)) }
+        "observe" -> MirRuntimeValue.String(jet_services_observe(runtime_to_tree(one(0)?, span)?))
+        _ -> return Err(unsupported("`core.service.{method}()`", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3100
+fn legacy_conversion_error(label: String) -> Diagnostic { unsupported(label, Span.new(0, 0)) }
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3104
+pub fn ct_to_runtime_value(value: &CtValue) -> MirRuntimeValue Diagnostic! {
+    if value == {
+        .Int(value) -> MirRuntimeValue.Int(value)
+        .Float(.F32(value)) -> MirRuntimeValue.Float{value: value as F64, f32: true}
+        .Float(.F64(value)) -> MirRuntimeValue.Float{value: value, f32: false}
+        .Bool(value) -> MirRuntimeValue.Bool(value)
+        .Char(value) -> MirRuntimeValue.Char(value)
+        .Str(value) -> MirRuntimeValue.String(value.clone())
+        .BigInt(value) -> MirRuntimeValue.BigInt(value.to_string_rep())
+        .Bytes(values) -> MirRuntimeValue.Bytes(values.clone())
+        .List(values) -> {
+            out := [MirRuntimeValue]{}
+            loop item in values -> &out.push(ct_to_runtime_value(item)?)
+            MirRuntimeValue.List(out)
+        }
+        .Map(values) -> {
+            // GATE #4499: CtKey canonical ordered map, not string-encoded keys.
+            keys := values.keys().collect()
+            &keys.sort()
+            out := [(MirKey, MirRuntimeValue)]{}
+            loop key in keys -> &out.push((ct_to_mir_key(key.clone()), ct_to_runtime_value(values[key])?))
+            MirRuntimeValue.Map(out)
+        }
+        .Struct(type_name, fields) -> {
+            out := [(String, MirRuntimeValue)]{}
+            loop (name, item) in fields -> &out.push((name.clone(), ct_to_runtime_value(item)?))
+            MirRuntimeValue.Struct{type_name: type_name.clone(), fields: out}
+        }
+        .Enum(type_name, variant, args) -> {
+            out := [(String?, MirRuntimeValue)]{}
+            loop (name, item) in args -> &out.push((name.clone(), ct_to_runtime_value(item)?))
+            MirRuntimeValue.Enum{type_name: type_name.clone(), variant: variant.clone(), args: out}
+        }
+        .Present(value) -> MirRuntimeValue.Present(ct_to_runtime_value(value)?)
+        .Failed(.Clean(ty)) -> MirRuntimeValue.Absent{element: mir_compat_type(ty)}
+        .Failed(.Told(value)) -> MirRuntimeValue.FailedTold(ct_to_runtime_value(value)?)
+        .Unit -> MirRuntimeValue.Unit
+        .Closure(_) -> return Err(legacy_conversion_error("legacy closure service value"))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3164
+pub fn runtime_to_ct_value(value: &MirRuntimeValue) -> CtValue Diagnostic! {
+    if value == {
+        .Int(value) -> CtValue.Int(value)
+        .BigInt(value) -> CtValue.BigInt(crate.Numeric.CtBigInt.from_str(value).map_err(fn(_) { legacy_conversion_error("runtime BigInt service value") })?)
+        .Float(value, f32) -> CtValue.Float(if f32 -> CtFloat.F32(value as F32) else -> CtFloat.F64(value))
+        .Bool(value) -> CtValue.Bool(value)
+        .Char(value) -> CtValue.Char(value)
+        .String(value) -> CtValue.Str(value.clone())
+        .Bytes(values) -> CtValue.Bytes(values.clone())
+        .List(values) -> {
+            out := [CtValue]{}
+            loop item in values -> &out.push(runtime_to_ct_value(item)?)
+            CtValue.List(out)
+        }
+        .Map(values) -> {
+            // GATE #4499: native composite CtKey equality/hash/order.
+            out := [CtKey:CtValue]{}
+            loop (key, item) in values -> out[mir_to_ct_key(key)] = runtime_to_ct_value(item)?
+            CtValue.Map(out)
+        }
+        .Struct(type_name, fields) -> {
+            out := [(String, CtValue)]{}
+            loop (name, item) in fields -> &out.push((name.clone(), runtime_to_ct_value(item)?))
+            CtValue.Struct{type_name: type_name.clone(), fields: out}
+        }
+        .Enum(type_name, variant, args) -> {
+            out := [(String?, CtValue)]{}
+            loop (name, item) in args -> &out.push((name.clone(), runtime_to_ct_value(item)?))
+            CtValue.Enum{type_name: type_name.clone(), variant: variant.clone(), args: out}
+        }
+        .Present(value) -> CtValue.Present(runtime_to_ct_value(value)?)
+        .FailedTold(value) -> CtValue.Failed(CtReport.Told(runtime_to_ct_value(value)?))
+        .Absent(element) -> CtValue.Failed(CtReport.Clean(Type.Named(element.display_name())))
+        .Unit -> CtValue.Unit
+        .Moved -> return Err(legacy_conversion_error("internal moved service value"))
+        .NativeCursor(_) -> return Err(legacy_conversion_error("native cursor service value"))
+        .NativeOwned(_) -> return Err(legacy_conversion_error("native-owned service value"))
+        .Closure(_) -> return Err(legacy_conversion_error("runtime closure service value"))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3228
+pub fn interpreter_job_cbor_bytes(value: &MirRuntimeValue, span: Span) -> [U8] Diagnostic! {
+    value :: runtime_to_ct_value(value)?
+    crate.Comptime.EncodingLite.cbor_encode_canonical(value).map_err(fn(error) { unsupported("Job payload CBOR encoding: {error.debug()}", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3238
+pub fn service_runtime_value(store: String, retention_ms: I64) -> MirRuntimeValue { service_runtime_to_value(jet_services_runtime(store, retention_ms)) }
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3242
+pub fn service_show_value(value: &CtValue) -> String? { ct_to_runtime_value(value).ok().and_then(fn(value) { service_show_value_runtime(value) }) }
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3248
+pub fn apply_runtime_method(receiver: &CtValue, method: String, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    receiver :: ct_to_runtime_value(receiver)?
+    converted := [MirRuntimeValue]{}
+    loop item in args -> &converted.push(ct_to_runtime_value(item)?)
+    runtime_to_ct_value(apply_runtime_method_mir(receiver, method, converted, span)?)?
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3262
+pub fn take_mut_ok(value: CtValue) -> (CtValue, CtValue) CtValue! {
+    runtime :: if ct_to_runtime_value(value) == { Ok(value) -> value; Err(_) -> return Err(value) }
+    if take_mut_runtime(runtime) == {
+        Ok((tree, result)) -> if (runtime_to_ct_value(tree), runtime_to_ct_value(result)) == { (Ok(tree), Ok(value)) -> (tree, value); _ -> return Err(value) }
+        Err(result) -> if runtime_to_ct_value(result) == { Ok(result) -> return Err(result); Err(_) -> return Err(value) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3276
+pub fn apply(method: String, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    converted := [MirRuntimeValue]{}
+    loop value in args {
+        item :: if (method, value) == { ("worker", .Closure(_)) -> MirRuntimeValue.Unit; _ -> ct_to_runtime_value(value)? }
+        &converted.push(item)
+    }
+    if !converted.is_empty() {
+        tree :: converted[0]
+        converted[0] = MirRuntimeValue.Unit
+        converted[0] = intern_resolve(tree)
+    }
+    slot :: converted.first().and_then(intern_slot)
+    runtime_to_ct_value(intern_commit(slot, apply_runtime(method, converted, span)?))?
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3299
+fn queue_failed(error: JetServiceError) -> MirRuntimeValue { MirRuntimeValue.FailedTold(map_err(error)) }
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3303
+fn queue_one(args: &[MirRuntimeValue], index: USize, method: String, span: Span) -> &MirRuntimeValue Diagnostic! { args.get(index) ?? return Err(unsupported("core.jobs.{method} arg {index}", span)) }
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3313
+fn queue_timeout_ms(value: &MirRuntimeValue, span: Span) -> I64 Diagnostic! {
+    if value == { .Struct(type_name, _) -> { if type_name == "Duration" -> return queue_duration_ms(value, span); return Err(unsupported("JobQueue.wait timeout", span)) }; _ -> return Err(unsupported("JobQueue.wait timeout", span)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3322
+fn apply_jobs_runtime_for_endpoint(endpoint: &JetServiceEndpoint, method: String, args: &[MirRuntimeValue], span: Span) -> MirRuntimeValue Diagnostic! {
+    if method == {
+        "queue" -> {
+            if !args.is_empty() -> return Err(unsupported("`core.jobs.queue()` takes no arguments", span))
+            queue_result_value(queue_open(endpoint, JOB_QUEUE_DEFAULT_NAME).map(fn(_) { queue_to_runtime(endpoint, JOB_QUEUE_DEFAULT_NAME) }), fn(value) { value })
+        }
+        _ -> return Err(unsupported("`core.jobs.{method}()`", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3346
+pub fn apply_jobs_runtime(method: String, args: &[MirRuntimeValue], span: Span) -> MirRuntimeValue Diagnostic! {
+    endpoint :: if jet_services_active_execution_endpoint() == { Ok(endpoint) -> endpoint; Err(error) -> return queue_failed(error) }
+    apply_jobs_runtime_for_endpoint(endpoint, method, args, span)
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3361
+pub fn apply_jobs_method_mir(receiver: &MirRuntimeValue, method: String, args: &[MirRuntimeValue], span: Span) -> MirRuntimeValue Diagnostic! {
+    (endpoint, name) :: runtime_to_queue(receiver, span)?
+    jet_services_authority_validate(endpoint).map_err(fn(_) { unsupported("JobQueue endpoint authority", span) })?
+    queue := if queue_open(endpoint, name) == { Ok(queue) -> queue; Err(error) -> return queue_failed(error) }
+    exact :: fn(expected: USize) -> Unit Diagnostic! { if args.len() != expected -> return Err(unsupported("JobQueue.{method} argument count", span)) }
+    if method == {
+        "enqueue" -> {
+            if args.len() < 2 || args.len() > 3 -> return Err(unsupported("JobQueue.enqueue(Job, payload, key?)", span))
+            job_type :: queue_job_type(queue_one(args, 0, "enqueue", span)?, span)?
+            payload :: queue_payload(job_type, queue_one(args, 1, "enqueue", span)?, span)?
+            request :: queue_request(job_type, payload, args, span)?
+            queue_result_value(&queue.enqueue(request), queue_receipt_to_runtime)
+        }
+        "delay" -> {
+            exact(3)?
+            job_type :: queue_job_type(queue_one(args, 0, "delay", span)?, span)?
+            payload :: queue_payload(job_type, queue_one(args, 1, "delay", span)?, span)?
+            delay_ms :: queue_duration_ms(queue_one(args, 2, "delay", span)?, span)?
+            queue_result_value(&queue.enqueue_delayed(job_type, payload, delay_ms, None, None), queue_receipt_to_runtime)
+        }
+        "receipt" -> {
+            exact(1)?
+            id :: queue_text(queue_one(args, 0, "receipt", span)?, "JobQueue", "id", span)?
+            queue_result_value(queue.receipt(id), queue_receipt_to_runtime)
+        }
+        "inspect" -> {
+            exact(2)?
+            // GATE #4483: selected-target USize checked conversion.
+            limit :: USize.try_from(queue_int(queue_one(args, 0, "inspect", span)?, "JobQueue", "limit", span)?).map_err(fn(_) { unsupported("JobQueue.inspect limit", span) })?
+            include_payload :: queue_bool(queue_one(args, 1, "inspect", span)?, "JobQueue", "include_payload", span)?
+            queue_result_value(queue.inspect(limit, include_payload), fn(records) { MirRuntimeValue.List(records.into_iter().map(queue_record_to_runtime).collect()) })
+        }
+        "events" -> {
+            exact(1)?
+            id :: queue_text(queue_one(args, 0, "events", span)?, "JobQueue", "id", span)?
+            queue_result_value(queue.events(id), fn(events) { MirRuntimeValue.List(events.into_iter().map(queue_event_to_runtime).collect()) })
+        }
+        "claim" -> {
+            exact(2)?
+            worker :: queue_text(queue_one(args, 0, "claim", span)?, "JobQueue", "worker", span)?
+            limit :: USize.try_from(queue_int(queue_one(args, 1, "claim", span)?, "JobQueue", "limit", span)?).map_err(fn(_) { unsupported("JobQueue.claim limit", span) })?
+            queue_result_value(&queue.claim(worker, limit), fn(claims) { MirRuntimeValue.List(claims.into_iter().map(queue_claim_to_runtime).collect()) })
+        }
+        "heartbeat" -> {
+            exact(1)?
+            claim :: runtime_to_queue_claim(queue_one(args, 0, "heartbeat", span)?, span)?
+            queue_result_value(&queue.heartbeat(claim), queue_receipt_to_runtime)
+        }
+        "acknowledge" -> {
+            exact(2)?
+            claim :: runtime_to_queue_claim(queue_one(args, 0, "acknowledge", span)?, span)?
+            result :: runtime_to_queue_result(queue_one(args, 1, "acknowledge", span)?, span)?
+            queue_result_value(&queue.acknowledge(claim, result), queue_receipt_to_runtime)
+        }
+        "fail" -> {
+            exact(2)?
+            claim :: runtime_to_queue_claim(queue_one(args, 0, "fail", span)?, span)?
+            error :: runtime_to_queue_error(queue_one(args, 1, "fail", span)?, span)?
+            queue_result_value(&queue.fail(claim, error), queue_receipt_to_runtime)
+        }
+        "cancel" | "dead_letter" -> {
+            if args.len() < 2 || args.len() > 3 -> return Err(unsupported("JobQueue.{method}(id, reason, lease_token?)", span))
+            id :: queue_text(queue_one(args, 0, method, span)?, "JobQueue", "id", span)?
+            reason :: queue_text(queue_one(args, 1, method, span)?, "JobQueue", "reason", span)?
+            lease_token :: queue_optional_text(args, 2, "JobQueue", "lease_token", span)?
+            result :: if method == "cancel" -> &queue.cancel(id, reason, lease_token.as_deref()) else -> &queue.dead_letter(id, reason, lease_token.as_deref())
+            queue_result_value(result, queue_receipt_to_runtime)
+        }
+        "recover_expired" -> { exact(0)?; queue_result_value(&queue.recover_expired(), fn(_) { MirRuntimeValue.Unit }) }
+        "status" -> { exact(0)?; queue_result_value(queue.status(), queue_status_to_runtime) }
+        "pause" | "resume" -> {
+            exact(0)?
+            result :: if method == "pause" -> &queue.pause() else -> &queue.resume()
+            queue_result_value(result, queue_status_to_runtime)
+        }
+        "wait" -> {
+            exact(1)?
+            timeout_ms :: queue_timeout_ms(queue_one(args, 0, "wait", span)?, span)?
+            queue_result_value(&queue.wait(timeout_ms), queue_status_to_runtime)
+        }
+        "prune" -> { exact(0)?; queue_result_value(&queue.prune(), fn(count) { MirRuntimeValue.Int(I64.try_from(count).unwrap_or(I64.MAX)) }) }
+        _ -> return Err(unsupported("`JobQueue.{method}()`", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3505
+pub fn apply_jobs_method(receiver: &CtValue, method: String, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    receiver :: ct_to_runtime_value(receiver)?
+    converted := [MirRuntimeValue]{}
+    loop item in args -> &converted.push(ct_to_runtime_value(item)?)
+    runtime_to_ct_value(apply_jobs_method_mir(receiver, method, converted, span)?)?
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3519
+pub fn apply_jobs(method: String, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    converted := [MirRuntimeValue]{}
+    loop item in args -> &converted.push(ct_to_runtime_value(item)?)
+    runtime_to_ct_value(apply_jobs_runtime(method, converted, span)?)?
+}

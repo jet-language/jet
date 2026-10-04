@@ -1,0 +1,75 @@
+use jet_foundation.[AccessConvention, Expr, Param, ParamZone, Span, Stmt, TraitMethodSig, Type]
+use JetSema.Sema.Registration.Checked.[effect_key, is_fallible_void_return, method_defined_twice, method_field_clash, synthesize_default_method, synthesize_delegation_method]
+use std.fs.[read_to_string] // GATE #4494 retained native filesystem test fixture primitive.
+use std.env.[cargo_manifest_dir] // GATE #4494 reference-source root provided by test host.
+
+// Rust: crates/jet-sema/src/Sema/Registration.rs:2118
+#Test("registration_stays_split_without_reordering_passes") {
+    // Like the paired Bundle structural test, preserve the original reference
+    // fixture assertions rather than weakening them to a lexical port census.
+    MAX_MODULE_LINES :: 2500
+    root :: cargo_manifest_dir()
+    read :: fn(relative: String) -> String Never! { read_to_string(root.join(relative)).unwrap() }
+    registration :: read("src/Sema/Registration.rs")
+    items :: read("src/Sema/Registration/Items.rs")
+    serde :: read("src/Sema/Registration/Serde.rs")
+    production :: registration.split("#[cfg(test)]\nmod structure_tests").next().unwrap()
+    loop (relative, source) in [("src/Sema/Registration.rs", production), ("src/Sema/Registration/Items.rs", items), ("src/Sema/Registration/Serde.rs", serde)] {
+        assert(source.lines().count() < MAX_MODULE_LINES, "{relative} must stay below the card #510 module boundary")
+        assert(!source.contains("include!("))
+        assert(!source.contains("#[path"))
+    }
+    assert(production.contains("\nmod Items;\nmod Serde;\n"))
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration.rs:313,1637 (behavioral control)
+#Test("effect_key_distinguishes_method_owner_and_void_failure_has_no_payload") {
+    assert(effect_key(None, "run") == "run")
+    assert(effect_key(Val("Task"), "run") == "Task::run")
+    assert(is_fallible_void_return(Type.Result(Type.Named{name: "Unit"}, Type.Named{name: "Err"})))
+    assert(!is_fallible_void_return(Type.Result(Type.Int, Type.Named{name: "Err"})))
+    assert(!is_fallible_void_return(Type.Named{name: "Unit"}))
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration.rs:1691-1728 (behavioral control)
+#Test("duplicate_method_contract_preserves_constructor_naming_hint") {
+    span :: Span.new(7, 12)
+    clash :: method_field_clash("value", "Container", span)
+    assert(clash.code == "E0105")
+    assert(clash.what == "method `value` can't share a name with a field on `Container`")
+    assert(clash.span == Val(span))
+    duplicate :: method_defined_twice("new", "Container", span, true)
+    assert(duplicate.fix.contains("Container.new"))
+    assert(duplicate.fix.contains("Container.other_name"))
+    ordinary :: method_defined_twice("value", "Container", span, false)
+    assert(ordinary.fix == "rename or remove one of the definitions")
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration.rs:1865-2078 (behavioral control)
+#Test("synthetic_delegation_and_default_methods_keep_explicit_signature_and_body") {
+    zero :: Span.new(0, 0)
+    span :: Span.new(10, 16)
+    parameter :: Param{convention: AccessConvention.Read, root: false, name: "input", name_span: span, ty: Type.Int, ty_span: span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}
+    body :: [Stmt.Return(Val(Expr.Ident("input", span)), span)]
+    signature :: TraitMethodSig{name: "run", name_span: span, params: [parameter], return_type: Val(Type.Int), span: span, default_body: Val(body), is_pure: false, declared_effects: None, return_view_provenance: None, declared_return_view_provenance: None}
+    delegated :: synthesize_delegation_method(signature, "worker")
+    assert(delegated.params.len() == 2)
+    assert(delegated.params[0].name == "self")
+    assert(delegated.params[0].ty == Type.Named{name: ""})
+    assert(delegated.params[1].name == "input")
+    assert(delegated.return_type == Val(Type.Int))
+    assert(delegated.span == span)
+    assert(!delegated.compiler_generated)
+    assert(delegated.body[0] == .Return(.Val(.MethodCall(receiver, method, _, _, _, args, _, _, _, _)), _))
+    if delegated.body[0] == .Return(.Val(.MethodCall(receiver, method, _, _, _, args, _, _, _, _)), _) {
+        assert(receiver == Expr.Field(Expr.Ident("self", zero), "worker", zero))
+        assert(method == "run")
+        assert(args.len() == 1)
+        assert(args[0].expr == Expr.Ident("input", zero))
+    }
+    defaulted :: synthesize_default_method(signature, body)
+    assert(defaulted.body == body)
+    assert(defaulted.params.len() == 2)
+    assert(defaulted.return_type == delegated.return_type)
+    assert(defaulted.name_span == span)
+}

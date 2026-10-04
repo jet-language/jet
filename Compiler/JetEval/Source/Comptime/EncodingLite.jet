@@ -1,1795 +1,745 @@
-// PORT-PENDING 0584 crates-jet-comptime-src-comptime-encodinglite-slice-1: crates/jet-comptime/src/Comptime/EncodingLite.rs:1-1791
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #392 pass 4 gap fix: `core.encoding.{csv,toml,yaml,xml,cbor,jsonl}`
-//RS //! + `core.encoding.json.{canonical,events}`, ported verbatim into the
-//RS //! comptime/REPL tier-0 interpreter so they match AOT byte-for-byte (R12
-//RS //! parity). Sources (std-only, I6, no changes to logic — only the target
-//RS //! value type changes from `jet_std::DataTree` to the canonical `DataTree`
-//RS //! `CtValue` shape `JSONInterp.rs` established for `core.encoding.json`):
-//RS //!
-//RS //! - csv: `jet_ring_csv_parse`/`jet_ring_csv_render`,
-//RS //!   `crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs`.
-//RS //! - toml: `pub mod toml` (`parse_to_tree`/`render`),
-//RS //!   `crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs`.
-//RS //! - yaml: `pub mod yaml` (`parse_to_tree`/`render`),
-//RS //!   `crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs`.
-//RS //! - xml/cbor: `jet_std_xml_parse`/`jet_std_xml_render`/`jet_std_cbor_encode`/
-//RS //!   `jet_std_cbor_decode`, `crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs`.
-//RS //! - jsonl: `jet_std_jsonl_parse`/`jet_std_jsonl_render`,
-//RS //!   `crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs`.
-//RS //! - json canonical/events: `jet_std_json_render_canonical`/`jet_std_json_events`,
-//RS //!   same file.
-//RS //!
-//RS //! sema (`fixed_sigs.rs`) types `core.encoding.{toml,yaml,xml,cbor}`'s
-//RS //! parsed value as the same `DataTree` type as `core.encoding.json` — AOT
-//RS //! backs every one of these with the single `jet_std::DataTree`. Comptime
-//RS //! mirrors that with the same canonical `CtValue::Enum` (`JSONInterp::json_variant`/
-//RS //! `json_payload`) every accessor method (`.field`/`.at`/...) already reads,
-//RS //! so no new value machinery is needed — just new parse/render walkers that
-//RS //! build/consume that shape.
-//RS //! parity: guard tests/encoding_parity.rs::whole_value_codecs_match_aot_comptime_and_default_dev
-//RS 
-//RS use std::collections::{BTreeMap, HashMap};
-//RS 
-//RS use crate::AST::{CtFloat, CtKey, CtReport, CtValue, StructDef, Type};
-//RS 
-//RS use super::JSONInterp::{json_payload, json_variant};
-//RS 
-//RS // ── core.encoding.csv ───────────────────────────────────────────────────────
-//RS 
-//RS pub(super) fn csv_parse(
-//RS     text: &str,
-//RS     delimiter: &str,
-//RS     header: bool,
-//RS     skip_blank: bool,
-//RS ) -> Result<Vec<jet_foundation::CsvKernel::CsvRecord>, String> {
-//RS     let delimiter = jet_foundation::CsvKernel::delimiter(delimiter)?;
-//RS     jet_foundation::CsvKernel::parse(
-//RS         text,
-//RS         jet_foundation::CsvKernel::CsvOptions {
-//RS             delimiter,
-//RS             header,
-//RS             skip_blank,
-//RS         },
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn csv_render(rows: &[Vec<String>]) -> String {
-//RS     jet_foundation::CsvKernel::render(rows)
-//RS }
-//RS 
-//RS // ── shared: canonical EncodingError CtValue::Struct ─────────────────────────
-//RS // Whole-value format parsers expose the same eight-field error carrier as
-//RS // AOT/JIT; only the format and source location differ.
-//RS fn encoding_error_struct(format: &str, line: i64, message: String) -> CtValue {
-//RS     encoding_error_value_at(format, "Syntax", line, 1, message)
-//RS }
-//RS 
-//RS // ── core.encoding.toml ──────────────────────────────────────────────────────
-//RS // Ported from `TOML.rs`'s `pub mod toml`, target type swapped from
-//RS // `DataTree` to the `JSON`-tagged `CtValue`.
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS enum TOMLValue {
-//RS     String(String),
-//RS     Integer(i64),
-//RS     Float(f64),
-//RS     Boolean(bool),
-//RS     Datetime(String),
-//RS     Array(Vec<TOMLValue>),
-//RS     InlineTable(Vec<(String, TOMLValue)>),
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS enum TOMLItem {
-//RS     Header { path: Vec<String>, array: bool },
-//RS     KeyVal { path: Vec<String>, value: TOMLValue },
-//RS }
-//RS 
-//RS pub(super) fn toml_parse(raw: &str) -> Result<CtValue, CtValue> {
-//RS     let mut p = TOMLParser {
-//RS         chars: raw.chars().collect(),
-//RS         pos: 0,
-//RS         line: 1,
-//RS         current_path_len: 0,
-//RS     };
-//RS     let mut items = Vec::new();
-//RS     loop {
-//RS         p.skip_between_statements();
-//RS         if p.peek().is_none() {
-//RS             break;
-//RS         }
-//RS         if let Some(item) = p
-//RS             .statement()
-//RS             .map_err(|e| encoding_error_struct("TOML", e.line as i64, e.message))?
-//RS         {
-//RS             if let TOMLItem::Header { path, .. } = &item {
-//RS                 p.current_path_len = path.len();
-//RS             }
-//RS             items.push(item);
-//RS         }
-//RS     }
-//RS     Ok(toml_assemble(items))
-//RS }
-//RS 
-//RS // A tagged `JSON` `Object` whose payload keeps insertion order — AOT's
-//RS // `DataTree::Object(Vec<…>)` does the same; a sorted `BTreeMap` reordered
-//RS // TOML keys (e.g. `port` before `title`) and broke #777 corpus differential.
-//RS fn json_object(entries: Vec<(String, CtValue)>) -> CtValue {
-//RS     json_variant(
-//RS         "Object",
-//RS         Some(CtValue::Struct {
-//RS             type_name: "JSONObject".into(),
-//RS             fields: entries,
-//RS         }),
-//RS     )
-//RS }
-//RS fn json_array(items: Vec<CtValue>) -> CtValue {
-//RS     json_variant("Array", Some(CtValue::List(items)))
-//RS }
-//RS fn json_object_entries(v: &CtValue) -> Option<Vec<(String, CtValue)>> {
-//RS     match json_payload(v, "Object") {
-//RS         Some(CtValue::Struct { fields, .. }) => Some(fields.clone()),
-//RS         Some(CtValue::Map(m)) => Some(
-//RS             m.iter()
-//RS                 .map(|(k, v)| {
-//RS                     (
-//RS                         match k {
-//RS                             CtKey::Str(s) => s.clone(),
-//RS                             other => format!("{:?}", other),
-//RS                         },
-//RS                         v.clone(),
-//RS                     )
-//RS                 })
-//RS                 .collect(),
-//RS         ),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS fn json_array_items(v: &CtValue) -> Option<Vec<CtValue>> {
-//RS     match json_payload(v, "Array") {
-//RS         Some(CtValue::List(xs)) => Some(xs.clone()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn toml_assemble(items: Vec<TOMLItem>) -> CtValue {
-//RS     let mut root = json_object(Vec::new());
-//RS     let mut current: Vec<String> = Vec::new();
-//RS     for item in items {
-//RS         match item {
-//RS             TOMLItem::Header { path, array } => {
-//RS                 if array {
-//RS                     toml_push_array_table(&mut root, &path);
-//RS                 } else {
-//RS                     let _ = toml_table_at(&mut root, &path);
-//RS                 }
-//RS                 current = path;
-//RS             }
-//RS             TOMLItem::KeyVal { path, value } => {
-//RS                 toml_set_key(&mut root, &current, &path, toml_value_to_json(value));
-//RS             }
-//RS         }
-//RS     }
-//RS     root
-//RS }
-//RS 
-//RS // Ensure a table exists at `path` (creating empty tables along the way, but
-//RS // never clobbering a table that already has keys) — used for a bare
-//RS // `[table]` header with no keys under it yet. A value-typed
-//RS // re-implementation of the AOT version's `&mut DataTree` walk (which
-//RS // mutates in place via live aliasing that doesn't fit an immutable-by-value
-//RS // `CtValue` tree directly); behaviorally identical output (`descend into
-//RS // the last element of an existing array-of-tables` included).
-//RS fn toml_table_at(root: &mut CtValue, path: &[String]) {
-//RS     *root = toml_ensure_table(root, path);
-//RS }
-//RS fn toml_ensure_table(node: &CtValue, path: &[String]) -> CtValue {
-//RS     let Some((seg, rest)) = path.split_first() else {
-//RS         return node.clone();
-//RS     };
-//RS     let mut entries = json_object_entries(node).unwrap_or_default();
-//RS     match entries.iter().position(|(k, _)| k == seg) {
-//RS         Some(idx) => {
-//RS             if let Some(mut items) = json_array_items(&entries[idx].1) {
-//RS                 let last_idx = items.len().saturating_sub(1);
-//RS                 if let Some(last) = items.get(last_idx).cloned() {
-//RS                     items[last_idx] = toml_ensure_table(&last, rest);
-//RS                 }
-//RS                 entries[idx].1 = json_array(items);
-//RS             } else {
-//RS                 entries[idx].1 = toml_ensure_table(&entries[idx].1, rest);
-//RS             }
-//RS         }
-//RS         None => entries.push((
-//RS             seg.clone(),
-//RS             toml_ensure_table(&json_object(Vec::new()), rest),
-//RS         )),
-//RS     }
-//RS     json_object(entries)
-//RS }
-//RS 
-//RS fn toml_set_key(root: &mut CtValue, current: &[String], key_path: &[String], value: CtValue) {
-//RS     let mut full: Vec<String> = current.to_vec();
-//RS     full.extend_from_slice(&key_path[..key_path.len() - 1]);
-//RS     let fk = key_path[key_path.len() - 1].clone();
-//RS     *root = toml_set_at_path(root, &full, &fk, value);
-//RS }
-//RS 
-//RS // Rebuild `root` with `value` set at `path.field`, creating tables along the
-//RS // way. Recursive-by-value (immutable `CtValue`) rewrite of the AOT
-//RS // `&mut DataTree` walk, which needs live mutable aliasing that doesn't fit a
-//RS // value-typed `CtValue` tree as directly — behaviorally identical output.
-//RS fn toml_set_at_path(root: &CtValue, path: &[String], field: &str, value: CtValue) -> CtValue {
-//RS     if path.is_empty() {
-//RS         let mut entries = json_object_entries(root).unwrap_or_default();
-//RS         match entries.iter_mut().find(|(k, _)| k == field) {
-//RS             Some(slot) => slot.1 = value,
-//RS             None => entries.push((field.to_string(), value)),
-//RS         }
-//RS         return json_object(entries);
-//RS     }
-//RS     let (seg, rest) = (path[0].clone(), &path[1..]);
-//RS     let mut entries = json_object_entries(root).unwrap_or_default();
-//RS     match entries.iter().position(|(k, _)| k == &seg) {
-//RS         Some(idx) => {
-//RS             let is_arr = json_array_items(&entries[idx].1).is_some();
-//RS             if is_arr {
-//RS                 let mut items = json_array_items(&entries[idx].1).unwrap();
-//RS                 let last_idx = items.len().saturating_sub(1);
-//RS                 if let Some(last) = items.get(last_idx).cloned() {
-//RS                     items[last_idx] = toml_set_at_path(&last, rest, field, value);
-//RS                 }
-//RS                 entries[idx].1 = json_array(items);
-//RS             } else {
-//RS                 let updated = toml_set_at_path(&entries[idx].1, rest, field, value);
-//RS                 entries[idx].1 = updated;
-//RS             }
-//RS         }
-//RS         None => {
-//RS             let child = toml_set_at_path(&json_object(Vec::new()), rest, field, value);
-//RS             entries.push((seg, child));
-//RS         }
-//RS     }
-//RS     json_object(entries)
-//RS }
-//RS 
-//RS fn toml_push_array_table(root: &mut CtValue, path: &[String]) {
-//RS     let (parent_path, last) = path.split_at(path.len() - 1);
-//RS     let last = &last[0];
-//RS     *root = toml_push_array_at(root, parent_path, last);
-//RS }
-//RS fn toml_push_array_at(root: &CtValue, path: &[String], field: &str) -> CtValue {
-//RS     if path.is_empty() {
-//RS         let mut entries = json_object_entries(root).unwrap_or_default();
-//RS         match entries.iter().position(|(k, _)| k == field) {
-//RS             Some(idx) => {
-//RS                 let mut items = json_array_items(&entries[idx].1).unwrap_or_default();
-//RS                 items.push(json_object(Vec::new()));
-//RS                 entries[idx].1 = json_array(items);
-//RS             }
-//RS             None => entries.push((field.to_string(), json_array(vec![json_object(Vec::new())]))),
-//RS         }
-//RS         return json_object(entries);
-//RS     }
-//RS     let (seg, rest) = (path[0].clone(), &path[1..]);
-//RS     let mut entries = json_object_entries(root).unwrap_or_default();
-//RS     match entries.iter().position(|(k, _)| k == &seg) {
-//RS         Some(idx) => {
-//RS             let is_arr = json_array_items(&entries[idx].1).is_some();
-//RS             if is_arr {
-//RS                 let mut items = json_array_items(&entries[idx].1).unwrap();
-//RS                 let last_idx = items.len().saturating_sub(1);
-//RS                 if let Some(last) = items.get(last_idx).cloned() {
-//RS                     items[last_idx] = toml_push_array_at(&last, rest, field);
-//RS                 }
-//RS                 entries[idx].1 = json_array(items);
-//RS             } else {
-//RS                 entries[idx].1 = toml_push_array_at(&entries[idx].1, rest, field);
-//RS             }
-//RS         }
-//RS         None => {
-//RS             let child = toml_push_array_at(&json_object(Vec::new()), rest, field);
-//RS             entries.push((seg, child));
-//RS         }
-//RS     }
-//RS     json_object(entries)
-//RS }
-//RS 
-//RS fn toml_value_to_json(v: TOMLValue) -> CtValue {
-//RS     match v {
-//RS         TOMLValue::String(s) => json_variant("Text", Some(CtValue::Str(s))),
-//RS         TOMLValue::Integer(n) => json_variant("Int", Some(CtValue::Int(n))),
-//RS         TOMLValue::Float(value) => json_variant("Float", Some(CtValue::Float(CtFloat::f64(value)))),
-//RS         TOMLValue::Boolean(b) => json_variant("Bool", Some(CtValue::Bool(b))),
-//RS         TOMLValue::Datetime(s) => json_variant("Text", Some(CtValue::Str(s))),
-//RS         TOMLValue::Array(xs) => json_array(xs.into_iter().map(toml_value_to_json).collect()),
-//RS         TOMLValue::InlineTable(es) => json_object(
-//RS             es.into_iter()
-//RS                 .map(|(k, v)| (k, toml_value_to_json(v)))
-//RS                 .collect(),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS // ── TOML render: `JSON`-tagged CtValue → TOML text ─────────────────────────
-//RS 
-//RS pub(super) fn toml_render(v: &CtValue) -> String {
-//RS     let mut out = String::new();
-//RS     toml_render_table(v, &[], &mut out);
-//RS     out.trim_end().to_string()
-//RS }
-//RS 
-//RS fn toml_is_table(v: &CtValue) -> bool {
-//RS     json_object_entries(v).is_some()
-//RS }
-//RS fn toml_is_array_of_tables(v: &CtValue) -> bool {
-//RS     match json_array_items(v) {
-//RS         Some(arr) => !arr.is_empty() && arr.iter().all(toml_is_table),
-//RS         None => false,
-//RS     }
-//RS }
-//RS fn toml_render_table(t: &CtValue, path: &[String], out: &mut String) {
-//RS     let Some(entries) = json_object_entries(t) else {
-//RS         return;
-//RS     };
-//RS     for (k, v) in &entries {
-//RS         if !toml_is_table(v) && !toml_is_array_of_tables(v) {
-//RS             out.push_str(&format!("{} = {}\n", k, toml_render_value(v)));
-//RS         }
-//RS     }
-//RS     for (k, v) in &entries {
-//RS         if toml_is_table(v) {
-//RS             let mut p = path.to_vec();
-//RS             p.push(k.clone());
-//RS             out.push_str(&format!("\n[{}]\n", p.join(".")));
-//RS             toml_render_table(v, &p, out);
-//RS         } else if toml_is_array_of_tables(v) {
-//RS             let mut p = path.to_vec();
-//RS             p.push(k.clone());
-//RS             if let Some(arr) = json_array_items(v) {
-//RS                 for elem in &arr {
-//RS                     out.push_str(&format!("\n[[{}]]\n", p.join(".")));
-//RS                     toml_render_table(elem, &p, out);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS fn toml_render_value(v: &CtValue) -> String {
-//RS     match v {
-//RS         _ if json_payload(v, "Null").is_some() || matches!(v, CtValue::Unit) => "\"\"".to_string(),
-//RS         _ => match v {
-//RS             CtValue::Enum { variant, args, .. } => match (variant.as_str(), args.first()) {
-//RS                 ("Null", _) => "\"\"".to_string(),
-//RS                 ("Bool", Some((_, CtValue::Bool(b)))) => b.to_string(),
-//RS                 ("Int", Some((_, CtValue::Int(n)))) => n.to_string(),
-//RS                 ("Float", Some((_, CtValue::Float(f)))) => format!("{:?}", f),
-//RS                 ("Text", Some((_, CtValue::Str(s)))) => quote_json_local(s),
-//RS                 ("Array", Some((_, CtValue::List(items)))) => {
-//RS                     let parts: Vec<String> = items.iter().map(toml_render_value).collect();
-//RS                     format!("[{}]", parts.join(", "))
-//RS                 }
-//RS                 ("Object", _) => {
-//RS                     let Some(entries) = json_object_entries(v) else {
-//RS                         return "\"\"".to_string();
-//RS                     };
-//RS                     let parts: Vec<String> = entries
-//RS                         .iter()
-//RS                         .map(|(k, val)| format!("{} = {}", k, toml_render_value(val)))
-//RS                         .collect();
-//RS                     format!("{{ {} }}", parts.join(", "))
-//RS                 }
-//RS                 _ => "\"\"".to_string(),
-//RS             },
-//RS             _ => "\"\"".to_string(),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS struct TOMLParser {
-//RS     chars: Vec<char>,
-//RS     pos: usize,
-//RS     line: usize,
-//RS     current_path_len: usize,
-//RS }
-//RS const MAX_TOML_DEPTH: usize = 64;
-//RS struct TOMLParseError {
-//RS     line: usize,
-//RS     message: String,
-//RS }
-//RS impl TOMLParser {
-//RS     fn peek(&self) -> Option<char> {
-//RS         self.chars.get(self.pos).copied()
-//RS     }
-//RS     fn peek_at(&self, n: usize) -> Option<char> {
-//RS         self.chars.get(self.pos + n).copied()
-//RS     }
-//RS     fn bump(&mut self) -> Option<char> {
-//RS         let c = self.peek()?;
-//RS         self.pos += 1;
-//RS         if c == '\n' {
-//RS             self.line += 1;
-//RS         }
-//RS         Some(c)
-//RS     }
-//RS     fn err(&self, message: impl Into<String>) -> TOMLParseError {
-//RS         TOMLParseError {
-//RS             line: self.line,
-//RS             message: message.into(),
-//RS         }
-//RS     }
-//RS     fn skip_inline_ws(&mut self) {
-//RS         while matches!(self.peek(), Some(' ' | '\t')) {
-//RS             self.pos += 1;
-//RS         }
-//RS     }
-//RS     fn skip_between_statements(&mut self) {
-//RS         loop {
-//RS             match self.peek() {
-//RS                 Some(' ' | '\t' | '\r' | '\n') => {
-//RS                     self.bump();
-//RS                 }
-//RS                 Some('#') => self.skip_comment(),
-//RS                 _ => break,
-//RS             }
-//RS         }
-//RS     }
-//RS     fn skip_comment(&mut self) {
-//RS         while let Some(c) = self.peek() {
-//RS             if c == '\n' {
-//RS                 break;
-//RS             }
-//RS             self.pos += 1;
-//RS         }
-//RS     }
-//RS     fn finish_line(&mut self) -> Result<(), TOMLParseError> {
-//RS         self.skip_inline_ws();
-//RS         if self.peek() == Some('#') {
-//RS             self.skip_comment();
-//RS         }
-//RS         match self.peek() {
-//RS             None | Some('\n') | Some('\r') => Ok(()),
-//RS             Some(c) => Err(
-//RS                 self.err(jet_foundation::EncodingErrors::toml_unexpected_after_value(
-//RS                     c,
-//RS                 )),
-//RS             ),
-//RS         }
-//RS     }
-//RS     fn statement(&mut self) -> Result<Option<TOMLItem>, TOMLParseError> {
-//RS         match self.peek() {
-//RS             Some('[') => self.header().map(Some),
-//RS             _ => self.key_value().map(Some),
-//RS         }
-//RS     }
-//RS     fn header(&mut self) -> Result<TOMLItem, TOMLParseError> {
-//RS         self.bump();
-//RS         let array = self.peek() == Some('[');
-//RS         if array {
-//RS             self.bump();
-//RS         }
-//RS         self.skip_inline_ws();
-//RS         let path = self.key_path()?;
-//RS         self.skip_inline_ws();
-//RS         if self.peek() != Some(']') {
-//RS             return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_TABLE_CLOSE));
-//RS         }
-//RS         self.bump();
-//RS         if array {
-//RS             if self.peek() != Some(']') {
-//RS                 return Err(
-//RS                     self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_ARRAY_TABLE_CLOSE)
-//RS                 );
-//RS             }
-//RS             self.bump();
-//RS         }
-//RS         if path.is_empty() {
-//RS             return Err(self.err(jet_foundation::EncodingErrors::TOML_TABLE_NAME_REQUIRED));
-//RS         }
-//RS         self.finish_line()?;
-//RS         Ok(TOMLItem::Header { path, array })
-//RS     }
-//RS     fn key_value(&mut self) -> Result<TOMLItem, TOMLParseError> {
-//RS         let path = self.key_path()?;
-//RS         if path.is_empty() {
-//RS             return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_KEY));
-//RS         }
-//RS         if self
-//RS             .current_path_len
-//RS             .checked_add(path.len())
-//RS             .is_none_or(|depth| depth > MAX_TOML_DEPTH)
-//RS         {
-//RS             return Err(self.err("TOML key path is nested too deeply"));
-//RS         }
-//RS         self.skip_inline_ws();
-//RS         if self.peek() != Some('=') {
-//RS             return Err(self.err(
-//RS                 jet_foundation::EncodingErrors::toml_expected_equals_after_key(&path.join(".")),
-//RS             ));
-//RS         }
-//RS         self.bump();
-//RS         self.skip_inline_ws();
-//RS         let value = self.value(0)?;
-//RS         self.finish_line()?;
-//RS         Ok(TOMLItem::KeyVal { path, value })
-//RS     }
-//RS     fn key_path(&mut self) -> Result<Vec<String>, TOMLParseError> {
-//RS         let mut path = Vec::new();
-//RS         loop {
-//RS             self.skip_inline_ws();
-//RS             if path.len() >= MAX_TOML_DEPTH {
-//RS                 return Err(self.err("TOML key path is nested too deeply"));
-//RS             }
-//RS             path.push(self.simple_key()?);
-//RS             self.skip_inline_ws();
-//RS             if self.peek() == Some('.') {
-//RS                 self.bump();
-//RS             } else {
-//RS                 break;
-//RS             }
-//RS         }
-//RS         Ok(path)
-//RS     }
-//RS     fn simple_key(&mut self) -> Result<String, TOMLParseError> {
-//RS         match self.peek() {
-//RS             Some('"') => self.basic_string(),
-//RS             Some('\'') => self.literal_string(),
-//RS             Some(c) if toml_is_bare_key_char(c) => {
-//RS                 let mut s = String::new();
-//RS                 while let Some(c) = self.peek() {
-//RS                     if toml_is_bare_key_char(c) {
-//RS                         s.push(c);
-//RS                         self.pos += 1;
-//RS                     } else {
-//RS                         break;
-//RS                     }
-//RS                 }
-//RS                 Ok(s)
-//RS             }
-//RS             Some(c) => Err(
-//RS                 self.err(jet_foundation::EncodingErrors::toml_invalid_key_character(
-//RS                     c,
-//RS                 )),
-//RS             ),
-//RS             None => Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_KEY)),
-//RS         }
-//RS     }
-//RS     fn value(&mut self, depth: usize) -> Result<TOMLValue, TOMLParseError> {
-//RS         if depth >= MAX_TOML_DEPTH {
-//RS             return Err(self.err("TOML value is nested too deeply"));
-//RS         }
-//RS         match self.peek() {
-//RS             Some('"') => Ok(TOMLValue::String(self.basic_string()?)),
-//RS             Some('\'') => Ok(TOMLValue::String(self.literal_string()?)),
-//RS             Some('[') => self.array(depth),
-//RS             Some('{') => self.inline_table(depth),
-//RS             Some('t') | Some('f') => self.boolean(),
-//RS             Some('+') | Some('-') | Some('0'..='9') | Some('i') | Some('n') => {
-//RS                 self.number_or_datetime()
-//RS             }
-//RS             Some(c) => Err(self.err(jet_foundation::EncodingErrors::toml_invalid_value_start(c))),
-//RS             None => Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_VALUE)),
-//RS         }
-//RS     }
-//RS     fn boolean(&mut self) -> Result<TOMLValue, TOMLParseError> {
-//RS         if self.try_keyword("true") {
-//RS             Ok(TOMLValue::Boolean(true))
-//RS         } else if self.try_keyword("false") {
-//RS             Ok(TOMLValue::Boolean(false))
-//RS         } else {
-//RS             Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_BOOLEAN))
-//RS         }
-//RS     }
-//RS     fn try_keyword(&mut self, kw: &str) -> bool {
-//RS         let chars: Vec<char> = kw.chars().collect();
-//RS         for (i, c) in chars.iter().enumerate() {
-//RS             if self.peek_at(i) != Some(*c) {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         if let Some(after) = self.peek_at(chars.len()) {
-//RS             if toml_is_bare_key_char(after) || after == '.' {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         for _ in 0..chars.len() {
-//RS             self.bump();
-//RS         }
-//RS         true
-//RS     }
-//RS     fn basic_string(&mut self) -> Result<String, TOMLParseError> {
-//RS         if self.peek() == Some('"') && self.peek_at(1) == Some('"') && self.peek_at(2) == Some('"')
-//RS         {
-//RS             return self.multiline_basic_string();
-//RS         }
-//RS         self.bump();
-//RS         let mut out = String::new();
-//RS         loop {
-//RS             match self.bump() {
-//RS                 None | Some('\n') => {
-//RS                     return Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_STRING))
-//RS                 }
-//RS                 Some('"') => return Ok(out),
-//RS                 Some('\\') => out.push(self.string_escape()?),
-//RS                 Some(c) if (c as u32) < 0x20 => {
-//RS                     return Err(self.err(jet_foundation::EncodingErrors::TOML_CONTROL_CHARACTER))
-//RS                 }
-//RS                 Some(c) => out.push(c),
-//RS             }
-//RS         }
-//RS     }
-//RS     fn multiline_basic_string(&mut self) -> Result<String, TOMLParseError> {
-//RS         self.bump();
-//RS         self.bump();
-//RS         self.bump();
-//RS         if self.peek() == Some('\r') {
-//RS             self.bump();
-//RS         }
-//RS         if self.peek() == Some('\n') {
-//RS             self.bump();
-//RS         }
-//RS         let mut out = String::new();
-//RS         loop {
-//RS             if self.peek() == Some('"')
-//RS                 && self.peek_at(1) == Some('"')
-//RS                 && self.peek_at(2) == Some('"')
-//RS             {
-//RS                 self.bump();
-//RS                 self.bump();
-//RS                 self.bump();
-//RS                 return Ok(out);
-//RS             }
-//RS             match self.bump() {
-//RS                 None => {
-//RS                     return Err(self
-//RS                         .err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_MULTILINE_STRING))
-//RS                 }
-//RS                 Some('\\') => {
-//RS                     if matches!(
-//RS                         self.peek(),
-//RS                         Some('\n') | Some('\r') | Some(' ') | Some('\t')
-//RS                     ) {
-//RS                         let mut sawline = false;
-//RS                         let save = self.pos;
-//RS                         let saveline = self.line;
-//RS                         while matches!(
-//RS                             self.peek(),
-//RS                             Some(' ') | Some('\t') | Some('\r') | Some('\n')
-//RS                         ) {
-//RS                             if self.peek() == Some('\n') {
-//RS                                 sawline = true;
-//RS                             }
-//RS                             self.bump();
-//RS                         }
-//RS                         if !sawline {
-//RS                             self.pos = save;
-//RS                             self.line = saveline;
-//RS                             out.push(self.string_escape()?);
-//RS                         }
-//RS                     } else {
-//RS                         out.push(self.string_escape()?);
-//RS                     }
-//RS                 }
-//RS                 Some(c) => out.push(c),
-//RS             }
-//RS         }
-//RS     }
-//RS     fn string_escape(&mut self) -> Result<char, TOMLParseError> {
-//RS         match self.bump() {
-//RS             Some('"') => Ok('"'),
-//RS             Some('\\') => Ok('\\'),
-//RS             Some('b') => Ok('\u{0008}'),
-//RS             Some('f') => Ok('\u{000c}'),
-//RS             Some('n') => Ok('\n'),
-//RS             Some('r') => Ok('\r'),
-//RS             Some('t') => Ok('\t'),
-//RS             Some('u') => self.unicode_escape(4),
-//RS             Some('U') => self.unicode_escape(8),
-//RS             Some(c) => Err(self.err(jet_foundation::EncodingErrors::toml_invalid_escape(c))),
-//RS             None => Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_ESCAPE)),
-//RS         }
-//RS     }
-//RS     fn unicode_escape(&mut self, n: usize) -> Result<char, TOMLParseError> {
-//RS         let mut v = 0u32;
-//RS         for _ in 0..n {
-//RS             let Some(c) = self.peek() else {
-//RS                 return Err(self.err(jet_foundation::EncodingErrors::TOML_TRUNCATED_UNICODE_ESCAPE));
-//RS             };
-//RS             let Some(d) = c.to_digit(16) else {
-//RS                 return Err(self.err(jet_foundation::EncodingErrors::TOML_INVALID_UNICODE_ESCAPE));
-//RS             };
-//RS             v = v * 16 + d;
-//RS             self.pos += 1;
-//RS         }
-//RS         char::from_u32(v)
-//RS             .ok_or_else(|| self.err(jet_foundation::EncodingErrors::TOML_INVALID_UNICODE_SCALAR))
-//RS     }
-//RS     fn literal_string(&mut self) -> Result<String, TOMLParseError> {
-//RS         if self.peek() == Some('\'')
-//RS             && self.peek_at(1) == Some('\'')
-//RS             && self.peek_at(2) == Some('\'')
-//RS         {
-//RS             return self.multiline_literal_string();
-//RS         }
-//RS         self.bump();
-//RS         let mut out = String::new();
-//RS         loop {
-//RS             match self.bump() {
-//RS                 None | Some('\n') => {
-//RS                     return Err(
-//RS                         self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_LITERAL_STRING)
-//RS                     )
-//RS                 }
-//RS                 Some('\'') => return Ok(out),
-//RS                 Some(c) => out.push(c),
-//RS             }
-//RS         }
-//RS     }
-//RS     fn multiline_literal_string(&mut self) -> Result<String, TOMLParseError> {
-//RS         self.bump();
-//RS         self.bump();
-//RS         self.bump();
-//RS         if self.peek() == Some('\r') {
-//RS             self.bump();
-//RS         }
-//RS         if self.peek() == Some('\n') {
-//RS             self.bump();
-//RS         }
-//RS         let mut out = String::new();
-//RS         loop {
-//RS             if self.peek() == Some('\'')
-//RS                 && self.peek_at(1) == Some('\'')
-//RS                 && self.peek_at(2) == Some('\'')
-//RS             {
-//RS                 self.bump();
-//RS                 self.bump();
-//RS                 self.bump();
-//RS                 return Ok(out);
-//RS             }
-//RS             match self.bump() {
-//RS                 None => {
-//RS                     return Err(self.err(
-//RS                         jet_foundation::EncodingErrors::TOML_UNTERMINATED_MULTILINE_LITERAL_STRING,
-//RS                     ))
-//RS                 }
-//RS                 Some(c) => out.push(c),
-//RS             }
-//RS         }
-//RS     }
-//RS     fn array(&mut self, depth: usize) -> Result<TOMLValue, TOMLParseError> {
-//RS         self.bump();
-//RS         let mut items = Vec::new();
-//RS         loop {
-//RS             self.skip_ws_newlines_comments();
-//RS             match self.peek() {
-//RS                 Some(']') => {
-//RS                     self.bump();
-//RS                     return Ok(TOMLValue::Array(items));
-//RS                 }
-//RS                 None => {
-//RS                     return Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_ARRAY))
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS             items.push(self.value(depth + 1)?);
-//RS             self.skip_ws_newlines_comments();
-//RS             match self.peek() {
-//RS                 Some(',') => {
-//RS                     self.bump();
-//RS                 }
-//RS                 Some(']') => {
-//RS                     self.bump();
-//RS                     return Ok(TOMLValue::Array(items));
-//RS                 }
-//RS                 Some(c) => {
-//RS                     return Err(
-//RS                         self.err(jet_foundation::EncodingErrors::toml_expected_array_separator(c))
-//RS                     )
-//RS                 }
-//RS                 None => {
-//RS                     return Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_ARRAY))
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     fn skip_ws_newlines_comments(&mut self) {
-//RS         loop {
-//RS             match self.peek() {
-//RS                 Some(' ' | '\t' | '\r' | '\n') => {
-//RS                     self.bump();
-//RS                 }
-//RS                 Some('#') => self.skip_comment(),
-//RS                 _ => break,
-//RS             }
-//RS         }
-//RS     }
-//RS     fn inline_table(&mut self, depth: usize) -> Result<TOMLValue, TOMLParseError> {
-//RS         self.bump();
-//RS         let mut entries = Vec::new();
-//RS         self.skip_inline_ws();
-//RS         if self.peek() == Some('}') {
-//RS             self.bump();
-//RS             return Ok(TOMLValue::InlineTable(entries));
-//RS         }
-//RS         loop {
-//RS             self.skip_inline_ws();
-//RS             let path = self.key_path()?;
-//RS             self.skip_inline_ws();
-//RS             if self.bump() != Some('=') {
-//RS                 return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_INLINE_EQUALS));
-//RS             }
-//RS             self.skip_inline_ws();
-//RS             let value = self.value(depth + 1)?;
-//RS             entries.push((path.join("."), value));
-//RS             self.skip_inline_ws();
-//RS             match self.bump() {
-//RS                 Some(',') => continue,
-//RS                 Some('}') => return Ok(TOMLValue::InlineTable(entries)),
-//RS                 Some(c) => {
-//RS                     return Err(
-//RS                         self.err(jet_foundation::EncodingErrors::toml_expected_inline_separator(c))
-//RS                     )
-//RS                 }
-//RS                 None => {
-//RS                     return Err(
-//RS                         self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_INLINE_TABLE)
-//RS                     )
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     fn number_or_datetime(&mut self) -> Result<TOMLValue, TOMLParseError> {
-//RS         if self.looks_like_date() || self.looks_like_time() {
-//RS             return self.datetime();
-//RS         }
-//RS         self.number()
-//RS     }
-//RS     fn looks_like_date(&self) -> bool {
-//RS         let d = |n: usize| self.peek_at(n).map_or(false, |c| c.is_ascii_digit());
-//RS         d(0) && d(1)
-//RS             && d(2)
-//RS             && d(3)
-//RS             && self.peek_at(4) == Some('-')
-//RS             && d(5)
-//RS             && d(6)
-//RS             && self.peek_at(7) == Some('-')
-//RS             && d(8)
-//RS             && d(9)
-//RS     }
-//RS     fn looks_like_time(&self) -> bool {
-//RS         let d = |n: usize| self.peek_at(n).map_or(false, |c| c.is_ascii_digit());
-//RS         d(0) && d(1) && self.peek_at(2) == Some(':') && d(3) && d(4)
-//RS     }
-//RS     fn datetime(&mut self) -> Result<TOMLValue, TOMLParseError> {
-//RS         let mut s = String::new();
-//RS         let is_dt = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | ':' | '.' | '+');
-//RS         while let Some(c) = self.peek() {
-//RS             if is_dt(c) {
-//RS                 s.push(c);
-//RS                 self.pos += 1;
-//RS             } else if c == ' '
-//RS                 && self.peek_at(1).map_or(false, |n| n.is_ascii_digit())
-//RS                 && self.peek_at(3) == Some(':')
-//RS             {
-//RS                 s.push(' ');
-//RS                 self.pos += 1;
-//RS             } else {
-//RS                 break;
-//RS             }
-//RS         }
-//RS         Ok(TOMLValue::Datetime(s))
-//RS     }
-//RS     fn number(&mut self) -> Result<TOMLValue, TOMLParseError> {
-//RS         if self.try_keyword("inf") {
-//RS             return Ok(TOMLValue::Float(f64::INFINITY));
-//RS         }
-//RS         if self.try_keyword("nan") {
-//RS             return Ok(TOMLValue::Float(f64::NAN));
-//RS         }
-//RS         let mut tok = String::new();
-//RS         if matches!(self.peek(), Some('+') | Some('-')) {
-//RS             let sign = self.bump().unwrap();
-//RS             tok.push(sign);
-//RS             if self.try_keyword("inf") {
-//RS                 return Ok(TOMLValue::Float(if sign == '-' {
-//RS                     f64::NEG_INFINITY
-//RS                 } else {
-//RS                     f64::INFINITY
-//RS                 }));
-//RS             }
-//RS             if self.try_keyword("nan") {
-//RS                 return Ok(TOMLValue::Float(f64::NAN));
-//RS             }
-//RS         }
-//RS         if self.peek() == Some('0') {
-//RS             if let Some(r) = self.peek_at(1) {
-//RS                 if matches!(r, 'x' | 'o' | 'b') && tok.is_empty() {
-//RS                     return self.radix_integer();
-//RS                 }
-//RS             }
-//RS         }
-//RS         let mut is_float = false;
-//RS         while let Some(c) = self.peek() {
-//RS             match c {
-//RS                 '0'..='9' | '_' => {
-//RS                     tok.push(c);
-//RS                     self.pos += 1;
-//RS                 }
-//RS                 '.' | 'e' | 'E' | '+' | '-' => {
-//RS                     is_float = true;
-//RS                     tok.push(c);
-//RS                     self.pos += 1;
-//RS                 }
-//RS                 _ => break,
-//RS             }
-//RS         }
-//RS         let clean: String = tok.chars().filter(|c| *c != '_').collect();
-//RS         if is_float {
-//RS             clean
-//RS                 .parse::<f64>()
-//RS                 .map(TOMLValue::Float)
-//RS                 .map_err(|_| self.err(jet_foundation::EncodingErrors::toml_invalid_number(&tok)))
-//RS         } else {
-//RS             clean
-//RS                 .parse::<i64>()
-//RS                 .map(TOMLValue::Integer)
-//RS                 .map_err(|_| self.err(jet_foundation::EncodingErrors::toml_invalid_number(&tok)))
-//RS         }
-//RS     }
-//RS     fn radix_integer(&mut self) -> Result<TOMLValue, TOMLParseError> {
-//RS         self.bump();
-//RS         let prefix = self.bump().unwrap();
-//RS         let radix = match prefix {
-//RS             'x' => 16,
-//RS             'o' => 8,
-//RS             'b' => 2,
-//RS             _ => 16,
-//RS         };
-//RS         let mut tok = String::new();
-//RS         while let Some(c) = self.peek() {
-//RS             if c == '_' {
-//RS                 self.pos += 1;
-//RS             } else if c.is_digit(radix) {
-//RS                 tok.push(c);
-//RS                 self.pos += 1;
-//RS             } else {
-//RS                 break;
-//RS             }
-//RS         }
-//RS         if tok.is_empty() {
-//RS             return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_RADIX_DIGITS));
-//RS         }
-//RS         i64::from_str_radix(&tok, radix)
-//RS             .map(TOMLValue::Integer)
-//RS             .map_err(|_| {
-//RS                 self.err(jet_foundation::EncodingErrors::toml_invalid_radix_integer(
-//RS                     radix, &tok,
-//RS                 ))
-//RS             })
-//RS     }
-//RS }
-//RS fn toml_is_bare_key_char(c: char) -> bool {
-//RS     c.is_ascii_alphanumeric() || c == '_' || c == '-'
-//RS }
-//RS 
-//RS // Mirrors `JSONInterp::quote_json` (private to that module) — same escape
-//RS // table AOT's `TOML.rs` reuses from `JSON.rs`'s `quote_json` for its own
-//RS // string-value rendering.
-//RS fn quote_json_local(s: &str) -> String {
-//RS     let mut out = String::from("\"");
-//RS     for c in s.chars() {
-//RS         match c {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\u{0008}' => out.push_str("\\b"),
-//RS             '\u{000c}' => out.push_str("\\f"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-//RS             _ => out.push(c),
-//RS         }
-//RS     }
-//RS     out.push('"');
-//RS     out
-//RS }
-//RS 
-//RS // ── core.encoding.yaml ──────────────────────────────────────────────────────
-//RS // Ported from `YAML.rs`'s `pub mod yaml`, target type swapped from
-//RS // `DataTree` to the `JSON`-tagged `CtValue` (same convention as toml above).
-//RS 
-//RS pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
-//RS     let line_count = raw
-//RS         .as_bytes()
-//RS         .iter()
-//RS         .filter(|byte| **byte == b'\n')
-//RS         .count()
-//RS         .checked_add(1);
-//RS     if raw.len() > MAX_YAML_BYTES || !line_count.is_some_and(|count| count <= MAX_YAML_NODES) {
-//RS         return Err(encoding_error_struct(
-//RS             "YAML",
-//RS             1,
-//RS             "YAML input exceeds its byte or line budget".to_string(),
-//RS         ));
-//RS     }
-//RS     let lines: Vec<String> = raw
-//RS         .split('\n')
-//RS         .map(|l| l.trim_end_matches('\r').to_string())
-//RS         .collect();
-//RS     let mut p = YAMLParser {
-//RS         lines,
-//RS         pos: 0,
-//RS         anchors: BTreeMap::new(),
-//RS         budget: YamlBudget::default(),
-//RS     };
-//RS     p.skip_ignorable();
-//RS     while p.at_doc_marker() {
-//RS         p.pos = p.pos.saturating_add(1);
-//RS         p.skip_ignorable();
-//RS     }
-//RS     if p.pos >= p.lines.len() || p.at_doc_end() {
-//RS         let line = p.pos.saturating_add(1) as i64;
-//RS         return p.null().map_err(|_| {
-//RS             encoding_error_struct(
-//RS                 "YAML",
-//RS                 line,
-//RS                 "YAML value exceeds its node or byte budget".to_string(),
-//RS             )
-//RS         });
-//RS     }
-//RS     let base = p.indent(p.pos);
-//RS     let value = p
-//RS         .parse_node(base, 0)
-//RS         .map_err(|e| encoding_error_struct("YAML", e.line as i64, e.message))?;
-//RS     p.skip_ignorable();
-//RS     if p.pos < p.lines.len() && !p.at_doc_marker() && !p.at_doc_end() {
-//RS         return Err(encoding_error_struct(
-//RS             "YAML",
-//RS             p.pos.saturating_add(1) as i64,
-//RS             jet_foundation::EncodingErrors::YAML_EXPECTED_KEY_VALUE.to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(value)
-//RS }
-//RS 
-//RS struct YAMLParser {
-//RS     lines: Vec<String>,
-//RS     pos: usize,
-//RS     anchors: BTreeMap<String, CtValue>,
-//RS     budget: YamlBudget,
-//RS }
-//RS const MAX_YAML_DEPTH: usize = 64;
-//RS const MAX_YAML_NODES: usize = 64 * 1024;
-//RS const MAX_YAML_BYTES: usize = 64 * 1024 * 1024;
-//RS const YAML_NODE_OVERHEAD: usize = 32;
-//RS 
-//RS #[derive(Default)]
-//RS struct YamlBudget {
-//RS     nodes: usize,
-//RS     bytes: usize,
-//RS }
-//RS 
-//RS impl YamlBudget {
-//RS     fn node(&mut self, payload: usize) -> Result<(), ()> {
-//RS         let nodes = self.nodes.checked_add(1).ok_or(())?;
-//RS         let cost = YAML_NODE_OVERHEAD.checked_add(payload).ok_or(())?;
-//RS         let bytes = self.bytes.checked_add(cost).ok_or(())?;
-//RS         if nodes > MAX_YAML_NODES || bytes > MAX_YAML_BYTES {
-//RS             return Err(());
-//RS         }
-//RS         self.nodes = nodes;
-//RS         self.bytes = bytes;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn bytes(&mut self, amount: usize) -> Result<(), ()> {
-//RS         let bytes = self.bytes.checked_add(amount).ok_or(())?;
-//RS         if bytes > MAX_YAML_BYTES {
-//RS             return Err(());
-//RS         }
-//RS         self.bytes = bytes;
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS enum FlowError {
-//RS     Depth,
-//RS     Budget,
-//RS }
-//RS 
-//RS fn yaml_null(budget: &mut YamlBudget) -> Result<CtValue, ()> {
-//RS     budget.node(0)?;
-//RS     Ok(json_variant("Null", None))
-//RS }
-//RS 
-//RS fn yaml_scalar(s: &str, budget: &mut YamlBudget) -> Result<CtValue, ()> {
-//RS     let value = yaml_scalar_value(s);
-//RS     let payload = yaml_scalar_payload(&value).ok_or(())?;
-//RS     budget.node(payload)?;
-//RS     Ok(value)
-//RS }
-//RS 
-//RS fn yaml_scalar_payload(value: &CtValue) -> Option<usize> {
-//RS     if let CtValue::BigInt(integer) = value {
-//RS         return integer.limbs.len().checked_mul(std::mem::size_of::<u32>());
-//RS     }
-//RS     if let Some(CtValue::BigInt(integer)) = json_payload(value, "Int") {
-//RS         return integer.limbs.len().checked_mul(std::mem::size_of::<u32>());
-//RS     }
-//RS     Some(
-//RS         ["Text", "Number", "TypedText"]
-//RS             .iter()
-//RS             .find_map(|variant| match json_payload(value, variant) {
-//RS                 Some(CtValue::Str(text)) => Some(text.len()),
-//RS                 _ => None,
-//RS             })
-//RS             .unwrap_or(0),
-//RS     )
-//RS }
-//RS 
-//RS fn yaml_clone(value: &CtValue, budget: &mut YamlBudget) -> Result<CtValue, ()> {
-//RS     if matches!(
-//RS         value,
-//RS         CtValue::Enum {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS         } if type_name == "DataTree" && variant == "Null" && args.is_empty()
-//RS     ) {
-//RS         budget.node(0)?;
-//RS     } else if let Some(CtValue::List(items)) = json_payload(value, "Array") {
-//RS         budget.node(0)?;
-//RS         for item in items {
-//RS             yaml_clone(item, budget)?;
-//RS         }
-//RS     } else if let Some(CtValue::Struct { fields, .. }) = json_payload(value, "Object") {
-//RS         budget.node(0)?;
-//RS         for (key, item) in fields {
-//RS             budget.bytes(key.len())?;
-//RS             yaml_clone(item, budget)?;
-//RS         }
-//RS     } else if value_is_yaml_scalar(value) {
-//RS         let payload = yaml_scalar_payload(value).ok_or(())?;
-//RS         budget.node(payload)?;
-//RS     } else {
-//RS         return Err(());
-//RS     }
-//RS     Ok(value.clone())
-//RS }
-//RS 
-//RS fn value_is_yaml_scalar(value: &CtValue) -> bool {
-//RS     ["Bool", "Int", "Float", "Number", "TypedText", "Text"]
-//RS         .iter()
-//RS         .any(|variant| json_payload(value, variant).is_some())
-//RS }
-//RS 
-//RS fn yaml_flow_message(error: FlowError) -> &'static str {
-//RS     match error {
-//RS         FlowError::Depth => "YAML value is nested too deeply",
-//RS         FlowError::Budget => "YAML value exceeds its node or byte budget",
-//RS     }
-//RS }
-//RS struct YAMLParseError {
-//RS     line: usize,
-//RS     message: String,
-//RS }
-//RS 
-//RS impl YAMLParser {
-//RS     fn indent(&self, i: usize) -> usize {
-//RS         self.lines[i].chars().take_while(|c| *c == ' ').count()
-//RS     }
-//RS     fn content(&self, i: usize) -> String {
-//RS         let after = &self.lines[i][self.indent(i)..];
-//RS         yaml_strip_comment(after)
-//RS     }
-//RS     fn is_ignorable(&self, i: usize) -> bool {
-//RS         let t = self.lines[i].trim();
-//RS         t.is_empty() || t.starts_with('#')
-//RS     }
-//RS     fn skip_ignorable(&mut self) {
-//RS         while self.pos < self.lines.len() && self.is_ignorable(self.pos) {
-//RS             self.pos = self.pos.saturating_add(1);
-//RS         }
-//RS     }
-//RS     fn at_doc_marker(&self) -> bool {
-//RS         self.pos < self.lines.len() && self.lines[self.pos].trim_start().starts_with("---")
-//RS     }
-//RS     fn at_doc_end(&self) -> bool {
-//RS         self.pos < self.lines.len() && self.lines[self.pos].trim() == "..."
-//RS     }
-//RS 
-//RS     fn limit_error(&self) -> YAMLParseError {
-//RS         YAMLParseError {
-//RS             line: self.pos.saturating_add(1),
-//RS             message: "YAML value exceeds its node or byte budget".to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn null(&mut self) -> Result<CtValue, YAMLParseError> {
-//RS         yaml_null(&mut self.budget).map_err(|_| self.limit_error())
-//RS     }
-//RS 
-//RS     fn scalar(&mut self, value: &str) -> Result<CtValue, YAMLParseError> {
-//RS         yaml_scalar(value, &mut self.budget).map_err(|_| self.limit_error())
-//RS     }
-//RS 
-//RS     fn array(&mut self, items: Vec<CtValue>) -> Result<CtValue, YAMLParseError> {
-//RS         self.budget.node(0).map_err(|_| self.limit_error())?;
-//RS         Ok(json_array(items))
-//RS     }
-//RS 
-//RS     fn object(&mut self, entries: Vec<(String, CtValue)>) -> Result<CtValue, YAMLParseError> {
-//RS         for (key, _) in &entries {
-//RS             self.budget
-//RS                 .bytes(key.len())
-//RS                 .map_err(|_| self.limit_error())?;
-//RS         }
-//RS         self.budget.node(0).map_err(|_| self.limit_error())?;
-//RS         Ok(json_object(entries))
-//RS     }
-//RS 
-//RS     fn next_depth(&self, depth: usize) -> Result<usize, YAMLParseError> {
-//RS         depth.checked_add(1).ok_or_else(|| self.limit_error())
-//RS     }
-//RS 
-//RS     fn next_indent(&self, indent: usize) -> Result<usize, YAMLParseError> {
-//RS         indent.checked_add(1).ok_or_else(|| self.limit_error())
-//RS     }
-//RS 
-//RS     fn parse_node(&mut self, min_indent: usize, depth: usize) -> Result<CtValue, YAMLParseError> {
-//RS         self.skip_ignorable();
-//RS         if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
-//RS             return self.null();
-//RS         }
-//RS         if depth >= MAX_YAML_DEPTH {
-//RS             return Err(YAMLParseError {
-//RS                 line: self.pos.saturating_add(1),
-//RS                 message: "YAML value is nested too deeply".to_string(),
-//RS             });
-//RS         }
-//RS         let ind = self.indent(self.pos);
-//RS         if ind < min_indent {
-//RS             return self.null();
-//RS         }
-//RS         let content = self.content(self.pos);
-//RS         if content == "-" || content.starts_with("- ") {
-//RS             self.parse_block_seq(ind, depth)
-//RS         } else if yaml_is_map_entry(&content) {
-//RS             self.parse_block_map(ind, depth)
-//RS         } else {
-//RS             self.pos = self.pos.saturating_add(1);
-//RS             self.parse_inline_value(&content, depth)
-//RS         }
-//RS     }
-//RS 
-//RS     fn parse_block_seq(&mut self, indent: usize, depth: usize) -> Result<CtValue, YAMLParseError> {
-//RS         let mut items = Vec::new();
-//RS         loop {
-//RS             self.skip_ignorable();
-//RS             if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
-//RS                 break;
-//RS             }
-//RS             let ind = self.indent(self.pos);
-//RS             if ind != indent {
-//RS                 break;
-//RS             }
-//RS             let content = self.content(self.pos);
-//RS             if content != "-" && !content.starts_with("- ") {
-//RS                 break;
-//RS             }
-//RS             let line = &mut self.lines[self.pos];
-//RS             let chars: Vec<char> = line.chars().collect();
-//RS             let mut rebuilt: String = chars
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .map(|(i, c)| if i == indent { ' ' } else { *c })
-//RS                 .collect();
-//RS             if rebuilt.trim().is_empty() {
-//RS                 rebuilt = String::new();
-//RS             }
-//RS             *line = rebuilt;
-//RS             let item = self.parse_node(self.next_indent(indent)?, self.next_depth(depth)?)?;
-//RS             items.push(item);
-//RS         }
-//RS         self.array(items)
-//RS     }
-//RS 
-//RS     fn parse_block_map(&mut self, indent: usize, depth: usize) -> Result<CtValue, YAMLParseError> {
-//RS         let mut entries: Vec<(String, CtValue)> = Vec::new();
-//RS         loop {
-//RS             self.skip_ignorable();
-//RS             if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
-//RS                 break;
-//RS             }
-//RS             let ind = self.indent(self.pos);
-//RS             if ind != indent {
-//RS                 break;
-//RS             }
-//RS             let content = self.content(self.pos);
-//RS             if content.starts_with("- ") || content == "-" || !yaml_is_map_entry(&content) {
-//RS                 break;
-//RS             }
-//RS             let line_no = self.pos.saturating_add(1);
-//RS             let (key, rest) = yaml_split_key(&content).ok_or_else(|| YAMLParseError {
-//RS                 line: line_no,
-//RS                 message: jet_foundation::EncodingErrors::YAML_EXPECTED_KEY_VALUE.into(),
-//RS             })?;
-//RS             self.pos = self.pos.saturating_add(1);
-//RS             let rest = rest.trim();
-//RS             let value = if rest.is_empty() {
-//RS                 self.skip_ignorable();
-//RS                 if self.pos < self.lines.len()
-//RS                     && self.indent(self.pos) > indent
-//RS                     && !self.at_doc_marker()
-//RS                     && !self.at_doc_end()
-//RS                 {
-//RS                     self.parse_node(self.next_indent(indent)?, self.next_depth(depth)?)?
-//RS                 } else {
-//RS                     self.null()?
-//RS                 }
-//RS             } else if rest.starts_with('|') || rest.starts_with('>') {
-//RS                 self.parse_block_scalar(indent, rest)?
-//RS             } else {
-//RS                 self.parse_inline_value(rest, self.next_depth(depth)?)?
-//RS             };
-//RS             entries.push((key, value));
-//RS         }
-//RS         self.object(entries)
-//RS     }
-//RS 
-//RS     fn parse_block_scalar(
-//RS         &mut self,
-//RS         parent_indent: usize,
-//RS         header: &str,
-//RS     ) -> Result<CtValue, YAMLParseError> {
-//RS         let folded = header.starts_with('>');
-//RS         let chomp = if header.contains('-') {
-//RS             'S'
-//RS         } else if header.contains('+') {
-//RS             'K'
-//RS         } else {
-//RS             'C'
-//RS         };
-//RS         let mut body_lines: Vec<String> = Vec::new();
-//RS         let mut block_indent: Option<usize> = None;
-//RS         while self.pos < self.lines.len() {
-//RS             let raw = &self.lines[self.pos];
-//RS             if raw.trim().is_empty() {
-//RS                 body_lines.push(String::new());
-//RS                 self.pos = self.pos.saturating_add(1);
-//RS                 continue;
-//RS             }
-//RS             let ind = self.indent(self.pos);
-//RS             if ind <= parent_indent {
-//RS                 break;
-//RS             }
-//RS             let bi = *block_indent.get_or_insert(ind);
-//RS             let chars: Vec<char> = raw.chars().collect();
-//RS             let start = bi.min(chars.len());
-//RS             let dedented: String = chars[start..].iter().collect();
-//RS             body_lines.push(dedented);
-//RS             self.pos = self.pos.saturating_add(1);
-//RS         }
-//RS         let mut text = if folded {
-//RS             yaml_fold_lines(&body_lines)
-//RS         } else {
-//RS             body_lines.join("\n")
-//RS         };
-//RS         let trimmed = text.trim_end_matches('\n').to_string();
-//RS         text = match chomp {
-//RS             'S' => trimmed,
-//RS             'K' => text.trim_end_matches('\n').to_string() + "\n",
-//RS             _ => trimmed + "\n",
-//RS         };
-//RS         self.budget
-//RS             .node(text.len())
-//RS             .map_err(|_| self.limit_error())?;
-//RS         Ok(json_variant("Text", Some(CtValue::Str(text))))
-//RS     }
-//RS 
-//RS     fn parse_inline_value(&mut self, s: &str, depth: usize) -> Result<CtValue, YAMLParseError> {
-//RS         let s = s.trim();
-//RS         if let Some(rest) = s.strip_prefix('&') {
-//RS             let mut it = rest.splitn(2, char::is_whitespace);
-//RS             let name = it.next().unwrap_or("").to_string();
-//RS             self.budget
-//RS                 .bytes(name.len())
-//RS                 .map_err(|_| self.limit_error())?;
-//RS             let val_str = it.next().unwrap_or("").trim();
-//RS             let value = if val_str.is_empty() {
-//RS                 self.parse_node(0, self.next_depth(depth)?)?
-//RS             } else {
-//RS                 self.parse_inline_value(val_str, self.next_depth(depth)?)?
-//RS             };
-//RS             let stored = yaml_clone(&value, &mut self.budget).map_err(|_| self.limit_error())?;
-//RS             self.anchors.insert(name, stored);
-//RS             return Ok(value);
-//RS         }
-//RS         if let Some(name) = s.strip_prefix('*') {
-//RS             if let Some(value) = self.anchors.get(name.trim()) {
-//RS                 return yaml_clone(value, &mut self.budget).map_err(|_| self.limit_error());
-//RS             }
-//RS             return self.null();
-//RS         }
-//RS         if s.starts_with('[') || s.starts_with('{') {
-//RS             return yaml_parse_flow(s, depth, &mut self.budget)
-//RS                 .map(|(value, _)| value)
-//RS                 .map_err(|error| YAMLParseError {
-//RS                     line: self.pos.saturating_add(1),
-//RS                     message: yaml_flow_message(error).to_string(),
-//RS                 });
-//RS         }
-//RS         self.scalar(s)
-//RS     }
-//RS }
-//RS 
-//RS fn yaml_parse_flow(
-//RS     s: &str,
-//RS     depth: usize,
-//RS     budget: &mut YamlBudget,
-//RS ) -> Result<(CtValue, usize), FlowError> {
-//RS     let chars: Vec<char> = s.chars().collect();
-//RS     yaml_parse_flow_at(&chars, 0, depth, budget)
-//RS }
-//RS fn yaml_parse_flow_at(
-//RS     chars: &[char],
-//RS     mut i: usize,
-//RS     depth: usize,
-//RS     budget: &mut YamlBudget,
-//RS ) -> Result<(CtValue, usize), FlowError> {
-//RS     while i < chars.len() && chars[i].is_whitespace() {
-//RS         i = i.saturating_add(1);
-//RS     }
-//RS     if i >= chars.len() {
-//RS         return Ok((yaml_null(budget).map_err(|_| FlowError::Budget)?, i));
-//RS     }
-//RS     match chars[i] {
-//RS         '[' => {
-//RS             if depth >= MAX_YAML_DEPTH {
-//RS                 return Err(FlowError::Depth);
-//RS             }
-//RS             i = i.saturating_add(1);
-//RS             let mut items = Vec::new();
-//RS             loop {
-//RS                 while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') {
-//RS                     i = i.saturating_add(1);
-//RS                 }
-//RS                 if i >= chars.len() || chars[i] == ']' {
-//RS                     i = i.saturating_add(1);
-//RS                     break;
-//RS                 }
-//RS                 let next_depth = depth.checked_add(1).ok_or(FlowError::Depth)?;
-//RS                 let (v, ni) = yaml_parse_flow_at(chars, i, next_depth, budget)?;
-//RS                 items.push(v);
-//RS                 i = ni;
-//RS                 while i < chars.len() && chars[i].is_whitespace() {
-//RS                     i = i.saturating_add(1);
-//RS                 }
-//RS                 if i < chars.len() && chars[i] == ',' {
-//RS                     i = i.saturating_add(1);
-//RS                 } else if i < chars.len() && chars[i] == ']' {
-//RS                     i = i.saturating_add(1);
-//RS                     break;
-//RS                 }
-//RS             }
-//RS             budget.node(0).map_err(|_| FlowError::Budget)?;
-//RS             Ok((json_array(items), i))
-//RS         }
-//RS         '{' => {
-//RS             if depth >= MAX_YAML_DEPTH {
-//RS                 return Err(FlowError::Depth);
-//RS             }
-//RS             i = i.saturating_add(1);
-//RS             let mut entries = Vec::new();
-//RS             loop {
-//RS                 while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') {
-//RS                     i = i.saturating_add(1);
-//RS                 }
-//RS                 if i >= chars.len() || chars[i] == '}' {
-//RS                     i = i.saturating_add(1);
-//RS                     break;
-//RS                 }
-//RS                 let (key, ni) = yaml_scan_flow_scalar(chars, i, true);
-//RS                 i = ni;
-//RS                 while i < chars.len() && chars[i].is_whitespace() {
-//RS                     i = i.saturating_add(1);
-//RS                 }
-//RS                 if i < chars.len() && chars[i] == ':' {
-//RS                     i = i.saturating_add(1);
-//RS                 }
-//RS                 let next_depth = depth.checked_add(1).ok_or(FlowError::Depth)?;
-//RS                 let (v, nj) = yaml_parse_flow_at(chars, i, next_depth, budget)?;
-//RS                 i = nj;
-//RS                 let key = key.trim().to_string();
-//RS                 budget.bytes(key.len()).map_err(|_| FlowError::Budget)?;
-//RS                 entries.push((key, v));
-//RS                 while i < chars.len() && chars[i].is_whitespace() {
-//RS                     i = i.saturating_add(1);
-//RS                 }
-//RS                 if i < chars.len() && chars[i] == ',' {
-//RS                     i = i.saturating_add(1);
-//RS                 } else if i < chars.len() && chars[i] == '}' {
-//RS                     i = i.saturating_add(1);
-//RS                     break;
-//RS                 }
-//RS             }
-//RS             budget.node(0).map_err(|_| FlowError::Budget)?;
-//RS             Ok((json_object(entries), i))
-//RS         }
-//RS         _ => {
-//RS             let (raw, ni) = yaml_scan_flow_scalar(chars, i, false);
-//RS             Ok((
-//RS                 yaml_scalar(raw.trim(), budget).map_err(|_| FlowError::Budget)?,
-//RS                 ni,
-//RS             ))
-//RS         }
-//RS     }
-//RS }
-//RS fn yaml_scan_flow_scalar(chars: &[char], mut i: usize, as_key: bool) -> (String, usize) {
-//RS     while i < chars.len() && chars[i].is_whitespace() {
-//RS         i = i.saturating_add(1);
-//RS     }
-//RS     if i < chars.len() && (chars[i] == '"' || chars[i] == '\'') {
-//RS         let q = chars[i];
-//RS         let mut out = String::new();
-//RS         i = i.saturating_add(1);
-//RS         while i < chars.len() {
-//RS             if chars[i] == q {
-//RS                 if q == '\''
-//RS                     && i.checked_add(1)
-//RS                         .is_some_and(|next| next < chars.len() && chars[next] == '\'')
-//RS                 {
-//RS                     out.push('\'');
-//RS                     i = i.saturating_add(2);
-//RS                     continue;
-//RS                 }
-//RS                 i = i.saturating_add(1);
-//RS                 break;
-//RS             }
-//RS             if chars[i] == '\\' && q == '"' {
-//RS                 if let Some(next) = i.checked_add(1).filter(|next| *next < chars.len()) {
-//RS                     out.push(yaml_unescape(chars[next]));
-//RS                     i = i.saturating_add(2);
-//RS                     continue;
-//RS                 }
-//RS             }
-//RS             out.push(chars[i]);
-//RS             i = i.saturating_add(1);
-//RS         }
-//RS         return (out, i);
-//RS     }
-//RS     let mut out = String::new();
-//RS     while i < chars.len() {
-//RS         let c = chars[i];
-//RS         if c == ',' || c == ']' || c == '}' {
-//RS             break;
-//RS         }
-//RS         if as_key && c == ':' {
-//RS             break;
-//RS         }
-//RS         out.push(c);
-//RS         i = i.saturating_add(1);
-//RS     }
-//RS     (out, i)
-//RS }
-//RS fn yaml_fold_lines(lines: &[String]) -> String {
-//RS     let mut out = String::new();
-//RS     let mut prev_blank = true;
-//RS     for l in lines {
-//RS         if l.trim().is_empty() {
-//RS             out.push('\n');
-//RS             prev_blank = true;
-//RS         } else {
-//RS             if !prev_blank {
-//RS                 out.push(' ');
-//RS             }
-//RS             out.push_str(l);
-//RS             prev_blank = false;
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS fn yaml_unescape(c: char) -> char {
-//RS     match c {
-//RS         'n' => '\n',
-//RS         't' => '\t',
-//RS         'r' => '\r',
-//RS         '0' => '\0',
-//RS         '\\' => '\\',
-//RS         '"' => '"',
-//RS         _ => c,
-//RS     }
-//RS }
-//RS fn yaml_strip_comment(s: &str) -> String {
-//RS     let chars: Vec<char> = s.chars().collect();
-//RS     let mut in_s = false;
-//RS     let mut in_d = false;
-//RS     let mut i = 0;
-//RS     while i < chars.len() {
-//RS         let c = chars[i];
-//RS         match c {
-//RS             '\'' if !in_d => in_s = !in_s,
-//RS             '"' if !in_s => in_d = !in_d,
-//RS             '#' if !in_s && !in_d && (i == 0 || chars[i - 1] == ' ' || chars[i - 1] == '\t') => {
-//RS                 let kept: String = chars[..i].iter().collect();
-//RS                 return kept.trim_end().to_string();
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         i = i.saturating_add(1);
-//RS     }
-//RS     s.trim_end().to_string()
-//RS }
-//RS fn yaml_is_map_entry(s: &str) -> bool {
-//RS     yaml_top_level_colon(s).is_some()
-//RS }
-//RS fn yaml_top_level_colon(s: &str) -> Option<usize> {
-//RS     let chars: Vec<char> = s.chars().collect();
-//RS     let mut in_s = false;
-//RS     let mut in_d = false;
-//RS     let mut depth = 0i32;
-//RS     let mut i = 0;
-//RS     while i < chars.len() {
-//RS         let c = chars[i];
-//RS         match c {
-//RS             '\'' if !in_d => in_s = !in_s,
-//RS             '"' if !in_s => in_d = !in_d,
-//RS             '[' | '{' if !in_s && !in_d => depth = depth.saturating_add(1),
-//RS             ']' | '}' if !in_s && !in_d => depth = depth.saturating_sub(1),
-//RS             ':' if !in_s && !in_d && depth == 0 => {
-//RS                 if i.checked_add(1)
-//RS                     .is_none_or(|next| next >= chars.len() || chars[next] == ' ')
-//RS                 {
-//RS                     return Some(i);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         i = i.saturating_add(1);
-//RS     }
-//RS     None
-//RS }
-//RS fn yaml_split_key(s: &str) -> Option<(String, String)> {
-//RS     let idx = yaml_top_level_colon(s)?;
-//RS     let chars: Vec<char> = s.chars().collect();
-//RS     let key_raw: String = chars[..idx].iter().collect();
-//RS     let rest_start = idx.checked_add(1)?;
-//RS     let rest: String = chars[rest_start..].iter().collect();
-//RS     Some((yaml_unquote_key(key_raw.trim()), rest))
-//RS }
-//RS fn yaml_unquote_key(k: &str) -> String {
-//RS     if (k.starts_with('"') && k.ends_with('"') && k.len() >= 2)
-//RS         || (k.starts_with('\'') && k.ends_with('\'') && k.len() >= 2)
-//RS     {
-//RS         k[1..k.len() - 1].to_string()
-//RS     } else {
-//RS         k.to_string()
-//RS     }
-//RS }
-//RS fn yaml_scalar_value(s: &str) -> CtValue {
-//RS     let s = s.trim();
-//RS     if s.is_empty() {
-//RS         return json_variant("Null", None);
-//RS     }
-//RS     if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-//RS         let inner = &s[1..s.len() - 1];
-//RS         let mut out = String::new();
-//RS         let mut chars = inner.chars().peekable();
-//RS         while let Some(c) = chars.next() {
-//RS             if c == '\\' {
-//RS                 if let Some(n) = chars.next() {
-//RS                     out.push(yaml_unescape(n));
-//RS                 }
-//RS             } else {
-//RS                 out.push(c);
-//RS             }
-//RS         }
-//RS         return json_variant("Text", Some(CtValue::Str(out)));
-//RS     }
-//RS     if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
-//RS         return json_variant(
-//RS             "Text",
-//RS             Some(CtValue::Str(s[1..s.len() - 1].replace("''", "'"))),
-//RS         );
-//RS     }
-//RS     match s {
-//RS         "null" | "Null" | "NULL" | "~" => return json_variant("Null", None),
-//RS         "true" | "True" | "TRUE" => return json_variant("Bool", Some(CtValue::Bool(true))),
-//RS         "false" | "False" | "FALSE" => return json_variant("Bool", Some(CtValue::Bool(false))),
-//RS         ".inf" | ".Inf" | ".INF" => {
-//RS             return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f64::INFINITY))))
-//RS         }
-//RS         "-.inf" | "-.Inf" => {
-//RS             return json_variant(
-//RS                 "Float",
-//RS                 Some(CtValue::Float(CtFloat::f64(f64::NEG_INFINITY))),
-//RS             )
-//RS         }
-//RS         ".nan" | ".NaN" | ".NAN" => {
-//RS             return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f64::NAN))))
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS     if let Ok(n) = crate::Numeric::CtBigInt::from_str(s) {
-//RS         return json_variant("Int", Some(super::Builtins::exact_int_value(n)));
-//RS     }
-//RS     if (s.contains('.') || s.contains('e') || s.contains('E'))
-//RS         && s.chars()
-//RS             .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
-//RS     {
-//RS         if let Ok(f) = s.parse::<f64>() {
-//RS             return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f))));
-//RS         }
-//RS     }
-//RS     json_variant("Text", Some(CtValue::Str(s.to_string())))
-//RS }
-//RS 
-//RS pub(super) fn yaml_render(v: &CtValue) -> String {
-//RS     let mut out = String::new();
-//RS     yaml_render_node(v, 0, &mut out);
-//RS     let s = out.trim_end().to_string();
-//RS     if s.is_empty() {
-//RS         "{}".to_string()
-//RS     } else {
-//RS         s
-//RS     }
-//RS }
-//RS fn yaml_render_node(t: &CtValue, indent: usize, out: &mut String) {
-//RS     let pad = " ".repeat(indent);
-//RS     if let Some(entries) = json_object_entries(t) {
-//RS         if entries.is_empty() {
-//RS             out.push_str(&format!("{}{{}}\n", pad));
-//RS             return;
-//RS         }
-//RS         for (k, v) in &entries {
-//RS             let is_nonempty_obj = json_object_entries(v).map_or(false, |e| !e.is_empty());
-//RS             let is_nonempty_arr = json_array_items(v).map_or(false, |a| !a.is_empty());
-//RS             if is_nonempty_obj {
-//RS                 out.push_str(&format!("{}{}:\n", pad, yaml_render_key(k)));
-//RS                 yaml_render_node(v, indent + 2, out);
-//RS             } else if is_nonempty_arr {
-//RS                 out.push_str(&format!("{}{}:\n", pad, yaml_render_key(k)));
-//RS                 yaml_render_seq(&json_array_items(v).unwrap(), indent, out);
-//RS             } else {
-//RS                 out.push_str(&format!(
-//RS                     "{}{}: {}\n",
-//RS                     pad,
-//RS                     yaml_render_key(k),
-//RS                     yaml_render_scalar(v)
-//RS                 ));
-//RS             }
-//RS         }
-//RS         return;
-//RS     }
-//RS     if let Some(items) = json_array_items(t) {
-//RS         yaml_render_seq(&items, indent, out);
-//RS         return;
-//RS     }
-//RS     out.push_str(&format!("{}{}\n", pad, yaml_render_scalar(t)));
-//RS }
-//RS fn yaml_render_seq(items: &[CtValue], indent: usize, out: &mut String) {
-//RS     let pad = " ".repeat(indent);
-//RS     for item in items {
-//RS         let is_nonempty_obj = json_object_entries(item).map_or(false, |e| !e.is_empty());
-//RS         let is_nonempty_arr = json_array_items(item).map_or(false, |a| !a.is_empty());
-//RS         if is_nonempty_obj {
-//RS             out.push_str(&format!("{}-\n", pad));
-//RS             yaml_render_node(item, indent + 2, out);
-//RS         } else if is_nonempty_arr {
-//RS             out.push_str(&format!("{}-\n", pad));
-//RS             yaml_render_seq(&json_array_items(item).unwrap(), indent + 2, out);
-//RS         } else {
-//RS             out.push_str(&format!("{}- {}\n", pad, yaml_render_scalar(item)));
-//RS         }
-//RS     }
-//RS }
-//RS fn yaml_render_key(k: &str) -> String {
-//RS     if k.is_empty() || k.contains(':') || k.contains(' ') || k.contains('#') {
-//RS         format!("{:?}", k)
-//RS     } else {
-//RS         k.to_string()
-//RS     }
-//RS }
-// END-PORT-PENDING 0584 crates/jet-comptime/src/Comptime/EncodingLite.rs:1-1791
-
+// Card #392: whole-value codecs use the canonical DataTree CtValue shape.
+use jet_foundation.AST.[CtFloat, CtKey, CtReport, CtValue, StructDef, Type]
+use jet_comptime.Comptime.JSONInterp.[json_payload, json_variant]
+use jet_comptime.Numeric.CtBigInt
+use jet_comptime.Comptime.Builtins.exact_int_value
+use jet_foundation.CsvKernel
+use jet_foundation.EncodingErrors.*
+use jet_foundation.TEXT_NUL
+// Same private owner as EncodingLite02: encoding_error_value_at and yaml_render_scalar.
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:38
+pub fn csv_parse(text: String, delimiter: String, header: Bool, skip_blank: Bool) -> [CsvKernel.CsvRecord] Err! {
+    delimiter := CsvKernel.delimiter(delimiter)?
+    CsvKernel.parse(text, CsvKernel.CsvOptions { delimiter, header, skip_blank })?
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:55
+pub fn csv_render(rows: &[[String]]) -> String { CsvKernel.render(rows) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:62
+fn encoding_error_struct(format: String, line: I64, message: String) -> CtValue { encoding_error_value_at(format, "Syntax", line, 1, message) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:71
+enum TOMLValue { String(String), Integer(I64), Float(F64), Boolean(Bool), Datetime(String), Array([TOMLValue]), InlineTable([(String, TOMLValue)]) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:82
+enum TOMLItem { Header { path: [String], array: Bool }, KeyVal { path: [String], value: TOMLValue } }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:87
+pub fn toml_parse(raw: String) -> CtValue CtValue! {
+    p := TOMLParser { chars: raw.chars().collect(), pos: 0, line: 1, current_path_len: 0 }
+    items := []
+    loop {
+        p.skip_between_statements()
+        if p.peek().is_none() { break }
+        item := try { p.statement()? } catch(e) { fail encoding_error_struct("TOML", e.line as I64, e.message) }
+        if item == Val(item) {
+            if item == Header { path, .. } { p.current_path_len = path.len() }
+            items.push(item)
+        }
+    }
+    toml_assemble(items)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:116
+fn json_object(entries: [(String, CtValue)]) -> CtValue {
+    // Insertion order matches DataTree.Object, not sorted TOML keys.
+    json_variant("Object", Val(CtValue.Struct { type_name: "JSONObject", fields: entries }))
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:125
+fn json_array(items: [CtValue]) -> CtValue { json_variant("Array", Val(CtValue.List(items))) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:128
+fn json_object_entries(v: &CtValue) -> [(String, CtValue)]? {
+    json_payload(v, "Object") == {
+        Val(Struct { fields, .. }) -> Val(fields.clone())
+        Val(Map(m)) -> {
+            // GATE #4499: retain exact CtKey ordering in the legacy map projection.
+            keys := m.keys().cloned().collect(); keys.sort()
+            Val(keys.iter().map(fn(k) { (k == { Str(s) -> s.clone(); other -> "{other:?}" }, m[k].clone()) }).collect())
+        }
+        _ -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:147
+fn json_array_items(v: &CtValue) -> [CtValue]? { json_payload(v, "Array") == { Val(List(xs)) -> Val(xs.clone()); _ -> None } }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:154
+fn toml_assemble(items: [TOMLItem]) -> CtValue {
+    root := json_object([]); current: [String] := []
+    for item in items { item == {
+        Header { path, array } -> { if array { toml_push_array_table(&root, &path) } else { toml_table_at(&root, &path) }; current = path }
+        KeyVal { path, value } -> toml_set_key(&root, &current, &path, toml_value_to_json(value))
+    } }
+    root
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:182
+fn toml_table_at(root: &CtValue, path: &[String]) { *root = toml_ensure_table(root, path) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:185
+fn toml_ensure_table(node: &CtValue, path: &[String]) -> CtValue {
+    (seg, rest) := path.split_first() == { Val(pair) -> pair; None -> { return node.clone() } }
+    entries := json_object_entries(node).unwrap_or_default()
+    entries.iter().position(fn(e) { e.0 == seg }) == {
+        Val(idx) -> {
+            if json_array_items(&entries[idx].1) == Val(items) {
+                last_idx := items.len().saturating_sub(1)
+                if items.get(last_idx).cloned() == Val(last) { items[last_idx] = toml_ensure_table(&last, rest) }
+                entries[idx].1 = json_array(items)
+            } else { entries[idx].1 = toml_ensure_table(&entries[idx].1, rest) }
+        }
+        None -> entries.push((seg.clone(), toml_ensure_table(&json_object([]), rest)))
+    }
+    json_object(entries)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:210
+fn toml_set_key(root: &CtValue, current: &[String], key_path: &[String], value: CtValue) {
+    full := current.to_vec(); full.extend_from_slice(&key_path[..key_path.len() - 1])
+    fk := key_path[key_path.len() - 1].clone(); *root = toml_set_at_path(root, &full, &fk, value)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:221
+fn toml_set_at_path(root: &CtValue, path: &[String], field: String, value: CtValue) -> CtValue {
+    if path.is_empty() {
+        entries := json_object_entries(root).unwrap_or_default()
+        entries.iter_mut().find(fn(e) { e.0 == field }) == { Val(slot) -> slot.1 = value; None -> entries.push((field.to_string(), value)) }
+        return json_object(entries)
+    }
+    (seg, rest) := (path[0].clone(), &path[1..]); entries := json_object_entries(root).unwrap_or_default()
+    entries.iter().position(fn(e) { e.0 == seg }) == {
+        Val(idx) -> {
+            is_arr := json_array_items(&entries[idx].1).is_some()
+            if is_arr {
+                items := json_array_items(&entries[idx].1).unwrap(); last_idx := items.len().saturating_sub(1)
+                if items.get(last_idx).cloned() == Val(last) { items[last_idx] = toml_set_at_path(&last, rest, field, value) }
+                entries[idx].1 = json_array(items)
+            } else { entries[idx].1 = toml_set_at_path(&entries[idx].1, rest, field, value) }
+        }
+        None -> { child := toml_set_at_path(&json_object([]), rest, field, value); entries.push((seg, child)) }
+    }
+    json_object(entries)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:255
+fn toml_push_array_table(root: &CtValue, path: &[String]) {
+    (parent_path, last) := path.split_at(path.len() - 1); *root = toml_push_array_at(root, parent_path, &last[0])
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:260
+fn toml_push_array_at(root: &CtValue, path: &[String], field: String) -> CtValue {
+    if path.is_empty() {
+        entries := json_object_entries(root).unwrap_or_default()
+        entries.iter().position(fn(e) { e.0 == field }) == {
+            Val(idx) -> { items := json_array_items(&entries[idx].1).unwrap_or_default(); items.push(json_object([])); entries[idx].1 = json_array(items) }
+            None -> entries.push((field.to_string(), json_array([json_object([])])))
+        }
+        return json_object(entries)
+    }
+    (seg, rest) := (path[0].clone(), &path[1..]); entries := json_object_entries(root).unwrap_or_default()
+    entries.iter().position(fn(e) { e.0 == seg }) == {
+        Val(idx) -> {
+            is_arr := json_array_items(&entries[idx].1).is_some()
+            if is_arr {
+                items := json_array_items(&entries[idx].1).unwrap(); last_idx := items.len().saturating_sub(1)
+                if items.get(last_idx).cloned() == Val(last) { items[last_idx] = toml_push_array_at(&last, rest, field) }
+                entries[idx].1 = json_array(items)
+            } else { entries[idx].1 = toml_push_array_at(&entries[idx].1, rest, field) }
+        }
+        None -> { child := toml_push_array_at(&json_object([]), rest, field); entries.push((seg, child)) }
+    }
+    json_object(entries)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:297
+fn toml_value_to_json(v: TOMLValue) -> CtValue {
+    v == {
+        String(s) | Datetime(s) -> json_variant("Text", Val(CtValue.Str(s)))
+        Integer(n) -> json_variant("Int", Val(CtValue.Int(n)))
+        Float(v) -> json_variant("Float", Val(CtValue.Float(CtFloat.f64(v))))
+        Boolean(b) -> json_variant("Bool", Val(CtValue.Bool(b)))
+        Array(xs) -> json_array(xs.into_iter().map(toml_value_to_json).collect())
+        InlineTable(es) -> json_object(es.into_iter().map(fn(e) { (e.0, toml_value_to_json(e.1)) }).collect())
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:315
+pub fn toml_render(v: &CtValue) -> String { out := ""; toml_render_table(v, &[], &out); t := out.trim_end(); t.to_string() }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:321
+fn toml_is_table(v: &CtValue) -> Bool { json_object_entries(v).is_some() }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:324
+fn toml_is_array_of_tables(v: &CtValue) -> Bool { json_array_items(v) == { Val(arr) -> !arr.is_empty() && arr.iter().all(toml_is_table); None -> false } }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:330
+fn toml_render_table(t: &CtValue, path: &[String], out: &String) {
+    entries := json_object_entries(t) == { Val(e) -> e; None -> { return } }
+    for (k, v) in &entries { if !toml_is_table(v) && !toml_is_array_of_tables(v) { out.push_str("{k} = {toml_render_value(v)}\n") } }
+    for (k, v) in &entries {
+        if toml_is_table(v) { p := path.to_vec(); p.push(k.clone()); out.push_str("\n[{p.join(".")}]\n"); toml_render_table(v, &p, out) }
+        else if toml_is_array_of_tables(v) {
+            p := path.to_vec(); p.push(k.clone())
+            if json_array_items(v) == Val(arr) { for elem in &arr { out.push_str("\n[[{p.join(".")}]]\n"); toml_render_table(elem, &p, out) } }
+        }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:357
+fn toml_render_value(v: &CtValue) -> String {
+    if json_payload(v, "Null").is_some() || v == CtValue.Unit { return "\"\"" }
+    v == {
+        Enum { variant, args, .. } -> (variant, args.first()) == {
+            ("Null", _) -> "\"\""; ("Bool", Val((_, Bool(b)))) -> b.to_string(); ("Int", Val((_, Int(n)))) -> n.to_string()
+            ("Float", Val((_, Float(f)))) -> "{f:?}"; ("Text", Val((_, Str(s)))) -> quote_json_local(s)
+            ("Array", Val((_, List(items)))) -> { parts: [String] := items.iter().map(toml_render_value).collect(); "[{parts.join(", ")}]" }
+            ("Object", _) -> {
+                entries := json_object_entries(v) == { Val(e) -> e; None -> { return "\"\"" } }
+                parts: [String] := entries.iter().map(fn(e) { "{e.0} = {toml_render_value(e.1)}" }).collect()
+                "{{ {parts.join(", ")} }}"
+            }
+            _ -> "\"\""
+        }
+        _ -> "\"\""
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:388
+struct TOMLParser { chars: [Char], pos: USize, line: USize, current_path_len: USize }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:394
+const MAX_TOML_DEPTH: USize = 64
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:395
+#Error
+struct TOMLParseError { line: USize, message: String }
+impl TOMLParser {
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:400
+    fn peek(self) -> Char? { self.chars.get(self.pos).copied() }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:403
+    fn peek_at(self, n: USize) -> Char? { self.chars.get(self.pos + n).copied() }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:406
+    fn bump(self: &Self) -> Char? { c := self.peek()?; self.pos += 1; if c == '\n' { self.line += 1 }; Val(c) }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:414
+    fn err(self, message: String) -> TOMLParseError { TOMLParseError { line: self.line, message } }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:420
+    fn skip_inline_ws(self: &Self) { while self.peek() == { Val(' ') | Val('\t') -> true; _ -> false } { self.pos += 1 } }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:425
+    fn skip_between_statements(self: &Self) {
+        loop { self.peek() == { Val(' ') | Val('\t') | Val('\r') | Val('\n') -> { _ :: self.bump() }; Val('#') -> self.skip_comment(); _ -> { break } } }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:436
+    fn skip_comment(self: &Self) { while self.peek() == Val(c) { if c == '\n' { break }; self.pos += 1 } }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:444
+    fn finish_line(self: &Self) -> Unit TOMLParseError! {
+        self.skip_inline_ws(); if self.peek() == Val('#') { self.skip_comment() }
+        self.peek() == { None | Val('\n') | Val('\r') -> (); Val(c) -> { fail self.err(toml_unexpected_after_value(c)) } }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:458
+    fn statement(self: &Self) -> TOMLItem? TOMLParseError! { self.peek() == { Val('[') -> Val(self.header()?); _ -> Val(self.key_value()?) } }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:464
+    fn header(self: &Self) -> TOMLItem TOMLParseError! {
+        _ :: self.bump(); array := self.peek() == Val('['); if array { _ :: self.bump() }
+        self.skip_inline_ws(); path := self.key_path()?; self.skip_inline_ws()
+        if self.peek() != Val(']') { fail self.err(TOML_EXPECTED_TABLE_CLOSE) }; _ :: self.bump()
+        if array { if self.peek() != Val(']') { fail self.err(TOML_EXPECTED_ARRAY_TABLE_CLOSE) }; _ :: self.bump() }
+        if path.is_empty() { fail self.err(TOML_TABLE_NAME_REQUIRED) }; self.finish_line()?
+        TOMLItem.Header { path, array }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:491
+    fn key_value(self: &Self) -> TOMLItem TOMLParseError! {
+        path := self.key_path()?; if path.is_empty() { fail self.err(TOML_EXPECTED_KEY) }
+        if self.current_path_len.checked_add(path.len()).is_none_or(fn(d) { d > MAX_TOML_DEPTH }) { fail self.err("TOML key path is nested too deeply") }
+        self.skip_inline_ws(); if self.peek() != Val('=') { fail self.err(toml_expected_equals_after_key(&path.join("."))) }
+        _ :: self.bump(); self.skip_inline_ws(); value := self.value(0)?; self.finish_line()?
+        TOMLItem.KeyVal { path, value }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:515
+    fn key_path(self: &Self) -> [String] TOMLParseError! {
+        path := []
+        loop { self.skip_inline_ws(); if path.len() >= MAX_TOML_DEPTH { fail self.err("TOML key path is nested too deeply") }; path.push(self.simple_key()?); self.skip_inline_ws(); if self.peek() == Val('.') { _ :: self.bump() } else { break } }
+        path
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:532
+    fn simple_key(self: &Self) -> String TOMLParseError! {
+        self.peek() == {
+            Val('"') -> self.basic_string()?; Val('\'') -> self.literal_string()?
+            Val(c) if toml_is_bare_key_char(c) -> { s := ""; while self.peek() == Val(c) { if toml_is_bare_key_char(c) { s.push(c); self.pos += 1 } else { break } }; s }
+            Val(c) -> { fail self.err(toml_invalid_key_character(c)) }; None -> { fail self.err(TOML_EXPECTED_KEY) }
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:556
+    fn value(self: &Self, depth: USize) -> TOMLValue TOMLParseError! {
+        if depth >= MAX_TOML_DEPTH { fail self.err("TOML value is nested too deeply") }
+        self.peek() == {
+            Val('"') -> TOMLValue.String(self.basic_string()?); Val('\'') -> TOMLValue.String(self.literal_string()?)
+            Val('[') -> self.array(depth)?; Val('{') -> self.inline_table(depth)?; Val('t') | Val('f') -> self.boolean()?
+            Val('+') | Val('-') | Val('0'..='9') | Val('i') | Val('n') -> self.number_or_datetime()?
+            Val(c) -> { fail self.err(toml_invalid_value_start(c)) }; None -> { fail self.err(TOML_EXPECTED_VALUE) }
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:573
+    fn boolean(self: &Self) -> TOMLValue TOMLParseError! {
+        if self.try_keyword("true") { TOMLValue.Boolean(true) } else if self.try_keyword("false") { TOMLValue.Boolean(false) } else { fail self.err(TOML_EXPECTED_BOOLEAN) }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:582
+    fn try_keyword(self: &Self, kw: String) -> Bool {
+        chars: [Char] := kw.chars().collect()
+        for (i, c) in chars.iter().enumerate() { if self.peek_at(i) != Val(c) { return false } }
+        if self.peek_at(chars.len()) == Val(after) { if toml_is_bare_key_char(after) || after == '.' { return false } }
+        for _ in 0..chars.len() { _ :: self.bump() }; true
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:599
+    fn basic_string(self: &Self) -> String TOMLParseError! {
+        if self.peek() == Val('"') && self.peek_at(1) == Val('"') && self.peek_at(2) == Val('"') { return self.multiline_basic_string()? }
+        _ :: self.bump(); out := ""
+        loop { self.bump() == {
+            None | Val('\n') -> { fail self.err(TOML_UNTERMINATED_STRING) }; Val('"') -> { return out }
+            Val('\\') -> out.push(self.string_escape()?); Val(c) if (c as U32) < 0x20 -> { fail self.err(TOML_CONTROL_CHARACTER) }; Val(c) -> out.push(c)
+        } }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:620
+    fn multiline_basic_string(self: &Self) -> String TOMLParseError! {
+        _ :: self.bump(); _ :: self.bump(); _ :: self.bump()
+        if self.peek() == Val('\r') { _ :: self.bump() }; if self.peek() == Val('\n') { _ :: self.bump() }
+        out := ""
+        loop {
+            if self.peek() == Val('"') && self.peek_at(1) == Val('"') && self.peek_at(2) == Val('"') { _ :: self.bump(); _ :: self.bump(); _ :: self.bump(); return out }
+            self.bump() == {
+                None -> { fail self.err(TOML_UNTERMINATED_MULTILINE_STRING) }
+                Val('\\') -> {
+                    if self.peek() == { Val('\n') | Val('\r') | Val(' ') | Val('\t') -> true; _ -> false } {
+                        sawline := false; save := self.pos; saveline := self.line
+                        while self.peek() == { Val(' ') | Val('\t') | Val('\r') | Val('\n') -> true; _ -> false } { if self.peek() == Val('\n') { sawline = true }; _ :: self.bump() }
+                        if !sawline { self.pos = save; self.line = saveline; out.push(self.string_escape()?) }
+                    } else { out.push(self.string_escape()?) }
+                }
+                Val(c) -> out.push(c)
+            }
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:676
+    fn string_escape(self: &Self) -> Char TOMLParseError! {
+        self.bump() == {
+            Val('"') -> '"'; Val('\\') -> '\\'; Val('b') -> '\u{0008}'; Val('f') -> '\u{000c}'; Val('n') -> '\n'; Val('r') -> '\r'; Val('t') -> '\t'
+            Val('u') -> self.unicode_escape(4)?; Val('U') -> self.unicode_escape(8)?
+            Val(c) -> { fail self.err(toml_invalid_escape(c)) }; None -> { fail self.err(TOML_UNTERMINATED_ESCAPE) }
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:691
+    fn unicode_escape(self: &Self, n: USize) -> Char TOMLParseError! {
+        v: U32 := 0
+        for _ in 0..n {
+            c := self.peek().ok_or_else(fn() { self.err(TOML_TRUNCATED_UNICODE_ESCAPE) })?
+            d := c.to_digit(16).ok_or_else(fn() { self.err(TOML_INVALID_UNICODE_ESCAPE) })?
+            v = v * 16 + d; self.pos += 1
+        }
+        Char.from_u32(v).ok_or_else(fn() { self.err(TOML_INVALID_UNICODE_SCALAR) })?
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:706
+    fn literal_string(self: &Self) -> String TOMLParseError! {
+        if self.peek() == Val('\'') && self.peek_at(1) == Val('\'') && self.peek_at(2) == Val('\'') { return self.multiline_literal_string()? }
+        _ :: self.bump(); out := ""
+        loop { self.bump() == { None | Val('\n') -> { fail self.err(TOML_UNTERMINATED_LITERAL_STRING) }; Val('\'') -> { return out }; Val(c) -> out.push(c) } }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:727
+    fn multiline_literal_string(self: &Self) -> String TOMLParseError! {
+        _ :: self.bump(); _ :: self.bump(); _ :: self.bump()
+        if self.peek() == Val('\r') { _ :: self.bump() }; if self.peek() == Val('\n') { _ :: self.bump() }; out := ""
+        loop {
+            if self.peek() == Val('\'') && self.peek_at(1) == Val('\'') && self.peek_at(2) == Val('\'') { _ :: self.bump(); _ :: self.bump(); _ :: self.bump(); return out }
+            self.bump() == { None -> { fail self.err(TOML_UNTERMINATED_MULTILINE_LITERAL_STRING) }; Val(c) -> out.push(c) }
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:758
+    fn array(self: &Self, depth: USize) -> TOMLValue TOMLParseError! {
+        _ :: self.bump(); items := []
+        loop {
+            self.skip_ws_newlines_comments()
+            self.peek() == { Val(']') -> { _ :: self.bump(); return TOMLValue.Array(items) }; None -> { fail self.err(TOML_UNTERMINATED_ARRAY) }; _ -> () }
+            items.push(self.value(depth + 1)?); self.skip_ws_newlines_comments()
+            self.peek() == { Val(',') -> { _ :: self.bump() }; Val(']') -> { _ :: self.bump(); return TOMLValue.Array(items) }; Val(c) -> { fail self.err(toml_expected_array_separator(c)) }; None -> { fail self.err(TOML_UNTERMINATED_ARRAY) } }
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:794
+    fn skip_ws_newlines_comments(self: &Self) {
+        loop { self.peek() == { Val(' ') | Val('\t') | Val('\r') | Val('\n') -> { _ :: self.bump() }; Val('#') -> self.skip_comment(); _ -> { break } } }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:805
+    fn inline_table(self: &Self, depth: USize) -> TOMLValue TOMLParseError! {
+        _ :: self.bump(); entries := []; self.skip_inline_ws()
+        if self.peek() == Val('}') { _ :: self.bump(); return TOMLValue.InlineTable(entries) }
+        loop {
+            self.skip_inline_ws(); path := self.key_path()?; self.skip_inline_ws()
+            if self.bump() != Val('=') { fail self.err(TOML_EXPECTED_INLINE_EQUALS) }; self.skip_inline_ws()
+            value := self.value(depth + 1)?; entries.push((path.join("."), value)); self.skip_inline_ws()
+            self.bump() == { Val(',') -> { continue }; Val('}') -> { return TOMLValue.InlineTable(entries) }; Val(c) -> { fail self.err(toml_expected_inline_separator(c)) }; None -> { fail self.err(TOML_UNTERMINATED_INLINE_TABLE) } }
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:840
+    fn number_or_datetime(self: &Self) -> TOMLValue TOMLParseError! { if self.looks_like_date() || self.looks_like_time() { self.datetime()? } else { self.number()? } }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:846
+    fn looks_like_date(self) -> Bool { d := fn(n) { self.peek_at(n).map_or(false, fn(c) { c.is_ascii_digit() }) }; d(0) && d(1) && d(2) && d(3) && self.peek_at(4) == Val('-') && d(5) && d(6) && self.peek_at(7) == Val('-') && d(8) && d(9) }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:858
+    fn looks_like_time(self) -> Bool { d := fn(n) { self.peek_at(n).map_or(false, fn(c) { c.is_ascii_digit() }) }; d(0) && d(1) && self.peek_at(2) == Val(':') && d(3) && d(4) }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:862
+    fn datetime(self: &Self) -> TOMLValue TOMLParseError! {
+        s := ""; is_dt := fn(c) { c.is_ascii_alphanumeric() || c == { '-' | ':' | '.' | '+' -> true; _ -> false } }
+        while self.peek() == Val(c) {
+            if is_dt(c) { s.push(c); self.pos += 1 }
+            else if c == ' ' && self.peek_at(1).map_or(false, fn(n) { n.is_ascii_digit() }) && self.peek_at(3) == Val(':') { s.push(' '); self.pos += 1 }
+            else { break }
+        }
+        TOMLValue.Datetime(s)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:881
+    fn number(self: &Self) -> TOMLValue TOMLParseError! {
+        if self.try_keyword("inf") { return TOMLValue.Float(F64.INFINITY) }; if self.try_keyword("nan") { return TOMLValue.Float(F64.NAN) }
+        tok := ""
+        if self.peek() == { Val('+') | Val('-') -> true; _ -> false } {
+            sign := self.bump().unwrap(); tok.push(sign)
+            if self.try_keyword("inf") { return TOMLValue.Float(if sign == '-' { F64.NEG_INFINITY } else { F64.INFINITY }) }
+            if self.try_keyword("nan") { return TOMLValue.Float(F64.NAN) }
+        }
+        if self.peek() == Val('0') { if self.peek_at(1) == Val(r) { if (r == { 'x' | 'o' | 'b' -> true; _ -> false }) && tok.is_empty() { return self.radix_integer()? } } }
+        is_float := false
+        while self.peek() == Val(c) { c == { '0'..='9' | '_' -> { tok.push(c); self.pos += 1 }; '.' | 'e' | 'E' | '+' | '-' -> { is_float = true; tok.push(c); self.pos += 1 }; _ -> { break } } }
+        clean: String := tok.chars().filter(fn(c) { c != '_' }).collect()
+        if is_float { TOMLValue.Float(clean.parse<F64>().map_err(fn(_) { self.err(toml_invalid_number(&tok)) })?) }
+        else { TOMLValue.Integer(clean.parse<I64>().map_err(fn(_) { self.err(toml_invalid_number(&tok)) })?) }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:938
+    fn radix_integer(self: &Self) -> TOMLValue TOMLParseError! {
+        _ :: self.bump(); prefix := self.bump().unwrap(); radix := prefix == { 'x' -> 16; 'o' -> 8; 'b' -> 2; _ -> 16 }; tok := ""
+        while self.peek() == Val(c) { if c == '_' { self.pos += 1 } else if c.is_digit(radix) { tok.push(c); self.pos += 1 } else { break } }
+        if tok.is_empty() { fail self.err(TOML_EXPECTED_RADIX_DIGITS) }
+        TOMLValue.Integer(I64.from_str_radix(&tok, radix).map_err(fn(_) { self.err(toml_invalid_radix_integer(radix, &tok)) })?)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:970
+fn toml_is_bare_key_char(c: Char) -> Bool { c.is_ascii_alphanumeric() || c == '_' || c == '-' }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:977
+fn quote_json_local(s: String) -> String {
+    out := "\""
+    for c in s.chars() { c == {
+        '"' -> out.push_str("\\\""); '\\' -> out.push_str("\\\\"); '\u{0008}' -> out.push_str("\\b"); '\u{000c}' -> out.push_str("\\f")
+        '\n' -> out.push_str("\\n"); '\r' -> out.push_str("\\r"); '\t' -> out.push_str("\\t")
+        c if (c as U32) < 0x20 -> out.push_str("\\u{c as U32:04x}"); _ -> out.push(c)
+    } }
+    out.push('"'); out
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1000
+pub fn yaml_parse(raw: String) -> CtValue CtValue! {
+    line_count := raw.as_bytes().iter().filter(fn(b) { b == 10 }).count().checked_add(1)
+    if raw.len() > MAX_YAML_BYTES || !line_count.is_some_and(fn(n) { n <= MAX_YAML_NODES }) { fail encoding_error_struct("YAML", 1, "YAML input exceeds its byte or line budget") }
+    lines: [String] := raw.split('\n').map(fn(l) { t := l.trim_end_matches('\r'); t.to_string() }).collect()
+    p := YAMLParser { lines, pos: 0, anchors: [:], budget: YamlBudget { nodes: 0, bytes: 0 } }
+    p.skip_ignorable(); while p.at_doc_marker() { p.pos = p.pos.saturating_add(1); p.skip_ignorable() }
+    if p.pos >= p.lines.len() || p.at_doc_end() {
+        line := p.pos.saturating_add(1) as I64
+        return try { p.null()? } catch(_) { fail encoding_error_struct("YAML", line, "YAML value exceeds its node or byte budget") }
+    }
+    base := p.indent(p.pos)
+    value := try { p.parse_node(base, 0)? } catch(e) { fail encoding_error_struct("YAML", e.line as I64, e.message) }
+    p.skip_ignorable()
+    if p.pos < p.lines.len() && !p.at_doc_marker() && !p.at_doc_end() { fail encoding_error_struct("YAML", p.pos.saturating_add(1) as I64, YAML_EXPECTED_KEY_VALUE.to_string()) }
+    value
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1054
+struct YAMLParser { lines: [String], pos: USize, anchors: [String:CtValue], budget: YamlBudget }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1060
+const MAX_YAML_DEPTH: USize = 64
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1061
+const MAX_YAML_NODES: USize = 64 * 1024
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1062
+const MAX_YAML_BYTES: USize = 64 * 1024 * 1024
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1063
+const YAML_NODE_OVERHEAD: USize = 32
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1066
+struct YamlBudget { nodes: USize, bytes: USize }
+impl YamlBudget {
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1072
+    fn node(self: &Self, payload: USize) -> Unit Unit! {
+        nodes := self.nodes.checked_add(1).ok_or(())?; cost := YAML_NODE_OVERHEAD.checked_add(payload).ok_or(())?; bytes := self.bytes.checked_add(cost).ok_or(())?
+        if nodes > MAX_YAML_NODES || bytes > MAX_YAML_BYTES { fail () }
+        self.nodes = nodes; self.bytes = bytes
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1084
+    fn bytes(self: &Self, amount: USize) -> Unit Unit! { bytes := self.bytes.checked_add(amount).ok_or(())?; if bytes > MAX_YAML_BYTES { fail () }; self.bytes = bytes }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1094
+#Error
+enum FlowError { Depth, Budget }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1099
+fn yaml_null(budget: &YamlBudget) -> CtValue Unit! { budget.node(0)?; json_variant("Null", None) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1104
+fn yaml_scalar(s: String, budget: &YamlBudget) -> CtValue Unit! {
+    value := yaml_scalar_value(s); payload := yaml_scalar_payload(&value).ok_or(())?; budget.node(payload)?; value
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1111
+fn yaml_scalar_payload(value: &CtValue) -> USize? {
+    // U32 limbs have exact four-byte payload width on every selected target.
+    if value == BigInt(integer) { return integer.limbs.len().checked_mul(4) }
+    if json_payload(value, "Int") == Val(BigInt(integer)) { return integer.limbs.len().checked_mul(4) }
+    Val(["Text", "Number", "TypedText"].iter().find_map(fn(variant) { json_payload(value, variant) == { Val(Str(text)) -> Val(text.len()); _ -> None } }).unwrap_or(0))
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1129
+fn yaml_clone(value: &CtValue, budget: &YamlBudget) -> CtValue Unit! {
+    if value == { Enum { type_name, variant, args } if type_name == "DataTree" && variant == "Null" && args.is_empty() -> true; _ -> false } { budget.node(0)? }
+    else if json_payload(value, "Array") == Val(List(items)) { budget.node(0)?; for item in items { _ :: yaml_clone(item, budget)? } }
+    else if json_payload(value, "Object") == Val(Struct { fields, .. }) { budget.node(0)?; for (key, item) in fields { budget.bytes(key.len())?; _ :: yaml_clone(item, budget)? } }
+    else if value_is_yaml_scalar(value) { payload := yaml_scalar_payload(value).ok_or(())?; budget.node(payload)? }
+    else { fail () }
+    value.clone()
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1159
+fn value_is_yaml_scalar(value: &CtValue) -> Bool { ["Bool", "Int", "Float", "Number", "TypedText", "Text"].iter().any(fn(v) { json_payload(value, v).is_some() }) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1165
+fn yaml_flow_message(error: FlowError) -> String { error == { Depth -> "YAML value is nested too deeply"; Budget -> "YAML value exceeds its node or byte budget" } }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1171
+#Error
+struct YAMLParseError { line: USize, message: String }
+impl YAMLParser {
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1177
+    fn indent(self, i: USize) -> USize { self.lines[i].chars().take_while(fn(c) { c == ' ' }).count() }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1180
+    fn content(self, i: USize) -> String { after := &self.lines[i][self.indent(i)..]; yaml_strip_comment(after) }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1184
+    fn is_ignorable(self, i: USize) -> Bool { t := self.lines[i].trim(); t.is_empty() || t.starts_with('#') }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1188
+    fn skip_ignorable(self: &Self) { while self.pos < self.lines.len() && self.is_ignorable(self.pos) { self.pos = self.pos.saturating_add(1) } }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1193
+    fn at_doc_marker(self) -> Bool { self.pos < self.lines.len() && self.lines[self.pos].trim_start().starts_with("---") }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1196
+    fn at_doc_end(self) -> Bool { self.pos < self.lines.len() && self.lines[self.pos].trim() == "..." }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1200
+    fn limit_error(self) -> YAMLParseError { YAMLParseError { line: self.pos.saturating_add(1), message: "YAML value exceeds its node or byte budget" } }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1207
+    fn null(self: &Self) -> CtValue YAMLParseError! { yaml_null(&self.budget).map_err(fn(_) { self.limit_error() })? }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1211
+    fn scalar(self: &Self, value: String) -> CtValue YAMLParseError! { yaml_scalar(value, &self.budget).map_err(fn(_) { self.limit_error() })? }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1215
+    fn array(self: &Self, items: [CtValue]) -> CtValue YAMLParseError! { self.budget.node(0).map_err(fn(_) { self.limit_error() })?; json_array(items) }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1220
+    fn object(self: &Self, entries: [(String, CtValue)]) -> CtValue YAMLParseError! {
+        for (key, _) in &entries { self.budget.bytes(key.len()).map_err(fn(_) { self.limit_error() })? }
+        self.budget.node(0).map_err(fn(_) { self.limit_error() })?; json_object(entries)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1230
+    fn next_depth(self, depth: USize) -> USize YAMLParseError! { depth.checked_add(1).ok_or_else(fn() { self.limit_error() })? }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1234
+    fn next_indent(self, indent: USize) -> USize YAMLParseError! { indent.checked_add(1).ok_or_else(fn() { self.limit_error() })? }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1238
+    fn parse_node(self: &Self, min_indent: USize, depth: USize) -> CtValue YAMLParseError! {
+        self.skip_ignorable(); if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() { return self.null()? }
+        if depth >= MAX_YAML_DEPTH { fail YAMLParseError { line: self.pos.saturating_add(1), message: "YAML value is nested too deeply" } }
+        ind := self.indent(self.pos); if ind < min_indent { return self.null()? }; content := self.content(self.pos)
+        if content == "-" || content.starts_with("- ") { self.parse_block_seq(ind, depth)? }
+        else if yaml_is_map_entry(&content) { self.parse_block_map(ind, depth)? }
+        else { self.pos = self.pos.saturating_add(1); self.parse_inline_value(&content, depth)? }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1264
+    fn parse_block_seq(self: &Self, indent: USize, depth: USize) -> CtValue YAMLParseError! {
+        items := []
+        loop {
+            self.skip_ignorable(); if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() { break }
+            ind := self.indent(self.pos); if ind != indent { break }; content := self.content(self.pos)
+            if content != "-" && !content.starts_with("- ") { break }
+            chars: [Char] := self.lines[self.pos].chars().collect()
+            rebuilt: String := chars.iter().enumerate().map(fn(e) { if e.0 == indent { ' ' } else { e.1 } }).collect()
+            if rebuilt.trim().is_empty() { rebuilt = "" }; self.lines[self.pos] = rebuilt
+            item := self.parse_node(self.next_indent(indent)?, self.next_depth(depth)?)?; items.push(item)
+        }
+        self.array(items)?
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1296
+    fn parse_block_map(self: &Self, indent: USize, depth: USize) -> CtValue YAMLParseError! {
+        entries: [(String, CtValue)] := []
+        loop {
+            self.skip_ignorable(); if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() { break }
+            ind := self.indent(self.pos); if ind != indent { break }; content := self.content(self.pos)
+            if content.starts_with("- ") || content == "-" || !yaml_is_map_entry(&content) { break }
+            line_no := self.pos.saturating_add(1)
+            (key, rest) := yaml_split_key(&content).ok_or_else(fn() { YAMLParseError { line: line_no, message: YAML_EXPECTED_KEY_VALUE.to_string() } })?
+            self.pos = self.pos.saturating_add(1); rest := rest.trim() // #4303
+            value := if rest.is_empty() {
+                self.skip_ignorable()
+                if self.pos < self.lines.len() && self.indent(self.pos) > indent && !self.at_doc_marker() && !self.at_doc_end() { self.parse_node(self.next_indent(indent)?, self.next_depth(depth)?)? }
+                else { self.null()? }
+            } else if rest.starts_with('|') || rest.starts_with('>') { self.parse_block_scalar(indent, rest)? }
+            else { self.parse_inline_value(rest, self.next_depth(depth)?)? }
+            entries.push((key, value))
+        }
+        self.object(entries)?
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1339
+    fn parse_block_scalar(self: &Self, parent_indent: USize, header: String) -> CtValue YAMLParseError! {
+        folded := header.starts_with('>'); chomp := if header.contains('-') { 'S' } else if header.contains('+') { 'K' } else { 'C' }
+        body_lines: [String] := []; block_indent: USize? := None
+        while self.pos < self.lines.len() {
+            raw := &self.lines[self.pos]
+            if raw.trim().is_empty() { body_lines.push(""); self.pos = self.pos.saturating_add(1); continue }
+            ind := self.indent(self.pos); if ind <= parent_indent { break }
+            bi := block_indent.get_or_insert(ind); chars: [Char] := raw.chars().collect(); start := bi.min(chars.len())
+            dedented: String := chars[start..].iter().collect(); body_lines.push(dedented); self.pos = self.pos.saturating_add(1)
+        }
+        text := if folded { yaml_fold_lines(&body_lines) } else { body_lines.join("\n") }
+        t := text.trim_end_matches('\n'); trimmed := t.to_string()
+        text = chomp == { 'S' -> trimmed; 'K' -> { t := text.trim_end_matches('\n'); t.to_string() + "\n" }; _ -> trimmed + "\n" }
+        self.budget.node(text.len()).map_err(fn(_) { self.limit_error() })?
+        json_variant("Text", Val(CtValue.Str(text)))
+    }
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1389
+    fn parse_inline_value(self: &Self, s: String, depth: USize) -> CtValue YAMLParseError! {
+        s := s.trim() // #4303
+        if s.strip_prefix('&') == Val(rest) {
+            it := rest.splitn(2, fn(c) { c.is_whitespace() }); name := it.next().unwrap_or("").to_string()
+            self.budget.bytes(name.len()).map_err(fn(_) { self.limit_error() })?
+            val_str := it.next().unwrap_or("").trim() // #4303
+            value := if val_str.is_empty() { self.parse_node(0, self.next_depth(depth)?)? } else { self.parse_inline_value(val_str, self.next_depth(depth)?)? }
+            stored := yaml_clone(&value, &self.budget).map_err(fn(_) { self.limit_error() })?; self.anchors.insert(name, stored); return value
+        }
+        if s.strip_prefix('*') == Val(name) {
+            if self.anchors.get(name.trim()) == Val(value) { return yaml_clone(value, &self.budget).map_err(fn(_) { self.limit_error() })? }
+            return self.null()?
+        }
+        if s.starts_with('[') || s.starts_with('{') {
+            return yaml_parse_flow(s, depth, &self.budget).map(fn(e) { e.0 }).map_err(fn(error) { YAMLParseError { line: self.pos.saturating_add(1), message: yaml_flow_message(error).to_string() } })?
+        }
+        self.scalar(s)?
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1425
+fn yaml_parse_flow(s: String, depth: USize, budget: &YamlBudget) -> (CtValue, USize) FlowError! {
+    chars: [Char] := s.chars().collect(); yaml_parse_flow_at(&chars, 0, depth, budget)?
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1433
+fn yaml_parse_flow_at(chars: &[Char], i: USize, depth: USize, budget: &YamlBudget) -> (CtValue, USize) FlowError! {
+    while i < chars.len() && chars[i].is_whitespace() { i = i.saturating_add(1) }
+    if i >= chars.len() { return (yaml_null(budget).map_err(fn(_) { FlowError.Budget })?, i) }
+    chars[i] == {
+        '[' -> {
+            if depth >= MAX_YAML_DEPTH { fail FlowError.Depth }; i = i.saturating_add(1); items := []
+            loop {
+                while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') { i = i.saturating_add(1) }
+                if i >= chars.len() || chars[i] == ']' { i = i.saturating_add(1); break }
+                next_depth := depth.checked_add(1).ok_or(FlowError.Depth)?; (v, ni) := yaml_parse_flow_at(chars, i, next_depth, budget)?; items.push(v); i = ni
+                while i < chars.len() && chars[i].is_whitespace() { i = i.saturating_add(1) }
+                if i < chars.len() && chars[i] == ',' { i = i.saturating_add(1) } else if i < chars.len() && chars[i] == ']' { i = i.saturating_add(1); break }
+            }
+            budget.node(0).map_err(fn(_) { FlowError.Budget })?; (json_array(items), i)
+        }
+        '{' -> {
+            if depth >= MAX_YAML_DEPTH { fail FlowError.Depth }; i = i.saturating_add(1); entries := []
+            loop {
+                while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') { i = i.saturating_add(1) }
+                if i >= chars.len() || chars[i] == '}' { i = i.saturating_add(1); break }
+                (key, ni) := yaml_scan_flow_scalar(chars, i, true); i = ni
+                while i < chars.len() && chars[i].is_whitespace() { i = i.saturating_add(1) }
+                if i < chars.len() && chars[i] == ':' { i = i.saturating_add(1) }
+                next_depth := depth.checked_add(1).ok_or(FlowError.Depth)?; (v, nj) := yaml_parse_flow_at(chars, i, next_depth, budget)?; i = nj
+                t := key.trim(); key := t.to_string(); budget.bytes(key.len()).map_err(fn(_) { FlowError.Budget })?; entries.push((key, v))
+                while i < chars.len() && chars[i].is_whitespace() { i = i.saturating_add(1) }
+                if i < chars.len() && chars[i] == ',' { i = i.saturating_add(1) } else if i < chars.len() && chars[i] == '}' { i = i.saturating_add(1); break }
+            }
+            budget.node(0).map_err(fn(_) { FlowError.Budget })?; (json_object(entries), i)
+        }
+        _ -> { (raw, ni) := yaml_scan_flow_scalar(chars, i, false); t := raw.trim(); (yaml_scalar(t, budget).map_err(fn(_) { FlowError.Budget })?, ni) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1527
+fn yaml_scan_flow_scalar(chars: &[Char], i: USize, as_key: Bool) -> (String, USize) {
+    while i < chars.len() && chars[i].is_whitespace() { i = i.saturating_add(1) }
+    if i < chars.len() && (chars[i] == '"' || chars[i] == '\'') {
+        q := chars[i]; out := ""; i = i.saturating_add(1)
+        while i < chars.len() {
+            if chars[i] == q {
+                if q == '\'' && i.checked_add(1).is_some_and(fn(next) { next < chars.len() && chars[next] == '\'' }) { out.push('\''); i = i.saturating_add(2); continue }
+                i = i.saturating_add(1); break
+            }
+            if chars[i] == '\\' && q == '"' { if i.checked_add(1).filter(fn(next) { next < chars.len() }) == Val(next) { out.push(yaml_unescape(chars[next])); i = i.saturating_add(2); continue } }
+            out.push(chars[i]); i = i.saturating_add(1)
+        }
+        return (out, i)
+    }
+    out := ""
+    while i < chars.len() { c := chars[i]; if c == ',' || c == ']' || c == '}' { break }; if as_key && c == ':' { break }; out.push(c); i = i.saturating_add(1) }
+    (out, i)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1574
+fn yaml_fold_lines(lines: &[String]) -> String {
+    out := ""; prev_blank := true
+    for l in lines { if l.trim().is_empty() { out.push('\n'); prev_blank = true } else { if !prev_blank { out.push(' ') }; out.push_str(l); prev_blank = false } }
+    out
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1591
+fn yaml_unescape(c: Char) -> Char { c == { 'n' -> '\n'; 't' -> '\t'; 'r' -> '\r'; '0' -> TEXT_NUL.chars().next().unwrap(); '\\' -> '\\'; '"' -> '"'; _ -> c } }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1602
+fn yaml_strip_comment(s: String) -> String {
+    chars: [Char] := s.chars().collect(); in_s := false; in_d := false; i: USize := 0
+    while i < chars.len() {
+        c := chars[i]; c == {
+            '\'' if !in_d -> in_s = !in_s; '"' if !in_s -> in_d = !in_d
+            '#' if !in_s && !in_d && (i == 0 || chars[i - 1] == ' ' || chars[i - 1] == '\t') -> { kept: String := chars[..i].iter().collect(); t := kept.trim_end(); return t.to_string() }
+            _ -> ()
+        }; i = i.saturating_add(1)
+    }
+    t := s.trim_end(); t.to_string()
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1622
+fn yaml_is_map_entry(s: String) -> Bool { yaml_top_level_colon(s).is_some() }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1625
+fn yaml_top_level_colon(s: String) -> USize? {
+    chars: [Char] := s.chars().collect(); in_s := false; in_d := false; depth: I32 := 0; i: USize := 0
+    while i < chars.len() { c := chars[i]; c == {
+        '\'' if !in_d -> in_s = !in_s; '"' if !in_s -> in_d = !in_d
+        '[' | '{' if !in_s && !in_d -> depth = depth.saturating_add(1)
+        ']' | '}' if !in_s && !in_d -> depth = depth.saturating_sub(1)
+        ':' if !in_s && !in_d && depth == 0 -> { if i.checked_add(1).is_none_or(fn(next) { next >= chars.len() || chars[next] == ' ' }) { return Val(i) } }
+        _ -> ()
+    }; i = i.saturating_add(1) }
+    None
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1651
+fn yaml_split_key(s: String) -> (String, String)? {
+    idx := yaml_top_level_colon(s)?; chars: [Char] := s.chars().collect(); key_raw: String := chars[..idx].iter().collect(); rest_start := idx.checked_add(1)?; rest: String := chars[rest_start..].iter().collect()
+    t := key_raw.trim(); Val((yaml_unquote_key(t), rest))
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1659
+fn yaml_unquote_key(k: String) -> String {
+    if (k.starts_with('"') && k.ends_with('"') && k.len() >= 2) || (k.starts_with('\'') && k.ends_with('\'') && k.len() >= 2) { k[1..k.len() - 1].to_string() } else { k.to_string() }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1668
+fn yaml_scalar_value(s: String) -> CtValue {
+    s := s.trim() // #4303
+    if s.is_empty() { return json_variant("Null", None) }
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        inner := &s[1..s.len() - 1]; out := ""; chars := inner.chars().peekable()
+        while chars.next() == Val(c) { if c == '\\' { if chars.next() == Val(n) { out.push(yaml_unescape(n)) } } else { out.push(c) } }
+        return json_variant("Text", Val(CtValue.Str(out)))
+    }
+    if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 { return json_variant("Text", Val(CtValue.Str(s[1..s.len() - 1].replace("''", "'")))) }
+    s == {
+        "null" | "Null" | "NULL" | "~" -> { return json_variant("Null", None) }
+        "true" | "True" | "TRUE" -> { return json_variant("Bool", Val(CtValue.Bool(true))) }
+        "false" | "False" | "FALSE" -> { return json_variant("Bool", Val(CtValue.Bool(false))) }
+        ".inf" | ".Inf" | ".INF" -> { return json_variant("Float", Val(CtValue.Float(CtFloat.f64(F64.INFINITY)))) }
+        "-.inf" | "-.Inf" -> { return json_variant("Float", Val(CtValue.Float(CtFloat.f64(F64.NEG_INFINITY)))) }
+        ".nan" | ".NaN" | ".NAN" -> { return json_variant("Float", Val(CtValue.Float(CtFloat.f64(F64.NAN)))) }
+        _ -> ()
+    }
+    if CtBigInt.from_str(s) == Ok(n) { return json_variant("Int", Val(exact_int_value(n))) }
+    if (s.contains('.') || s.contains('e') || s.contains('E')) && s.chars().all(fn(c) { c.is_ascii_digit() || c == { '.' | 'e' | 'E' | '+' | '-' -> true; _ -> false } }) {
+        if s.parse<F64>() == Ok(f) { return json_variant("Float", Val(CtValue.Float(CtFloat.f64(f)))) }
+    }
+    json_variant("Text", Val(CtValue.Str(s.to_string())))
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1726
+pub fn yaml_render(v: &CtValue) -> String {
+    out := ""; yaml_render_node(v, 0, &out); t := out.trim_end(); s := t.to_string(); if s.is_empty() { "{}" } else { s }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1736
+fn yaml_render_node(t: &CtValue, indent: USize, out: &String) {
+    pad := " ".repeat(indent)
+    if json_object_entries(t) == Val(entries) {
+        if entries.is_empty() { out.push_str("{pad}{{}}\n"); return }
+        for (k, v) in &entries {
+            is_nonempty_obj := json_object_entries(v).map_or(false, fn(e) { !e.is_empty() }); is_nonempty_arr := json_array_items(v).map_or(false, fn(a) { !a.is_empty() })
+            if is_nonempty_obj { out.push_str("{pad}{yaml_render_key(k)}:\n"); yaml_render_node(v, indent + 2, out) }
+            else if is_nonempty_arr { out.push_str("{pad}{yaml_render_key(k)}:\n"); yaml_render_seq(&json_array_items(v).unwrap(), indent, out) }
+            else { out.push_str("{pad}{yaml_render_key(k)}: {yaml_render_scalar(v)}\n") }
+        }; return
+    }
+    if json_array_items(t) == Val(items) { yaml_render_seq(&items, indent, out); return }
+    out.push_str("{pad}{yaml_render_scalar(t)}\n")
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1769
+fn yaml_render_seq(items: &[CtValue], indent: USize, out: &String) {
+    pad := " ".repeat(indent)
+    for item in items {
+        is_nonempty_obj := json_object_entries(item).map_or(false, fn(e) { !e.is_empty() }); is_nonempty_arr := json_array_items(item).map_or(false, fn(a) { !a.is_empty() })
+        if is_nonempty_obj { out.push_str("{pad}-\n"); yaml_render_node(item, indent + 2, out) }
+        else if is_nonempty_arr { out.push_str("{pad}-\n"); yaml_render_seq(&json_array_items(item).unwrap(), indent + 2, out) }
+        else { out.push_str("{pad}- {yaml_render_scalar(item)}\n") }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1785
+fn yaml_render_key(k: String) -> String { if k.is_empty() || k.contains(':') || k.contains(' ') || k.contains('#') { "{k:?}" } else { k.to_string() } }

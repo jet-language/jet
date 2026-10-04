@@ -1,228 +1,143 @@
-// PORT-PENDING 0437 crates-jet-sema-src-sema-policyfacts-module-group: crates/jet-sema/src/Sema/Prelude.rs:1-224
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! One compiler-owned opening of the readable Core prelude.
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::{
-//RS     ErrorConvDef, Expr, Func, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle, Stmt,
-//RS     TryConvert,
-//RS };
-//RS use jet_foundation::Prelude as CorePrelude;
-//RS use jet_foundation::Prelude::Target;
-//RS use std::collections::{BTreeSet, HashMap};
-//RS 
-//RS const INTERNAL_PREFIX: &str = "__jet_prelude_";
-//RS 
-//RS /// D-FAIL-CONV2=A: open the standard library's own error family onto the default
-//RS /// `Err`. The declarations are ordinary Jet source in `Prelude/Errors.jet`.
-//RS ///
-//RS /// Injection is demand-driven. A module receives only the conversions its own
-//RS /// `?` operators actually exercise (recorded as `TryConvert::Typed` during
-//RS /// checking). Unused members stay out of the module, so blast radius scales
-//RS /// with use instead of being total.
-//RS ///
-//RS /// A `#NoPrelude` file receives nothing. A memory denial is an effect contract
-//RS /// and does not disable the readable Core prelude.
-//RS pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> Vec<Diagnostic> {
-//RS     if module.no_prelude {
-//RS         return Vec::new();
-//RS     }
-//RS     let (shipped, diagnostics) = shipped_error_conversions();
-//RS     if shipped.is_empty() {
-//RS         return diagnostics;
-//RS     }
-//RS     // Keyed by the exercised source name. A source-owned Core error arrives
-//RS     // under its canonical identity; its conversion is the shipped declaration
-//RS     // for its leaf, bound to that identity so sema and codegen name one
-//RS     // conversion function.
-//RS     let mut needed: HashMap<(String, String), ErrorConvDef> = HashMap::new();
-//RS     for item in &mut module.items {
-//RS         walk_item_exprs(item, &mut |expr| {
-//RS             let Expr::Try(_, _, TryConvert::Typed { source, target, .. }, _) = expr else {
-//RS                 return;
-//RS             };
-//RS             let source = source.name();
-//RS             let target = target.name();
-//RS             let leaf = crate::Sema::Diagnostics::core_error_family_leaf(&source);
-//RS             for conversion in &shipped {
-//RS                 if leaf == conversion.from_ty && target == conversion.to_ty {
-//RS                     let mut bound = conversion.clone();
-//RS                     bound.from_ty = source.clone();
-//RS                     needed.insert((source.clone(), target.clone()), bound);
-//RS                 }
-//RS             }
-//RS         });
-//RS     }
-//RS     let mut needed: Vec<_> = needed.into_values().collect();
-//RS     needed.sort_by(|a, b| (&a.from_ty, &a.to_ty).cmp(&(&b.from_ty, &b.to_ty)));
-//RS     for conversion in needed {
-//RS         let declared_locally = module.items.iter().any(|item| {
-//RS             matches!(
-//RS                 item,
-//RS                 Item::ErrorConv(local)
-//RS                     if local.from_ty == conversion.from_ty && local.to_ty == conversion.to_ty
-//RS             )
-//RS         });
-//RS         if declared_locally {
-//RS             continue;
-//RS         }
-//RS         module.items.push(Item::ErrorConv(conversion));
-//RS     }
-//RS     diagnostics
-//RS }
-//RS 
-//RS fn shipped_error_conversions() -> (Vec<ErrorConvDef>, Vec<Diagnostic>) {
-//RS     const SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Errors.jet");
-//RS     let (tokens, mut diagnostics) = crate::Lexer::lex_generated(SOURCE);
-//RS     match crate::Parser::parse(&tokens) {
-//RS         Ok(program) => {
-//RS             let conversions = program
-//RS                 .items
-//RS                 .into_iter()
-//RS                 .filter_map(|item| match item {
-//RS                     Item::ErrorConv(conversion) => Some(conversion),
-//RS                     _ => None,
-//RS                 })
-//RS                 .collect();
-//RS             (conversions, diagnostics)
-//RS         }
-//RS         Err(mut parse_diagnostics) => {
-//RS             diagnostics.append(&mut parse_diagnostics);
-//RS             (Vec::new(), diagnostics)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn walk_item_exprs(item: &mut Item, visit: &mut impl FnMut(&Expr)) {
-//RS     match item {
-//RS         Item::Func(function) => walk_func(function, visit),
-//RS         Item::Struct(definition) => {
-//RS             for method in &mut definition.methods {
-//RS                 walk_func(method, visit);
-//RS             }
-//RS             for implementation in &mut definition.trait_impls {
-//RS                 for method in &mut implementation.methods {
-//RS                     walk_func(method, visit);
-//RS                 }
-//RS             }
-//RS         }
-//RS         Item::Impl(implementation) => {
-//RS             for method in &mut implementation.methods {
-//RS                 walk_func(method, visit);
-//RS             }
-//RS         }
-//RS         Item::Test(test) => walk_stmts(&mut test.body, visit),
-//RS         Item::Const(constant) => walk_expr(&mut constant.value, visit),
-//RS         Item::ErrorConv(conversion) => walk_stmts(&mut conversion.body, visit),
-//RS         Item::CodeModule(module) => {
-//RS             if let Some(body) = &mut module.body {
-//RS                 for inner in body {
-//RS                     walk_item_exprs(inner, visit);
-//RS                 }
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn walk_func(function: &mut Func, visit: &mut impl FnMut(&Expr)) {
-//RS     walk_stmts(&mut function.body, visit);
-//RS }
-//RS 
-//RS fn walk_stmts(body: &mut [Stmt], visit: &mut impl FnMut(&Expr)) {
-//RS     for stmt in body {
-//RS         stmt.for_each_expr_mut(|expr| walk_expr(expr, visit));
-//RS     }
-//RS }
-//RS 
-//RS fn walk_expr(expr: &mut Expr, visit: &mut impl FnMut(&Expr)) {
-//RS     visit(expr);
-//RS }
-//RS 
-//RS /// Inject the prelude's Core module aliases once at file scope. The import
-//RS /// nodes are compiler-owned so codegen, JIT, and interpreter all receive the
-//RS /// same core-import map; no package source can manufacture this opening.
-//RS pub(crate) fn inject(bundle: &mut ProgramBundle) {
-//RS     for module in &mut bundle.modules {
-//RS         if module.no_prelude {
-//RS             continue;
-//RS         }
-//RS         let modules: BTreeSet<&'static str> = CorePrelude::entries()
-//RS             .iter()
-//RS             .filter_map(|entry| match entry.target {
-//RS                 Target::Core {
-//RS                     module: core_module,
-//RS                     ..
-//RS                 } if source_mentions_identifier(&module.source, entry.name) => Some(core_module),
-//RS                 _ => None,
-//RS             })
-//RS             .collect();
-//RS         for core_module in modules {
-//RS             if module.imports.iter().any(|import| {
-//RS                 import.import_alias().starts_with(INTERNAL_PREFIX)
-//RS                     && import.core_module_path().as_deref() == Some(core_module)
-//RS             }) {
-//RS                 continue;
-//RS             }
-//RS             let stem = core_module.replace('.', "_");
-//RS             let base = format!("{INTERNAL_PREFIX}{stem}");
-//RS             let mut alias = base.clone();
-//RS             let mut suffix = 0usize;
-//RS             while module
-//RS                 .imports
-//RS                 .iter()
-//RS                 .any(|import| import.import_alias() == alias)
-//RS             {
-//RS                 suffix += 1;
-//RS                 alias = format!("{base}_{suffix}");
-//RS             }
-//RS             let zero = Span::new(0, 0);
-//RS             module.imports.push(ImportDecl {
-//RS                 kind: ImportKind::Module(core_module.to_string(), zero),
-//RS                 alias,
-//RS                 alias_span: zero,
-//RS                 span: zero,
-//RS                 item_spans: Vec::new(),
-//RS                 local_spans: Vec::new(),
-//RS                 is_pub: false,
-//RS                 is_package_pub: false,
-//RS                 inline_version: None,
-//RS             });
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Find the compiler-owned alias for one Core module after injection.
-//RS pub(crate) fn core_alias_for<'a>(
-//RS     core_imports: &'a HashMap<String, String>,
-//RS     module: &str,
-//RS ) -> Option<&'a str> {
-//RS     core_imports.iter().find_map(|(alias, target)| {
-//RS         (alias.starts_with(INTERNAL_PREFIX) && target == module).then_some(alias.as_str())
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn shadow_warning(name: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::lint(
-//RS         "L0510",
-//RS         format!("declaration {name} replaces a Core prelude alias"),
-//RS         "the readable Core prelude opens this name automatically, and a user declaration wins in its file".to_string(),
-//RS         "keep the declaration to accept the shadow, or rename it to use the prelude alias".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS pub(crate) fn is_prelude_name(name: &str) -> bool {
-//RS     CorePrelude::entry(name).is_some()
-//RS }
-//RS 
-//RS fn source_mentions_identifier(source: &str, name: &str) -> bool {
-//RS     source.match_indices(name).any(|(start, _)| {
-//RS         let before = source[..start].chars().next_back();
-//RS         let after = source[start + name.len()..].chars().next();
-//RS         !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-//RS             && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-//RS     })
-//RS }
-// END-PORT-PENDING 0437 crates/jet-sema/src/Sema/Prelude.rs:1-224
+use jet_foundation.[Diagnostic, Span, ErrorConvDef, Expr, Func, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle, Stmt, TryConvert]
+use jet_foundation.Prelude as CorePrelude
+use jet_foundation.Prelude.[Target]
+use jet_lexer.[lex_generated]
+use jet_parser.[parse]
 
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:12
+const INTERNAL_PREFIX: String = "__jet_prelude_"
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:24
+pub fn inject_exercised_error_conversions(module: &LoadedModule) -> [Diagnostic] {
+    if module.no_prelude -> return []
+    (shipped, diagnostics) :: shipped_error_conversions()
+    if shipped.is_empty() -> return diagnostics
+    // GATE #4499: exact tuple-key equality for conversion identity.
+    needed := [(String, String):ErrorConvDef]{}
+    loop item in &module.items {
+        walk_item_exprs(&item, fn(expr: Expr) {
+            if expr == .Try(_, _, .Typed(source, target, _), _) {
+                source_name :: source.name()
+                target_name :: target.name()
+                leaf :: core_error_family_leaf(source_name)
+                loop conversion in shipped {
+                    if leaf == conversion.from_ty && target_name == conversion.to_ty {
+                        bound := ~conversion
+                        bound.from_ty = source_name
+                        needed[(source_name, target_name)] = bound
+                    }
+                }
+            }
+        })
+    }
+    keys := needed.keys().collect()
+    &keys.sort()
+    loop key in keys {
+        conversion :: needed[key]
+        declared_locally := false
+        loop item in module.items {
+            if item == .ErrorConv(local) {
+                if local.from_ty == conversion.from_ty && local.to_ty == conversion.to_ty { declared_locally = true; break }
+            }
+        }
+        if !declared_locally -> &module.items.push(Item.ErrorConv(conversion))
+    }
+    diagnostics
+}
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:72
+fn shipped_error_conversions() -> ([ErrorConvDef], [Diagnostic]) {
+    // Compile-time source inclusion, not a Rust execution bridge.
+    SOURCE :: #Embed("../../../../crates/jet-codegen/src/Prelude/Errors.jet")
+    (tokens, diagnostics) := lex_generated(SOURCE)
+    if parse(tokens) == {
+        .Ok(program) -> {
+            conversions := [ErrorConvDef]{}
+            loop item in program.items { if item == .ErrorConv(conversion) -> &conversions.push(conversion) }
+            (conversions, diagnostics)
+        }
+        .Err(parse_diagnostics) -> {
+            &diagnostics.extend(parse_diagnostics)
+            ([], diagnostics)
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:94
+fn walk_item_exprs(item: &Item, visit: fn(Expr)) {
+    if item == {
+        .Func(function) -> walk_func(&function, visit)
+        .Struct(definition) -> {
+            loop method in &definition.methods -> walk_func(&method, visit)
+            loop implementation in &definition.trait_impls { loop method in &implementation.methods -> walk_func(&method, visit) }
+        }
+        .Impl(implementation) -> { loop method in &implementation.methods -> walk_func(&method, visit) }
+        .Test(test) -> walk_stmts(&test.body, visit)
+        .Const(constant) -> walk_expr(&constant.value, visit)
+        .ErrorConv(conversion) -> walk_stmts(&conversion.body, visit)
+        .CodeModule(module) -> { if module.body == .Val(body) { loop inner in &body -> walk_item_exprs(&inner, visit) } }
+        else -> {}
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:126
+fn walk_func(function: &Func, visit: fn(Expr)) { walk_stmts(&function.body, visit) }
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:130
+fn walk_stmts(body: &[Stmt], visit: fn(Expr)) {
+    loop statement in &body -> &statement.for_each_expr_mut(fn(expr: &Expr) { walk_expr(&expr, visit) })
+}
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:136
+fn walk_expr(expr: &Expr, visit: fn(Expr)) { visit(expr) }
+
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:143
+pub fn inject(bundle: &ProgramBundle) {
+    loop module in &bundle.modules {
+        if module.no_prelude -> continue
+        modules := [String:Bool]{}
+        loop entry in CorePrelude.entries() {
+            if entry.target == .Core(core_module, _) {
+                if source_mentions_identifier(module.source, entry.name) -> modules[core_module] = true
+            }
+        }
+        keys := modules.keys().collect()
+        &keys.sort()
+        loop core_module in keys {
+            present := false
+            loop import in module.imports {
+                if import.import_alias().starts_with(INTERNAL_PREFIX) && import.core_module_path() == Val(core_module) { present = true; break }
+            }
+            if present -> continue
+            stem :: core_module.replace(".", "_")
+            base :: "{INTERNAL_PREFIX}{stem}"
+            alias := base
+            suffix := 0
+            loop {
+                occupied := false
+                loop import in module.imports { if import.import_alias() == alias { occupied = true; break } }
+                if !occupied -> break
+                suffix += 1
+                alias = "{base}_{suffix}"
+            }
+            zero :: Span.new(0, 0)
+            &module.imports.push(ImportDecl{kind: ImportKind.Module(core_module, zero), alias: alias, alias_span: zero, span: zero, item_spans: [], local_spans: [], is_pub: false, is_package_pub: false, inline_version: None})
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:194
+pub fn core_alias_for(core_imports: [String:String], module: String) -> String? {
+    loop (alias, target) in core_imports { if alias.starts_with(INTERNAL_PREFIX) && target == module -> return Val(alias) }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:203
+pub fn shadow_warning(name: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.lint("L0510", "declaration {name} replaces a Core prelude alias", "the readable Core prelude opens this name automatically, and a user declaration wins in its file", "keep the declaration to accept the shadow, or rename it to use the prelude alias", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:213
+pub fn is_prelude_name(name: String) -> Bool Never! { CorePrelude.entry(name) != None }
+// Rust: crates/jet-sema/src/Sema/Prelude.rs:217
+fn source_mentions_identifier(source: String, name: String) -> Bool Never! {
+    loop (start, _) in source.match_indices(name) {
+        before :: source[..start].chars().next_back()
+        after :: source[start + name.len()..].chars().next()
+        before_ident :: before.is_some_and(ch -> ch.is_alphanumeric() || ch == '_')
+        after_ident :: after.is_some_and(ch -> ch.is_alphanumeric() || ch == '_')
+        if !before_ident && !after_ident -> return true
+    }
+    false
+}

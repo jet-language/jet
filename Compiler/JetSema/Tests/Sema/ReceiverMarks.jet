@@ -1,0 +1,16 @@
+use jet_foundation.[Expr, Span, Type, TagMarker, AccessConvention]
+// Rust: crates/jet-sema/src/Sema/ReceiverMarks.rs:36-77 (behavioral control, same private module)
+#Test("receiver_marks_order_conventions_and_preserve_whole_place_span") {
+    assert(convention_rank(AccessConvention.Read) < convention_rank(AccessConvention.Write))
+    assert(convention_rank(AccessConvention.Write) < convention_rank(AccessConvention.Move))
+    root :: Expr.Ident{name: "value", span: Span.new(2, 7)}
+    field :: Expr.Field{base: root, member: "buf", span: Span.new(7, 11)}
+    outer :: Expr.Field{base: field, member: "text", span: Span.new(11, 16)}
+    assert(place_root(outer) == Val("value"))
+    assert(place_span(outer) == Span.new(2, 16))
+    assert(place_root(Expr.Bool{value: true, span: Span.new(2, 6)}) == None)
+    assert(is_window_type(Type.Apply{name: "ViewMut", args: [Type]{Type.Int}}))
+    assert(is_window_type(Type.Tagged{marker: TagMarker.User{name: "Audit"}, inner: Type.Apply{name: "ComputeViewMut", args: [Type]{Type.Int}}}))
+    assert(!is_window_type(Type.Apply{name: "View", args: [Type]{Type.Int}}))
+    assert(!is_window_type(Type.Int))
+}

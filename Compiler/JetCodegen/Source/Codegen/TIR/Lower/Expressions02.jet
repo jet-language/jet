@@ -1,1805 +1,801 @@
-// PORT-PENDING 0476 crates-jet-codegen-src-codegen-tir-lower-expressions-slice-1803: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1803-3603
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS struct ExprComptimeCacheGuard {
-//RS     scope: Option<ExprCacheScope>,
-//RS }
-//RS 
-//RS impl ExprComptimeCacheGuard {
-//RS     fn enter(env: &LowerEnv) -> Self {
-//RS         if env.fn_name != "__ct" {
-//RS             return Self { scope: None };
-//RS         }
-//RS         let nested = EXPR_COMPTIME_CACHE_DEPTH.with(|depth| {
-//RS             let nested = depth.get() > 0;
-//RS             depth.set(depth.get() + 1);
-//RS             nested
-//RS         });
-//RS         if nested {
-//RS             return Self { scope: None };
-//RS         }
-//RS         Self {
-//RS             scope: Some(ExprCacheScope::enter()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for ExprComptimeCacheGuard {
-//RS     fn drop(&mut self) {
-//RS         // The scope restores the outer memo as it drops.
-//RS         self.scope.take();
-//RS         EXPR_COMPTIME_CACHE_DEPTH.with(|depth| {
-//RS             depth.set(depth.get().saturating_sub(1));
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for ExprCacheOwner {
-//RS     fn drop(&mut self) {
-//RS         if self.owns_cache {
-//RS             expr_cache_end();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn expr_cache_take(expr: &Expr, cx: &Cx) -> Option<TExpr> {
-//RS     EXPR_WORKLIST_CACHE.with(|cache| {
-//RS         let mut cache = cache.borrow_mut();
-//RS         if !cache.active {
-//RS             return None;
-//RS         }
-//RS         let key = expr_key(expr, cx);
-//RS         let value = cache
-//RS             .values
-//RS             .get_mut(&key)
-//RS             .and_then(|values| values.pop_front());
-//RS         if cache
-//RS             .values
-//RS             .get(&key)
-//RS             .is_some_and(|values| values.is_empty())
-//RS         {
-//RS             cache.values.remove(&key);
-//RS         }
-//RS         value
-//RS     })
-//RS }
-//RS 
-//RS fn expr_cache_put(expr: &Expr, value: TExpr, cx: &Cx) {
-//RS     EXPR_WORKLIST_CACHE.with(|cache| {
-//RS         let mut cache = cache.borrow_mut();
-//RS         cache.types.insert(expr_key(expr, cx), value.ty.clone());
-//RS         cache
-//RS             .values
-//RS             .entry(expr_key(expr, cx))
-//RS             .or_default()
-//RS             .push_back(value);
-//RS     });
-//RS }
-//RS 
-//RS fn expr_cache_type(expr: &Expr, cx: &Cx) -> Option<Type> {
-//RS     let expr = strip_expr_parens(expr);
-//RS     EXPR_WORKLIST_CACHE.with(|cache| {
-//RS         let cache = cache.borrow();
-//RS         cache
-//RS             .active
-//RS             .then(|| cache.types.get(&expr_key(expr, cx)).cloned())
-//RS             .flatten()
-//RS     })
-//RS }
-//RS 
-//RS fn expr_cache_put_method_sig(expr: &Expr, sig: Vec<(AccessConvention, Type)>, cx: &Cx) {
-//RS     EXPR_WORKLIST_CACHE.with(|cache| {
-//RS         cache
-//RS             .borrow_mut()
-//RS             .method_sigs
-//RS             .entry(expr_key(expr, cx))
-//RS             .or_default()
-//RS             .push_back(sig);
-//RS     });
-//RS }
-//RS 
-//RS fn expr_cache_take_method_sig(expr: &Expr, cx: &Cx) -> Option<Vec<(AccessConvention, Type)>> {
-//RS     EXPR_WORKLIST_CACHE.with(|cache| {
-//RS         let mut cache = cache.borrow_mut();
-//RS         if !cache.active {
-//RS             return None;
-//RS         }
-//RS         let key = expr_key(expr, cx);
-//RS         let sig = cache
-//RS             .method_sigs
-//RS             .get_mut(&key)
-//RS             .and_then(|sigs| sigs.pop_front());
-//RS         if cache
-//RS             .method_sigs
-//RS             .get(&key)
-//RS             .is_some_and(|sigs| sigs.is_empty())
-//RS         {
-//RS             cache.method_sigs.remove(&key);
-//RS         }
-//RS         sig
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn take_scheduled_expr(expr: &Expr, cx: &Cx) -> Option<TExpr> {
-//RS     expr_cache_take(expr, cx).or_else(|| {
-//RS         let stripped = strip_expr_parens(expr);
-//RS         (!std::ptr::eq(expr, stripped))
-//RS             .then(|| expr_cache_take(stripped, cx))
-//RS             .flatten()
-//RS     })
-//RS }
-//RS 
-//RS /// Lower one expression after its work-item children are ready. A condition
-//RS /// builder uses this instead of reopening a nested expression segment, so a
-//RS /// value is consumed from the cache exactly once.
-//RS pub(crate) fn lower_cached_expr(expr: &Expr, cx: &Cx, _env: &mut LowerEnv) -> TExpr {
-//RS     let expr = strip_expr_parens(expr);
-//RS     take_scheduled_expr(expr, cx).expect("condition child missing from expression worklist")
-//RS }
-//RS 
-//RS /// Return the non-call children of an expression. Calls use the unified work
-//RS /// item path below so argument context and source order stay explicit.
-//RS fn plain_expr_children(expr: &Expr) -> Vec<&Expr> {
-//RS     match expr {
-//RS         Expr::Str(parts, _) => parts
-//RS             .iter()
-//RS             .filter_map(|part| match part {
-//RS                 StrPart::Interp(expr, _) => Some(expr.as_ref()),
-//RS                 StrPart::Lit(_) => None,
-//RS             })
-//RS             .collect(),
-//RS         Expr::ListLit(items, _) => {
-//RS             let mut children = Vec::with_capacity(items.len());
-//RS             for item in items {
-//RS                 match item {
-//RS                     Expr::Spread(inner, _) => children.push(inner.as_ref()),
-//RS                     item => children.push(item),
-//RS                 }
-//RS             }
-//RS             children
-//RS         }
-//RS         Expr::MemberSpread { base, .. } => vec![base.as_ref()],
-//RS         Expr::Spread(inner, _)
-//RS         | Expr::Unary(_, inner, _)
-//RS         | Expr::Deref(inner, _)
-//RS         | Expr::RawOf(inner, _)
-//RS         | Expr::Copy(inner, _)
-//RS         | Expr::Tainted(inner, _, _)
-//RS         | Expr::Present(inner, _)
-//RS         | Expr::Ok(inner, _)
-//RS         | Expr::Err(inner, _) => vec![inner.as_ref()],
-//RS         Expr::Try(inner, _, _, note) => std::iter::once(inner.as_ref())
-//RS             .chain(note.as_deref())
-//RS             .collect(),
-//RS         Expr::MapLit(entries, _) => entries
-//RS             .iter()
-//RS             .flat_map(|(key, value)| [key, value])
-//RS             .collect(),
-//RS         Expr::Index { base, index, .. } => vec![base.as_ref(), index.as_ref()],
-//RS         Expr::Slice {
-//RS             base,
-//RS             start,
-//RS             end,
-//RS             range,
-//RS             ..
-//RS         } => {
-//RS             if let Some(range) = range {
-//RS                 vec![base.as_ref(), range.as_ref()]
-//RS             } else {
-//RS                 vec![base.as_ref(), start.as_ref(), end.as_ref()]
-//RS             }
-//RS         }
-//RS         Expr::Range { start, end, .. } => vec![start.as_ref(), end.as_ref()],
-//RS         Expr::Binary(_, left, right, _) => vec![left.as_ref(), right.as_ref()],
-//RS         Expr::CompareChain { operands, .. } => operands.iter().collect(),
-//RS         Expr::Place(inner, _, _) => {
-//RS             if let Expr::Slice {
-//RS                 base,
-//RS                 start,
-//RS                 end,
-//RS                 range,
-//RS                 ..
-//RS             } = inner.as_ref()
-//RS             {
-//RS                 let mut children = vec![base.as_ref()];
-//RS                 if let Some(range) = range {
-//RS                     children.push(range.as_ref());
-//RS                 } else {
-//RS                     children.push(start.as_ref());
-//RS                     children.push(end.as_ref());
-//RS                 }
-//RS                 children
-//RS             } else {
-//RS                 vec![inner.as_ref()]
-//RS             }
-//RS         }
-//RS         Expr::Field(receiver, _, _) => {
-//RS             if let Expr::Index { base, index, .. } = receiver.as_ref() {
-//RS                 vec![base.as_ref(), index.as_ref()]
-//RS             } else {
-//RS                 vec![receiver.as_ref()]
-//RS             }
-//RS         }
-//RS         Expr::OptField { base, .. } => vec![base.as_ref()],
-//RS         Expr::StructLit { fields, .. } => fields.iter().map(|(_, _, value)| value).collect(),
-//RS         Expr::EnumLit { args, .. } => args
-//RS             .iter()
-//RS             .map(|arg| match arg {
-//RS                 EnumLitArg::Positional(expr) => expr,
-//RS                 EnumLitArg::Named { expr, .. } => expr,
-//RS             })
-//RS             .collect(),
-//RS         Expr::PatternTest { subject, .. } => vec![subject.as_ref()],
-//RS         Expr::Call(_) | Expr::CallValue { .. } | Expr::MethodCall { .. } => Vec::new(),
-//RS         Expr::TypedLit { body, .. } => {
-//RS             let mut children = Vec::new();
-//RS             match body {
-//RS                 TypedLitBody::Fields(fields) => {
-//RS                     for (_, _, value) in fields.iter() {
-//RS                         children.push(value);
-//RS                     }
-//RS                 }
-//RS                 TypedLitBody::Elements(elements) => children.extend(elements.iter()),
-//RS                 TypedLitBody::Entries(entries) => {
-//RS                     for (key, value) in entries.iter() {
-//RS                         children.push(key);
-//RS                         children.push(value);
-//RS                     }
-//RS                 }
-//RS                 TypedLitBody::Value(value) => children.push(value),
-//RS                 TypedLitBody::ByteText(_) => {}
-//RS                 TypedLitBody::Empty => {}
-//RS             }
-//RS             children
-//RS         }
-//RS         Expr::OrFallback { value, .. } => {
-//RS             // D-FAIL-BIND1=A: lower the fallback only from `lower_or_fallback`,
-//RS             // after that function installs the contextual `err` slot. If the
-//RS             // fallback is pre-lowered here, an `err` identifier becomes an
-//RS             // ordinary user local before the slot exists and the interpreter
-//RS             // reports it as unbound.
-//RS             vec![value.as_ref()]
-//RS         }
-//RS         Expr::If { cond, .. } => vec![cond.as_ref()],
-//RS         Expr::Lambda(_) => Vec::new(),
-//RS         Expr::TupleLit(fields, _, _) => fields.iter().map(|(_, value)| value).collect(),
-//RS         Expr::PtrFromAddr { addr, .. } => vec![addr.as_ref()],
-//RS         Expr::Paren(inner, _) => vec![inner.as_ref()],
-//RS         Expr::StrMatchLit(..)
-//RS         | Expr::BinMatchLit(..)
-//RS         | Expr::Int(..)
-//RS         | Expr::Float(..)
-//RS         | Expr::Bool(..)
-//RS         | Expr::Unit(..)
-//RS         | Expr::Char(..)
-//RS         | Expr::Ident(..)
-//RS         | Expr::UnitLit { .. }
-//RS         | Expr::ComptimeName { .. }
-//RS         | Expr::Absent(_)
-//RS         | Expr::Todo { .. }
-//RS         | Expr::NoElse(_)
-//RS         | Expr::ReduceMarker(..) => Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS enum ExprArgMode<'a> {
-//RS     Plain,
-//RS     Convention(Option<(AccessConvention, Type)>),
-//RS     CallValue { callee: &'a Expr, index: usize },
-//RS }
-//RS 
-//RS struct ExprWorkArg<'a> {
-//RS     arg: &'a CallArg,
-//RS     mode: ExprArgMode<'a>,
-//RS }
-//RS 
-//RS enum ExprWorkChild<'a> {
-//RS     Expr(&'a Expr),
-//RS     Arg(ExprWorkArg<'a>),
-//RS }
-//RS 
-//RS fn source_arg_indices(args: &[CallArg]) -> Vec<usize> {
-//RS     let Some(order) = source_arg_order(args) else {
-//RS         return (0..args.len()).collect();
-//RS     };
-//RS     let mut seen = vec![false; args.len()];
-//RS     let mut indices = Vec::with_capacity(args.len());
-//RS     for index in order {
-//RS         seen[index] = true;
-//RS         indices.push(index);
-//RS     }
-//RS     indices.extend(
-//RS         seen.into_iter()
-//RS             .enumerate()
-//RS             .filter_map(|(index, seen)| (!seen).then_some(index)),
-//RS     );
-//RS     indices
-//RS }
-//RS 
-//RS /// The parameter conventions and types of a direct call to a named function,
-//RS /// with the call's checked type arguments substituted. Sema records inferred
-//RS /// arguments on `call.type_args` (D-GENERIC-CALL1=A); the worklist and the
-//RS /// call lowering must see the same concrete slots, or a callback argument
-//RS /// keeps the callee's `fn(Int) -> T` and the instantiation cannot be found.
-//RS fn checked_direct_call_sig(
-//RS     call: &crate::AST::Call,
-//RS     cx: &Cx,
-//RS ) -> Option<Vec<(AccessConvention, Type)>> {
-//RS     let sig = cx.sigs.get(&call.name)?;
-//RS     let Some(order) = cx.fn_type_param_order.get(&call.name) else {
-//RS         return Some(sig.clone());
-//RS     };
-//RS     if order.is_empty() || order.len() != call.type_args.len() {
-//RS         return Some(sig.clone());
-//RS     }
-//RS     let subst = order
-//RS         .iter()
-//RS         .zip(&call.type_args)
-//RS         .map(|(param, actual)| (param.clone(), actual.clone()))
-//RS         .collect();
-//RS     Some(
-//RS         sig.iter()
-//RS             .map(|(convention, ty)| (*convention, crate::Generics::substitute_type(ty, &subst)))
-//RS             .collect(),
-//RS     )
-//RS }
-//RS 
-//RS fn direct_call_conventions(
-//RS     call: &crate::AST::Call,
-//RS     cx: &Cx,
-//RS     env: &LowerEnv,
-//RS ) -> Option<Vec<(AccessConvention, Type)>> {
-//RS     if env.locals.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
-//RS         return match env.ty_of(&call.name) {
-//RS             Some(Type::Fn { params, .. }) => Some(
-//RS                 params
-//RS                     .iter()
-//RS                     .cloned()
-//RS                     .map(|ty| (AccessConvention::Read, ty))
-//RS                     .collect(),
-//RS             ),
-//RS             _ => Some(Vec::new()),
-//RS         };
-//RS     }
-//RS     if let Some(sig) = checked_direct_call_sig(call, cx) {
-//RS         return Some(sig);
-//RS     }
-//RS     let inline_mangled = cx
-//RS         .inline_unqualified
-//RS         .get(&env.fn_name)
-//RS         .and_then(|scope| scope.get(&call.name))
-//RS         .or_else(|| cx.unqualified_inline.get(&call.name));
-//RS     if let Some(mangled) = inline_mangled {
-//RS         return cx.sigs.get(mangled).cloned();
-//RS     }
-//RS     let inline_file = cx
-//RS         .inline_unqualified_file
-//RS         .get(&env.fn_name)
-//RS         .and_then(|scope| scope.get(&call.name))
-//RS         .or_else(|| cx.unqualified_file.get(&call.name));
-//RS     inline_file.and_then(|(_, function)| {
-//RS         cx.import_sigs
-//RS             .get(&(call.name.clone(), function.clone()))
-//RS             .cloned()
-//RS     })
-//RS }
-//RS 
-//RS fn method_arg_mode(sig: Option<&[(AccessConvention, Type)]>, index: usize) -> ExprArgMode<'static> {
-//RS     sig.map(|sig| ExprArgMode::Convention(sig.get(index).cloned()))
-//RS         .unwrap_or(ExprArgMode::Plain)
-//RS }
-//RS 
-//RS fn method_arg_contract(
-//RS     method: &str,
-//RS     recv_type: &Option<String>,
-//RS     owner_type_args: &[Type],
-//RS     type_args: &[Type],
-//RS     cx: &Cx,
-//RS ) -> Option<Vec<(AccessConvention, Type)>> {
-//RS     let ty = recv_type.as_ref()?;
-//RS     let sig = cx.method_sigs.get(&(ty.clone(), method.to_string()))?;
-//RS     Some(crate::Codegen::TIR::instantiate_method_sig(
-//RS         cx,
-//RS         ty,
-//RS         method,
-//RS         sig,
-//RS         owner_type_args,
-//RS         type_args,
-//RS     ))
-//RS }
-//RS 
-//RS fn inline_loop_body(expr: &Expr) -> Option<&[Stmt]> {
-//RS     let Expr::CallValue { callee, args, .. } = expr else {
-//RS         return None;
-//RS     };
-//RS     if !args.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let Expr::Lambda(lam) = callee.as_ref() else {
-//RS         return None;
-//RS     };
-//RS     if !(lam.meta.collecting_loop || lam.meta.result_loop) {
-//RS         return None;
-//RS     }
-//RS     let crate::AST::LambdaBody::Block(body) = &lam.body else {
-//RS         return None;
-//RS     };
-//RS     Some(body)
-//RS }
-//RS 
-//RS fn expr_children<'a>(expr: &'a Expr, cx: &Cx, env: &LowerEnv) -> Vec<ExprWorkChild<'a>> {
-//RS     match expr {
-//RS         Expr::Call(call) => {
-//RS             // D-CALLPOLICY1=E: policy arguments are typed compile-time values.
-//RS             // The checked final callable is the only runtime child; lowering
-//RS             // policy calls here would invent a second engine policy path.
-//RS             if call.name == "apply"
-//RS                 && !cx.sigs.contains_key(&call.name)
-//RS                 && !env.locals.contains_key(&call.name)
-//RS                 && call
-//RS                     .args
-//RS                     .last()
-//RS                     .is_some_and(|arg| arg.flags.callable_policy.is_some())
-//RS             {
-//RS                 return call
-//RS                     .args
-//RS                     .last()
-//RS                     .map(|arg| {
-//RS                         vec![ExprWorkChild::Arg(ExprWorkArg {
-//RS                             arg,
-//RS                             mode: ExprArgMode::Plain,
-//RS                         })]
-//RS                     })
-//RS                     .unwrap_or_default();
-//RS             }
-//RS             let conventions = direct_call_conventions(call, cx, env);
-//RS             source_arg_indices(&call.args)
-//RS                 .into_iter()
-//RS                 .map(|index| {
-//RS                     ExprWorkChild::Arg(ExprWorkArg {
-//RS                         arg: &call.args[index],
-//RS                         mode: conventions
-//RS                             .as_ref()
-//RS                             .map(|sig| ExprArgMode::Convention(sig.get(index).cloned()))
-//RS                             .unwrap_or(ExprArgMode::Plain),
-//RS                     })
-//RS                 })
-//RS                 .collect()
-//RS         }
-//RS         Expr::CallValue { callee, args, .. } => {
-//RS             let mut children = Vec::with_capacity(args.len() + 1);
-//RS             if inline_loop_body(expr).is_none() {
-//RS                 children.push(ExprWorkChild::Expr(callee.as_ref()));
-//RS                 children.extend(source_arg_indices(args).into_iter().map(|index| {
-//RS                     ExprWorkChild::Arg(ExprWorkArg {
-//RS                         arg: &args[index],
-//RS                         mode: ExprArgMode::CallValue {
-//RS                             callee: callee.as_ref(),
-//RS                             index,
-//RS                         },
-//RS                     })
-//RS                 }));
-//RS             }
-//RS             children
-//RS         }
-//RS         Expr::MethodCall { .. } => {
-//RS             let mut calls = Vec::new();
-//RS             let mut cursor = expr;
-//RS             while let Expr::MethodCall { receiver, .. } = cursor {
-//RS                 calls.push(cursor);
-//RS                 cursor = receiver;
-//RS             }
-//RS             let mut children = vec![ExprWorkChild::Expr(cursor)];
-//RS             for call in calls.into_iter().rev() {
-//RS                 let Expr::MethodCall {
-//RS                     method,
-//RS                     owner_type_args,
-//RS                     type_args,
-//RS                     args,
-//RS                     recv_type,
-//RS                     ..
-//RS                 } = call
-//RS                 else {
-//RS                     unreachable!("method chain contains only method calls")
-//RS                 };
-//RS                 let contract =
-//RS                     method_arg_contract(method, recv_type, owner_type_args, type_args, cx);
-//RS                 if let Some(contract) = contract.as_ref() {
-//RS                     expr_cache_put_method_sig(call, contract.clone(), cx);
-//RS                 }
-//RS                 children.extend(source_arg_indices(args).into_iter().map(|index| {
-//RS                     ExprWorkChild::Arg(ExprWorkArg {
-//RS                         arg: &args[index],
-//RS                         mode: method_arg_mode(contract.as_deref(), index),
-//RS                     })
-//RS                 }));
-//RS             }
-//RS             children
-//RS         }
-//RS         _ => plain_expr_children(expr)
-//RS             .into_iter()
-//RS             .map(ExprWorkChild::Expr)
-//RS             .collect(),
-//RS     }
-//RS }
-//RS 
-//RS enum ExprWork<'a> {
-//RS     Enter(&'a Expr),
-//RS     EnterArg(ExprWorkArg<'a>),
-//RS     Build(&'a Expr),
-//RS     BuildArg(ExprWorkArg<'a>),
-//RS     LowerInlineLoop { expr: &'a Expr, body: &'a [Stmt] },
-//RS     BuildIf(&'a Expr),
-//RS     LowerIfCondition(Box<ExprIfConditionWork<'a>>),
-//RS     LowerIfThenBody(Box<ExprIfWork<'a>>),
-//RS     LowerIfThenValue(Box<ExprIfWork<'a>>),
-//RS     LowerIfElseBody(Box<ExprIfWork<'a>>),
-//RS     LowerIfElseValue(Box<ExprIfWork<'a>>),
-//RS }
-//RS 
-//RS struct ExprIfConditionWork<'a> {
-//RS     expr: &'a Expr,
-//RS     then_body: &'a [Stmt],
-//RS     then_value: &'a Expr,
-//RS     else_body: &'a [Stmt],
-//RS     else_value: &'a Expr,
-//RS     terms: Vec<&'a Expr>,
-//RS     next: usize,
-//RS     lowered: Vec<TIfCond>,
-//RS     bindings: Vec<(String, TLocal, Option<Type>)>,
-//RS     prefixes: Vec<TStmt>,
-//RS     base_env: LowerEnv,
-//RS }
-//RS 
-//RS struct ExprIfWork<'a> {
-//RS     expr: &'a Expr,
-//RS     condition: TIfCond,
-//RS     then_prefix: Vec<TStmt>,
-//RS     then_body: &'a [Stmt],
-//RS     then_value: &'a Expr,
-//RS     else_body: &'a [Stmt],
-//RS     else_value: &'a Expr,
-//RS     base_env: LowerEnv,
-//RS     then_env: Option<LowerEnv>,
-//RS     then_lowered: Vec<TStmt>,
-//RS     then_value_lowered: Option<TExpr>,
-//RS     else_lowered: Vec<TStmt>,
-//RS }
-//RS 
-//RS struct ResultHandlerAst<'a> {
-//RS     subject: &'a Expr,
-//RS     ok_pattern: &'a Pattern,
-//RS     ok_body: &'a [Stmt],
-//RS     ok_value: &'a Expr,
-//RS     err_pattern: &'a Pattern,
-//RS     err_body: &'a [Stmt],
-//RS     err_value: &'a Expr,
-//RS     terminal: &'a Expr,
-//RS     ok_cond_span: Span,
-//RS     err_cond_span: Span,
-//RS }
-//RS 
-//RS /// Recognize the parser's fixed two-pattern Result handler shape. The receiver
-//RS /// is evaluated once into an ordinary local before the existing `.Ok`/`.Err`
-//RS /// conditions are lowered, so every backend observes one source evaluation.
-//RS fn result_handler_ast(expr: &Expr) -> Option<ResultHandlerAst<'_>> {
-//RS     let Expr::If {
-//RS         cond: ok_cond,
-//RS         then_body: ok_body,
-//RS         then_value: ok_value,
-//RS         else_body: outer_else_body,
-//RS         else_value: outer_else_value,
-//RS         span: _,
-//RS     } = expr
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     if !outer_else_body.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let Expr::PatternTest {
-//RS         subject: ok_subject,
-//RS         pattern: ok_pattern @ Pattern::Ok { .. },
-//RS         span: ok_cond_span,
-//RS     } = ok_cond.as_ref()
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     let Expr::If {
-//RS         cond: err_cond,
-//RS         then_body: err_body,
-//RS         then_value: err_value,
-//RS         else_body: err_else_body,
-//RS         else_value: terminal,
-//RS         span: _,
-//RS     } = outer_else_value.as_ref()
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     if !err_else_body.is_empty() || !matches!(terminal.as_ref(), Expr::NoElse(_)) {
-//RS         return None;
-//RS     }
-//RS     let Expr::PatternTest {
-//RS         subject: err_subject,
-//RS         pattern: err_pattern @ Pattern::Err { .. },
-//RS         span: err_cond_span,
-//RS     } = err_cond.as_ref()
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     // The parser clones the exact receiver into both pattern tests. A source
-//RS     // span is sufficient here: two distinct source expressions cannot occupy
-//RS     // the same span, while the synthetic local used below deliberately gets a
-//RS     // different span for the second read so this rewrite does not recurse.
-//RS     if ok_subject.span() != err_subject.span() {
-//RS         return None;
-//RS     }
-//RS     Some(ResultHandlerAst {
-//RS         subject: ok_subject,
-//RS         ok_pattern,
-//RS         ok_body,
-//RS         ok_value,
-//RS         err_pattern,
-//RS         err_body,
-//RS         err_value,
-//RS         terminal,
-//RS         ok_cond_span: *ok_cond_span,
-//RS         err_cond_span: *err_cond_span,
-//RS     })
-//RS }
-//RS 
-//RS fn result_handler_pattern(cond: TIfCond) -> TPattern {
-//RS     let TIfCond::IfLet { pattern, .. } = cond else {
-//RS         unreachable!("checked Result handler must bind an Ok or Err pattern")
-//RS     };
-//RS     pattern
-//RS }
-//RS 
-//RS fn lower_result_handler_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
-//RS     let shape = result_handler_ast(expr)?;
-//RS     let base_env = clone_env(env);
-//RS     let fallback_subject = env.fallback_subject;
-//RS     env.fallback_subject = true;
-//RS     let subject = super::control_flow::lower_if_let_subject(shape.subject, cx, env, false);
-//RS     env.fallback_subject = fallback_subject;
-//RS     let temp = jet_format!("{jet_prefix}result_handler_{}", shape.subject.span().start);
-//RS     let temp_local = TLocal::generated(&temp);
-//RS 
-//RS     // Lower the two branches directly. Rebuilding a synthetic `Expr::If` here
-//RS     // loses the branch environment at the value tail: the worklist sees the
-//RS     // cloned pattern-test nodes, but the payload binding belongs to the
-//RS     // original branch. That made a valid payload tail lower as `Unit` while the
-//RS     // other branch retained its Result carrier. The statement-position path
-//RS     // below already uses this explicit condition/body/value sequence; keep the
-//RS     // value form on the same one-mechanism path.
-//RS     let lowered = {
-//RS         let mut handler_env = clone_env(env);
-//RS         handler_env.bind(&temp, temp_local, Some(subject.ty.clone()));
-//RS 
-//RS         let ok_cond_expr = Expr::PatternTest {
-//RS             subject: Box::new(Expr::Ident(temp.clone(), shape.subject.span())),
-//RS             pattern: shape.ok_pattern.clone(),
-//RS             span: shape.ok_cond_span,
-//RS         };
-//RS         let mut ok_env = clone_env(&handler_env);
-//RS         let (ok_cond, ok_bindings, mut ok_body) =
-//RS             super::control_flow::lower_if_cond(&ok_cond_expr, cx, &mut ok_env);
-//RS         for (name, place, ty) in ok_bindings {
-//RS             ok_env.bind(&name, place, ty.clone());
-//RS             if matches!(ty, Some(Type::Named(ref name)) if cx.has_close_type(name)) {
-//RS                 ok_env.mark_resource(&name);
-//RS             }
-//RS         }
-//RS         ok_body.extend(lower_stmts(shape.ok_body, cx, &mut ok_env));
-//RS         let ok_value = lower_owned_expr(shape.ok_value, cx, &mut ok_env);
-//RS 
-//RS         let err_cond_expr = Expr::PatternTest {
-//RS             subject: Box::new(Expr::Ident(temp.clone(), shape.err_cond_span)),
-//RS             pattern: shape.err_pattern.clone(),
-//RS             span: shape.err_cond_span,
-//RS         };
-//RS         let mut err_env = clone_env(&handler_env);
-//RS         let (err_cond, err_bindings, mut err_body) =
-//RS             super::control_flow::lower_if_cond(&err_cond_expr, cx, &mut err_env);
-//RS         for (name, place, ty) in err_bindings {
-//RS             err_env.bind(&name, place, ty.clone());
-//RS             if matches!(ty, Some(Type::Named(ref name)) if cx.has_close_type(name)) {
-//RS                 err_env.mark_resource(&name);
-//RS             }
-//RS         }
-//RS         err_body.extend(lower_stmts(shape.err_body, cx, &mut err_env));
-//RS         let err_value = lower_owned_expr(shape.err_value, cx, &mut err_env);
-//RS         let terminal = lower_expr(shape.terminal, cx, &mut handler_env);
-//RS 
-//RS         let inner_ty = tir_if_join_type(
-//RS             tir_if_branch_reaches_merge(&err_body, &err_value),
-//RS             &err_value.ty,
-//RS             tir_expr_reaches_merge(&terminal),
-//RS             &terminal.ty,
-//RS         );
-//RS         let inner_reaches = tir_if_branch_reaches_merge(&err_body, &err_value)
-//RS             || tir_expr_reaches_merge(&terminal);
-//RS         let outer_ty = tir_if_join_type(
-//RS             tir_if_branch_reaches_merge(&ok_body, &ok_value),
-//RS             &ok_value.ty,
-//RS             inner_reaches,
-//RS             &inner_ty,
-//RS         );
-//RS         TExpr {
-//RS             ty: outer_ty,
-//RS             kind: TExprKind::ResultHandler {
-//RS                 subject: Box::new(subject),
-//RS                 ok_pattern: result_handler_pattern(ok_cond),
-//RS                 ok_body,
-//RS                 ok_value: Box::new(ok_value),
-//RS                 err_pattern: result_handler_pattern(err_cond),
-//RS                 err_body,
-//RS                 err_value: Box::new(err_value),
-//RS                 terminal: Box::new(terminal),
-//RS             },
-//RS         }
-//RS     };
-//RS     *env = base_env;
-//RS     Some(canonicalize_pre_tier_expr(lowered))
-//RS }
-//RS 
-//RS fn dispatch_condition_subject(expr: &Expr) -> Option<&Expr> {
-//RS     match expr.without_parens() {
-//RS         Expr::PatternTest { subject, .. } => Some(subject),
-//RS         Expr::Binary(op, left, _, _) if op.is_comparison() => Some(left),
-//RS         Expr::Binary(BinOp::And | BinOp::Or, left, right, _) => {
-//RS             dispatch_condition_subject(left).or_else(|| dispatch_condition_subject(right))
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn replace_dispatch_subject(expr: &Expr, subject_span: Span, replacement: &Expr) -> Expr {
-//RS     match expr {
-//RS         Expr::PatternTest {
-//RS             subject,
-//RS             pattern,
-//RS             span,
-//RS         } if subject.span() == subject_span => Expr::PatternTest {
-//RS             subject: Box::new(replacement.clone()),
-//RS             pattern: pattern.clone(),
-//RS             span: *span,
-//RS         },
-//RS         Expr::Binary(op, left, right, span)
-//RS             if op.is_comparison() && left.span() == subject_span =>
-//RS         {
-//RS             Expr::Binary(*op, Box::new(replacement.clone()), right.clone(), *span)
-//RS         }
-//RS         Expr::Binary(op @ (BinOp::And | BinOp::Or), left, right, span) => Expr::Binary(
-//RS             *op,
-//RS             Box::new(replace_dispatch_subject(left, subject_span, replacement)),
-//RS             Box::new(replace_dispatch_subject(right, subject_span, replacement)),
-//RS             *span,
-//RS         ),
-//RS         _ => expr.clone(),
-//RS     }
-//RS }
-//RS 
-//RS /// Value-form dispatch is parsed as an `Expr::If` chain. When two or more
-//RS /// arms test the same subject, retain that subject once for the whole chain;
-//RS /// lowering each range arm independently would repeat calls and side effects.
-//RS fn discarded_dispatch_subject(expr: &Expr) -> Option<&Expr> {
-//RS     if result_handler_ast(expr).is_some() {
-//RS         return None;
-//RS     }
-//RS     let Expr::If {
-//RS         cond, else_value, ..
-//RS     } = expr.without_parens()
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     let subject = dispatch_condition_subject(cond)?;
-//RS     let subject_span = subject.span();
-//RS     let mut matched = 1usize;
-//RS     let mut tail = else_value.without_parens();
-//RS     while let Expr::If {
-//RS         cond, else_value, ..
-//RS     } = tail
-//RS     {
-//RS         let Some(next_subject) = dispatch_condition_subject(cond) else {
-//RS             break;
-//RS         };
-//RS         if next_subject.span() != subject_span {
-//RS             break;
-//RS         }
-//RS         matched += 1;
-//RS         tail = else_value.without_parens();
-//RS     }
-//RS     (matched >= 2).then_some(subject)
-//RS }
-//RS 
-//RS /// A value-form dispatch table repeats its subject in every arm's test. Bind a
-//RS /// non-identifier subject once to a compiler local, as the statement and
-//RS /// discarded forms do, and lower the table against that local so a call
-//RS /// subject and its side effects run exactly once.
-//RS fn lower_value_dispatch_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
-//RS     let subject = discarded_dispatch_subject(expr)?;
-//RS     if dispatch_subject_is_place(subject) {
-//RS         return None;
-//RS     }
-//RS     let subject_span = subject.span();
-//RS     let name = jet_format!("{jet_prefix}switch_subject_{}", subject_span.start);
-//RS     let local = Expr::Ident(name.clone(), subject_span);
-//RS     let mut arms = Vec::new();
-//RS     let mut tail = expr.without_parens();
-//RS     while let Expr::If {
-//RS         cond, else_value, ..
-//RS     } = tail
-//RS     {
-//RS         if dispatch_condition_subject(cond).map(Expr::span) != Some(subject_span) {
-//RS             break;
-//RS         }
-//RS         arms.push(tail);
-//RS         tail = else_value.without_parens();
-//RS     }
-//RS     let carrier = arms.iter().any(|arm| {
-//RS         matches!(
-//RS             arm,
-//RS             Expr::If { cond, .. } if matches!(
-//RS                 dispatch_condition_pattern(cond),
-//RS                 Some(Pattern::Ok { .. } | Pattern::Err { .. })
-//RS             )
-//RS         )
-//RS     });
-//RS     let mut table = tail.clone();
-//RS     for arm in arms.into_iter().rev() {
-//RS         let Expr::If {
-//RS             cond,
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             span,
-//RS             ..
-//RS         } = arm
-//RS         else {
-//RS             unreachable!("dispatch arms are if expressions");
-//RS         };
-//RS         table = Expr::If {
-//RS             cond: Box::new(replace_dispatch_subject(cond, subject_span, &local)),
-//RS             then_body: then_body.clone(),
-//RS             then_value: then_value.clone(),
-//RS             else_body: else_body.clone(),
-//RS             else_value: Box::new(table),
-//RS             span: *span,
-//RS         };
-//RS     }
-//RS     // The rebuilt table is a short-lived AST; keep its pointer-keyed cache
-//RS     // entries inside this lowering.
-//RS     let _cache_scope = ExprCacheScope::enter();
-//RS     let fallback_subject = env.fallback_subject;
-//RS     env.fallback_subject = carrier || fallback_subject;
-//RS     let init = super::control_flow::lower_if_let_subject(subject, cx, env, false);
-//RS     env.fallback_subject = fallback_subject;
-//RS     let ty = init.ty.clone();
-//RS     env.bind(&name, TLocal::generated(&name), Some(ty.clone()));
-//RS     let lowered = lower_expr(&table, cx, env);
-//RS     let TExprKind::IfExpr {
-//RS         cond,
-//RS         then_body,
-//RS         then_value,
-//RS         else_body,
-//RS         else_value,
-//RS     } = lowered.kind
-//RS     else {
-//RS         unreachable!("a value dispatch table lowers to an if expression");
-//RS     };
-//RS     Some(TExpr {
-//RS         ty: lowered.ty,
-//RS         kind: TExprKind::IfExpr {
-//RS             cond: Box::new(TIfCond::WithPrelude {
-//RS                 prelude: vec![TStmt::Let {
-//RS                     name,
-//RS                     kw: "let",
-//RS                     let_ty: crate::Codegen::TIR::TLetTy::plain(ty),
-//RS                     init,
-//RS                     gc_promotion: None,
-//RS                     gc_transferred: false,
-//RS                 }],
-//RS                 cond,
-//RS             }),
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS         },
-//RS     })
-//RS }
-//RS 
-//RS fn dispatch_condition_pattern(expr: &Expr) -> Option<&Pattern> {
-//RS     match expr.without_parens() {
-//RS         Expr::PatternTest { pattern, .. } => Some(pattern),
-//RS         Expr::Binary(BinOp::And | BinOp::Or, left, right, _) => {
-//RS             dispatch_condition_pattern(left).or_else(|| dispatch_condition_pattern(right))
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// A local or field path reads the same value in every arm and runs nothing.
-//RS fn dispatch_subject_is_place(mut subject: &Expr) -> bool {
-//RS     loop {
-//RS         match subject.without_parens() {
-//RS             Expr::Ident(..) => return true,
-//RS             Expr::Field(base, _, _) | Expr::Copy(base, _) => subject = base.as_ref(),
-//RS             _ => return false,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS enum DiscardedExprWork<'a> {
-//RS     Enter {
-//RS         expr: &'a Expr,
-//RS         env: LowerEnv,
-//RS     },
-//RS     FinishIf {
-//RS         cond: TIfCond,
-//RS         then_body: Vec<TStmt>,
-//RS         else_body: Option<Vec<TStmt>>,
-//RS     },
-//RS     FinishResultHandler {
-//RS         subject: TExpr,
-//RS         ok_cond: TIfCond,
-//RS         ok_body: Vec<TStmt>,
-//RS         err_cond: TIfCond,
-//RS         err_body: Vec<TStmt>,
-//RS     },
-//RS }
-//RS 
-//RS fn is_single_if_body(body: &[TStmt]) -> bool {
-//RS     body.len() == 1 && matches!(body.first(), Some(TStmt::If { .. }))
-//RS }
-//RS 
-//RS /// Lower an `if` expression whose enclosing source position discards its value.
-//RS /// Keep branch tails as expression statements, including compact Result handlers,
-//RS /// so discarded values never enter value-form branch unification. The worklist
-//RS /// keeps a deep else-if chain off the native stack.
-//RS pub(crate) fn lower_discarded_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt {
-//RS     let root = e.without_parens();
-//RS     let mut root_env = clone_env(env);
-//RS     let dispatch = discarded_dispatch_subject(root).map(|subject| {
-//RS         let name = jet_format!("{jet_prefix}switch_subject");
-//RS         let init = lower_expr(subject, cx, &mut root_env);
-//RS         let ty = init.ty.clone();
-//RS         root_env.bind(&name, TLocal::generated(&name), Some(ty.clone()));
-//RS         (name, subject.span(), ty, init)
-//RS     });
-//RS     // The replacement conditions below are short-lived AST nodes. Keep their
-//RS     // pointer-keyed expression-cache entries inside this lowering call so a
-//RS     // later web/native pass cannot observe an address-reused entry.
-//RS     let _dispatch_cache_scope = dispatch.as_ref().map(|_| ExprCacheScope::enter());
-//RS     let mut work = TirWorklist::new();
-//RS     let mut lowered = Vec::new();
-//RS     work.push(DiscardedExprWork::Enter {
-//RS         expr: root,
-//RS         env: root_env,
-//RS     });
-//RS 
-//RS     while let Some(task) = work.pop() {
-//RS         match task {
-//RS             DiscardedExprWork::Enter { expr, mut env } => {
-//RS                 let expr = expr.without_parens();
-//RS                 if let Some(shape) = result_handler_ast(expr) {
-//RS                     // These condition nodes are compiler-private, just like
-//RS                     // the value-form rewrite below. Keep their cache entries
-//RS                     // inside this task so no synthetic node address survives
-//RS                     // the discarded lowering.
-//RS                     let _cache_scope = ExprCacheScope::enter();
-//RS                     let fallback_subject = env.fallback_subject;
-//RS                     env.fallback_subject = true;
-//RS                     let subject = super::control_flow::lower_if_let_subject(
-//RS                         shape.subject,
-//RS                         cx,
-//RS                         &mut env,
-//RS                         false,
-//RS                     );
-//RS                     env.fallback_subject = fallback_subject;
-//RS                     let temp =
-//RS                         jet_format!("{jet_prefix}result_handler_{}", shape.subject.span().start);
-//RS                     let temp_local = TLocal::generated(&temp);
-//RS                     let mut handler_env = clone_env(&env);
-//RS                     handler_env.bind(&temp, temp_local, Some(subject.ty.clone()));
-//RS 
-//RS                     let ok_cond_expr = Expr::PatternTest {
-//RS                         subject: Box::new(Expr::Ident(temp.clone(), shape.subject.span())),
-//RS                         pattern: shape.ok_pattern.clone(),
-//RS                         span: shape.ok_cond_span,
-//RS                     };
-//RS                     let mut ok_env = clone_env(&handler_env);
-//RS                     let (ok_cond, ok_bindings, mut ok_body) =
-//RS                         super::control_flow::lower_if_cond(&ok_cond_expr, cx, &mut ok_env);
-//RS                     for (name, place, ty) in ok_bindings {
-//RS                         ok_env.bind(&name, place, ty.clone());
-//RS                         if matches!(ty, Some(Type::Named(ref ty_name)) if cx.has_close_type(ty_name)) {
-//RS                             ok_env.mark_resource(&name);
-//RS                         }
-//RS                     }
-//RS                     ok_body.extend(lower_stmts(shape.ok_body, cx, &mut ok_env));
-//RS 
-//RS                     let err_cond_expr = Expr::PatternTest {
-//RS                         subject: Box::new(Expr::Ident(temp.clone(), shape.err_cond_span)),
-//RS                         pattern: shape.err_pattern.clone(),
-//RS                         span: shape.err_cond_span,
-//RS                     };
-//RS                     let mut err_env = clone_env(&handler_env);
-//RS                     let (err_cond, err_bindings, mut err_body) =
-//RS                         super::control_flow::lower_if_cond(&err_cond_expr, cx, &mut err_env);
-//RS                     for (name, place, ty) in err_bindings {
-//RS                         err_env.bind(&name, place, ty.clone());
-//RS                         if matches!(ty, Some(Type::Named(ref ty_name)) if cx.has_close_type(ty_name)) {
-//RS                             err_env.mark_resource(&name);
-//RS                         }
-//RS                     }
-//RS                     err_body.extend(lower_stmts(shape.err_body, cx, &mut err_env));
-//RS 
-//RS                     work.push(DiscardedExprWork::FinishResultHandler {
-//RS                         subject,
-//RS                         ok_cond,
-//RS                         ok_body,
-//RS                         err_cond,
-//RS                         err_body,
-//RS                     });
-//RS                     work.push(DiscardedExprWork::Enter {
-//RS                         expr: shape.terminal,
-//RS                         env: clone_env(&handler_env),
-//RS                     });
-//RS                     work.push(DiscardedExprWork::Enter {
-//RS                         expr: shape.err_value,
-//RS                         env: err_env,
-//RS                     });
-//RS                     work.push(DiscardedExprWork::Enter {
-//RS                         expr: shape.ok_value,
-//RS                         env: ok_env,
-//RS                     });
-//RS                     continue;
-//RS                 }
-//RS 
-//RS                 let Expr::If {
-//RS                     cond,
-//RS                     then_body,
-//RS                     then_value,
-//RS                     else_body,
-//RS                     else_value,
-//RS                     ..
-//RS                 } = expr
-//RS                 else {
-//RS                     lowered.push(TStmt::ExprStmt(lower_expr(expr, cx, &mut env)));
-//RS                     continue;
-//RS                 };
-//RS 
-//RS                 let mut then_env = clone_env(&env);
-//RS                 let replaced_cond = dispatch.as_ref().and_then(|(name, subject_span, _, _)| {
-//RS                     dispatch_condition_subject(cond)
-//RS                         .filter(|subject| subject.span() == *subject_span)
-//RS                         .map(|_| {
-//RS                             replace_dispatch_subject(
-//RS                                 cond,
-//RS                                 *subject_span,
-//RS                                 &Expr::Ident(name.clone(), *subject_span),
-//RS                             )
-//RS                         })
-//RS                 });
-//RS                 let cond = replaced_cond.as_ref().unwrap_or(cond);
-//RS                 let (tir_cond, bindings, mut then_lowered) =
-//RS                     super::control_flow::lower_if_cond(cond, cx, &mut then_env);
-//RS                 for (name, place, ty) in bindings {
-//RS                     then_env.bind(&name, place, ty);
-//RS                 }
-//RS                 then_lowered.extend(lower_stmts(then_body, cx, &mut then_env));
-//RS 
-//RS                 let (else_lowered, else_env) = if else_body.is_empty()
-//RS                     && matches!(else_value.without_parens(), Expr::NoElse(_))
-//RS                 {
-//RS                     (None, None)
-//RS                 } else {
-//RS                     let mut else_env = clone_env(&env);
-//RS                     let else_lowered = lower_stmts(else_body, cx, &mut else_env);
-//RS                     (Some(else_lowered), Some(else_env))
-//RS                 };
-//RS                 work.push(DiscardedExprWork::FinishIf {
-//RS                     cond: tir_cond,
-//RS                     then_body: then_lowered,
-//RS                     else_body: else_lowered,
-//RS                 });
-//RS                 if let Some(else_env) = else_env {
-//RS                     work.push(DiscardedExprWork::Enter {
-//RS                         expr: else_value,
-//RS                         env: else_env,
-//RS                     });
-//RS                 }
-//RS                 work.push(DiscardedExprWork::Enter {
-//RS                     expr: then_value,
-//RS                     env: then_env,
-//RS                 });
-//RS             }
-//RS             DiscardedExprWork::FinishIf {
-//RS                 cond,
-//RS                 mut then_body,
-//RS                 else_body,
-//RS             } => {
-//RS                 let (else_body, else_is_elseif) = match else_body {
-//RS                     Some(mut else_body) => {
-//RS                         let else_value = lowered.pop().expect("discarded if else tail was lowered");
-//RS                         let then_value = lowered.pop().expect("discarded if then tail was lowered");
-//RS                         then_body.push(then_value);
-//RS                         else_body.push(else_value);
-//RS                         let else_is_elseif = is_single_if_body(&else_body);
-//RS                         (Some(else_body), else_is_elseif)
-//RS                     }
-//RS                     None => {
-//RS                         let then_value = lowered.pop().expect("discarded if then tail was lowered");
-//RS                         then_body.push(then_value);
-//RS                         (None, false)
-//RS                     }
-//RS                 };
-//RS                 lowered.push(TStmt::If {
-//RS                     cond,
-//RS                     then_body,
-//RS                     else_body,
-//RS                     else_is_elseif,
-//RS                 });
-//RS             }
-//RS             DiscardedExprWork::FinishResultHandler {
-//RS                 subject,
-//RS                 ok_cond,
-//RS                 mut ok_body,
-//RS                 err_cond,
-//RS                 mut err_body,
-//RS             } => {
-//RS                 let terminal = lowered
-//RS                     .pop()
-//RS                     .expect("discarded Result handler terminal was lowered");
-//RS                 let err_value = lowered
-//RS                     .pop()
-//RS                     .expect("discarded Result handler failure tail was lowered");
-//RS                 let ok_value = lowered
-//RS                     .pop()
-//RS                     .expect("discarded Result handler success tail was lowered");
-//RS                 ok_body.push(ok_value);
-//RS                 err_body.push(err_value);
-//RS                 let TStmt::ExprStmt(terminal) = terminal else {
-//RS                     unreachable!("discarded Result handler terminal must lower to an expression");
-//RS                 };
-//RS                 // Both branches project from the one owned carrier; a
-//RS                 // discarded tail still evaluates before the Unit result.
-//RS                 let unit_tail = || Box::new(TExpr {
-//RS                     ty: unit_type(),
-//RS                     kind: TExprKind::Unit,
-//RS                 });
-//RS                 lowered.push(TStmt::ExprStmt(canonicalize_pre_tier_expr(TExpr {
-//RS                     ty: unit_type(),
-//RS                     kind: TExprKind::ResultHandler {
-//RS                         subject: Box::new(subject),
-//RS                         ok_pattern: result_handler_pattern(ok_cond),
-//RS                         ok_body,
-//RS                         ok_value: unit_tail(),
-//RS                         err_pattern: result_handler_pattern(err_cond),
-//RS                         err_body,
-//RS                         err_value: unit_tail(),
-//RS                         terminal: Box::new(terminal),
-//RS                     },
-//RS                 })));
-//RS             }
-//RS         }
-//RS     }
-//RS     let root = lowered
-//RS         .pop()
-//RS         .expect("discarded expression worklist lost its root");
-//RS     let Some((name, _, ty, init)) = dispatch else {
-//RS         return root;
-//RS     };
-//RS     let TStmt::If {
-//RS         cond,
-//RS         then_body,
-//RS         else_body,
-//RS         else_is_elseif,
-//RS     } = root
-//RS     else {
-//RS         unreachable!("discarded dispatch root must lower to an if statement");
-//RS     };
-//RS     TStmt::If {
-//RS         cond: TIfCond::WithPrelude {
-//RS             prelude: vec![TStmt::Let {
-//RS                 name,
-//RS                 kw: "let",
-//RS                 let_ty: crate::Codegen::TIR::TLetTy::plain(ty),
-//RS                 init,
-//RS                 gc_promotion: None,
-//RS                 gc_transferred: false,
-//RS             }],
-//RS             cond: Box::new(cond),
-//RS         },
-//RS         then_body,
-//RS         else_body,
-//RS         else_is_elseif,
-//RS     }
-//RS }
-//RS 
-//RS fn condition_terms<'a>(cond: &'a Expr) -> Vec<&'a Expr> {
-//RS     let mut work = TirWorklist::new();
-//RS     work.push(cond);
-//RS     let mut terms = Vec::new();
-//RS     while let Some(term) = work.pop() {
-//RS         if let Expr::Binary(BinOp::And, left, right, _) = term {
-//RS             work.push(right);
-//RS             work.push(left);
-//RS         } else {
-//RS             terms.push(term);
-//RS         }
-//RS     }
-//RS     terms
-//RS }
-//RS 
-//RS fn push_expr_children<'a>(work: &mut Vec<ExprWork<'a>>, children: Vec<ExprWorkChild<'a>>) {
-//RS     for child in children.into_iter().rev() {
-//RS         match child {
-//RS             ExprWorkChild::Expr(child) => {
-//RS                 let child = strip_expr_parens(child);
-//RS                 work.push(ExprWork::Enter(child));
-//RS             }
-//RS             ExprWorkChild::Arg(arg) => work.push(ExprWork::EnterArg(arg)),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn push_expr_condition_atom<'a>(
-//RS     work: &mut Vec<ExprWork<'a>>,
-//RS     expr: &'a Expr,
-//RS     cx: &Cx,
-//RS     env: &LowerEnv,
-//RS ) {
-//RS     if matches!(expr, Expr::PatternTest { .. }) {
-//RS         push_expr_children(work, expr_children(expr, cx, env));
-//RS     } else {
-//RS         push_expr_work(work, expr, cx, env);
-//RS     }
-//RS }
-//RS 
-//RS fn push_expr_work<'a>(work: &mut Vec<ExprWork<'a>>, expr: &'a Expr, cx: &Cx, env: &LowerEnv) {
-//RS     let expr = strip_expr_parens(expr);
-//RS     if let Some(body) = inline_loop_body(expr) {
-//RS         work.push(ExprWork::LowerInlineLoop { expr, body });
-//RS     } else if matches!(expr, Expr::If { .. }) {
-//RS         work.push(ExprWork::BuildIf(expr));
-//RS     } else {
-//RS         work.push(ExprWork::Build(expr));
-//RS         push_expr_children(work, expr_children(expr, cx, env));
-//RS     }
-//RS }
-//RS 
-//RS fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TExpr {
-//RS     let root = strip_expr_parens(root);
-//RS     let mut work = vec![ExprWork::Enter(root)];
-//RS     while let Some(task) = work.pop() {
-//RS         match task {
-//RS             ExprWork::Enter(expr) => {
-//RS                 let expr = strip_expr_parens(expr);
-//RS                 push_expr_work(&mut work, expr, cx, env);
-//RS             }
-//RS             ExprWork::Build(expr) => {
-//RS                 expr_cache_put(expr, lower_expr_node(expr, cx, env), cx);
-//RS             }
-//RS             ExprWork::EnterArg(arg) => {
-//RS                 let expr = strip_expr_parens(&arg.arg.expr);
-//RS                 let has_binder_refs = !arg.arg.flags.binder_refs.is_empty();
-//RS                 work.push(ExprWork::BuildArg(arg));
-//RS                 // Default expressions carry declaration-slot references. Lower
-//RS                 // them as one argument under that slot mapping; pre-lowering
-//RS                 // their children would resolve the private names as ordinary
-//RS                 // locals before `lower_call_arg_value` installs the mapping.
-//RS                 // A Try/?? subject has the same cache-boundary rule: its
-//RS                 // argument must be lowered once in normal value context below.
-//RS                 if has_binder_refs || env.fallback_subject {
-//RS                     continue;
-//RS                 }
-//RS                 if let Some(body) = inline_loop_body(expr) {
-//RS                     work.push(ExprWork::LowerInlineLoop { expr, body });
-//RS                 } else if matches!(expr, Expr::If { .. }) {
-//RS                     work.push(ExprWork::BuildIf(expr));
-//RS                 } else {
-//RS                     push_expr_children(&mut work, expr_children(expr, cx, env));
-//RS                 }
-//RS             }
-//RS             ExprWork::BuildArg(arg) => {
-//RS                 // A lambda is a lazy argument, not a strict child value. Keep its
-//RS                 // lowering in the call site so special callbacks can apply their
-//RS                 // host-borrow/value contract exactly once; caching a context-free
-//RS                 // lambda here would force that call site to lower it a second time.
-//RS                 if matches!(strip_expr_parens(&arg.arg.expr), Expr::Lambda(_)) {
-//RS                     continue;
-//RS                 }
-//RS                 let lower_value = |env: &mut LowerEnv| match &arg.mode {
-//RS                     ExprArgMode::Plain => lower_expr(&arg.arg.expr, cx, env),
-//RS                     ExprArgMode::Convention(conv) => {
-//RS                         crate::Codegen::TIR::lower_call_arg_value(arg.arg, conv.clone(), env, cx)
-//RS                     }
-//RS                     ExprArgMode::CallValue { callee, index } => {
-//RS                         let callee_ty = expr_cache_type(callee, cx)
-//RS                             .or_else(|| Some(lower_expr(callee, cx, env).ty));
-//RS                         let conv = callee_ty.and_then(|ty| match ty.with_effective_fn_returns() {
-//RS                             Type::Fn { params, .. } => params
-//RS                                 .get(*index)
-//RS                                 .cloned()
-//RS                                 .map(|ty| (AccessConvention::Read, ty)),
-//RS                             _ => None,
-//RS                         });
-//RS                         crate::Codegen::TIR::lower_call_arg_value(arg.arg, conv, env, cx)
-//RS                     }
-//RS                 };
-//RS                 let value = if env.fallback_subject {
-//RS                     let _arg_cache_scope = ExprCacheScope::enter();
-//RS                     let fallback_subject = env.fallback_subject;
-//RS                     env.fallback_subject = false;
-//RS                     let value = lower_value(env);
-//RS                     env.fallback_subject = fallback_subject;
-//RS                     value
-//RS                 } else {
-//RS                     lower_value(env)
-//RS                 };
-//RS                 expr_cache_put(
-//RS                     strip_expr_parens(&arg.arg.expr),
-//RS                     canonicalize_pre_tier_expr(value),
-//RS                     cx,
-//RS                 );
-//RS             }
-//RS             ExprWork::LowerInlineLoop { expr, body } => {
-//RS                 let mut block_env = clone_env(env);
-//RS                 let lowered = lower_stmts(body, cx, &mut block_env);
-//RS                 let Expr::CallValue { callee, .. } = expr else {
-//RS                     unreachable!("inline loop work item requires a call value")
-//RS                 };
-//RS                 let Expr::Lambda(lam) = callee.as_ref() else {
-//RS                     unreachable!("inline loop work item requires a lambda")
-//RS                 };
-//RS                 let ty = if lam.meta.collecting_loop {
-//RS                     Type::List(Box::new(
-//RS                         lam.meta.collect_item_type.clone().unwrap_or(Type::Int),
-//RS                     ))
-//RS                 } else {
-//RS                     lam.meta.loop_result_type.clone().unwrap_or(Type::Int)
-//RS                 };
-//RS                 expr_cache_put(
-//RS                     expr,
-//RS                     canonicalize_pre_tier_expr(TExpr {
-//RS                         ty,
-//RS                         kind: TExprKind::InlineBlock(lowered),
-//RS                     }),
-//RS                     cx,
-//RS                 );
-//RS             }
-//RS             ExprWork::BuildIf(expr) => {
-//RS                 if let Some(handler) = lower_result_handler_expr(expr, cx, env) {
-//RS                     expr_cache_put(expr, handler, cx);
-//RS                     continue;
-//RS                 }
-//RS                 if let Some(table) = lower_value_dispatch_expr(expr, cx, env) {
-//RS                     expr_cache_put(expr, table, cx);
-//RS                     continue;
-//RS                 }
-//RS                 let Expr::If {
-//RS                     cond,
-//RS                     then_body,
-//RS                     then_value,
-//RS                     else_body,
-//RS                     else_value,
-//RS                     ..
-//RS                 } = expr
-//RS                 else {
-//RS                     unreachable!("if work item requires an if expression")
-//RS                 };
-//RS                 let terms = condition_terms(cond);
-//RS                 let state = ExprIfConditionWork {
-//RS                     expr,
-//RS                     then_body,
-//RS                     then_value,
-//RS                     else_body,
-//RS                     else_value,
-//RS                     terms,
-//RS                     next: 0,
-//RS                     lowered: Vec::new(),
-//RS                     bindings: Vec::new(),
-//RS                     prefixes: Vec::new(),
-//RS                     base_env: clone_env(env),
-//RS                 };
-//RS                 let first = state
-//RS                     .terms
-//RS                     .first()
-//RS                     .copied()
-//RS                     .expect("if condition has one or more terms");
-//RS                 work.push(ExprWork::LowerIfCondition(Box::new(state)));
-//RS                 push_expr_condition_atom(&mut work, first, cx, env);
-//RS             }
-//RS             ExprWork::LowerIfCondition(mut state) => {
-//RS                 let term = state.terms[state.next];
-//RS                 let (lowered, binding, prefix) =
-//RS                     super::control_flow::lower_if_cond_atom_cached(term, cx, env);
-//RS                 for (name, place, ty) in binding {
-//RS                     env.bind(&name, place.clone(), ty.clone());
-//RS                     state.bindings.push((name, place, ty));
-//RS                 }
-//RS                 state.lowered.push(lowered);
-//RS                 state.prefixes.extend(prefix);
-//RS                 state.next += 1;
-//RS                 if let Some(next) = state.terms.get(state.next).copied() {
-//RS                     work.push(ExprWork::LowerIfCondition(state));
-//RS                     push_expr_condition_atom(&mut work, next, cx, env);
-//RS                     continue;
-//RS                 }
-//RS 
-//RS                 let ExprIfConditionWork {
-//RS                     expr,
-//RS                     then_body,
-//RS                     then_value,
-//RS                     else_body,
-//RS                     else_value,
-//RS                     lowered: lowered_terms,
-//RS                     bindings,
-//RS                     prefixes,
-//RS                     base_env,
-//RS                     ..
-//RS                 } = *state;
-//RS                 let mut lowered = lowered_terms.into_iter().rev();
-//RS                 let mut condition = lowered
-//RS                     .next()
-//RS                     .expect("if condition has one or more lowered terms");
-//RS                 for left in lowered {
-//RS                     condition = TIfCond::And {
-//RS                         left: Box::new(left),
-//RS                         right: Box::new(condition),
-//RS                     };
-//RS                 }
-//RS                 let mut then_env = clone_env(&base_env);
-//RS                 for (name, place, ty) in &bindings {
-//RS                     then_env.bind(name, place.clone(), ty.clone());
-//RS                 }
-//RS                 let branch_env = clone_env(&then_env);
-//RS                 let if_state = ExprIfWork {
-//RS                     expr,
-//RS                     condition,
-//RS                     then_prefix: prefixes,
-//RS                     then_body,
-//RS                     then_value,
-//RS                     else_body,
-//RS                     else_value,
-//RS                     base_env,
-//RS                     then_env: Some(then_env),
-//RS                     then_lowered: Vec::new(),
-//RS                     then_value_lowered: None,
-//RS                     else_lowered: Vec::new(),
-//RS                 };
-//RS                 *env = branch_env;
-//RS                 work.push(ExprWork::LowerIfThenBody(Box::new(if_state)));
-//RS             }
-//RS             ExprWork::LowerIfThenBody(mut state) => {
-//RS                 let mut branch_env = state
-//RS                     .then_env
-//RS                     .take()
-//RS                     .expect("if then environment is consumed once");
-//RS                 state.then_lowered = lower_stmts(state.then_body, cx, &mut branch_env);
-//RS                 *env = branch_env;
-//RS                 let then_value = state.then_value;
-//RS                 work.push(ExprWork::LowerIfThenValue(state));
-//RS                 work.push(ExprWork::Enter(then_value));
-//RS             }
-//RS             ExprWork::LowerIfThenValue(mut state) => {
-//RS                 state.then_value_lowered = Some(
-//RS                     expr_cache_take(strip_expr_parens(state.then_value), cx)
-//RS                         .expect("if then value was lowered exactly once"),
-//RS                 );
-//RS                 state.then_env = Some(clone_env(env));
-//RS                 *env = clone_env(&state.base_env);
-//RS                 work.push(ExprWork::LowerIfElseBody(state));
-//RS             }
-//RS             ExprWork::LowerIfElseBody(mut state) => {
-//RS                 state.else_lowered = lower_stmts(state.else_body, cx, env);
-//RS                 let else_value = state.else_value;
-//RS                 work.push(ExprWork::LowerIfElseValue(state));
-//RS                 work.push(ExprWork::Enter(else_value));
-//RS             }
-//RS             ExprWork::LowerIfElseValue(state) => {
-//RS                 let mut else_value = expr_cache_take(strip_expr_parens(state.else_value), cx)
-//RS                     .expect("if else value was lowered exactly once");
-//RS                 let mut then_value = state
-//RS                     .then_value_lowered
-//RS                     .expect("if then value is consumed once");
-//RS                 let mut then_body = state.then_prefix;
-//RS                 then_body.extend(state.then_lowered);
-//RS                 let then_reaches_merge = tir_if_branch_reaches_merge(&then_body, &then_value);
-//RS                 let else_reaches_merge =
-//RS                     tir_if_branch_reaches_merge(&state.else_lowered, &else_value);
-//RS                 if then_reaches_merge && else_reaches_merge {
-//RS                     let then_absent = matches!(&then_value.kind, TExprKind::Absent);
-//RS                     let else_absent = matches!(&else_value.kind, TExprKind::Absent);
-//RS                     // `None` has no payload from which to infer its option type.
-//RS                     // Use only the exact checked type of a live, non-absent peer.
-//RS                     if then_absent && !else_absent && matches!(&else_value.ty, Type::Option(_)) {
-//RS                         then_value.ty = else_value.ty.clone();
-//RS                     } else if else_absent
-//RS                         && !then_absent
-//RS                         && matches!(&then_value.ty, Type::Option(_))
-//RS                     {
-//RS                         else_value.ty = then_value.ty.clone();
-//RS                     }
-//RS                 }
-//RS                 let ty = tir_if_join_type(
-//RS                     then_reaches_merge,
-//RS                     &then_value.ty,
-//RS                     else_reaches_merge,
-//RS                     &else_value.ty,
-//RS                 );
-//RS                 let value = canonicalize_pre_tier_expr(TExpr {
-//RS                     ty,
-//RS                     kind: TExprKind::IfExpr {
-//RS                         cond: Box::new(state.condition),
-//RS                         then_body,
-//RS                         then_value: Box::new(then_value),
-//RS                         else_body: state.else_lowered,
-//RS                         else_value: Box::new(else_value),
-//RS                     },
-//RS                 });
-//RS                 *env = state.base_env;
-//RS                 expr_cache_put(state.expr, value, cx);
-//RS             }
-//RS         }
-//RS     }
-//RS     expr_cache_take(root, cx).expect("expression worklist lost its root")
-//RS }
-//RS 
-//RS /// Select the value type at a lowered `if` merge using the same reachability
-//RS /// policy as semantic inference.
-//RS ///
-//RS /// Sema reports an incompatible live pair as E0124 and poisons the later tail
-//RS /// with a diverging recovery node, but codegen still walks that tree to collect
-//RS /// diagnostics. Keep the first live branch as the recovery type instead of
-//RS /// asserting on a malformed pair and turning a user error into an ICE.
-//RS fn tir_if_join_type(
-//RS     then_reaches_merge: bool,
-//RS     then_ty: &Type,
-//RS     else_reaches_merge: bool,
-//RS     else_ty: &Type,
-//RS ) -> Type {
-//RS     match (then_reaches_merge, else_reaches_merge) {
-//RS         (false, true) => else_ty.clone(),
-//RS         (true, false) => then_ty.clone(),
-//RS         (true, true) => then_ty.clone(),
-//RS         (false, false) => then_ty.clone(),
-//RS     }
-//RS }
-//RS 
-//RS fn tir_if_branch_reaches_merge(body: &[TStmt], value: &TExpr) -> bool {
-//RS     tir_stmt_sequence_reaches_merge(body) && tir_expr_reaches_merge(value)
-//RS }
-//RS 
-//RS fn tir_stmt_sequence_reaches_merge(stmts: &[TStmt]) -> bool {
-//RS     // A lowered sequence can contain an explicit exit before its syntactic
-//RS     // tail. Check every statement so an unreachable tail cannot make a
-//RS     // divergent branch look live at the value merge.
-//RS     stmts.iter().all(tir_stmt_reaches_merge)
-//RS }
-//RS 
-//RS fn tir_stmt_reaches_merge(stmt: &TStmt) -> bool {
-//RS     match stmt {
-//RS         TStmt::Return(_) | TStmt::Break(_) | TStmt::BreakValue { .. } | TStmt::Continue(_) => false,
-//RS         TStmt::ExprStmt(expr) => tir_expr_reaches_merge(expr),
-//RS         TStmt::If {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             tir_stmt_sequence_reaches_merge(then_body)
-//RS                 || else_body
-//RS                     .as_deref()
-//RS                     .is_none_or(tir_stmt_sequence_reaches_merge)
-//RS         }
-//RS         TStmt::ContractScope { body, .. }
-//RS         | TStmt::TaskGroup { body, .. }
-//RS         | TStmt::Inline(body)
-//RS         | TStmt::Unsafe { body, .. }
-//RS         | TStmt::SentryPolicy { body, .. }
-//RS         | TStmt::Impure(body)
-//RS         | TStmt::Region(body)
-//RS         | TStmt::Layout { body, .. }
-//RS         | TStmt::ContextBlock { body, .. }
-//RS         | TStmt::Live { body }
-//RS         | TStmt::Shield { body }
-//RS         | TStmt::ScopeMember { body, .. }
-//RS         | TStmt::Transact { body, .. } => tir_stmt_sequence_reaches_merge(body),
-//RS         TStmt::GcEdit { stmt, .. } => tir_stmt_reaches_merge(stmt),
-//RS         TStmt::EnumMatch {
-//RS             arms,
-//RS             else_body,
-//RS             fallthrough,
-//RS             ..
-//RS         } => {
-//RS             arms.iter()
-//RS                 .any(|arm| tir_stmt_sequence_reaches_merge(&arm.body))
-//RS                 || else_body
-//RS                     .as_deref()
-//RS                     .map(tir_stmt_sequence_reaches_merge)
-//RS                     .unwrap_or(!*fallthrough)
-//RS         }
-//RS         TStmt::RangeSwitch {
-//RS             arms, else_body, ..
-//RS         } => {
-//RS             arms.iter()
-//RS                 .any(|(_, _, body)| tir_stmt_sequence_reaches_merge(body))
-//RS                 || tir_stmt_sequence_reaches_merge(else_body)
-//RS         }
-//RS         TStmt::MixedSwitch {
-//RS             arms, else_body, ..
-//RS         } => {
-//RS             arms.iter()
-//RS                 .any(|(_, body)| tir_stmt_sequence_reaches_merge(body))
-//RS                 || else_body
-//RS                     .as_deref()
-//RS                     .is_none_or(tir_stmt_sequence_reaches_merge)
-//RS         }
-//RS         _ => true,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn tir_expr_reaches_merge(expr: &TExpr) -> bool {
-//RS     if matches!(&expr.ty, Type::Named(name) if name == Syntax::TYPE_NEVER) {
-//RS         return false;
-//RS     }
-//RS     match &expr.kind {
-//RS         TExprKind::Unreachable { .. } | TExprKind::Todo { .. } => false,
-//RS         TExprKind::RequireStop { always_stops, .. } => !always_stops,
-//RS         TExprKind::IfExpr {
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS             ..
-//RS         } => {
-//RS             tir_if_branch_reaches_merge(then_body, then_value)
-//RS                 || tir_if_branch_reaches_merge(else_body, else_value)
-//RS         }
-//RS         TExprKind::ResultHandler {
-//RS             ok_body, ok_value, err_body, err_value, terminal, ..
-//RS         } => {
-//RS             tir_if_branch_reaches_merge(ok_body, ok_value)
-//RS                 || tir_if_branch_reaches_merge(err_body, err_value)
-//RS                 || tir_expr_reaches_merge(terminal)
-//RS         }
-//RS         TExprKind::InlineBlock(stmts) => tir_stmt_sequence_reaches_merge(stmts),
-//RS         TExprKind::Try { inner, .. } => tir_expr_reaches_merge(inner),
-//RS         TExprKind::OrFallback { value, fallback } => {
-//RS             tir_expr_reaches_merge(value)
-//RS                 || match fallback {
-//RS                     TOrFallback::Value(fallback) => tir_expr_reaches_merge(fallback),
-//RS                     TOrFallback::Return(_)
-//RS                     | TOrFallback::Panic { .. }
-//RS                     | TOrFallback::Break
-//RS                     | TOrFallback::Continue
-//RS                     | TOrFallback::BreakLabel(_)
-//RS                     | TOrFallback::ContinueLabel(_) => false,
-//RS                 }
-//RS         }
-//RS         _ => true,
-//RS     }
-//RS }
-//RS 
-//RS /// D-TAG1: recognize a leaf unit variant reached through a grouped value path
-//RS /// such as `Damage.Fire.Burn`. The AST shape is a field chain, but the Rust
-//RS /// value is one flat enum variant (`__jet_Damage::__jet_Fire__Burn`).
-//RS pub(crate) fn grouped_enum_unit_variant(
-//RS     cx: &Cx,
-//RS     receiver: &Expr,
-//RS     member: &str,
-//RS     is_bound: impl Fn(&str) -> bool,
-//RS ) -> Option<(String, String)> {
-//RS     fn collect_path(expr: &Expr, path: &mut Vec<String>) -> bool {
-//RS         match expr {
-//RS             Expr::Ident(name, _) => {
-//RS                 path.push(name.clone());
-//RS                 true
-//RS             }
-//RS             Expr::Field(base, member, _) => {
-//RS                 if !collect_path(base, path) {
-//RS                     return false;
-//RS                 }
-//RS                 path.push(member.clone());
-//RS                 true
-//RS             }
-//RS             Expr::Paren(inner, _) => collect_path(inner, path),
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     let mut path = Vec::new();
-//RS     if !collect_path(receiver, &mut path) {
-//RS         return None;
-//RS     }
-//RS     path.push(member.to_string());
-//RS     let enum_name = path.first()?.clone();
-//RS     if path.len() < 3 || is_bound(&enum_name) {
-//RS         return None;
-//RS     }
-//RS     let variant = path[1..].join(".");
-//RS     if cx.variant_owner.get(&variant).map(String::as_str) != Some(enum_name.as_str()) {
-//RS         return None;
-//RS     }
-//RS     let is_unit = cx.enum_variants.get(&enum_name).is_some_and(|variants| {
-//RS         variants.iter().any(|(name, payload)| {
-//RS             name == &variant && matches!(payload, crate::AST::VariantPayload::Unit)
-//RS         })
-//RS     });
-//RS     is_unit.then_some((enum_name, variant))
-//RS }
-//RS #[inline(never)]
-//RS pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-//RS     let before_payload = CanonicalPass::enabled()
-//RS         .then(|| CanonicalPass::debug_payload("ast", "tir.lower-expression", e));
-//RS     let before_identity = CanonicalPass::enabled()
-//RS         .then(|| CanonicalPass::debug_identity("ast", "tir.lower-expression", e));
-//RS     let lowered = lower_expr_impl(e, cx, env);
-//RS     if let (Some(before_payload), Some(before_identity)) = (before_payload, before_identity) {
-//RS         CanonicalPass::record(
-//RS             "lowering",
-//RS             "tir.lower-expression",
-//RS             "crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs",
-//RS             "ast",
-//RS             before_payload,
-//RS             before_identity,
-//RS             "tir",
-//RS             crate::Codegen::TIR::canonical_expression_payload(&lowered),
-//RS             crate::Codegen::TIR::canonical_expression_identity(&lowered),
-//RS             "preserve",
-//RS         );
-//RS     }
-//RS     lowered
-//RS }
-//RS 
-//RS #[inline(never)]
-//RS fn lower_expr_impl(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-//RS     let _comptime_cache_guard = ExprComptimeCacheGuard::enter(env);
-//RS     // Keep expression descent off the native stack. Value-if and inline-loop nodes
-//RS     // use the same continuation worklist as every other expression.
-//RS     let e = strip_expr_parens(e);
-//RS     // A cached worklist value may have been produced before a default argument's
-//RS     // binder mapping was installed. Resolve the private name first so cache
-//RS     // reuse cannot bypass the declaration-slot substitution.
-//RS     if let Expr::Ident(name, _) = e {
-//RS         if let Some((temp, ty)) = env.binder_ref(name).cloned() {
-//RS             return TExpr {
-//RS                 ty,
-//RS                 kind: TExprKind::Local(TLocal::user(temp)),
-//RS             };
-//RS         }
-//RS     }
-//RS     if let Some(value) = expr_cache_take(e, cx) {
-//RS         // A nested lowering context can rebind the same source identifier,
-//RS         // notably a lambda capture, after the outer worklist cached its local
-//RS         // read. Refresh the structured local and type from the active
-//RS         // environment before using that cached value.
-//RS         if let Expr::Ident(name, _) = e {
-//RS             if matches!(&value.kind, TExprKind::Local(_)) {
-//RS                 if let Some(ty) = env.ty_of(name) {
-//RS                     return TExpr {
-//RS                         ty,
-//RS                         kind: TExprKind::Local(env.local_of(name)),
-//RS                     };
-//RS                 }
-//RS             }
-//RS         }
-//RS         return canonicalize_pre_tier_expr(value);
-//RS     }
-//RS     let cache_owner = ExprCacheOwner {
-//RS         owns_cache: expr_cache_begin(),
-//RS     };
-//RS     let value = lower_expr_segment(e, cx, env);
-//RS     let value = canonicalize_pre_tier_expr(value);
-//RS     drop(cache_owner);
-//RS     value
-//RS }
-//RS 
-//RS /// D-BOUND-HEAD1=A: comptime can lower a typed head before sema has rewritten
-//RS /// it to the ordinary alternating literal/hole call. Keep that early path on
-//RS /// the same TIR host node used after sema. Evaluation callers validate the
-//RS /// typed boundary before entering this lowering seam.
-// END-PORT-PENDING 0476 crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1803-3603
+use jet_foundation.AST.[Expr, Call, CallArg, Stmt, Pattern, StrPart, EnumLitArg, TypedLitBody, LambdaBody, BinOp, AccessConvention, Type, VariantPayload]
+use jet_foundation.Diagnostics.Span
+use jet_foundation.Syntax
+use jet_foundation.CanonicalPass
+use jet_codegen.Generics
+use jet_codegen.Codegen.generated_prefix
+use jet_codegen.Codegen.Context.Cx
+use jet_codegen.Codegen.TIR.[TExpr, TExprKind, TStmt, TIfCond, TLocal, TPattern, TOrFallback, TLetTy, instantiate_method_sig, lower_call_arg_value, canonical_expression_payload, canonical_expression_identity]
+use jet_codegen.Codegen.TIR.Lower.[LowerEnv, clone_env, lower_stmts, unit_type, TirWorklist]
+use jet_codegen.Codegen.TIR.Lower.ControlFlow.[lower_if_let_subject, lower_if_cond, lower_if_cond_atom_cached]
+// This private fragment shares Expressions' TLS memo, pointer keys and cache-scope owners.
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1803
+struct ExprComptimeCacheGuard { scope: ExprCacheScope? }
+impl ExprComptimeCacheGuard {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1808
+    fn enter(env: LowerEnv) -> ExprComptimeCacheGuard Never! {
+        if env.fn_name != "__ct" -> return ExprComptimeCacheGuard{scope: None}
+        // GATE #4494: use the canonical predecessor's real per-thread depth cell.
+        nested :: EXPR_COMPTIME_CACHE_DEPTH.with((depth) => {
+            nested :: depth.get() > 0
+            depth.set(depth.get() + 1)
+            nested
+        })
+        if nested -> return ExprComptimeCacheGuard{scope: None}
+        ExprComptimeCacheGuard{scope: Val(ExprCacheScope.enter())}
+    }
+}
+impl ExprComptimeCacheGuard.Drop {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1827
+    fn drop(&self) Never! {
+        drop(self.scope.take())
+        // GATE #4494: restore the outer memo before decrementing TLS depth.
+        EXPR_COMPTIME_CACHE_DEPTH.with((depth) => depth.set(depth.get().saturating_sub(1)))
+    }
+}
+impl ExprCacheOwner.Drop {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1837
+    fn drop(&self) Never! { if self.owns_cache { expr_cache_end() } }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1844
+fn expr_cache_take(expr: Expr, cx: Cx) -> TExpr? Never! {
+    // GATE #4494: actual TLS RefCell, same cache as the canonical Expressions owner.
+    EXPR_WORKLIST_CACHE.with((cell) => {
+        cache := cell.borrow_mut()
+        if !cache.active -> return None
+        key :: expr_key(expr, cx)
+        value :: cache.values.get_mut(key).and_then((values) => values.pop_front())
+        if cache.values.get(key).is_some_and((values) => values.is_empty()) { cache.values.remove(key) }
+        value
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1866
+fn expr_cache_put(expr: Expr, value: ^TExpr, cx: Cx) Never! {
+    // GATE #4494
+    EXPR_WORKLIST_CACHE.with((cell) => {
+        cache := cell.borrow_mut()
+        cache.types.insert(expr_key(expr, cx), ~value.ty)
+        cache.values.entry(expr_key(expr, cx)).or_default().push_back(^value)
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1878
+fn expr_cache_type(expr: Expr, cx: Cx) -> Type? Never! {
+    stripped :: strip_expr_parens(expr)
+    // GATE #4494
+    EXPR_WORKLIST_CACHE.with((cell) => {
+        cache :: cell.borrow()
+        if !cache.active -> return None
+        cache.types.get(expr_key(stripped, cx)).map((ty) => ~ty)
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1889
+fn expr_cache_put_method_sig(expr: Expr, sig: ^[(AccessConvention, Type)], cx: Cx) Never! {
+    // GATE #4494; #4499 preserves the predecessor's exact pointer/context key equality.
+    EXPR_WORKLIST_CACHE.with((cell) => cell.borrow_mut().method_sigs.entry(expr_key(expr, cx)).or_default().push_back(^sig))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1900
+fn expr_cache_take_method_sig(expr: Expr, cx: Cx) -> [(AccessConvention, Type)]? Never! {
+    // GATE #4494
+    EXPR_WORKLIST_CACHE.with((cell) => {
+        cache := cell.borrow_mut()
+        if !cache.active -> return None
+        key :: expr_key(expr, cx)
+        sig :: cache.method_sigs.get_mut(key).and_then((sigs) => sigs.pop_front())
+        if cache.method_sigs.get(key).is_some_and((sigs) => sigs.is_empty()) { cache.method_sigs.remove(key) }
+        sig
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1922
+pub fn take_scheduled_expr(expr: Expr, cx: Cx) -> TExpr? Never! {
+    if expr_cache_take(expr, cx) == .Val(value) -> return Val(^value)
+    stripped :: strip_expr_parens(expr)
+    // GATE #4494: node identity, not structural equality; never clone the AST here.
+    if !std.ptr.eq(expr, stripped) -> return expr_cache_take(stripped, cx)
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1934
+pub fn lower_cached_expr(expr: Expr, cx: Cx, _env: &LowerEnv) -> TExpr Never! {
+    take_scheduled_expr(strip_expr_parens(expr), cx).expect("condition child missing from expression worklist")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1941
+fn plain_expr_children(expr: Expr) -> [@Expr] Never! from expr {
+    if expr == {
+        .Str(parts, _) -> {
+            children := [@Expr]{}
+            loop part in parts { if part == .Interp(inner, _) { children.push(@inner) } }
+            ^children
+        }
+        .ListLit(items, _) -> {
+            children := [@Expr]{}
+            loop item in items { if item == { .Spread(inner, _) -> children.push(@inner) else -> children.push(@item) } }
+            ^children
+        }
+        .MemberSpread{base, ..} -> [@base]
+        .Spread(inner, _) | .Unary(_, inner, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) -> [@inner]
+        .Try(inner, _, _, note) -> {
+            children := [@Expr]{@inner}
+            if note == .Val(value) { children.push(@value) }
+            ^children
+        }
+        .MapLit(entries, _) -> {
+            children := [@Expr]{}
+            loop (key, value) in entries { children.push(@key); children.push(@value) }
+            ^children
+        }
+        .Index{base, index, ..} -> [@base, @index]
+        .Slice{base, start, end, range, ..} -> if range == { .Val(value) -> [@base, @value] .None -> [@base, @start, @end] }
+        .Range{start, end, ..} -> [@start, @end]
+        .Binary(_, left, right, _) -> [@left, @right]
+        .CompareChain{operands, ..} -> operands.iter().map((value) => @value).collect()
+        .Place(inner, _, _) -> if inner == {
+            .Slice{base, start, end, range, ..} -> if range == { .Val(value) -> [@base, @value] .None -> [@base, @start, @end] }
+            else -> [@inner]
+        }
+        .Field(receiver, _, _) -> if receiver == { .Index{base, index, ..} -> [@base, @index] else -> [@receiver] }
+        .OptField{base, ..} -> [@base]
+        .StructLit{fields, ..} -> fields.iter().map((field) => @field.2).collect()
+        .EnumLit{args, ..} -> args.iter().map((arg) => if arg == { .Positional(value) -> @value .Named{expr: value, ..} -> @value }).collect()
+        .PatternTest{subject, ..} -> [@subject]
+        .Call(_) | .CallValue{..} | .MethodCall{..} -> []
+        .TypedLit{body, ..} -> {
+            children := [@Expr]{}
+            if body == {
+                .Fields(fields) -> { loop (_, _, value) in fields { children.push(@value) } }
+                .Elements(elements) -> { loop value in elements { children.push(@value) } }
+                .Entries(entries) -> { loop (key, value) in entries { children.push(@key); children.push(@value) } }
+                .Value(value) -> children.push(@value)
+                .ByteText(_) | .Empty -> {}
+            }
+            ^children
+        }
+        // Contextual err is installed only by lower_or_fallback, not a strict child.
+        .OrFallback{value, ..} -> [@value]
+        .If{cond, ..} -> [@cond]
+        .Lambda(_) -> []
+        .TupleLit(fields, _, _) -> fields.iter().map((field) => @field.1).collect()
+        .PtrFromAddr{addr, ..} -> [@addr]
+        .Paren(inner, _) -> [@inner]
+        .StrMatchLit(..) | .BinMatchLit(..) | .Int(..) | .Float(..) | .Bool(..) | .Unit(..) | .Char(..) | .Ident(..) | .UnitLit{..} | .ComptimeName{..} | .Absent(_) | .Todo{..} | .NoElse(_) | .ReduceMarker(..) -> []
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2084
+// GATE #4500: work items retain borrowed AST nodes, never copies or structural keys.
+enum ExprArgMode { Plain Convention(slot: (AccessConvention, Type)?) CallValue(callee: @Expr, index: Int) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2090
+struct ExprWorkArg { arg: @CallArg, mode: ExprArgMode }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2095
+enum ExprWorkChild { Expr(expr: @Expr) Arg(arg: ExprWorkArg) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2100
+fn source_arg_indices(args: [CallArg]) -> [Int] Never! {
+    order := source_arg_order(args) ?? return (0..<args.len()).collect<[Int]>()
+    seen := [Bool].filled(args.len(), false)
+    indices := [Int]{}
+    loop index in order { seen[index] = true; indices.push(index) }
+    loop (index, marked) in seen.enumerate() { if !marked { indices.push(index) } }
+    ^indices
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2123
+fn checked_direct_call_sig(call: Call, cx: Cx) -> [(AccessConvention, Type)]? Never! {
+    sig := cx.sigs.get(call.name) ?? return None
+    order := cx.fn_type_param_order.get(call.name) ?? return Val(~sig)
+    if order.is_empty() || order.len() != call.type_args.len() -> return Val(~sig)
+    subst := [String:Type]{}
+    loop (param, actual) in order.iter().zip(call.type_args.iter()) { subst.insert(param, ~actual) }
+    Val(sig.iter().map((slot) => (slot.0, Generics.substitute_type(slot.1, subst))).collect())
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2146
+fn direct_call_conventions(call: Call, cx: Cx, env: LowerEnv) -> [(AccessConvention, Type)]? Never! {
+    if env.locals.contains_key(call.name) && !cx.consts.contains_key(call.name) {
+        if env.ty_of(call.name) == { .Val(.Fn{params, ..}) -> Val(params.iter().map((ty) => (.Read, ~ty)).collect()) else -> Val([]) }
+    } else {
+        if checked_direct_call_sig(call, cx) == .Val(sig) -> return Val(^sig)
+        inline_mangled :: cx.inline_unqualified.get(env.fn_name).and_then((scope) => scope.get(call.name)).or_else(() => cx.unqualified_inline.get(call.name))
+        if inline_mangled == .Val(mangled) -> return cx.sigs.get(mangled).map((sig) => ~sig)
+        inline_file :: cx.inline_unqualified_file.get(env.fn_name).and_then((scope) => scope.get(call.name)).or_else(() => cx.unqualified_file.get(call.name))
+        inline_file.and_then((entry) => cx.import_sigs.get((call.name, entry.1)).map((sig) => ~sig))
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2186
+fn method_arg_mode(sig: [(AccessConvention, Type)]?, index: Int) -> ExprArgMode Never! {
+    if sig == { .Val(slots) -> .Convention(slots.get(index).map((slot) => ~slot)) .None -> .Plain }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2191
+fn method_arg_contract(method: String, recv_type: String?, owner_type_args: [Type], type_args: [Type], cx: Cx) -> [(AccessConvention, Type)]? Never! {
+    ty := recv_type ?? return None
+    sig := cx.method_sigs.get((ty, method)) ?? return None
+    Val(instantiate_method_sig(cx, ty, method, sig, owner_type_args, type_args))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2210
+fn inline_loop_body(expr: Expr) -> View<Stmt>? Never! from expr {
+    if expr == .CallValue{callee, args, ..} {
+        if !args.is_empty() -> return None
+        if callee == .Lambda(lam) {
+            if !(lam.meta.collecting_loop || lam.meta.result_loop) -> return None
+            if lam.body == .Block(body) -> return Val(body.view())
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2229
+fn expr_children(expr: Expr, cx: Cx, env: LowerEnv) -> [ExprWorkChild] Never! from expr {
+    if expr == {
+        .Call(call) -> {
+            if call.name == "apply" && !cx.sigs.contains_key(call.name) && !env.locals.contains_key(call.name) && call.args.last().is_some_and((arg) => arg.flags.callable_policy.is_some()) -> return [.Arg(ExprWorkArg{arg: @call.args.last().expect("policy has final callable"), mode: .Plain})]
+            conventions :: direct_call_conventions(call, cx, env)
+            source_arg_indices(call.args).iter().map((index) => .Arg(ExprWorkArg{arg: @call.args[index], mode: method_arg_mode(conventions, index)})).collect()
+        }
+        .CallValue{callee, args, ..} -> {
+            children := [ExprWorkChild]{}
+            if inline_loop_body(expr).is_none() {
+                children.push(.Expr(@callee))
+                loop index in source_arg_indices(args) { children.push(.Arg(ExprWorkArg{arg: @args[index], mode: .CallValue(@callee, index)})) }
+            }
+            ^children
+        }
+        .MethodCall{..} -> {
+            calls := [@Expr]{}
+            cursor := @expr
+            loop {
+                if cursor == .MethodCall{receiver, ..} { calls.push(cursor); cursor = @receiver } else { break }
+            }
+            children := [ExprWorkChild]{.Expr(cursor)}
+            loop call in calls.iter().rev() {
+                if call == .MethodCall{method, owner_type_args, type_args, args, recv_type, ..} {
+                    contract :: method_arg_contract(method, recv_type, owner_type_args, type_args, cx)
+                    if contract == .Val(sig) { expr_cache_put_method_sig(call, ~sig, cx) }
+                    loop index in source_arg_indices(args) { children.push(.Arg(ExprWorkArg{arg: @args[index], mode: method_arg_mode(contract, index)})) }
+                } else { panic("method chain contains only method calls") }
+            }
+            ^children
+        }
+        else -> plain_expr_children(expr).iter().map((child) => .Expr(child)).collect()
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2325
+enum ExprWork {
+    Enter(expr: @Expr) EnterArg(arg: ExprWorkArg) Build(expr: @Expr) BuildArg(arg: ExprWorkArg)
+    LowerInlineLoop(expr: @Expr, body: View<Stmt>) BuildIf(expr: @Expr)
+    LowerIfCondition(state: ExprIfConditionWork) LowerIfThenBody(state: ExprIfWork)
+    LowerIfThenValue(state: ExprIfWork) LowerIfElseBody(state: ExprIfWork) LowerIfElseValue(state: ExprIfWork)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2339
+struct ExprIfConditionWork {
+    expr: @Expr, then_body: View<Stmt>, then_value: @Expr, else_body: View<Stmt>, else_value: @Expr,
+    terms: [@Expr], next: Int, lowered: [TIfCond], bindings: [(String, TLocal, Type?)], prefixes: [TStmt], base_env: LowerEnv
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2353
+struct ExprIfWork {
+    expr: @Expr, condition: TIfCond, then_prefix: [TStmt], then_body: View<Stmt>, then_value: @Expr,
+    else_body: View<Stmt>, else_value: @Expr, base_env: LowerEnv, then_env: LowerEnv?, then_lowered: [TStmt], then_value_lowered: TExpr?, else_lowered: [TStmt]
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2368
+struct ResultHandlerAst {
+    subject: @Expr, ok_pattern: @Pattern, ok_body: View<Stmt>, ok_value: @Expr,
+    err_pattern: @Pattern, err_body: View<Stmt>, err_value: @Expr, terminal: @Expr, ok_cond_span: Span, err_cond_span: Span
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2384
+fn result_handler_ast(expr: Expr) -> ResultHandlerAst? Never! from expr {
+    if expr == .If{cond: ok_cond, then_body: ok_body, then_value: ok_value, else_body: outer_else_body, else_value: outer_else_value, ..} {
+        if !outer_else_body.is_empty() -> return None
+        if ok_cond == .PatternTest{subject: ok_subject, pattern: ok_pattern, span: ok_cond_span} {
+            if !(if ok_pattern == { .Ok{..} -> true else -> false }) -> return None
+            if outer_else_value == .If{cond: err_cond, then_body: err_body, then_value: err_value, else_body: err_else_body, else_value: terminal, ..} {
+                if !err_else_body.is_empty() -> return None
+                if !(if terminal == { .NoElse(_) -> true else -> false }) -> return None
+                if err_cond == .PatternTest{subject: err_subject, pattern: err_pattern, span: err_cond_span} {
+                    if !(if err_pattern == { .Err{..} -> true else -> false }) -> return None
+                    if ok_subject.span() != err_subject.span() -> return None
+                    return Val(ResultHandlerAst{subject: @ok_subject, ok_pattern: @ok_pattern, ok_body: ok_body.view(), ok_value: @ok_value, err_pattern: @err_pattern, err_body: err_body.view(), err_value: @err_value, terminal: @terminal, ok_cond_span: ok_cond_span, err_cond_span: err_cond_span})
+                }
+            }
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2450
+fn result_handler_pattern(cond: ^TIfCond) -> TPattern Never! {
+    if cond == { .IfLet{pattern, ..} -> ^pattern else -> panic("checked Result handler must bind an Ok or Err pattern") }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2457
+fn lower_result_handler_expr(expr: Expr, cx: Cx, env: &LowerEnv) -> TExpr? Never! {
+    shape := result_handler_ast(expr) ?? return None
+    base_env :: clone_env(env)
+    fallback_subject :: env.fallback_subject
+    env.fallback_subject = true
+    subject :: lower_if_let_subject(shape.subject, cx, &env, false)
+    env.fallback_subject = fallback_subject
+    temp :: "{generated_prefix()}result_handler_{shape.subject.span().start}"
+    temp_local :: TLocal.generated(temp)
+    handler_env := clone_env(env)
+    handler_env.bind(temp, temp_local, Val(~subject.ty))
+    ok_cond_expr :: Expr.PatternTest{subject: .Ident(temp, shape.subject.span()), pattern: ~shape.ok_pattern, span: shape.ok_cond_span}
+    ok_env := clone_env(handler_env)
+    (ok_cond, ok_bindings, ok_body) := lower_if_cond(ok_cond_expr, cx, &ok_env)
+    loop (name, place, ty) in ok_bindings {
+        ok_env.bind(name, ^place, ~ty)
+        if ty == .Val(.Named(type_name)) { if cx.has_close_type(type_name) { ok_env.mark_resource(name) } }
+    }
+    ok_body.extend(lower_stmts(shape.ok_body, cx, &ok_env))
+    ok_value :: lower_owned_expr(shape.ok_value, cx, &ok_env)
+    err_cond_expr :: Expr.PatternTest{subject: .Ident(temp, shape.err_cond_span), pattern: ~shape.err_pattern, span: shape.err_cond_span}
+    err_env := clone_env(handler_env)
+    (err_cond, err_bindings, err_body) := lower_if_cond(err_cond_expr, cx, &err_env)
+    loop (name, place, ty) in err_bindings {
+        err_env.bind(name, ^place, ~ty)
+        if ty == .Val(.Named(type_name)) { if cx.has_close_type(type_name) { err_env.mark_resource(name) } }
+    }
+    err_body.extend(lower_stmts(shape.err_body, cx, &err_env))
+    err_value :: lower_owned_expr(shape.err_value, cx, &err_env)
+    terminal :: lower_expr(shape.terminal, cx, &handler_env)
+    inner_ty :: tir_if_join_type(tir_if_branch_reaches_merge(err_body, err_value), err_value.ty, tir_expr_reaches_merge(terminal), terminal.ty)
+    inner_reaches :: tir_if_branch_reaches_merge(err_body, err_value) || tir_expr_reaches_merge(terminal)
+    outer_ty :: tir_if_join_type(tir_if_branch_reaches_merge(ok_body, ok_value), ok_value.ty, inner_reaches, inner_ty)
+    lowered :: TExpr{ty: outer_ty, kind: .ResultHandler{subject: ^subject, ok_pattern: result_handler_pattern(^ok_cond), ok_body: ^ok_body, ok_value: ^ok_value, err_pattern: result_handler_pattern(^err_cond), err_body: ^err_body, err_value: ^err_value, terminal: ^terminal}}
+    env = ^base_env
+    Val(canonicalize_pre_tier_expr(^lowered))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2545
+fn dispatch_condition_subject(expr: Expr) -> (@Expr)? Never! from expr {
+    if expr.without_parens() == {
+        .PatternTest{subject, ..} -> Val(@subject)
+        .Binary(op, left, right, _) -> {
+            if op.is_comparison() -> return Val(@left)
+            if op == .And || op == .Or -> return dispatch_condition_subject(left).or_else(() => dispatch_condition_subject(right))
+            None
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2556
+fn replace_dispatch_subject(expr: Expr, subject_span: Span, replacement: Expr) -> Expr Never! {
+    if expr == {
+        .PatternTest{subject, pattern, span} -> if subject.span() == subject_span -> .PatternTest{subject: ~replacement, pattern: ~pattern, span: span} else -> ~expr
+        .Binary(op, left, right, span) -> {
+            if op.is_comparison() && left.span() == subject_span -> return .Binary(op, ~replacement, ~right, span)
+            if op == .And || op == .Or -> return .Binary(op, replace_dispatch_subject(left, subject_span, replacement), replace_dispatch_subject(right, subject_span, replacement), span)
+            ~expr
+        }
+        else -> ~expr
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2585
+fn discarded_dispatch_subject(expr: Expr) -> (@Expr)? Never! from expr {
+    if result_handler_ast(expr).is_some() -> return None
+    if expr.without_parens() == .If{cond, else_value, ..} {
+        subject := dispatch_condition_subject(cond) ?? return None
+        subject_span :: subject.span()
+        matched := 1
+        tail := @else_value.without_parens()
+        loop {
+            if tail == .If{cond: next_cond, else_value: next_else, ..} {
+                next_subject := dispatch_condition_subject(next_cond) ?? break
+                if next_subject.span() != subject_span -> break
+                matched += 1
+                tail = @next_else.without_parens()
+            } else { break }
+        }
+        if matched >= 2 -> return Val(subject)
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2619
+fn lower_value_dispatch_expr(expr: Expr, cx: Cx, env: &LowerEnv) -> TExpr? Never! {
+    subject := discarded_dispatch_subject(expr) ?? return None
+    if dispatch_subject_is_place(subject) -> return None
+    subject_span :: subject.span()
+    name :: "{generated_prefix()}switch_subject_{subject_span.start}"
+    local :: Expr.Ident(name, subject_span)
+    arms := [@Expr]{}
+    tail := @expr.without_parens()
+    loop {
+        if tail == .If{cond, else_value, ..} {
+            if dispatch_condition_subject(cond).map((subject) => subject.span()) != Val(subject_span) -> break
+            arms.push(tail)
+            tail = @else_value.without_parens()
+        } else { break }
+    }
+    carrier :: arms.iter().any((arm) => if arm == { .If{cond, ..} -> if dispatch_condition_pattern(cond) == { .Val(.Ok{..}) | .Val(.Err{..}) -> true else -> false } else -> false })
+    table := ~tail
+    loop arm in arms.iter().rev() {
+        if arm == .If{cond, then_body, then_value, else_body, span, ..} {
+            table = .If{cond: replace_dispatch_subject(cond, subject_span, local), then_body: ~then_body, then_value: ~then_value, else_body: ~else_body, else_value: ^table, span: span}
+        } else { panic("dispatch arms are if expressions") }
+    }
+    cache_scope :: ExprCacheScope.enter()
+    fallback_subject :: env.fallback_subject
+    env.fallback_subject = carrier || fallback_subject
+    init :: lower_if_let_subject(subject, cx, &env, false)
+    env.fallback_subject = fallback_subject
+    ty :: ~init.ty
+    env.bind(name, TLocal.generated(name), Val(~ty))
+    lowered :: lower_expr(table, cx, &env)
+    if lowered.kind == {
+        .IfExpr{cond, then_body, then_value, else_body, else_value} -> Val(TExpr{ty: ^lowered.ty, kind: .IfExpr{cond: .WithPrelude{prelude: [.Let{name: name, kw: "let", let_ty: TLetTy.plain(^ty), init: ^init, gc_promotion: None, gc_transferred: false}], cond: ^cond}, then_body: ^then_body, then_value: ^then_value, else_body: ^else_body, else_value: ^else_value}})
+        else -> panic("a value dispatch table lowers to an if expression")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2712
+fn dispatch_condition_pattern(expr: Expr) -> (@Pattern)? Never! from expr {
+    if expr.without_parens() == {
+        .PatternTest{pattern, ..} -> Val(@pattern)
+        .Binary(op, left, right, _) -> if op == .And || op == .Or -> dispatch_condition_pattern(left).or_else(() => dispatch_condition_pattern(right)) else -> None
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2723
+fn dispatch_subject_is_place(subject: Expr) -> Bool Never! {
+    cursor := @subject
+    loop {
+        if cursor.without_parens() == {
+            .Ident(..) -> return true
+            .Field(base, _, _) | .Copy(base, _) -> cursor = @base
+            else -> return false
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2733
+enum DiscardedExprWork {
+    Enter(expr: @Expr, env: LowerEnv)
+    FinishIf(cond: TIfCond, then_body: [TStmt], else_body: [TStmt]?)
+    FinishResultHandler(subject: TExpr, ok_cond: TIfCond, ok_body: [TStmt], err_cond: TIfCond, err_body: [TStmt])
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2752
+fn is_single_if_body(body: [TStmt]) -> Bool Never! { body.len() == 1 && (if body.first() == { .Val(.If{..}) -> true else -> false }) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2760
+pub fn lower_discarded_expr(e: Expr, cx: Cx, env: &LowerEnv) -> TStmt Never! {
+    root :: e.without_parens()
+    root_env := clone_env(env)
+    dispatch :: discarded_dispatch_subject(root).map((subject) => {
+        name :: "{generated_prefix()}switch_subject"
+        init :: lower_expr(subject, cx, &root_env)
+        ty :: ~init.ty
+        root_env.bind(name, TLocal.generated(name), Val(~ty))
+        (name, subject.span(), ^ty, ^init)
+    })
+    dispatch_cache_scope :: dispatch.map((_) => ExprCacheScope.enter())
+    work := TirWorklist<DiscardedExprWork>.new()
+    lowered := [TStmt]{}
+    work.push(.Enter(@root, ^root_env))
+    loop {
+        task := work.pop() ?? break
+        if task == {
+            .Enter(expr, branch_env) -> {
+                expr :: expr.without_parens()
+                if result_handler_ast(expr) == .Val(shape) {
+                    cache_scope :: ExprCacheScope.enter()
+                    fallback_subject :: branch_env.fallback_subject
+                    branch_env.fallback_subject = true
+                    subject :: lower_if_let_subject(shape.subject, cx, &branch_env, false)
+                    branch_env.fallback_subject = fallback_subject
+                    temp :: "{generated_prefix()}result_handler_{shape.subject.span().start}"
+                    handler_env := clone_env(branch_env)
+                    handler_env.bind(temp, TLocal.generated(temp), Val(~subject.ty))
+                    ok_cond_expr :: Expr.PatternTest{subject: .Ident(temp, shape.subject.span()), pattern: ~shape.ok_pattern, span: shape.ok_cond_span}
+                    ok_env := clone_env(handler_env)
+                    (ok_cond, ok_bindings, ok_body) := lower_if_cond(ok_cond_expr, cx, &ok_env)
+                    loop (name, place, ty) in ok_bindings {
+                        ok_env.bind(name, ^place, ~ty)
+                        if ty == .Val(.Named(type_name)) { if cx.has_close_type(type_name) { ok_env.mark_resource(name) } }
+                    }
+                    ok_body.extend(lower_stmts(shape.ok_body, cx, &ok_env))
+                    err_cond_expr :: Expr.PatternTest{subject: .Ident(temp, shape.err_cond_span), pattern: ~shape.err_pattern, span: shape.err_cond_span}
+                    err_env := clone_env(handler_env)
+                    (err_cond, err_bindings, err_body) := lower_if_cond(err_cond_expr, cx, &err_env)
+                    loop (name, place, ty) in err_bindings {
+                        err_env.bind(name, ^place, ~ty)
+                        if ty == .Val(.Named(type_name)) { if cx.has_close_type(type_name) { err_env.mark_resource(name) } }
+                    }
+                    err_body.extend(lower_stmts(shape.err_body, cx, &err_env))
+                    work.push(.FinishResultHandler(^subject, ^ok_cond, ^ok_body, ^err_cond, ^err_body))
+                    work.push(.Enter(shape.terminal, clone_env(handler_env)))
+                    work.push(.Enter(shape.err_value, ^err_env))
+                    work.push(.Enter(shape.ok_value, ^ok_env))
+                    next
+                }
+                if expr == .If{cond, then_body, then_value, else_body, else_value, ..} {
+                    then_env := clone_env(branch_env)
+                    replaced_cond :: dispatch.and_then((entry) => {
+                        subject := dispatch_condition_subject(cond) ?? return None
+                        if subject.span() != entry.1 -> return None
+                        Val(replace_dispatch_subject(cond, entry.1, .Ident(entry.0, entry.1)))
+                    })
+                    condition :: replaced_cond ?? cond
+                    (tir_cond, bindings, then_lowered) := lower_if_cond(condition, cx, &then_env)
+                    loop (name, place, ty) in bindings { then_env.bind(name, ^place, ^ty) }
+                    then_lowered.extend(lower_stmts(then_body, cx, &then_env))
+                    else_lowered := None as [TStmt]?
+                    else_env := None as LowerEnv?
+                    no_else :: if else_value.without_parens() == { .NoElse(_) -> true else -> false }
+                    if !(else_body.is_empty() && no_else) {
+                        alternate := clone_env(branch_env)
+                        else_lowered = Val(lower_stmts(else_body, cx, &alternate))
+                        else_env = Val(^alternate)
+                    }
+                    work.push(.FinishIf(^tir_cond, ^then_lowered, ^else_lowered))
+                    if else_env == .Val(alternate) { work.push(.Enter(@else_value, ^alternate)) }
+                    work.push(.Enter(@then_value, ^then_env))
+                } else {
+                    lowered.push(.ExprStmt(lower_expr(expr, cx, &branch_env)))
+                }
+            }
+            .FinishIf(cond, then_body, else_body) -> {
+                alternate := None as [TStmt]?
+                else_is_elseif := false
+                if else_body == .Val(body) {
+                    else_value :: lowered.pop().expect("discarded if else tail was lowered")
+                    then_value :: lowered.pop().expect("discarded if then tail was lowered")
+                    then_body.push(^then_value)
+                    body.push(^else_value)
+                    else_is_elseif = is_single_if_body(body)
+                    alternate = Val(^body)
+                } else { then_body.push(lowered.pop().expect("discarded if then tail was lowered")) }
+                lowered.push(.If{cond: ^cond, then_body: ^then_body, else_body: ^alternate, else_is_elseif: else_is_elseif})
+            }
+            .FinishResultHandler(subject, ok_cond, ok_body, err_cond, err_body) -> {
+                terminal :: lowered.pop().expect("discarded Result handler terminal was lowered")
+                err_value :: lowered.pop().expect("discarded Result handler failure tail was lowered")
+                ok_value :: lowered.pop().expect("discarded Result handler success tail was lowered")
+                ok_body.push(^ok_value); err_body.push(^err_value)
+                if terminal == .ExprStmt(value) {
+                    lowered.push(.ExprStmt(canonicalize_pre_tier_expr(TExpr{ty: unit_type(), kind: .ResultHandler{subject: ^subject, ok_pattern: result_handler_pattern(^ok_cond), ok_body: ^ok_body, ok_value: TExpr{ty: unit_type(), kind: .Unit}, err_pattern: result_handler_pattern(^err_cond), err_body: ^err_body, err_value: TExpr{ty: unit_type(), kind: .Unit}, terminal: ^value}})))
+                } else { panic("discarded Result handler terminal must lower to an expression") }
+            }
+        }
+    }
+    root :: lowered.pop().expect("discarded expression worklist lost its root")
+    (name, _, ty, init) := dispatch ?? return ^root
+    if root == {
+        .If{cond, then_body, else_body, else_is_elseif} -> .If{cond: .WithPrelude{prelude: [.Let{name: ^name, kw: "let", let_ty: TLetTy.plain(^ty), init: ^init, gc_promotion: None, gc_transferred: false}], cond: ^cond}, then_body: ^then_body, else_body: ^else_body, else_is_elseif: else_is_elseif}
+        else -> panic("discarded dispatch root must lower to an if statement")
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3021
+fn condition_terms(cond: Expr) -> [@Expr] Never! from cond {
+    work := TirWorklist<@Expr>.new()
+    work.push(@cond)
+    terms := [@Expr]{}
+    loop {
+        term := work.pop() ?? break
+        if term == .Binary(.And, left, right, _) { work.push(@right); work.push(@left) } else { terms.push(term) }
+    }
+    ^terms
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3036
+fn push_expr_children(work: &[ExprWork], children: ^[ExprWorkChild]) Never! {
+    loop child in children.into_iter().rev() {
+        if child == { .Expr(value) -> work.push(.Enter(@strip_expr_parens(value))) .Arg(arg) -> work.push(.EnterArg(^arg)) }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3048
+fn push_expr_condition_atom(work: &[ExprWork], expr: @Expr, cx: Cx, env: LowerEnv) Never! {
+    if expr == .PatternTest{..} { push_expr_children(&work, expr_children(expr, cx, env)) } else { push_expr_work(&work, expr, cx, env) }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3061
+fn push_expr_work(work: &[ExprWork], expr: @Expr, cx: Cx, env: LowerEnv) Never! {
+    stripped :: strip_expr_parens(expr)
+    if inline_loop_body(stripped) == .Val(body) { work.push(.LowerInlineLoop(@stripped, body)) }
+    else if stripped == .If{..} { work.push(.BuildIf(@stripped)) }
+    else { work.push(.Build(@stripped)); push_expr_children(&work, expr_children(stripped, cx, env)) }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3073
+fn lower_expr_segment(root: Expr, cx: Cx, env: &LowerEnv) -> TExpr Never! {
+    root :: strip_expr_parens(root)
+    work := [ExprWork]{.Enter(@root)}
+    loop {
+        task := work.pop() ?? break
+        if task == {
+            .Enter(expr) -> push_expr_work(&work, @strip_expr_parens(expr), cx, env)
+            .Build(expr) -> expr_cache_put(expr, lower_expr_node(expr, cx, &env), cx)
+            .EnterArg(arg) -> {
+                expr :: strip_expr_parens(arg.arg.expr)
+                has_binder_refs :: !arg.arg.flags.binder_refs.is_empty()
+                work.push(.BuildArg(^arg))
+                if has_binder_refs || env.fallback_subject -> next
+                if inline_loop_body(expr) == .Val(body) { work.push(.LowerInlineLoop(@expr, body)) }
+                else if expr == .If{..} { work.push(.BuildIf(@expr)) }
+                else { push_expr_children(&work, expr_children(expr, cx, env)) }
+            }
+            .BuildArg(arg) -> {
+                if strip_expr_parens(arg.arg.expr) == .Lambda(_) -> next
+                lower_value :: (active_env: &LowerEnv) => {
+                    if arg.mode == {
+                        .Plain -> lower_expr(arg.arg.expr, cx, &active_env)
+                        .Convention(conv) -> lower_call_arg_value(arg.arg, ~conv, &active_env, cx)
+                        .CallValue(callee, index) -> {
+                            callee_ty :: expr_cache_type(callee, cx).or_else(() => Val(lower_expr(callee, cx, &active_env).ty))
+                            conv :: callee_ty.and_then((ty) => if ty.with_effective_fn_returns() == { .Fn{params, ..} -> params.get(index).map((ty) => (.Read, ~ty)) else -> None })
+                            lower_call_arg_value(arg.arg, conv, &active_env, cx)
+                        }
+                    }
+                }
+                value :: if env.fallback_subject {
+                    arg_cache_scope :: ExprCacheScope.enter()
+                    fallback_subject :: env.fallback_subject
+                    env.fallback_subject = false
+                    value :: lower_value(&env)
+                    env.fallback_subject = fallback_subject
+                    ^value
+                } else { lower_value(&env) }
+                expr_cache_put(strip_expr_parens(arg.arg.expr), canonicalize_pre_tier_expr(^value), cx)
+            }
+            .LowerInlineLoop(expr, body) -> {
+                block_env := clone_env(env)
+                lowered :: lower_stmts(body, cx, &block_env)
+                if expr == .CallValue{callee, ..} {
+                    if callee == .Lambda(lam) {
+                        ty :: if lam.meta.collecting_loop -> Type.List(lam.meta.collect_item_type ?? Type.Int) else -> lam.meta.loop_result_type ?? Type.Int
+                        expr_cache_put(expr, canonicalize_pre_tier_expr(TExpr{ty: ty, kind: .InlineBlock(^lowered)}), cx)
+                    } else { panic("inline loop work item requires a lambda") }
+                } else { panic("inline loop work item requires a call value") }
+            }
+            .BuildIf(expr) -> {
+                if lower_result_handler_expr(expr, cx, &env) == .Val(handler) { expr_cache_put(expr, ^handler, cx); next }
+                if lower_value_dispatch_expr(expr, cx, &env) == .Val(table) { expr_cache_put(expr, ^table, cx); next }
+                if expr == .If{cond, then_body, then_value, else_body, else_value, ..} {
+                    state :: ExprIfConditionWork{expr: expr, then_body: then_body.view(), then_value: @then_value, else_body: else_body.view(), else_value: @else_value, terms: condition_terms(cond), next: 0, lowered: [], bindings: [], prefixes: [], base_env: clone_env(env)}
+                    first :: state.terms.first().expect("if condition has one or more terms")
+                    work.push(.LowerIfCondition(^state))
+                    push_expr_condition_atom(&work, first, cx, env)
+                } else { panic("if work item requires an if expression") }
+            }
+            .LowerIfCondition(state) -> {
+                term :: state.terms[state.next]
+                (lowered, binding, prefix) :: lower_if_cond_atom_cached(term, cx, &env)
+                loop (name, place, ty) in binding {
+                    env.bind(name, ~place, ~ty)
+                    state.bindings.push((^name, ^place, ^ty))
+                }
+                state.lowered.push(^lowered); state.prefixes.extend(^prefix); state.next += 1
+                if state.terms.get(state.next) == .Val(next_term) {
+                    work.push(.LowerIfCondition(^state))
+                    push_expr_condition_atom(&work, next_term, cx, env)
+                    next
+                }
+                lowered_terms := state.lowered.into_iter().rev()
+                condition := lowered_terms.next().expect("if condition has one or more lowered terms")
+                loop left in lowered_terms { condition = .And{left: ^left, right: ^condition} }
+                then_env := clone_env(state.base_env)
+                loop (name, place, ty) in state.bindings { then_env.bind(name, ~place, ~ty) }
+                branch_env :: clone_env(then_env)
+                if_state :: ExprIfWork{expr: state.expr, condition: ^condition, then_prefix: ^state.prefixes, then_body: state.then_body, then_value: state.then_value, else_body: state.else_body, else_value: state.else_value, base_env: ^state.base_env, then_env: Val(^then_env), then_lowered: [], then_value_lowered: None, else_lowered: []}
+                env = ^branch_env
+                work.push(.LowerIfThenBody(^if_state))
+            }
+            .LowerIfThenBody(state) -> {
+                branch_env := state.then_env.take().expect("if then environment is consumed once")
+                state.then_lowered = lower_stmts(state.then_body, cx, &branch_env)
+                env = ^branch_env
+                then_value :: state.then_value
+                work.push(.LowerIfThenValue(^state)); work.push(.Enter(then_value))
+            }
+            .LowerIfThenValue(state) -> {
+                state.then_value_lowered = Val(expr_cache_take(strip_expr_parens(state.then_value), cx).expect("if then value was lowered exactly once"))
+                state.then_env = Val(clone_env(env))
+                env = clone_env(state.base_env)
+                work.push(.LowerIfElseBody(^state))
+            }
+            .LowerIfElseBody(state) -> {
+                state.else_lowered = lower_stmts(state.else_body, cx, &env)
+                else_value :: state.else_value
+                work.push(.LowerIfElseValue(^state)); work.push(.Enter(else_value))
+            }
+            .LowerIfElseValue(state) -> {
+                else_value := expr_cache_take(strip_expr_parens(state.else_value), cx).expect("if else value was lowered exactly once")
+                then_value := state.then_value_lowered.expect("if then value is consumed once")
+                then_body := state.then_prefix
+                then_body.extend(^state.then_lowered)
+                then_reaches :: tir_if_branch_reaches_merge(then_body, then_value)
+                else_reaches :: tir_if_branch_reaches_merge(state.else_lowered, else_value)
+                if then_reaches && else_reaches {
+                    then_absent :: then_value.kind == .Absent
+                    else_absent :: else_value.kind == .Absent
+                    if then_absent && !else_absent && (if else_value.ty == { .Option(_) -> true else -> false }) { then_value.ty = ~else_value.ty }
+                    else if else_absent && !then_absent && (if then_value.ty == { .Option(_) -> true else -> false }) { else_value.ty = ~then_value.ty }
+                }
+                ty :: tir_if_join_type(then_reaches, then_value.ty, else_reaches, else_value.ty)
+                value :: canonicalize_pre_tier_expr(TExpr{ty: ty, kind: .IfExpr{cond: ^state.condition, then_body: ^then_body, then_value: ^then_value, else_body: ^state.else_lowered, else_value: ^else_value}})
+                env = ^state.base_env
+                expr_cache_put(state.expr, ^value, cx)
+            }
+        }
+    }
+    expr_cache_take(root, cx).expect("expression worklist lost its root")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3358
+fn tir_if_join_type(then_reaches_merge: Bool, then_ty: Type, else_reaches_merge: Bool, else_ty: Type) -> Type Never! {
+    // Incompatible live pairs already diagnose E0124; retain first live recovery type.
+    if !then_reaches_merge && else_reaches_merge -> ~else_ty else -> ~then_ty
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3372
+fn tir_if_branch_reaches_merge(body: [TStmt], value: TExpr) -> Bool Never! { tir_stmt_sequence_reaches_merge(body) && tir_expr_reaches_merge(value) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3376
+fn tir_stmt_sequence_reaches_merge(stmts: [TStmt]) -> Bool Never! { stmts.iter().all((stmt) => tir_stmt_reaches_merge(stmt)) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3383
+fn tir_stmt_reaches_merge(stmt: TStmt) -> Bool Never! {
+    if stmt == {
+        .Return(_) | .Break(_) | .BreakValue{..} | .Continue(_) -> false
+        .ExprStmt(expr) -> tir_expr_reaches_merge(expr)
+        .If{then_body, else_body, ..} -> tir_stmt_sequence_reaches_merge(then_body) || else_body.is_none_or((body) => tir_stmt_sequence_reaches_merge(body))
+        .ContractScope{body, ..} | .TaskGroup{body, ..} | .Inline(body) | .Unsafe{body, ..} | .SentryPolicy{body, ..} | .Impure(body) | .Region(body) | .Layout{body, ..} | .ContextBlock{body, ..} | .Live{body} | .Shield{body} | .ScopeMember{body, ..} | .Transact{body, ..} -> tir_stmt_sequence_reaches_merge(body)
+        .GcEdit{stmt: inner, ..} -> tir_stmt_reaches_merge(inner)
+        .EnumMatch{arms, else_body, fallthrough, ..} -> arms.iter().any((arm) => tir_stmt_sequence_reaches_merge(arm.body)) || (else_body.map((body) => tir_stmt_sequence_reaches_merge(body)) ?? !fallthrough)
+        .RangeSwitch{arms, else_body, ..} -> arms.iter().any((arm) => tir_stmt_sequence_reaches_merge(arm.2)) || tir_stmt_sequence_reaches_merge(else_body)
+        .MixedSwitch{arms, else_body, ..} -> arms.iter().any((arm) => tir_stmt_sequence_reaches_merge(arm.1)) || else_body.is_none_or((body) => tir_stmt_sequence_reaches_merge(body))
+        else -> true
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3444
+pub fn tir_expr_reaches_merge(expr: TExpr) -> Bool Never! {
+    if expr.ty == .Named(name) { if name == Syntax.TYPE_NEVER -> return false }
+    if expr.kind == {
+        .Unreachable{..} | .Todo{..} -> false
+        .RequireStop{always_stops, ..} -> !always_stops
+        .IfExpr{then_body, then_value, else_body, else_value, ..} -> tir_if_branch_reaches_merge(then_body, then_value) || tir_if_branch_reaches_merge(else_body, else_value)
+        .ResultHandler{ok_body, ok_value, err_body, err_value, terminal, ..} -> tir_if_branch_reaches_merge(ok_body, ok_value) || tir_if_branch_reaches_merge(err_body, err_value) || tir_expr_reaches_merge(terminal)
+        .InlineBlock(stmts) -> tir_stmt_sequence_reaches_merge(stmts)
+        .Try{inner, ..} -> tir_expr_reaches_merge(inner)
+        .OrFallback{value, fallback} -> tir_expr_reaches_merge(value) || (if fallback == { .Value(other) -> tir_expr_reaches_merge(other) .Return(_) | .Panic{..} | .Break | .Continue | .BreakLabel(_) | .ContinueLabel(_) -> false })
+        else -> true
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3489
+pub fn grouped_enum_unit_variant(cx: Cx, receiver: Expr, member: String, is_bound: (String) -> Bool) -> (String, String)? Never! {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3495
+    fn collect_path(expr: Expr, path: &[String]) -> Bool Never! {
+        if expr == {
+            .Ident(name, _) -> { path.push(~name); true }
+            .Field(base, member, _) -> { if !collect_path(base, &path) -> return false; path.push(~member); true }
+            .Paren(inner, _) -> collect_path(inner, &path)
+            else -> false
+        }
+    }
+    path := [String]{}
+    if !collect_path(receiver, &path) -> return None
+    path.push(member)
+    enum_name := path.first() ?? return None
+    if path.len() < 3 || is_bound(enum_name) -> return None
+    variant :: path.view(1..<path.len()).join(".")
+    if cx.variant_owner.get(variant) != Val(enum_name) -> return None
+    is_unit :: cx.enum_variants.get(enum_name).is_some_and((variants) => variants.iter().any((entry) => entry.0 == variant && entry.1 == .Unit))
+    if is_unit -> Val((~enum_name, variant)) else -> None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3534
+#Inline(false)
+pub fn lower_expr(e: Expr, cx: Cx, env: &LowerEnv) -> TExpr Never! {
+    before_payload :: if CanonicalPass.enabled() -> Val(CanonicalPass.debug_payload("ast", "tir.lower-expression", e)) else -> None
+    before_identity :: if CanonicalPass.enabled() -> Val(CanonicalPass.debug_identity("ast", "tir.lower-expression", e)) else -> None
+    lowered :: lower_expr_impl(e, cx, &env)
+    if (before_payload, before_identity) == (.Val(payload), .Val(identity)) {
+        CanonicalPass.record("lowering", "tir.lower-expression", "crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs", "ast", payload, identity, "tir", canonical_expression_payload(lowered), canonical_expression_identity(lowered), "preserve")
+    }
+    ^lowered
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3558
+#Inline(false)
+fn lower_expr_impl(e: Expr, cx: Cx, env: &LowerEnv) -> TExpr Never! {
+    comptime_cache_guard :: ExprComptimeCacheGuard.enter(env)
+    stripped :: strip_expr_parens(e)
+    if stripped == .Ident(name, _) {
+        if env.binder_ref(name) == .Val((temp, ty)) -> return TExpr{ty: ~ty, kind: .Local(TLocal.user(~temp))}
+    }
+    if expr_cache_take(stripped, cx) == .Val(value) {
+        if stripped == .Ident(name, _) {
+            if value.kind == .Local(_) {
+                if env.ty_of(name) == .Val(ty) -> return TExpr{ty: ty, kind: .Local(env.local_of(name))}
+            }
+        }
+        return canonicalize_pre_tier_expr(^value)
+    }
+    cache_owner :: ExprCacheOwner{owns_cache: expr_cache_begin()}
+    value :: canonicalize_pre_tier_expr(lower_expr_segment(stripped, cx, &env))
+    drop(cache_owner)
+    ^value
+}

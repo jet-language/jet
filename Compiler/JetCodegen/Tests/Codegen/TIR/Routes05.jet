@@ -1,0 +1,72 @@
+use jet_foundation.[Type, BinOp, TFailureCarrier, Effect]
+use jet_foundation.MIR.[MirIndexKind, MirAccess, MirPreludeAbi, MirSymbol]
+use jet_codegen.Codegen.TIR.Routes.[fixed_width_name, exact_int_type, binary_route, index_route, index_write_route, string_method_route, shared_guard_map_route, cell_guard_map_route, require_stop_route, math_builtin_route]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:7012,7069 (behavioral controls; no inline Rust tests)
+#Test("numeric_routes_distinguish_exact_and_fixed_width_integers") {
+    assert(exact_int_type(Type.Int))
+    assert(!exact_int_type(Type.IntN(true, 64)))
+    assert(fixed_width_name(Type.IntN(true, 8)) == Val("i8"))
+    assert(fixed_width_name(Type.IntN(false, 64)) == Val("u64"))
+    assert(fixed_width_name(Type.IntN(true, 128)) == None)
+    assert(fixed_width_name(Type.Int) == None)
+    .expect_fail { _ :: binary_route(BinOp.Add, false, Type.Int, Type.Int, Type.Float, TFailureCarrier.Infallible)! }
+    .expect_fail { _ :: binary_route(BinOp.Add, true, Type.IntN(true, 8), Type.IntN(true, 8), Type.IntN(true, 16), TFailureCarrier.Infallible)! }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:7735,7811
+#Test("checked_index_routes_preserve_access_and_key_ownership") {
+    carrier :: TFailureCarrier.Infallible
+    read :: index_route(MirIndexKind.List, MirAccess.Read, Type.Int, carrier)!
+    write :: index_route(MirIndexKind.FixedListProof, MirAccess.Write, Type.Int, carrier)!
+    assert(read.member == "index_list")
+    assert(write.member == "index_list_mut")
+    assert(read.signature.borrow_mask == [true, false, true, false])
+    assert(write.signature.arity == 4)
+    string_key :: index_write_route(MirIndexKind.Map, Type.Map(Type.String, Type.Int), Type.Int, carrier)!
+    int_key :: index_write_route(MirIndexKind.Map, Type.Map(Type.Int, Type.Int), Type.Int, carrier)!
+    assert(string_key.signature.borrow_mask == [true, true, false])
+    assert(int_key.signature.borrow_mask == [true, false, false])
+    .expect_fail { _ :: index_route(MirIndexKind.Map, MirAccess.Move, Type.Int, carrier)! }
+    .expect_fail { _ :: index_write_route(MirIndexKind.Lane, Type.Int, Type.Int, carrier)! }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:7871,7968
+#Test("guard_routes_retain_distinct_control_and_value_protocols") {
+    shared :: shared_guard_map_route(true, Type.Int, TFailureCarrier.Infallible)!
+    cell :: cell_guard_map_route(false, Type.Int, TFailureCarrier.Infallible)!
+    assert(shared.module == "core.shared_guard")
+    assert(shared.member == "map_edit")
+    assert(shared.abi == MirPreludeAbi.Control)
+    assert(shared.signature.arity == 3)
+    assert(cell.module == "core.cell_guard")
+    assert(cell.member == "map_read")
+    assert(cell.abi == MirPreludeAbi.Value)
+    assert(cell.signature.arity == 2)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8189
+#Test("require_stop_routes_validate_semantic_arity_before_kernel_expansion") {
+    require :: require_stop_route("require", 0, Type.Int, TFailureCarrier.Infallible)!
+    equality :: require_stop_route("require_eq", 2, Type.Int, TFailureCarrier.Infallible)!
+    panic_row :: require_stop_route("panic", 1, Type.Int, TFailureCarrier.Infallible)!
+    assert(require.signature.arity == 9)
+    assert(equality.signature.arity == 10)
+    assert(panic_row.signature.arity == 8)
+    assert(require.effect == Val(Effect.Panic))
+    assert(equality.abi == MirPreludeAbi.Control)
+    .expect_fail { _ :: require_stop_route("require", 2, Type.Int, TFailureCarrier.Infallible)! }
+    .expect_fail { _ :: require_stop_route("require_eq", 1, Type.Int, TFailureCarrier.Infallible)! }
+    .expect_fail { _ :: require_stop_route("panic", 0, Type.Int, TFailureCarrier.Infallible)! }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8429
+#Test("math_abs_routes_require_exact_checked_result_and_unary_arity") {
+    exact :: math_builtin_route("Int", "abs", 1, Type.Int, TFailureCarrier.Infallible)!
+    complex :: math_builtin_route("Complex", "abs", 1, Type.Float, TFailureCarrier.Infallible)!
+    assert(exact.member == "abs")
+    assert(exact.signature.borrow_mask == [false])
+    assert(complex.signature.arity == 1)
+    .expect_fail { _ :: math_builtin_route("Int", "abs", 2, Type.Int, TFailureCarrier.Infallible)! }
+    .expect_fail { _ :: math_builtin_route("Int", "abs", 1, Type.Float, TFailureCarrier.Infallible)! }
+}

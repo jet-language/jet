@@ -1,0 +1,38 @@
+use JetCodegen.Codegen.TIR.Lower.Expressions.*
+use JetCodegen.Codegen.TIR.[TExpr, TExprKind]
+use JetSema.AST.[Type, Expr, BinOp]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:106
+#Test("math_scalar_builtin_rejects_non_math_operators") {
+    assert(math_scalar_builtin(BinOp.Add, Type.Float, Type.Float) == None)
+    assert(math_scalar_builtin(BinOp.Mul, Type.Int, Type.Int) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:446
+#Test("shared_guard_type_name_uses_qualified_leaf") {
+    assert(shared_guard_type_name("SharedGuard"))
+    assert(shared_guard_type_name("core::mem.SharedGuard"))
+    assert(!shared_guard_type_name("NotSharedGuard"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1050
+#Test("patch_absent_and_present_keep_one_option_carrier") {
+    expected := Type.Option(Type.Int)
+    absent := fit_patch_field_value(TExpr{ty: Type.Int, kind: TExprKind.Absent}, expected)
+    assert(absent.ty == expected)
+    assert(absent.kind == TExprKind.Absent)
+    inner := TExpr{ty: Type.Int, kind: TExprKind.Unit}
+    present := fit_patch_field_value(TExpr{ty: expected.clone(), kind: TExprKind.Present(inner)}, expected)
+    assert(present.ty == expected)
+    if present.kind == {
+        .Present(payload) -> assert(payload.ty == Type.Int)
+        else -> assert(false)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:1712
+#Test("pre_tier_range_keeps_exact_nominal_identity") {
+    input := TExpr{ty: Type.Named("Range"), kind: TExprKind.Unit}
+    output := canonicalize_pre_tier_expr(input)
+    assert(output.ty == Type.Named("Range"))
+}

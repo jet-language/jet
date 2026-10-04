@@ -1,1607 +1,737 @@
-// PORT-PENDING 0572 crates-jet-comptime-src-comptime-builtins-slice-1642: crates/jet-comptime/src/Comptime/Builtins.rs:1642-3244
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS pub fn apply_method(
-//RS     recv: &CtValue,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     if let Some(result) = apply_authority_method(recv, method, &args, span) {
-//RS         return result;
-//RS     }
-//RS     if let CtValue::Enum {
-//RS         type_name,
-//RS         variant,
-//RS         args: enum_args,
-//RS     } = recv
-//RS     {
-//RS         if type_name == crate::Syntax::TYPE_ORDERING && enum_args.is_empty() {
-//RS             match method {
-//RS                 "reverse" if args.is_empty() => {
-//RS                     return Ok(CtValue::Enum {
-//RS                         type_name: type_name.clone(),
-//RS                         variant: match variant.as_str() {
-//RS                             "Less" => "Greater",
-//RS                             "Greater" => "Less",
-//RS                             _ => "Equal",
-//RS                         }
-//RS                         .to_string(),
-//RS                         args: Vec::new(),
-//RS                     });
-//RS                 }
-//RS                 "then" if args.len() == 1 => {
-//RS                     let Some(CtValue::Enum {
-//RS                         type_name: other_type,
-//RS                         variant: other_variant,
-//RS                         args: other_args,
-//RS                     }) = args.into_iter().next()
-//RS                     else {
-//RS                         return Err(unsupported("Ordering.then needs an Ordering", span));
-//RS                     };
-//RS                     if other_type != crate::Syntax::TYPE_ORDERING || !other_args.is_empty() {
-//RS                         return Err(unsupported("Ordering.then needs an Ordering", span));
-//RS                     }
-//RS                     return Ok(CtValue::Enum {
-//RS                         type_name: type_name.clone(),
-//RS                         variant: if variant == "Equal" {
-//RS                             other_variant
-//RS                         } else {
-//RS                             variant.clone()
-//RS                         },
-//RS                         args: Vec::new(),
-//RS                     });
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     if let CtValue::Str(s) = recv {
-//RS         if let Some(value) = super::TextLite::string_route(s, method, &args) {
-//RS             return Ok(value);
-//RS         }
-//RS     }
-//RS     if let Some(result) = super::MathLayout::apply_method(recv, method, &args, span) {
-//RS         return result;
-//RS     }
-//RS     if let Some(result) = super::Methods::apply_core_pure_method(recv, method, &args, span) {
-//RS         return result;
-//RS     }
-//RS     if let Some(result) = super::Methods::apply_regex_method(recv, method, &args, span) {
-//RS         return result;
-//RS     }
-//RS     if let Some(result) = super::Methods::apply_pool(recv, method, &args, span) {
-//RS         return result.map(|(value, _)| value);
-//RS     }
-//RS     if let Some(result) = super::CollectionEval::apply_method(recv, method, &args, span) {
-//RS         return result;
-//RS     }
-//RS     match (recv, method) {
-//RS         (value @ (CtValue::Int(_) | CtValue::BigInt(_)), "to_radix") => {
-//RS             let [radix] = args.as_slice() else {
-//RS                 return Err(unsupported("Int.to_radix expects one radix", span));
-//RS             };
-//RS             let Some(radix) = exact_big(radix).and_then(|value| value.try_i64()) else {
-//RS                 return Err(unsupported("integer radix must fit in Int", span));
-//RS             };
-//RS             let Ok(radix) = u32::try_from(radix) else {
-//RS                 let message = format!("integer radix must be between 2 and 36, got {radix}");
-//RS                 return Err(unsupported(&message, span));
-//RS             };
-//RS             exact_big(value)
-//RS                 .expect("whole-number radix receiver")
-//RS                 .to_radix(radix)
-//RS                 .map(CtValue::Str)
-//RS                 .map_err(|message| unsupported(&message, span))
-//RS         }
-//RS         // Universal
-//RS         (v, "to_string") => Ok(CtValue::Str(v.jet_show())),
-//RS         // c139: `.raw()` unwraps a distinct/`#UnitFamily` type (D-DIST1/D-QUAL3).
-//RS         // Distinct types have zero runtime representation difference from
-//RS         // their base — the interpreter never wraps one, so unwrapping is
-//RS         // identity (`eval_distinct_ctor` in methods.rs constructs the same
-//RS         // unwrapped value).
-//RS         (v, "raw") => Ok(v.clone()),
-//RS         // c139: `.clone()` — every `CtValue` is already an owned, independently
-//RS         // mutable tree (no shared/interior-mutable state in this value model),
-//RS         // so a deep clone is just `Clone::clone`.
-//RS         (v, "clone") => Ok(v.clone()),
-//RS         // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a
-//RS         // failure. One carrier, so the payload rides through untouched and only
-//RS         // the report changes — the same move the prelude's
-//RS         // `JetOptionalView::or_err` makes.
-//RS         (CtValue::Present(payload), "or_err") => Ok(CtValue::Present(payload.clone())),
-//RS         (CtValue::Failed(CtReport::Clean(_)), "or_err") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(message)) => Ok(CtValue::failed(Box::new(CtValue::from_jet_err(
-//RS                 &jet_foundation::Outcome::jet_err_from_message(message),
-//RS             )))),
-//RS             _ => Err(unsupported("`.or_err` requires a string reason", span)),
-//RS         },
-//RS         // D-FAIL-CARRIER1=A: the carrier's middle states. Marshalling only —
-//RS         // `carrier_fact` supplies the projection onto the report and calls the
-//RS         // prelude reader, which is where what a success and a failure each
-//RS         // answer is decided.
-//RS         (value, crate::Syntax::FIELD_OUTCOME_PARTIAL | crate::Syntax::FIELD_OUTCOME_NOTES) => {
-//RS             carrier_fact(value, method, method == crate::Syntax::FIELD_OUTCOME_NOTES).ok_or_else(
-//RS                 || {
-//RS                     unsupported(
-//RS                         "this middle state needs an error type that carries it",
-//RS                         span,
-//RS                     )
-//RS                 },
-//RS             )
-//RS         }
-//RS         // D-DATATREE-ERGO1=A: dynamic tree methods marshal through the shared
-//RS         // Prelude implementation. The type guard keeps ordinary user enums
-//RS         // from acquiring DataTree-only operations in the interpreter.
-//RS         (v @ CtValue::Enum { type_name, .. }, "to_text")
-//RS             if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") =>
-//RS         {
-//RS             Ok(match super::SyncLite::datatree_to_text(v) {
-//RS                 Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
-//RS                 None => CtValue::absent(Type::String),
-//RS             })
-//RS         }
-//RS         (v @ CtValue::Enum { type_name, .. }, "equal_unordered")
-//RS             if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") =>
-//RS         {
-//RS             let Some(other) = args.into_iter().next() else {
-//RS                 return Err(unsupported(
-//RS                     "`.equal_unordered` requires one DataTree argument",
-//RS                     span,
-//RS                 ));
-//RS             };
-//RS             Ok(CtValue::Bool(super::SyncLite::datatree_equal_unordered(
-//RS                 v, &other,
-//RS             )))
-//RS         }
-//RS         // D-HOLE1: `.zip` — pair two `Option`s, `None` if either is absent.
-//RS         // `(v, "zip")` rather than guarding to `CtValue::Present`/`Failed` because
-//RS         // both arms of the pairing need the same fallback.
-//RS         (CtValue::Present(a), "zip") => Ok(match args.into_iter().next() {
-//RS             Some(CtValue::Present(b)) => CtValue::Present(Box::new(CtValue::Struct {
-//RS                 type_name: "Pair".to_string(),
-//RS                 fields: vec![("a".to_string(), (**a).clone()), ("b".to_string(), *b)],
-//RS             })),
-//RS             _ => CtValue::absent(Type::Int),
-//RS         }),
-//RS         (CtValue::Failed(CtReport::Clean(t)), "zip") => Ok(CtValue::absent(t.clone())),
-//RS         // D-SERDE-ACCESS=B: dynamic `JSON`/`DataTree` accessors follow the
-//RS         // canonical typed-codec contract. Every mismatch returns a told
-//RS         // `[FieldError]` value; only a matching read returns `Present`.
-//RS         (v @ CtValue::Enum { .. }, "field") if is_datatree(v) => {
-//RS             let key = match args.into_iter().next() {
-//RS                 Some(CtValue::Str(s)) => s,
-//RS                 _ => return Ok(datatree_failure("", "field name must be Text")),
-//RS             };
-//RS             Ok(match datatree_payload(v, "Object") {
-//RS                 Some(CtValue::Map(m)) => match m.get(&CtKey::Str(key.clone())) {
-//RS                     Some(found) => CtValue::Present(Box::new(found.clone())),
-//RS                     None => datatree_failure(key.clone(), format!("field `{key}` not found")),
-//RS                 },
-//RS                 Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
-//RS                     match fields.iter().find(|(name, _)| name == &key) {
-//RS                         Some((_, found)) => CtValue::Present(Box::new(found.clone())),
-//RS                         None => datatree_failure(key.clone(), format!("field `{key}` not found")),
-//RS                     }
-//RS                 }
-//RS                 _ => datatree_failure(key, format!("expected object, got {}", datatree_render(v))),
-//RS             })
-//RS         }
-//RS         (v @ CtValue::Enum { .. }, "at") if is_datatree(v) => {
-//RS             let index = match args.first() {
-//RS                 Some(CtValue::Int(index)) => *index,
-//RS                 _ => -1,
-//RS             };
-//RS             Ok(match datatree_payload(v, "Array") {
-//RS                 Some(CtValue::List(items)) => {
-//RS                     let resolved = if index < 0 {
-//RS                         index
-//RS                             .checked_neg()
-//RS                             .and_then(|value| usize::try_from(value).ok())
-//RS                             .and_then(|value| items.len().checked_sub(value))
-//RS                     } else {
-//RS                         usize::try_from(index).ok()
-//RS                     };
-//RS                     match resolved.and_then(|index| items.get(index)) {
-//RS                         Some(found) => CtValue::Present(Box::new(found.clone())),
-//RS                         None => datatree_failure(
-//RS                             format!("[{index}]"),
-//RS                             format!("index {index} out of bounds (len {})", items.len()),
-//RS                         ),
-//RS                     }
-//RS                 }
-//RS                 _ => datatree_failure(
-//RS                     format!("[{index}]"),
-//RS                     format!("expected array, got {}", datatree_render(v)),
-//RS                 ),
-//RS             })
-//RS         }
-//RS         (v @ CtValue::Enum { .. }, "int") if is_datatree(v) => {
-//RS             let value = match datatree_payload(v, "Int") {
-//RS                 Some(value @ (CtValue::Int(_) | CtValue::BigInt(_))) => Some(value.clone()),
-//RS                 _ => match datatree_payload(v, "Number") {
-//RS                     Some(CtValue::Str(text)) => crate::Numeric::CtBigInt::from_json_number(text)
-//RS                         .ok()
-//RS                         .map(exact_int_value),
-//RS                     _ => None,
-//RS                 },
-//RS             };
-//RS             Ok(value
-//RS                 .map(|value| CtValue::Present(Box::new(value)))
-//RS                 .unwrap_or_else(|| {
-//RS                     datatree_failure("", format!("expected int, got {}", datatree_render(v)))
-//RS                 }))
-//RS         }
-//RS         (v @ CtValue::Enum { .. }, "text") if is_datatree(v) => {
-//RS             let value = datatree_payload(v, "Text")
-//RS                 .or_else(|| datatree_payload(v, "TypedText"))
-//RS                 .and_then(|value| matches!(value, CtValue::Str(_)).then(|| value.clone()));
-//RS             Ok(value
-//RS                 .map(|value| CtValue::Present(Box::new(value)))
-//RS                 .unwrap_or_else(|| {
-//RS                     datatree_failure("", format!("expected text, got {}", datatree_render(v)))
-//RS                 }))
-//RS         }
-//RS         (v @ CtValue::Enum { .. }, "bool") if is_datatree(v) => {
-//RS             let value = datatree_payload(v, "Bool")
-//RS                 .and_then(|value| matches!(value, CtValue::Bool(_)).then(|| value.clone()));
-//RS             Ok(value
-//RS                 .map(|value| CtValue::Present(Box::new(value)))
-//RS                 .unwrap_or_else(|| {
-//RS                     datatree_failure("", format!("expected bool, got {}", datatree_render(v)))
-//RS                 }))
-//RS         }
-//RS         (v @ CtValue::Enum { .. }, "float") if is_datatree(v) => {
-//RS             let value = match datatree_payload(v, "Float") {
-//RS                 Some(value @ CtValue::Float(_)) => Some(value.clone()),
-//RS                 _ => datatree_payload(v, "Int")
-//RS                     .and_then(|value| match value {
-//RS                         CtValue::Int(value) => Some(CtValue::Float(CtFloat::f64(*value as f64))),
-//RS                         CtValue::BigInt(value) => value
-//RS                             .to_string_rep()
-//RS                             .parse::<f64>()
-//RS                             .ok()
-//RS                             .filter(|value| value.is_finite())
-//RS                             .map(|value| CtValue::Float(CtFloat::f64(value))),
-//RS                         _ => None,
-//RS                     })
-//RS                     .or_else(|| match datatree_payload(v, "Number") {
-//RS                         Some(CtValue::Str(text)) => text
-//RS                             .trim()
-//RS                             .parse::<f64>()
-//RS                             .ok()
-//RS                             .filter(|value| value.is_finite())
-//RS                             .map(|value| CtValue::Float(CtFloat::f64(value))),
-//RS                         _ => None,
-//RS                     }),
-//RS             };
-//RS             Ok(value
-//RS                 .map(|value| CtValue::Present(Box::new(value)))
-//RS                 .unwrap_or_else(|| {
-//RS                     datatree_failure("", format!("expected float, got {}", datatree_render(v)))
-//RS                 }))
-//RS         }
-//RS         (value @ (CtValue::Int(_) | CtValue::BigInt(_)), "abs") => Ok(exact_int_value(
-//RS             exact_big(value).expect("whole-number absolute value").abs(),
-//RS         )),
-//RS         (CtValue::Float(f), "abs") => Ok(CtValue::Float(f.abs())),
-//RS         (CtValue::Float(f), "is_nan") => Ok(CtValue::Bool(f.is_nan())),
-//RS         (CtValue::Float(f), "is_infinite") => Ok(CtValue::Bool(f.is_infinite())),
-//RS         (CtValue::Float(f), "is_finite") => Ok(CtValue::Bool(f.is_finite())),
-//RS         (CtValue::Struct { type_name, fields }, "contains")
-//RS             if type_name == crate::Syntax::TYPE_RANGE =>
-//RS         {
-//RS             let field = |name: &str| {
-//RS                 fields
-//RS                     .iter()
-//RS                     .find(|(field, _)| field == name)
-//RS                     .map(|(_, value)| value)
-//RS             };
-//RS             let (Some(CtValue::Int(start)), Some(CtValue::Int(end))) =
-//RS                 (field("start"), field("end"))
-//RS             else {
-//RS                 return Err(unsupported("Range.contains", span));
-//RS             };
-//RS             let exclusive = matches!(field("exclusive"), Some(CtValue::Bool(true)));
-//RS             let value = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-//RS             Ok(CtValue::Bool(range_semantics::jet_range_contains(
-//RS                 *start, *end, exclusive, value,
-//RS             )))
-//RS         }
-//RS         // List
-//RS         (CtValue::List(xs), "len") => Ok(CtValue::Int(xs.len() as i64)),
-//RS         (CtValue::List(xs), "is_empty") => Ok(CtValue::Bool(xs.is_empty())),
-//RS         (CtValue::List(xs), "get") => {
-//RS             let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-//RS             Ok(if i < 0 || i as usize >= xs.len() {
-//RS                 CtValue::absent(xs.first().map(|v| v.jet_type()).unwrap_or(Type::Int))
-//RS             } else {
-//RS                 CtValue::Present(Box::new(xs[i as usize].clone()))
-//RS             })
-//RS         }
-//RS         (CtValue::List(xs), "contains") => {
-//RS             let needle = args.into_iter().next().unwrap_or(CtValue::Unit);
-//RS             Ok(CtValue::Bool(xs.iter().any(|x| *x == needle)))
-//RS         }
-//RS         (CtValue::List(xs), "count") => {
-//RS             let needle = args.into_iter().next().unwrap_or(CtValue::Unit);
-//RS             Ok(CtValue::Int(
-//RS                 xs.iter().filter(|item| *item == &needle).count() as i64,
-//RS             ))
-//RS         }
-//RS         (CtValue::List(xs), "counts") => {
-//RS             let mut out = std::collections::BTreeMap::new();
-//RS             for value in xs {
-//RS                 let key = CtKey::from_value(value.clone())
-//RS                     .ok_or_else(|| unsupported("this map key type", span))?;
-//RS                 let count = out.entry(key).or_insert(CtValue::Int(0));
-//RS                 let CtValue::Int(count) = count else {
-//RS                     unreachable!()
-//RS                 };
-//RS                 *count += 1;
-//RS             }
-//RS             Ok(CtValue::Map(out))
-//RS         }
-//RS         (CtValue::List(xs), "concat") => {
-//RS             let Some(CtValue::List(other)) = args.into_iter().next() else {
-//RS                 return Err(unsupported("List.concat expects a list", span));
-//RS             };
-//RS             let mut out = xs.clone();
-//RS             out.extend(other);
-//RS             Ok(CtValue::List(out))
-//RS         }
-//RS         (CtValue::List(xs), "join") => {
-//RS             let sep = match args.into_iter().next() {
-//RS                 Some(CtValue::Str(s)) => s,
-//RS                 _ => String::new(),
-//RS             };
-//RS             let parts: Vec<String> = xs.iter().map(|x| x.jet_show()).collect();
-//RS             Ok(CtValue::Str(parts.join(&sep)))
-//RS         }
-//RS         // D-ITERTOOLS1=A: Iter is List-shaped in comptime/TIR eval; materialize is
-//RS         // identity. Non-closure adapters mirror SequenceParity so JIT deopt works.
-//RS         (CtValue::List(xs), "to_list" | "collect" | "lazy") => Ok(CtValue::List(xs.clone())),
-//RS         (CtValue::List(xs), "take") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-//RS             if let Some(message) = super::CollectionEval::sequence_argument_message("take", n) {
-//RS                 return Err(comptime_panic(message, span));
-//RS             }
-//RS             Ok(CtValue::List(xs.iter().take(n as usize).cloned().collect()))
-//RS         }
-//RS         (CtValue::List(xs), "skip") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-//RS             if let Some(message) = super::CollectionEval::sequence_argument_message("skip", n) {
-//RS                 return Err(comptime_panic(message, span));
-//RS             }
-//RS             Ok(CtValue::List(super::CollectionEval::iter_skip(
-//RS                 xs.clone(),
-//RS                 n,
-//RS             )))
-//RS         }
-//RS         (CtValue::List(xs), "step_by") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-//RS             if let Some(message) = super::CollectionEval::sequence_argument_message("step_by", n) {
-//RS                 return Err(comptime_panic(message, span));
-//RS             }
-//RS             Ok(CtValue::List(
-//RS                 xs.iter().step_by(n as usize).cloned().collect(),
-//RS             ))
-//RS         }
-//RS         (CtValue::List(xs), "dedup") => {
-//RS             let mut out = Vec::new();
-//RS             for x in xs {
-//RS                 if out.last() != Some(x) {
-//RS                     out.push(x.clone());
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::List(out))
-//RS         }
-//RS         (CtValue::List(xs), "repeat") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
-//RS             let mut out = Vec::with_capacity(xs.len().saturating_mul(n));
-//RS             for _ in 0..n {
-//RS                 out.extend(xs.iter().cloned());
-//RS             }
-//RS             Ok(CtValue::List(out))
-//RS         }
-//RS         // D-ITER1: bounded cycle — mirrors `jet_iter_cycle`, exactly `n`
-//RS         // items produced by looping the source.
-//RS         (CtValue::List(xs), "cycle") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
-//RS             if xs.is_empty() || n == 0 {
-//RS                 Ok(CtValue::List(Vec::new()))
-//RS             } else {
-//RS                 Ok(CtValue::List(xs.iter().cloned().cycle().take(n).collect()))
-//RS             }
-//RS         }
-//RS         (CtValue::List(xs), "drop_last") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
-//RS             Ok(CtValue::List(if n >= xs.len() {
-//RS                 Vec::new()
-//RS             } else {
-//RS                 xs[..xs.len() - n].to_vec()
-//RS             }))
-//RS         }
-//RS         (CtValue::List(xs), "shuffle") => {
-//RS             let mut out = xs.clone();
-//RS             let mut state: u64 = 0xC0FF_EE42;
-//RS             for i in (1..out.len()).rev() {
-//RS                 state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-//RS                 let j = ((state >> 33) as usize) % (i + 1);
-//RS                 out.swap(i, j);
-//RS             }
-//RS             Ok(CtValue::List(out))
-//RS         }
-//RS         (CtValue::List(xs), "is_sorted") => {
-//RS             let ok = xs.windows(2).all(|w| match (&w[0], &w[1]) {
-//RS                 (CtValue::Int(a), CtValue::Int(b)) => a <= b,
-//RS                 (CtValue::Str(a), CtValue::Str(b)) => a <= b,
-//RS                 _ => w[0].jet_show() <= w[1].jet_show(),
-//RS             });
-//RS             Ok(CtValue::Bool(ok))
-//RS         }
-//RS         (CtValue::List(xs), "last_index_of") => {
-//RS             let needle = args.first().cloned().unwrap_or(CtValue::Int(0));
-//RS             let idx = xs.iter().rposition(|x| x == &needle);
-//RS             Ok(match idx {
-//RS                 Some(i) => CtValue::Present(Box::new(CtValue::Int(i as i64))),
-//RS                 None => CtValue::absent(Type::Int),
-//RS             })
-//RS         }
-//RS         (CtValue::List(xs), "average") => {
-//RS             if xs.is_empty() {
-//RS                 return Ok(CtValue::Float(CtFloat::f64(0.0)));
-//RS             }
-//RS             // Int averages sum exactly, as the AOT and JIT kernels do, and
-//RS             // convert the exact sum to Float once before dividing.
-//RS             if matches!(xs[0], CtValue::Int(_) | CtValue::BigInt(_)) {
-//RS                 let mut total = crate::Numeric::CtBigInt::from_int(0);
-//RS                 for value in xs {
-//RS                     let value = exact_big(value)
-//RS                         .ok_or_else(|| unsupported("average on mixed numeric types", span))?;
-//RS                     total = total.add(&value);
-//RS                 }
-//RS                 let text = total.to_string_rep();
-//RS                 let sum = text.parse::<f64>().unwrap_or(if text.starts_with('-') {
-//RS                     f64::NEG_INFINITY
-//RS                 } else {
-//RS                     f64::INFINITY
-//RS                 });
-//RS                 return Ok(CtValue::Float(CtFloat::f64(sum / xs.len() as f64)));
-//RS             }
-//RS             let mut sum = 0.0f64;
-//RS             for x in xs {
-//RS                 sum += match x {
-//RS                     CtValue::Float(n) => n.as_f64(),
-//RS                     _ => return Err(unsupported("average on non-numeric list", span)),
-//RS                 };
-//RS             }
-//RS             Ok(CtValue::Float(CtFloat::f64(sum / xs.len() as f64)))
-//RS         }
-//RS         (CtValue::List(xs), "compare") => {
-//RS             // Mirrors `jet_iter_compare`'s `Ord`-based slice comparison —
-//RS             // element-wise, not by rendered text (a text compare would sort
-//RS             // "10" before "9").
-//RS             let other = match args.first() {
-//RS                 Some(CtValue::List(ys)) => ys,
-//RS                 _ => return Err(unsupported("compare needs a list argument", span)),
-//RS             };
-//RS             let mut ord = std::cmp::Ordering::Equal;
-//RS             for (a, b) in xs.iter().zip(other.iter()) {
-//RS                 ord = cmp(a.clone(), b.clone(), span)?;
-//RS                 if ord != std::cmp::Ordering::Equal {
-//RS                     break;
-//RS                 }
-//RS             }
-//RS             if ord == std::cmp::Ordering::Equal {
-//RS                 ord = xs.len().cmp(&other.len());
-//RS             }
-//RS             Ok(CtValue::Int(match ord {
-//RS                 std::cmp::Ordering::Less => -1,
-//RS                 std::cmp::Ordering::Equal => 0,
-//RS                 std::cmp::Ordering::Greater => 1,
-//RS             }))
-//RS         }
-//RS         (CtValue::List(xs), "split") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
-//RS             let (left, right) = if n >= xs.len() {
-//RS                 (xs.clone(), Vec::new())
-//RS             } else {
-//RS                 (xs[..n].to_vec(), xs[n..].to_vec())
-//RS             };
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: String::new(),
-//RS                 fields: vec![
-//RS                     ("left".to_string(), CtValue::List(left)),
-//RS                     ("right".to_string(), CtValue::List(right)),
-//RS                 ],
-//RS             })
-//RS         }
-//RS         (CtValue::List(xs), "to_set") => {
-//RS             let mut out = std::collections::BTreeMap::new();
-//RS             for x in xs {
-//RS                 let key = crate::AST::CtKey::from_value(x.clone())
-//RS                     .ok_or_else(|| unsupported("to_set element type", span))?;
-//RS                 out.insert(key, CtValue::Bool(true));
-//RS             }
-//RS             // Represent as Map for comptime; AOT uses HashSet.
-//RS             Ok(CtValue::Map(out))
-//RS         }
-//RS         (CtValue::List(xs), "chunks") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?;
-//RS             if let Some(message) = super::CollectionEval::sequence_argument_message("chunks", n) {
-//RS                 return Err(comptime_panic(message, span));
-//RS             }
-//RS             Ok(CtValue::List(
-//RS                 xs.chunks(n as usize)
-//RS                     .map(|chunk| CtValue::List(chunk.to_vec()))
-//RS                     .collect(),
-//RS             ))
-//RS         }
-//RS         (CtValue::List(xs), "windows") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?;
-//RS             if let Some(message) = super::CollectionEval::sequence_argument_message("windows", n) {
-//RS                 return Err(comptime_panic(message, span));
-//RS             }
-//RS             Ok(CtValue::List(
-//RS                 xs.windows(n as usize)
-//RS                     .map(|window| CtValue::List(window.to_vec()))
-//RS                     .collect(),
-//RS             ))
-//RS         }
-//RS         (CtValue::List(xs), "first") => Ok(match super::CollectionEval::iter_first(xs.clone()) {
-//RS             Some(v) => CtValue::Present(Box::new(v)),
-//RS             None => CtValue::absent(Type::Int),
-//RS         }),
-//RS         (CtValue::List(xs), "last") => Ok(match xs.last() {
-//RS             Some(v) => CtValue::Present(Box::new(v.clone())),
-//RS             None => CtValue::absent(Type::Int),
-//RS         }),
-//RS         (CtValue::List(xs), "flatten") => {
-//RS             let mut out = Vec::new();
-//RS             for x in xs {
-//RS                 let CtValue::List(values) = x else {
-//RS                     return Err(unsupported("flatten on a non-nested list", span));
-//RS                 };
-//RS                 out.extend(values.iter().cloned());
-//RS             }
-//RS             Ok(CtValue::List(out))
-//RS         }
-//RS         (CtValue::List(xs), "sum") => {
-//RS             let Some(first) = xs.first() else {
-//RS                 return Ok(CtValue::Int(0));
-//RS             };
-//RS             match first {
-//RS                 CtValue::Float(first) => {
-//RS                     let mut total = match first {
-//RS                         CtFloat::F32(_) => CtFloat::f32(0.0),
-//RS                         CtFloat::F64(_) => CtFloat::f64(0.0),
-//RS                     };
-//RS                     for value in xs {
-//RS                         let CtValue::Float(value) = value else {
-//RS                             return Err(unsupported("sum on mixed numeric types", span));
-//RS                         };
-//RS                         total = total
-//RS                             .binop(BinOp::Add, *value)
-//RS                             .ok_or_else(|| unsupported("sum on mixed float widths", span))?;
-//RS                     }
-//RS                     Ok(CtValue::Float(total))
-//RS                 }
-//RS                 CtValue::Int(_) | CtValue::BigInt(_) => {
-//RS                     let mut total = crate::Numeric::CtBigInt::from_int(0);
-//RS                     for value in xs {
-//RS                         let value = exact_big(value).ok_or_else(|| {
-//RS                             unsupported("sum on mixed numeric types", span)
-//RS                         })?;
-//RS                         total = total.add(&value);
-//RS                     }
-//RS                     Ok(exact_int_value(total))
-//RS                 }
-//RS                 _ => Err(unsupported("sum on non-numeric values", span)),
-//RS             }
-//RS         }
-//RS         (CtValue::List(xs), "product") => {
-//RS             let mut total = crate::Numeric::CtBigInt::from_int(1);
-//RS             for value in xs {
-//RS                 let value = exact_big(value).ok_or_else(|| {
-//RS                     unsupported("product on mixed numeric types", span)
-//RS                 })?;
-//RS                 total = total.mul(&value);
-//RS             }
-//RS             Ok(exact_int_value(total))
-//RS         }
-//RS         (CtValue::List(xs), "min") => {
-//RS             let Some(mut best) = xs.first().cloned() else {
-//RS                 return Ok(CtValue::absent(Type::Int));
-//RS             };
-//RS             for candidate in xs.iter().skip(1) {
-//RS                 if cmp(best.clone(), candidate.clone(), span)? == std::cmp::Ordering::Greater {
-//RS                     best = candidate.clone();
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::Present(Box::new(best)))
-//RS         }
-//RS         (CtValue::List(xs), "max") => {
-//RS             let Some(mut best) = xs.first().cloned() else {
-//RS                 return Ok(CtValue::absent(Type::Int));
-//RS             };
-//RS             for candidate in xs.iter().skip(1) {
-//RS                 if cmp(best.clone(), candidate.clone(), span)? != std::cmp::Ordering::Greater {
-//RS                     best = candidate.clone();
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::Present(Box::new(best)))
-//RS         }
-//RS         (CtValue::List(xs), "intersperse") => {
-//RS             let sep = args.into_iter().next().unwrap_or(CtValue::Unit);
-//RS             let mut out = Vec::with_capacity(xs.len().saturating_mul(2).saturating_sub(1));
-//RS             for (index, x) in xs.iter().enumerate() {
-//RS                 if index != 0 {
-//RS                     out.push(sep.clone());
-//RS                 }
-//RS                 out.push(x.clone());
-//RS             }
-//RS             Ok(CtValue::List(out))
-//RS         }
-//RS         (CtValue::List(xs), "unzip") => {
-//RS             let mut left = Vec::with_capacity(xs.len());
-//RS             let mut right = Vec::with_capacity(xs.len());
-//RS             for x in xs {
-//RS                 let CtValue::Struct { fields, .. } = x else {
-//RS                     return Err(unsupported("unzip on a non-tuple list", span));
-//RS                 };
-//RS                 let a = fields
-//RS                     .iter()
-//RS                     .find(|(name, _)| name == "a")
-//RS                     .map(|(_, v)| v.clone());
-//RS                 let b = fields
-//RS                     .iter()
-//RS                     .find(|(name, _)| name == "b")
-//RS                     .map(|(_, v)| v.clone());
-//RS                 match (a, b) {
-//RS                     (Some(a), Some(b)) => {
-//RS                         left.push(a);
-//RS                         right.push(b);
-//RS                     }
-//RS                     _ => return Err(unsupported("unzip on a tuple without `a` and `b`", span)),
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: "(a,b)".to_string(),
-//RS                 fields: vec![
-//RS                     ("a".to_string(), CtValue::List(left)),
-//RS                     ("b".to_string(), CtValue::List(right)),
-//RS                 ],
-//RS             })
-//RS         }
-//RS         (CtValue::List(xs), "indexed") => Ok(CtValue::List(
-//RS             xs.iter()
-//RS                 .enumerate()
-//RS                 .map(|(idx, item)| CtValue::Struct {
-//RS                     type_name: "(idx,item)".to_string(),
-//RS                     fields: vec![
-//RS                         ("idx".to_string(), CtValue::Int(idx as i64)),
-//RS                         ("item".to_string(), item.clone()),
-//RS                     ],
-//RS                 })
-//RS                 .collect(),
-//RS         )),
-//RS         (CtValue::List(xs), "indexes") => Ok(CtValue::List(
-//RS             (0..xs.len() as i64).map(CtValue::Int).collect(),
-//RS         )),
-//RS         (CtValue::List(xs), "zip") => {
-//RS             let CtValue::List(other) = args.into_iter().next().unwrap_or(CtValue::Unit) else {
-//RS                 return Err(unsupported("zip with a non-list argument", span));
-//RS             };
-//RS             if super::CollectionEval::zip_row_count(&[xs.len(), other.len()], 1).is_none() {
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0128",
-//RS                     "zip inputs have different lengths".to_string(),
-//RS                     "strict `zip` requires every input to end on the same row".to_string(),
-//RS                     "use `zip_short` or `zip_pad` when lengths may differ".to_string(),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS             Ok(CtValue::List(
-//RS                 xs.iter()
-//RS                     .zip(other)
-//RS                     .map(|(a, b)| CtValue::Struct {
-//RS                         type_name: "(a,b)".to_string(),
-//RS                         fields: vec![("a".to_string(), a.clone()), ("b".to_string(), b)],
-//RS                     })
-//RS                     .collect(),
-//RS             ))
-//RS         }
-//RS         (CtValue::List(xs), "index_of") => {
-//RS             let needle = args.into_iter().next().unwrap_or(CtValue::Unit);
-//RS             Ok(match xs.iter().position(|x| *x == needle) {
-//RS                 Some(index) => CtValue::Present(Box::new(CtValue::Int(index as i64))),
-//RS                 None => CtValue::absent(Type::Int),
-//RS             })
-//RS         }
-//RS         // Bytes (`[U8]` from `embed_bytes`) — same surface as List, u8 elements.
-//RS         (CtValue::Bytes(bs), "len") => Ok(CtValue::Int(bs.len() as i64)),
-//RS         (CtValue::Bytes(bs), "is_empty") => Ok(CtValue::Bool(bs.is_empty())),
-//RS         (CtValue::Bytes(bs), "get") => {
-//RS             let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-//RS             Ok(if i < 0 || i as usize >= bs.len() {
-//RS                 CtValue::absent(Type::IntN {
-//RS                     signed: false,
-//RS                     bits: 8,
-//RS                 })
-//RS             } else {
-//RS                 CtValue::Present(Box::new(CtValue::Int(bs[i as usize] as i64)))
-//RS             })
-//RS         }
-//RS 
-//RS         (CtValue::List(xs), "starts_with") => {
-//RS             let Some(CtValue::List(prefix)) = args.into_iter().next() else {
-//RS                 return Err(unsupported("starts_with needs a list", span));
-//RS             };
-//RS             Ok(CtValue::Bool(xs.starts_with(&prefix)))
-//RS         }
-//RS         (CtValue::List(xs), "ends_with") => {
-//RS             let Some(CtValue::List(suffix)) = args.into_iter().next() else {
-//RS                 return Err(unsupported("ends_with needs a list", span));
-//RS             };
-//RS             Ok(CtValue::Bool(xs.ends_with(&suffix)))
-//RS         }
-//RS         (CtValue::List(xs), "copy") => Ok(CtValue::List(xs.clone())),
-//RS         (CtValue::List(xs), "equal") => {
-//RS             let Some(CtValue::List(other)) = args.into_iter().next() else {
-//RS                 return Err(unsupported("equal needs a list", span));
-//RS             };
-//RS             Ok(CtValue::Bool(list_values_equal(xs, &other)))
-//RS         }
-//RS         (CtValue::List(xs), "slice") => {
-//RS             let start = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-//RS             let end = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
-//RS             let len = xs.len() as i64;
-//RS             let s = start.clamp(0, len) as usize;
-//RS             let e = end.clamp(0, len) as usize;
-//RS             Ok(CtValue::List(if e <= s {
-//RS                 vec![]
-//RS             } else {
-//RS                 xs[s..e].to_vec()
-//RS             }))
-//RS         }
-//RS         (CtValue::List(xs), "binary_search") => {
-//RS             let needle = args.first().cloned().unwrap_or(CtValue::Int(0));
-//RS             let idx = xs.iter().position(|x| x == &needle);
-//RS             // only exact match path for eval (sorted assumed)
-//RS             Ok(match idx {
-//RS                 Some(i) => CtValue::Present(Box::new(CtValue::Int(i as i64))),
-//RS                 None => CtValue::absent(Type::Int),
-//RS             })
-//RS         }
-//RS         (CtValue::List(xs), "union") => {
-//RS             let Some(CtValue::List(other)) = args.into_iter().next() else {
-//RS                 return Err(unsupported("union needs a list", span));
-//RS             };
-//RS             let mut out = xs.clone();
-//RS             for x in other {
-//RS                 if !out.contains(&x) {
-//RS                     out.push(x);
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::List(out))
-//RS         }
-//RS         (CtValue::List(xs), "intersection") => {
-//RS             let Some(CtValue::List(other)) = args.into_iter().next() else {
-//RS                 return Err(unsupported("intersection needs a list", span));
-//RS             };
-//RS             let mut out = Vec::new();
-//RS             for x in xs {
-//RS                 if other.contains(x) && !out.contains(x) {
-//RS                     out.push(x.clone());
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::List(out))
-//RS         }
-//RS         (CtValue::List(xs), "difference") => {
-//RS             let Some(CtValue::List(other)) = args.into_iter().next() else {
-//RS                 return Err(unsupported("difference needs a list", span));
-//RS             };
-//RS             Ok(CtValue::List(
-//RS                 xs.iter().filter(|x| !other.contains(x)).cloned().collect(),
-//RS             ))
-//RS         }
-//RS         (CtValue::List(xs), "random") => {
-//RS             if xs.is_empty() {
-//RS                 return Ok(CtValue::absent(Type::Int));
-//RS             }
-//RS             let mut state: u64 = 0xC0FF_EE42;
-//RS             state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-//RS             let i = ((state >> 33) as usize) % xs.len();
-//RS             Ok(CtValue::Present(Box::new(xs[i].clone())))
-//RS         }
-//RS         (CtValue::List(xs), "replace") => {
-//RS             let index = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-//RS             let new = args.get(1).cloned().unwrap_or(CtValue::Int(0));
-//RS             if index < 0 || index as usize >= xs.len() {
-//RS                 return Err(index_oob(xs.len(), index, span));
-//RS             }
-//RS             Ok(CtValue::List(super::CollectionEval::list_replace(
-//RS                 xs, index, new,
-//RS             )))
-//RS         }
-//RS         (CtValue::List(xs), "min_max") => {
-//RS             let mut values = xs.iter();
-//RS             let Some(first) = values.next() else {
-//RS                 return Ok(CtValue::absent(Type::Int));
-//RS             };
-//RS             let (mut min, mut max) = (first, first);
-//RS             for value in values {
-//RS                 if cmp_ref(value, min, span)? == std::cmp::Ordering::Less {
-//RS                     min = value;
-//RS                 }
-//RS                 if cmp_ref(value, max, span)? != std::cmp::Ordering::Less {
-//RS                     max = value;
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::Present(Box::new(CtValue::Struct {
-//RS                 type_name: String::new(),
-//RS                 fields: vec![("min".into(), min.clone()), ("max".into(), max.clone())],
-//RS             })))
-//RS         }
-//RS         // Map
-//RS         (CtValue::Map(m), "len") => Ok(CtValue::Int(m.len() as i64)),
-//RS         (CtValue::Map(m), "is_empty") => Ok(CtValue::Bool(m.is_empty())),
-//RS         (CtValue::Map(m), "has_key") => {
-//RS             let k = CtKey::from_value(args.into_iter().next().unwrap_or(CtValue::Unit))
-//RS                 .ok_or_else(|| unsupported("this map key type", span))?;
-//RS             Ok(CtValue::Bool(m.contains_key(&k)))
-//RS         }
-//RS         (CtValue::Map(m), "get") => {
-//RS             let k = CtKey::from_value(args.into_iter().next().unwrap_or(CtValue::Unit))
-//RS                 .ok_or_else(|| unsupported("this map key type", span))?;
-//RS             Ok(match m.get(&k) {
-//RS                 Some(v) => CtValue::Present(Box::new(v.clone())),
-//RS                 None => CtValue::absent(Type::Int),
-//RS             })
-//RS         }
-//RS         (CtValue::Map(m), "keys") => Ok(CtValue::List(m.keys().map(|k| k.to_value()).collect())),
-//RS         (CtValue::Map(m), "values") => Ok(CtValue::List(m.values().cloned().collect())),
-//RS         // D-MAP-MERGE1=E: right wins when conflict omitted.
-//RS         (CtValue::Map(left), "merge") => {
-//RS             let other = args.first().cloned().unwrap_or(CtValue::Unit);
-//RS             let CtValue::Map(right) = other else {
-//RS                 return Err(unsupported("Map.merge other must be a map", span));
-//RS             };
-//RS             if args.len() >= 2 {
-//RS                 return Err(unsupported(
-//RS                     "Map.merge conflict callback at compile time",
-//RS                     span,
-//RS                 ));
-//RS             }
-//RS             let mut out = left.clone();
-//RS             for (k, v) in right {
-//RS                 out.insert(k, v);
-//RS             }
-//RS             Ok(CtValue::Map(out))
-//RS         }
-//RS         (CtValue::Map(m), "copy") => Ok(CtValue::Map(m.clone())),
-//RS         (CtValue::Map(m), "equal") => {
-//RS             let Some(CtValue::Map(other)) = args.into_iter().next() else {
-//RS                 return Err(unsupported("equal needs a map", span));
-//RS             };
-//RS             Ok(CtValue::Bool(map_values_equal(m, &other)))
-//RS         }
-//RS         (CtValue::Map(m), "first") => Ok(match m.keys().next() {
-//RS             Some(k) => CtValue::Present(Box::new(k.to_value())),
-//RS             None => CtValue::absent(Type::Int),
-//RS         }),
-//RS         (CtValue::Map(m), "to_list") => Ok(CtValue::List(
-//RS             m.iter()
-//RS                 .map(|(k, v)| CtValue::Struct {
-//RS                     type_name: String::new(),
-//RS                     fields: vec![("key".into(), k.to_value()), ("value".into(), v.clone())],
-//RS                 })
-//RS                 .collect(),
-//RS         )),
-//RS         (CtValue::Map(m), "top_n") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
-//RS             if n == 0 {
-//RS                 return Ok(CtValue::List(Vec::new()));
-//RS             }
-//RS             let mut entries = m.iter().collect::<Vec<_>>();
-//RS             if let Some((_, first_value)) = entries.first() {
-//RS                 cmp_for_sort_ref(first_value, first_value, span)?;
-//RS                 for (_, value) in entries.iter().skip(1) {
-//RS                     cmp_for_sort_ref(first_value, value, span)?;
-//RS                 }
-//RS             }
-//RS             let mut sort_error = None;
-//RS             entries.sort_by(|(left_key, left_value), (right_key, right_value)| {
-//RS                 match cmp_for_sort_ref(right_value, left_value, span) {
-//RS                     Ok(order) => order.then_with(|| left_key.cmp(right_key)),
-//RS                     Err(error) => {
-//RS                         sort_error.get_or_insert(error);
-//RS                         std::cmp::Ordering::Equal
-//RS                     }
-//RS                 }
-//RS             });
-//RS             if let Some(error) = sort_error {
-//RS                 return Err(error);
-//RS             }
-//RS             Ok(CtValue::List(
-//RS                 entries
-//RS                     .into_iter()
-//RS                     .take(n)
-//RS                     .map(|(key, value)| CtValue::Struct {
-//RS                         type_name: String::new(),
-//RS                         fields: vec![
-//RS                             ("key".into(), key.to_value()),
-//RS                             ("value".into(), value.clone()),
-//RS                         ],
-//RS                     })
-//RS                     .collect(),
-//RS             ))
-//RS         }
-//RS         (CtValue::Map(m), "min") => Ok(match extreme_ref(m.values(), false, span)? {
-//RS             Some(min) => CtValue::Present(Box::new(min.clone())),
-//RS             None => CtValue::absent(Type::Int),
-//RS         }),
-//RS         (CtValue::Map(m), "max") => Ok(match extreme_ref(m.values(), true, span)? {
-//RS             Some(max) => CtValue::Present(Box::new(max.clone())),
-//RS             None => CtValue::absent(Type::Int),
-//RS         }),
-//RS         (CtValue::Map(m), "intersection") => {
-//RS             let Some(CtValue::Map(other)) = args.into_iter().next() else {
-//RS                 return Err(unsupported("intersection needs a map", span));
-//RS             };
-//RS             let mut out = std::collections::BTreeMap::new();
-//RS             for (k, v) in m.iter() {
-//RS                 if other.contains_key(k) {
-//RS                     out.insert(k.clone(), v.clone());
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::Map(out))
-//RS         }
-//RS         (CtValue::Map(m), "slice") => {
-//RS             let Some(CtValue::List(keys)) = args.into_iter().next() else {
-//RS                 return Err(unsupported("slice needs key list", span));
-//RS             };
-//RS             let mut out = std::collections::BTreeMap::new();
-//RS             for k in keys {
-//RS                 let key = CtKey::from_value(k).ok_or_else(|| unsupported("map key", span))?;
-//RS                 if let Some(v) = m.get(&key) {
-//RS                     out.insert(key, v.clone());
-//RS                 }
-//RS             }
-//RS             Ok(CtValue::Map(out))
-//RS         }
-//RS         (CtValue::Map(m), "contains_value") => {
-//RS             let needle = args.into_iter().next().unwrap_or(CtValue::Unit);
-//RS             Ok(CtValue::Bool(m.values().any(|v| v == &needle)))
-//RS         }
-//RS         (CtValue::Map(m), "pop_first") => {
-//RS             let Some(key) = m.keys().next().cloned() else {
-//RS                 return Ok(CtValue::absent(Type::Int));
-//RS             };
-//RS             // Comp-time maps are immutable values; pop_first returns the first value without mutating.
-//RS             Ok(match m.get(&key) {
-//RS                 Some(v) => CtValue::Present(Box::new(v.clone())),
-//RS                 None => CtValue::absent(Type::Int),
-//RS             })
-//RS         }
-//RS 
-//RS         // String (char-counted per S41)
-//RS         (CtValue::Str(s), "len") => Ok(CtValue::Int(s.chars().count() as i64)),
-//RS         (CtValue::Str(s), "count_bytes") => Ok(CtValue::Int(s.len() as i64)),
-//RS         (CtValue::Str(s), "is_empty") => Ok(CtValue::Bool(s.is_empty())),
-//RS         (CtValue::Str(s), "to_upper") => Ok(CtValue::Str(super::TextLite::upper(s))),
-//RS         (CtValue::Str(s), "to_lower") => Ok(CtValue::Str(super::TextLite::lower(s))),
-//RS         (CtValue::Str(s), "trim") => Ok(CtValue::Str(super::TextLite::trim(s))),
-//RS         (CtValue::Str(s), "trim_start") => Ok(CtValue::Str(super::TextLite::trim_start(s))),
-//RS         (CtValue::Str(s), "trim_end") => Ok(CtValue::Str(super::TextLite::trim_end(s))),
-//RS         (CtValue::Str(s), "pad_start") => {
-//RS             let (Some(CtValue::Int(width)), Some(CtValue::Str(fill))) = (args.first(), args.get(1))
-//RS             else {
-//RS                 return Err(unsupported(
-//RS                     "pad_start requires an Int width and text fill",
-//RS                     span,
-//RS                 ));
-//RS             };
-//RS             Ok(CtValue::Str(super::TextLite::pad_start(s, *width, fill)))
-//RS         }
-//RS         (CtValue::Str(s), "pad_end") => {
-//RS             let (Some(CtValue::Int(width)), Some(CtValue::Str(fill))) = (args.first(), args.get(1))
-//RS             else {
-//RS                 return Err(unsupported(
-//RS                     "pad_end requires an Int width and text fill",
-//RS                     span,
-//RS                 ));
-//RS             };
-//RS             Ok(CtValue::Str(super::TextLite::pad_end(s, *width, fill)))
-//RS         }
-//RS         (CtValue::Str(s), "index_of") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(needle)) => Ok(match s.find(&needle) {
-//RS                 Some(byte) => {
-//RS                     CtValue::Present(Box::new(CtValue::Int(s[..byte].chars().count() as i64)))
-//RS                 }
-//RS                 None => CtValue::absent(Type::Int),
-//RS             }),
-//RS             _ => Err(unsupported("index_of with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "count") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(needle)) => {
-//RS                 if needle.is_empty() {
-//RS                     return Ok(CtValue::Int(0));
-//RS                 }
-//RS                 let mut rest = s.as_str();
-//RS                 let mut count = 0i64;
-//RS                 while let Some(at) = rest.find(&needle) {
-//RS                     count += 1;
-//RS                     rest = &rest[at + needle.len()..];
-//RS                 }
-//RS                 Ok(CtValue::Int(count))
-//RS             }
-//RS             _ => Err(unsupported("count with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "is_alphabetic") => Ok(CtValue::Bool(super::TextLite::is_alphabetic(s))),
-//RS         (CtValue::Str(s), "is_numeric") => Ok(CtValue::Bool(super::TextLite::is_numeric(s))),
-//RS         (CtValue::Str(s), "is_whitespace") => Ok(CtValue::Bool(super::TextLite::is_whitespace(s))),
-//RS         (CtValue::Str(s), "is_ascii") => Ok(CtValue::Bool(s.is_ascii())),
-//RS         (CtValue::Str(s), "to_title") => Ok(CtValue::Str(super::TextLite::title(s))),
-//RS         (CtValue::Str(s), "is_lower") => Ok(CtValue::Bool(super::TextLite::is_lower(s))),
-//RS         (CtValue::Str(s), "is_upper") => Ok(CtValue::Bool(super::TextLite::is_upper(s))),
-//RS         (CtValue::Str(s), "capitalize") => Ok(CtValue::Str(super::TextLite::capitalize(s))),
-//RS         (CtValue::Str(s), "swapcase") => Ok(CtValue::Str(super::TextLite::swapcase(s))),
-//RS         (CtValue::Str(s), "copy") => Ok(CtValue::Str(s.clone())),
-//RS         (CtValue::Str(s), "reverse") => Ok(CtValue::Str(super::TextLite::reverse(s))),
-//RS         (CtValue::Str(s), "normalize") => Ok(CtValue::Str(super::TextLite::nfc(s))),
-//RS         (CtValue::Str(s), "remove_prefix") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(prefix)) => {
-//RS                 Ok(CtValue::Str(super::TextLite::remove_prefix(s, &prefix)))
-//RS             }
-//RS             _ => Err(unsupported("remove_prefix with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "remove_suffix") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(suffix)) => {
-//RS                 Ok(CtValue::Str(super::TextLite::remove_suffix(s, &suffix)))
-//RS             }
-//RS             _ => Err(unsupported("remove_suffix with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "last_index_of") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(needle)) => Ok(match s.rfind(&needle) {
-//RS                 Some(byte) => {
-//RS                     CtValue::Present(Box::new(CtValue::Int(s[..byte].chars().count() as i64)))
-//RS                 }
-//RS                 None => CtValue::absent(Type::Int),
-//RS             }),
-//RS             _ => Err(unsupported("last_index_of with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "compare") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(other)) => Ok(CtValue::Int(super::TextLite::compare(s, &other))),
-//RS             _ => Err(unsupported("compare with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "equal") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(other)) => Ok(CtValue::Bool(s == other.as_str())),
-//RS             _ => Err(unsupported("equal with a non-text argument", span)),
-//RS         },
-//RS         // D-STR-DECLINE1=C: `matches`/`match` — the same shared regex kernel
-//RS         // `core.regex.compile`/`is_match`/`find` already run (`regex_is_match`/
-//RS         // `regex_find` in Methods/core_calls.rs), composed for a String receiver.
-//RS         (CtValue::Str(s), "matches") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(pattern)) => {
-//RS                 Ok(match super::regex_kernel::JetRegex::parse(&pattern) {
-//RS                     Ok(re) => CtValue::Present(Box::new(CtValue::Bool(re.is_match(s)))),
-//RS                     Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
-//RS                 })
-//RS             }
-//RS             _ => Err(unsupported("matches with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "match") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(pattern)) => {
-//RS                 Ok(match super::regex_kernel::JetRegex::parse(&pattern) {
-//RS                     Ok(re) => CtValue::Present(Box::new(match re.find(s).ok() {
-//RS                         Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
-//RS                         None => CtValue::absent(Type::String),
-//RS                     })),
-//RS                     Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
-//RS                 })
-//RS             }
-//RS             _ => Err(unsupported("match with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "rsplit") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(sep)) => {
-//RS                 let parts = if sep.is_empty() {
-//RS                     s.split(sep.as_str())
-//RS                         .map(|p| p.to_string())
-//RS                         .collect::<Vec<_>>()
-//RS                 } else {
-//RS                     let mut parts: Vec<String> =
-//RS                         s.rsplit(sep.as_str()).map(|p| p.to_string()).collect();
-//RS                     parts.reverse();
-//RS                     parts
-//RS                 };
-//RS                 Ok(CtValue::List(parts.into_iter().map(CtValue::Str).collect()))
-//RS             }
-//RS             _ => Err(unsupported("rsplit with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "split_once") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(sep)) => Ok(match s.find(&sep) {
-//RS                 Some(at) => CtValue::Present(Box::new(CtValue::Struct {
-//RS                     type_name: "(before,after)".to_string(),
-//RS                     fields: vec![
-//RS                         ("before".to_string(), CtValue::Str(s[..at].to_string())),
-//RS                         (
-//RS                             "after".to_string(),
-//RS                             CtValue::Str(s[at + sep.len()..].to_string()),
-//RS                         ),
-//RS                     ],
-//RS                 })),
-//RS                 None => CtValue::absent(Type::Tuple(vec![
-//RS                     ("before".to_string(), Box::new(Type::String)),
-//RS                     ("after".to_string(), Box::new(Type::String)),
-//RS                 ])),
-//RS             }),
-//RS             _ => Err(unsupported("split_once with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "cut_last") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(sep)) => Ok(match s.rfind(&sep) {
-//RS                 Some(at) => CtValue::Present(Box::new(CtValue::Struct {
-//RS                     type_name: "(before,after)".to_string(),
-//RS                     fields: vec![
-//RS                         ("before".to_string(), CtValue::Str(s[..at].to_string())),
-//RS                         (
-//RS                             "after".to_string(),
-//RS                             CtValue::Str(s[at + sep.len()..].to_string()),
-//RS                         ),
-//RS                     ],
-//RS                 })),
-//RS                 None => CtValue::absent(Type::Tuple(vec![
-//RS                     ("before".to_string(), Box::new(Type::String)),
-//RS                     ("after".to_string(), Box::new(Type::String)),
-//RS                 ])),
-//RS             }),
-//RS             _ => Err(unsupported("cut_last with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "contains") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(n)) => Ok(CtValue::Bool(super::CollectionEval::string_contains(
-//RS                 s,
-//RS                 n.as_str(),
-//RS             ))),
-//RS             _ => Err(unsupported("contains with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "starts_with") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(n)) => Ok(CtValue::Bool(s.starts_with(&n))),
-//RS             _ => Err(unsupported("starts_with with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "ends_with") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(n)) => Ok(CtValue::Bool(s.ends_with(&n))),
-//RS             _ => Err(unsupported("ends_with with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "after") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(sep)) => Ok(CtValue::Str(match s.find(&sep) {
-//RS                 Some(i) => s[i + sep.len()..].to_string(),
-//RS                 None => s.clone(),
-//RS             })),
-//RS             _ => Err(unsupported("after with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "before") => match args.into_iter().next() {
-//RS             Some(CtValue::Str(sep)) => Ok(CtValue::Str(match s.find(&sep) {
-//RS                 Some(i) => s[..i].to_string(),
-//RS                 None => s.clone(),
-//RS             })),
-//RS             _ => Err(unsupported("before with a non-text argument", span)),
-//RS         },
-//RS         (CtValue::Str(s), "bytes") => Ok(CtValue::List(
-//RS             s.as_bytes()
-//RS                 .iter()
-//RS                 .map(|byte| CtValue::Int(i64::from(*byte)))
-//RS                 .collect(),
-//RS         )),
-//RS         (CtValue::Str(s), "slice") => {
-//RS             let mut args = args.into_iter();
-//RS             let a = match args.next() {
-//RS                 Some(CtValue::Int(n)) => n,
-//RS                 _ => return Err(unsupported("slice with a non-Int start", span)),
-//RS             };
-//RS             let b = match args.next() {
-//RS                 Some(CtValue::Int(n)) => n,
-//RS                 _ => return Err(unsupported("slice with a non-Int end", span)),
-//RS             };
-//RS             let chars = s.chars().collect::<Vec<_>>();
-//RS             let len = chars.len() as i64;
-//RS             if a < 0 || b < 0 || a > b || b > len {
-//RS                 return Err(comptime_panic(
-//RS                     &format!("can't slice {len} characters from {a} to {b} (exclusive)"),
-//RS                     span,
-//RS                 ));
-//RS             }
-//RS             Ok(CtValue::Str(
-//RS                 chars[a as usize..b as usize].iter().collect(),
-//RS             ))
-//RS         }
-//RS         (CtValue::Str(s), "repeat") => {
-//RS             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-//RS             Ok(CtValue::Str(s.repeat(n.max(0) as usize)))
-//RS         }
-//RS         (CtValue::Str(s), "replace") => {
-//RS             let mut it = args.into_iter();
-//RS             match (it.next(), it.next()) {
-//RS                 (Some(CtValue::Str(from)), Some(CtValue::Str(to))) => {
-//RS                     Ok(CtValue::Str(s.replace(&from, &to)))
-//RS                 }
-//RS                 _ => Err(unsupported("replace with non-text arguments", span)),
-//RS             }
-//RS         }
-//RS         (CtValue::Str(s), "split") => {
-//RS             let sep = match args.into_iter().next() {
-//RS                 Some(CtValue::Str(s)) => s,
-//RS                 _ => String::new(),
-//RS             };
-//RS             Ok(CtValue::List(
-//RS                 s.split(&sep).map(|p| CtValue::Str(p.to_string())).collect(),
-//RS             ))
-//RS         }
-//RS         (CtValue::Str(s), "chars") => Ok(CtValue::List(s.chars().map(CtValue::Char).collect())),
-//RS         // c97/D-STRPARSE1: `.lines()` — split on `\n`, stripping `\r\n` too (mirrors runtime).
-//RS         (CtValue::Str(s), "lines") => Ok(CtValue::List(
-//RS             s.lines().map(|l| CtValue::Str(l.to_string())).collect(),
-//RS         )),
-//RS         // D-METAREFLECT1=B: `.reflect()` on a TypeInfo struct is identity.
-//RS         (CtValue::Struct { type_name, .. }, "reflect") if type_name == "TypeInfo" => {
-//RS             Ok(recv.clone())
-//RS         }
-//RS         (CtValue::Struct { type_name, fields }, "types")
-//RS             if type_name == crate::Syntax::TYPE_PROGRAM_INFO =>
-//RS         {
-//RS             program_info_list(fields, "types", span)
-//RS         }
-//RS         (CtValue::Struct { type_name, fields }, method)
-//RS             if type_name == crate::Syntax::TYPE_PROGRAM_INFO
-//RS                 && matches!(
-//RS                     method,
-//RS                     "functions"
-//RS                         | "packages"
-//RS                         | "definitions"
-//RS                         | "references"
-//RS                         | "call_edges"
-//RS                         | "structural_nodes"
-//RS                 ) =>
-//RS         {
-//RS             program_info_list(fields, method, span)
-//RS         }
-//RS         // D-FRONTENDAPI1=A: compiler result methods are projections over the
-//RS         // immutable value returned by `core.compiler`; they never re-run or
-//RS         // mutate a front-end query.
-//RS         (CtValue::Struct { type_name, fields }, method)
-//RS             if matches!(
-//RS                 type_name.as_str(),
-//RS                 "CompilerLexed"
-//RS                     | "CompilerSyntaxTree"
-//RS                     | "CompilerChecked"
-//RS                     | "CompilerSourceMap"
-//RS                     | "CompilerPackageError"
-//RS                     | "CompilerDependency"
-//RS                     | "CompilerPackageTarget"
-//RS                     | "CompilerPackageOutput"
-//RS                     | "CompilerBuildProfile"
-//RS                     | "CompilerManifest"
-//RS                     | "CompilerPackage"
-//RS                     | "CompilerLockedPackage"
-//RS                     | "CompilerLock"
-//RS                     | "CompilerKeyValue"
-//RS                     | "CompilerProfile"
-//RS                     | "CompilerProfileSet"
-//RS             ) =>
-//RS         {
-//RS             Ok(fields
-//RS                 .iter()
-//RS                 .find(|(name, _)| name == method)
-//RS                 .map(|(_, value)| value.clone())
-//RS                 .unwrap_or_else(|| CtValue::List(Vec::new())))
-//RS         }
-//RS         (CtValue::Struct { type_name, fields }, "has_method") if type_name == "TypeInfo" => {
-//RS             let needle = match args.first() {
-//RS                 Some(CtValue::Str(value)) => value,
-//RS                 _ => return Err(unsupported("`has_method` requires a string", span)),
-//RS             };
-//RS             let found = fields.iter().find(|(name, _)| name == "methods").and_then(|(_, value)| match value { CtValue::List(values) => Some(values), _ => None }).is_some_and(|values| values.iter().any(|value| matches!(value, CtValue::Struct { fields, .. } if fields.iter().any(|(name, value)| name == "name" && matches!(value, CtValue::Str(actual) if actual == needle)))));
-//RS             Ok(CtValue::Bool(found))
-//RS         }
-//RS         (CtValue::Struct { type_name, fields }, "implements") if type_name == "TypeInfo" => {
-//RS             let needle = match args.first() {
-//RS                 Some(CtValue::Str(value)) => value,
-//RS                 _ => return Err(unsupported("`implements` requires a string", span)),
-//RS             };
-//RS             let found = fields
-//RS                 .iter()
-//RS                 .find(|(name, _)| name == "implements")
-//RS                 .and_then(|(_, value)| match value {
-//RS                     CtValue::List(values) => Some(values),
-//RS                     _ => None,
-//RS                 })
-//RS                 .is_some_and(|values| {
-//RS                     values
-//RS                         .iter()
-//RS                         .any(|value| matches!(value, CtValue::Str(actual) if actual == needle))
-//RS                 });
-//RS             Ok(CtValue::Bool(found))
-//RS         }
-//RS         (CtValue::Struct { type_name, fields }, "reaches_panic") if type_name == "FunctionInfo" => {
-//RS             Ok(fields
-//RS                 .iter()
-//RS                 .find(|(name, _)| name == "reaches_panic")
-//RS                 .map(|(_, value)| value.clone())
-//RS                 .unwrap_or(CtValue::Bool(false)))
-//RS         }
-//RS         (CtValue::Struct { type_name, fields }, "has") if type_name == "EffectInfo" => {
-//RS             let needle = match args.first() {
-//RS                 Some(CtValue::Str(value)) => value,
-//RS                 _ => return Err(unsupported("`has` requires a string", span)),
-//RS             };
-//RS             let found = fields
-//RS                 .iter()
-//RS                 .find(|(name, _)| name == "values")
-//RS                 .and_then(|(_, value)| match value {
-//RS                     CtValue::List(values) => Some(values),
-//RS                     _ => None,
-//RS                 })
-//RS                 .is_some_and(|values| {
-//RS                     values
-//RS                         .iter()
-//RS                         .any(|value| matches!(value, CtValue::Str(actual) if actual == needle))
-//RS                 });
-//RS             Ok(CtValue::Bool(found))
-//RS         }
-//RS         // D-METAREFLECT1 / D-REFLECT1: `.has_marker(name)` on reflected member handles.
-//RS         (CtValue::Struct { type_name, fields }, "has_marker")
-//RS             if matches!(type_name.as_str(), "FieldInfo" | "MethodInfo" | "TypeInfo") =>
-//RS         {
-//RS             let needle = match args.into_iter().next() {
-//RS                 Some(CtValue::Str(s)) => s,
-//RS                 _ => return Err(unsupported("`has_marker` requires a string argument", span)),
-//RS             };
-//RS             if let Some((_, CtValue::List(markers))) = fields.iter().find(|(n, _)| n == "markers") {
-//RS                 let found = markers.iter().any(|m| match m {
-//RS                     CtValue::Str(name) => *name == needle,
-//RS                     CtValue::Struct { fields, .. } => fields.iter().any(|(field, value)| {
-//RS                         field == "name" && matches!(value, CtValue::Str(name) if *name == needle)
-//RS                     }),
-//RS                     _ => false,
-//RS                 });
-//RS                 return Ok(CtValue::Bool(found));
-//RS             }
-//RS             Ok(CtValue::Bool(false))
-//RS         }
-//RS         (CtValue::Struct { type_name, fields }, method)
-//RS             if type_name == "Match"
-//RS                 && matches!(
-//RS                     method,
-//RS                     "group"
-//RS                         | "name"
-//RS                         | "start"
-//RS                         | "end"
-//RS                         | "group_start"
-//RS                         | "group_end"
-//RS                         | "named_captures"
-//RS                 ) =>
-//RS         {
-//RS             let list_field = |name: &str| {
-//RS                 fields
-//RS                     .iter()
-//RS                     .find(|(field, _)| field == name)
-//RS                     .and_then(|(_, value)| match value {
-//RS                         CtValue::List(items) => Some(items.as_slice()),
-//RS                         _ => None,
-//RS                     })
-//RS             };
-//RS             let index = || {
-//RS                 as_int(args.first().unwrap_or(&CtValue::Int(0)), span)
-//RS                     .ok()
-//RS                     .and_then(|value| usize::try_from(value).ok())
-//RS             };
-//RS             let span_value = |index: usize, field: &str| {
-//RS                 list_field("spans")
-//RS                     .and_then(|spans| spans.get(index))
-//RS                     .and_then(|value| match value {
-//RS                         CtValue::Present(value) => Some(value.as_ref()),
-//RS                         _ => None,
-//RS                     })
-//RS                     .and_then(|value| match value {
-//RS                         CtValue::Struct { fields, .. } => fields
-//RS                             .iter()
-//RS                             .find_map(|(name, value)| (name == field).then_some(value)),
-//RS                         _ => None,
-//RS                     })
-//RS                     .and_then(|value| match value {
-//RS                         CtValue::Int(value) => Some(*value),
-//RS                         _ => None,
-//RS                     })
-//RS             };
-//RS             match method {
-//RS                 "group" => Ok(index()
-//RS                     .and_then(|index| list_field("groups")?.get(index).cloned())
-//RS                     .unwrap_or_else(|| CtValue::absent(crate::AST::Type::String))),
-//RS                 "name" => {
-//RS                     let name = as_string(
-//RS                         args.first()
-//RS                             .ok_or_else(|| unsupported("Match.name argument", span))?,
-//RS                         span,
-//RS                     )?;
-//RS                     let found = list_field("names")
-//RS                         .and_then(|names| {
-//RS                             names.iter().position(|value| {
-//RS                                 matches!(
-//RS                                     value,
-//RS                                     CtValue::Present(value)
-//RS                                         if matches!(value.as_ref(), CtValue::Str(item) if item == name)
-//RS                                 )
-//RS                             })
-//RS                         })
-//RS                         .and_then(|index| list_field("groups")?.get(index).cloned());
-//RS                     Ok(found.unwrap_or_else(|| CtValue::absent(crate::AST::Type::String)))
-//RS                 }
-//RS                 "start" => Ok(CtValue::Int(span_value(0, "start").unwrap_or(-1))),
-//RS                 "end" => Ok(CtValue::Int(span_value(0, "end").unwrap_or(-1))),
-//RS                 "named_captures" => {
-//RS                     let groups = list_field("groups").unwrap_or_default();
-//RS                     Ok(CtValue::List(
-//RS                         list_field("names")
-//RS                             .unwrap_or_default()
-//RS                             .iter()
-//RS                             .enumerate()
-//RS                             .filter_map(|(index, name)| {
-//RS                                 let CtValue::Present(name) = name else {
-//RS                                     return None;
-//RS                                 };
-//RS                                 let CtValue::Str(name) = name.as_ref() else {
-//RS                                     return None;
-//RS                                 };
-//RS                                 let CtValue::Present(value) = groups.get(index)? else {
-//RS                                     return None;
-//RS                                 };
-//RS                                 let CtValue::Str(value) = value.as_ref() else {
-//RS                                     return None;
-//RS                                 };
-//RS                                 Some(CtValue::List(vec![
-//RS                                     CtValue::Str(name.clone()),
-//RS                                     CtValue::Str(value.clone()),
-//RS                                 ]))
-//RS                             })
-//RS                             .collect(),
-//RS                     ))
-//RS                 }
-//RS                 "group_start" | "group_end" => {
-//RS                     let field = if method == "group_start" {
-//RS                         "start"
-//RS                     } else {
-//RS                         "end"
-//RS                     };
-//RS                     Ok(index()
-//RS                         .and_then(|index| span_value(index, field))
-//RS                         .map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
-//RS                         .unwrap_or_else(|| CtValue::absent(crate::AST::Type::Int)))
-//RS                 }
-//RS                 _ => unreachable!("guarded Match method"),
-//RS             }
-//RS         }
-//RS         (
-//RS             CtValue::Enum {
-//RS                 type_name, variant, ..
-//RS             },
-//RS             method,
-//RS         ) if type_name == "Loadable"
-//RS             && matches!(method, "is_idle" | "is_loading" | "is_loaded" | "is_failed") =>
-//RS         {
-//RS             let actual = match variant.as_str() {
-//RS                 "Idle" => loadable_semantics::JET_LOADABLE_IDLE,
-//RS                 "Loading" => loadable_semantics::JET_LOADABLE_LOADING,
-//RS                 "Loaded" => loadable_semantics::JET_LOADABLE_LOADED,
-//RS                 "Failed" => loadable_semantics::JET_LOADABLE_FAILED,
-//RS                 _ => u8::MAX,
-//RS             };
-//RS             let expected = match method {
-//RS                 "is_idle" => loadable_semantics::JET_LOADABLE_IDLE,
-//RS                 "is_loading" => loadable_semantics::JET_LOADABLE_LOADING,
-//RS                 "is_loaded" => loadable_semantics::JET_LOADABLE_LOADED,
-//RS                 _ => loadable_semantics::JET_LOADABLE_FAILED,
-//RS             };
-//RS             Ok(CtValue::Bool(loadable_semantics::jet_loadable_is_tag(
-//RS                 actual, expected,
-//RS             )))
-//RS         }
-//RS         (
-//RS             CtValue::Enum {
-//RS                 type_name,
-//RS                 variant,
-//RS                 args,
-//RS             },
-//RS             "loaded",
-//RS         ) if type_name == "Loadable" => {
-//RS             let tag = match variant.as_str() {
-//RS                 "Idle" => loadable_semantics::JET_LOADABLE_IDLE,
-//RS                 "Loading" => loadable_semantics::JET_LOADABLE_LOADING,
-//RS                 "Loaded" => loadable_semantics::JET_LOADABLE_LOADED,
-//RS                 "Failed" => loadable_semantics::JET_LOADABLE_FAILED,
-//RS                 _ => u8::MAX,
-//RS             };
-//RS             Ok(if loadable_semantics::jet_loadable_has_value(tag) {
-//RS                 args.first()
-//RS                     .map(|(_, value)| CtValue::Present(Box::new(value.clone())))
-//RS                     .unwrap_or_else(|| CtValue::absent(crate::AST::Type::Named("Unit".to_string())))
-//RS             } else {
-//RS                 CtValue::absent(crate::AST::Type::Named("Unit".to_string()))
-//RS             })
-//RS         }
-//RS         (
-//RS             CtValue::Enum {
-//RS                 type_name,
-//RS                 variant,
-//RS                 args: values,
-//RS             },
-//RS             "or_else",
-//RS         ) if type_name == "Loadable" => {
-//RS             let tag = match variant.as_str() {
-//RS                 "Idle" => loadable_semantics::JET_LOADABLE_IDLE,
-//RS                 "Loading" => loadable_semantics::JET_LOADABLE_LOADING,
-//RS                 "Loaded" => loadable_semantics::JET_LOADABLE_LOADED,
-//RS                 "Failed" => loadable_semantics::JET_LOADABLE_FAILED,
-//RS                 _ => u8::MAX,
-//RS             };
-//RS             if loadable_semantics::jet_loadable_has_value(tag) {
-//RS                 Ok(values
-//RS                     .first()
-//RS                     .map(|(_, value)| value.clone())
-//RS                     .unwrap_or(CtValue::Unit))
-//RS             } else {
-//RS                 args.into_iter()
-//RS                     .next()
-//RS                     .ok_or_else(|| unsupported("`Loadable.or_else` requires a default", span))
-//RS             }
-//RS         }
-//RS         (CtValue::Struct { type_name, fields }, "now")
-//RS             if type_name == crate::Syntax::CLOCK_TYPE =>
-//RS         {
-//RS             Ok(fields
-//RS                 .iter()
-//RS                 .find(|(n, _)| n == "now")
-//RS                 .map(|(_, v)| v.clone())
-//RS                 .unwrap_or(CtValue::Int(0)))
-//RS         }
-//RS         (CtValue::Struct { type_name, fields }, "in")
-//RS             if type_name == crate::Syntax::DURATION_TYPE =>
-//RS         {
-//RS             // D-TIMERES1=A: Duration stores whole nanoseconds.
-//RS             let ns = fields
-//RS                 .iter()
-//RS                 .find_map(|(name, value)| match (name.as_str(), value) {
-//RS                     ("ns", CtValue::Int(value)) => Some(*value),
-//RS                     _ => None,
-//RS                 })
-//RS                 .unwrap_or(0);
-//RS             let unit = match args.first() {
-//RS                 Some(CtValue::Enum {
-//RS                     type_name, variant, ..
-//RS                 }) if type_name == crate::Syntax::DURATION_UNIT_TYPE => variant.as_str(),
-//RS                 Some(CtValue::Int(index)) => crate::Syntax::DURATION_UNITS
-//RS                     .get(usize::try_from(*index).ok().unwrap_or(usize::MAX))
-//RS                     .copied()
-//RS                     .ok_or_else(|| unsupported("Duration.in expects a DurationUnit", span))?,
-//RS                 _ => return Err(unsupported("Duration.in expects a DurationUnit", span)),
-//RS             };
-//RS             let scale = match unit {
-//RS                 "Nanoseconds" => 1_i64,
-//RS                 "Microseconds" => 1_000,
-//RS                 "Milliseconds" => 1_000_000,
-//RS                 "Seconds" => 1_000_000_000,
-//RS                 "Minutes" => 60_000_000_000,
-//RS                 "Hours" => 3_600_000_000_000,
-//RS                 _ => return Err(unsupported("this duration unit", span)),
-//RS             };
-//RS             Ok(CtValue::Present(Box::new(CtValue::Int(
-//RS                 duration_semantics::jet_duration_kernel_in(ns, scale),
-//RS             ))))
-//RS         }
-//RS         _ => Err(unsupported(
-//RS             &format!("the method `.{}` at compile time", method),
-//RS             span,
-//RS         )),
-//RS     }
-//RS }
-// END-PORT-PENDING 0572 crates/jet-comptime/src/Comptime/Builtins.rs:1642-3244
+use jet_foundation.[CtValue, CtFloat, CtReport, CtKey, CtMapEntry, NamedCtValue, CtEnumArg, Type, Span, Diagnostic, BinOp]
+use jet_comptime.Builtins.[apply_authority_method, exact_big, exact_int_value, carrier_fact, is_datatree, datatree_payload, datatree_failure, datatree_render, program_info_list, cmp, cmp_ref, cmp_for_sort_ref, extreme_ref, list_values_equal, map_values_equal, as_int, as_string]
+use jet_comptime.[TextLite, MathLayout, Methods, CollectionEval, SyncLite, regex_kernel]
+use jet_comptime.Numeric.[CtBigInt]
+use jet_foundation.[range_semantics, loadable_semantics, duration_semantics]
 
+// The canonical AST map carrier is an ordered entry vector. Index once for
+// Rust BTreeMap operations, and sort keys once when publishing the carrier.
+// GATE #4499: CtKey equality/hash/order must retain composite-key semantics.
+fn prelude_method_map(entries: &[CtMapEntry]) -> [CtKey:CtValue] Never! {
+    out := [CtKey:CtValue]{}
+    loop entry in entries { out[entry.key] = entry.value }
+    out
+}
+fn prelude_method_map_value(entries: [CtKey:CtValue]) -> CtValue Never! {
+    keys := entries.keys().to_list()
+    keys.sort()
+    out := [CtMapEntry]{}
+    loop key in keys { out.push(CtMapEntry{key: key, value: entries[key]}) }
+    CtValue.Map{entries: ^out}
+}
+fn prelude_method_field(fields: &[NamedCtValue], name: String) -> CtValue? {
+    loop field in fields { if field.name == name -> return Val(field.value) }
+    None
+}
+fn prelude_method_list_field(fields: &[NamedCtValue], name: String) -> [CtValue]? {
+    value :: prelude_method_field(fields, name) ?? return None
+    if value == { .List(items) -> Val(items) else -> None }
+}
+fn prelude_method_arg(args: &[CtValue], index: Int, fallback: CtValue) -> CtValue Never! {
+    if index < args.len() -> args[index] else -> fallback
+}
+fn prelude_method_present(value: CtValue) -> CtValue Never! { CtValue.Present{value: ^value} }
+fn prelude_method_absent(ty: Type) -> CtValue Never! { CtValue.Failed{report: CtReport.Clean{ty: ty}} }
+fn prelude_method_pair(name: String, a_name: String, a: CtValue, b_name: String, b: CtValue) -> CtValue Never! {
+    CtValue.Struct{type_name: name, fields: [NamedCtValue]{NamedCtValue{name: a_name, value: ^a}, NamedCtValue{name: b_name, value: ^b}}}
+}
+fn prelude_method_match_span(fields: &[NamedCtValue], index: Int, field: String) -> Int? {
+    spans :: prelude_method_list_field(fields, "spans") ?? return None
+    if index < 0 || index >= spans.len() -> return None
+    if spans[index] == {
+        .Present(value) -> if value == {
+            .Struct(_, members) -> {
+                value :: prelude_method_field(&members, field) ?? return None
+                if value == { .Int(n) -> Val(n) else -> None }
+            }
+            else -> None
+        }
+        else -> None
+    }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Builtins.rs:1642
+// Extends the canonical Routes/Prelude owner; no separate public dispatch table.
+pub fn apply_method(recv: &CtValue, method: String, args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    if apply_authority_method(recv, method, &args, span) == { Val(result) -> return result else -> {} }
+    if recv == {
+        .Enum(type_name, variant, enum_args) -> {
+            if type_name == jet_foundation.Syntax.TYPE_ORDERING && enum_args.is_empty() {
+                if method == {
+                    "reverse" -> if args.is_empty() {
+                        reversed :: if variant == { "Less" -> "Greater" "Greater" -> "Less" else -> "Equal" }
+                        return CtValue.Enum{type_name: type_name, variant: reversed, args: [CtEnumArg]{}}
+                    }
+                    "then" -> if args.len() == 1 {
+                        if args[0] == {
+                            .Enum(other_type, other_variant, other_args) -> {
+                                if other_type != jet_foundation.Syntax.TYPE_ORDERING || !other_args.is_empty() -> fail unsupported("Ordering.then needs an Ordering", span)
+                                return CtValue.Enum{type_name: type_name, variant: if variant == "Equal" -> other_variant else -> variant, args: [CtEnumArg]{}}
+                            }
+                            else -> fail unsupported("Ordering.then needs an Ordering", span)
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+        else -> {}
+    }
+    if recv == { .Str(s) -> if TextLite.string_route(s, method, &args) == { Val(value) -> return value else -> {} } else -> {} }
+    if MathLayout.apply_method(recv, method, &args, span) == { Val(result) -> return result else -> {} }
+    if Methods.apply_core_pure_method(recv, method, &args, span) == { Val(result) -> return result else -> {} }
+    if Methods.apply_regex_method(recv, method, &args, span) == { Val(result) -> return result else -> {} }
+    if Methods.apply_pool(recv, method, &args, span) == { Val(result) -> { (value, _) :: result!; return value } else -> {} }
+    if CollectionEval.apply_method(recv, method, &args, span) == { Val(result) -> return result else -> {} }
+
+    // Rust: crates/jet-comptime/src/Comptime/Builtins.rs:1718
+    if method == "to_radix" && (if recv == { .Int(_) | .BigInt(_) -> true else -> false }) {
+        if args.len() != 1 -> fail unsupported("Int.to_radix expects one radix", span)
+        radix_big :: exact_big(&args[0]) ?? fail unsupported("integer radix must fit in Int", span)
+        radix :: radix_big.try_i64() ?? fail unsupported("integer radix must fit in Int", span)
+        if radix < 0 || radix > 4294967295 -> fail unsupported("integer radix must be between 2 and 36, got {radix}", span)
+        number :: exact_big(recv).expect("whole-number radix receiver")
+        text :: number.to_radix(U32{radix}) catch message -> fail unsupported(message, span)
+        return CtValue.Str{value: text}
+    }
+    if method == {
+        "to_string" -> return CtValue.Str{value: recv.jet_show()}
+        "raw" | "clone" -> return recv.clone()
+        "or_err" -> if recv == {
+            .Present(payload) -> return prelude_method_present(payload.clone())
+            .Failed(.Clean(_)) -> {
+                if prelude_method_arg(&args, 0, CtValue.Unit) == {
+                    .Str(message) -> return CtValue.failed(CtValue.from_jet_err(&jet_foundation.Outcome.jet_err_from_message(message)))
+                    else -> fail unsupported("`.or_err` requires a string reason", span)
+                }
+            }
+            else -> {}
+        }
+        else -> {}
+    }
+    if method == jet_foundation.Syntax.FIELD_OUTCOME_PARTIAL || method == jet_foundation.Syntax.FIELD_OUTCOME_NOTES {
+        return carrier_fact(recv, method, method == jet_foundation.Syntax.FIELD_OUTCOME_NOTES) ?? fail unsupported("this middle state needs an error type that carries it", span)
+    }
+    if recv == {
+        .Enum(type_name, _, _) -> if type_name == "DataTree" || type_name == "TOML" || type_name == "YAML" || type_name == "CSV" {
+            if method == {
+                "to_text" -> return if SyncLite.datatree_to_text(recv) == { Val(text) -> prelude_method_present(CtValue.Str{value: text}) else -> prelude_method_absent(Type.String) }
+                "equal_unordered" -> {
+                    if args.is_empty() -> fail unsupported("`.equal_unordered` requires one DataTree argument", span)
+                    return CtValue.Bool{value: SyncLite.datatree_equal_unordered(recv, &args[0])}
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    if method == "zip" {
+        if recv == {
+            .Present(a) -> return if prelude_method_arg(&args, 0, CtValue.Unit) == {
+                .Present(b) -> prelude_method_present(prelude_method_pair("Pair", "a", a.clone(), "b", b))
+                else -> prelude_method_absent(Type.Int)
+            }
+            .Failed(.Clean(t)) -> return prelude_method_absent(t)
+            else -> {}
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Builtins.rs:1810
+    if is_datatree(recv) {
+        if method == {
+            "field" -> {
+                key :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(s) -> s else -> return datatree_failure("", "field name must be Text") }
+                if datatree_payload(recv, "Object") == {
+                    Val(.Map(entries)) -> {
+                        indexed :: prelude_method_map(&entries)
+                        return if indexed.get(CtKey.Str{value: key}) == { Val(found) -> prelude_method_present(found.clone()) else -> datatree_failure(key, "field `{key}` not found") }
+                    }
+                    Val(.Struct(type_name, fields)) -> if type_name == "JSONObject" {
+                        return if prelude_method_field(&fields, key) == { Val(found) -> prelude_method_present(found.clone()) else -> datatree_failure(key, "field `{key}` not found") }
+                    }
+                    else -> {}
+                }
+                return datatree_failure(key, "expected object, got {datatree_render(recv)}")
+            }
+            "at" -> {
+                index :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Int(i) -> i else -> -1 }
+                if datatree_payload(recv, "Array") == {
+                    Val(.List(items)) -> {
+                        // checked_neg avoids overflow at Int::MIN.
+                        resolved :: if index < 0 -> index.checked_neg().and_then(fn(n: Int) -> Int? { items.len().checked_sub(n) }) else -> Val(index)
+                        if resolved == { Val(i) -> if i >= 0 && i < items.len() -> return prelude_method_present(items[i].clone()) else -> {} }
+                        return datatree_failure("[{index}]", "index {index} out of bounds (len {items.len()})")
+                    }
+                    else -> return datatree_failure("[{index}]", "expected array, got {datatree_render(recv)}")
+                }
+            }
+            "int" -> {
+                if datatree_payload(recv, "Int") == { Val(value) -> if value == { .Int(_) | .BigInt(_) -> return prelude_method_present(value.clone()) else -> {} } else -> {} }
+                if datatree_payload(recv, "Number") == { Val(.Str(text)) -> if CtBigInt.from_json_number(text) == { Val(number) -> return prelude_method_present(exact_int_value(number)) else -> {} } else -> {} }
+                return datatree_failure("", "expected int, got {datatree_render(recv)}")
+            }
+            "text" -> {
+                value :: datatree_payload(recv, "Text") ?? datatree_payload(recv, "TypedText")
+                if value == { Val(.Str(s)) -> return prelude_method_present(CtValue.Str{value: s}) else -> {} }
+                return datatree_failure("", "expected text, got {datatree_render(recv)}")
+            }
+            "bool" -> {
+                if datatree_payload(recv, "Bool") == { Val(.Bool(b)) -> return prelude_method_present(CtValue.Bool{value: b}) else -> {} }
+                return datatree_failure("", "expected bool, got {datatree_render(recv)}")
+            }
+            "float" -> {
+                if datatree_payload(recv, "Float") == { Val(.Float(f)) -> return prelude_method_present(CtValue.Float{value: f}) else -> {} }
+                if datatree_payload(recv, "Int") == {
+                    Val(.Int(n)) -> return prelude_method_present(CtValue.Float{value: CtFloat.f64(Float{n})})
+                    Val(.BigInt(n)) -> if Float.parse(n) == { Val(f) -> if f.is_finite() -> return prelude_method_present(CtValue.Float{value: CtFloat.f64(f)}) else -> {} }
+                    else -> {}
+                }
+                if datatree_payload(recv, "Number") == {
+                    Val(.Str(text)) -> {
+                        trimmed := text.trim() // #4303
+                        if Float.parse(trimmed) == { Val(f) -> if f.is_finite() -> return prelude_method_present(CtValue.Float{value: CtFloat.f64(f)}) else -> {} }
+                    }
+                    else -> {}
+                }
+                return datatree_failure("", "expected float, got {datatree_render(recv)}")
+            }
+            else -> {}
+        }
+    }
+    if recv == {
+        .Int(_) | .BigInt(_) -> if method == "abs" -> return exact_int_value(exact_big(recv).expect("whole-number absolute value").abs())
+        .Float(f) -> if method == {
+            "abs" -> return CtValue.Float{value: f.abs()}
+            "is_nan" -> return CtValue.Bool{value: f.is_nan()}
+            "is_infinite" -> return CtValue.Bool{value: f.is_infinite()}
+            "is_finite" -> return CtValue.Bool{value: f.is_finite()}
+            else -> {}
+        }
+        .Struct(type_name, fields) -> if type_name == jet_foundation.Syntax.TYPE_RANGE && method == "contains" {
+            start :: if prelude_method_field(&fields, "start") == { Val(.Int(n)) -> n else -> fail unsupported("Range.contains", span) }
+            end :: if prelude_method_field(&fields, "end") == { Val(.Int(n)) -> n else -> fail unsupported("Range.contains", span) }
+            exclusive :: prelude_method_field(&fields, "exclusive") == Val(CtValue.Bool{value: true})
+            value :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: 0}), span)!
+            return CtValue.Bool{value: range_semantics.jet_range_contains(start, end, exclusive, value)}
+        }
+        else -> {}
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Builtins.rs:1951
+    if recv == {
+        .List(xs) -> {
+            if method == {
+                "len" -> return CtValue.Int{value: xs.len()}
+                "is_empty" -> return CtValue.Bool{value: xs.is_empty()}
+                "get" -> {
+                    i :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: 0}), span)!
+                    if i < 0 || i >= xs.len() -> return prelude_method_absent(if xs.is_empty() -> Type.Int else -> xs[0].jet_type())
+                    return prelude_method_present(xs[i].clone())
+                }
+                "contains" | "count" -> {
+                    needle :: prelude_method_arg(&args, 0, CtValue.Unit)
+                    count := 0
+                    loop x in xs { if x == needle { if method == "contains" -> return CtValue.Bool{value: true}; count += 1 } }
+                    return if method == "contains" -> CtValue.Bool{value: false} else -> CtValue.Int{value: count}
+                }
+                "counts" -> {
+                    out := [CtKey:CtValue]{}
+                    loop value in xs {
+                        key :: CtKey.from_value(value.clone()) ?? fail unsupported("this map key type", span)
+                        count :: if out.get(key) == { Val(.Int(n)) -> n else -> 0 }
+                        out[key] = CtValue.Int{value: count + 1}
+                    }
+                    return prelude_method_map_value(^out)
+                }
+                "concat" -> {
+                    other :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .List(values) -> values else -> fail unsupported("List.concat expects a list", span) }
+                    out := xs.clone(); out.extend(^other); return CtValue.List{values: ^out}
+                }
+                "join" -> {
+                    sep :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(s) -> s else -> "" }
+                    parts := [String]{}
+                    loop x in xs { parts.push(x.jet_show()) }
+                    return CtValue.Str{value: parts.join(sep)}
+                }
+                "to_list" | "collect" | "lazy" | "copy" -> return CtValue.List{values: xs.clone()}
+                "take" | "skip" | "step_by" | "chunks" | "windows" -> {
+                    n :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: if method == "chunks" || method == "windows" -> 1 else -> 0}), span)!
+                    if CollectionEval.sequence_argument_message(method, n) == { Val(message) -> fail comptime_panic(message, span) else -> {} }
+                    if method == "skip" -> return CtValue.List{values: CollectionEval.iter_skip(xs.clone(), n)}
+                    out := [CtValue]{}
+                    if method == {
+                        "take" -> loop i in 0..<n.min(xs.len()) { out.push(xs[i].clone()) }
+                        "step_by" -> { i := 0; loop i < xs.len() { out.push(xs[i].clone()); i += n } }
+                        "chunks" -> { i := 0; loop i < xs.len() { out.push(CtValue.List{values: xs[i..<(i + n).min(xs.len())].to_list()}); i += n } }
+                        "windows" -> { i := 0; loop i + n <= xs.len() { out.push(CtValue.List{values: xs[i..<i + n].to_list()}); i += 1 } }
+                        else -> {}
+                    }
+                    return CtValue.List{values: ^out}
+                }
+                "dedup" -> {
+                    out := [CtValue]{}
+                    loop x in xs { if out.is_empty() || out[out.len() - 1] != x -> out.push(x.clone()) }
+                    return CtValue.List{values: ^out}
+                }
+                "repeat" | "cycle" | "drop_last" -> {
+                    n :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: 0}), span)!.max(0)
+                    out := [CtValue]{}
+                    if method == {
+                        "repeat" -> loop _ in 0..<n { loop x in xs { out.push(x.clone()) } }
+                        "cycle" -> if !xs.is_empty() { loop i in 0..<n { out.push(xs[i % xs.len()].clone()) } }
+                        else -> if n < xs.len() { out = xs[0..<xs.len() - n].to_list() }
+                    }
+                    return CtValue.List{values: ^out}
+                }
+                "shuffle" -> {
+                    out := xs.clone(); state := U64{0xC0FF_EE42}; i := out.len() - 1
+                    loop i >= 1 {
+                        state = state.wrapping_mul(U64{6364136223846793005}).wrapping_add(U64{1})
+                        j :: Int{state >> 33} % (i + 1)
+                        out.swap(i, j); i -= 1
+                    }
+                    return CtValue.List{values: ^out}
+                }
+                "is_sorted" -> {
+                    loop i in 1..<xs.len() {
+                        a :: xs[i - 1]; b :: xs[i]
+                        ordered :: if (a, b) == { (.Int(x), .Int(y)) -> x <= y (.Str(x), .Str(y)) -> x <= y else -> a.jet_show() <= b.jet_show() }
+                        if !ordered -> return CtValue.Bool{value: false}
+                    }
+                    return CtValue.Bool{value: true}
+                }
+                "last_index_of" | "index_of" | "binary_search" -> {
+                    needle :: prelude_method_arg(&args, 0, if method == "index_of" -> CtValue.Unit else -> CtValue.Int{value: 0})
+                    index := -1
+                    loop i in 0..<xs.len() { if xs[i] == needle { index = i; if method != "last_index_of" -> break } }
+                    return if index < 0 -> prelude_method_absent(Type.Int) else -> prelude_method_present(CtValue.Int{value: index})
+                }
+                "average" -> {
+                    if xs.is_empty() -> return CtValue.Float{value: CtFloat.f64(0.0)}
+                    sum := 0.0
+                    if xs[0] == {
+                        .Int(_) | .BigInt(_) -> {
+                            total := CtBigInt.from_int(0)
+                            loop value in xs { number :: exact_big(&value) ?? fail unsupported("average on mixed numeric types", span); total = total.add(&number) }
+                            text :: total.to_string_rep()
+                            sum = Float.parse(text) ?? (if text.starts_with("-") -> Float.NEG_INFINITY else -> Float.INFINITY)
+                        }
+                        else -> loop x in xs { if x == { .Float(n) -> sum += n.as_f64() else -> fail unsupported("average on non-numeric list", span) } }
+                    }
+                    return CtValue.Float{value: CtFloat.f64(sum / Float{xs.len()})}
+                }
+                "compare" -> {
+                    other :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .List(ys) -> ys else -> fail unsupported("compare needs a list argument", span) }
+                    order := Ordering.Equal
+                    loop i in 0..<xs.len().min(other.len()) { order = cmp(xs[i].clone(), other[i].clone(), span)!; if order != Ordering.Equal -> break }
+                    if order == Ordering.Equal -> order = xs.len().compare(other.len())
+                    return CtValue.Int{value: if order == { .Less -> -1 .Equal -> 0 .Greater -> 1 }}
+                }
+                "split" -> {
+                    n :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: 0}), span)!.max(0).min(xs.len())
+                    return prelude_method_pair("", "left", CtValue.List{values: xs[0..<n].to_list()}, "right", CtValue.List{values: xs[n..<xs.len()].to_list()})
+                }
+                "to_set" -> {
+                    out := [CtKey:CtValue]{}
+                    loop x in xs { key :: CtKey.from_value(x.clone()) ?? fail unsupported("to_set element type", span); out[key] = CtValue.Bool{value: true} }
+                    return prelude_method_map_value(^out)
+                }
+                "first" -> return if CollectionEval.iter_first(xs.clone()) == { Val(v) -> prelude_method_present(v) else -> prelude_method_absent(Type.Int) }
+                "last" -> return if xs.is_empty() -> prelude_method_absent(Type.Int) else -> prelude_method_present(xs[xs.len() - 1].clone())
+                "flatten" -> {
+                    out := [CtValue]{}
+                    loop x in xs { if x == { .List(values) -> out.extend(values.clone()) else -> fail unsupported("flatten on a non-nested list", span) } }
+                    return CtValue.List{values: ^out}
+                }
+                "sum" -> {
+                    if xs.is_empty() -> return CtValue.Int{value: 0}
+                    if xs[0] == {
+                        .Float(first) -> {
+                            total := if first == { .F32(_) -> CtFloat.f32(0.0) .F64(_) -> CtFloat.f64(0.0) }
+                            loop value in xs {
+                                number :: if value == { .Float(n) -> n else -> fail unsupported("sum on mixed numeric types", span) }
+                                total = total.binop(BinOp.Add, number) ?? fail unsupported("sum on mixed float widths", span)
+                            }
+                            return CtValue.Float{value: total}
+                        }
+                        .Int(_) | .BigInt(_) -> {
+                            total := CtBigInt.from_int(0)
+                            loop value in xs { number :: exact_big(&value) ?? fail unsupported("sum on mixed numeric types", span); total = total.add(&number) }
+                            return exact_int_value(total)
+                        }
+                        else -> fail unsupported("sum on non-numeric values", span)
+                    }
+                }
+                "product" -> {
+                    total := CtBigInt.from_int(1)
+                    loop value in xs { number :: exact_big(&value) ?? fail unsupported("product on mixed numeric types", span); total = total.mul(&number) }
+                    return exact_int_value(total)
+                }
+                "min" | "max" -> {
+                    if xs.is_empty() -> return prelude_method_absent(Type.Int)
+                    best := xs[0].clone()
+                    loop i in 1..<xs.len() {
+                        order :: cmp(best.clone(), xs[i].clone(), span)!
+                        if (method == "min" && order == Ordering.Greater) || (method == "max" && order != Ordering.Greater) -> best = xs[i].clone()
+                    }
+                    return prelude_method_present(^best)
+                }
+                "intersperse" -> {
+                    sep :: prelude_method_arg(&args, 0, CtValue.Unit); out := [CtValue]{}
+                    loop i in 0..<xs.len() { if i != 0 -> out.push(sep.clone()); out.push(xs[i].clone()) }
+                    return CtValue.List{values: ^out}
+                }
+                "unzip" -> {
+                    left := [CtValue]{}; right := [CtValue]{}
+                    loop x in xs {
+                        fields :: if x == { .Struct(_, fields) -> fields else -> fail unsupported("unzip on a non-tuple list", span) }
+                        a :: prelude_method_field(&fields, "a") ?? fail unsupported("unzip on a tuple without `a` and `b`", span)
+                        b :: prelude_method_field(&fields, "b") ?? fail unsupported("unzip on a tuple without `a` and `b`", span)
+                        left.push(a.clone()); right.push(b.clone())
+                    }
+                    return prelude_method_pair("(a,b)", "a", CtValue.List{values: ^left}, "b", CtValue.List{values: ^right})
+                }
+                "indexed" | "indexes" -> {
+                    out := [CtValue]{}
+                    loop i in 0..<xs.len() { out.push(if method == "indexes" -> CtValue.Int{value: i} else -> prelude_method_pair("(idx,item)", "idx", CtValue.Int{value: i}, "item", xs[i].clone())) }
+                    return CtValue.List{values: ^out}
+                }
+                "zip" -> {
+                    other :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .List(values) -> values else -> fail unsupported("zip with a non-list argument", span) }
+                    if CollectionEval.zip_row_count([Int]{xs.len(), other.len()}, 1).is_none() -> fail Diagnostic.error("E0128", "zip inputs have different lengths", "strict `zip` requires every input to end on the same row", "use `zip_short` or `zip_pad` when lengths may differ", Val(span))
+                    out := [CtValue]{}
+                    loop i in 0..<xs.len() { out.push(prelude_method_pair("(a,b)", "a", xs[i].clone(), "b", other[i])) }
+                    return CtValue.List{values: ^out}
+                }
+                "starts_with" | "ends_with" | "equal" -> {
+                    other :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .List(values) -> values else -> fail unsupported("{method} needs a list", span) }
+                    return CtValue.Bool{value: if method == { "starts_with" -> xs.starts_with(other) "ends_with" -> xs.ends_with(other) else -> list_values_equal(&xs, &other) }}
+                }
+                "slice" -> {
+                    start :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: 0}), span)!.clamp(0, xs.len())
+                    end :: as_int(&prelude_method_arg(&args, 1, CtValue.Int{value: 0}), span)!.clamp(0, xs.len())
+                    return CtValue.List{values: if end <= start -> [CtValue]{} else -> xs[start..<end].to_list()}
+                }
+                "union" | "intersection" | "difference" -> {
+                    other :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .List(values) -> values else -> fail unsupported("{method} needs a list", span) }
+                    out := if method == "union" -> xs.clone() else -> [CtValue]{}
+                    if method == "union" { loop x in other { if !out.contains(x) -> out.push(x) } }
+                    else { loop x in xs { if method == "difference" { if !other.contains(x) -> out.push(x.clone()) } else { if other.contains(x) && !out.contains(x) -> out.push(x.clone()) } } }
+                    return CtValue.List{values: ^out}
+                }
+                "random" -> {
+                    if xs.is_empty() -> return prelude_method_absent(Type.Int)
+                    state :: U64{0xC0FF_EE42}.wrapping_mul(U64{6364136223846793005}).wrapping_add(U64{1})
+                    i :: Int{state >> 33} % xs.len()
+                    return prelude_method_present(xs[i].clone())
+                }
+                "replace" -> {
+                    index :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: 0}), span)!
+                    new :: prelude_method_arg(&args, 1, CtValue.Int{value: 0})
+                    if index < 0 || index >= xs.len() -> fail index_oob(xs.len(), index, span)
+                    return CtValue.List{values: CollectionEval.list_replace(&xs, index, new)}
+                }
+                "min_max" -> {
+                    if xs.is_empty() -> return prelude_method_absent(Type.Int)
+                    min := xs[0]; max := xs[0]
+                    loop i in 1..<xs.len() { if cmp_ref(&xs[i], &min, span)! == Ordering.Less -> min = xs[i]; if cmp_ref(&xs[i], &max, span)! != Ordering.Less -> max = xs[i] }
+                    return prelude_method_present(prelude_method_pair("", "min", min.clone(), "max", max.clone()))
+                }
+                else -> {}
+            }
+        }
+        .Bytes(bs) -> if method == {
+            "len" -> return CtValue.Int{value: bs.len()}
+            "is_empty" -> return CtValue.Bool{value: bs.is_empty()}
+            "get" -> {
+                i :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: 0}), span)!
+                return if i < 0 || i >= bs.len() -> prelude_method_absent(Type.IntN{signed: false, bits: 8}) else -> prelude_method_present(CtValue.Int{value: Int{bs[i]}})
+            }
+            else -> {}
+        }
+        else -> {}
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Builtins.rs:2487
+    if recv == {
+        .Map(entries) -> {
+            m :: prelude_method_map(&entries)
+            keys := m.keys().to_list(); keys.sort()
+            if method == {
+                "len" -> return CtValue.Int{value: m.len()}
+                "is_empty" -> return CtValue.Bool{value: m.is_empty()}
+                "has_key" | "get" -> {
+                    key :: CtKey.from_value(prelude_method_arg(&args, 0, CtValue.Unit)) ?? fail unsupported("this map key type", span)
+                    if method == "has_key" -> return CtValue.Bool{value: m.contains_key(key)}
+                    return if m.get(key) == { Val(v) -> prelude_method_present(v.clone()) else -> prelude_method_absent(Type.Int) }
+                }
+                "keys" | "values" | "to_list" -> {
+                    out := [CtValue]{}
+                    loop key in keys { out.push(if method == { "keys" -> key.to_value() "values" -> m[key].clone() else -> prelude_method_pair("", "key", key.to_value(), "value", m[key].clone()) }) }
+                    return CtValue.List{values: ^out}
+                }
+                "merge" -> {
+                    right :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Map(values) -> values else -> fail unsupported("Map.merge other must be a map", span) }
+                    if args.len() >= 2 -> fail unsupported("Map.merge conflict callback at compile time", span)
+                    out := m.clone(); loop entry in right { out[entry.key] = entry.value }
+                    return prelude_method_map_value(^out)
+                }
+                "copy" -> return recv.clone()
+                "equal" -> {
+                    other :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Map(values) -> values else -> fail unsupported("equal needs a map", span) }
+                    return CtValue.Bool{value: map_values_equal(&entries, &other)}
+                }
+                "first" -> return if keys.is_empty() -> prelude_method_absent(Type.Int) else -> prelude_method_present(keys[0].to_value())
+                "top_n" -> {
+                    n :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: 0}), span)!.max(0)
+                    if n == 0 -> return CtValue.List{values: [CtValue]{}}
+                    if !keys.is_empty() {
+                        first :: m[keys[0]]; _ :: cmp_for_sort_ref(&first, &first, span)!
+                        loop i in 1..<keys.len() { _ :: cmp_for_sort_ref(&first, &m[keys[i]], span)! }
+                    }
+                    sort_error := None
+                    keys.sort_by(fn(left: CtKey, right: CtKey) -> Ordering Never! {
+                        order :: cmp_for_sort_ref(&m[right], &m[left], span) catch error -> { if sort_error.is_none() -> sort_error = Val(error); return Ordering.Equal }
+                        if order == Ordering.Equal -> left.compare(right) else -> order
+                    })
+                    if sort_error == { Val(error) -> fail error else -> {} }
+                    out := [CtValue]{}
+                    loop i in 0..<n.min(keys.len()) { key :: keys[i]; out.push(prelude_method_pair("", "key", key.to_value(), "value", m[key].clone())) }
+                    return CtValue.List{values: ^out}
+                }
+                "min" | "max" -> {
+                    values := [CtValue]{}; loop key in keys { values.push(m[key]) }
+                    return if extreme_ref(&values, method == "max", span)! == { Val(value) -> prelude_method_present(value.clone()) else -> prelude_method_absent(Type.Int) }
+                }
+                "intersection" -> {
+                    other :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Map(values) -> prelude_method_map(&values) else -> fail unsupported("intersection needs a map", span) }
+                    out := [CtKey:CtValue]{}
+                    loop key in keys { if other.contains_key(key) -> out[key] = m[key].clone() }
+                    return prelude_method_map_value(^out)
+                }
+                "slice" -> {
+                    requested :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .List(values) -> values else -> fail unsupported("slice needs key list", span) }
+                    out := [CtKey:CtValue]{}
+                    loop k in requested { key :: CtKey.from_value(k) ?? fail unsupported("map key", span); if m.get(key) == { Val(v) -> out[key] = v.clone() else -> {} } }
+                    return prelude_method_map_value(^out)
+                }
+                "contains_value" -> {
+                    needle :: prelude_method_arg(&args, 0, CtValue.Unit)
+                    loop key in keys { if m[key] == needle -> return CtValue.Bool{value: true} }
+                    return CtValue.Bool{value: false}
+                }
+                "pop_first" -> return if keys.is_empty() -> prelude_method_absent(Type.Int) else -> prelude_method_present(m[keys[0]].clone())
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Builtins.rs:2629
+    if recv == {
+        .Str(s) -> {
+            if method == {
+                "len" -> return CtValue.Int{value: s.chars().count()}
+                "count_bytes" -> return CtValue.Int{value: s.bytes().len()}
+                "is_empty" -> return CtValue.Bool{value: s.is_empty()}
+                "to_upper" -> return CtValue.Str{value: TextLite.upper(s)}
+                "to_lower" -> return CtValue.Str{value: TextLite.lower(s)}
+                "trim" -> return CtValue.Str{value: TextLite.trim(s)}
+                "trim_start" -> return CtValue.Str{value: TextLite.trim_start(s)}
+                "trim_end" -> return CtValue.Str{value: TextLite.trim_end(s)}
+                "pad_start" | "pad_end" -> {
+                    width :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Int(n) -> n else -> fail unsupported("{method} requires an Int width and text fill", span) }
+                    fill :: if prelude_method_arg(&args, 1, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("{method} requires an Int width and text fill", span) }
+                    return CtValue.Str{value: if method == "pad_start" -> TextLite.pad_start(s, width, fill) else -> TextLite.pad_end(s, width, fill)}
+                }
+                "index_of" | "last_index_of" -> {
+                    needle :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("{method} with a non-text argument", span) }
+                    found :: if method == "index_of" -> s.find(needle) else -> s.rfind(needle)
+                    return if found == { Val(byte) -> prelude_method_present(CtValue.Int{value: s[0..<byte].chars().count()}) else -> prelude_method_absent(Type.Int) }
+                }
+                "count" -> {
+                    needle :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("count with a non-text argument", span) }
+                    if needle.is_empty() -> return CtValue.Int{value: 0}
+                    rest := s.as_str(); count := 0
+                    loop { at :: rest.find(needle) ?? break; count += 1; rest = rest[at + needle.bytes().len()..] }
+                    return CtValue.Int{value: count}
+                }
+                "is_alphabetic" -> return CtValue.Bool{value: TextLite.is_alphabetic(s)}
+                "is_numeric" -> return CtValue.Bool{value: TextLite.is_numeric(s)}
+                "is_whitespace" -> return CtValue.Bool{value: TextLite.is_whitespace(s)}
+                "is_ascii" -> return CtValue.Bool{value: s.is_ascii()}
+                "to_title" -> return CtValue.Str{value: TextLite.title(s)}
+                "is_lower" -> return CtValue.Bool{value: TextLite.is_lower(s)}
+                "is_upper" -> return CtValue.Bool{value: TextLite.is_upper(s)}
+                "capitalize" -> return CtValue.Str{value: TextLite.capitalize(s)}
+                "swapcase" -> return CtValue.Str{value: TextLite.swapcase(s)}
+                "copy" -> return recv.clone()
+                "reverse" -> return CtValue.Str{value: TextLite.reverse(s)}
+                "normalize" -> return CtValue.Str{value: TextLite.nfc(s)}
+                "remove_prefix" | "remove_suffix" | "compare" | "equal" -> {
+                    other :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("{method} with a non-text argument", span) }
+                    return if method == {
+                        "remove_prefix" -> CtValue.Str{value: TextLite.remove_prefix(s, other)}
+                        "remove_suffix" -> CtValue.Str{value: TextLite.remove_suffix(s, other)}
+                        "compare" -> CtValue.Int{value: TextLite.compare(s, other)}
+                        else -> CtValue.Bool{value: s == other}
+                    }
+                }
+                "matches" | "match" -> {
+                    pattern :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("{method} with a non-text argument", span) }
+                    re :: regex_kernel.JetRegex.parse(pattern) catch message -> return CtValue.failed(CtValue.Str{value: message})
+                    if method == "matches" -> return prelude_method_present(CtValue.Bool{value: re.is_match(s)})
+                    found :: re.find(s).ok()
+                    return prelude_method_present(if found == { Val(value) -> prelude_method_present(CtValue.Str{value: value}) else -> prelude_method_absent(Type.String) })
+                }
+                "rsplit" -> {
+                    sep :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("rsplit with a non-text argument", span) }
+                    parts := if sep.is_empty() -> s.split(sep).to_list() else -> s.rsplit(sep).to_list()
+                    if !sep.is_empty() -> parts.reverse()
+                    out := [CtValue]{}; loop part in parts { text := part.to_string(); out.push(CtValue.Str{value: text}) }
+                    return CtValue.List{values: ^out}
+                }
+                "split_once" | "cut_last" -> {
+                    sep :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("{method} with a non-text argument", span) }
+                    found :: if method == "split_once" -> s.find(sep) else -> s.rfind(sep)
+                    if found == { Val(at) -> {
+                        before := s[0..<at].to_string(); after := s[at + sep.bytes().len()..].to_string()
+                        return prelude_method_present(prelude_method_pair("(before,after)", "before", CtValue.Str{value: before}, "after", CtValue.Str{value: after}))
+                    } else -> {} }
+                    return prelude_method_absent(Type.Tuple{fields: [(String, Type)]{("before", Type.String), ("after", Type.String)}})
+                }
+                "contains" | "starts_with" | "ends_with" | "after" | "before" -> {
+                    sep :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("{method} with a non-text argument", span) }
+                    if method == {
+                        "contains" -> return CtValue.Bool{value: CollectionEval.string_contains(s, sep)}
+                        "starts_with" -> return CtValue.Bool{value: s.starts_with(sep)}
+                        "ends_with" -> return CtValue.Bool{value: s.ends_with(sep)}
+                        else -> {
+                            if s.find(sep) == { Val(at) -> { text := if method == "after" -> s[at + sep.bytes().len()..].to_string() else -> s[0..<at].to_string(); return CtValue.Str{value: text} } else -> return recv.clone() }
+                        }
+                    }
+                }
+                "bytes" -> { out := [CtValue]{}; loop byte in s.bytes() { out.push(CtValue.Int{value: Int{byte}}) }; return CtValue.List{values: ^out} }
+                "slice" -> {
+                    a :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Int(n) -> n else -> fail unsupported("slice with a non-Int start", span) }
+                    b :: if prelude_method_arg(&args, 1, CtValue.Unit) == { .Int(n) -> n else -> fail unsupported("slice with a non-Int end", span) }
+                    chars :: s.chars().to_list(); len :: chars.len()
+                    if a < 0 || b < 0 || a > b || b > len -> fail comptime_panic("can't slice {len} characters from {a} to {b} (exclusive)", span)
+                    return CtValue.Str{value: chars[a..<b].iter().collect()}
+                }
+                "repeat" -> { n :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: 0}), span)!; return CtValue.Str{value: s.repeat(n.max(0))} }
+                "replace" -> {
+                    from :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("replace with non-text arguments", span) }
+                    to :: if prelude_method_arg(&args, 1, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("replace with non-text arguments", span) }
+                    return CtValue.Str{value: s.replace(from, to)}
+                }
+                "split" -> {
+                    sep :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> "" }
+                    out := [CtValue]{}; loop part in s.split(sep) { text := part.to_string(); out.push(CtValue.Str{value: text}) }
+                    return CtValue.List{values: ^out}
+                }
+                "chars" -> { out := [CtValue]{}; loop c in s.chars() { out.push(CtValue.Char{value: c}) }; return CtValue.List{values: ^out} }
+                "lines" -> { out := [CtValue]{}; loop line in s.lines() { text := line.to_string(); out.push(CtValue.Str{value: text}) }; return CtValue.List{values: ^out} }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Builtins.rs:2884
+    if recv == {
+        .Struct(type_name, fields) -> {
+            if type_name == "TypeInfo" && method == "reflect" -> return recv.clone()
+            if type_name == jet_foundation.Syntax.TYPE_PROGRAM_INFO && (method == "types" || method == "functions" || method == "packages" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes") -> return program_info_list(&fields, method, span)
+            if type_name == {
+                "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked" | "CompilerSourceMap" | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget" | "CompilerPackageOutput" | "CompilerBuildProfile" | "CompilerManifest" | "CompilerPackage" | "CompilerLockedPackage" | "CompilerLock" | "CompilerKeyValue" | "CompilerProfile" | "CompilerProfileSet" -> return prelude_method_field(&fields, method) ?? CtValue.List{values: [CtValue]{}}
+                else -> {}
+            }
+            if (type_name == "TypeInfo" && (method == "has_method" || method == "implements")) || (type_name == "EffectInfo" && method == "has") {
+                needle :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("`{method}` requires a string", span) }
+                field :: if method == { "has_method" -> "methods" "implements" -> "implements" else -> "values" }
+                values :: prelude_method_list_field(&fields, field) ?? [CtValue]{}
+                loop value in values {
+                    if method == "has_method" {
+                        if value == { .Struct(_, members) -> if prelude_method_field(&members, "name") == Val(CtValue.Str{value: needle}) -> return CtValue.Bool{value: true} else -> {} }
+                    } else { if value == CtValue.Str{value: needle} -> return CtValue.Bool{value: true} }
+                }
+                return CtValue.Bool{value: false}
+            }
+            if type_name == "FunctionInfo" && method == "reaches_panic" -> return prelude_method_field(&fields, "reaches_panic") ?? CtValue.Bool{value: false}
+            if (type_name == "FieldInfo" || type_name == "MethodInfo" || type_name == "TypeInfo") && method == "has_marker" {
+                needle :: if prelude_method_arg(&args, 0, CtValue.Unit) == { .Str(text) -> text else -> fail unsupported("`has_marker` requires a string argument", span) }
+                markers :: prelude_method_list_field(&fields, "markers") ?? [CtValue]{}
+                loop marker in markers {
+                    if marker == {
+                        .Str(name) -> if name == needle -> return CtValue.Bool{value: true}
+                        .Struct(_, members) -> if prelude_method_field(&members, "name") == Val(CtValue.Str{value: needle}) -> return CtValue.Bool{value: true}
+                        else -> {}
+                    }
+                }
+                return CtValue.Bool{value: false}
+            }
+            if type_name == "Match" && (method == "group" || method == "name" || method == "start" || method == "end" || method == "group_start" || method == "group_end" || method == "named_captures") {
+                index :: as_int(&prelude_method_arg(&args, 0, CtValue.Int{value: 0}), span).ok().filter(fn(n: Int) -> Bool Never! { n >= 0 })
+                if method == {
+                    "group" -> {
+                        groups :: prelude_method_list_field(&fields, "groups") ?? [CtValue]{}
+                        if index == { Val(i) -> if i < groups.len() -> return groups[i].clone() else -> {} }
+                        return prelude_method_absent(Type.String)
+                    }
+                    "name" -> {
+                        if args.is_empty() -> fail unsupported("Match.name argument", span)
+                        name :: as_string(&args[0], span)!
+                        names :: prelude_method_list_field(&fields, "names") ?? [CtValue]{}
+                        groups :: prelude_method_list_field(&fields, "groups") ?? [CtValue]{}
+                        loop i in 0..<names.len() { if names[i] == CtValue.Present{value: CtValue.Str{value: name}} { if i < groups.len() -> return groups[i].clone(); break } }
+                        return prelude_method_absent(Type.String)
+                    }
+                    "start" | "end" -> return CtValue.Int{value: prelude_method_match_span(&fields, 0, method) ?? -1}
+                    "named_captures" -> {
+                        groups :: prelude_method_list_field(&fields, "groups") ?? [CtValue]{}
+                        names :: prelude_method_list_field(&fields, "names") ?? [CtValue]{}
+                        out := [CtValue]{}
+                        loop i in 0..<names.len() {
+                            if i >= groups.len() -> continue
+                            if (names[i], groups[i]) == {
+                                (.Present(.Str(name)), .Present(.Str(value))) -> out.push(CtValue.List{values: [CtValue]{CtValue.Str{value: name}, CtValue.Str{value: value}}})
+                                else -> {}
+                            }
+                        }
+                        return CtValue.List{values: ^out}
+                    }
+                    else -> {
+                        field :: if method == "group_start" -> "start" else -> "end"
+                        if index == { Val(i) -> if prelude_method_match_span(&fields, i, field) == { Val(n) -> return prelude_method_present(CtValue.Int{value: n}) else -> {} } else -> {} }
+                        return prelude_method_absent(Type.Int)
+                    }
+                }
+            }
+            if type_name == jet_foundation.Syntax.CLOCK_TYPE && method == "now" -> return prelude_method_field(&fields, "now") ?? CtValue.Int{value: 0}
+            if type_name == jet_foundation.Syntax.DURATION_TYPE && method == "in" {
+                ns :: if prelude_method_field(&fields, "ns") == { Val(.Int(n)) -> n else -> 0 }
+                unit :: if prelude_method_arg(&args, 0, CtValue.Unit) == {
+                    .Enum(name, variant, _) -> if name == jet_foundation.Syntax.DURATION_UNIT_TYPE -> variant else -> fail unsupported("Duration.in expects a DurationUnit", span)
+                    .Int(i) -> if i >= 0 && i < jet_foundation.Syntax.DURATION_UNITS.len() -> jet_foundation.Syntax.DURATION_UNITS[i] else -> fail unsupported("Duration.in expects a DurationUnit", span)
+                    else -> fail unsupported("Duration.in expects a DurationUnit", span)
+                }
+                scale :: if unit == { "Nanoseconds" -> 1 "Microseconds" -> 1000 "Milliseconds" -> 1000000 "Seconds" -> 1000000000 "Minutes" -> 60000000000 "Hours" -> 3600000000000 else -> fail unsupported("this duration unit", span) }
+                return prelude_method_present(CtValue.Int{value: duration_semantics.jet_duration_kernel_in(ns, scale)})
+            }
+        }
+        .Enum(type_name, variant, values) -> if type_name == "Loadable" {
+            tag :: if variant == { "Idle" -> loadable_semantics.JET_LOADABLE_IDLE "Loading" -> loadable_semantics.JET_LOADABLE_LOADING "Loaded" -> loadable_semantics.JET_LOADABLE_LOADED "Failed" -> loadable_semantics.JET_LOADABLE_FAILED else -> U8.MAX }
+            if method == {
+                "is_idle" | "is_loading" | "is_loaded" | "is_failed" -> {
+                    expected :: if method == { "is_idle" -> loadable_semantics.JET_LOADABLE_IDLE "is_loading" -> loadable_semantics.JET_LOADABLE_LOADING "is_loaded" -> loadable_semantics.JET_LOADABLE_LOADED else -> loadable_semantics.JET_LOADABLE_FAILED }
+                    return CtValue.Bool{value: loadable_semantics.jet_loadable_is_tag(tag, expected)}
+                }
+                "loaded" -> return if loadable_semantics.jet_loadable_has_value(tag) && !values.is_empty() -> prelude_method_present(values[0].value.clone()) else -> prelude_method_absent(Type.Named{name: "Unit"})
+                "or_else" -> {
+                    if loadable_semantics.jet_loadable_has_value(tag) -> return if values.is_empty() -> CtValue.Unit else -> values[0].value.clone()
+                    if args.is_empty() -> fail unsupported("`Loadable.or_else` requires a default", span)
+                    return args[0]
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    fail unsupported("the method `.{method}` at compile time", span)
+}

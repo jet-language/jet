@@ -4,15 +4,16 @@ use jet_sema.[SemaBuildFacts, SemaRegistrationHostHooks, SemaRegistrationModuleI
 use core.files.host.retained_descriptor as names_test_native
 use core.files.runtime.kernel_path_components as names_test_path
 
-fn names_checked_module(program: ^Program, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
-    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, foreign_handles: []}
+fn names_checked_module(program: ^Program, source: String, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, unit_source: source, foreign_handles: []}
 }
 fn names_checked_facts(source: String) -[Env, FS]> NameLedger Never! {
     parsed :: parse_source(source.bytes())
     assert(parsed.diagnostics.len() == 0, "names source witness must parse")
-    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    effects_source :: foundation_embedded_core().effect_source()
+    effects :: parse_source(effects_source.bytes())
     assert(effects.diagnostics.len() == 0, "canonical effects must parse")
-    inputs :: [SemaRegistrationModuleInput]{names_checked_module(^parsed.program, "main", "names.jet", "names"), names_checked_module(^effects.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude")}
+    inputs :: [SemaRegistrationModuleInput]{names_checked_module(^parsed.program, source, "main", "names.jet", "names"), names_checked_module(^effects.program, effects_source, "effects", "Prelude/Effects.jet", "jet:canonical-prelude")}
     build :: SemaBuildFacts{package_name: "names", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "names-test", stamp_at: "", artifact_build: false}
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
     registration :: sema_test_prepare_graph(inputs, [], "names", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)

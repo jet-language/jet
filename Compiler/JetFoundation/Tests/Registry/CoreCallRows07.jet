@@ -1,0 +1,45 @@
+use jet_foundation.AST.[Expr, Type, Item]
+use jet_foundation.Diagnostics.[Span]
+use jet_codegen.Codegen.Context.[build_cx_items, ExternFn]
+use jet_codegen.Codegen.TIR.[LowerEnv, TExprKind, TMethodRef, TStaticOwner, TPreludeArg, TBuiltinOp]
+use jet_codegen.Codegen.TIR.Lower.MethodCalls.[lower_method_call_impl_11055]
+use jet_codegen.Syntax
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11913-11939 (behavioral control; no inline Rust test)
+#Test("static_set_constructor_preserves_checked_element_type") {
+    cx :: build_cx_items([Item]{}, "", "set.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("set")
+    span :: Span.new(0, 1)
+    receiver :: Expr.Ident("Set", span)
+    expected :: Type.Apply{name: "Set", args: [Type.String]}
+    value :: lower_method_call_impl_11055(receiver, "new", span, [], [], [], None, None, Val(expected), false, cx, &env, None, None)
+    assert(value.ty == expected)
+    assert(if value.kind == {
+        .StaticCall{owner: owner, owner_type: owner_type, method: method, type_args: type_args, args: args} -> owner == TStaticOwner.Prelude{rooted: false, path: "std::collections::HashSet", generics: [TPreludeArg.Jet(Type.String)]} && owner_type == None && method == TMethodRef.bare("new") && type_args.is_empty() && args.is_empty()
+        else -> false
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11983-12000 (behavioral control)
+#Test("static_map_constructor_retains_key_and_value_types") {
+    cx :: build_cx_items([Item]{}, "", "map.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("map")
+    span :: Span.new(0, 1)
+    receiver :: Expr.Ident(Syntax.TYPE_MAP, span)
+    expected :: Type.Map{key: Type.String, key_span: None, value: Type.Bool}
+    value :: lower_method_call_impl_11055(receiver, "new", span, [], [], [], None, None, Val(expected), false, cx, &env, None, None)
+    assert(value.ty == expected)
+    assert(if value.kind == { .MapLit(entries) -> entries.is_empty() else -> false })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11944-11981 (behavioral control)
+#Test("fallible_list_constructor_keeps_allocation_error_carrier") {
+    cx :: build_cx_items([Item]{}, "", "list.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("list")
+    span :: Span.new(0, 1)
+    receiver :: Expr.Ident(Syntax.TYPE_LIST, span)
+    expected :: Type.Result{ok: Type.List(Type.String), err: Type.Named(Syntax.TYPE_ALLOC_ERROR)}
+    value :: lower_method_call_impl_11055(receiver, "try_new", span, [], [], [], None, None, Val(expected), false, cx, &env, None, None)
+    assert(value.ty == expected)
+    assert(if value.kind == { .BuiltinMethod{recv: recv, op: op, args: args} -> recv.kind == TExprKind.Unit && op == TBuiltinOp.ListTryNew && args.is_empty() else -> false })
+}

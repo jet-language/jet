@@ -1,0 +1,24 @@
+use jet_foundation.[Type, TLocal]
+use jet_codegen.Codegen.TIR.Lower.Env.LowerEnv
+use jet_codegen.Codegen.TIR.Lower.Panic.[safe_locals_snapshot, fork_panic]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/panic.rs:30-46; no original inline tests.
+#Test("panic_snapshot_is_sorted_and_excludes_unsafe_or_unresolved_types") {
+    env := LowerEnv.new("function")
+    &env.bind("z", TLocal.user("z"), Val(Type.Int))
+    &env.bind("a", TLocal.user("a"), Val(Type.Bool))
+    &env.bind("m", TLocal.user("m"), Val(Type.Float))
+    &env.bind("text", TLocal.user("text"), Val(Type.String))
+    &env.bind("float32", TLocal.user("float32"), Val(Type.Float32))
+    &env.bind("unknown", TLocal.user("unknown"), None)
+    snapshot :: safe_locals_snapshot(env)
+    assert_eq(snapshot.len(), 3)
+    assert_eq(snapshot[0].display_name, "a")
+    assert_eq(snapshot[1].display_name, "m")
+    assert_eq(snapshot[2].display_name, "z")
+    assert_eq(snapshot[2].local.name, "z")
+    fork := fork_panic(env)
+    &fork.bind("child", TLocal.user("child"), Val(Type.Int))
+    assert_eq(safe_locals_snapshot(env).len(), 3)
+    assert_eq(safe_locals_snapshot(fork).len(), 4)
+}

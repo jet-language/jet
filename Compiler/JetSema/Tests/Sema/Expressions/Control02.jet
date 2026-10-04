@@ -1,0 +1,40 @@
+use jet_foundation.[DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:36-81 (behavioral control; no inline Rust tests)
+#Test("fallible_ok_uses_contextual_success_type") {
+    positive :: statements05_diagnostics("fn run() Int String! -> Ok(3)\n")
+    assert(!positive.any(d -> d.severity == DIAGNOSTIC_ERROR), "{positive:?}")
+    negative :: statements05_diagnostics("fn run() Int String! -> Ok(true)\n")
+    assert(negative.any(d -> d.code == "E0108"), "{negative:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:140-231 (behavioral control)
+#Test("fallible_err_requires_matching_error_payload") {
+    positive :: statements05_diagnostics("fn run() Int String! -> Err(\"failed\")\n")
+    assert(!positive.any(d -> d.severity == DIAGNOSTIC_ERROR), "{positive:?}")
+    negative :: statements05_diagnostics("fn run() Int String! -> Err(true)\n")
+    assert(negative.any(d -> d.code == "E0108"), "{negative:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:668-910 (behavioral control)
+#Test("fallible_propagation_checks_error_domain_not_success_type") {
+    positive :: statements05_diagnostics("fn value() Int String! -> 4\nfn run() Bool String! -> value()? > 0\n")
+    assert(!positive.any(d -> d.severity == DIAGNOSTIC_ERROR), "{positive:?}")
+    negative :: statements05_diagnostics("fn value() Int String! -> 4\nfn run() Int Never! -> value()?\n")
+    assert(negative.any(d -> d.code == "E2404"), "{negative:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1209-1593 (behavioral control)
+#Test("fallible_fallback_handles_carrier_locally_and_checks_payload") {
+    positive :: statements05_diagnostics("fn value() Int String! -> 4\nfn run() Int Never! -> value() ?? 0\n")
+    assert(!positive.any(d -> d.severity == DIAGNOSTIC_ERROR), "{positive:?}")
+    negative :: statements05_diagnostics("fn value() Int String! -> 4\nfn run() Int Never! -> value() ?? true\n")
+    assert(negative.any(d -> d.code == "E0405"), "{negative:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:1790-1813 (behavioral control)
+#Test("fallible_statement_infers_valueless_call_as_unit") {
+    diagnostics :: statements05_diagnostics("fn effect() {{}}\nfn run() {{ effect() }}\n")
+    assert(!diagnostics.any(d -> d.code == "E0116"), "{diagnostics:?}")
+}

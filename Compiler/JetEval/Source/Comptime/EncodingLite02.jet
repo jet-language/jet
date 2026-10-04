@@ -1,1827 +1,764 @@
-// PORT-PENDING 0585 crates-jet-comptime-src-comptime-encodinglite-slice-1792: crates/jet-comptime/src/Comptime/EncodingLite.rs:1792-3614
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn yaml_render_scalar(v: &CtValue) -> String {
-//RS     if let Some(entries) = json_object_entries(v) {
-//RS         let parts: Vec<String> = entries
-//RS             .iter()
-//RS             .map(|(k, val)| format!("{}: {}", yaml_render_key(k), yaml_render_scalar(val)))
-//RS             .collect();
-//RS         return format!("{{{}}}", parts.join(", "));
-//RS     }
-//RS     if let Some(items) = json_array_items(v) {
-//RS         let parts: Vec<String> = items.iter().map(yaml_render_scalar).collect();
-//RS         return format!("[{}]", parts.join(", "));
-//RS     }
-//RS     match v {
-//RS         CtValue::Enum { variant, args, .. } => match (variant.as_str(), args.first()) {
-//RS             ("Null", _) => "null".to_string(),
-//RS             ("Bool", Some((_, CtValue::Bool(b)))) => b.to_string(),
-//RS             ("Int", Some((_, CtValue::Int(n)))) => n.to_string(),
-//RS             ("Float", Some((_, CtValue::Float(f)))) => format!("{:?}", f),
-//RS             ("Text", Some((_, CtValue::Str(s)))) => {
-//RS                 if yaml_needs_quote(s) {
-//RS                     format!("{:?}", s)
-//RS                 } else {
-//RS                     s.clone()
-//RS                 }
-//RS             }
-//RS             _ => "null".to_string(),
-//RS         },
-//RS         _ => "null".to_string(),
-//RS     }
-//RS }
-//RS fn yaml_needs_quote(s: &str) -> bool {
-//RS     if s.is_empty() {
-//RS         return true;
-//RS     }
-//RS     matches!(
-//RS         s,
-//RS         "null" | "Null" | "NULL" | "~" | "true" | "True" | "TRUE" | "false" | "False" | "FALSE"
-//RS     ) || crate::Numeric::CtBigInt::from_str(s).is_ok()
-//RS         || s.parse::<f64>().is_ok()
-//RS         || s.starts_with(' ')
-//RS         || s.ends_with(' ')
-//RS         || s.starts_with([
-//RS             '-', '?', ':', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@',
-//RS             '`',
-//RS         ])
-//RS         || s.contains(": ")
-//RS         || s.contains(" #")
-//RS         || s.contains('\n')
-//RS }
-//RS 
-//RS // ── core.encoding.xml ────────────────────────────────────────────────────────
-//RS // Runtime and comptime share one parser/folder. These adapters only translate
-//RS // the ordinary DataTree algebra to and from comptime's tagged representation.
-//RS fn xml_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
-//RS     xml_value_to_ct(value)
-//RS }
-//RS 
-//RS fn xml_value_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
-//RS     use jet_foundation::XmlPull::Value;
-//RS     match value {
-//RS         Value::Null => json_variant("Null", None),
-//RS         Value::Bool(value) => json_variant("Bool", Some(CtValue::Bool(value))),
-//RS         Value::Int(value) => json_variant("Int", Some(CtValue::Int(value))),
-//RS         Value::Text(value) => json_variant("Text", Some(CtValue::Str(value))),
-//RS         Value::Array(values) => json_array(values.into_iter().map(xml_value_to_ct).collect()),
-//RS         Value::Object(entries) => json_object(
-//RS             entries
-//RS                 .into_iter()
-//RS                 .map(|(key, value)| (key, xml_value_to_ct(value)))
-//RS                 .collect(),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn restore_xml_snapshot_order(value: &mut jet_foundation::XmlPull::Value) {
-//RS     use jet_foundation::XmlPull::Value;
-//RS     match value {
-//RS         Value::Array(values) => {
-//RS             for value in values {
-//RS                 restore_xml_snapshot_order(value);
-//RS             }
-//RS         }
-//RS         Value::Object(entries) => {
-//RS             for (_, value) in entries.iter_mut() {
-//RS                 restore_xml_snapshot_order(value);
-//RS             }
-//RS             // CtValue maps sort keys; D-ENCXML1 closed schemas preserve exact
-//RS             // field order, but only after lexical evidence has been checked.
-//RS             if let Some(order) = jet_foundation::XmlPull::xml_schema_order(entries) {
-//RS                 entries.sort_by_key(|(key, _)| {
-//RS                     order
-//RS                         .iter()
-//RS                         .position(|expected| *expected == key)
-//RS                         .expect("checked XML schema key")
-//RS                 });
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn xml_value_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, String> {
-//RS     use jet_foundation::XmlPull::Value;
-//RS     if matches!(
-//RS         value,
-//RS         CtValue::Enum {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS         } if type_name == "DataTree" && variant == "Null" && args.is_empty()
-//RS     ) {
-//RS         return Ok(Value::Null);
-//RS     }
-//RS     if let Some(CtValue::Bool(value)) = json_payload(value, "Bool") {
-//RS         return Ok(Value::Bool(*value));
-//RS     }
-//RS     if let Some(CtValue::Int(value)) = json_payload(value, "Int") {
-//RS         return Ok(Value::Int(*value));
-//RS     }
-//RS     if let Some(CtValue::Str(value)) = json_payload(value, "Text") {
-//RS         return Ok(Value::Text(value.clone()));
-//RS     }
-//RS     if let Some(CtValue::List(values)) = json_payload(value, "Array") {
-//RS         return Ok(Value::Array(
-//RS             values
-//RS                 .iter()
-//RS                 .map(xml_value_from_ct)
-//RS                 .collect::<Result<Vec<_>, _>>()?,
-//RS         ));
-//RS     }
-//RS     if let Some(entries) = json_object_entries(value) {
-//RS         let converted: Result<Vec<_>, String> = entries
-//RS             .into_iter()
-//RS             .map(|(key, value)| Ok((key, xml_value_from_ct(&value)?)))
-//RS             .collect();
-//RS         return Ok(Value::Object(converted?));
-//RS     }
-//RS     Err("XML tree contains a non-DataTree value".to_string())
-//RS }
-//RS 
-//RS pub(super) fn xml_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, String> {
-//RS     let mut value = xml_value_from_ct(value)?;
-//RS     // The runtime kernel owns XML attribute-value normalization and lexical
-//RS     // trust. Validate before restoring closed-schema order, or a reordered
-//RS     // semantic object could make stale raw XML look trustworthy.
-//RS     jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
-//RS     restore_xml_snapshot_order(&mut value);
-//RS     Ok(value)
-//RS }
-//RS 
-//RS pub(super) fn xml_parse(text: &str) -> Result<CtValue, jet_foundation::XmlPull::Error> {
-//RS     jet_foundation::XmlKernel::parse_document(text).map(xml_to_ct)
-//RS }
-//RS 
-//RS pub(super) fn xml_safe_limits_value() -> CtValue {
-//RS     let limits = jet_foundation::XmlPull::Limits::safe();
-//RS     CtValue::Struct {
-//RS         type_name: "XMLLimits".to_string(),
-//RS         fields: vec![
-//RS             (
-//RS                 "max_depth".to_string(),
-//RS                 CtValue::Int(limits.max_depth as i64),
-//RS             ),
-//RS             (
-//RS                 "max_nodes".to_string(),
-//RS                 CtValue::Int(limits.max_nodes as i64),
-//RS             ),
-//RS             (
-//RS                 "max_attributes_per_element".to_string(),
-//RS                 CtValue::Int(limits.max_attributes_per_element as i64),
-//RS             ),
-//RS             (
-//RS                 "max_name_bytes".to_string(),
-//RS                 CtValue::Int(limits.max_name_bytes as i64),
-//RS             ),
-//RS             (
-//RS                 "max_text_bytes".to_string(),
-//RS                 CtValue::Int(limits.max_text_bytes as i64),
-//RS             ),
-//RS             (
-//RS                 "max_entity_declarations".to_string(),
-//RS                 CtValue::Int(limits.max_entity_declarations as i64),
-//RS             ),
-//RS             (
-//RS                 "max_entity_depth".to_string(),
-//RS                 CtValue::Int(limits.max_entity_depth as i64),
-//RS             ),
-//RS             (
-//RS                 "max_entity_replacement_bytes".to_string(),
-//RS                 CtValue::Int(limits.max_entity_replacement_bytes as i64),
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn xml_safe_options_value() -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "XMLParseOptions".to_string(),
-//RS         fields: vec![
-//RS             (
-//RS                 "entities".to_string(),
-//RS                 CtValue::Enum {
-//RS                     type_name: "XMLEntityPolicy".to_string(),
-//RS                     variant: "Preserve".to_string(),
-//RS                     args: Vec::new(),
-//RS                 },
-//RS             ),
-//RS             ("limits".to_string(), xml_safe_limits_value()),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn xml_safe_render_options_value() -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "XMLRenderOptions".to_string(),
-//RS         fields: vec![
-//RS             (
-//RS                 "encoding".to_string(),
-//RS                 CtValue::Enum {
-//RS                     type_name: "XMLEncoding".to_string(),
-//RS                     variant: "UTF8".to_string(),
-//RS                     args: Vec::new(),
-//RS                 },
-//RS             ),
-//RS             (
-//RS                 "lexical".to_string(),
-//RS                 CtValue::Enum {
-//RS                     type_name: "XMLLexicalPolicy".to_string(),
-//RS                     variant: "PreserveValid".to_string(),
-//RS                     args: Vec::new(),
-//RS                 },
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn xml_parse_with(
-//RS     text: &str,
-//RS     options: &CtValue,
-//RS ) -> Result<CtValue, jet_foundation::XmlPull::Error> {
-//RS     let options = xml_options(options)?;
-//RS     jet_foundation::XmlKernel::parse_document_with(text, &options).map(xml_to_ct)
-//RS }
-//RS 
-//RS pub(super) fn xml_parse_bytes(
-//RS     bytes: &[u8],
-//RS     options: Option<&CtValue>,
-//RS ) -> Result<CtValue, jet_foundation::XmlPull::Error> {
-//RS     let options = match options {
-//RS         Some(options) => xml_options(options)?,
-//RS         None => jet_foundation::XmlPull::ParseOptions::safe(),
-//RS     };
-//RS     jet_foundation::XmlKernel::parse_document_bytes_with(bytes, &options).map(xml_to_ct)
-//RS }
-//RS 
-//RS fn xml_int(fields: &[(String, CtValue)], name: &str) -> i64 {
-//RS     fields
-//RS         .iter()
-//RS         .find_map(|(field, value)| {
-//RS             (field == name)
-//RS                 .then_some(value)
-//RS                 .and_then(|value| match value {
-//RS                     CtValue::Int(value) => Some(*value),
-//RS                     _ => None,
-//RS                 })
-//RS         })
-//RS         .unwrap_or(-1)
-//RS }
-//RS 
-//RS fn xml_options(
-//RS     value: &CtValue,
-//RS ) -> Result<jet_foundation::XmlPull::ParseOptions, jet_foundation::XmlPull::Error> {
-//RS     let CtValue::Struct { fields, .. } = value else {
-//RS         return Ok(jet_foundation::XmlPull::ParseOptions::safe());
-//RS     };
-//RS     let entities = fields
-//RS         .iter()
-//RS         .find_map(|(name, value)| (name == "entities").then_some(value));
-//RS     let entities = match entities {
-//RS         Some(CtValue::Enum { variant, .. }) if variant == "Reject" => {
-//RS             jet_foundation::XmlPull::EntityPolicy::Reject
-//RS         }
-//RS         Some(CtValue::Enum { variant, args, .. }) if variant == "Resolve" => {
-//RS             let mut resolved = BTreeMap::new();
-//RS             if let Some((_, CtValue::Map(entries))) = args.first() {
-//RS                 for (key, value) in entries {
-//RS                     if let (CtKey::Str(key), CtValue::Str(value)) = (key, value) {
-//RS                         resolved.insert(key.clone(), value.clone());
-//RS                     }
-//RS                 }
-//RS             }
-//RS             jet_foundation::XmlPull::EntityPolicy::Resolve(resolved)
-//RS         }
-//RS         _ => jet_foundation::XmlPull::EntityPolicy::Preserve,
-//RS     };
-//RS     let limits_fields = fields.iter().find_map(|(name, value)| {
-//RS         if name == "limits" {
-//RS             if let CtValue::Struct { fields, .. } = value {
-//RS                 Some(fields.as_slice())
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         } else {
-//RS             None
-//RS         }
-//RS     });
-//RS     let safe = jet_foundation::XmlPull::Limits::safe();
-//RS     let to_usize = |value: i64| usize::try_from(value).unwrap_or(usize::MAX);
-//RS     let limits = if let Some(fields) = limits_fields {
-//RS         jet_foundation::XmlPull::Limits {
-//RS             max_depth: to_usize(xml_int(fields, "max_depth")),
-//RS             max_nodes: to_usize(xml_int(fields, "max_nodes")),
-//RS             max_attributes_per_element: to_usize(xml_int(fields, "max_attributes_per_element")),
-//RS             max_name_bytes: to_usize(xml_int(fields, "max_name_bytes")),
-//RS             max_text_bytes: to_usize(xml_int(fields, "max_text_bytes")),
-//RS             max_entity_declarations: to_usize(xml_int(fields, "max_entity_declarations")),
-//RS             max_entity_depth: to_usize(xml_int(fields, "max_entity_depth")),
-//RS             max_entity_replacement_bytes: to_usize(xml_int(fields, "max_entity_replacement_bytes")),
-//RS         }
-//RS     } else {
-//RS         safe
-//RS     };
-//RS     let options = jet_foundation::XmlPull::ParseOptions { entities, limits };
-//RS     options.limits.validate()?;
-//RS     Ok(options)
-//RS }
-//RS 
-//RS fn xml_error_kind(kind: jet_foundation::XmlPull::Reason) -> &'static str {
-//RS     use jet_foundation::XmlPull::Reason;
-//RS     match kind {
-//RS         Reason::EntityCycle | Reason::Limit => "Limit",
-//RS         Reason::Canonicalization | Reason::Unsupported => "Unsupported",
-//RS         _ => "Syntax",
-//RS     }
-//RS }
-//RS 
-//RS fn xml_error_value_with_source(
-//RS     error: jet_foundation::XmlPull::Error,
-//RS     source_bytes: bool,
-//RS ) -> CtValue {
-//RS     let byte_offset = if source_bytes || error.line.is_some() {
-//RS         error.offset as i64
-//RS     } else {
-//RS         0
-//RS     };
-//RS     encoding_error_value_fields(
-//RS         "XML",
-//RS         xml_error_kind(error.kind),
-//RS         byte_offset,
-//RS         error.line.map(|value| value as i64),
-//RS         error.column.map(|value| value as i64),
-//RS         error.path,
-//RS         error.reason,
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn xml_error_value(error: jet_foundation::XmlPull::Error) -> CtValue {
-//RS     xml_error_value_with_source(error, false)
-//RS }
-//RS 
-//RS pub(super) fn xml_source_error_value(error: jet_foundation::XmlPull::Error) -> CtValue {
-//RS     xml_error_value_with_source(error, true)
-//RS }
-//RS 
-//RS pub(super) fn xml_shape_error_value(reason: String) -> CtValue {
-//RS     encoding_error_value_fields("XML", "Syntax", 0, None, None, String::new(), reason)
-//RS }
-//RS 
-//RS pub(super) fn xml_render(value: &CtValue) -> String {
-//RS     xml_from_ct(value)
-//RS         .and_then(|value| {
-//RS             jet_foundation::XmlKernel::render_document(&value).map_err(|error| error.reason)
-//RS         })
-//RS         .unwrap_or_default()
-//RS }
-//RS 
-//RS pub(super) fn xml_root(document: &CtValue) -> Result<CtValue, CtValue> {
-//RS     let value = xml_from_ct(document).map_err(xml_shape_error_value)?;
-//RS     jet_foundation::XmlKernel::document_root(&value)
-//RS         .map(xml_to_ct)
-//RS         .map_err(xml_error_value)
-//RS }
-//RS 
-//RS pub(super) fn xml_expanded_name(node: &CtValue) -> Result<CtValue, CtValue> {
-//RS     let value = xml_from_ct(node).map_err(xml_shape_error_value)?;
-//RS     let (raw, prefix, local, namespace_uri) =
-//RS         jet_foundation::XmlKernel::expanded_name_parts(&value).map_err(xml_error_value)?;
-//RS     Ok(CtValue::Struct {
-//RS         type_name: String::new(),
-//RS         fields: vec![
-//RS             ("raw".to_string(), CtValue::Str(raw)),
-//RS             (
-//RS                 "prefix".to_string(),
-//RS                 prefix
-//RS                     .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
-//RS                     .unwrap_or(CtValue::absent(Type::String)),
-//RS             ),
-//RS             ("local".to_string(), CtValue::Str(local)),
-//RS             (
-//RS                 "namespace_uri".to_string(),
-//RS                 namespace_uri
-//RS                     .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
-//RS                     .unwrap_or(CtValue::absent(Type::String)),
-//RS             ),
-//RS         ],
-//RS     })
-//RS }
-//RS 
-//RS pub(super) fn xml_attribute(element: &CtValue, name: &str) -> Result<CtValue, CtValue> {
-//RS     let value = xml_from_ct(element).map_err(xml_shape_error_value)?;
-//RS     match jet_foundation::XmlKernel::lookup_attribute(&value, name).map_err(xml_error_value)? {
-//RS         Some(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
-//RS         None => Ok(CtValue::absent(Type::String)),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn xml_content(element: &CtValue) -> Result<CtValue, CtValue> {
-//RS     let value = xml_from_ct(element).map_err(xml_shape_error_value)?;
-//RS     let children = jet_foundation::XmlKernel::element_content(&value).map_err(xml_error_value)?;
-//RS     Ok(CtValue::List(children.into_iter().map(xml_to_ct).collect()))
-//RS }
-//RS 
-//RS /// D-ENCXML-PROJECTION1: project the closed XML tree into the Codable shape
-//RS /// (`@attr` / `$text` / child keys) before typed decode.
-//RS pub(super) fn xml_project_for_decode(document: &CtValue) -> Result<CtValue, CtValue> {
-//RS     let value = xml_from_ct(document).map_err(xml_shape_error_value)?;
-//RS     jet_foundation::XmlKernel::project_document_for_decode(&value)
-//RS         .map(xml_to_ct)
-//RS         .map_err(xml_error_value)
-//RS }
-//RS 
-//RS pub(super) fn xml_to_bytes(value: &CtValue, options: Option<&CtValue>) -> Result<Vec<u8>, CtValue> {
-//RS     let value = xml_from_ct(value).map_err(xml_shape_error_value)?;
-//RS     let (encoding, lexical) = match options {
-//RS         Some(CtValue::Struct { fields, .. }) => {
-//RS             let encoding = match fields
-//RS                 .iter()
-//RS                 .find_map(|(name, value)| (name == "encoding").then_some(value))
-//RS             {
-//RS                 Some(CtValue::Enum { variant, .. }) if variant == "UTF8BOM" => {
-//RS                     jet_foundation::XmlPull::RenderEncoding::UTF8Bom
-//RS                 }
-//RS                 Some(CtValue::Enum { variant, .. }) if variant == "UTF16LE" => {
-//RS                     jet_foundation::XmlPull::RenderEncoding::Utf16Le
-//RS                 }
-//RS                 Some(CtValue::Enum { variant, .. }) if variant == "UTF16BE" => {
-//RS                     jet_foundation::XmlPull::RenderEncoding::Utf16Be
-//RS                 }
-//RS                 _ => jet_foundation::XmlPull::RenderEncoding::UTF8,
-//RS             };
-//RS             let lexical = match fields
-//RS                 .iter()
-//RS                 .find_map(|(name, value)| (name == "lexical").then_some(value))
-//RS             {
-//RS                 Some(CtValue::Enum { variant, .. }) if variant == "Deterministic" => {
-//RS                     jet_foundation::XmlPull::LexicalPolicy::Deterministic
-//RS                 }
-//RS                 _ => jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
-//RS             };
-//RS             (encoding, lexical)
-//RS         }
-//RS         _ => (
-//RS             jet_foundation::XmlPull::RenderEncoding::UTF8,
-//RS             jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
-//RS         ),
-//RS     };
-//RS     jet_foundation::XmlKernel::render_document_bytes(&value, encoding, lexical)
-//RS         .map_err(xml_error_value)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod xml_tests {
-//RS     use super::*;
-//RS 
-//RS     fn field_mut<'a>(
-//RS         value: &'a mut jet_foundation::XmlPull::Value,
-//RS         key: &str,
-//RS     ) -> &'a mut jet_foundation::XmlPull::Value {
-//RS         let jet_foundation::XmlPull::Value::Object(entries) = value else {
-//RS             panic!("expected object")
-//RS         };
-//RS         &mut entries
-//RS             .iter_mut()
-//RS             .find(|(candidate, _)| candidate == key)
-//RS             .unwrap_or_else(|| panic!("missing {key}"))
-//RS             .1
-//RS     }
-//RS 
-//RS     fn first(value: &mut jet_foundation::XmlPull::Value) -> &mut jet_foundation::XmlPull::Value {
-//RS         let jet_foundation::XmlPull::Value::Array(values) = value else {
-//RS             panic!("expected array")
-//RS         };
-//RS         &mut values[0]
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn parse_render_preserves_element_open_lexical_snapshot() {
-//RS         let source = "<r xmlns='urn:\tfoo\r\nbar' a='x\t y\r\nz\ru\nv' b='&#xD;&#xA;&#x9;'/>";
-//RS         let tree = xml_parse(&source).expect("parse XML");
-//RS         assert_eq!(xml_render(&tree), source);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn round_trip_restores_every_nested_xml_schema_order() {
-//RS         let source = "<?xml version='1.0'?>\n<!DOCTYPE r [<!ENTITY e 'v'>]>\n<r xmlns='urn:r' xmlns:p='urn:p' a='x&amp;y'>t&amp;<![CDATA[c]]><!--m--><?go now?><p:c/></r>\n";
-//RS         let expected = jet_foundation::XmlPull::parse_document(source).expect("parse XML");
-//RS         let actual = xml_from_ct(&xml_to_ct(expected.clone())).expect("reconstruct XML");
-//RS         assert_eq!(actual, expected);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn byte_round_trip_preserves_detected_encoding_bom_and_lexical_evidence() {
-//RS         let utf8_source = "<?xml version='1.0' encoding='UTF-8'?><r>é🙂</r>";
-//RS         let mut utf8 = vec![0xef, 0xbb, 0xbf];
-//RS         utf8.extend_from_slice(utf8_source.as_bytes());
-//RS 
-//RS         let utf16_source = "<?xml version='1.0' encoding='UTF-16'?><r>é🙂</r>";
-//RS         let mut utf16 = vec![0xff, 0xfe];
-//RS         utf16.extend(utf16_source.encode_utf16().flat_map(u16::to_le_bytes));
-//RS 
-//RS         for (variant, bytes) in [("UTF8BOM", utf8), ("UTF16LE", utf16)] {
-//RS             let expected =
-//RS                 jet_foundation::XmlPull::parse_document_bytes(&bytes).expect("parse XML bytes");
-//RS             let comptime = xml_to_ct(expected.clone());
-//RS             let actual = xml_from_ct(&comptime).expect("reconstruct XML bytes");
-//RS             assert_eq!(actual, expected, "{variant} metadata and evidence");
-//RS 
-//RS             let options = CtValue::Struct {
-//RS                 type_name: "XMLRenderOptions".to_string(),
-//RS                 fields: vec![
-//RS                     (
-//RS                         "encoding".to_string(),
-//RS                         CtValue::Enum {
-//RS                             type_name: "XMLEncoding".to_string(),
-//RS                             variant: variant.to_string(),
-//RS                             args: Vec::new(),
-//RS                         },
-//RS                     ),
-//RS                     (
-//RS                         "lexical".to_string(),
-//RS                         CtValue::Enum {
-//RS                             type_name: "XMLLexicalPolicy".to_string(),
-//RS                             variant: "PreserveValid".to_string(),
-//RS                             args: Vec::new(),
-//RS                         },
-//RS                     ),
-//RS                 ],
-//RS             };
-//RS             assert_eq!(
-//RS                 xml_to_bytes(&comptime, Some(&options)).expect("render XML bytes"),
-//RS                 bytes,
-//RS                 "{variant} byte identity",
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn round_trip_restores_every_xml_event_schema_order() {
-//RS         let source = b"<?xml version='1.0'?>\n<!DOCTYPE r [<!ENTITY e 'v'>]>\n<r xmlns='urn:r' xmlns:p='urn:p' a='x&amp;y'>t&amp;<![CDATA[c]]><!--m--><?go now?><p:c/></r>\n";
-//RS         let mut scanner = jet_foundation::XmlPull::StreamScanner::new(
-//RS             source.len(),
-//RS             jet_foundation::XmlPull::ParseOptions::safe(),
-//RS         )
-//RS         .expect("stream scanner");
-//RS         scanner.push(source).expect("stream input");
-//RS         scanner.finish_input().expect("finish stream input");
-//RS 
-//RS         let mut tags = std::collections::BTreeSet::new();
-//RS         while let Some(event) = scanner.next().expect("stream event") {
-//RS             let expected = jet_foundation::XmlPull::stream_event_value(event);
-//RS             if let jet_foundation::XmlPull::Value::Object(entries) = &expected {
-//RS                 if let Some((_, jet_foundation::XmlPull::Value::Text(tag))) =
-//RS                     entries.iter().find(|(key, _)| key == "$xml_event")
-//RS                 {
-//RS                     tags.insert(tag.clone());
-//RS                 }
-//RS             }
-//RS             let actual = xml_from_ct(&xml_to_ct(expected.clone())).expect("reconstruct event");
-//RS             assert_eq!(actual, expected);
-//RS         }
-//RS 
-//RS         assert_eq!(
-//RS             tags,
-//RS             [
-//RS                 "cdata",
-//RS                 "comment",
-//RS                 "declaration",
-//RS                 "doctype",
-//RS                 "document_end",
-//RS                 "document_start",
-//RS                 "document_whitespace",
-//RS                 "element_end",
-//RS                 "element_start",
-//RS                 "entity_ref",
-//RS                 "processing_instruction",
-//RS                 "text",
-//RS             ]
-//RS             .into_iter()
-//RS             .map(str::to_string)
-//RS             .collect()
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn hostile_deep_snapshots_match_runtime_rejection() {
-//RS         const SOURCE: &str =
-//RS             "<r xmlns='urn:\troot' xmlns:p='urn:p' a='x\t y' b='z'><?go   now?></r>";
-//RS         let parsed = || jet_foundation::XmlPull::parse_document(SOURCE).expect("parse XML");
-//RS         let assert_parity = |value: jet_foundation::XmlPull::Value, source: &str, label: &str| {
-//RS             let runtime = jet_foundation::XmlPull::render_document(&value).expect("runtime render");
-//RS             let comptime = xml_render(&xml_to_ct(value));
-//RS             assert_eq!(comptime, runtime, "{label}");
-//RS             assert_ne!(runtime, source, "{label} trusted stale raw");
-//RS         };
-//RS 
-//RS         let mut reordered_name = parsed();
-//RS         let root = first(field_mut(&mut reordered_name, "children"));
-//RS         let semantic = field_mut(field_mut(root, "open_lexical"), "semantic");
-//RS         let jet_foundation::XmlPull::Value::Object(name) = field_mut(semantic, "name") else {
-//RS             panic!("name object")
-//RS         };
-//RS         name.reverse();
-//RS         assert_parity(reordered_name, SOURCE, "reordered XMLName snapshot");
-//RS 
-//RS         let mut reordered_attributes = parsed();
-//RS         let root = first(field_mut(&mut reordered_attributes, "children"));
-//RS         let semantic = field_mut(field_mut(root, "open_lexical"), "semantic");
-//RS         let jet_foundation::XmlPull::Value::Array(attributes) = field_mut(semantic, "attributes")
-//RS         else {
-//RS             panic!("attribute array")
-//RS         };
-//RS         attributes.reverse();
-//RS         assert_parity(reordered_attributes, SOURCE, "reordered attribute snapshot");
-//RS 
-//RS         let mut stale_namespace = parsed();
-//RS         let root = first(field_mut(&mut stale_namespace, "children"));
-//RS         let semantic = field_mut(field_mut(root, "open_lexical"), "semantic");
-//RS         let namespace = first(field_mut(semantic, "namespaces"));
-//RS         *field_mut(namespace, "namespace_uri") =
-//RS             jet_foundation::XmlPull::Value::Text("urn:stale".to_string());
-//RS         assert_parity(stale_namespace, SOURCE, "stale namespace snapshot");
-//RS 
-//RS         let mut stale_leaf = parsed();
-//RS         let root = first(field_mut(&mut stale_leaf, "children"));
-//RS         let processing_instruction = first(field_mut(root, "children"));
-//RS         let semantic = field_mut(field_mut(processing_instruction, "lexical"), "semantic");
-//RS         *field_mut(semantic, "value") = jet_foundation::XmlPull::Value::Text("stale".to_string());
-//RS         assert_parity(stale_leaf, SOURCE, "stale leaf snapshot");
-//RS 
-//RS         const SIMPLE: &str = "<r  a='x'/>";
-//RS         let simple = || jet_foundation::XmlPull::parse_document(SIMPLE).expect("parse XML");
-//RS 
-//RS         let mut reordered_live_name = simple();
-//RS         let root = first(field_mut(&mut reordered_live_name, "children"));
-//RS         let jet_foundation::XmlPull::Value::Object(name) = field_mut(root, "name") else {
-//RS             panic!("name object")
-//RS         };
-//RS         name.reverse();
-//RS         assert_parity(reordered_live_name, SIMPLE, "reordered live XMLName");
-//RS 
-//RS         let mut extra_lexical_key = simple();
-//RS         let root = first(field_mut(&mut extra_lexical_key, "children"));
-//RS         let jet_foundation::XmlPull::Value::Object(lexical) = field_mut(root, "open_lexical")
-//RS         else {
-//RS             panic!("lexical object")
-//RS         };
-//RS         lexical.push(("extra".to_string(), jet_foundation::XmlPull::Value::Null));
-//RS         assert_parity(extra_lexical_key, SIMPLE, "extra lexical key");
-//RS 
-//RS         let mut both_raw_forms = simple();
-//RS         let root = first(field_mut(&mut both_raw_forms, "children"));
-//RS         *field_mut(field_mut(root, "open_lexical"), "raw_bytes") =
-//RS             jet_foundation::XmlPull::Value::Array(vec![jet_foundation::XmlPull::Value::Int(60)]);
-//RS         assert_parity(both_raw_forms, SIMPLE, "both lexical raw forms");
-//RS 
-//RS         let mut wrong_raw_type = simple();
-//RS         let root = first(field_mut(&mut wrong_raw_type, "children"));
-//RS         *field_mut(field_mut(root, "open_lexical"), "raw_text") =
-//RS             jet_foundation::XmlPull::Value::Int(1);
-//RS         assert_parity(wrong_raw_type, SIMPLE, "wrong lexical raw type");
-//RS     }
-//RS }
-//RS 
-//RS // ── core.encoding.cbor ──────────────────────────────────────────────────────
-//RS // Ported from `EncodingCodecs.rs`'s `jet_cbor_*`/`jet_std_cbor_*`, target
-//RS // type swapped from `DataTree` to the `JSON`-tagged `CtValue`.
-//RS 
-//RS fn cbor_is_u8_list(ty: Option<&Type>) -> bool {
-//RS     matches!(
-//RS         ty,
-//RS         Some(Type::List(elem) | Type::FixedList { elem, .. })
-//RS             if matches!(elem.as_ref(), Type::IntN { signed: false, bits: 8 })
-//RS                 || matches!(elem.as_ref(), Type::Named(name) if name == "U8")
-//RS     )
-//RS }
-//RS 
-//RS fn cbor_codable_value(
-//RS     value: &CtValue,
-//RS     ty: Option<&Type>,
-//RS     struct_fields: &HashMap<String, Vec<(String, Type)>>,
-//RS ) -> Result<CtValue, String> {
-//RS     let ty = match ty {
-//RS         Some(Type::Shared(inner) | Type::Tagged { inner, .. }) => Some(inner.as_ref()),
-//RS         other => other,
-//RS     };
-//RS     match value {
-//RS         CtValue::List(items) if cbor_is_u8_list(ty) => items
-//RS             .iter()
-//RS             .map(|item| match item {
-//RS                 CtValue::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
-//RS                 _ => Err("CBOR [U8] contains an out-of-range byte".to_string()),
-//RS             })
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .map(CtValue::Bytes),
-//RS         CtValue::List(items) => {
-//RS             let elem_ty = match ty {
-//RS                 Some(Type::List(elem) | Type::FixedList { elem, .. }) => Some(elem.as_ref()),
-//RS                 _ => None,
-//RS             };
-//RS             items
-//RS                 .iter()
-//RS                 .map(|item| cbor_codable_value(item, elem_ty, struct_fields))
-//RS                 .collect::<Result<Vec<_>, _>>()
-//RS                 .map(CtValue::List)
-//RS         }
-//RS         CtValue::Map(entries) => {
-//RS             let value_ty = match ty {
-//RS                 Some(Type::Map { value, .. }) => Some(value.as_ref()),
-//RS                 _ => None,
-//RS             };
-//RS             let mut mapped = BTreeMap::new();
-//RS             for (key, value) in entries {
-//RS                 if !matches!(key, CtKey::Str(_)) {
-//RS                     return Err("CBOR Codable maps require text keys".to_string());
-//RS                 }
-//RS                 mapped.insert(
-//RS                     key.clone(),
-//RS                     cbor_codable_value(value, value_ty, struct_fields)?,
-//RS                 );
-//RS             }
-//RS             Ok(CtValue::Map(mapped))
-//RS         }
-//RS         CtValue::Struct { type_name, fields } => {
-//RS             let definition = struct_fields
-//RS                 .get(type_name)
-//RS                 .ok_or_else(|| format!("CBOR comptime encoder has no schema for `{type_name}`"))?;
-//RS             let mut mapped = Vec::with_capacity(fields.len());
-//RS             for (name, value) in fields {
-//RS                 let field_ty = definition
-//RS                     .iter()
-//RS                     .find(|(field, _)| field == name)
-//RS                     .map(|(_, ty)| ty);
-//RS                 mapped.push((
-//RS                     name.clone(),
-//RS                     cbor_codable_value(value, field_ty, struct_fields)?,
-//RS                 ));
-//RS             }
-//RS             Ok(CtValue::Struct {
-//RS                 type_name: type_name.clone(),
-//RS                 fields: mapped,
-//RS             })
-//RS         }
-//RS         CtValue::Present(inner) => Ok(CtValue::Present(Box::new(cbor_codable_value(
-//RS             inner,
-//RS             match ty {
-//RS                 Some(Type::Option(inner)) => Some(inner.as_ref()),
-//RS                 _ => None,
-//RS             },
-//RS             struct_fields,
-//RS         )?))),
-//RS         CtValue::Failed(CtReport::Clean(_)) => Ok(value.clone()),
-//RS         CtValue::BigInt(_) => Err("CBOR kernel cannot encode an exact Int spill".to_string()),
-//RS         CtValue::Closure(_) => Err("CBOR cannot encode a function value".to_string()),
-//RS         CtValue::Failed(CtReport::Told(_)) => {
-//RS             Err("CBOR cannot encode a Result without an explicit Codable schema".to_string())
-//RS         }
-//RS         CtValue::Enum { type_name, .. } if type_name != "DataTree" => Err(format!(
-//RS             "CBOR comptime encoder does not own the Codable schema for enum `{type_name}`"
-//RS         )),
-//RS         _ => Ok(value.clone()),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn cbor_encode_typed(
-//RS     value: &CtValue,
-//RS     root_ty: Option<&Type>,
-//RS     struct_fields: &HashMap<String, Vec<(String, Type)>>,
-//RS     canonical: bool,
-//RS ) -> Result<Vec<u8>, String> {
-//RS     let value = cbor_codable_value(value, root_ty, struct_fields)?;
-//RS     if canonical {
-//RS         cbor_encode_canonical(&value)
-//RS     } else {
-//RS         cbor_encode(&value)
-//RS     }
-//RS     .map_err(|error| error.reason)
-//RS }
-//RS 
-//RS pub(super) fn cbor_struct_fields(
-//RS     structs: &HashMap<String, &StructDef>,
-//RS ) -> HashMap<String, Vec<(String, Type)>> {
-//RS     structs
-//RS         .iter()
-//RS         .map(|(name, definition)| {
-//RS             (
-//RS                 name.clone(),
-//RS                 definition
-//RS                     .reflection_fields()
-//RS                     .map(|field| (field.name.clone(), field.ty.clone()))
-//RS                     .collect(),
-//RS             )
-//RS         })
-//RS         .collect()
-//RS }
-//RS #[derive(Clone, Debug)]
-//RS pub(super) struct CborFailure {
-//RS     kind: &'static str,
-//RS     byte_offset: usize,
-//RS     path: String,
-//RS     pub(super) reason: String,
-//RS }
-//RS 
-//RS impl CborFailure {
-//RS     fn new(
-//RS         kind: &'static str,
-//RS         byte_offset: usize,
-//RS         path: impl Into<String>,
-//RS         reason: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             kind,
-//RS             byte_offset,
-//RS             path: path.into(),
-//RS             reason: reason.into(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn cbor_encoding_kind(kind: &str) -> &'static str {
-//RS     match kind {
-//RS         "Truncated" => "Truncated",
-//RS         "Unsupported" | "NonCanonical" => "Unsupported",
-//RS         "Limit" => "Limit",
-//RS         _ => "Syntax",
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn cbor_encoding_error_value(error: CborFailure) -> CtValue {
-//RS     encoding_error_value_fields(
-//RS         "CBOR",
-//RS         cbor_encoding_kind(error.kind),
-//RS         error.byte_offset as i64,
-//RS         None,
-//RS         None,
-//RS         error.path,
-//RS         error.reason,
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn cbor_unsupported_error_value(reason: impl Into<String>) -> CtValue {
-//RS     cbor_encoding_error_value(CborFailure::new("Unsupported", 0, "$", reason))
-//RS }
-//RS 
-//RS pub(super) fn cbor_safe_options() -> jet_foundation::CborKernel::Options {
-//RS     jet_foundation::CborKernel::Options::safe()
-//RS }
-//RS 
-//RS pub(super) fn cbor_options(
-//RS     value: Option<&CtValue>,
-//RS ) -> Result<jet_foundation::CborKernel::Options, CborFailure> {
-//RS     let mut max_depth = None;
-//RS     let mut max_items = None;
-//RS     let mut max_bytes = None;
-//RS     let mut require_canonical = None;
-//RS     if let Some(CtValue::Struct { fields, .. }) = value {
-//RS         for (name, value) in fields {
-//RS             match (name.as_str(), value) {
-//RS                 ("max_depth", CtValue::Int(n)) => max_depth = Some(*n),
-//RS                 ("max_items", CtValue::Int(n)) => max_items = Some(*n),
-//RS                 ("max_bytes", CtValue::Int(n)) => max_bytes = Some(*n),
-//RS                 ("require_canonical", CtValue::Bool(v)) => require_canonical = Some(*v),
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     jet_foundation::CborKernel::Options::from_fields(
-//RS         max_depth,
-//RS         max_items,
-//RS         max_bytes,
-//RS         require_canonical,
-//RS     )
-//RS     .map_err(cbor_kernel_error)
-//RS }
-//RS 
-//RS fn cbor_kernel_error(error: jet_foundation::CborKernel::Error) -> CborFailure {
-//RS     let kind = match error.kind {
-//RS         jet_foundation::CborKernel::ErrorKind::Syntax => "Syntax",
-//RS         jet_foundation::CborKernel::ErrorKind::Truncated => "Truncated",
-//RS         jet_foundation::CborKernel::ErrorKind::Unsupported => "Unsupported",
-//RS         jet_foundation::CborKernel::ErrorKind::Limit => "Limit",
-//RS         jet_foundation::CborKernel::ErrorKind::TypeMismatch => "TypeMismatch",
-//RS         jet_foundation::CborKernel::ErrorKind::TrailingData => "TrailingData",
-//RS         jet_foundation::CborKernel::ErrorKind::NonCanonical => "NonCanonical",
-//RS     };
-//RS     CborFailure::new(kind, error.byte_offset, error.path, error.reason)
-//RS }
-//RS 
-//RS fn cbor_kernel_value(value: &CtValue) -> Result<jet_foundation::CborKernel::Value, String> {
-//RS     if let Some(entries) = json_object_entries(value) {
-//RS         return entries
-//RS             .iter()
-//RS             .map(|(key, value)| cbor_kernel_value(value).map(|value| (key.clone(), value)))
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .map(jet_foundation::CborKernel::Value::Object);
-//RS     }
-//RS     if let Some(items) = json_array_items(value) {
-//RS         return items
-//RS             .iter()
-//RS             .map(cbor_kernel_value)
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .map(jet_foundation::CborKernel::Value::Array);
-//RS     }
-//RS     match value {
-//RS         CtValue::Unit | CtValue::Failed(CtReport::Clean(_)) => {
-//RS             Ok(jet_foundation::CborKernel::Value::Null)
-//RS         }
-//RS         CtValue::Bool(value) => Ok(jet_foundation::CborKernel::Value::Bool(*value)),
-//RS         CtValue::Int(value) => Ok(jet_foundation::CborKernel::Value::Int(*value)),
-//RS         CtValue::Float(value) => Ok(jet_foundation::CborKernel::Value::Float(value.as_f64())),
-//RS         CtValue::Char(value) => Ok(jet_foundation::CborKernel::Value::Text(value.to_string())),
-//RS         CtValue::Str(value) => Ok(jet_foundation::CborKernel::Value::Text(value.clone())),
-//RS         CtValue::Bytes(value) => Ok(jet_foundation::CborKernel::Value::Bytes(value.clone())),
-//RS         CtValue::List(items) => items
-//RS             .iter()
-//RS             .map(cbor_kernel_value)
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .map(jet_foundation::CborKernel::Value::Array),
-//RS         CtValue::Map(entries) => entries
-//RS             .iter()
-//RS             .map(|(key, value)| {
-//RS                 let CtKey::Str(key) = key else {
-//RS                     return Err("CBOR maps require text keys".to_string());
-//RS                 };
-//RS                 cbor_kernel_value(value).map(|value| (key.clone(), value))
-//RS             })
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .map(jet_foundation::CborKernel::Value::Object),
-//RS         CtValue::Struct { fields, .. } => fields
-//RS             .iter()
-//RS             .map(|(key, value)| cbor_kernel_value(value).map(|value| (key.clone(), value)))
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .map(jet_foundation::CborKernel::Value::Object),
-//RS         CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
-//RS             cbor_kernel_value(value)
-//RS         }
-//RS         CtValue::Enum {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS         } if type_name == "DataTree" => match variant.as_str() {
-//RS             "Null" => Ok(jet_foundation::CborKernel::Value::Null),
-//RS             "Bool" => match args.first().map(|(_, value)| value) {
-//RS                 Some(CtValue::Bool(value)) => Ok(jet_foundation::CborKernel::Value::Bool(*value)),
-//RS                 _ => Err("DataTree.Bool has an invalid payload".to_string()),
-//RS             },
-//RS             "Int" => match args.first().map(|(_, value)| value) {
-//RS                 Some(CtValue::Int(value)) => Ok(jet_foundation::CborKernel::Value::Int(*value)),
-//RS                 _ => Err("DataTree.Int has an invalid payload".to_string()),
-//RS             },
-//RS             "Float" => match args.first().map(|(_, value)| value) {
-//RS                 Some(CtValue::Float(value)) => {
-//RS                     Ok(jet_foundation::CborKernel::Value::Float(value.as_f64()))
-//RS                 }
-//RS                 _ => Err("DataTree.Float has an invalid payload".to_string()),
-//RS             },
-//RS             "Text" | "TypedText" => match args.first().map(|(_, value)| value) {
-//RS                 Some(CtValue::Str(value)) => {
-//RS                     Ok(jet_foundation::CborKernel::Value::Text(value.clone()))
-//RS                 }
-//RS                 _ => Err("DataTree.Text has an invalid payload".to_string()),
-//RS             },
-//RS             _ => Err(format!("unsupported DataTree variant `{variant}`")),
-//RS         },
-//RS         CtValue::Enum { type_name, .. } => {
-//RS             Err(format!("CBOR encoder does not own enum `{type_name}`"))
-//RS         }
-//RS         CtValue::BigInt(_) => Err("CBOR kernel cannot encode an exact Int spill".to_string()),
-//RS         CtValue::Closure(_) => Err("CBOR cannot encode a function value".to_string()),
-//RS     }
-//RS }
-//RS 
-//RS fn cbor_kernel_tree(value: jet_foundation::CborKernel::Value) -> CtValue {
-//RS     match value {
-//RS         jet_foundation::CborKernel::Value::Null => json_variant("Null", None),
-//RS         jet_foundation::CborKernel::Value::Bool(value) => {
-//RS             json_variant("Bool", Some(CtValue::Bool(value)))
-//RS         }
-//RS         jet_foundation::CborKernel::Value::Int(value) => {
-//RS             json_variant("Int", Some(CtValue::Int(value)))
-//RS         }
-//RS         jet_foundation::CborKernel::Value::Float(value) => {
-//RS             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
-//RS         }
-//RS         jet_foundation::CborKernel::Value::Text(value) => {
-//RS             json_variant("Text", Some(CtValue::Str(value)))
-//RS         }
-//RS         jet_foundation::CborKernel::Value::Bytes(value) => CtValue::Bytes(value),
-//RS         jet_foundation::CborKernel::Value::Array(values) => {
-//RS             json_array(values.into_iter().map(cbor_kernel_tree).collect())
-//RS         }
-//RS         jet_foundation::CborKernel::Value::Object(entries) => json_object(
-//RS             entries
-//RS                 .into_iter()
-//RS                 .map(|(key, value)| (key, cbor_kernel_tree(value)))
-//RS                 .collect(),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn cbor_encode(v: &CtValue) -> Result<Vec<u8>, CborFailure> {
-//RS     let value =
-//RS         cbor_kernel_value(v).map_err(|reason| CborFailure::new("Unsupported", 0, "$", reason))?;
-//RS     jet_foundation::CborKernel::encode(&value, false).map_err(cbor_kernel_error)
-//RS }
-//RS 
-//RS pub(super) fn cbor_encode_canonical(v: &CtValue) -> Result<Vec<u8>, CborFailure> {
-//RS     let value =
-//RS         cbor_kernel_value(v).map_err(|reason| CborFailure::new("Unsupported", 0, "$", reason))?;
-//RS     jet_foundation::CborKernel::encode(&value, true).map_err(cbor_kernel_error)
-//RS }
-//RS 
-//RS pub(super) fn cbor_decode(
-//RS     bytes: &[u8],
-//RS     options: &jet_foundation::CborKernel::Options,
-//RS     allow_bytes: bool,
-//RS ) -> Result<CtValue, CborFailure> {
-//RS     jet_foundation::CborKernel::decode(bytes, options, allow_bytes)
-//RS         .map(cbor_kernel_tree)
-//RS         .map_err(cbor_kernel_error)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod cbor_tests {
-//RS     use super::*;
-//RS 
-//RS     fn safe() -> jet_foundation::CborKernel::Options {
-//RS         cbor_options(None).unwrap()
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn hostile_errors_keep_owned_kind_offset_path_and_reason() {
-//RS         let cases = [
-//RS             (
-//RS                 &[0xff][..],
-//RS                 false,
-//RS                 "Syntax",
-//RS                 0,
-//RS                 "$",
-//RS                 "CBOR break outside an indefinite container",
-//RS             ),
-//RS             (
-//RS                 &[0x81][..],
-//RS                 false,
-//RS                 "Truncated",
-//RS                 1,
-//RS                 "$[0]",
-//RS                 "CBOR value is missing",
-//RS             ),
-//RS             (
-//RS                 &[0xc0, 1][..],
-//RS                 false,
-//RS                 "Unsupported",
-//RS                 0,
-//RS                 "$",
-//RS                 "CBOR tags are unsupported",
-//RS             ),
-//RS             (
-//RS                 &[1, 2][..],
-//RS                 false,
-//RS                 "TrailingData",
-//RS                 1,
-//RS                 "$",
-//RS                 "trailing CBOR data after root value",
-//RS             ),
-//RS         ];
-//RS         for (wire, allow_bytes, kind, offset, path, reason) in cases {
-//RS             let error = cbor_decode(wire, &safe(), allow_bytes).unwrap_err();
-//RS             assert_eq!(
-//RS                 (
-//RS                     error.kind,
-//RS                     error.byte_offset,
-//RS                     error.path.as_str(),
-//RS                     error.reason.as_str()
-//RS                 ),
-//RS                 (kind, offset, path, reason)
-//RS             );
-//RS         }
-//RS         let mut strict = safe();
-//RS         strict.require_canonical = true;
-//RS         let error = cbor_decode(&[0x18, 1], &strict, false).unwrap_err();
-//RS         assert_eq!(
-//RS             (
-//RS                 error.kind,
-//RS                 error.byte_offset,
-//RS                 error.path.as_str(),
-//RS                 error.reason.as_str()
-//RS             ),
-//RS             (
-//RS                 "NonCanonical",
-//RS                 0,
-//RS                 "$",
-//RS                 "CBOR argument does not use its shortest form"
-//RS             )
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS // ── core.encoding.jsonl ─────────────────────────────────────────────────────
-//RS // Ported from `MathRandomTime.rs`'s `jet_std_jsonl_parse`/`jet_std_jsonl_render`.
-//RS 
-//RS pub(super) fn jsonl_parse(text: &str) -> Result<Vec<CtValue>, CtValue> {
-//RS     let mut out = Vec::new();
-//RS     for (idx, line) in text.lines().enumerate() {
-//RS         let trimmed = line.trim();
-//RS         if trimmed.is_empty() {
-//RS             continue;
-//RS         }
-//RS         match super::JSONInterp::parse_json(trimmed) {
-//RS             Ok(v) => out.push(v),
-//RS             Err(e) => return Err(super::JSONInterp::encoding_error_value_at_line(e, idx as i64)),
-//RS         }
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS pub(super) fn jsonl_render(rows: &[CtValue]) -> String {
-//RS     let mut out = rows
-//RS         .iter()
-//RS         .map(|v| super::JSONInterp::render_json_pretty(v, false, 0))
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n");
-//RS     if !out.is_empty() {
-//RS         out.push('\n');
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS // ── core.encoding.json: canonical / events ─────────────────────────────────
-//RS // Edition 2026: prototype sort+render (`jet_std_json_render_canonical`).
-//RS // Edition 2027: RFC 8785 JCS (`jet_enc_json_canonical`) ported for CtValue.
-//RS 
-//RS #[derive(Clone, Copy, Debug)]
-//RS pub(super) struct EncodingLimitsLite {
-//RS     pub max_depth: i64,
-//RS     pub max_item_bytes: i64,
-//RS     pub max_total_bytes: Option<i64>,
-//RS     buffer_bytes: i64,
-//RS     max_expansion_depth: i64,
-//RS     max_expansion_bytes: i64,
-//RS }
-//RS 
-//RS impl EncodingLimitsLite {
-//RS     pub(super) fn safe() -> Self {
-//RS         Self {
-//RS             buffer_bytes: 65536,
-//RS             max_depth: 256,
-//RS             max_item_bytes: 16777216,
-//RS             max_total_bytes: None,
-//RS             max_expansion_depth: 32,
-//RS             max_expansion_bytes: 8388608,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn encoding_limits_safe_value() -> CtValue {
-//RS     let lim = EncodingLimitsLite::safe();
-//RS     CtValue::Struct {
-//RS         type_name: "EncodingLimits".to_string(),
-//RS         fields: vec![
-//RS             ("buffer_bytes".to_string(), CtValue::Int(lim.buffer_bytes)),
-//RS             ("max_depth".to_string(), CtValue::Int(lim.max_depth)),
-//RS             (
-//RS                 "max_item_bytes".to_string(),
-//RS                 CtValue::Int(lim.max_item_bytes),
-//RS             ),
-//RS             (
-//RS                 "max_total_bytes".to_string(),
-//RS                 CtValue::absent(crate::AST::Type::Int),
-//RS             ),
-//RS             (
-//RS                 "max_expansion_depth".to_string(),
-//RS                 CtValue::Int(lim.max_expansion_depth),
-//RS             ),
-//RS             (
-//RS                 "max_expansion_bytes".to_string(),
-//RS                 CtValue::Int(lim.max_expansion_bytes),
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn encoding_limits_from_value(v: &CtValue) -> Result<EncodingLimitsLite, String> {
-//RS     let CtValue::Struct { type_name, fields } = v else {
-//RS         return Err("EncodingLimits expected".to_string());
-//RS     };
-//RS     if type_name != "EncodingLimits" {
-//RS         return Err("EncodingLimits expected".to_string());
-//RS     }
-//RS     let mut lim = EncodingLimitsLite::safe();
-//RS     for (name, value) in fields {
-//RS         match (name.as_str(), value) {
-//RS             ("buffer_bytes", CtValue::Int(n)) => lim.buffer_bytes = *n,
-//RS             ("max_depth", CtValue::Int(n)) => lim.max_depth = *n,
-//RS             ("max_item_bytes", CtValue::Int(n)) => lim.max_item_bytes = *n,
-//RS             ("max_total_bytes", CtValue::Failed(CtReport::Clean(_))) => lim.max_total_bytes = None,
-//RS             ("max_total_bytes", CtValue::Present(inner)) => match inner.as_ref() {
-//RS                 CtValue::Int(n) => lim.max_total_bytes = Some(*n),
-//RS                 _ => return Err("max_total_bytes must be Int?".to_string()),
-//RS             },
-//RS             ("max_total_bytes", CtValue::Int(n)) => lim.max_total_bytes = Some(*n),
-//RS             ("max_expansion_depth", CtValue::Int(n)) => lim.max_expansion_depth = *n,
-//RS             ("max_expansion_bytes", CtValue::Int(n)) => lim.max_expansion_bytes = *n,
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     Ok(lim)
-//RS }
-//RS 
-//RS fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
-//RS     encoding_error_value_at("JSON", kind, 1, 1, reason)
-//RS }
-//RS 
-//RS fn encoding_error_value_fields(
-//RS     format: &str,
-//RS     kind: &str,
-//RS     byte_offset: i64,
-//RS     line: Option<i64>,
-//RS     column: Option<i64>,
-//RS     path: String,
-//RS     reason: impl Into<String>,
-//RS ) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "EncodingError".to_string(),
-//RS         fields: vec![
-//RS             (
-//RS                 "format".to_string(),
-//RS                 CtValue::Enum {
-//RS                     type_name: "EncodingFormat".to_string(),
-//RS                     variant: format.to_string(),
-//RS                     args: Vec::new(),
-//RS                 },
-//RS             ),
-//RS             (
-//RS                 "kind".to_string(),
-//RS                 CtValue::Enum {
-//RS                     type_name: "EncodingErrorKind".to_string(),
-//RS                     variant: kind.to_string(),
-//RS                     args: Vec::new(),
-//RS                 },
-//RS             ),
-//RS             ("byte_offset".to_string(), CtValue::Int(byte_offset)),
-//RS             (
-//RS                 "line".to_string(),
-//RS                 line.map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
-//RS                     .unwrap_or(CtValue::absent(Type::Int)),
-//RS             ),
-//RS             (
-//RS                 "column".to_string(),
-//RS                 column
-//RS                     .map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
-//RS                     .unwrap_or(CtValue::absent(Type::Int)),
-//RS             ),
-//RS             ("path".to_string(), CtValue::Str(path)),
-//RS             ("reason".to_string(), CtValue::Str(reason.into())),
-//RS             (
-//RS                 "cause".to_string(),
-//RS                 CtValue::absent(crate::AST::Type::Named("EncodingCause".to_string())),
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn encoding_error_value_at(
-//RS     format: &str,
-//RS     kind: &str,
-//RS     line: i64,
-//RS     column: i64,
-//RS     reason: impl Into<String>,
-//RS ) -> CtValue {
-//RS     encoding_error_value_fields(
-//RS         format,
-//RS         kind,
-//RS         0,
-//RS         Some(line),
-//RS         Some(column),
-//RS         String::new(),
-//RS         reason,
-//RS     )
-//RS }
-//RS 
-//RS fn validate_encoding_limits(limits: &EncodingLimitsLite) -> Result<(), CtValue> {
-//RS     let invalid = if !(4096..=16777216).contains(&limits.buffer_bytes) {
-//RS         Some(format!(
-//RS             "buffer_bytes {} is outside 4096..16777216",
-//RS             limits.buffer_bytes
-//RS         ))
-//RS     } else if !(1..=4096).contains(&limits.max_depth) {
-//RS         Some(format!("max_depth {} is outside 1..4096", limits.max_depth))
-//RS     } else if !(1..=1073741824).contains(&limits.max_item_bytes) {
-//RS         Some(format!(
-//RS             "max_item_bytes {} is outside 1..1073741824",
-//RS             limits.max_item_bytes
-//RS         ))
-//RS     } else if limits.max_total_bytes.is_some_and(|value| value < 0) {
-//RS         Some(format!(
-//RS             "max_total_bytes {} is outside 0..Int.max",
-//RS             limits.max_total_bytes.unwrap_or_default()
-//RS         ))
-//RS     } else if !(0..=256).contains(&limits.max_expansion_depth) {
-//RS         Some(format!(
-//RS             "max_expansion_depth {} is outside 0..256",
-//RS             limits.max_expansion_depth
-//RS         ))
-//RS     } else if !(0..=1073741824).contains(&limits.max_expansion_bytes) {
-//RS         Some(format!(
-//RS             "max_expansion_bytes {} is outside 0..1073741824",
-//RS             limits.max_expansion_bytes
-//RS         ))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     match invalid {
-//RS         Some(reason) => Err(encoding_error_value("Limit", reason)),
-//RS         None => Ok(()),
-//RS     }
-//RS }
-//RS 
-//RS // #1636: one home for the limb-arithmetic bigint routine. `crate::Numeric::CtBigInt`
-//RS // (jet-foundation, already a direct dependency of every seam crate) is the
-//RS // canonical compiled implementation; JCS float formatting here just borrows
-//RS // its name locally so the call sites below read unchanged. The Prelude's
-//RS // `JetBigInt` (CommonTypes.rs) stays a separate, hand-mirrored copy — AOT
-//RS // output is a standalone Rust program that can't link back into the compiler,
-//RS // the same constraint `JetDecimal`/`CtDecimal` already document there.
-//RS mod jcs_big {
-//RS     pub use crate::Numeric::CtBigInt as JetBigInt;
-//RS }
-//RS 
-//RS fn jcs_big_pow(mut base: jcs_big::JetBigInt, mut exponent: usize) -> jcs_big::JetBigInt {
-//RS     let mut out = jcs_big::JetBigInt::from_int(1);
-//RS     while exponent > 0 {
-//RS         if exponent & 1 == 1 {
-//RS             out = out.mul(&base);
-//RS         }
-//RS         base = base.mul(&base);
-//RS         exponent >>= 1;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn jcs_decimal_ratio(text: &str) -> (jcs_big::JetBigInt, jcs_big::JetBigInt) {
-//RS     let (mantissa, exponent) = text
-//RS         .split_once('e')
-//RS         .map(|(m, e)| (m, e.parse::<i32>().expect("Rust float exponent")))
-//RS         .unwrap_or((text, 0));
-//RS     let decimal = mantissa.find('.').unwrap_or(mantissa.len()) as i32;
-//RS     let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
-//RS     let mut numerator = jcs_big::JetBigInt::from_str(&digits).expect("Rust float digits");
-//RS     let mut denominator = jcs_big::JetBigInt::from_int(1);
-//RS     let decimal_exponent = exponent - ((digits.len() as i32) - decimal);
-//RS     if decimal_exponent >= 0 {
-//RS         numerator = numerator.mul(&jcs_big_pow(
-//RS             jcs_big::JetBigInt::from_int(10),
-//RS             decimal_exponent as usize,
-//RS         ));
-//RS     } else {
-//RS         denominator = jcs_big_pow(
-//RS             jcs_big::JetBigInt::from_int(10),
-//RS             (-decimal_exponent) as usize,
-//RS         );
-//RS     }
-//RS     (numerator, denominator)
-//RS }
-//RS 
-//RS fn jcs_float_ratio(value: f64) -> (jcs_big::JetBigInt, jcs_big::JetBigInt) {
-//RS     let bits = value.to_bits();
-//RS     let biased = ((bits >> 52) & 0x7ff) as i32;
-//RS     let fraction = bits & ((1u64 << 52) - 1);
-//RS     let (significand, exponent) = if biased == 0 {
-//RS         (fraction, -1074)
-//RS     } else {
-//RS         ((1u64 << 52) | fraction, biased - 1023 - 52)
-//RS     };
-//RS     let mut numerator = jcs_big::JetBigInt::from_int(significand as i64);
-//RS     let mut denominator = jcs_big::JetBigInt::from_int(1);
-//RS     if exponent >= 0 {
-//RS         numerator = numerator.mul(&jcs_big_pow(
-//RS             jcs_big::JetBigInt::from_int(2),
-//RS             exponent as usize,
-//RS         ));
-//RS     } else {
-//RS         denominator = jcs_big_pow(jcs_big::JetBigInt::from_int(2), (-exponent) as usize);
-//RS     }
-//RS     (numerator, denominator)
-//RS }
-//RS 
-//RS fn jcs_decimal_distance(
-//RS     text: &str,
-//RS     exact: &(jcs_big::JetBigInt, jcs_big::JetBigInt),
-//RS ) -> jcs_big::JetBigInt {
-//RS     let candidate = jcs_decimal_ratio(text);
-//RS     let distance = candidate.0.mul(&exact.1).sub(&exact.0.mul(&candidate.1));
-//RS     let rendered = distance.to_string_rep();
-//RS     jcs_big::JetBigInt::from_str(rendered.strip_prefix('-').unwrap_or(&rendered))
-//RS         .expect("absolute decimal distance")
-//RS }
-//RS 
-//RS fn jcs_positive_big_cmp(
-//RS     left: &jcs_big::JetBigInt,
-//RS     right: &jcs_big::JetBigInt,
-//RS ) -> std::cmp::Ordering {
-//RS     let left = left.to_string_rep();
-//RS     let right = right.to_string_rep();
-//RS     left.len().cmp(&right.len()).then_with(|| left.cmp(&right))
-//RS }
-//RS 
-//RS fn jcs_shortest(value: f64) -> String {
-//RS     let shortest = format!("{:?}", value);
-//RS     let mantissa_end = shortest.find('e').unwrap_or(shortest.len());
-//RS     let Some(index) = shortest[..mantissa_end].rfind(|ch: char| ch.is_ascii_digit()) else {
-//RS         return shortest;
-//RS     };
-//RS     let digit = shortest.as_bytes()[index] - b'0';
-//RS     let mut candidates = vec![(shortest.clone(), digit)];
-//RS     for replacement in [
-//RS         digit.checked_sub(1),
-//RS         digit.checked_add(1).filter(|next| *next < 10),
-//RS     ]
-//RS     .into_iter()
-//RS     .flatten()
-//RS     {
-//RS         let mut candidate = shortest.clone().into_bytes();
-//RS         candidate[index] = b'0' + replacement;
-//RS         let candidate = String::from_utf8(candidate).expect("ASCII digit replacement");
-//RS         if candidate
-//RS             .parse::<f64>()
-//RS             .is_ok_and(|parsed| parsed.to_bits() == value.to_bits())
-//RS         {
-//RS             candidates.push((candidate, replacement));
-//RS         }
-//RS     }
-//RS     let exact = jcs_float_ratio(value);
-//RS     candidates.sort_by(|(left, left_digit), (right, right_digit)| {
-//RS         let left_distance = jcs_decimal_distance(left, &exact);
-//RS         let right_distance = jcs_decimal_distance(right, &exact);
-//RS         jcs_positive_big_cmp(&left_distance, &right_distance)
-//RS             .then_with(|| left_digit.cmp(right_digit))
-//RS             .then_with(|| left.cmp(right))
-//RS     });
-//RS     candidates
-//RS         .into_iter()
-//RS         .map(|(candidate, _)| candidate)
-//RS         .next()
-//RS         .expect("at least one shortest float")
-//RS }
-//RS 
-//RS fn jcs_number(value: f64) -> String {
-//RS     if value == 0.0 {
-//RS         return "0".to_string();
-//RS     }
-//RS     let negative = value.is_sign_negative();
-//RS     let shortest = jcs_shortest(value.abs());
-//RS     let (mantissa, exponent) = shortest
-//RS         .split_once('e')
-//RS         .map(|(mantissa, exponent)| {
-//RS             (
-//RS                 mantissa,
-//RS                 exponent.parse::<i32>().expect("Rust float exponent"),
-//RS             )
-//RS         })
-//RS         .unwrap_or((&shortest, 0));
-//RS     let decimal = mantissa.find('.').unwrap_or(mantissa.len()) as i32;
-//RS     let mut digits = mantissa
-//RS         .bytes()
-//RS         .filter(|byte| *byte != b'.')
-//RS         .collect::<Vec<_>>();
-//RS     let leading = digits.iter().take_while(|byte| **byte == b'0').count();
-//RS     digits.drain(..leading);
-//RS     while digits.len() > 1 && digits.last() == Some(&b'0') {
-//RS         digits.pop();
-//RS     }
-//RS     let n = decimal + exponent - leading as i32;
-//RS     let mut out = String::new();
-//RS     if negative {
-//RS         out.push('-');
-//RS     }
-//RS     if n > 0 && n <= 21 {
-//RS         if digits.len() <= n as usize {
-//RS             out.extend(digits.iter().map(|byte| *byte as char));
-//RS             out.extend(std::iter::repeat_n('0', n as usize - digits.len()));
-//RS         } else {
-//RS             let split = n as usize;
-//RS             out.extend(digits[..split].iter().map(|byte| *byte as char));
-//RS             out.push('.');
-//RS             out.extend(digits[split..].iter().map(|byte| *byte as char));
-//RS         }
-//RS     } else if n > -6 && n <= 0 {
-//RS         out.push_str("0.");
-//RS         out.extend(std::iter::repeat_n('0', (-n) as usize));
-//RS         out.extend(digits.iter().map(|byte| *byte as char));
-//RS     } else {
-//RS         out.push(digits[0] as char);
-//RS         if digits.len() > 1 {
-//RS             out.push('.');
-//RS             out.extend(digits[1..].iter().map(|byte| *byte as char));
-//RS         }
-//RS         out.push('e');
-//RS         let exponent = n - 1;
-//RS         if exponent >= 0 {
-//RS             out.push('+');
-//RS         }
-//RS         out.push_str(&exponent.to_string());
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn jcs_quote_text(text: &str) -> Vec<u8> {
-//RS     let mut out = Vec::new();
-//RS     out.push(b'"');
-//RS     const HEX: &[u8; 16] = b"0123456789abcdef";
-//RS     for ch in text.chars() {
-//RS         match ch {
-//RS             '"' => out.extend_from_slice(b"\\\""),
-//RS             '\\' => out.extend_from_slice(b"\\\\"),
-//RS             '\n' => out.extend_from_slice(b"\\n"),
-//RS             '\r' => out.extend_from_slice(b"\\r"),
-//RS             '\t' => out.extend_from_slice(b"\\t"),
-//RS             '\u{08}' => out.extend_from_slice(b"\\b"),
-//RS             '\u{0c}' => out.extend_from_slice(b"\\f"),
-//RS             c if c <= '\u{1f}' => {
-//RS                 let value = c as usize;
-//RS                 out.extend_from_slice(&[
-//RS                     b'\\',
-//RS                     b'u',
-//RS                     HEX[(value >> 12) & 15],
-//RS                     HEX[(value >> 8) & 15],
-//RS                     HEX[(value >> 4) & 15],
-//RS                     HEX[value & 15],
-//RS                 ]);
-//RS             }
-//RS             c => {
-//RS                 let mut encoded = [0u8; 4];
-//RS                 out.extend_from_slice(c.encode_utf8(&mut encoded).as_bytes());
-//RS             }
-//RS         }
-//RS     }
-//RS     out.push(b'"');
-//RS     out
-//RS }
-//RS 
-//RS fn jcs_tree(value: &CtValue, limits: &EncodingLimitsLite, depth: i64) -> Result<Vec<u8>, CtValue> {
-//RS     if depth > limits.max_depth {
-//RS         return Err(encoding_error_value(
-//RS             "Limit",
-//RS             format!("max_depth {} exceeded", limits.max_depth),
-//RS         ));
-//RS     }
-//RS     if let CtValue::Enum {
-//RS         type_name,
-//RS         variant,
-//RS         args,
-//RS     } = value
-//RS     {
-//RS         if type_name == "DataTree" {
-//RS             match variant.as_str() {
-//RS                 "Null" => return Ok(b"null".to_vec()),
-//RS                 "Bool" => {
-//RS                     let b = match args.first().map(|(_, v)| v) {
-//RS                         Some(CtValue::Bool(b)) => *b,
-//RS                         _ => false,
-//RS                     };
-//RS                     return Ok(if b {
-//RS                         b"true".to_vec()
-//RS                     } else {
-//RS                         b"false".to_vec()
-//RS                     });
-//RS                 }
-//RS                 "Int" => {
-//RS                     if let Some(CtValue::Int(n)) = args.first().map(|(_, v)| v) {
-//RS                         if (*n as f64) as i128 != *n as i128 {
-//RS                             return Err(encoding_error_value(
-//RS                                 "Unsupported",
-//RS                                 "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text",
-//RS                             ));
-//RS                         }
-//RS                         return Ok(jcs_number(*n as f64).into_bytes());
-//RS                     }
-//RS                 }
-//RS                 "Float" => {
-//RS                     if let Some(CtValue::Float(f)) = args.first().map(|(_, v)| v) {
-//RS                         let f = f.as_f64();
-//RS                         if !f.is_finite() {
-//RS                             return Err(encoding_error_value(
-//RS                                 "Unsupported",
-//RS                                 "JCS cannot encode a non-finite Float",
-//RS                             ));
-//RS                         }
-//RS                         return Ok(jcs_number(f).into_bytes());
-//RS                     }
-//RS                 }
-//RS                 "Text" => {
-//RS                     if let Some(CtValue::Str(s)) = args.first().map(|(_, v)| v) {
-//RS                         return Ok(jcs_quote_text(s));
-//RS                     }
-//RS                 }
-//RS                 "Bytes" => {
-//RS                     return Err(encoding_error_value(
-//RS                         "Unsupported",
-//RS                         "JSON cannot encode Bytes; encode bytes as Text explicitly",
-//RS                     ));
-//RS                 }
-//RS                 "Array" => {
-//RS                     let items = json_array_items(value).unwrap_or_default();
-//RS                     let mut out = Vec::from(b"[");
-//RS                     for (index, item) in items.iter().enumerate() {
-//RS                         if index > 0 {
-//RS                             out.push(b',');
-//RS                         }
-//RS                         out.extend_from_slice(&jcs_tree(item, limits, depth + 1)?);
-//RS                     }
-//RS                     out.push(b']');
-//RS                     return Ok(out);
-//RS                 }
-//RS                 "Object" => {
-//RS                     let mut sorted = json_object_entries(value).unwrap_or_default();
-//RS                     sorted.sort_by(|left, right| left.0.encode_utf16().cmp(right.0.encode_utf16()));
-//RS                     if sorted.windows(2).any(|pair| pair[0].0 == pair[1].0) {
-//RS                         return Err(encoding_error_value(
-//RS                             "Syntax",
-//RS                             "JCS requires unique object keys",
-//RS                         ));
-//RS                     }
-//RS                     let mut out = Vec::from(b"{");
-//RS                     for (index, (key, item)) in sorted.iter().enumerate() {
-//RS                         if index > 0 {
-//RS                             out.push(b',');
-//RS                         }
-//RS                         out.extend_from_slice(&jcs_quote_text(key));
-//RS                         out.push(b':');
-//RS                         out.extend_from_slice(&jcs_tree(item, limits, depth + 1)?);
-//RS                     }
-//RS                     out.push(b'}');
-//RS                     return Ok(out);
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     match value {
-//RS         CtValue::Bool(b) => Ok(if *b {
-//RS             b"true".to_vec()
-//RS         } else {
-//RS             b"false".to_vec()
-//RS         }),
-//RS         CtValue::Int(n) => {
-//RS             if (*n as f64) as i128 != *n as i128 {
-//RS                 Err(encoding_error_value(
-//RS                     "Unsupported",
-//RS                     "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text",
-//RS                 ))
-//RS             } else {
-//RS                 Ok(jcs_number(*n as f64).into_bytes())
-//RS             }
-//RS         }
-//RS         CtValue::Float(f) => {
-//RS             let f = f.as_f64();
-//RS             if !f.is_finite() {
-//RS                 Err(encoding_error_value(
-//RS                     "Unsupported",
-//RS                     "JCS cannot encode a non-finite Float",
-//RS                 ))
-//RS             } else {
-//RS                 Ok(jcs_number(f).into_bytes())
-//RS             }
-//RS         }
-//RS         CtValue::Str(s) => Ok(jcs_quote_text(s)),
-//RS         CtValue::Bytes(_) => Err(encoding_error_value(
-//RS             "Unsupported",
-//RS             "JSON cannot encode Bytes; encode bytes as Text explicitly",
-//RS         )),
-//RS         CtValue::List(items) => {
-//RS             let mut out = Vec::from(b"[");
-//RS             for (index, item) in items.iter().enumerate() {
-//RS                 if index > 0 {
-//RS                     out.push(b',');
-//RS                 }
-//RS                 out.extend_from_slice(&jcs_tree(item, limits, depth + 1)?);
-//RS             }
-//RS             out.push(b']');
-//RS             Ok(out)
-//RS         }
-//RS         _ => Err(encoding_error_value(
-//RS             "Unsupported",
-//RS             "JCS cannot encode this value",
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn json_canonical_jcs(
-//RS     v: &CtValue,
-//RS     limits: &EncodingLimitsLite,
-//RS ) -> Result<String, CtValue> {
-//RS     validate_encoding_limits(limits)?;
-//RS     let bytes = jcs_tree(v, limits, 1)?;
-//RS     if limits
-//RS         .max_total_bytes
-//RS         .is_some_and(|max| bytes.len() as i64 > max)
-//RS     {
-//RS         return Err(encoding_error_value(
-//RS             "Limit",
-//RS             format!(
-//RS                 "max_total_bytes {} exceeded",
-//RS                 limits.max_total_bytes.unwrap_or(0)
-//RS             ),
-//RS         ));
-//RS     }
-//RS     String::from_utf8(bytes)
-//RS         .map_err(|_| encoding_error_value("Unsupported", "canonical JSON output is not UTF-8"))
-//RS }
-//RS 
-//RS pub(super) fn json_canonical(v: &CtValue) -> String {
-//RS     super::JSONInterp::render_json_pretty(v, false, 0)
-//RS }
-//RS pub(super) fn json_events(v: &CtValue) -> String {
-//RS     fn walk(path: String, t: &CtValue, out: &mut Vec<String>) {
-//RS         let here = if path.is_empty() {
-//RS             "$".to_string()
-//RS         } else {
-//RS             path
-//RS         };
-//RS         if let Some(entries) = json_object_entries(t) {
-//RS             out.push(format!("object_start {here}"));
-//RS             for (k, v) in &entries {
-//RS                 walk(format!("{}.{}", here, k), v, out);
-//RS             }
-//RS             out.push(format!("object_end {here}"));
-//RS             return;
-//RS         }
-//RS         if let Some(items) = json_array_items(t) {
-//RS             out.push(format!("array_start {here}"));
-//RS             for (i, v) in items.iter().enumerate() {
-//RS                 walk(format!("{}[{}]", here, i), v, out);
-//RS             }
-//RS             out.push(format!("array_end {here}"));
-//RS             return;
-//RS         }
-//RS         out.push(format!("value {here} {}", json_canonical(t)));
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     walk(String::new(), v, &mut out);
-//RS     out.join("\n")
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod depth_tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn hostile_toml_and_yaml_nesting_is_rejected() {
-//RS         let toml_depth = MAX_TOML_DEPTH + 1;
-//RS         let toml = format!(
-//RS             "value = {}0{}",
-//RS             "[".repeat(toml_depth),
-//RS             "]".repeat(toml_depth)
-//RS         );
-//RS         assert!(toml_parse(&toml).is_err());
-//RS 
-//RS         let yaml_depth = MAX_YAML_DEPTH + 1;
-//RS         let mut yaml = String::new();
-//RS         for depth in 0..yaml_depth {
-//RS             yaml.push_str(&"  ".repeat(depth));
-//RS             yaml.push_str("value:\n");
-//RS         }
-//RS         yaml.push_str(&"  ".repeat(yaml_depth));
-//RS         yaml.push_str("0\n");
-//RS         assert!(yaml_parse(&yaml).is_err());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn hostile_yaml_alias_clones_are_rejected_by_the_shared_budget() {
-//RS         let mut yaml = String::from("base: &a\n  value: x\nitems:\n");
-//RS         for _ in 0..=(MAX_YAML_NODES / 2) {
-//RS             yaml.push_str("  - *a\n");
-//RS         }
-//RS         assert!(yaml_parse(&yaml).is_err());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn dotted_toml_key_depth_is_bounded_before_assembly() {
-//RS         let dotted = (0..MAX_TOML_DEPTH)
-//RS             .map(|index| format!("key{index}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(".");
-//RS         assert!(toml_parse(&format!("{dotted} = 0")).is_ok());
-//RS 
-//RS         let too_deep = (0..=MAX_TOML_DEPTH)
-//RS             .map(|index| format!("key{index}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(".");
-//RS         assert!(toml_parse(&format!("{too_deep} = 0")).is_err());
-//RS 
-//RS         let header = (0..(MAX_TOML_DEPTH - 1))
-//RS             .map(|index| format!("table{index}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(".");
-//RS         assert!(toml_parse(&format!("[{header}]\nleaf = 0")).is_ok());
-//RS 
-//RS         let too_deep_header = (0..MAX_TOML_DEPTH)
-//RS             .map(|index| format!("table{index}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(".");
-//RS         assert!(toml_parse(&format!("[{too_deep_header}]\nleaf = 0")).is_err());
-//RS     }
-//RS }
-// END-PORT-PENDING 0585 crates/jet-comptime/src/Comptime/EncodingLite.rs:1792-3614
+use jet_foundation.AST.[CtValue, CtKey, CtFloat, Type]
+use jet_foundation.[XmlPull, XmlKernel]
+use jet_comptime.Comptime.EncodingLite.*
+use jet_comptime.Comptime.CollectionEval.try_collect
+
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1792
+fn yaml_render_scalar(v: &CtValue) -> String {
+    if json_object_entries(v) is Some(entries) {
+        parts: [String] = entries.iter().map(fn(pair) { "{yaml_render_key(&pair.0)}: {yaml_render_scalar(&pair.1)}" }).collect()
+        return "\{{parts.join(\", \")}\}"
+    }
+    if json_array_items(v) is Some(items) {
+        parts: [String] = items.iter().map(yaml_render_scalar).collect()
+        return "[{parts.join(\", \")}]"
+    }
+    match v {
+        CtValue.Enum{variant, args, ..} => match (variant, args.first()) {
+            ("Null", _) => "null",
+            ("Bool", Some((_, CtValue.Bool(b)))) => b.to_string(),
+            ("Int", Some((_, CtValue.Int(n)))) => n.to_string(),
+            ("Float", Some((_, CtValue.Float(f)))) => f.debug(),
+            ("Text", Some((_, CtValue.Str(s)))) => if yaml_needs_quote(s) { s.debug() } else { s.clone() },
+            _ => "null"
+        },
+        _ => "null"
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1822
+fn yaml_needs_quote(s: String) -> Bool {
+    s.is_empty() || ["null", "Null", "NULL", "~", "true", "True", "TRUE", "false", "False", "FALSE"].contains(s)
+        || jet_foundation.Numeric.CtBigInt.from_str(s).is_ok() || s.parse<F64>().is_ok()
+        || s.starts_with(' ') || s.ends_with(' ')
+        || s.starts_with(['-', '?', ':', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`'])
+        || s.contains(": ") || s.contains(" #") || s.contains('\n')
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1845
+fn xml_to_ct(value: XmlPull.Value) -> CtValue { xml_value_to_ct(^value) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1849
+fn xml_value_to_ct(value: XmlPull.Value) -> CtValue {
+    match value {
+        XmlPull.Value.Null => json_variant("Null", None),
+        XmlPull.Value.Bool(value) => json_variant("Bool", Some(CtValue.Bool(value))),
+        XmlPull.Value.Int(value) => json_variant("Int", Some(CtValue.Int(value))),
+        XmlPull.Value.Text(value) => json_variant("Text", Some(CtValue.Str(^value))),
+        XmlPull.Value.Array(values) => json_array(values.into_iter().map(xml_value_to_ct).collect()),
+        XmlPull.Value.Object(entries) => json_object(entries.into_iter().map(fn(pair) { (pair.0, xml_value_to_ct(pair.1)) }).collect())
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1866
+fn restore_xml_snapshot_order(value: &XmlPull.Value) {
+    match value {
+        XmlPull.Value.Array(values) => for value in values { restore_xml_snapshot_order(&value) },
+        XmlPull.Value.Object(entries) => {
+            for (_, value) in entries { restore_xml_snapshot_order(&value) }
+            if XmlPull.xml_schema_order(entries) is Some(order) {
+                entries.sort_by_key(fn(pair) { order.iter().position(fn(expected) { expected == &pair.0 }).expect("checked XML schema key") })
+            }
+        },
+        _ => {}
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1893
+fn xml_value_from_ct(value: &CtValue) -> XmlPull.Value Err! {
+    match value { CtValue.Enum{type_name, variant, args} if type_name == "DataTree" && variant == "Null" && args.is_empty() => return Ok(XmlPull.Value.Null), _ => {} }
+    if json_payload(value, "Bool") is Some(CtValue.Bool(value)) -> return Ok(XmlPull.Value.Bool(value))
+    if json_payload(value, "Int") is Some(CtValue.Int(value)) -> return Ok(XmlPull.Value.Int(value))
+    if json_payload(value, "Text") is Some(CtValue.Str(value)) -> return Ok(XmlPull.Value.Text(value.clone()))
+    if json_payload(value, "Array") is Some(CtValue.List(values)) -> return Ok(XmlPull.Value.Array(try_collect(values.iter().map(xml_value_from_ct))?))
+    if json_object_entries(value) is Some(entries) {
+        converted := try_collect(entries.into_iter().map(fn(pair) { Ok((pair.0, xml_value_from_ct(&pair.1)?)) }))?
+        return Ok(XmlPull.Value.Object(^converted))
+    }
+    Err("XML tree contains a non-DataTree value")
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1932
+pub fn xml_from_ct(value: &CtValue) -> XmlPull.Value Err! {
+    value := xml_value_from_ct(value)?
+    XmlPull.invalidate_untrusted_lexical_evidence(&value)
+    restore_xml_snapshot_order(&value)
+    Ok(^value)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1942
+pub fn xml_parse(text: String) -> CtValue XmlPull.Error! { XmlKernel.parse_document(text).map(xml_to_ct) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1946
+pub fn xml_safe_limits_value() -> CtValue {
+    limits := XmlPull.Limits.safe()
+    CtValue.Struct{type_name: "XMLLimits", fields: [
+        ("max_depth", CtValue.Int(limits.max_depth as I64)),
+        ("max_nodes", CtValue.Int(limits.max_nodes as I64)),
+        ("max_attributes_per_element", CtValue.Int(limits.max_attributes_per_element as I64)),
+        ("max_name_bytes", CtValue.Int(limits.max_name_bytes as I64)),
+        ("max_text_bytes", CtValue.Int(limits.max_text_bytes as I64)),
+        ("max_entity_declarations", CtValue.Int(limits.max_entity_declarations as I64)),
+        ("max_entity_depth", CtValue.Int(limits.max_entity_depth as I64)),
+        ("max_entity_replacement_bytes", CtValue.Int(limits.max_entity_replacement_bytes as I64))
+    ]}
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:1987
+pub fn xml_safe_options_value() -> CtValue {
+    CtValue.Struct{type_name: "XMLParseOptions", fields: [
+        ("entities", CtValue.Enum{type_name: "XMLEntityPolicy", variant: "Preserve", args: []}),
+        ("limits", xml_safe_limits_value())
+    ]}
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2004
+pub fn xml_safe_render_options_value() -> CtValue {
+    CtValue.Struct{type_name: "XMLRenderOptions", fields: [
+        ("encoding", CtValue.Enum{type_name: "XMLEncoding", variant: "UTF8", args: []}),
+        ("lexical", CtValue.Enum{type_name: "XMLLexicalPolicy", variant: "PreserveValid", args: []})
+    ]}
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2028
+pub fn xml_parse_with(text: String, options: &CtValue) -> CtValue XmlPull.Error! {
+    options := xml_options(options)?
+    XmlKernel.parse_document_with(text, &options).map(xml_to_ct)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2036
+pub fn xml_parse_bytes(bytes: &[U8], options: (&CtValue)?) -> CtValue XmlPull.Error! {
+    options := match options { Some(options) => xml_options(options)?, None => XmlPull.ParseOptions.safe() }
+    XmlKernel.parse_document_bytes_with(bytes, &options).map(xml_to_ct)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2047
+fn xml_int(fields: &[(String,CtValue)], name: String) -> I64 {
+    fields.iter().find_map(fn(pair) { if pair.0 == name { match pair.1 { CtValue.Int(value) => Some(value), _ => None } } else { None } }).unwrap_or(-1)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2061
+fn xml_options(value: &CtValue) -> XmlPull.ParseOptions XmlPull.Error! {
+    fields := match value { CtValue.Struct{fields, ..} => fields, _ => return Ok(XmlPull.ParseOptions.safe()) }
+    entities := fields.iter().find_map(fn(pair) { if pair.0 == "entities" { Some(&pair.1) } else { None } })
+    entities := match entities {
+        Some(CtValue.Enum{variant, ..}) if variant == "Reject" => XmlPull.EntityPolicy.Reject,
+        Some(CtValue.Enum{variant, args, ..}) if variant == "Resolve" => {
+            resolved: [String:String] = [String:String].new()
+            if args.first() is Some((_, CtValue.Map(entries))) {
+                for (key, value) in entries {
+                    match (key, value) { (CtKey.Str(key), CtValue.Str(value)) => { _ :: resolved.insert(key.clone(), value.clone()) }, _ => {} }
+                }
+            }
+            XmlPull.EntityPolicy.Resolve(^resolved)
+        },
+        _ => XmlPull.EntityPolicy.Preserve
+    }
+    limits_fields := fields.iter().find_map(fn(pair) { if pair.0 == "limits" { match pair.1 { CtValue.Struct{fields, ..} => Some(fields), _ => None } } else { None } })
+    to_usize := fn(value: I64) { USize.try_from(value).unwrap_or(USize.MAX) } // GATE #4483: selected-target width.
+    limits := if limits_fields is Some(fields) {
+        XmlPull.Limits{
+            max_depth: to_usize(xml_int(fields, "max_depth")),
+            max_nodes: to_usize(xml_int(fields, "max_nodes")),
+            max_attributes_per_element: to_usize(xml_int(fields, "max_attributes_per_element")),
+            max_name_bytes: to_usize(xml_int(fields, "max_name_bytes")),
+            max_text_bytes: to_usize(xml_int(fields, "max_text_bytes")),
+            max_entity_declarations: to_usize(xml_int(fields, "max_entity_declarations")),
+            max_entity_depth: to_usize(xml_int(fields, "max_entity_depth")),
+            max_entity_replacement_bytes: to_usize(xml_int(fields, "max_entity_replacement_bytes"))
+        }
+    } else { XmlPull.Limits.safe() }
+    options := XmlPull.ParseOptions{entities: ^entities, limits: ^limits}
+    options.limits.validate()?
+    Ok(^options)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2119
+fn xml_error_kind(kind: XmlPull.Reason) -> String {
+    match kind { XmlPull.Reason.EntityCycle | XmlPull.Reason.Limit => "Limit", XmlPull.Reason.Canonicalization | XmlPull.Reason.Unsupported => "Unsupported", _ => "Syntax" }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2128
+fn xml_error_value_with_source(error: XmlPull.Error, source_bytes: Bool) -> CtValue {
+    byte_offset := if source_bytes || error.line.is_some() { error.offset as I64 } else { 0 }
+    encoding_error_value_fields("XML", xml_error_kind(error.kind), byte_offset, error.line.map(fn(value) { value as I64 }), error.column.map(fn(value) { value as I64 }), error.path, error.reason)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2148
+pub fn xml_error_value(error: XmlPull.Error) -> CtValue { xml_error_value_with_source(^error, false) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2152
+pub fn xml_source_error_value(error: XmlPull.Error) -> CtValue { xml_error_value_with_source(^error, true) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2156
+pub fn xml_shape_error_value(reason: String) -> CtValue { encoding_error_value_fields("XML", "Syntax", 0, None, None, "", ^reason) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2160
+pub fn xml_render(value: &CtValue) -> String {
+    xml_from_ct(value).and_then(fn(value) { XmlKernel.render_document(&value).map_err(fn(error) { error.reason }) }).unwrap_or_default()
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2168
+pub fn xml_root(document: &CtValue) -> CtValue CtValue! {
+    value := xml_from_ct(document).map_err(xml_shape_error_value)?
+    XmlKernel.document_root(&value).map(xml_to_ct).map_err(xml_error_value)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2175
+pub fn xml_expanded_name(node: &CtValue) -> CtValue CtValue! {
+    value := xml_from_ct(node).map_err(xml_shape_error_value)?
+    (raw, prefix, local, namespace_uri) := XmlKernel.expanded_name_parts(&value).map_err(xml_error_value)?
+    Ok(CtValue.Struct{type_name: "", fields: [
+        ("raw", CtValue.Str(^raw)),
+        ("prefix", prefix.map(fn(value) { CtValue.Present(Box.new(CtValue.Str(^value))) }).unwrap_or(CtValue.absent(Type.String))),
+        ("local", CtValue.Str(^local)),
+        ("namespace_uri", namespace_uri.map(fn(value) { CtValue.Present(Box.new(CtValue.Str(^value))) }).unwrap_or(CtValue.absent(Type.String)))
+    ]})
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2200
+pub fn xml_attribute(element: &CtValue, name: String) -> CtValue CtValue! {
+    value := xml_from_ct(element).map_err(xml_shape_error_value)?
+    match XmlKernel.lookup_attribute(&value, name).map_err(xml_error_value)? {
+        Some(text) => Ok(CtValue.Present(Box.new(CtValue.Str(^text)))), None => Ok(CtValue.absent(Type.String))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2208
+pub fn xml_content(element: &CtValue) -> CtValue CtValue! {
+    value := xml_from_ct(element).map_err(xml_shape_error_value)?
+    children := XmlKernel.element_content(&value).map_err(xml_error_value)?
+    Ok(CtValue.List(children.into_iter().map(xml_to_ct).collect()))
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2216
+pub fn xml_project_for_decode(document: &CtValue) -> CtValue CtValue! {
+    value := xml_from_ct(document).map_err(xml_shape_error_value)?
+    XmlKernel.project_document_for_decode(&value).map(xml_to_ct).map_err(xml_error_value)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2223
+pub fn xml_to_bytes(value: &CtValue, options: (&CtValue)?) -> [U8] CtValue! {
+    value := xml_from_ct(value).map_err(xml_shape_error_value)?
+    (encoding, lexical) := match options {
+        Some(CtValue.Struct{fields, ..}) => {
+            encoding := match fields.iter().find_map(fn(pair) { if pair.0 == "encoding" { Some(&pair.1) } else { None } }) {
+                Some(CtValue.Enum{variant, ..}) if variant == "UTF8BOM" => XmlPull.RenderEncoding.UTF8Bom,
+                Some(CtValue.Enum{variant, ..}) if variant == "UTF16LE" => XmlPull.RenderEncoding.Utf16Le,
+                Some(CtValue.Enum{variant, ..}) if variant == "UTF16BE" => XmlPull.RenderEncoding.Utf16Be,
+                _ => XmlPull.RenderEncoding.UTF8
+            }
+            lexical := match fields.iter().find_map(fn(pair) { if pair.0 == "lexical" { Some(&pair.1) } else { None } }) {
+                Some(CtValue.Enum{variant, ..}) if variant == "Deterministic" => XmlPull.LexicalPolicy.Deterministic,
+                _ => XmlPull.LexicalPolicy.PreserveValid
+            }
+            (encoding, lexical)
+        },
+        _ => (XmlPull.RenderEncoding.UTF8, XmlPull.LexicalPolicy.PreserveValid)
+    }
+    XmlKernel.render_document_bytes(&value, encoding, lexical).map_err(xml_error_value)
+}
+
+use jet_foundation.AST.[CtReport, StructDef]
+use jet_foundation.CborKernel
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2479
+fn cbor_is_u8_list(ty: (&Type)?) -> Bool {
+    match ty {
+        Some(Type.List(elem)) | Some(Type.FixedList{elem, ..}) => match elem.as_ref() {
+            Type.IntN{signed: false, bits: 8} => true,
+            Type.Named(name) => name == "U8",
+            _ => false
+        },
+        _ => false
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2488
+fn cbor_codable_value(value: &CtValue, ty: (&Type)?, struct_fields: &[String:[(String,Type)]]) -> CtValue Err! {
+    ty := match ty { Some(Type.Shared(inner)) | Some(Type.Tagged{inner, ..}) => Some(inner.as_ref()), other => other }
+    match value {
+        CtValue.List(items) if cbor_is_u8_list(ty) => try_collect(items.iter().map(fn(item) {
+            match item { CtValue.Int(n) if n >= 0 && n <= 255 => Ok(n as U8), _ => Err("CBOR [U8] contains an out-of-range byte") }
+        })).map(CtValue.Bytes),
+        CtValue.List(items) => {
+            elem_ty := match ty { Some(Type.List(elem)) | Some(Type.FixedList{elem, ..}) => Some(elem.as_ref()), _ => None }
+            try_collect(items.iter().map(fn(item) { cbor_codable_value(item, elem_ty, struct_fields) })).map(CtValue.List)
+        },
+        CtValue.Map(entries) => {
+            value_ty := match ty { Some(Type.Map{value, ..}) => Some(value.as_ref()), _ => None }
+            mapped: [CtKey:CtValue] = [CtKey:CtValue].new()
+            for (key, value) in entries {
+                if !(key is CtKey.Str(_)) -> return Err("CBOR Codable maps require text keys")
+                _ :: mapped.insert(key.clone(), cbor_codable_value(value, value_ty, struct_fields)?)
+            }
+            Ok(CtValue.Map(^mapped))
+        },
+        CtValue.Struct{type_name, fields} => {
+            definition := struct_fields.get(type_name).ok_or_else(fn() { "CBOR comptime encoder has no schema for `{type_name}`" })?
+            mapped: [(String,CtValue)] = [].with_capacity(fields.len())
+            for (name, value) in fields {
+                field_ty := definition.iter().find(fn(pair) { pair.0 == name }).map(fn(pair) { &pair.1 })
+                mapped.push((name.clone(), cbor_codable_value(value, field_ty, struct_fields)?))
+            }
+            Ok(CtValue.Struct{type_name: type_name.clone(), fields: ^mapped})
+        },
+        CtValue.Present(inner) => Ok(CtValue.Present(Box.new(cbor_codable_value(inner, match ty { Some(Type.Option(inner)) => Some(inner.as_ref()), _ => None }, struct_fields)?))),
+        CtValue.Failed(CtReport.Clean(_)) => Ok(value.clone()),
+        CtValue.BigInt(_) => Err("CBOR kernel cannot encode an exact Int spill"),
+        CtValue.Closure(_) => Err("CBOR cannot encode a function value"),
+        CtValue.Failed(CtReport.Told(_)) => Err("CBOR cannot encode a Result without an explicit Codable schema"),
+        CtValue.Enum{type_name, ..} if type_name != "DataTree" => Err("CBOR comptime encoder does not own the Codable schema for enum `{type_name}`"),
+        _ => Ok(value.clone())
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2575
+pub fn cbor_encode_typed(value: &CtValue, root_ty: (&Type)?, struct_fields: &[String:[(String,Type)]], canonical: Bool) -> [U8] Err! {
+    value := cbor_codable_value(value, root_ty, struct_fields)?
+    result := if canonical { cbor_encode_canonical(&value) } else { cbor_encode(&value) }
+    result.map_err(fn(error) { error.reason })
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2590
+pub fn cbor_struct_fields(structs: &[String:&StructDef]) -> [String:[(String,Type)]] {
+    structs.iter().map(fn(pair) { (pair.0.clone(), pair.1.reflection_fields().map(fn(field) { (field.name.clone(), field.ty.clone()) }).collect()) }).collect()
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2606
+#Derive(Clone, Debug)
+pub struct CborFailure {
+    kind: String
+    byte_offset: USize
+    path: String
+    pub reason: String
+}
+impl CborFailure {
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2615
+    fn new(kind: String, byte_offset: USize, path: String, reason: String) -> Self { Self{kind: kind, byte_offset: byte_offset, path: ^path, reason: ^reason} }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2630
+fn cbor_encoding_kind(kind: String) -> String {
+    match kind { "Truncated" => "Truncated", "Unsupported" | "NonCanonical" => "Unsupported", "Limit" => "Limit", _ => "Syntax" }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2639
+pub fn cbor_encoding_error_value(error: CborFailure) -> CtValue {
+    encoding_error_value_fields("CBOR", cbor_encoding_kind(error.kind), error.byte_offset as I64, None, None, error.path, error.reason)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2651
+pub fn cbor_unsupported_error_value(reason: String) -> CtValue { cbor_encoding_error_value(CborFailure.new("Unsupported", 0, "$", ^reason)) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2655
+pub fn cbor_safe_options() -> CborKernel.Options { CborKernel.Options.safe() }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2659
+pub fn cbor_options(value: (&CtValue)?) -> CborKernel.Options CborFailure! {
+    max_depth: I64? = None
+    max_items: I64? = None
+    max_bytes: I64? = None
+    require_canonical: Bool? = None
+    if value is Some(CtValue.Struct{fields, ..}) {
+        for (name, value) in fields {
+            match (name, value) {
+                ("max_depth", CtValue.Int(n)) => max_depth = Some(n),
+                ("max_items", CtValue.Int(n)) => max_items = Some(n),
+                ("max_bytes", CtValue.Int(n)) => max_bytes = Some(n),
+                ("require_canonical", CtValue.Bool(v)) => require_canonical = Some(v),
+                _ => {}
+            }
+        }
+    }
+    CborKernel.Options.from_fields(max_depth, max_items, max_bytes, require_canonical).map_err(cbor_kernel_error)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2686
+fn cbor_kernel_error(error: CborKernel.Error) -> CborFailure {
+    kind := match error.kind {
+        CborKernel.ErrorKind.Syntax => "Syntax", CborKernel.ErrorKind.Truncated => "Truncated",
+        CborKernel.ErrorKind.Unsupported => "Unsupported", CborKernel.ErrorKind.Limit => "Limit",
+        CborKernel.ErrorKind.TypeMismatch => "TypeMismatch", CborKernel.ErrorKind.TrailingData => "TrailingData",
+        CborKernel.ErrorKind.NonCanonical => "NonCanonical"
+    }
+    CborFailure.new(kind, error.byte_offset, error.path, error.reason)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2699
+fn cbor_kernel_value(value: &CtValue) -> CborKernel.Value Err! {
+    if json_object_entries(value) is Some(entries) -> return try_collect(entries.iter().map(fn(pair) { cbor_kernel_value(&pair.1).map(fn(value) { (pair.0.clone(), ^value) }) })).map(CborKernel.Value.Object)
+    if json_array_items(value) is Some(items) -> return try_collect(items.iter().map(cbor_kernel_value)).map(CborKernel.Value.Array)
+    match value {
+        CtValue.Unit | CtValue.Failed(CtReport.Clean(_)) => Ok(CborKernel.Value.Null),
+        CtValue.Bool(value) => Ok(CborKernel.Value.Bool(value)),
+        CtValue.Int(value) => Ok(CborKernel.Value.Int(value)),
+        CtValue.Float(value) => Ok(CborKernel.Value.Float(value.as_f64())),
+        CtValue.Char(value) => Ok(CborKernel.Value.Text(value.to_string())),
+        CtValue.Str(value) => Ok(CborKernel.Value.Text(value.clone())),
+        CtValue.Bytes(value) => Ok(CborKernel.Value.Bytes(value.clone())),
+        CtValue.List(items) => try_collect(items.iter().map(cbor_kernel_value)).map(CborKernel.Value.Array),
+        CtValue.Map(entries) => {
+            // GATE #4499: CtKey map uses canonical key ordering.
+            keys := entries.keys().cloned().collect()
+            keys.sort()
+            try_collect(keys.iter().map(fn(key) {
+                match key {
+                    CtKey.Str(text) => cbor_kernel_value(entries.get(key).unwrap()).map(fn(value) { (text.clone(), ^value) }),
+                    _ => Err("CBOR maps require text keys")
+                }
+            })).map(CborKernel.Value.Object)
+        },
+        CtValue.Struct{fields, ..} => try_collect(fields.iter().map(fn(pair) { cbor_kernel_value(&pair.1).map(fn(value) { (pair.0.clone(), ^value) }) })).map(CborKernel.Value.Object),
+        CtValue.Present(value) | CtValue.Failed(CtReport.Told(value)) => cbor_kernel_value(value),
+        CtValue.Enum{type_name, variant, args} if type_name == "DataTree" => match variant {
+            "Null" => Ok(CborKernel.Value.Null),
+            "Bool" => match args.first().map(fn(pair) { &pair.1 }) { Some(CtValue.Bool(value)) => Ok(CborKernel.Value.Bool(value)), _ => Err("DataTree.Bool has an invalid payload") },
+            "Int" => match args.first().map(fn(pair) { &pair.1 }) { Some(CtValue.Int(value)) => Ok(CborKernel.Value.Int(value)), _ => Err("DataTree.Int has an invalid payload") },
+            "Float" => match args.first().map(fn(pair) { &pair.1 }) { Some(CtValue.Float(value)) => Ok(CborKernel.Value.Float(value.as_f64())), _ => Err("DataTree.Float has an invalid payload") },
+            "Text" | "TypedText" => match args.first().map(fn(pair) { &pair.1 }) { Some(CtValue.Str(value)) => Ok(CborKernel.Value.Text(value.clone())), _ => Err("DataTree.Text has an invalid payload") },
+            _ => Err("unsupported DataTree variant `{variant}`")
+        },
+        CtValue.Enum{type_name, ..} => Err("CBOR encoder does not own enum `{type_name}`"),
+        CtValue.BigInt(_) => Err("CBOR kernel cannot encode an exact Int spill"),
+        CtValue.Closure(_) => Err("CBOR cannot encode a function value")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2783
+fn cbor_kernel_tree(value: CborKernel.Value) -> CtValue {
+    match value {
+        CborKernel.Value.Null => json_variant("Null", None),
+        CborKernel.Value.Bool(value) => json_variant("Bool", Some(CtValue.Bool(value))),
+        CborKernel.Value.Int(value) => json_variant("Int", Some(CtValue.Int(value))),
+        CborKernel.Value.Float(value) => json_variant("Float", Some(CtValue.Float(CtFloat.f64(value)))),
+        CborKernel.Value.Text(value) => json_variant("Text", Some(CtValue.Str(^value))),
+        CborKernel.Value.Bytes(value) => CtValue.Bytes(^value),
+        CborKernel.Value.Array(values) => json_array(values.into_iter().map(cbor_kernel_tree).collect()),
+        CborKernel.Value.Object(entries) => json_object(entries.into_iter().map(fn(pair) { (pair.0, cbor_kernel_tree(pair.1)) }).collect())
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2811
+pub fn cbor_encode(v: &CtValue) -> [U8] CborFailure! {
+    value := cbor_kernel_value(v).map_err(fn(reason) { CborFailure.new("Unsupported", 0, "$", ^reason) })?
+    CborKernel.encode(&value, false).map_err(cbor_kernel_error)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2817
+pub fn cbor_encode_canonical(v: &CtValue) -> [U8] CborFailure! {
+    value := cbor_kernel_value(v).map_err(fn(reason) { CborFailure.new("Unsupported", 0, "$", ^reason) })?
+    CborKernel.encode(&value, true).map_err(cbor_kernel_error)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2823
+pub fn cbor_decode(bytes: &[U8], options: &CborKernel.Options, allow_bytes: Bool) -> CtValue CborFailure! {
+    CborKernel.decode(bytes, options, allow_bytes).map(cbor_kernel_tree).map_err(cbor_kernel_error)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2912
+pub fn jsonl_parse(text: String) -> [CtValue] CtValue! {
+    out: [CtValue] = []
+    for (idx, line) in text.lines().enumerate() {
+        trimmed := line.trim() // #4303
+        if trimmed.is_empty() -> continue
+        match jet_comptime.Comptime.JSONInterp.parse_json(trimmed) {
+            Ok(v) => out.push(^v),
+            Err(e) => return Err(jet_comptime.Comptime.JSONInterp.encoding_error_value_at_line(e, idx as I64))
+        }
+    }
+    Ok(^out)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2926
+pub fn jsonl_render(rows: &[CtValue]) -> String {
+    out := rows.iter().map(fn(v) { jet_comptime.Comptime.JSONInterp.render_json_pretty(v, false, 0) }).collect<[String]>().join("\n")
+    if !out.is_empty() { out.push('\n') }
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2942
+#Derive(Clone, Copy, Debug)
+pub struct EncodingLimitsLite {
+    pub max_depth: I64
+    pub max_item_bytes: I64
+    pub max_total_bytes: I64?
+    buffer_bytes: I64
+    max_expansion_depth: I64
+    max_expansion_bytes: I64
+}
+impl EncodingLimitsLite {
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2953
+    pub fn safe() -> Self {
+        Self{buffer_bytes: 65536, max_depth: 256, max_item_bytes: 16777216, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2965
+pub fn encoding_limits_safe_value() -> CtValue {
+    lim := EncodingLimitsLite.safe()
+    CtValue.Struct{type_name: "EncodingLimits", fields: [
+        ("buffer_bytes", CtValue.Int(lim.buffer_bytes)), ("max_depth", CtValue.Int(lim.max_depth)),
+        ("max_item_bytes", CtValue.Int(lim.max_item_bytes)), ("max_total_bytes", CtValue.absent(Type.Int)),
+        ("max_expansion_depth", CtValue.Int(lim.max_expansion_depth)), ("max_expansion_bytes", CtValue.Int(lim.max_expansion_bytes))
+    ]}
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2992
+pub fn encoding_limits_from_value(v: &CtValue) -> EncodingLimitsLite Err! {
+    fields := match v { CtValue.Struct{type_name, fields} if type_name == "EncodingLimits" => fields, _ => return Err("EncodingLimits expected") }
+    lim := EncodingLimitsLite.safe()
+    for (name, value) in fields {
+        match (name, value) {
+            ("buffer_bytes", CtValue.Int(n)) => lim.buffer_bytes = n,
+            ("max_depth", CtValue.Int(n)) => lim.max_depth = n,
+            ("max_item_bytes", CtValue.Int(n)) => lim.max_item_bytes = n,
+            ("max_total_bytes", CtValue.Failed(CtReport.Clean(_))) => lim.max_total_bytes = None,
+            ("max_total_bytes", CtValue.Present(inner)) => match inner.as_ref() { CtValue.Int(n) => lim.max_total_bytes = Some(n), _ => return Err("max_total_bytes must be Int?") },
+            ("max_total_bytes", CtValue.Int(n)) => lim.max_total_bytes = Some(n),
+            ("max_expansion_depth", CtValue.Int(n)) => lim.max_expansion_depth = n,
+            ("max_expansion_bytes", CtValue.Int(n)) => lim.max_expansion_bytes = n,
+            _ => {}
+        }
+    }
+    Ok(lim)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3019
+fn encoding_error_value(kind: String, reason: String) -> CtValue { encoding_error_value_at("JSON", kind, 1, 1, ^reason) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3023
+fn encoding_error_value_fields(format: String, kind: String, byte_offset: I64, line: I64?, column: I64?, path: String, reason: String) -> CtValue {
+    CtValue.Struct{type_name: "EncodingError", fields: [
+        ("format", CtValue.Enum{type_name: "EncodingFormat", variant: format, args: []}),
+        ("kind", CtValue.Enum{type_name: "EncodingErrorKind", variant: kind, args: []}),
+        ("byte_offset", CtValue.Int(byte_offset)),
+        ("line", line.map(fn(value) { CtValue.Present(Box.new(CtValue.Int(value))) }).unwrap_or(CtValue.absent(Type.Int))),
+        ("column", column.map(fn(value) { CtValue.Present(Box.new(CtValue.Int(value))) }).unwrap_or(CtValue.absent(Type.Int))),
+        ("path", CtValue.Str(^path)), ("reason", CtValue.Str(^reason)),
+        ("cause", CtValue.absent(Type.Named("EncodingCause")))
+    ]}
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3073
+pub fn encoding_error_value_at(format: String, kind: String, line: I64, column: I64, reason: String) -> CtValue {
+    encoding_error_value_fields(format, kind, 0, Some(line), Some(column), "", ^reason)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3091
+fn validate_encoding_limits(limits: &EncodingLimitsLite) -> Unit CtValue! {
+    invalid: String? = if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 {
+        Some("buffer_bytes {limits.buffer_bytes} is outside 4096..16777216")
+    } else if limits.max_depth < 1 || limits.max_depth > 4096 {
+        Some("max_depth {limits.max_depth} is outside 1..4096")
+    } else if limits.max_item_bytes < 1 || limits.max_item_bytes > 1073741824 {
+        Some("max_item_bytes {limits.max_item_bytes} is outside 1..1073741824")
+    } else if limits.max_total_bytes.is_some_and(fn(value) { value < 0 }) {
+        Some("max_total_bytes {limits.max_total_bytes.unwrap_or_default()} is outside 0..Int.max")
+    } else if limits.max_expansion_depth < 0 || limits.max_expansion_depth > 256 {
+        Some("max_expansion_depth {limits.max_expansion_depth} is outside 0..256")
+    } else if limits.max_expansion_bytes < 0 || limits.max_expansion_bytes > 1073741824 {
+        Some("max_expansion_bytes {limits.max_expansion_bytes} is outside 0..1073741824")
+    } else { None }
+    match invalid { Some(reason) => Err(encoding_error_value("Limit", ^reason)), None => Ok(()) }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3135
+mod jcs_big { pub use jet_foundation.Numeric.CtBigInt as JetBigInt }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3139
+fn jcs_big_pow(base: jcs_big.JetBigInt, exponent: USize) -> jcs_big.JetBigInt {
+    out := jcs_big.JetBigInt.from_int(1)
+    while exponent > 0 {
+        if exponent & 1 == 1 { out = out.mul(&base) }
+        base = base.mul(&base)
+        exponent >>= 1
+    }
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3151
+fn jcs_decimal_ratio(text: String) -> (jcs_big.JetBigInt,jcs_big.JetBigInt) {
+    (mantissa, exponent) := text.split_once('e').map(fn(pair) { (pair.0, pair.1.parse<I32>().expect("Rust float exponent")) }).unwrap_or((text, 0))
+    decimal := mantissa.find('.').unwrap_or(mantissa.len()) as I32
+    digits: String = mantissa.chars().filter(fn(c) { c != '.' }).collect()
+    numerator := jcs_big.JetBigInt.from_str(&digits).expect("Rust float digits")
+    denominator := jcs_big.JetBigInt.from_int(1)
+    decimal_exponent := exponent - ((digits.len() as I32) - decimal)
+    if decimal_exponent >= 0 { numerator = numerator.mul(&jcs_big_pow(jcs_big.JetBigInt.from_int(10), decimal_exponent as USize)) }
+    else { denominator = jcs_big_pow(jcs_big.JetBigInt.from_int(10), (-decimal_exponent) as USize) }
+    (^numerator, ^denominator)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3175
+fn jcs_float_ratio(value: F64) -> (jcs_big.JetBigInt,jcs_big.JetBigInt) {
+    bits := value.to_bits()
+    biased := ((bits >> 52) & 0x7ff) as I32
+    fraction := bits & ((1 as U64 << 52) - 1)
+    (significand, exponent) := if biased == 0 { (fraction, -1074) } else { ((1 as U64 << 52) | fraction, biased - 1023 - 52) }
+    numerator := jcs_big.JetBigInt.from_int(significand as I64)
+    denominator := jcs_big.JetBigInt.from_int(1)
+    if exponent >= 0 { numerator = numerator.mul(&jcs_big_pow(jcs_big.JetBigInt.from_int(2), exponent as USize)) }
+    else { denominator = jcs_big_pow(jcs_big.JetBigInt.from_int(2), (-exponent) as USize) }
+    (^numerator, ^denominator)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3197
+fn jcs_decimal_distance(text: String, exact: &(jcs_big.JetBigInt,jcs_big.JetBigInt)) -> jcs_big.JetBigInt {
+    candidate := jcs_decimal_ratio(text)
+    distance := candidate.0.mul(&exact.1).sub(&exact.0.mul(&candidate.1))
+    rendered := distance.to_string_rep()
+    jcs_big.JetBigInt.from_str(rendered.strip_prefix('-').unwrap_or(&rendered)).expect("absolute decimal distance")
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3208
+fn jcs_positive_big_cmp(left: &jcs_big.JetBigInt, right: &jcs_big.JetBigInt) -> Ordering {
+    left := left.to_string_rep()
+    right := right.to_string_rep()
+    left.len().cmp(&right.len()).then_with(fn() { left.cmp(&right) })
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3217
+fn jcs_shortest(value: F64) -> String {
+    shortest := value.debug() // GATE #4500: shortest round-trip float debug spelling.
+    mantissa_end := shortest.find('e').unwrap_or(shortest.len())
+    index := match shortest[..mantissa_end].rfind(fn(ch: Char) { ch.is_ascii_digit() }) { Some(index) => index, None => return ^shortest }
+    digit := shortest.as_bytes()[index] - '0' as U8
+    candidates := [(shortest.clone(), digit)]
+    for replacement in [digit.checked_sub(1), digit.checked_add(1).filter(fn(next) { next < 10 })].into_iter().flatten() {
+        candidate := shortest.clone().into_bytes()
+        candidate[index] = '0' as U8 + replacement
+        candidate := String.from_utf8(^candidate).expect("ASCII digit replacement")
+        if candidate.parse<F64>().is_ok_and(fn(parsed) { parsed.to_bits() == value.to_bits() }) { candidates.push((^candidate, replacement)) }
+    }
+    exact := jcs_float_ratio(value)
+    candidates.sort_by(fn(left, right) {
+        left_distance := jcs_decimal_distance(&left.0, &exact)
+        right_distance := jcs_decimal_distance(&right.0, &exact)
+        jcs_positive_big_cmp(&left_distance, &right_distance).then_with(fn() { left.1.cmp(&right.1) }).then_with(fn() { left.0.cmp(&right.0) })
+    })
+    candidates.into_iter().map(fn(pair) { pair.0 }).next().expect("at least one shortest float")
+}
+
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3257
+fn jcs_number(value: F64) -> String {
+    if value == 0.0 -> return "0"
+    negative := value.is_sign_negative()
+    shortest := jcs_shortest(value.abs())
+    (mantissa, exponent) := shortest.split_once('e').map(fn(pair) { (pair.0, pair.1.parse<I32>().expect("Rust float exponent")) }).unwrap_or((&shortest, 0))
+    decimal := mantissa.find('.').unwrap_or(mantissa.len()) as I32
+    digits := mantissa.bytes().filter(fn(byte) { byte != '.' as U8 }).collect<[U8]>()
+    leading := digits.iter().take_while(fn(byte) { byte == '0' as U8 }).count()
+    _ :: digits.drain(..leading)
+    while digits.len() > 1 && digits.last() == Some(&('0' as U8)) { _ :: digits.pop() }
+    n := decimal + exponent - leading as I32
+    out := String.new()
+    if negative { out.push('-') }
+    if n > 0 && n <= 21 {
+        if digits.len() <= n as USize {
+            out.extend(digits.iter().map(fn(byte) { byte as Char }))
+            out.extend(iter.repeat_n('0', n as USize - digits.len()))
+        } else {
+            split := n as USize
+            out.extend(digits[..split].iter().map(fn(byte) { byte as Char }))
+            out.push('.')
+            out.extend(digits[split..].iter().map(fn(byte) { byte as Char }))
+        }
+    } else if n > -6 && n <= 0 {
+        out.push_str("0.")
+        out.extend(iter.repeat_n('0', (-n) as USize))
+        out.extend(digits.iter().map(fn(byte) { byte as Char }))
+    } else {
+        out.push(digits[0] as Char)
+        if digits.len() > 1 { out.push('.'); out.extend(digits[1..].iter().map(fn(byte) { byte as Char })) }
+        out.push('e')
+        exponent := n - 1
+        if exponent >= 0 { out.push('+') }
+        out.push_str(&exponent.to_string())
+    }
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3317
+fn jcs_quote_text(text: String) -> [U8] {
+    out: [U8] = ['"' as U8]
+    HEX := "0123456789abcdef".as_bytes()
+    for ch in text.chars() {
+        match ch {
+            '"' => out.extend_from_slice("\\\"".as_bytes()),
+            '\\' => out.extend_from_slice("\\\\".as_bytes()),
+            '\n' => out.extend_from_slice("\\n".as_bytes()),
+            '\r' => out.extend_from_slice("\\r".as_bytes()),
+            '\t' => out.extend_from_slice("\\t".as_bytes()),
+            c if c as U32 == 8 => out.extend_from_slice("\\b".as_bytes()),
+            c if c as U32 == 12 => out.extend_from_slice("\\f".as_bytes()),
+            c if c as U32 <= 31 => {
+                value := c as USize
+                out.extend_from_slice(&['\\' as U8, 'u' as U8, HEX[(value >> 12) & 15], HEX[(value >> 8) & 15], HEX[(value >> 4) & 15], HEX[value & 15]])
+            },
+            c => {
+                encoded: [U8;4] = [0;4]
+                out.extend_from_slice(c.encode_utf8(&encoded).as_bytes())
+            }
+        }
+    }
+    out.push('"' as U8)
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3351
+fn jcs_tree(value: &CtValue, limits: &EncodingLimitsLite, depth: I64) -> [U8] CtValue! {
+    if depth > limits.max_depth -> return Err(encoding_error_value("Limit", "max_depth {limits.max_depth} exceeded"))
+    if value is CtValue.Enum{type_name, variant, args} {
+        if type_name == "DataTree" {
+            match variant {
+                "Null" => return Ok("null".as_bytes().to_vec()),
+                "Bool" => {
+                    b := match args.first().map(fn(pair) { &pair.1 }) { Some(CtValue.Bool(b)) => b, _ => false }
+                    return Ok(if b { "true".as_bytes().to_vec() } else { "false".as_bytes().to_vec() })
+                },
+                "Int" => {
+                    if args.first().map(fn(pair) { &pair.1 }) is Some(CtValue.Int(n)) {
+                        if (n as F64) as I128 != n as I128 -> return Err(encoding_error_value("Unsupported", "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text"))
+                        return Ok(jcs_number(n as F64).into_bytes())
+                    }
+                },
+                "Float" => {
+                    if args.first().map(fn(pair) { &pair.1 }) is Some(CtValue.Float(f)) {
+                        f := f.as_f64()
+                        if !f.is_finite() -> return Err(encoding_error_value("Unsupported", "JCS cannot encode a non-finite Float"))
+                        return Ok(jcs_number(f).into_bytes())
+                    }
+                },
+                "Text" => {
+                    if args.first().map(fn(pair) { &pair.1 }) is Some(CtValue.Str(s)) -> return Ok(jcs_quote_text(s))
+                },
+                "Bytes" => return Err(encoding_error_value("Unsupported", "JSON cannot encode Bytes; encode bytes as Text explicitly")),
+                "Array" => {
+                    items := json_array_items(value).unwrap_or_default()
+                    out := "[".as_bytes().to_vec()
+                    for (index, item) in items.iter().enumerate() {
+                        if index > 0 { out.push(',' as U8) }
+                        out.extend_from_slice(&jcs_tree(item, limits, depth + 1)?)
+                    }
+                    out.push(']' as U8)
+                    return Ok(^out)
+                },
+                "Object" => {
+                    sorted := json_object_entries(value).unwrap_or_default()
+                    sorted.sort_by(fn(left, right) { left.0.encode_utf16().cmp(right.0.encode_utf16()) })
+                    if sorted.windows(2).any(fn(pair) { pair[0].0 == pair[1].0 }) -> return Err(encoding_error_value("Syntax", "JCS requires unique object keys"))
+                    out: [U8] = ['{' as U8]
+                    for (index, (key, item)) in sorted.iter().enumerate() {
+                        if index > 0 { out.push(',' as U8) }
+                        out.extend_from_slice(&jcs_quote_text(key))
+                        out.push(':' as U8)
+                        out.extend_from_slice(&jcs_tree(item, limits, depth + 1)?)
+                    }
+                    out.push('}' as U8)
+                    return Ok(^out)
+                },
+                _ => {}
+            }
+        }
+    }
+    match value {
+        CtValue.Bool(b) => Ok(if b { "true".as_bytes().to_vec() } else { "false".as_bytes().to_vec() }),
+        CtValue.Int(n) => {
+            if (n as F64) as I128 != n as I128 { Err(encoding_error_value("Unsupported", "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text")) }
+            else { Ok(jcs_number(n as F64).into_bytes()) }
+        },
+        CtValue.Float(f) => {
+            f := f.as_f64()
+            if !f.is_finite() { Err(encoding_error_value("Unsupported", "JCS cannot encode a non-finite Float")) }
+            else { Ok(jcs_number(f).into_bytes()) }
+        },
+        CtValue.Str(s) => Ok(jcs_quote_text(s)),
+        CtValue.Bytes(_) => Err(encoding_error_value("Unsupported", "JSON cannot encode Bytes; encode bytes as Text explicitly")),
+        CtValue.List(items) => {
+            out := "[".as_bytes().to_vec()
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 { out.push(',' as U8) }
+                out.extend_from_slice(&jcs_tree(item, limits, depth + 1)?)
+            }
+            out.push(']' as U8)
+            Ok(^out)
+        },
+        _ => Err(encoding_error_value("Unsupported", "JCS cannot encode this value"))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3499
+pub fn json_canonical_jcs(v: &CtValue, limits: &EncodingLimitsLite) -> String CtValue! {
+    validate_encoding_limits(limits)?
+    bytes := jcs_tree(v, limits, 1)?
+    if limits.max_total_bytes.is_some_and(fn(max) { bytes.len() as I64 > max }) -> return Err(encoding_error_value("Limit", "max_total_bytes {limits.max_total_bytes.unwrap_or(0)} exceeded"))
+    String.from_utf8(^bytes).map_err(fn(_) { encoding_error_value("Unsupported", "canonical JSON output is not UTF-8") })
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3521
+pub fn json_canonical(v: &CtValue) -> String { jet_comptime.Comptime.JSONInterp.render_json_pretty(v, false, 0) }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3524
+pub fn json_events(v: &CtValue) -> String {
+    // Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3525
+    fn walk(path: String, t: &CtValue, out: &[String]) {
+        here := if path.is_empty() { "$" } else { ^path }
+        if json_object_entries(t) is Some(entries) {
+            out.push("object_start {here}")
+            for (k, v) in &entries { walk("{here}.{k}", v, out) }
+            out.push("object_end {here}")
+            return
+        }
+        if json_array_items(t) is Some(items) {
+            out.push("array_start {here}")
+            for (i, v) in items.iter().enumerate() { walk("{here}[{i}]", v, out) }
+            out.push("array_end {here}")
+            return
+        }
+        out.push("value {here} {json_canonical(t)}")
+    }
+    out: [String] = []
+    walk("", v, &out)
+    out.join("\n")
+}
+
 

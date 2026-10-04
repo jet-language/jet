@@ -1,0 +1,22 @@
+use jet_comptime.Comptime.Methods.CoreCalls.Impure.*
+use jet_comptime.Comptime.Methods.CoreCalls.log_kernel
+use jet_foundation.AST.CtValue
+use jet_foundation.Diagnostics.Span
+// Behavioral controls for Rust impure.rs:89/117/130/151; no inline Rust tests.
+#Test("log_field_marshalling_preserves_redaction_and_kind") {
+    span := Span.new(0, 0)
+    field := log_kernel.LogField { key: "secret", value: "hidden", kind: "text", redacted: true }
+    value := ct_log_field(field)
+    decoded := log_field_arg(&value, span).unwrap()
+    assert_eq(decoded.key, "secret"); assert_eq(decoded.value, "hidden")
+    assert_eq(decoded.kind, "text"); assert(decoded.redacted)
+    assert(log_fields_arg(&CtValue.Int(1), span).is_err())
+}
+#Test("log_span_requires_nominal_carrier_and_all_fields") {
+    span := Span.new(0, 0)
+    value := ct_log_span(log_kernel.LogSpan { id: 7, name: "work" })
+    decoded := log_span_arg(&value, span).unwrap()
+    assert_eq(decoded.id, 7); assert_eq(decoded.name, "work")
+    assert(log_span_arg(&CtValue.Struct { type_name: "Other", fields: [("id", CtValue.Int(7)), ("name", CtValue.Str("work"))] }, span).is_err())
+    assert(log_span_arg(&CtValue.Struct { type_name: "LogSpan", fields: [("id", CtValue.Int(7))] }, span).is_err())
+}

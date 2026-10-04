@@ -1,0 +1,44 @@
+use JetCodegen.Codegen.TIR.Opt.*
+use JetCodegen.Codegen.TIR.*
+use JetSema.AST.[Type, BinOp]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/opt.rs:1204
+// Behavioral control: floor division rounds down, remainder retains truncating semantics.
+#Test("floor_div_and_mod_preserve_signed_semantics") {
+    assert(floor_div(-7, 3) == Val(-3))
+    assert(floor_div(7, -3) == Val(-3))
+    assert(floor_div(-7, -3) == Val(2))
+    assert(fold_integer_binary(BinOp.Mod, -7, 3) == Val(2))
+    assert(fold_integer_binary(BinOp.Rem, -7, 3) == Val(-1))
+    assert(floor_div(1, 0) == None)
+    assert(floor_div(I64.MIN, -1) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/opt.rs:412
+#Test("integer_range_step_retains_unproved_forms") {
+    start := TExpr(ty: Type.Int, kind: .IntLit(0, None))
+    end := TExpr(ty: Type.Int, kind: .IntLit(10, None))
+    zero := TExpr(ty: Type.Int, kind: .IntLit(0, None))
+    negative := TExpr(ty: Type.Int, kind: .IntLit(-1, None))
+    max_end := TExpr(ty: Type.Int, kind: .IntLit(I64.MAX, None))
+    fixed := TExpr(ty: Type.IntN(signed: true, bits: 32), kind: .IntLit(0, Val((true, 32))))
+    assert(integer_range_step(None, start, end, None) == Val(1))
+    assert(integer_range_step(None, start, end, Val(zero)) == None)
+    assert(integer_range_step(None, start, end, Val(negative)) == None)
+    assert(integer_range_step(None, start, max_end, None) == None)
+    assert(integer_range_step(None, fixed, end, None) == None)
+    assert(integer_range_step(Val(start), start, end, None) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/opt.rs:248
+// Fixed shared slices cannot remove nodes; owned statement vectors can.
+#Test("false_while_elision_preserves_container_shape") {
+    fixed := [TStmt.While(label: None,
+        cond: TExpr(ty: Type.Bool, kind: .BoolLit(false)), body: [])]
+    canonicalize_fixed_stmts(&fixed)
+    assert(if fixed[0] == { .Inline(body) -> body.is_empty(); else -> false })
+    owned := [TStmt.While(label: None,
+        cond: TExpr(ty: Type.Bool, kind: .BoolLit(false)), body: [])]
+    canonicalize_stmts(&owned)
+    assert(owned.is_empty())
+}

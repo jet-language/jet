@@ -1,1765 +1,823 @@
-// PORT-PENDING 0504 crates-jet-codegen-src-codegen-tir-mod-slice-1: crates/jet-codegen/src/Codegen/TIR/mod.rs:1-1761
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! TIR — a small, *typed* intermediate representation for codegen (c109 Phase 1).
-//RS //!
-//RS //! ## Why this exists
-//RS //!
-//RS //! Today codegen (`emit_func` and friends) re-derives semantic facts while it
-//RS //! emits Rust: it calls `expr_jet_ty` to re-infer expression types and
-//RS //! `operand_is_integer` to re-decide which operator traps on overflow. That is
-//RS //! exactly the "codegen re-derives / falls back" smell that invariant I3
-//RS //! ("codegen is dumb") forbids, and it is the bug class that produced the I2
-//RS //! holes the checked-IR effort was built to kill.
-//RS //!
-//RS //! The TIR is the fix. It is a distinct, post-sema representation whose defining
-//RS //! property is **TOTALITY**: every fact codegen needs is carried concretely on
-//RS //! the node — never re-inferred, never an `Option` codegen has to fall back from.
-//RS //! Every `TExpr` carries its resolved `Type`; every `Binary` carries its
-//RS //! overflow decision as a plain `bool`; every `Let` carries the resolved binding
-//RS //! type. The borrowed `TFactChannel` below exposes the optimizer-relevant
-//RS //! sema facts without allocating a side table or introducing another IR.
-//RS //! Consumers treat an absent channel fact as "not proven" and keep the checked
-//RS //! Prelude operation.
-//RS //!
-//RS //! The emitter (`emit_tir_func`) makes ZERO semantic decisions: it
-//RS //! pattern-matches TIR fields and formats Rust. It never calls `expr_jet_ty` or
-//RS //! `operand_is_integer`.
-//RS 
-//RS //!
-//RS //! ## Coverage contract
-//RS //!
-//RS //! `tir_covers` proves that every reachable function is fully represented by TIR.
-//RS //! TIR is the only codegen seam: a coverage miss is an internal compiler error,
-//RS //! never a fallback. Add a node only when its construct is covered, and make every
-//RS //! field total.
-//RS 
-//RS // Re-export the parent `Codegen` glob so the split-out submodules
-//RS // (`subset`/`lower`/`emit`) reach `Cx`, `mangle`, `rust_*`, etc. via `use super::*`.
-//RS pub(crate) use super::*;
-//RS use jet_foundation::CanonicalPass;
-//RS use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactRequest, MirViewCopyKind};
-//RS use jet_foundation::SchemaMigration::{
-//RS     SchemaMigrationOp, SchemaMigrationPlan, SchemaMigrationStep,
-//RS };
-//RS 
-//RS mod artifact_plan;
-//RS mod data_plan;
-//RS mod mir;
-//RS mod opt;
-//RS mod routes;
-//RS mod tir_to_mir_core;
-//RS mod tir_to_mir_expr;
-//RS mod tir_to_mir_drop_flags;
-//RS mod tir_to_mir_last_use;
-//RS mod tir_to_mir_stmt;
-//RS pub(crate) mod tir_to_mir_types;
-//RS use artifact_plan::{TirArtifactFacts, lower_tir_artifact_facts_for_request};
-//RS pub(crate) use data_plan::data_plan_for_core_call;
-//RS pub use data_plan::{
-//RS     DataPlanError, TDATA_PLAN_SCHEMA_VERSION, TDataPlan, TDataPlanNode, TDataPlanPhysicalNode,
-//RS     project_data_plan,
-//RS };
-//RS pub use mir::{
-//RS     LowerError, lower_checked_mir_program_for, lower_checked_mir_program_for_with_debug,
-//RS     lower_tir_to_mir,
-//RS };
-//RS use tir_to_mir_types::{
-//RS     TirDeclarations, lower_declarations_from_items_with_boxed_edges, lower_tir_declarations,
-//RS };
-//RS 
-//RS fn source_array_literal(
-//RS     definition: &crate::AST::ConstDef,
-//RS ) -> Option<(&crate::AST::Type, &[crate::AST::Expr])> {
-//RS     if definition.mutable || definition.is_comptime {
-//RS         return None;
-//RS     }
-//RS     let crate::AST::Expr::TypedLit {
-//RS         head: Some(crate::AST::Type::List(element)),
-//RS         body,
-//RS         ..
-//RS     } = &definition.value
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     if !matches!(
-//RS         element.as_ref(),
-//RS         crate::AST::Type::Int | crate::AST::Type::IntN {
-//RS             signed: false,
-//RS             bits: 8,
-//RS         }
-//RS     ) {
-//RS         return None;
-//RS     }
-//RS     let elements = match body {
-//RS         crate::AST::TypedLitBody::Elements(elements) => elements.as_slice(),
-//RS         crate::AST::TypedLitBody::Empty => &[],
-//RS         _ => return None,
-//RS     };
-//RS     Some((element.as_ref(), elements))
-//RS }
-//RS 
-//RS fn source_integer_constant_value(expression: &crate::AST::Expr) -> Option<crate::AST::CtValue> {
-//RS     let crate::AST::Expr::Int(value, _, _, raw) = expression else {
-//RS         return None;
-//RS     };
-//RS     if let Some(raw) = raw {
-//RS         let raw = raw.replace('_', "");
-//RS         if raw.parse::<i64>().is_err() {
-//RS             if let Ok(value) = jet_foundation::Numeric::CtBigInt::from_literal(&raw) {
-//RS                 return Some(crate::AST::CtValue::BigInt(value));
-//RS             }
-//RS         }
-//RS     }
-//RS     Some(crate::AST::CtValue::Int(*value))
-//RS }
-//RS 
-//RS pub(super) fn source_constant_type(definition: &crate::AST::ConstDef) -> Option<crate::AST::Type> {
-//RS     if let Some(ty) = definition.ty.clone() {
-//RS         return Some(ty);
-//RS     }
-//RS     if let Some(value) = &definition.ct {
-//RS         return Some(value.jet_type());
-//RS     }
-//RS     if let Some((element, _)) = source_array_literal(definition) {
-//RS         return Some(crate::AST::Type::List(Box::new(element.clone())));
-//RS     }
-//RS     match &definition.value {
-//RS         crate::AST::Expr::Int(..) => Some(crate::AST::Type::Int),
-//RS         crate::AST::Expr::Float(_, _, is_f32, _) => Some(if *is_f32 {
-//RS             crate::AST::Type::Float32
-//RS         } else {
-//RS             crate::AST::Type::Float
-//RS         }),
-//RS         crate::AST::Expr::Bool(..) => Some(crate::AST::Type::Bool),
-//RS         crate::AST::Expr::Char(..) => Some(crate::AST::Type::Char),
-//RS         crate::AST::Expr::Str(parts, _)
-//RS             if matches!(parts.as_slice(), [crate::AST::StrPart::Lit(_)]) =>
-//RS         {
-//RS             Some(crate::AST::Type::String)
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn source_constant_value(
-//RS     definition: &crate::AST::ConstDef,
-//RS ) -> Option<crate::AST::CtValue> {
-//RS     definition
-//RS         .ct
-//RS         .clone()
-//RS         .or_else(|| match &definition.value {
-//RS             // A literal past the machine word keeps its exact spelling and
-//RS             // lowers to the arbitrary-precision `Int` carrier (D-INTBIG1).
-//RS             crate::AST::Expr::Int(..) => source_integer_constant_value(&definition.value),
-//RS             crate::AST::Expr::Float(value, _, is_f32, _) => Some(crate::AST::CtValue::Float(
-//RS                 crate::AST::CtFloat::literal(*value, *is_f32),
-//RS             )),
-//RS             crate::AST::Expr::Bool(value, _) => Some(crate::AST::CtValue::Bool(*value)),
-//RS             crate::AST::Expr::Char(value, _) => Some(crate::AST::CtValue::Char(*value)),
-//RS             crate::AST::Expr::Str(parts, _)
-//RS                 if matches!(parts.as_slice(), [crate::AST::StrPart::Lit(_)]) =>
-//RS             {
-//RS                 let [crate::AST::StrPart::Lit(value)] = parts.as_slice() else {
-//RS                     unreachable!("string literal guard must match one literal part");
-//RS                 };
-//RS                 Some(crate::AST::CtValue::Str(value.clone()))
-//RS             }
-//RS             _ => None,
-//RS         })
-//RS         .or_else(|| {
-//RS             let (_, elements) = source_array_literal(definition)?;
-//RS             let values = elements
-//RS                 .iter()
-//RS                 .map(source_integer_constant_value)
-//RS                 .collect::<Option<Vec<_>>>()?;
-//RS             Some(crate::AST::CtValue::List(values))
-//RS         })
-//RS }
-//RS 
-//RS fn set_lowered_method_name(lowered: &mut TFunc, name: impl FnOnce() -> String) {
-//RS     if !matches!(&lowered.kind, TFuncKind::TraitMethod { .. }) {
-//RS         lowered.name = name();
-//RS     }
-//RS }
-//RS 
-//RS fn qualification_binders(
-//RS     owner: &[crate::AST::TypeParam],
-//RS     method: Option<&crate::AST::Func>,
-//RS ) -> Vec<String> {
-//RS     owner
-//RS         .iter()
-//RS         .map(|param| param.name.clone())
-//RS         .chain(
-//RS             method
-//RS                 .into_iter()
-//RS                 .flat_map(|method| method.type_params.iter().map(|param| param.name.clone())),
-//RS         )
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Resolve a reflected row through its enclosing generic owner. AOT, Web, and
-//RS /// the interpreter call this one substitution seam before building carriers.
-//RS pub(crate) fn substitute_reflect_field_type(
-//RS     struct_type_params: &std::collections::HashMap<String, Vec<String>>,
-//RS     owner_ty: &Type,
-//RS     declared: &Type,
-//RS ) -> Type {
-//RS     let Type::Apply { name, args } = owner_ty else {
-//RS         return declared.clone();
-//RS     };
-//RS     let Some(params) = struct_type_params.get(name) else {
-//RS         return declared.clone();
-//RS     };
-//RS     let substitutions = params
-//RS         .iter()
-//RS         .zip(args)
-//RS         .map(|(param, arg)| (param.clone(), arg.clone()))
-//RS         .collect();
-//RS     crate::Generics::substitute_type(declared, &substitutions)
-//RS }
-//RS mod lower;
-//RS mod subset;
-//RS 
-//RS pub(crate) use lower::*;
-//RS use routes::*;
-//RS pub use subset::is_civil_time_method_name;
-//RS pub(crate) use subset::*;
-//RS 
-//RS pub(super) fn mir_unary_op(op: crate::AST::UnOp) -> jet_foundation::MIR::MirUnaryOp {
-//RS     match op {
-//RS         crate::AST::UnOp::Neg => jet_foundation::MIR::MirUnaryOp::Neg,
-//RS         crate::AST::UnOp::Not => jet_foundation::MIR::MirUnaryOp::Not,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn mir_binary_op(op: crate::AST::BinOp) -> jet_foundation::MIR::MirBinaryOp {
-//RS     match op {
-//RS         crate::AST::BinOp::Add => jet_foundation::MIR::MirBinaryOp::Add,
-//RS         crate::AST::BinOp::Sub => jet_foundation::MIR::MirBinaryOp::Sub,
-//RS         crate::AST::BinOp::Mul => jet_foundation::MIR::MirBinaryOp::Mul,
-//RS         crate::AST::BinOp::Div => jet_foundation::MIR::MirBinaryOp::Div,
-//RS         crate::AST::BinOp::FloorDiv => jet_foundation::MIR::MirBinaryOp::FloorDiv,
-//RS         crate::AST::BinOp::Mod => jet_foundation::MIR::MirBinaryOp::Mod,
-//RS         crate::AST::BinOp::Rem => jet_foundation::MIR::MirBinaryOp::Rem,
-//RS         crate::AST::BinOp::Pow => jet_foundation::MIR::MirBinaryOp::Pow,
-//RS         crate::AST::BinOp::BitAnd => jet_foundation::MIR::MirBinaryOp::BitAnd,
-//RS         crate::AST::BinOp::BitOr => jet_foundation::MIR::MirBinaryOp::BitOr,
-//RS         crate::AST::BinOp::BitXor => jet_foundation::MIR::MirBinaryOp::BitXor,
-//RS         crate::AST::BinOp::Shl => jet_foundation::MIR::MirBinaryOp::Shl,
-//RS         crate::AST::BinOp::Shr => jet_foundation::MIR::MirBinaryOp::Shr,
-//RS         crate::AST::BinOp::Eq => jet_foundation::MIR::MirBinaryOp::Eq,
-//RS         crate::AST::BinOp::Ne => jet_foundation::MIR::MirBinaryOp::Ne,
-//RS         crate::AST::BinOp::Lt => jet_foundation::MIR::MirBinaryOp::Lt,
-//RS         crate::AST::BinOp::Gt => jet_foundation::MIR::MirBinaryOp::Gt,
-//RS         crate::AST::BinOp::Le => jet_foundation::MIR::MirBinaryOp::Le,
-//RS         crate::AST::BinOp::Ge => jet_foundation::MIR::MirBinaryOp::Ge,
-//RS         crate::AST::BinOp::Compare => jet_foundation::MIR::MirBinaryOp::Compare,
-//RS         crate::AST::BinOp::And => jet_foundation::MIR::MirBinaryOp::And,
-//RS         crate::AST::BinOp::Or => jet_foundation::MIR::MirBinaryOp::Or,
-//RS     }
-//RS }
-//RS 
-//RS use crate::AST::{
-//RS     AccessConvention, BinOp, CtValue, Expr, Func, Item, Pattern, ProgramBundle, TestDef, Type,
-//RS     UnOp, VariantPayload,
-//RS };
-//RS use crate::Codegen::{mangle, mangle_path};
-//RS 
-//RS /// D-FACT-ENUM-TIR: derive expansion replaces a typed fact read with a
-//RS /// `ComptimeName` carrying its enum value before sema sees the generated body.
-//RS /// Canonical fact metadata proves the enum kind; the AST node proves this is a
-//RS /// compiler-substituted fact rather than an ordinary user enum.
-//RS fn compiler_owned_unit_enum(
-//RS     type_name: &str,
-//RS ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
-//RS {
-//RS     crate::Sema::core_fact_kind_variants(type_name)
-//RS }
-//RS 
-//RS fn typed_unit_enum_value(expr: &Expr) -> Option<(&str, &str)> {
-//RS     match expr {
-//RS         Expr::Paren(inner, _) | Expr::Copy(inner, _) => typed_unit_enum_value(inner),
-//RS         Expr::EnumLit {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS             ..
-//RS         } if args.is_empty() => Some((type_name, variant)),
-//RS         Expr::ComptimeName {
-//RS             value:
-//RS                 Some(CtValue::Enum {
-//RS                     type_name,
-//RS                     variant,
-//RS                     args,
-//RS                 }),
-//RS             ..
-//RS         } if args.is_empty() => Some((type_name, variant)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn compiler_fact_enum_value(expr: &Expr) -> Option<(&str, &str)> {
-//RS     match expr {
-//RS         Expr::Paren(inner, _) | Expr::Copy(inner, _) => compiler_fact_enum_value(inner),
-//RS         Expr::ComptimeName {
-//RS             value:
-//RS                 Some(CtValue::Enum {
-//RS                     type_name,
-//RS                     variant,
-//RS                     args,
-//RS                 }),
-//RS             ..
-//RS         } if args.is_empty() => Some((type_name, variant)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Fold equality between compiler-owned fact enum values before any engine or
-//RS /// Rust emission sees them. The caller must use this predicate as its coverage
-//RS /// proof and its lowering decision so a fact cannot re-enter runtime dispatch.
-//RS pub(crate) fn fold_typed_fact_enum_equality(op: BinOp, lhs: &Expr, rhs: &Expr) -> Option<bool> {
-//RS     if !matches!(op, BinOp::Eq | BinOp::Ne) {
-//RS         return None;
-//RS     }
-//RS     if compiler_fact_enum_value(lhs).is_none() && compiler_fact_enum_value(rhs).is_none() {
-//RS         return None;
-//RS     }
-//RS     let (left_type, left_variant) = typed_unit_enum_value(lhs)?;
-//RS     let (right_type, right_variant) = typed_unit_enum_value(rhs)?;
-//RS     if left_type != right_type {
-//RS         return None;
-//RS     }
-//RS     let variants = compiler_owned_unit_enum(left_type)?;
-//RS     let is_unit = |variant: &str| matches!(variants.get(variant), Some((_, VariantPayload::Unit)));
-//RS     if !is_unit(left_variant) || !is_unit(right_variant) {
-//RS         return None;
-//RS     }
-//RS     Some(if op == BinOp::Eq {
-//RS         left_variant == right_variant
-//RS     } else {
-//RS         left_variant != right_variant
-//RS     })
-//RS }
-//RS 
-//RS /// The parser represents `value == .Variant` as a pattern test rather than a
-//RS /// binary expression. Fold that generated fact shape at the same typed boundary.
-//RS pub(crate) fn fold_typed_fact_enum_pattern(subject: &Expr, pattern: &Pattern) -> Option<bool> {
-//RS     let (type_name, value_variant) = compiler_fact_enum_value(subject)?;
-//RS     fold_fact_enum_variant_test(type_name, value_variant, pattern)
-//RS }
-//RS 
-//RS /// Test one compiler fact enum value against a binding-free variant pattern.
-//RS pub(crate) fn fold_fact_enum_variant_test(
-//RS     type_name: &str,
-//RS     value_variant: &str,
-//RS     pattern: &Pattern,
-//RS ) -> Option<bool> {
-//RS     let Pattern::Variant {
-//RS         variant, bindings, ..
-//RS     } = pattern
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     if !bindings.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let variants = compiler_owned_unit_enum(type_name)?;
-//RS     let is_unit = |variant: &str| matches!(variants.get(variant), Some((_, VariantPayload::Unit)));
-//RS     if !is_unit(value_variant) || !is_unit(variant) {
-//RS         return None;
-//RS     }
-//RS     Some(value_variant == variant)
-//RS }
-//RS 
-//RS /// c139 M4: lowered spawn-lambda body for Cranelift JIT (captures as explicit params).
-//RS pub struct TJitSpawnLambda {
-//RS     pub params: Vec<(String, Type)>,
-//RS     pub captures: Vec<JitSpawnCapture>,
-//RS     /// D-CONC-FREEZE1=A: frozen source names carried from sema's one flow
-//RS     /// fact; the JIT only marshals the already-owned capture slots.
-//RS     pub frozen_captures: Vec<String>,
-//RS     pub body: TJitSpawnBody,
-//RS     pub ret: Type,
-//RS     /// D-HARDENED1 / D-MEM-SENTRY1: the task body mints an address from its
-//RS     /// own frame storage and must execute through the shared lifetime token.
-//RS     pub uses_stack_sentry: bool,
-//RS }
-//RS 
-//RS pub struct JitSpawnCapture {
-//RS     /// Local name used by the lowered spawn body.
-//RS     pub name: String,
-//RS     /// Source local read at the spawn site.
-//RS     pub source: String,
-//RS     pub ty: Type,
-//RS     pub clone_at_spawn: bool,
-//RS     /// D-CONC-FREEZE1=A: sema proved this capture is an immutable snapshot.
-//RS     /// The JIT carries the fact; it does not re-run crossing policy.
-//RS     pub frozen_at_spawn: bool,
-//RS     /// D-MEM-COPYSEM1=A: a read-only view capture is copied into its owning
-//RS     /// destination at the spawn/callback boundary. The JIT only marshals the
-//RS     /// already-resolved owned type; copy semantics stay on the shared Prelude
-//RS     /// path used by AOT and the interpreter.
-//RS     pub materialize_at_spawn: bool,
-//RS }
-//RS 
-//RS /// One bounded traversal primitive for TIR lowering consumers.
-//RS ///
-//RS /// The stack is heap-owned and stores pending nodes, so deep source/TIR
-//RS /// structure does not consume the host call stack. Consumers use the same
-//RS /// push/pop order for AST scans, TIR statement lowering, and nested-lambda
-//RS /// shape inspection.
-//RS pub struct TirWorklist<T> {
-//RS     pending: Vec<T>,
-//RS }
-//RS 
-//RS impl<T> TirWorklist<T> {
-//RS     pub fn new() -> Self {
-//RS         Self {
-//RS             pending: Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn from_reversed<I>(items: I) -> Self
-//RS     where
-//RS         I: IntoIterator<Item = T>,
-//RS     {
-//RS         let mut pending = items.into_iter().collect::<Vec<_>>();
-//RS         pending.reverse();
-//RS         Self { pending }
-//RS     }
-//RS 
-//RS     pub fn push(&mut self, item: T) {
-//RS         self.pending.push(item);
-//RS     }
-//RS 
-//RS     pub fn extend<I>(&mut self, items: I)
-//RS     where
-//RS         I: IntoIterator<Item = T>,
-//RS     {
-//RS         self.pending.extend(items);
-//RS     }
-//RS 
-//RS     pub fn pop(&mut self) -> Option<T> {
-//RS         self.pending.pop()
-//RS     }
-//RS }
-//RS 
-//RS impl<T> Default for TirWorklist<T> {
-//RS     fn default() -> Self {
-//RS         Self::new()
-//RS     }
-//RS }
-//RS 
-//RS pub enum TJitSpawnBody {
-//RS     Expr(Box<TExpr>),
-//RS     Block {
-//RS         prefix: Vec<TStmt>,
-//RS         tail: Option<Box<TExpr>>,
-//RS     },
-//RS     /// A reactive body lowered once and shared with the normal lambda path.
-//RS     SharedBlock {
-//RS         body: std::sync::Arc<[TStmt]>,
-//RS         tail: bool,
-//RS     },
-//RS }
-//RS 
-//RS /// Package-level checked facts carried with the canonical TIR program.
-//RS #[derive(Clone, Debug, Default)]
-//RS pub struct TirPackageFacts {
-//RS     pub project_root: String,
-//RS     pub used_core: std::collections::BTreeSet<String>,
-//RS     pub ffi_callback_functions: std::collections::BTreeSet<String>,
-//RS     pub active_os: String,
-//RS     pub inferred_layer: String,
-//RS     pub allocator: String,
-//RS     pub web_app: Option<jet_foundation::App::AppGraph>,
-//RS     /// D-PLUGIN-AUTHORITY1: package-declared guest capability needs.
-//RS     pub authority_needs: Vec<String>,
-//RS     /// D-FOUND-BOARD1: sema-owned hardware operations and immutable profile.
-//RS     pub hardware_use: jet_foundation::TargetMachine::TargetHardwareUse,
-//RS     pub hardware_profile: Option<jet_foundation::TargetMachine::TargetHardwareFacts>,
-//RS     pub hardware_profile_id: String,
-//RS     pub hardware_capabilities: Vec<String>,
-//RS     pub hardware_setups: Vec<THardwareSetup>,
-//RS }
-//RS fn target_hardware_setups(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     hardware: &jet_foundation::TargetMachine::TargetHardwareUse,
-//RS     profile: Option<&jet_foundation::TargetMachine::TargetHardwareFacts>,
-//RS     profile_id: &str,
-//RS ) -> Vec<THardwareSetup> {
-//RS     let Some(profile) = profile else {
-//RS         return Vec::new();
-//RS     };
-//RS     if profile_id.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS     let mut setups = Vec::new();
-//RS     let mut channels = std::collections::BTreeSet::new();
-//RS     for operation in &hardware.dma_operations {
-//RS         if !matches!(
-//RS             operation.operation,
-//RS             jet_foundation::TargetMachine::TargetDmaOperation::Start
-//RS         ) || !channels.insert(operation.channel.clone())
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let Some(channel) = profile.dma_channel(&operation.channel) else {
-//RS             continue;
-//RS         };
-//RS         setups.push(THardwareSetup::DmaConfigure {
-//RS             profile_id: profile_id.to_string(),
-//RS             channel: channel.name.clone(),
-//RS             transfer_width: channel.transfer_width,
-//RS             ownership: channel.ownership,
-//RS         });
-//RS     }
-//RS     for handler in &hardware.interrupt_handlers {
-//RS         let Some(interrupt) = profile.interrupt(&handler.interrupt) else {
-//RS             continue;
-//RS         };
-//RS         let handler_symbol = bundle
-//RS             .modules
-//RS             .iter()
-//RS             .find(|module| {
-//RS                 module.items.iter().any(|item| match item {
-//RS                     crate::AST::Item::Func(function) => function.name == handler.handler,
-//RS                     crate::AST::Item::Struct(definition) => {
-//RS                         definition
-//RS                             .methods
-//RS                             .iter()
-//RS                             .any(|method| method.name == handler.handler)
-//RS                             || definition
-//RS                                 .trait_impls
-//RS                                 .iter()
-//RS                                 .flat_map(|implementation| implementation.methods.iter())
-//RS                                 .any(|method| method.name == handler.handler)
-//RS                     }
-//RS                     crate::AST::Item::Enum(definition) => {
-//RS                         definition
-//RS                             .methods
-//RS                             .iter()
-//RS                             .any(|method| method.name == handler.handler)
-//RS                             || definition
-//RS                                 .trait_impls
-//RS                                 .iter()
-//RS                                 .flat_map(|implementation| implementation.methods.iter())
-//RS                                 .any(|method| method.name == handler.handler)
-//RS                     }
-//RS                     crate::AST::Item::Impl(implementation) => implementation
-//RS                         .methods
-//RS                         .iter()
-//RS                         .any(|method| method.name == handler.handler),
-//RS                     _ => false,
-//RS                 })
-//RS             })
-//RS             .map(|module| format!("{}::{}", module.alias, handler.handler))
-//RS             .unwrap_or_else(|| handler.handler.clone());
-//RS         setups.push(THardwareSetup::InterruptBind {
-//RS             profile_id: profile_id.to_string(),
-//RS             interrupt: interrupt.name.clone(),
-//RS             vector: interrupt.vector,
-//RS             handler_symbol,
-//RS             forbidden_effects: interrupt
-//RS                 .forbidden_effects
-//RS                 .iter()
-//RS                 .chain(handler.forbidden_effects.iter())
-//RS                 .cloned()
-//RS                 .collect(),
-//RS         });
-//RS     }
-//RS     setups
-//RS }
-//RS 
-//RS /// Why a checked construct is absent from executable TIR.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum TirErasureReason {
-//RS     CompileTimeOnly,
-//RS     Disabled,
-//RS     ExpandedBeforeLowering,
-//RS     SemanticIndexOnly,
-//RS }
-//RS 
-//RS /// Explicit, typed erasure row.  Compile-time constructs never disappear
-//RS /// silently from the total checked program.
-//RS #[derive(Clone, Debug)]
-//RS pub struct TirErasure {
-//RS     pub construct: String,
-//RS     pub span: crate::Diagnostics::Span,
-//RS     pub reason: TirErasureReason,
-//RS }
-//RS 
-//RS fn collect_item_erasures(
-//RS     items: &[Item],
-//RS     module: &str,
-//RS     include_tests: bool,
-//RS     rows: &mut Vec<TirErasure>,
-//RS ) {
-//RS     use TirErasureReason::{CompileTimeOnly, Disabled, ExpandedBeforeLowering, SemanticIndexOnly};
-//RS     for item in items {
-//RS         let (construct, span, reason) = match item {
-//RS             Item::Tag(row) => ("Tag", row.span, CompileTimeOnly),
-//RS             Item::EffectDecl(row) => ("EffectDecl", row.span, CompileTimeOnly),
-//RS             Item::MarkerDecl(row) => ("MarkerDecl", row.span, CompileTimeOnly),
-//RS             Item::FactDecl(row) => ("FactDecl", row.span, CompileTimeOnly),
-//RS             Item::GenericModule(row) => ("GenericModule", row.span, CompileTimeOnly),
-//RS             Item::UserDerive(row) => ("UserDerive", row.span, CompileTimeOnly),
-//RS             Item::TemplateLoop(row) => ("TemplateLoop", row.span, ExpandedBeforeLowering),
-//RS             Item::ModuleAlias(row) => ("ModuleAlias", row.span, ExpandedBeforeLowering),
-//RS             Item::ProtocolDecl(row) => ("ProtocolDecl", row.span, ExpandedBeforeLowering),
-//RS             Item::UnitFamily(row) => ("UnitFamily", row.span, ExpandedBeforeLowering),
-//RS             Item::Migration(row) => ("Migration", row.span, SemanticIndexOnly),
-//RS             Item::Module(row) => ("Module", row.span, SemanticIndexOnly),
-//RS             Item::Test(row) if !include_tests => ("Test", row.span, Disabled),
-//RS             Item::CodeModule(row) => {
-//RS                 if let Some(body) = &row.body {
-//RS                     collect_item_erasures(
-//RS                         body,
-//RS                         &format!("{module}::{}", row.name),
-//RS                         include_tests,
-//RS                         rows,
-//RS                     );
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             Item::Func(_)
-//RS             | Item::Struct(_)
-//RS             | Item::Enum(_)
-//RS             | Item::Distinct(_)
-//RS             | Item::TypeAlias(_)
-//RS             | Item::Trait(_)
-//RS             | Item::Impl(_)
-//RS             | Item::Const(_)
-//RS             | Item::Test(_)
-//RS             | Item::ExternRust(_)
-//RS             | Item::CModule(_)
-//RS             | Item::ErrorConv(_) => continue,
-//RS         };
-//RS         rows.push(tir_to_mir_types::lower_erasure(
-//RS             format!("{module}::{construct}"),
-//RS             span,
-//RS             reason,
-//RS         ));
-//RS     }
-//RS }
-//RS 
-//RS /// The one total checked analytical program. Every checked executable body is
-//RS /// represented by one `TFunc` row with its module/source identity attached.
-//RS ///
-//RS /// Resident engines may temporarily read the same model while their old
-//RS /// adapters are removed.
-//RS pub struct TirProgram {
-//RS     /// Stable package identity supplied by the checked bundle.
-//RS     pub package_identity: String,
-//RS     /// D-MOD-CYCLE1=A: the entry's module identity and the call prefix its
-//RS     /// package siblings use for it (`__jet_run::`). A sibling reaches an entry
-//RS     /// function through the ordinary imported-call spelling, while the entry
-//RS     /// lowers its own functions unprefixed; MIR resolves the first to the
-//RS     /// second. `None` when the entry has no package siblings.
-//RS     pub entry_sibling_calls: Option<(String, String)>,
-//RS     pub facts: TirPackageFacts,
-//RS     /// Display path of the entry module retained for temporary diagnostics.
-//RS     pub source_file: String,
-//RS     /// Source text of the entry module retained for temporary diagnostics.
-//RS     pub source_text: String,
-//RS     /// Canonical source text keyed by every checked module display path.
-//RS     pub source_files: std::collections::BTreeMap<String, String>,
-//RS     /// D-MEM-GUARANTEE1: package hardening is a checked bundle fact carried
-//RS     /// into named deopt; the evaluator never reparses package.jet.
-//RS     pub package_hardened: bool,
-//RS     /// D-EFFECT-AUTHORITY1: the sema-projected application decision travels
-//RS     /// with the lowered program. TIR, JIT, deopt, and the interpreter consume
-//RS     /// this value; none of them rediscover package.jet or re-solve effects.
-//RS     pub application_authority: jet_foundation::Authority::ApplicationAuthority,
-//RS     /// D-REL3: the package edition is a checked bundle fact carried the same
-//RS     /// way, because every tier that runs this program answers edition-gated
-//RS     /// questions from the checked bundle.
-//RS     pub edition: String,
-//RS     /// Every checked executable body, including imported modules and methods.
-//RS     pub funcs: Vec<TFunc>,
-//RS     /// All checked declaration rows.  MIR receives this projection rather than
-//RS     /// re-walking source items or reading generated names.
-//RS     declarations: TirDeclarations,
-//RS     /// Checked module/link/entry/harness/artifact facts for the selected request.
-//RS     artifact_facts: TirArtifactFacts,
-//RS     /// Exact checked Core registry identities, including receiver rows.
-//RS     pub core_calls: Vec<&'static crate::Syntax::CoreCallRecord>,
-//RS     /// Explicitly erased or unreachable checked constructs.
-//RS     pub unreachable: Vec<TirErasure>,
-//RS     /// c139 M4: spawn lambda bodies in program traversal order.
-//RS     pub spawn_lambdas: Vec<TJitSpawnLambda>,
-//RS     /// M5: mangled field names per struct type (field order).
-//RS     pub struct_fields: std::collections::HashMap<String, Vec<String>>,
-//RS     /// M5: field types parallel to `struct_fields` order.
-//RS     pub struct_field_types: std::collections::HashMap<String, Vec<Type>>,
-//RS     /// D-FIELDMEMO1=A: stored-field dependency edges consumed by the JIT
-//RS     /// invalidation adapter. Values are memo getter names, not policy.
-//RS     pub memo_dependencies:
-//RS         std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
-//RS     /// D-METAREFLECT1: registered field rows shared with comptime reflection.
-//RS     pub reflection_fields:
-//RS         std::collections::HashMap<String, Vec<jet_foundation::Reflection::ReflectionField>>,
-//RS     /// Canonical typeable paths used by interpreter reflection.
-//RS     pub reflect_paths: std::collections::HashMap<String, String>,
-//RS     /// #2252: the ONE projection from a TIR nominal spelling to the canonical
-//RS     /// module-qualified identity every shape, codec, and method table is keyed
-//RS     /// by. TIR carries three spellings of the same imported type - the bare
-//RS     /// local leaf inside the module that declares it, the alias-qualified
-//RS     /// source name in a consumer (`plan.ListReport`), and the canonical
-//RS     /// identity a qualified call return already resolves to - while the tables
-//RS     /// hold exactly one. Both engines resolve through this map instead of
-//RS     /// searching table keys by suffix; a spelling two modules could claim is
-//RS     /// absent, so an ambiguous name still reports the ordinary missing-shape
-//RS     /// diagnostic rather than silently picking a module.
-//RS     pub nominal_identities: std::collections::HashMap<String, String>,
-//RS     /// Declared generic parameter names per struct, in source order.
-//RS     pub struct_type_params: std::collections::HashMap<String, Vec<String>>,
-//RS     /// M5: mangled variant names per enum type (discriminant order).
-//RS     pub enum_variants: std::collections::HashMap<String, Vec<String>>,
-//RS     /// M5: payload field types per `__jet_Type::__jet_Variant` pattern prefix.
-//RS     pub enum_variant_payload_types: std::collections::HashMap<String, Vec<Type>>,
-//RS     /// Functions whose typed decode must use the canonical TIR migration plan.
-//RS     pub canonical_deopt: std::collections::HashSet<String>,
-//RS     /// Functions whose codec calls must remain canonical during named deopt.
-//RS     pub canonical_calls: std::collections::HashSet<String>,
-//RS     pub int_constants: std::collections::HashMap<String, i64>,
-//RS     pub constants: std::collections::HashMap<String, crate::AST::CtValue>,
-//RS     pub distinct_bases: std::collections::HashMap<String, Type>,
-//RS     pub distinct_ranges: std::collections::HashMap<String, (i64, i64)>,
-//RS     /// Published-schema migration plans compiled from sema facts. The
-//RS     /// evaluator applies these wire-key operations before re-entering the
-//RS     /// ordinary lowered `Decode` body.
-//RS     pub codec_migrations: std::collections::HashMap<String, SchemaMigrationPlan>,
-//RS     /// S62/M9: exact checked `(owner, method) -> trait` identity for static
-//RS     /// associated calls. This is projected once; lowerers never scan owners.
-//RS     pub trait_method_traits: std::collections::HashMap<(String, String), String>,
-//RS     pub iterable_item_types: std::collections::HashMap<(String, String), Type>,
-//RS }
-//RS 
-//RS /// Stable structured snapshot used by the opt-in pass journal. This is a
-//RS /// projection of the actual checked TIR rows, not a source reparse or digest.
-//RS pub fn canonical_payload(program: &TirProgram) -> String {
-//RS     let funcs = program
-//RS         .funcs
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(index, function)| {
-//RS             let params = function
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|(name, ty, convention)| {
-//RS                     format!(
-//RS                         "{{\"name\":\"{}\",\"type\":\"{}\",\"convention\":\"{:?}\"}}",
-//RS                         jet_foundation::JSON::json_escape(name),
-//RS                         jet_foundation::JSON::json_escape(&ty.name()),
-//RS                         convention
-//RS                     )
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             let ret = function
-//RS                 .ret
-//RS                 .as_ref()
-//RS                 .map(|ty| format!("\"{}\"", jet_foundation::JSON::json_escape(&ty.name())))
-//RS                 .unwrap_or_else(|| "null".to_string());
-//RS             format!(
-//RS                 "{{\"index\":{index},\"name\":\"{}\",\"module\":\"{}\",\"key\":\"{}\",\"source_file\":\"{}\",\"source_span\":{{\"start\":{},\"end\":{}}},\"params\":[{}],\"ret\":{},\"body_nodes\":{},\"is_main\":{},\"synthetic\":{}}}",
-//RS                 jet_foundation::JSON::json_escape(&function.name),
-//RS                 jet_foundation::JSON::json_escape(&function.module),
-//RS                 jet_foundation::JSON::json_escape(&function.key),
-//RS                 jet_foundation::JSON::json_escape(&function.source_file),
-//RS                 function.source_span.start,
-//RS                 function.source_span.end,
-//RS                 params,
-//RS                 ret,
-//RS                 function.body.len(),
-//RS                 function.is_main,
-//RS                 function.synthetic,
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"representation\":\"tir\",\"package\":\"{}\",\"source_file\":\"{}\",\"edition\":\"{}\",\"functions\":[{}]}}",
-//RS         jet_foundation::JSON::json_escape(&program.package_identity),
-//RS         jet_foundation::JSON::json_escape(&program.source_file),
-//RS         jet_foundation::JSON::json_escape(&program.edition),
-//RS         funcs
-//RS     )
-//RS }
-//RS 
-//RS pub fn canonical_expression_payload(expression: &TExpr) -> String {
-//RS     let kind = format!("{:?}", std::mem::discriminant(&expression.kind));
-//RS     format!(
-//RS         "{{\"representation\":\"tir\",\"type\":\"{}\",\"kind\":\"{}\"}}",
-//RS         jet_foundation::JSON::json_escape(&expression.ty.name()),
-//RS         jet_foundation::JSON::json_escape(&kind),
-//RS     )
-//RS }
-//RS 
-//RS pub fn canonical_expression_identity(expression: &TExpr) -> String {
-//RS     let kind = format!("{:?}", std::mem::discriminant(&expression.kind));
-//RS     format!(
-//RS         "{{\"representation\":\"tir\",\"type\":\"{}\",\"kind\":\"{}\"}}",
-//RS         jet_foundation::JSON::json_escape(&expression.ty.name()),
-//RS         jet_foundation::JSON::json_escape(&kind),
-//RS     )
-//RS }
-//RS 
-//RS pub fn canonical_statements_payload(statements: &[TStmt]) -> String {
-//RS     let kinds = statements
-//RS         .iter()
-//RS         .map(|statement| format!("{:?}", std::mem::discriminant(statement)))
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"representation\":\"tir\",\"statement_count\":{},\"kinds\":\"{}\"}}",
-//RS         statements.len(),
-//RS         jet_foundation::JSON::json_escape(&kinds),
-//RS     )
-//RS }
-//RS 
-//RS pub fn canonical_statements_identity(statements: &[TStmt]) -> String {
-//RS     format!(
-//RS         "{{\"representation\":\"tir\",\"statement_count\":{}}}",
-//RS         statements.len(),
-//RS     )
-//RS }
-//RS 
-//RS pub fn canonical_identity(program: &TirProgram) -> String {
-//RS     let functions = program
-//RS         .funcs
-//RS         .iter()
-//RS         .map(|function| {
-//RS             format!(
-//RS                 "{{\"key\":\"{}\",\"source_file\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}}}}",
-//RS                 jet_foundation::JSON::json_escape(&function.key),
-//RS                 jet_foundation::JSON::json_escape(&function.source_file),
-//RS                 function.source_span.start,
-//RS                 function.source_span.end
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"representation\":\"tir\",\"package\":\"{}\",\"functions\":[{}]}}",
-//RS         jet_foundation::JSON::json_escape(&program.package_identity),
-//RS         functions
-//RS     )
-//RS }
-//RS 
-//RS fn published_schema(s: &crate::AST::StructDef) -> bool {
-//RS     s.is_published_schema
-//RS         || s.derives
-//RS             .iter()
-//RS             .any(|(marker, _)| marker == crate::Syntax::MARKER_PUBLISHED_SCHEMA)
-//RS }
-//RS 
-//RS fn add_published_schema_field(s: &crate::AST::StructDef, fields: &mut Vec<String>) {
-//RS     if published_schema(s) {
-//RS         fields.push(crate::Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string());
-//RS     }
-//RS }
-//RS 
-//RS fn add_published_schema_field_type(s: &crate::AST::StructDef, types: &mut Vec<Type>) {
-//RS     if published_schema(s) {
-//RS         types.push(Type::Named(crate::Syntax::TYPE_DATA.to_string()));
-//RS     }
-//RS }
-//RS 
-//RS /// D-MIGRATE4 version vocabulary. Shapes count from one, and a step names the
-//RS /// shapes it moves between. The canonical schema plan owns the operation
-//RS /// records; these helpers keep the sema/codegen naming contract in one place.
-//RS /// `index` is zero-based.
-//RS pub fn migration_shape_name(index: usize) -> String {
-//RS     format!("v{}", index + 1)
-//RS }
-//RS 
-//RS fn payload_types_for_variant(payload: &VariantPayload) -> Vec<Type> {
-//RS     match payload {
-//RS         VariantPayload::Unit => Vec::new(),
-//RS         VariantPayload::Single(ty, _) => vec![ty.clone()],
-//RS         VariantPayload::Named(fields) => fields.iter().map(|field| field.ty.clone()).collect(),
-//RS     }
-//RS }
-//RS 
-//RS fn register_enum_variants(
-//RS     enum_name: &str,
-//RS     variants: &[crate::AST::Variant],
-//RS     enum_variants: &mut std::collections::HashMap<String, Vec<String>>,
-//RS     enum_variant_payload_types: &mut std::collections::HashMap<String, Vec<Type>>,
-//RS ) {
-//RS     enum_variants.insert(
-//RS         enum_name.to_string(),
-//RS         variants
-//RS             .iter()
-//RS             .map(|variant| mangle_path(&variant.name))
-//RS             .collect(),
-//RS     );
-//RS     for variant in variants {
-//RS         let pattern = format!("{}::{}", mangle_path(enum_name), mangle_path(&variant.name));
-//RS         enum_variant_payload_types.insert(pattern, payload_types_for_variant(&variant.payload));
-//RS     }
-//RS }
-//RS 
-//RS fn register_imported_enum_variants(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS     owner: &str,
-//RS     binders: &[String],
-//RS     enum_name: &str,
-//RS     variants: &[crate::AST::Variant],
-//RS     enum_variants: &mut std::collections::HashMap<String, Vec<String>>,
-//RS     enum_variant_payload_types: &mut std::collections::HashMap<String, Vec<Type>>,
-//RS ) {
-//RS     let identity = crate::Codegen::TIR::imported_type_name(owner, enum_name);
-//RS     enum_variants.insert(
-//RS         identity.clone(),
-//RS         variants
-//RS             .iter()
-//RS             .map(|variant| mangle_path(&variant.name))
-//RS             .collect(),
-//RS     );
-//RS     for variant in variants {
-//RS         let pattern = format!("{}::{}", mangle_path(&identity), mangle_path(&variant.name));
-//RS         let payload = payload_types_for_variant(&variant.payload)
-//RS             .into_iter()
-//RS             .map(|ty| {
-//RS                 crate::Codegen::TIR::qualify_imported_type(bundle, module_idx, owner, binders, &ty)
-//RS             })
-//RS             .collect();
-//RS         enum_variant_payload_types.insert(pattern, payload);
-//RS     }
-//RS }
-//RS 
-//RS fn compile_codec_migrations(
-//RS     cx: &Cx,
-//RS     module: &str,
-//RS     items: &[Item],
-//RS ) -> Option<std::collections::HashMap<String, SchemaMigrationPlan>> {
-//RS     let mut plans = std::collections::HashMap::new();
-//RS     for item in items {
-//RS         let Item::Struct(def) = item else { continue };
-//RS         let Some(blocks) = super::Items::migration_blocks(cx, def) else {
-//RS             continue;
-//RS         };
-//RS         let canonical = crate::Sema::Schema::canonical_migration_shape(module, def, blocks)
-//RS             .expect("sema-checked struct must have canonical migration shape facts");
-//RS         let historical_shapes = canonical.historical.clone();
-//RS         let mut steps = Vec::with_capacity(blocks.len());
-//RS         for (block_index, block) in blocks.iter().enumerate() {
-//RS             let mut ops = Vec::with_capacity(block.ops.len());
-//RS             for op in &block.ops {
-//RS                 ops.push(match op {
-//RS                     crate::AST::MigrationOp::Rename { from, to, .. } => SchemaMigrationOp::Rename {
-//RS                         from_key: canonical.json_key(from),
-//RS                         to_key: canonical.json_key(to),
-//RS                     },
-//RS                     crate::AST::MigrationOp::Remove { field, .. } => SchemaMigrationOp::Remove {
-//RS                         key: canonical.json_key(field),
-//RS                     },
-//RS                     crate::AST::MigrationOp::Add {
-//RS                         field,
-//RS                         ty,
-//RS                         default_fn,
-//RS                         ..
-//RS                     } => SchemaMigrationOp::Add {
-//RS                         key: canonical.json_key(field),
-//RS                         type_name: ty.name(),
-//RS                         default_fn: default_fn.clone()?,
-//RS                     },
-//RS                     crate::AST::MigrationOp::Change {
-//RS                         field,
-//RS                         from_ty,
-//RS                         to_ty,
-//RS                         conv_fn,
-//RS                         ..
-//RS                     } => SchemaMigrationOp::Change {
-//RS                         key: canonical.json_key(field),
-//RS                         from_type: from_ty.name(),
-//RS                         to_type: to_ty.name(),
-//RS                         converter_fn: conv_fn.clone()?,
-//RS                     },
-//RS                 });
-//RS             }
-//RS             steps.push(SchemaMigrationStep::new(
-//RS                 migration_shape_name(block_index),
-//RS                 migration_shape_name(block_index + 1),
-//RS                 ops,
-//RS             ));
-//RS         }
-//RS         plans.insert(
-//RS             def.name.clone(),
-//RS             SchemaMigrationPlan::new(def.name.clone(), historical_shapes, steps),
-//RS         );
-//RS     }
-//RS     Some(plans)
-//RS }
-//RS 
-//RS fn register_union_type(
-//RS     ty: &Type,
-//RS     enum_variants: &mut std::collections::HashMap<String, Vec<String>>,
-//RS     enum_variant_payload_types: &mut std::collections::HashMap<String, Vec<Type>>,
-//RS ) {
-//RS     match ty {
-//RS         Type::Union(members) => {
-//RS             let name = crate::AST::union_enum_name(members);
-//RS             enum_variants
-//RS                 .entry(name.clone())
-//RS                 .or_insert_with(|| members.iter().map(crate::AST::union_member_tag).collect());
-//RS             for member in members {
-//RS                 let tag = crate::AST::union_member_tag(member);
-//RS                 enum_variant_payload_types
-//RS                     .entry(format!("{name}::{tag}"))
-//RS                     .or_insert_with(|| vec![member.clone()]);
-//RS                 register_union_type(member, enum_variants, enum_variant_payload_types);
-//RS             }
-//RS         }
-//RS         Type::List(inner)
-//RS         | Type::Shared(inner)
-//RS         | Type::Option(inner)
-//RS         | Type::Tagged { inner, .. }
-//RS         | Type::FixedList { elem: inner, .. } => {
-//RS             register_union_type(inner, enum_variants, enum_variant_payload_types)
-//RS         }
-//RS         Type::Map { key, value, .. }
-//RS         | Type::Result {
-//RS             ok: key,
-//RS             err: value,
-//RS         } => {
-//RS             register_union_type(key, enum_variants, enum_variant_payload_types);
-//RS             register_union_type(value, enum_variants, enum_variant_payload_types);
-//RS         }
-//RS         Type::Fn { params, ret, .. } => {
-//RS             for param in params {
-//RS                 register_union_type(param, enum_variants, enum_variant_payload_types);
-//RS             }
-//RS             if let Some(ret) = ret {
-//RS                 register_union_type(ret, enum_variants, enum_variant_payload_types);
-//RS             }
-//RS         }
-//RS         Type::Apply { args, .. } => {
-//RS             for arg in args {
-//RS                 register_union_type(arg, enum_variants, enum_variant_payload_types);
-//RS             }
-//RS         }
-//RS         Type::Tuple(fields) => {
-//RS             for (_, field) in fields {
-//RS                 register_union_type(field, enum_variants, enum_variant_payload_types);
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS /// Rust local place for JIT variable lookup (`__jet_x`).
-//RS pub fn local_place(name: &str) -> String {
-//RS     super::mangle(name)
-//RS }
-//RS 
-//RS /// One local or parameter slot, carried as structure instead of a Rust place
-//RS /// string. Every engine resolves a slot from these facts alone.
-//RS ///
-//RS /// `name` is the slot's identity: a user binding carries its Jet name, which Rust
-//RS /// spells `__jet_<name>`; a compiler-generated temp (`generated`) is allocated
-//RS /// through the reserved machine-name lane, which cannot collide with a mangled
-//RS /// user name.
-//RS /// `deref` records a by-reference slot, which Rust reads through `(*…)`.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TLocal {
-//RS     pub name: String,
-//RS     pub generated: bool,
-//RS     pub deref: bool,
-//RS     /// Storage provenance for a place whose Rust shape does not carry it.
-//RS     /// `&self` is represented as the bare Rust receiver so ordinary field and
-//RS     /// method emission stays unchanged, but its address still belongs to the
-//RS     /// caller's storage rather than this method's frame.
-//RS     pub address_lifetime: Option<TAddressLifetime>,
-//RS     /// D-PERSIST-DEVSTATE1=A: canonical module-store identity for a pinned
-//RS     /// binding. Persistent slots do not enter the ordinary local variable map.
-//RS     pub persist_key: Option<String>,
-//RS     pub persist_ty: Option<Type>,
-//RS     /// The Rust binding is mutable. This is a TIR ownership fact, not an
-//RS     /// emitter-side repair for a generated spelling.
-//RS     pub mutable: bool,
-//RS     /// A dead `String.from_bytes(local)` binding may be fused into the following
-//RS     /// map update. This carries the source place only when lowering proved the
-//RS     /// binding is not read after that update; other engines ignore the AOT
-//RS     /// representation hint and retain the ordinary binding semantics.
-//RS     pub string_bytes_source: Option<Box<TLocal>>,
-//RS     /// A lowering-proven interval for an Int local. `None` means the local may
-//RS     /// carry a bigint value and consumers must retain checked arithmetic.
-//RS     pub integer_bounds: Option<TIntegerBounds>,
-//RS     /// The Rust binding is a vetted Prelude storage wrapper until sema-proved
-//RS     /// initialization; ordinary TIR reads still have the declared Jet type.
-//RS     pub uninit_scalar: bool,
-//RS     pub uninit_fixed: bool,
-//RS     /// The slot holds a non-escaping closure that borrows this frame (S47):
-//RS     /// every use is a direct call, and the body's capture writes land in the
-//RS     /// enclosing locals. Escaping closures never carry this; they own the
-//RS     /// first-class carrier and their captures are private copies.
-//RS     pub direct_closure: bool,
-//RS }
-//RS 
-//RS impl TLocal {
-//RS     /// A user binding, read by value.
-//RS     pub fn user(name: impl Into<String>) -> TLocal {
-//RS         TLocal {
-//RS             name: name.into(),
-//RS             generated: false,
-//RS             deref: false,
-//RS             address_lifetime: None,
-//RS             persist_key: None,
-//RS             persist_ty: None,
-//RS             mutable: false,
-//RS             string_bytes_source: None,
-//RS             integer_bounds: None,
-//RS             uninit_scalar: false,
-//RS             uninit_fixed: false,
-//RS             direct_closure: false,
-//RS         }
-//RS     }
-//RS 
-//RS     /// A compiler-generated temp slot, read by value.
-//RS     pub fn generated(name: impl Into<String>) -> TLocal {
-//RS         let name = name.into();
-//RS         let name = if name == "self" {
-//RS             name
-//RS         } else {
-//RS             super::mangle_generated(&name)
-//RS         };
-//RS         TLocal {
-//RS             name,
-//RS             generated: true,
-//RS             deref: false,
-//RS             address_lifetime: None,
-//RS             persist_key: None,
-//RS             persist_ty: None,
-//RS             mutable: false,
-//RS             string_bytes_source: None,
-//RS             integer_bounds: None,
-//RS             uninit_scalar: false,
-//RS             uninit_fixed: false,
-//RS             direct_closure: false,
-//RS         }
-//RS     }
-//RS 
-//RS     /// The compiler-owned STM handle used by `#Transact` Shared edits.
-//RS     pub fn stm() -> TLocal {
-//RS         TLocal::generated("stm").as_mutable()
-//RS     }
-//RS 
-//RS     /// A module binding whose value belongs to the shared development store.
-//RS     pub fn persistent(name: impl Into<String>, module: &str, ty: Type) -> TLocal {
-//RS         let name = name.into();
-//RS         TLocal {
-//RS             name: name.clone(),
-//RS             generated: false,
-//RS             deref: false,
-//RS             address_lifetime: None,
-//RS             persist_key: Some(format!("{module}::{name}")),
-//RS             persist_ty: Some(ty),
-//RS             mutable: false,
-//RS             string_bytes_source: None,
-//RS             integer_bounds: None,
-//RS             uninit_scalar: false,
-//RS             uninit_fixed: false,
-//RS             direct_closure: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn is_persistent(&self) -> bool {
-//RS         self.persist_key.is_some()
-//RS     }
-//RS 
-//RS     pub fn as_mutable(mut self) -> TLocal {
-//RS         self.mutable = true;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_string_bytes_source(mut self, source: TLocal) -> TLocal {
-//RS         self.string_bytes_source = Some(Box::new(source));
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn as_uninit_scalar(mut self) -> TLocal {
-//RS         self.uninit_scalar = true;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn as_uninit_fixed(mut self) -> TLocal {
-//RS         self.uninit_fixed = true;
-//RS         self
-//RS     }
-//RS 
-//RS     /// A local bound to a non-escaping closure that borrows this frame.
-//RS     pub fn as_direct_closure(mut self) -> TLocal {
-//RS         self.direct_closure = true;
-//RS         self
-//RS     }
-//RS 
-//RS     /// The same slot read through a by-reference deref.
-//RS     pub fn through_ref(mut self) -> TLocal {
-//RS         self.deref = true;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_address_lifetime(mut self, lifetime: TAddressLifetime) -> TLocal {
-//RS         self.address_lifetime = Some(lifetime);
-//RS         self
-//RS     }
-//RS 
-//RS     /// The Rust binding identifier for this slot, without the deref wrapper.
-//RS     pub fn rust_name(&self) -> String {
-//RS         if self.generated {
-//RS             self.name.clone()
-//RS         } else if self.is_persistent() {
-//RS             local_place(&self.name).to_uppercase()
-//RS         } else {
-//RS             local_place(&self.name)
-//RS         }
-//RS     }
-//RS 
-//RS     /// The Rust place this slot reads and writes.
-//RS     pub fn rust_place(&self) -> String {
-//RS         let rust = self.rust_name();
-//RS         if self.deref {
-//RS             format!("(*{rust})")
-//RS         } else {
-//RS             rust
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Storage provenance for an address-producing TIR expression. This is a
-//RS /// lowering fact, not a second address-admission policy: sema still decides
-//RS /// which source forms are legal, and each engine only marshals this fact.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum TAddressLifetime {
-//RS     /// A value in the current Jet function/lambda/task frame.
-//RS     Stack,
-//RS     /// Storage owned by a Jet allocator or collection buffer.
-//RS     Heap,
-//RS     /// A persistent/static slot whose lifetime is not the current frame.
-//RS     Static,
-//RS     /// A by-reference slot owned by an enclosing caller or boundary.
-//RS     Borrowed,
-//RS     /// An address whose owner is outside Jet's allocation ledger.
-//RS     Foreign,
-//RS     /// Lowering cannot prove a more precise owner.
-//RS     Unknown,
-//RS }
-//RS 
-//RS /// Classify the storage reached by an address-producing TIR expression.
-//RS /// Unknown and borrowed forms retain the established unowned registration
-//RS /// path; only a proven current-frame place receives an expiring sentry token.
-//RS pub fn tir_address_lifetime(expr: &TExpr) -> TAddressLifetime {
-//RS     match &expr.kind {
-//RS         TExprKind::Local(local) => local.address_lifetime.unwrap_or_else(|| {
-//RS             if local.is_persistent() {
-//RS                 TAddressLifetime::Static
-//RS             } else if local.deref {
-//RS                 TAddressLifetime::Borrowed
-//RS             } else {
-//RS                 TAddressLifetime::Stack
-//RS             }
-//RS         }),
-//RS         TExprKind::ConstRef(_) => TAddressLifetime::Static,
-//RS         TExprKind::Field { recv, .. } => tir_address_lifetime(recv),
-//RS         TExprKind::Index { base, .. } => match &base.ty {
-//RS             Type::FixedList { .. } => tir_address_lifetime(base),
-//RS             Type::List(_) => TAddressLifetime::Heap,
-//RS             _ => TAddressLifetime::Unknown,
-//RS         },
-//RS         // Distinct values are transparent to the resident raw-place lowering:
-//RS         // it takes the address of the same local slot after the nominal wrapper
-//RS         // is erased. Preserve that storage fact here so the JIT admission gate
-//RS         // and every emitter choose the same frame token.
-//RS         TExprKind::DistinctCtor { arg, .. } => tir_address_lifetime(arg),
-//RS         TExprKind::PoolSlot { .. } => TAddressLifetime::Heap,
-//RS         TExprKind::HandleMethod {
-//RS             op: THandleOp::AllocAlloc,
-//RS             ..
-//RS         } => TAddressLifetime::Heap,
-//RS         TExprKind::Borrow { place, .. } => tir_address_lifetime(place),
-//RS         TExprKind::RawOf(inner) => tir_address_lifetime(inner),
-//RS         TExprKind::Deref(_) | TExprKind::PtrFromAddr { .. } => TAddressLifetime::Foreign,
-//RS         _ => TAddressLifetime::Unknown,
-//RS     }
-//RS }
-//RS 
-//RS /// D-FAIL-BIND1=A: the one compiler-generated slot used to carry a failed
-//RS /// report into a `??` fallback. Its reserved spelling is shared by AOT, JIT,
-//RS /// and TIR-eval; engines only marshal the value already placed here.
-//RS pub fn ambient_err_local() -> TLocal {
-//RS     TLocal::generated("ambient_err")
-//RS }
-//RS 
-//RS /// A resolved user method identity. `name` is the Jet method name — the key the
-//RS /// JIT and interpreter dispatch on. `mangled` records the one Rust spelling fact:
-//RS /// an inherent method becomes `__jet_<name>`, while a trait-impl or dynamic-dispatch
-//RS /// method keeps the bare name the trait owns.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TMethodRef {
-//RS     pub name: String,
-//RS     pub mangled: bool,
-//RS     /// Sema-resolved trait that owns a dynamic call. `None` for inherent and
-//RS     /// prelude calls; JIT dispatch never reconstructs this fact from names.
-//RS     pub trait_owner: Option<String>,
-//RS     /// Complete sema-resolved operator identity. Ordinary method calls leave
-//RS     /// this unset; operator calls include lhs, trait, method, and RHS type.
-//RS     pub operator_identity: Option<String>,
-//RS }
-//RS 
-//RS impl TMethodRef {
-//RS     /// An inherent user method — Rust spells it `__jet_<name>`.
-//RS     pub fn inherent(name: impl Into<String>) -> TMethodRef {
-//RS         TMethodRef {
-//RS             name: name.into(),
-//RS             mangled: true,
-//RS             trait_owner: None,
-//RS             operator_identity: None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// A trait-owned method — Rust spells it bare (the trait declared the name).
-//RS     pub fn bare(name: impl Into<String>) -> TMethodRef {
-//RS         TMethodRef {
-//RS             name: name.into(),
-//RS             mangled: false,
-//RS             trait_owner: None,
-//RS             operator_identity: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn trait_method(trait_owner: impl Into<String>, name: impl Into<String>) -> TMethodRef {
-//RS         TMethodRef {
-//RS             name: name.into(),
-//RS             mangled: false,
-//RS             trait_owner: Some(trait_owner.into()),
-//RS             operator_identity: None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// A checked operator method whose complete function key includes RHS type.
-//RS     pub fn operator(
-//RS         left: impl Into<String>,
-//RS         trait_name: impl Into<String>,
-//RS         name: impl Into<String>,
-//RS         rhs: &Type,
-//RS     ) -> TMethodRef {
-//RS         let left = left.into();
-//RS         let trait_name = trait_name.into();
-//RS         let name = name.into();
-//RS         TMethodRef {
-//RS             name: name.clone(),
-//RS             mangled: false,
-//RS             trait_owner: Some(trait_name.clone()),
-//RS             operator_identity: Some(crate::Traits::operator_method_identity(
-//RS                 &left,
-//RS                 &trait_name,
-//RS                 &name,
-//RS                 rhs,
-//RS             )),
-//RS         }
-//RS     }
-//RS 
-//RS     /// The Rust method name.
-//RS     pub fn rust(&self) -> String {
-//RS         if self.mangled {
-//RS             super::mangle(&self.name)
-//RS         } else {
-//RS             self.name.clone()
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// One generic argument of a prelude container type.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum TPreludeArg {
-//RS     /// A resolved Jet type; the emitter spells it via `cx.rust_type`.
-//RS     Jet(Type),
-//RS     /// A host counter with no Jet spelling (the multiset's `usize` tally).
-//RS     HostUsize,
-//RS }
-//RS 
-//RS /// The owner of a static (associated) call.
-//RS #[derive(Clone)]
-//RS pub enum TStaticOwner {
-//RS     /// A user type the front end compiles. Both the Rust spelling and the JIT's
-//RS     /// compiled-function key derive from this Jet type name.
-//RS     User(String),
-//RS     /// A prelude/host type the front end never compiles. `path` is a resolved
-//RS     /// symbol path, not composed source: `rooted` prefixes the generated crate
-//RS     /// root, and `generics` are resolved arguments the emitter spells.
-//RS     Prelude {
-//RS         rooted: bool,
-//RS         path: String,
-//RS         generics: Vec<TPreludeArg>,
-//RS     },
-//RS }
-//RS 
-//RS /// An assignable place. Every engine reads the structure directly: a local slot
-//RS /// by name, or the already-structured place expression a field/index/pool write
-//RS /// targets. Rust spelling happens only in the emit layer.
-//RS #[derive(Clone)]
-//RS pub enum TPlace {
-//RS     Local(TLocal),
-//RS     /// A structured place expression — a field-read chain, a swizzle lane, a
-//RS     /// `Pool` slot. Its own node carries the facts; nothing is pre-rendered.
-//RS     Expr(Box<TExpr>),
-//RS }
-//RS 
-//RS fn demand_serde_codec(
-//RS     demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
-//RS     ty: &Type,
-//RS     method: &str,
-//RS ) {
-//RS     if matches!(ty, Type::Apply { .. }) {
-//RS         demands.insert(
-//RS             generic_method_instance_key(ty, method, &[]),
-//RS             (ty.clone(), method.to_string(), Vec::new()),
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS fn generic_type_arg_suffix(type_args: &[Type]) -> String {
-//RS     type_args
-//RS         .iter()
-//RS         .map(Type::name)
-//RS         .map(|name| {
-//RS             name.chars()
-//RS                 .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-//RS                 .collect::<String>()
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join("__")
-//RS }
-//RS 
-//RS /// Stable symbol key for one concrete method instance. Empty method arguments
-//RS /// retain the historical `Owner<Args>::method` key used by serde demands.
-//RS pub fn generic_method_instance_key(owner: &Type, method: &str, type_args: &[Type]) -> String {
-//RS     let base = format!("{}::{method}", owner.name());
-//RS     if type_args.is_empty() {
-//RS         return base;
-//RS     }
-//RS     format!("{base}__generic__{}", generic_type_arg_suffix(type_args))
-//RS }
-//RS 
-//RS /// Concrete free calls and their checked definitions share this instance key.
-//RS pub(crate) fn generic_free_function_instance_key(base: &str, type_args: &[Type]) -> String {
-//RS     if type_args.is_empty() {
-//RS         return base.to_string();
-//RS     }
-//RS     format!("{base}__generic__{}", generic_type_arg_suffix(type_args))
-//RS }
-//RS 
-//RS fn function_semantic_key(module: &str, name: &str) -> String {
-//RS     if module.is_empty() {
-//RS         name.to_string()
-//RS     } else {
-//RS         format!("{module}::{name}")
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn canonical_enum_owner(cx: &Cx, name: &str) -> String {
-//RS     cx.core_qualified_rust_type_name(name)
-//RS         .map(str::to_owned)
-//RS         .or_else(|| cx.local_type_identities.get(name).cloned())
-//RS         .or_else(|| cx.imported_type_metadata_name(name))
-//RS         .unwrap_or_else(|| name.to_string())
-//RS }
-//RS 
-//RS /// Seed monomorphize demand for generic Codable from encoding core calls and
-//RS /// SerdeEncode/DataTreeDecode ops already present in lowered bodies.
-//RS fn collect_serde_codec_demands(
-//RS     funcs: &[TFunc],
-//RS     demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
-//RS ) {
-//RS     fn walk_expr(
-//RS         expr: &TExpr,
-//RS         demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
-//RS     ) {
-//RS         // Keep the concrete owner type alive at every TIR node. A generic value
-//RS         // can be constructed in one statement and consumed by a later CoreCall;
-//RS         // collecting only the operation node loses the `Owner<Args>` identity
-//RS         // before the demand worklist runs.
-//RS         demand_serde_codec(demands, &expr.ty, "encode");
-//RS         demand_serde_codec(demands, &expr.ty, "decode");
-//RS         match &expr.kind {
-//RS             TExprKind::Print(inner) | TExprKind::DistinctCtor { arg: inner, .. } => {
-//RS                 walk_expr(inner, demands);
-//RS             }
-//RS             TExprKind::Call { args, .. } => {
-//RS                 for a in args {
-//RS                     walk_expr(&a.value, demands);
-//RS                 }
-//RS             }
-//RS             TExprKind::HandleMethod { recv, op, args } => {
-//RS                 walk_expr(recv, demands);
-//RS                 for a in args {
-//RS                     walk_expr(a, demands);
-//RS                 }
-//RS                 match op {
-//RS                     THandleOp::SerdeEncode => demand_serde_codec(demands, &recv.ty, "encode"),
-//RS                     THandleOp::DataTreeDecode(target) => {
-//RS                         demand_serde_codec(demands, target, "decode")
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS             TExprKind::DecodeUnder { segment, inner } => {
-//RS                 walk_expr(segment, demands);
-//RS                 walk_expr(inner, demands);
-//RS             }
-//RS             TExprKind::Try { inner, note, .. } => {
-//RS                 walk_expr(inner, demands);
-//RS                 if let Some(note) = note {
-//RS                     walk_expr(note, demands);
-//RS                 }
-//RS             }
-//RS             TExprKind::OrFallback { value, fallback } => {
-//RS                 walk_expr(value, demands);
-//RS                 match fallback {
-//RS                     TOrFallback::Value(inner) | TOrFallback::Return(Some(inner)) => {
-//RS                         walk_expr(inner, demands)
-//RS                     }
-//RS                     TOrFallback::Panic { msg, .. } => walk_expr(msg, demands),
-//RS                     TOrFallback::Return(None)
-//RS                     | TOrFallback::Break
-//RS                     | TOrFallback::Continue
-//RS                     | TOrFallback::BreakLabel(_)
-//RS                     | TOrFallback::ContinueLabel(_) => {}
-//RS                 }
-//RS             }
-//RS             TExprKind::CoreCall { record, args, .. } => {
-//RS                 for a in args {
-//RS                     walk_expr(a, demands);
-//RS                 }
-//RS                 let encoding = matches!(
-//RS                     record.module,
-//RS                     "core.encoding.json"
-//RS                         | "core.encoding.toml"
-//RS                         | "core.encoding.yaml"
-//RS                         | "core.encoding.csv"
-//RS                         | "core.encoding.cbor"
-//RS                 );
-//RS                 if encoding
-//RS                     && matches!(
-//RS                         record.member,
-//RS                         "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical"
-//RS                     )
-//RS                 {
-//RS                     if let Some(arg) = args.first() {
-//RS                         demand_serde_codec(demands, &arg.ty, "encode");
-//RS                     }
-//RS                 }
-//RS                 if encoding && record.member == "decode" {
-//RS                     if let Type::Result { ok, .. } = &expr.ty {
-//RS                         demand_serde_codec(demands, ok, "decode");
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     fn walk_stmt(
-//RS         stmt: &TStmt,
-//RS         demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
-//RS     ) {
-//RS         match stmt {
-//RS             TStmt::ExprStmt(e) | TStmt::Return(Some(e)) => walk_expr(e, demands),
-//RS             TStmt::Let { init, .. } | TStmt::Assign { value: init, .. } => walk_expr(init, demands),
-//RS             TStmt::RefutableBind { init, fallback, .. } => {
-//RS                 walk_expr(init, demands);
-//RS                 for stmt in fallback {
-//RS                     walk_stmt(stmt, demands);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     for func in funcs {
-//RS         for stmt in &func.body {
-//RS             walk_stmt(stmt, demands);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn lower_demanded_generic_methods(
-//RS     items: &[Item],
-//RS     cx: &Cx,
-//RS     funcs: &mut Vec<TFunc>,
-//RS ) -> Result<(), LowerError> {
-//RS     let mut pending = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
-//RS     collect_serde_codec_demands(funcs, &mut pending);
-//RS     let mut processed = std::collections::BTreeSet::new();
-//RS     while let Some((key, (owner_ty, method_name, method_type_args))) = pending.pop_first() {
-//RS         if !processed.insert(key.clone()) {
-//RS             continue;
-//RS         }
-//RS         if let Some(chain) = crate::Generics::generic_depth_exceeded(&owner_ty) {
-//RS             return Err(LowerError::new(
-//RS                 crate::Diagnostics::Span::new(0, 0),
-//RS                 format!(
-//RS                     "E0909: generic instantiation goes too deep; simplify the types involved: {chain}"
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         let (name, owner_args): (&str, &[Type]) = match &owner_ty {
-//RS             Type::Apply { name, args } => (name.as_str(), args.as_slice()),
-//RS             Type::Named(name) => (name.as_str(), &[]),
-//RS             _ => continue,
-//RS         };
-//RS         let Some(params) = items.iter().find_map(|item| match item {
-//RS             Item::Struct(def) if def.name == name => Some(def.type_params.as_slice()),
-//RS             Item::Enum(def) if def.name == name => Some(def.type_params.as_slice()),
-//RS             Item::Distinct(def) if def.name == name => Some(&[]),
-//RS             _ => None,
-//RS         }) else {
-//RS             continue;
-//RS         };
-//RS         let owner_subst: std::collections::HashMap<String, Type> = params
-//RS             .iter()
-//RS             .zip(owner_args)
-//RS             .map(|(param, arg)| (param.name.clone(), arg.clone()))
-//RS             .collect();
-//RS         for item in items {
-//RS             let (method, trait_name, generated_serde) = match item {
-//RS                 Item::Struct(def) if def.name == name => {
-//RS                     match def.methods.iter().find(|method| method.name == method_name) {
-//RS                         Some(method) => (method, None, false),
-//RS                         None => continue,
-//RS                     }
-//RS                 }
-//RS                 Item::Enum(def) if def.name == name => {
-//RS                     match def.methods.iter().find(|method| method.name == method_name) {
-//RS                         Some(method) => (method, None, false),
-//RS                         None => continue,
-//RS                     }
-//RS                 }
-//RS                 Item::Impl(imp) if imp.type_name == name => {
-//RS                     let Some(method) = imp.methods.iter().find(|method| method.name == method_name)
-//RS                     else {
-//RS                         continue;
-//RS                     };
-//RS                     match &imp.trait_name {
-//RS                         None => (method, None, false),
-//RS                         Some(t)
-//RS                             if matches!(
-//RS                                 t.as_str(),
-//RS                                 crate::Generics::ENCODE
-//RS                                     | crate::Generics::DECODE
-//RS                                     | crate::Generics::CHECKED_TEXT
-//RS                             ) =>
-//RS                         {
-//RS                             (method, Some(t.as_str()), imp.is_generated_serde)
-//RS                         }
-//RS                         Some(_) => continue,
-//RS                     }
-//RS                 }
-//RS                 _ => continue,
-//RS             };
-//RS             let mut subst = owner_subst.clone();
-//RS             // A codec impl keeps the owner's type parameters on its ordinary
-//RS             // method. A concrete owner such as `Wrap<Int>` binds those
-//RS             // parameters; they are not independent method arguments to discard.
-//RS             let owner_binds_method_params = trait_name.is_some_and(|trait_name| {
-//RS                 matches!(
-//RS                     trait_name,
-//RS                     crate::Generics::ENCODE | crate::Generics::DECODE
-//RS                 )
-//RS             }) && !owner_subst.is_empty()
-//RS                 && method
-//RS                     .type_params
-//RS                     .iter()
-//RS                     .all(|param| owner_subst.contains_key(&param.name));
-//RS             if owner_binds_method_params {
-//RS                 if !method_type_args.is_empty() {
-//RS                     continue;
-//RS                 }
-//RS             } else if !method_type_args.is_empty() {
-//RS                 if method_type_args.len() != method.type_params.len() {
-//RS                     continue;
-//RS                 }
-//RS                 for (param, actual) in method.type_params.iter().zip(&method_type_args) {
-//RS                     subst.insert(param.name.clone(), actual.clone());
-//RS                 }
-//RS             } else if !method.type_params.is_empty() {
-//RS                 continue;
-//RS             }
-//RS             let mut specialized = crate::Sema::specialize_function_types(method.clone(), &subst);
-//RS             let residual_type_params: std::collections::HashSet<String> = specialized
-//RS                 .type_params
-//RS                 .iter()
-//RS                 .map(|param| param.name.clone())
-//RS                 .collect();
-//RS             // Subst already rewrote the binder; drop residual type params so the
-//RS             // mono body is admitted as a concrete JIT function.
-//RS             specialized.type_params.clear();
-//RS             // Keep the source owner's generic identity visible while the lowerer
-//RS             // inspects the specialized body. Field types are concrete after
-//RS             // substitution, but sema's resolved codec calls still name the owner's
-//RS             // type parameter (for example `T.encode()`).
-//RS             let previous_type_params = cx.current_type_params.borrow().clone();
-//RS             let mut method_type_params = previous_type_params.clone();
-//RS             method_type_params.extend(residual_type_params);
-//RS             cx.current_type_params.replace(method_type_params);
-//RS             // I2: a demanded specialization always lowers. The structural coverage
-//RS             // gate is a report, not a filter: dropping a demanded method left its
-//RS             // callers with `missing checked function target` (`Box::new` in
-//RS             // `generic_constructor_inference`), while an unsupported construct in
-//RS             // the body now stops at its own MIR lowering site, named.
-//RS             let static_checked_text = trait_name == Some(crate::Generics::CHECKED_TEXT)
-//RS                 && !specialized
-//RS                     .params
-//RS                     .iter()
-//RS                     .any(|param| param.name == crate::Syntax::KW_SELF);
-//RS             let mut lowered = if let Some(trait_name) = trait_name {
-//RS                 // Encode is an ordinary instance method; Decode stays on the static
-//RS                 // trait-method ABI (`tree` only, no receiver). CheckedText static
-//RS                 // methods are ordinary associated functions too: their source
-//RS                 // call is a concrete `Type::method__generic__T` target, not a
-//RS                 // trait-vtable slot.
-//RS                 if (trait_name == crate::Generics::ENCODE
-//RS                     && matches!(&owner_ty, Type::Apply { .. }))
-//RS                     || static_checked_text
-//RS                 {
-//RS                     lower_method_for_owner(
-//RS                         &specialized,
-//RS                         name,
-//RS                         owner_ty.clone(),
-//RS                         cx,
-//RS                         generated_serde && specialized.compiler_generated,
-//RS                     )
-//RS                 } else {
-//RS                     lower_trait_method(
-//RS                         &specialized,
-//RS                         name,
-//RS                         cx,
-//RS                         trait_name,
-//RS                         generated_serde && specialized.compiler_generated,
-//RS                         None,
-//RS                     )
-//RS                 }
-//RS             } else {
-//RS                 lower_method_for_owner(&specialized, name, owner_ty.clone(), cx, false)
-//RS             };
-//RS             cx.current_type_params.replace(previous_type_params);
-//RS             lowered.key = function_semantic_key(&lowered.module, &key);
-//RS             set_lowered_method_name(&mut lowered, || key.clone());
-//RS             // Nested SerdeEncode/DataTreeDecode inside this body may demand more.
-//RS             collect_serde_codec_demands(std::slice::from_ref(&lowered), &mut pending);
-//RS             funcs.push(lowered);
-//RS         }
-//RS         for (key, call) in std::mem::take(&mut *cx.jit_method_calls.borrow_mut()) {
-//RS             if !processed.contains(&key) {
-//RS                 pending.entry(key).or_insert(call);
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-// END-PORT-PENDING 0504 crates/jet-codegen/src/Codegen/TIR/mod.rs:1-1761
+// Private continuation of Codegen.TIR; checked facts are never re-inferred by emitters.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1
+use jet_foundation.AST.*
+use jet_foundation.TIR.*
+use jet_foundation.Diagnostics.Span
+use jet_foundation.Numeric.CtBigInt
+use jet_foundation.JSON.json_escape
+use jet_foundation.MIR.[MirUnaryOp, MirBinaryOp, MirArtifactBuildMode, MirArtifactRequest, MirViewCopyKind]
+use jet_foundation.[SymbolID, CoreCallRecord]
+use jet_foundation.SchemaMigration.[SchemaMigrationOp, SchemaMigrationPlan, SchemaMigrationStep]
+use jet_foundation.TargetMachine.[TargetHardwareUse, TargetHardwareFacts, TargetDmaOperation]
+use jet_foundation.Authority.ApplicationAuthority
+use jet_foundation.Reflection.ReflectionField
+use jet_foundation.App.AppGraph
+use jet_foundation.Syntax as Syntax
+use jet_codegen.Codegen.[Cx, mangle, mangle_path, mangle_generated]
+use jet_codegen.Codegen.TIR.ArtifactPlan.[TirArtifactFacts, lower_tir_artifact_facts_for_request]
+use jet_codegen.Codegen.TIR.DataPlan.[data_plan_for_core_call, DataPlanError, TDATA_PLAN_SCHEMA_VERSION, TDataPlan, TDataPlanNode, TDataPlanPhysicalNode, project_data_plan]
+use jet_codegen.Codegen.TIR.Mir.[LowerError, lower_checked_mir_program_for, lower_checked_mir_program_for_with_debug, lower_tir_to_mir]
+use jet_codegen.Codegen.TIR.TirToMirTypes.[TirDeclarations, lower_declarations_from_items_with_boxed_edges, lower_tir_declarations, lower_erasure]
+use jet_codegen.Codegen.TIR.Lower.*
+use jet_codegen.Codegen.TIR.Subset.*
+use jet_codegen.Codegen.TIR.Routes.*
+use jet_sema.Generics.[substitute_type, generic_depth_exceeded, ENCODE, DECODE, CHECKED_TEXT]
+use jet_sema.Sema.[core_fact_kind_variants, specialize_function_types]
+use jet_sema.Sema.Schema.canonical_migration_shape
+use jet_sema.Traits.operator_method_identity
+use std.sync.Arc
+use std.iter.IntoIterator
+use std.mem.[discriminant, take]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:68
+fn source_array_literal(definition: ConstDef) -> (Type, [Expr])? Never! {
+    if definition.mutable || definition.is_comptime -> return None
+    if definition.value == {
+        .TypedLit(Val(Type.List(element)), body, _) -> {
+            if element != Type.Int && element != Type.IntN(false, 8) -> return None
+            if body == {
+                .Elements(elements) -> return Val((element, elements))
+                .Empty -> return Val((element, []))
+                else -> return None
+            }
+        }
+        else -> return None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:99
+fn source_integer_constant_value(expression: Expr) -> CtValue? Never! {
+    if expression == {
+        .Int(value, _, _, raw) -> {
+            if raw == Val(spelling) {
+                text :: spelling.replace("_", "")
+                if text.parse_i64() == None {
+                    if CtBigInt.from_literal(text) == Ok(big) -> return Val(CtValue.BigInt(big))
+                }
+            }
+            return Val(CtValue.Int(value))
+        }
+        else -> return None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:114
+pub fn source_constant_type(definition: ConstDef) -> Type? Never! {
+    if definition.ty == Val(ty) -> return Val(ty)
+    if definition.ct == Val(value) -> return Val(value.jet_type())
+    if source_array_literal(definition) == Val((element, _)) -> return Val(Type.List(element))
+    if definition.value == {
+        .Int(_, _, _, _) -> Val(Type.Int)
+        .Float(_, _, is_f32, _) -> Val(if is_f32 -> Type.Float32 else -> Type.Float)
+        .Bool(_, _) -> Val(Type.Bool)
+        .Char(_, _) -> Val(Type.Char)
+        .Str(parts, _) -> {
+            if parts.len() == 1 && parts[0] == .Lit(_) -> Val(Type.String) else -> None
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:142
+pub fn source_constant_value(definition: ConstDef) -> CtValue? Never! {
+    if definition.ct == Val(value) -> return Val(value)
+    if definition.value == {
+        .Int(_, _, _, _) -> return source_integer_constant_value(definition.value)
+        .Float(value, _, is_f32, _) -> return Val(CtValue.Float(CtFloat.literal(value, is_f32)))
+        .Bool(value, _) -> return Val(CtValue.Bool(value))
+        .Char(value, _) -> return Val(CtValue.Char(value))
+        .Str(parts, _) -> {
+            if parts.len() == 1 && parts[0] == .Lit(value) -> return Val(CtValue.Str(value))
+        }
+        else -> {}
+    }
+    (_, elements) :: source_array_literal(definition) ?? return None
+    values := [CtValue]{}
+    loop element in elements {
+        value :: source_integer_constant_value(element) ?? return None
+        &values.push(value)
+    }
+    Val(CtValue.List(^values))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:177
+fn set_lowered_method_name(&lowered: TFunc, name: fn() -> String) Never! {
+    if lowered.kind != .TraitMethod(_, _, _, _, _) -> lowered.name = name()
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:183
+fn qualification_binders(owner: [TypeParam], method: Func?) -> [String] Never! {
+    names := [String]{}
+    loop param in owner -> &names.push(param.name)
+    if method == Val(function) {
+        loop param in function.type_params -> &names.push(param.name)
+    }
+    names
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:200
+pub fn substitute_reflect_field_type(struct_type_params: [String:[String]], owner_ty: Type, declared: Type) -> Type Never! {
+    if owner_ty == .Apply(name, args) {
+        if struct_type_params.get(name) == Val(params) {
+            substitutions := [String:Type]{}
+            loop index in 0..params.len().min(args.len()) -> substitutions[params[index]] = args[index]
+            return substitute_type(declared, substitutions)
+        }
+    }
+    declared
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:226
+pub fn mir_unary_op(op: UnOp) -> MirUnaryOp Never! {
+    if op == { .Neg -> MirUnaryOp.Neg .Not -> MirUnaryOp.Not }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:233
+pub fn mir_binary_op(op: BinOp) -> MirBinaryOp Never! {
+    if op == {
+        .Add -> MirBinaryOp.Add .Sub -> MirBinaryOp.Sub .Mul -> MirBinaryOp.Mul
+        .Div -> MirBinaryOp.Div .FloorDiv -> MirBinaryOp.FloorDiv
+        .Mod -> MirBinaryOp.Mod .Rem -> MirBinaryOp.Rem .Pow -> MirBinaryOp.Pow
+        .BitAnd -> MirBinaryOp.BitAnd .BitOr -> MirBinaryOp.BitOr
+        .Eq -> MirBinaryOp.Eq .Ne -> MirBinaryOp.Ne .Lt -> MirBinaryOp.Lt
+        .Gt -> MirBinaryOp.Gt .Le -> MirBinaryOp.Le .Ge -> MirBinaryOp.Ge
+        .Compare -> MirBinaryOp.Compare .And -> MirBinaryOp.And .Or -> MirBinaryOp.Or
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:270
+fn compiler_owned_unit_enum(type_name: String) -> [String:(Span, VariantPayload)]? Never! {
+    core_fact_kind_variants(type_name)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:277
+fn typed_unit_enum_value(expr: Expr) -> (String, String)? Never! {
+    if expr == {
+        .Paren(inner, _) | .Copy(inner, _) -> typed_unit_enum_value(inner)
+        .EnumLit(type_name, variant, args, _) -> {
+            if args.is_empty() -> Val((type_name, variant)) else -> None
+        }
+        .ComptimeName(_, Val(CtValue.Enum(type_name, variant, args)), _) -> {
+            if args.is_empty() -> Val((type_name, variant)) else -> None
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:299
+fn compiler_fact_enum_value(expr: Expr) -> (String, String)? Never! {
+    if expr == {
+        .Paren(inner, _) | .Copy(inner, _) -> compiler_fact_enum_value(inner)
+        .ComptimeName(_, Val(CtValue.Enum(type_name, variant, args)), _) -> {
+            if args.is_empty() -> Val((type_name, variant)) else -> None
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:318
+pub fn fold_typed_fact_enum_equality(op: BinOp, lhs: Expr, rhs: Expr) -> Bool? Never! {
+    if op != BinOp.Eq && op != BinOp.Ne -> return None
+    if compiler_fact_enum_value(lhs) == None && compiler_fact_enum_value(rhs) == None -> return None
+    (left_type, left_variant) :: typed_unit_enum_value(lhs) ?? return None
+    (right_type, right_variant) :: typed_unit_enum_value(rhs) ?? return None
+    if left_type != right_type -> return None
+    variants :: compiler_owned_unit_enum(left_type) ?? return None
+    if variants.get(left_variant) != Val((_, VariantPayload.Unit)) || variants.get(right_variant) != Val((_, VariantPayload.Unit)) -> return None
+    Val(if op == BinOp.Eq -> left_variant == right_variant else -> left_variant != right_variant)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:344
+pub fn fold_typed_fact_enum_pattern(subject: Expr, pattern: Pattern) -> Bool? Never! {
+    (type_name, variant) :: compiler_fact_enum_value(subject) ?? return None
+    fold_fact_enum_variant_test(type_name, variant, pattern)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:350
+pub fn fold_fact_enum_variant_test(type_name: String, value_variant: String, pattern: Pattern) -> Bool? Never! {
+    if pattern == .Variant(variant, bindings, _, _) {
+        if !bindings.is_empty() -> return None
+        variants :: compiler_owned_unit_enum(type_name) ?? return None
+        if variants.get(value_variant) != Val((_, VariantPayload.Unit)) || variants.get(variant) != Val((_, VariantPayload.Unit)) -> return None
+        return Val(value_variant == variant)
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:373
+pub struct TJitSpawnLambda {
+    pub params: [(String, Type)]
+    pub captures: [JitSpawnCapture]
+    pub frozen_captures: [String]
+    pub body: TJitSpawnBody
+    pub ret: Type
+    pub uses_stack_sentry: Bool
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:386
+pub struct JitSpawnCapture {
+    pub name: String
+    pub source: String
+    pub ty: Type
+    pub clone_at_spawn: Bool
+    pub frozen_at_spawn: Bool
+    pub materialize_at_spawn: Bool
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:409
+pub struct TirWorklist<T> { pending: [T] }
+impl<T> TirWorklist<T> {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:414
+    pub fn new() -> Self Never! { Self{pending: []} }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:420
+    pub fn from_reversed<I: IntoIterator<T>>(items: I) -> Self Never! {
+        pending := items.into_iter().collect()
+        &pending.reverse()
+        Self{pending: ^pending}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:429
+    pub fn push(&self, item: T) Never! { &self.pending.push(^item) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:433
+    pub fn extend<I: IntoIterator<T>>(&self, items: I) Never! { &self.pending.extend(items.into_iter()) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:440
+    pub fn pop(&self) -> T? Never! { &self.pending.pop() }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:446
+    pub fn default() -> Self Never! { Self.new() }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:451
+pub enum TJitSpawnBody {
+    Expr(value: TExpr)
+    Block(prefix: [TStmt], tail: TExpr?)
+    SharedBlock(body: Arc<[TStmt]>, tail: Bool) // GATE #4494 retained shared ownership.
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:466
+pub struct TirPackageFacts {
+    pub project_root: String
+    pub used_core: [String:Bool]
+    pub ffi_callback_functions: [String:Bool]
+    pub active_os: String
+    pub inferred_layer: String
+    pub allocator: String
+    pub web_app: AppGraph?
+    pub authority_needs: [String]
+    pub hardware_use: TargetHardwareUse
+    pub hardware_profile: TargetHardwareFacts?
+    pub hardware_profile_id: String
+    pub hardware_capabilities: [String]
+    pub hardware_setups: [THardwareSetup]
+}
+impl TirPackageFacts {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:465 (derived Default)
+    pub fn default() -> Self Never! {
+        Self{project_root: "", used_core: [:], ffi_callback_functions: [:], active_os: "",
+            inferred_layer: "", allocator: "", web_app: None, authority_needs: [],
+            hardware_use: TargetHardwareUse.default(), hardware_profile: None,
+            hardware_profile_id: "", hardware_capabilities: [], hardware_setups: []}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:483
+fn target_hardware_setups(bundle: ProgramBundle, hardware: TargetHardwareUse, profile: TargetHardwareFacts?, profile_id: String) -> [THardwareSetup] Never! {
+    facts :: profile ?? return []
+    if profile_id.is_empty() -> return []
+    setups := [THardwareSetup]{}
+    channels := [String:Bool]{}
+    loop operation in hardware.dma_operations {
+        if operation.operation != TargetDmaOperation.Start || channels.contains_key(operation.channel) -> next
+        channels[operation.channel] = true
+        channel :: facts.dma_channel(operation.channel) ?? next
+        &setups.push(THardwareSetup.DmaConfigure(profile_id, channel.name, channel.transfer_width, channel.ownership))
+    }
+    loop handler in hardware.interrupt_handlers {
+        interrupt :: facts.interrupt(handler.interrupt) ?? next
+        handler_symbol := handler.handler
+        found := false
+        loop module in bundle.modules {
+            loop item in module.items {
+                matches_handler := false
+                if item == {
+                    .Func(function) -> matches_handler = function.name == handler.handler
+                    .Struct(definition) | .Enum(definition) -> {
+                        loop method in definition.methods {
+                            if method.name == handler.handler -> matches_handler = true
+                        }
+                        loop implementation in definition.trait_impls {
+                            loop method in implementation.methods {
+                                if method.name == handler.handler -> matches_handler = true
+                            }
+                        }
+                    }
+                    .Impl(implementation) -> {
+                        loop method in implementation.methods {
+                            if method.name == handler.handler -> matches_handler = true
+                        }
+                    }
+                    else -> {}
+                }
+                if matches_handler {
+                    handler_symbol = "{module.alias}::{handler.handler}"
+                    found = true
+                    break
+                }
+            }
+            if found -> break
+        }
+        effects := interrupt.forbidden_effects.clone()
+        &effects.extend(handler.forbidden_effects)
+        &setups.push(THardwareSetup.InterruptBind(profile_id, interrupt.name, interrupt.vector, handler_symbol, ^effects))
+    }
+    setups
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:574
+pub enum TirErasureReason { CompileTimeOnly Disabled ExpandedBeforeLowering SemanticIndexOnly }
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:584
+pub struct TirErasure { pub construct: String pub span: Span pub reason: TirErasureReason }
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:590
+fn collect_item_erasures(items: [Item], module: String, include_tests: Bool, &rows: [TirErasure]) Never! {
+    loop item in items {
+        row := (String, Span, TirErasureReason)?{None}
+        if item == {
+            .Tag(value) -> row = Val(("Tag", value.span, TirErasureReason.CompileTimeOnly))
+            .EffectDecl(value) -> row = Val(("EffectDecl", value.span, TirErasureReason.CompileTimeOnly))
+            .MarkerDecl(value) -> row = Val(("MarkerDecl", value.span, TirErasureReason.CompileTimeOnly))
+            .FactDecl(value) -> row = Val(("FactDecl", value.span, TirErasureReason.CompileTimeOnly))
+            .GenericModule(value) -> row = Val(("GenericModule", value.span, TirErasureReason.CompileTimeOnly))
+            .UserDerive(value) -> row = Val(("UserDerive", value.span, TirErasureReason.CompileTimeOnly))
+            .TemplateLoop(value) -> row = Val(("TemplateLoop", value.span, TirErasureReason.ExpandedBeforeLowering))
+            .ModuleAlias(value) -> row = Val(("ModuleAlias", value.span, TirErasureReason.ExpandedBeforeLowering))
+            .ProtocolDecl(value) -> row = Val(("ProtocolDecl", value.span, TirErasureReason.ExpandedBeforeLowering))
+            .UnitFamily(value) -> row = Val(("UnitFamily", value.span, TirErasureReason.ExpandedBeforeLowering))
+            .Migration(value) -> row = Val(("Migration", value.span, TirErasureReason.SemanticIndexOnly))
+            .Module(value) -> row = Val(("Module", value.span, TirErasureReason.SemanticIndexOnly))
+            .Test(value) -> { if !include_tests -> row = Val(("Test", value.span, TirErasureReason.Disabled)) }
+            .CodeModule(value) -> {
+                if value.body == Val(body) -> collect_item_erasures(body, "{module}::{value.name}", include_tests, &rows)
+            }
+            else -> {}
+        }
+        if row == Val((construct, span, reason)) -> &rows.push(lower_erasure("{module}::{construct}", span, reason))
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:649
+pub struct TirProgram {
+    pub package_identity: String
+    pub entry_sibling_calls: (String, String)?
+    pub facts: TirPackageFacts
+    pub source_file: String
+    pub source_text: String
+    pub source_files: [String:String]
+    pub package_hardened: Bool
+    pub application_authority: ApplicationAuthority
+    pub edition: String
+    pub funcs: [TFunc]
+    declarations: TirDeclarations
+    artifact_facts: TirArtifactFacts
+    pub core_calls: [CoreCallRecord]
+    pub unreachable: [TirErasure]
+    pub spawn_lambdas: [TJitSpawnLambda]
+    pub struct_fields: [String:[String]]
+    pub struct_field_types: [String:[Type]]
+    pub memo_dependencies: [String:[String:[String]]]
+    pub reflection_fields: [String:[ReflectionField]]
+    pub reflect_paths: [String:String]
+    pub nominal_identities: [String:String]
+    pub struct_type_params: [String:[String]]
+    pub enum_variants: [String:[String]]
+    pub enum_variant_payload_types: [String:[Type]]
+    pub canonical_deopt: [String:Bool]
+    pub canonical_calls: [String:Bool]
+    pub int_constants: [String:I64]
+    pub constants: [String:CtValue]
+    pub distinct_bases: [String:Type]
+    pub distinct_ranges: [String:(I64, I64)]
+    pub codec_migrations: [String:SchemaMigrationPlan]
+    pub trait_method_traits: [(String, String):String]
+    pub iterable_item_types: [(String, String):Type]
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:739
+pub fn canonical_payload(program: TirProgram) -> String Never! {
+    funcs := [String]{}
+    loop (index, function) in program.funcs.enumerate() {
+        params := [String]{}
+        loop parameter in function.params {
+            &params.push("{\"name\":\"" + json_escape(parameter.name) + "\",\"type\":\"" + json_escape(parameter.ty.name()) + "\",\"convention\":\"{parameter.convention:?}\"}")
+        }
+        ret :: if function.ret == Val(ty) -> "\"" + json_escape(ty.name()) + "\"" else -> "null"
+        &funcs.push("{\"index\":{index},\"name\":\"" + json_escape(function.name) + "\",\"module\":\"" + json_escape(function.module_name) + "\",\"key\":\"" + json_escape(function.key) + "\",\"source_file\":\"" + json_escape(function.source_file) + "\",\"source_span\":{\"start\":{function.source_span.start},\"end\":{function.source_span.end}},\"params\":[" + params.join(",") + "],\"ret\":" + ret + ",\"body_nodes\":{function.body.len()},\"is_main\":{function.is_main},\"synthetic\":{function.synthetic}}")
+    }
+    "{\"representation\":\"tir\",\"package\":\"" + json_escape(program.package_identity) + "\",\"source_file\":\"" + json_escape(program.source_file) + "\",\"edition\":\"" + json_escape(program.edition) + "\",\"functions\":[" + funcs.join(",") + "]}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:789
+pub fn canonical_expression_payload(expression: TExpr) -> String Never! {
+    // GATE #4494: std enum discriminant formatting is the pass-journal identity.
+    kind :: "{discriminant(expression.kind):?}"
+    "{\"representation\":\"tir\",\"type\":\"" + json_escape(expression.ty.name()) + "\",\"kind\":\"" + json_escape(kind) + "\"}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:798
+pub fn canonical_expression_identity(expression: TExpr) -> String Never! {
+    kind :: "{discriminant(expression.kind):?}" // GATE #4494
+    "{\"representation\":\"tir\",\"type\":\"" + json_escape(expression.ty.name()) + "\",\"kind\":\"" + json_escape(kind) + "\"}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:807
+pub fn canonical_statements_payload(statements: [TStmt]) -> String Never! {
+    kinds := [String]{}
+    loop statement in statements -> &kinds.push("{discriminant(statement):?}") // GATE #4494
+    "{\"representation\":\"tir\",\"statement_count\":{statements.len()},\"kinds\":\"" + json_escape(kinds.join(",")) + "\"}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:820
+pub fn canonical_statements_identity(statements: [TStmt]) -> String Never! {
+    "{\"representation\":\"tir\",\"statement_count\":{statements.len()}}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:827
+pub fn canonical_identity(program: TirProgram) -> String Never! {
+    functions := [String]{}
+    loop function in program.funcs {
+        &functions.push("{\"key\":\"" + json_escape(function.key) + "\",\"source_file\":\"" + json_escape(function.source_file) + "\",\"span\":{\"start\":{function.source_span.start},\"end\":{function.source_span.end}}}")
+    }
+    "{\"representation\":\"tir\",\"package\":\"" + json_escape(program.package_identity) + "\",\"functions\":[" + functions.join(",") + "]}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:849
+fn published_schema(definition: StructDef) -> Bool Never! {
+    if definition.is_published_schema -> return true
+    loop (marker, _) in definition.derives {
+        if marker == Syntax.MARKER_PUBLISHED_SCHEMA -> return true
+    }
+    false
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:856
+fn add_published_schema_field(definition: StructDef, &fields: [String]) Never! {
+    if published_schema(definition) -> &fields.push(Syntax.PUBLISHED_UNKNOWN_FIELDS)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:862
+fn add_published_schema_field_type(definition: StructDef, &types: [Type]) Never! {
+    if published_schema(definition) -> &types.push(Type.Named(Syntax.TYPE_DATA))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:872
+pub fn migration_shape_name(index: Int) -> String Never! { "v{index + 1}" }
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:876
+fn payload_types_for_variant(payload: VariantPayload) -> [Type] Never! {
+    if payload == {
+        .Unit -> []
+        .Single(ty, _) -> [ty]
+        .Named(fields) -> {
+            types := [Type]{}
+            loop field in fields -> &types.push(field.ty)
+            types
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:884
+fn register_enum_variants(enum_name: String, variants: [Variant], &enum_variants: [String:[String]], &enum_variant_payload_types: [String:[Type]]) Never! {
+    names := [String]{}
+    loop variant in variants -> &names.push(mangle_path(variant.name))
+    enum_variants[enum_name] = ^names
+    loop variant in variants {
+        pattern :: mangle_path(enum_name) + "::" + mangle_path(variant.name)
+        enum_variant_payload_types[pattern] = payload_types_for_variant(variant.payload)
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:903
+fn register_imported_enum_variants(bundle: ProgramBundle, module_idx: Int, owner: String, binders: [String], enum_name: String, variants: [Variant], &enum_variants: [String:[String]], &enum_variant_payload_types: [String:[Type]]) Never! {
+    identity :: imported_type_name(owner, enum_name)
+    names := [String]{}
+    loop variant in variants -> &names.push(mangle_path(variant.name))
+    enum_variants[identity] = ^names
+    loop variant in variants {
+        pattern :: mangle_path(identity) + "::" + mangle_path(variant.name)
+        payload := [Type]{}
+        loop ty in payload_types_for_variant(variant.payload) -> &payload.push(qualify_imported_type(bundle, module_idx, owner, binders, ty))
+        enum_variant_payload_types[pattern] = ^payload
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:933
+fn compile_codec_migrations(cx: Cx, module: String, items: [Item]) -> [String:SchemaMigrationPlan]? Never! {
+    plans := [String:SchemaMigrationPlan]{}
+    loop item in items {
+        if item != .Struct(_) -> next
+        if item == .Struct(definition) {
+            blocks :: jet_codegen.Codegen.Items.migration_blocks(cx, definition) ?? next
+            canonical :: canonical_migration_shape(module, definition, blocks) ?? panic("sema-checked struct must have canonical migration shape facts")
+            steps := [SchemaMigrationStep]{}
+            loop (block_index, block) in blocks.enumerate() {
+                ops := [SchemaMigrationOp]{}
+                loop op in block.ops {
+                    if op == {
+                        .Rename(from, to, _) -> &ops.push(SchemaMigrationOp.Rename(canonical.json_key(from), canonical.json_key(to)))
+                        .Remove(field, _) -> &ops.push(SchemaMigrationOp.Remove(canonical.json_key(field)))
+                        .Add(field, ty, default_fn, _) -> {
+                            default :: default_fn ?? return None
+                            &ops.push(SchemaMigrationOp.Add(canonical.json_key(field), ty.name(), default))
+                        }
+                        .Change(field, from_ty, to_ty, conv_fn, _) -> {
+                            converter :: conv_fn ?? return None
+                            &ops.push(SchemaMigrationOp.Change(canonical.json_key(field), from_ty.name(), to_ty.name(), converter))
+                        }
+                    }
+                }
+                &steps.push(SchemaMigrationStep.new(migration_shape_name(block_index), migration_shape_name(block_index + 1), ^ops))
+            }
+            plans[definition.name] = SchemaMigrationPlan.new(definition.name, canonical.historical, ^steps)
+        }
+    }
+    Val(^plans)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:997
+fn register_union_type(ty: Type, &enum_variants: [String:[String]], &enum_variant_payload_types: [String:[Type]]) Never! {
+    if ty == {
+        .Union(members) -> {
+            name :: union_enum_name(members)
+            if !enum_variants.contains_key(name) {
+                tags := [String]{}
+                loop member in members -> &tags.push(union_member_tag(member))
+                enum_variants[name] = ^tags
+            }
+            loop member in members {
+                tag :: union_member_tag(member)
+                key :: "{name}::{tag}"
+                if !enum_variant_payload_types.contains_key(key) -> enum_variant_payload_types[key] = [member]
+                register_union_type(member, &enum_variants, &enum_variant_payload_types)
+            }
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(inner, _) | .FixedList(inner, _) -> register_union_type(inner, &enum_variants, &enum_variant_payload_types)
+        .Map(key, value, _) | .Result(key, value) -> {
+            register_union_type(key, &enum_variants, &enum_variant_payload_types)
+            register_union_type(value, &enum_variants, &enum_variant_payload_types)
+        }
+        .Fn(params, ret, _) -> {
+            loop param in params -> register_union_type(param, &enum_variants, &enum_variant_payload_types)
+            if ret == Val(value) -> register_union_type(value, &enum_variants, &enum_variant_payload_types)
+        }
+        .Apply(_, args) -> loop arg in args -> register_union_type(arg, &enum_variants, &enum_variant_payload_types)
+        .Tuple(fields) -> loop (_, field) in fields -> register_union_type(field, &enum_variants, &enum_variant_payload_types)
+        else -> {}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1054
+pub fn local_place(name: String) -> String Never! { mangle(name) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1067
+// TLocal is owned by jet_foundation.TIR.TIR (all storage/ownership fields retained).
+impl TLocal {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1104
+    pub fn user(name: String) -> TLocal Never! { tir_user_local(name, Span{start: 0, end: 0}) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1122
+    pub fn generated(name: String) -> TLocal Never! {
+        slot :: if name == "self" -> name else -> mangle_generated(name)
+        tir_generated_local(slot, Span{start: 0, end: 0})
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1146
+    pub fn stm() -> TLocal Never! { TLocal.generated("stm").as_mutable() }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1151
+    pub fn persistent(name: String, module: String, ty: Type) -> TLocal Never! {
+        local := tir_persistent_local(name, module, ty, Span{start: 0, end: 0})
+        local.address_lifetime = None
+        local
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1169
+    pub fn is_persistent(self) -> Bool Never! { self.persist_key != None }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1173
+    pub fn as_mutable(self) -> TLocal Never! { local := ^self; local.mutable = true; local }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1178
+    pub fn with_string_bytes_source(self, source: TLocal) -> TLocal Never! { local := ^self; local.string_bytes_source = Val(^source); local }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1183
+    pub fn as_uninit_scalar(self) -> TLocal Never! { local := ^self; local.uninit_scalar = true; local }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1188
+    pub fn as_uninit_fixed(self) -> TLocal Never! { local := ^self; local.uninit_fixed = true; local }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1194
+    pub fn as_direct_closure(self) -> TLocal Never! { local := ^self; local.direct_closure = true; local }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1200
+    pub fn through_ref(self) -> TLocal Never! { local := ^self; local.deref = true; local }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1205
+    pub fn with_address_lifetime(self, lifetime: TAddressLifetime) -> TLocal Never! { local := ^self; local.address_lifetime = Val(lifetime); local }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1211
+    pub fn rust_name(self) -> String Never! {
+        if self.generated -> self.name
+        else if self.is_persistent() -> local_place(self.name).to_uppercase()
+        else -> local_place(self.name)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1222
+    pub fn rust_place(self) -> String Never! {
+        rust :: self.rust_name()
+        if self.deref -> "(*{rust})" else -> rust
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1236
+// TAddressLifetime uses the canonical jet_foundation.TIR enum, with all six arms.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1254
+pub fn tir_address_lifetime(expr: TExpr) -> TAddressLifetime Never! {
+    if expr.kind == {
+        .Local(local) -> {
+            if local.address_lifetime == Val(lifetime) -> return lifetime
+            if local.is_persistent() -> TAddressLifetime.Static
+            else if local.deref -> TAddressLifetime.Borrowed
+            else -> TAddressLifetime.Stack
+        }
+        .ConstRef(_) -> TAddressLifetime.Static
+        .Field(recv, _) -> tir_address_lifetime(recv)
+        .Index(base, _, _, _, _, _) | .IndexRead(base, _, _, _, _) -> {
+            if base.ty == {
+                .FixedList(_, _) -> tir_address_lifetime(base)
+                .List(_) -> TAddressLifetime.Heap
+                else -> TAddressLifetime.Unknown
+            }
+        }
+        .DistinctCtor(_, arg, _) -> tir_address_lifetime(arg)
+        .PoolSlot(_, _, _, _, _, _) -> TAddressLifetime.Heap
+        .HandleMethod(_, THandleOp.AllocAlloc, _) -> TAddressLifetime.Heap
+        .Borrow(place, _) -> tir_address_lifetime(place)
+        .RawOf(inner) -> tir_address_lifetime(inner)
+        .Deref(_) | .PtrFromAddr(_, _) -> TAddressLifetime.Foreign
+        else -> TAddressLifetime.Unknown
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1292
+pub fn ambient_err_local() -> TLocal Never! { TLocal.generated("ambient_err") }
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1301
+// TMethodRef is owned by jet_foundation.TIR; semantic names project to stable symbols.
+impl TMethodRef {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1314
+    pub fn inherent(name: String) -> TMethodRef Never! {
+        TMethodRef{symbol: SymbolID{key: name}, name: name, mangled: true, trait_owner: None, operator_identity: None}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1324
+    pub fn bare(name: String) -> TMethodRef Never! {
+        TMethodRef{symbol: SymbolID{key: name}, name: name, mangled: false, trait_owner: None, operator_identity: None}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1333
+    pub fn trait_method(trait_owner: String, name: String) -> TMethodRef Never! {
+        TMethodRef{symbol: SymbolID{key: "{trait_owner}::{name}"}, name: name, mangled: false, trait_owner: Val(SymbolID{key: trait_owner}), operator_identity: None}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1343
+    pub fn operator(left: String, trait_name: String, name: String, rhs: Type) -> TMethodRef Never! {
+        identity :: operator_method_identity(left, trait_name, name, rhs)
+        TMethodRef{symbol: SymbolID{key: identity}, name: name, mangled: false, trait_owner: Val(SymbolID{key: trait_name}), operator_identity: Val(identity)}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1366
+    pub fn rust(self) -> String Never! { if self.mangled -> mangle(self.name) else -> self.name }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1377
+// TPreludeArg: canonical Jet(Type), HostUsize in jet_foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1386
+// TStaticOwner: canonical User(String), Prelude(rooted, path, generics) in jet_foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1404
+// TPlace: canonical Local(TLocal), Expr(TExpr) in jet_foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1411
+fn demand_serde_codec(&demands: [String:(Type, String, [Type])], ty: Type, method: String) Never! {
+    if ty == .Apply(_, _) -> demands[generic_method_instance_key(ty, method, [])] = (ty, method, [])
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1424
+fn generic_type_arg_suffix(type_args: [Type]) -> String Never! {
+    names := [String]{}
+    loop ty in type_args {
+        chars := [Char]{}
+        loop ch in ty.name().chars() -> &chars.push(if ch.is_ascii_alphanumeric() -> ch else -> '_')
+        &names.push(String.from_chars(^chars))
+    }
+    names.join("__")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1439
+pub fn generic_method_instance_key(owner: Type, method: String, type_args: [Type]) -> String Never! {
+    base :: "{owner.name()}::{method}"
+    if type_args.is_empty() -> base else -> "{base}__generic__{generic_type_arg_suffix(type_args)}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1448
+pub fn generic_free_function_instance_key(base: String, type_args: [Type]) -> String Never! {
+    if type_args.is_empty() -> base else -> "{base}__generic__{generic_type_arg_suffix(type_args)}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1455
+fn function_semantic_key(module: String, name: String) -> String Never! {
+    if module.is_empty() -> name else -> "{module}::{name}"
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1463
+pub fn canonical_enum_owner(cx: Cx, name: String) -> String Never! {
+    if cx.core_qualified_rust_type_name(name) == Val(owner) -> return owner
+    if cx.local_type_identities.get(name) == Val(owner) -> return owner
+    cx.imported_type_metadata_name(name) ?? name
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1473
+fn collect_serde_codec_demands(funcs: [TFunc], &demands: [String:(Type, String, [Type])]) Never! {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1477
+    fn walk_expr(expr: TExpr, &demands: [String:(Type, String, [Type])]) Never! {
+        demand_serde_codec(&demands, expr.ty, "encode")
+        demand_serde_codec(&demands, expr.ty, "decode")
+        if expr.kind == {
+            .Print(inner) | .DistinctCtor(_, inner, _) -> walk_expr(inner, &demands)
+            .Call(_, args, _, _, _) -> loop arg in args -> walk_expr(arg.value, &demands)
+            .HandleMethod(recv, op, args) -> {
+                walk_expr(recv, &demands)
+                loop arg in args -> walk_expr(arg, &demands)
+                if op == {
+                    .SerdeEncode -> demand_serde_codec(&demands, recv.ty, "encode")
+                    .DataTreeDecode(target) -> demand_serde_codec(&demands, target, "decode")
+                    else -> {}
+                }
+            }
+            .DecodeUnder(segment, inner) -> { walk_expr(segment, &demands); walk_expr(inner, &demands) }
+            .Try(inner, _, _, _, note) -> {
+                walk_expr(inner, &demands)
+                if note == Val(value) -> walk_expr(value, &demands)
+            }
+            .OrFallback(value, fallback, _) -> {
+                walk_expr(value, &demands)
+                if fallback == {
+                    .Value(inner) | .Return(Val(inner)) -> walk_expr(inner, &demands)
+                    .Panic(message, _) -> walk_expr(message, &demands)
+                    else -> {}
+                }
+            }
+            .CoreCall(record, args, _, _, _, _, _) -> {
+                loop arg in args -> walk_expr(arg, &demands)
+                encoding :: record.module == "core.encoding.json" || record.module == "core.encoding.toml" || record.module == "core.encoding.yaml" || record.module == "core.encoding.csv" || record.module == "core.encoding.cbor"
+                if encoding && (record.member == "to_string" || record.member == "to_string_pretty" || record.member == "to_bytes" || record.member == "to_bytes_canonical") && !args.is_empty() -> demand_serde_codec(&demands, args[0].ty, "encode")
+                if encoding && record.member == "decode" && expr.ty == .Result(ok, _) -> demand_serde_codec(&demands, ok, "decode")
+            }
+            else -> {}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1564
+    fn walk_stmt(stmt: TStmt, &demands: [String:(Type, String, [Type])]) Never! {
+        if stmt == {
+            .ExprStmt(value, _) | .Return(Val(value), _) -> walk_expr(value, &demands)
+            .Let(_, _, init, _, _, _) | .Assign(_, _, init, _, _, _) -> walk_expr(init, &demands)
+            .RefutableBind(_, init, fallback, _) -> {
+                walk_expr(init, &demands)
+                loop row in fallback -> walk_stmt(row, &demands)
+            }
+            else -> {}
+        }
+    }
+    loop function in funcs {
+        loop statement in function.body -> walk_stmt(statement, &demands)
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1587
+fn lower_demanded_generic_methods(items: [Item], cx: Cx, &funcs: [TFunc]) LowerError! {
+    pending := take(&cx.jit_method_calls.borrow_mut()) // GATE #4494 retained RefCell borrow.
+    collect_serde_codec_demands(funcs, &pending)
+    processed := [String:Bool]{}
+    // GATE #4494: ordered-map pop_first retains Rust's logarithmic frontier updates.
+    loop pending.pop_first() == Val((key, (owner_ty, method_name, method_type_args))) {
+            if processed.contains_key(key) -> next
+            processed[key] = true
+            if generic_depth_exceeded(owner_ty) == Val(chain) -> fail LowerError.new(Span{start: 0, end: 0}, "E0909: generic instantiation goes too deep; simplify the types involved: {chain}")
+            name := ""
+            owner_args := [Type]{}
+            if owner_ty == {
+                .Apply(owner, args) -> { name = owner; owner_args = args }
+                .Named(owner) -> name = owner
+                else -> next
+            }
+            params := [TypeParam]?{None}
+            loop item in items {
+                if item == {
+                    .Struct(definition) | .Enum(definition) -> { if definition.name == name -> params = Val(definition.type_params) }
+                    .Distinct(definition) -> { if definition.name == name -> params = Val([]) }
+                    else -> {}
+                }
+                if params != None -> break
+            }
+            owner_params :: params ?? next
+            owner_subst := [String:Type]{}
+            loop index in 0..owner_params.len().min(owner_args.len()) -> owner_subst[owner_params[index].name] = owner_args[index]
+            loop item in items {
+                candidate := (Func, String?, Bool)?{None}
+                if item == {
+                    .Struct(definition) | .Enum(definition) -> {
+                        if definition.name != name -> next
+                        loop method in definition.methods {
+                            if method.name == method_name { candidate = Val((method, None, false)); break }
+                        }
+                    }
+                    .Impl(implementation) -> {
+                        if implementation.type_name != name -> next
+                        if implementation.trait_name == Val(trait_name) && trait_name != ENCODE && trait_name != DECODE && trait_name != CHECKED_TEXT -> next
+                        loop method in implementation.methods {
+                            if method.name == method_name {
+                                candidate = Val((method, implementation.trait_name, implementation.trait_name != None && implementation.is_generated_serde))
+                                break
+                            }
+                        }
+                    }
+                    else -> next
+                }
+                (method, trait_name, generated_serde) :: candidate ?? next
+                subst := owner_subst.clone()
+                owner_binds_method_params := (trait_name == Val(ENCODE) || trait_name == Val(DECODE)) && !owner_subst.is_empty()
+                loop param in method.type_params {
+                    if !owner_subst.contains_key(param.name) -> owner_binds_method_params = false
+                }
+                if owner_binds_method_params {
+                    if !method_type_args.is_empty() -> next
+                } else if !method_type_args.is_empty() {
+                    if method_type_args.len() != method.type_params.len() -> next
+                    loop index in 0..method.type_params.len() -> subst[method.type_params[index].name] = method_type_args[index]
+                } else if !method.type_params.is_empty() -> next
+                specialized := specialize_function_types(method, subst)
+                residual := [String:Bool]{}
+                loop param in specialized.type_params -> residual[param.name] = true
+                &specialized.type_params.clear()
+                previous_type_params :: cx.current_type_params.borrow().clone()
+                method_params := previous_type_params.clone()
+                loop param in residual.keys() -> method_params[param] = true
+                _ :: cx.current_type_params.replace(^method_params)
+                static_checked_text := trait_name == Val(CHECKED_TEXT)
+                loop param in specialized.params {
+                    if param.name == Syntax.KW_SELF -> static_checked_text = false
+                }
+                lowered := if trait_name == Val(owner_trait) {
+                    if (owner_trait == ENCODE && owner_ty == .Apply(_, _)) || static_checked_text -> lower_method_for_owner(specialized, name, owner_ty, cx, generated_serde && specialized.compiler_generated)
+                    else -> lower_trait_method(specialized, name, cx, owner_trait, generated_serde && specialized.compiler_generated, None)
+                } else -> lower_method_for_owner(specialized, name, owner_ty, cx, false)
+                _ :: cx.current_type_params.replace(previous_type_params)
+                lowered.key = function_semantic_key(lowered.module_name, key)
+                set_lowered_method_name(&lowered, fn() -> String { key })
+                collect_serde_codec_demands([lowered], &pending)
+                &funcs.push(^lowered)
+            }
+            calls :: take(&cx.jit_method_calls.borrow_mut()) // GATE #4494
+            loop call_key in calls.keys() {
+                if !processed.contains_key(call_key) && !pending.contains_key(call_key) -> pending[call_key] = calls[call_key]
+            }
+    }
+}

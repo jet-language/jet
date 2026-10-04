@@ -1,37 +1,15 @@
-// PORT-PENDING 0410 crates-jet-sema-src-sema-checkerinfer-expr-module-group-slice-5079: crates/jet-sema/src/Sema/CheckerCoreLib/mod_checks.rs:1-33
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::alloc_ptrs::result_ty;
-//RS use super::serde_diags::wrong_core_arity;
-//RS use crate::Diagnostics::Span;
-//RS use crate::Sema::Checker;
-//RS use crate::Sema::Effects::Effect;
-//RS use crate::AST::Type;
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     /// D-LIB-CALLGRANT1=A: a loaded Mod exposes one deliberately small first
-//RS     /// call surface. The host grants the load; the typed method keeps the
-//RS     /// exported scalar boundary visible to sema and every lowerer.
-//RS     pub(crate) fn check_mod_method(
-//RS         &mut self,
-//RS         method: &str,
-//RS         args: &mut [crate::AST::CallArg],
-//RS         span: Span,
-//RS     ) -> Option<Option<Type>> {
-//RS         if method != "on_tick" {
-//RS             return None;
-//RS         }
-//RS         if args.len() != 1 {
-//RS             self.diags
-//RS                 .push(wrong_core_arity("Mod.on_tick", 1, args.len(), span));
-//RS             for arg in args {
-//RS                 self.infer(&mut arg.expr);
-//RS             }
-//RS         } else {
-//RS             self.expect_core_arg("Mod.on_tick", 0, &Type::Int, &mut args[0]);
-//RS         }
-//RS         self.record_effect(Effect::Exec.name(), span);
-//RS         Some(Some(result_ty(Type::Int, Type::String)))
-//RS     }
-//RS }
-// END-PORT-PENDING 0410 crates/jet-sema/src/Sema/CheckerCoreLib/mod_checks.rs:1-33
-
+use jet_foundation.[Span, Type, CallArg]
+use jet_sema.[Checker, Effect]
+use jet_sema.CheckerCoreLib.[result_ty, wrong_core_arity]
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerCoreLib/mod_checks.rs:12
+    pub fn check_mod_method(self: &Self, method: String, args: &[CallArg], span: Span) -> Type?? Never! {
+        if method != "on_tick" -> return None
+        if args.len() != 1 {
+            &self.diags.push(wrong_core_arity("Mod.on_tick", 1, args.len(), span))
+            loop arg in &args -> _ :: &self.infer(&arg.expr)
+        } else { &self.expect_core_arg("Mod.on_tick", 0, Type.Int, &args[0]) }
+        &self.record_effect(Effect.Exec.name(), span)
+        Val(Val(result_ty(Type.Int, Type.String)))
+    }
+}

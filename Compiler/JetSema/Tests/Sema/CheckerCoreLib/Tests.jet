@@ -1,0 +1,44 @@
+use jet_foundation.[Type, Syntax]
+use jet_sema.CheckerCoreLib.[core_fixed_sig, core_module_items]
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/tests.rs:8
+#Test("raylib_skeleton_signatures_are_registered") {
+    window :: core_fixed_sig("core.game.raylib", "window_open").expect("raylib window_open signature").1.expect("window_open return type")
+    assert(window == Type.Named("RaylibWindow"))
+    color :: core_fixed_sig("core.game.raylib", "color").expect("raylib color signature").1.expect("color return type")
+    assert(color == Type.Named("RaylibColor"))
+    items :: core_module_items("core.game.raylib")
+    assert(items.contains("window_ready"))
+    assert(items.contains("draw_text"))
+    assert(items.contains("draw_rectangle"))
+    assert(items.contains("key_down"))
+    assert(items.contains("close_window"))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/tests.rs:30
+#Test("base64_url_entries_have_typed_signatures") {
+    encode :: core_fixed_sig("core.encoding.base64", "encode_url").expect("encode_url signature")
+    assert(encode.0.len() == 1)
+    assert(encode.1 == Val(Type.String))
+    decode :: core_fixed_sig("core.encoding.base64", "decode_url").expect("decode_url signature")
+    assert(decode.0.len() == 1)
+    assert(if decode.1 == { .Val(.Result) -> true; else -> false })
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/tests.rs:43
+#Test("core_mem_gate_table_matches_checker_surface") {
+    expected :: [("Ptr", Syntax.CoreMemGate.Import), ("from_addr", Syntax.CoreMemGate.Audit), ("volatile_read", Syntax.CoreMemGate.Audit), ("volatile_write", Syntax.CoreMemGate.Audit), ("address_of", Syntax.CoreMemGate.Import), ("pin", Syntax.CoreMemGate.Import), ("Pin", Syntax.CoreMemGate.Import), ("Arena", Syntax.CoreMemGate.Import), ("Bump", Syntax.CoreMemGate.Import), ("Pool", Syntax.CoreMemGate.Import), ("Fixed", Syntax.CoreMemGate.Import), ("AllocError", Syntax.CoreMemGate.Import), ("Atomic", Syntax.CoreMemGate.Import)]
+    assert(Syntax.CORE_MEM_GATE_TIERS == expected, "every checker-facing core.mem item must have its expected tier")
+    expected_items :: expected.map(fn(pair) { pair.0 }).to_array()
+    assert(core_module_items(Syntax.CORE_MEM_MODULE) == expected_items, "every checker-facing core.mem item must be exported")
+    loop (item, gate) in expected {
+        assert(Syntax.core_mem_gate(item) == Val(gate), "{item} must keep its expected gate")
+        assert(Syntax.core_mem_requires_audit(item) == (gate == Syntax.CoreMemGate.Audit), "{item} checker behavior must match its expected tier")
+    }
+    assert(Syntax.core_mem_requires_audit("unknown_core_mem_item"), "unknown core.mem items must fail closed")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/tests.rs:93
+#Test("plain_core_rows_keep_typed_signature_arity") {
+    drifted := [String]{}
+    loop row in Syntax.CORE_CALLS {
+        if core_fixed_sig(row.module, row.member) == .Val((params, _)) && params.len() != row.arity() -> &drifted.push("{row.module}.{row.member} typed={params.len()} registry={row.arity()}")
+    }
+    assert(drifted.is_empty(), "typed sema signature drifted for: {drifted.join(", ")}")
+}

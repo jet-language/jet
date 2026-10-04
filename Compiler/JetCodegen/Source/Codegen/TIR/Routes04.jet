@@ -1,2305 +1,502 @@
-// PORT-PENDING 0516 crates-jet-codegen-src-codegen-tir-routes-slice-4388: crates/jet-codegen/src/Codegen/TIR/routes.rs:4388-6688
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(super) fn prelude_route(
-//RS         &self,
-//RS         receiver: &Type,
-//RS         carrier: &TFailureCarrier,
-//RS     ) -> Result<TPreludeRoute, LowerError> {
-//RS         as_prelude(
-//RS             self.route_plan(receiver, carrier)?,
-//RS             &format!("handle method variant {:?}", std::mem::discriminant(self)),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS fn hardware_route(op: &super::THardwareCall, carrier: &TFailureCarrier) -> TRoutePlan {
-//RS     let (member, symbol, arity, borrow_mask) = match op {
-//RS         super::THardwareCall::RegisterRead { .. } => {
-//RS             ("register_read", "jet_hardware_register_read", 0, Vec::new())
-//RS         }
-//RS         super::THardwareCall::RegisterWrite { .. } => (
-//RS             "register_write",
-//RS             "jet_hardware_register_write",
-//RS             1,
-//RS             vec![false],
-//RS         ),
-//RS         super::THardwareCall::DmaStart { .. } => {
-//RS             ("dma_start", "jet_hardware_dma_start", 1, vec![false])
-//RS         }
-//RS         super::THardwareCall::DmaWait { .. } => {
-//RS             ("dma_wait", "jet_hardware_dma_wait", 0, Vec::new())
-//RS         }
-//RS     };
-//RS     prelude(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.hardware",
-//RS         member,
-//RS         symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS     )
-//RS }
-//RS fn devserver_route(method: &str, carrier: &TFailureCarrier) -> TRoutePlan {
-//RS     let (symbol, arity, borrow_mask, effect) = match method {
-//RS         "html" => ("jet_devserver_html", 2, vec![true, false], None),
-//RS         "port" => ("jet_devserver_port", 2, vec![true, false], None),
-//RS         "serve" => ("jet_devserver_serve", 1, vec![true], Some(Effect::Net)),
-//RS         _ => return primitive(),
-//RS     };
-//RS     prelude(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.web.devserver",
-//RS         method,
-//RS         symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         effect,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS     )
-//RS }
-//RS 
-//RS fn app_route(method: &str, args_len: usize, carrier: &TFailureCarrier) -> TRoutePlan {
-//RS     // Route, loader, and form registrations carry the checked input binding
-//RS     // as one trailing String argument appended by TIR lowering.
-//RS     let (symbol, arity, borrow_mask, effect) = match (method, args_len) {
-//RS         ("route", 2) => ("jet_app_route", 4, vec![true, false, false, false], None),
-//RS         ("page", 2) => ("jet_app_page", 4, vec![true, false, false, false], None),
-//RS         ("layout", 2) => ("jet_app_layout", 4, vec![true, false, false, false], None),
-//RS         ("loader", 2) => ("jet_app_loader", 4, vec![true, false, false, false], None),
-//RS         ("loader", 3) => (
-//RS             "jet_app_loader_preload",
-//RS             5,
-//RS             vec![true, false, false, false, false],
-//RS             None,
-//RS         ),
-//RS         ("pending", 1) => ("jet_app_pending", 2, vec![true, false], None),
-//RS         ("not_found", 1) => ("jet_app_not_found", 2, vec![true, false], None),
-//RS         ("error", 1) => ("jet_app_error", 2, vec![true, false], None),
-//RS         ("action", 2) => ("jet_app_action", 3, vec![true, false, false], None),
-//RS         ("form", 2) => ("jet_app_form", 4, vec![true, false, false, false], None),
-//RS         ("data", 2) => ("jet_app_data", 3, vec![true, false, false], None),
-//RS         ("mount", 2) => ("jet_app_mount", 3, vec![true, false, false], None),
-//RS         ("mount", 3) => (
-//RS             "jet_app_mount_with_effect",
-//RS             4,
-//RS             vec![true, false, false, false],
-//RS             None,
-//RS         ),
-//RS         ("mount", 4) => (
-//RS             "jet_app_mount_with_policy",
-//RS             5,
-//RS             vec![true, false, false, false, false],
-//RS             None,
-//RS         ),
-//RS         ("routes", 1) => ("jet_app_routes", 2, vec![true, false], None),
-//RS         ("security", 1) => ("jet_app_security", 2, vec![true, false], None),
-//RS         ("assets", 1) => ("jet_app_assets", 2, vec![true, false], None),
-//RS         ("split", 1) => ("jet_app_split", 2, vec![true, false], None),
-//RS         ("code_split", 1) => ("jet_app_code_split", 2, vec![true, false], None),
-//RS         ("cache", 1) => ("jet_app_cache", 2, vec![true, false], None),
-//RS         ("a11y", 1) => ("jet_app_a11y", 2, vec![true, false], None),
-//RS         ("adapter", 1) => ("jet_app_adapter", 2, vec![true, false], None),
-//RS         ("csr", 0) => ("jet_app_csr", 1, vec![true], None),
-//RS         ("ssr", 0) => ("jet_app_ssr", 1, vec![true], None),
-//RS         ("ssg", 0) => ("jet_app_ssg", 1, vec![true], None),
-//RS         ("stream", 0) => ("jet_app_stream", 1, vec![true], None),
-//RS         ("streaming", 0) => ("jet_app_streaming", 1, vec![true], None),
-//RS         ("island", 0) => ("jet_app_island", 1, vec![true], None),
-//RS         ("hydration_dev", 0) => ("jet_app_hydration_dev", 1, vec![true], None),
-//RS         ("hydration_release", 0) => ("jet_app_hydration_release", 1, vec![true], None),
-//RS         ("facts_json", 0) => ("jet_app_facts_json", 1, vec![true], None),
-//RS         ("serve", 0) => ("jet_app_serve", 1, vec![true], Some(Effect::Net)),
-//RS         ("serve", 1) => (
-//RS             "jet_app_serve_with_port",
-//RS             2,
-//RS             vec![true, false],
-//RS             Some(Effect::Net),
-//RS         ),
-//RS         ("serve_on", 1) => ("jet_app_serve_on", 2, vec![true, false], Some(Effect::Net)),
-//RS         _ => return primitive(),
-//RS     };
-//RS     prelude(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.web.app",
-//RS         method,
-//RS         symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         effect,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS     )
-//RS }
-//RS fn h(
-//RS     member: &str,
-//RS     symbol: &str,
-//RS     arity: usize,
-//RS     max_arity: usize,
-//RS     borrow_mask: &[bool],
-//RS     effect: Option<Effect>,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> TRoutePlan {
-//RS     prelude(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.handle",
-//RS         member,
-//RS         symbol,
-//RS         arity,
-//RS         max_arity,
-//RS         borrow_mask,
-//RS         effect,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS     )
-//RS }
-//RS fn regex_route(
-//RS     kind: &str,
-//RS     method: &str,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let (symbol, borrow_mask): (&str, &[bool]) = match (kind, method) {
-//RS         ("Regex", "pattern") => ("jet_std::JetRegex::pattern", &[true][..]),
-//RS         ("Regex", "source") => ("jet_std::JetRegex::source", &[true][..]),
-//RS         ("Regex", "flags") => ("jet_std::JetRegex::flags", &[true][..]),
-//RS         ("Regex", "options") => ("jet_std::JetRegex::options", &[true][..]),
-//RS         ("Regex", "names") => ("jet_std::JetRegex::names", &[true][..]),
-//RS         ("Regex", "count") => ("jet_std::JetRegex::count", &[true, true][..]),
-//RS         ("Regex", "is_match") => ("jet_std::JetRegex::is_match", &[true, true][..]),
-//RS         ("Regex", "full_match") => ("jet_std::JetRegex::full_match", &[true, true][..]),
-//RS         ("Regex", "match") => ("jet_std::JetRegex::match_value", &[true, true][..]),
-//RS         ("Regex", "find") => ("jet_std::JetRegex::find", &[true, true][..]),
-//RS         ("Regex", "find_all") => ("jet_std::JetRegex::find_all", &[true, true][..]),
-//RS         ("Regex", "matches") => ("jet_std::JetRegex::matches", &[true, true][..]),
-//RS         ("Regex", "split") => ("jet_std::JetRegex::split", &[true, true][..]),
-//RS         ("Regex", "replace") => ("jet_std::JetRegex::replace", &[true, true, true][..]),
-//RS         ("Regex", "replace_first") => ("jet_std::JetRegex::replace_first", &[true, true, true][..]),
-//RS         ("Regex", "replace_all_with") => (
-//RS             "jet_std::JetRegex::replace_all_with",
-//RS             &[true, true, false][..],
-//RS         ),
-//RS         ("Regex", "split_limit") => ("jet_std::JetRegex::split_limit", &[true, true, false][..]),
-//RS         ("Match", "start") => ("jet_std::JetRegexMatch::start", &[true][..]),
-//RS         ("Match", "end") => ("jet_std::JetRegexMatch::end", &[true][..]),
-//RS         ("Match", "named_captures") => ("jet_std::JetRegexMatch::named_captures", &[true][..]),
-//RS         ("Match", "group") => ("jet_std::JetRegexMatch::group", &[true, false][..]),
-//RS         ("Match", "name") => ("jet_std::JetRegexMatch::name", &[true, true][..]),
-//RS         ("Match", "group_start") => ("jet_std::JetRegexMatch::group_start", &[true, false][..]),
-//RS         ("Match", "group_end") => ("jet_std::JetRegexMatch::group_end", &[true, false][..]),
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "unknown checked regex method `{kind}.{method}`"
-//RS             )));
-//RS         }
-//RS     };
-//RS     let member = format!("{kind}.{method}");
-//RS     Ok(h(
-//RS         &member,
-//RS         symbol,
-//RS         borrow_mask.len(),
-//RS         borrow_mask.len(),
-//RS         borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS     ))
-//RS }
-//RS 
-//RS /// D-URL1=A: checked MIME projections. `URL` is the `core.net.url` record, so
-//RS /// its documented methods lower through the declaration, never a handle row.
-//RS fn url_mime_route(
-//RS     kind: &str,
-//RS     method: &str,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let (symbol, borrow_mask): (&str, &[bool]) = match (kind, method) {
-//RS         ("MIME", "media_type") => ("jet_std::JetMIME::media_type", &[true][..]),
-//RS         ("MIME", "subtype") => ("jet_std::JetMIME::subtype", &[true][..]),
-//RS         ("MIME", "essence") => ("jet_std::JetMIME::essence", &[true][..]),
-//RS         ("MIME", "params") => ("jet_std::JetMIME::params", &[true][..]),
-//RS         ("MIME", "to_string") => ("jet_std::JetMIME::to_string_value", &[true][..]),
-//RS         ("MIME", "param") => ("jet_std::JetMIME::param", &[true, true][..]),
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "unknown checked URL/MIME method `{kind}.{method}`"
-//RS             )));
-//RS         }
-//RS     };
-//RS     let member = format!("{kind}.{method}");
-//RS     Ok(h(
-//RS         &member,
-//RS         symbol,
-//RS         borrow_mask.len(),
-//RS         borrow_mask.len(),
-//RS         borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS     ))
-//RS }
-//RS 
-//RS fn measurement_route(method: &str, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
-//RS     let (symbol, borrow_mask): (&str, &[bool]) = match method {
-//RS         "value" => ("jet_std::JetMeasurement::value", &[true][..]),
-//RS         "uncertainty" => ("jet_std::JetMeasurement::uncertainty", &[true][..]),
-//RS         "add" => ("jet_std::JetMeasurement::add", &[true, false][..]),
-//RS         "sub" => ("jet_std::JetMeasurement::sub", &[true, false][..]),
-//RS         "mul" => ("jet_std::JetMeasurement::mul", &[true, false][..]),
-//RS         "div" => ("jet_std::JetMeasurement::div", &[true, false][..]),
-//RS         "sqrt" => ("jet_std::JetMeasurement::sqrt", &[true][..]),
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "unknown checked measurement method `{method}`"
-//RS             )));
-//RS         }
-//RS     };
-//RS     let member = format!("Measurement.{method}");
-//RS     Ok(h(
-//RS         &member,
-//RS         symbol,
-//RS         borrow_mask.len(),
-//RS         borrow_mask.len(),
-//RS         borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS     ))
-//RS }
-//RS 
-//RS fn reactive_method_route(
-//RS     receiver: &Type,
-//RS     method: &str,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let (member, symbol, borrow_mask): (&str, &str, &[bool]) =
-//RS         match (receiver.without_user_tags().base_name(), method) {
-//RS             (Some("Signal"), "get") => ("Signal.get", "jet_std::JetSignal::get", &[true]),
-//RS             (Some("Derived" | "Computed"), "get") => {
-//RS                 ("Derived.get", "jet_std::JetDerived::get", &[true])
-//RS             }
-//RS             (Some("Signal"), "set") => ("Signal.set", "jet_std::JetSignal::set", &[true, false]),
-//RS             _ => {
-//RS                 return Err(route_error(format!(
-//RS                     "checked reactive method `{method}` has no receiver route for {}",
-//RS                     receiver.name(),
-//RS                 )));
-//RS             }
-//RS         };
-//RS     Ok(prelude(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.reactive",
-//RS         member,
-//RS         symbol,
-//RS         borrow_mask.len(),
-//RS         borrow_mask.len(),
-//RS         borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS     ))
-//RS }
-//RS 
-//RS fn layout_method_route(method: &str, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
-//RS     let (symbol, arity, borrow_mask) = match method {
-//RS         "h" | "v" => (
-//RS             format!("jet_layout::Handle::{method}"),
-//RS             3,
-//RS             vec![true, false, false],
-//RS         ),
-//RS         "value" => (
-//RS             "jet_layout::Handle::value".to_string(),
-//RS             2,
-//RS             vec![true, false],
-//RS         ),
-//RS         "suggest" => (
-//RS             "jet_layout::Handle::suggest".to_string(),
-//RS             3,
-//RS             vec![true, false, false],
-//RS         ),
-//RS         "is_feasible" => ("jet_layout::Handle::is_feasible".to_string(), 1, vec![true]),
-//RS         "conflict" => ("jet_layout::Handle::conflict".to_string(), 1, vec![true]),
-//RS         "required" | "strong" | "medium" | "weak" => {
-//RS             (format!("jet_layout::Constraint::{method}"), 1, vec![false])
-//RS         }
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "unknown checked layout method `{method}`"
-//RS             )));
-//RS         }
-//RS     };
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.layout",
-//RS         &format!("layout.{method}"),
-//RS         &symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "layout method",
-//RS     )
-//RS     .map(TRoutePlan::Prelude)
-//RS }
-//RS 
-//RS fn loadable_method_route(
-//RS     method: &str,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let (arity, borrow_mask) = match method {
-//RS         "is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded" => (1, vec![true]),
-//RS         "or_else" => (2, vec![true, false]),
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "unknown checked Loadable method `{method}`"
-//RS             )));
-//RS         }
-//RS     };
-//RS     let symbol = format!("JetLoadable::{method}");
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.pending",
-//RS         &format!("loadable.{method}"),
-//RS         &symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "loadable method",
-//RS     )
-//RS     .map(TRoutePlan::Prelude)
-//RS }
-//RS 
-//RS fn ui_backend_method_route(
-//RS     method: &str,
-//RS     receiver: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let name = match receiver {
-//RS         Type::Named(name) | Type::Apply { name, .. } => name.as_str(),
-//RS         _ => {
-//RS             return Err(route_error(
-//RS                 "checked UI backend receiver has no nominal type",
-//RS             ));
-//RS         }
-//RS     };
-//RS     let name = name.rsplit("::").next().unwrap_or(name);
-//RS     let name = name.rsplit('.').next().unwrap_or(name);
-//RS     let backend = match name {
-//RS         "NullBackend" => "JetNullBackend",
-//RS         "TUIBackend" => "JetTuiBackend",
-//RS         "GtkBackend" => "JetGtkBackend",
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "checked UI backend type `{name}` has no Prelude carrier"
-//RS             )));
-//RS         }
-//RS     };
-//RS     let (member, borrow_mask): (&str, &[bool]) = match method {
-//RS         "measure" => ("measure_node", &[true, false, false]),
-//RS         "layout" => ("layout_node", &[true, false, false]),
-//RS         "paint" => ("paint_node", &[true, false]),
-//RS         "on_event" => ("dispatch_event", &[true, false]),
-//RS         "mount_default" => ("mount_node_default", &[true, false]),
-//RS         "mount" => ("mount_node", &[true, false, false]),
-//RS         "set_focus_group" => ("set_focus_group", &[true, false]),
-//RS         "focused_label" => ("focused_label", &[true]),
-//RS         "commands" if name == "NullBackend" => ("paint_commands", &[true]),
-//RS         "frame_lines" | "render_count" if name == "TUIBackend" => (method, &[true]),
-//RS         "present" if name == "GtkBackend" => ("present", &[true, false]),
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "checked UI backend method `{name}.{method}` has no Prelude route"
-//RS             )));
-//RS         }
-//RS     };
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.ui",
-//RS         &format!("{name}.{method}"),
-//RS         &format!("{backend}::{member}"),
-//RS         borrow_mask.len(),
-//RS         borrow_mask.len(),
-//RS         borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "UI backend method",
-//RS     )
-//RS     .map(TRoutePlan::Prelude)
-//RS }
-//RS 
-//RS fn db_h(
-//RS     member: &str,
-//RS     symbol: &str,
-//RS     metadata: &Option<super::TDbQueryMetadata>,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> TRoutePlan {
-//RS     let TRoutePlan::Prelude(mut route) = prelude(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.handle",
-//RS         member,
-//RS         symbol,
-//RS         3,
-//RS         3,
-//RS         &[true, true, true],
-//RS         Some(Effect::DB),
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS     ) else {
-//RS         unreachable!("database route is always a Prelude route");
-//RS     };
-//RS     route.db_metadata = metadata.clone();
-//RS     TRoutePlan::Prelude(route)
-//RS }
-//RS 
-//RS fn plugin_call_route(member: &str, symbol: &str, carrier: &TFailureCarrier) -> TRoutePlan {
-//RS     let TRoutePlan::Prelude(mut route) = prelude(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.handle",
-//RS         member,
-//RS         symbol,
-//RS         3,
-//RS         3,
-//RS         &[true, true, true],
-//RS         Some(Effect::FFI),
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS     ) else {
-//RS         unreachable!("plugin call route is always a Prelude route");
-//RS     };
-//RS     route.authority = Some(MirAuthorityDecision::plugin_call());
-//RS     TRoutePlan::Prelude(route)
-//RS }
-//RS 
-//RS fn is_string_receiver(receiver: &Type) -> bool {
-//RS     match receiver {
-//RS         Type::Tagged { inner, .. } => is_string_receiver(inner),
-//RS         Type::String => true,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn builtin_collection_route(
-//RS     op: &TBuiltinOp,
-//RS     receiver: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let receiver = match receiver {
-//RS         Type::Tagged { inner, .. } => {
-//RS             return builtin_collection_route(op, inner, carrier);
-//RS         }
-//RS         ty => ty,
-//RS     };
-//RS     let row = |member: &str, symbol: &str, arity: usize, borrow_mask: &[bool]| {
-//RS         b(member, symbol, arity, arity, borrow_mask, None, carrier)
-//RS     };
-//RS     let result = match (op, receiver) {
-//RS         (TBuiltinOp::Contains, Type::List(_) | Type::FixedList { .. }) => {
-//RS             row("contains", "jet_list_contains", 2, &[true, true])
-//RS         }
-//RS         (TBuiltinOp::Contains, Type::Apply { name, .. }) if name == "Set" => {
-//RS             row("contains", "jet_set_has", 2, &[true, true])
-//RS         }
-//RS         (TBuiltinOp::Max { float: false, .. }, Type::Apply { name, .. }) if name == "Set" => {
-//RS             row("max", "jet_set_max", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::SetShuffle, Type::Apply { name, .. }) if name == "Set" => {
-//RS             row("shuffle", "jet_set_shuffle", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::Contains, Type::Apply { name, .. })
-//RS             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
-//RS         {
-//RS             row("contains", "jet_list_contains", 2, &[true, true])
-//RS         }
-//RS         (TBuiltinOp::Contains, Type::Named(name)) if name == "Range" => {
-//RS             row("contains", "jet_range_contains", 2, &[true, false])
-//RS         }
-//RS         (TBuiltinOp::Contains, Type::InlineRange { .. }) => {
-//RS             row("contains", "jet_range_contains", 2, &[true, false])
-//RS         }
-//RS         (TBuiltinOp::Contains, Type::Named(name)) if name == crate::Syntax::TYPE_BITS => {
-//RS             row("bit_set_has", "jet_bit_set_has", 2, &[true, false])
-//RS         }
-//RS         (TBuiltinOp::ListUnion, Type::List(_) | Type::FixedList { .. }) => {
-//RS             row("union", "jet_list_union", 2, &[true, true])
-//RS         }
-//RS         (TBuiltinOp::ListIntersection, Type::List(_) | Type::FixedList { .. }) => {
-//RS             row("intersection", "jet_list_intersection", 2, &[true, true])
-//RS         }
-//RS         (TBuiltinOp::ListDifference, Type::List(_) | Type::FixedList { .. }) => {
-//RS             row("difference", "jet_list_difference", 2, &[true, true])
-//RS         }
-//RS         (TBuiltinOp::ListRandom, Type::List(_) | Type::FixedList { .. }) => {
-//RS             row("random", "jet_list_random", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::List(_) | Type::FixedList { .. }) => {
-//RS             row("len", "jet_list_len", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == "Iter" || name == "ViewIter" => {
-//RS             row("len", "jet_iter_len", 1, &[false])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::Apply { name, .. })
-//RS             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
-//RS         {
-//RS             row("len", "jet_list_len", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::Map { .. }) => row("len", "jet_map_len", 1, &[true]),
-//RS         (TBuiltinOp::ContainsKey, Type::Map { .. }) => {
-//RS             row("map_has_key", "jet_map_has_key", 2, &[true, true])
-//RS         }
-//RS         (TBuiltinOp::ContainsKey, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU => {
-//RS             row("lru_has", "jet_lru_has", 2, &[true, false])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == "Set" => {
-//RS             row("len", "jet_set_len", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::SetCapacity, Type::Apply { name, .. }) if name == "Set" => {
-//RS             row("capacity", "jet_set_capacity", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_RANK => {
-//RS             row("len", "jet_sorted_set_len", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::Apply { name, .. })
-//RS             if name == crate::Syntax::TYPE_PRIORITY_QUEUE =>
-//RS         {
-//RS             row("len", "jet_priority_queue_len", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU => {
-//RS             row("len", "jet_lru_len", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_TALLY => {
-//RS             row("len", "jet_bag_len", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::Named(name)) if name == crate::Syntax::TYPE_BITS => {
-//RS             row("len", "jet_bit_set_len", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_QUEUE => {
-//RS             row("len", "jet_deque_len", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::DequeCapacity, Type::Apply { name, .. })
-//RS             if name == crate::Syntax::TYPE_QUEUE =>
-//RS         {
-//RS             row("capacity", "jet_deque_capacity", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::LenList, Type::String) => row("len", "jet_char_len", 1, &[true]),
-//RS         (TBuiltinOp::IsEmpty, Type::List(_) | Type::FixedList { .. }) => {
-//RS             row("is_empty", "jet_list_is_empty", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::IsEmpty, Type::Apply { name, .. }) if name == "Iter" || name == "ViewIter" => {
-//RS             row("is_empty", "jet_iter_is_empty", 1, &[false])
-//RS         }
-//RS         (TBuiltinOp::IsEmpty, Type::Apply { name, .. })
-//RS             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
-//RS         {
-//RS             row("is_empty", "jet_list_is_empty", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::IsEmpty, Type::Map { .. }) => row("is_empty", "jet_map_is_empty", 1, &[true]),
-//RS         (TBuiltinOp::IsEmpty, Type::String) => row("is_empty", "jet_string_is_empty", 1, &[true]),
-//RS         (TBuiltinOp::IsEmpty, Type::Apply { name, .. }) if name == "Set" => {
-//RS             row("is_empty", "jet_set_is_empty", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::IsEmpty, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_RANK => {
-//RS             row("is_empty", "jet_sorted_set_is_empty", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::IsEmpty, Type::Apply { name, .. })
-//RS             if name == crate::Syntax::TYPE_PRIORITY_QUEUE =>
-//RS         {
-//RS             row("is_empty", "jet_priority_queue_is_empty", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::IsEmpty, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU => {
-//RS             row("is_empty", "jet_lru_is_empty", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::IsEmpty, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_TALLY => {
-//RS             row("is_empty", "jet_bag_is_empty", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::IsEmpty, Type::Named(name)) if name == crate::Syntax::TYPE_BITS => {
-//RS             row("is_empty", "jet_bit_set_is_empty", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::IsEmpty, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_QUEUE => {
-//RS             row("is_empty", "jet_deque_is_empty", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::GetList, Type::List(_) | Type::FixedList { .. }) => {
-//RS             row("get", "jet_list_get_opt", 2, &[true, false])
-//RS         }
-//RS         (TBuiltinOp::GetList, Type::Apply { name, .. })
-//RS             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
-//RS         {
-//RS             row("get", "jet_list_get_opt", 2, &[true, false])
-//RS         }
-//RS         (TBuiltinOp::GetMap, Type::Map { .. }) => row("get", "jet_map_get_opt", 2, &[true, true]),
-//RS         (TBuiltinOp::First, Type::List(_) | Type::FixedList { .. }) => {
-//RS             row("first", "jet_list_first", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::First, Type::Apply { name, .. }) if name == "Iter" || name == "ViewIter" => {
-//RS             row("first", "jet_iter_first", 1, &[false])
-//RS         }
-//RS         (TBuiltinOp::First, Type::Apply { name, .. })
-//RS             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
-//RS         {
-//RS             row("first", "jet_list_first", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::First, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_RANK => {
-//RS             row("first", "jet_sorted_set_first", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::Last, Type::List(_) | Type::FixedList { .. }) => {
-//RS             row("last", "jet_list_last", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::Last, Type::Apply { name, .. })
-//RS             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
-//RS         {
-//RS             row("last", "jet_list_last", 1, &[true])
-//RS         }
-//RS         (TBuiltinOp::Last, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_RANK => {
-//RS             row("last", "jet_sorted_set_last", 1, &[true])
-//RS         }
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "checked builtin operation `{op:?}` has an unsupported receiver type"
-//RS             )));
-//RS         }
-//RS     };
-//RS     Ok(result)
-//RS }
-//RS 
-//RS fn iterator_builtin_route(
-//RS     op: &TBuiltinOp,
-//RS     receiver: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Option<TRoutePlan> {
-//RS     let receiver = match receiver {
-//RS         Type::Tagged { inner, .. } => return iterator_builtin_route(op, inner, carrier),
-//RS         ty => ty,
-//RS     };
-//RS     let is_iter = crate::Collections::is_iter_type(receiver);
-//RS     let is_list = matches!(receiver, Type::List(_) | Type::FixedList { .. });
-//RS     let route = |member: &str, symbol: &str, arity: usize, borrow_mask: &[bool]| {
-//RS         b(member, symbol, arity, arity, borrow_mask, None, carrier)
-//RS     };
-//RS     let plan = match op {
-//RS         TBuiltinOp::IterToList if is_iter => route("iter_to_list", "jet_iter_to_list", 1, &[false]),
-//RS         TBuiltinOp::IterCollect if is_iter => {
-//RS             route("iter_collect", "jet_iter_collect", 1, &[false])
-//RS         }
-//RS         TBuiltinOp::ListLazy if is_list => route("list_lazy", "jet_iter_from_vec", 1, &[false]),
-//RS         TBuiltinOp::Take if is_iter => route("iter_take", "jet_iter_take", 2, &[false, false]),
-//RS         TBuiltinOp::Skip if is_iter => route("iter_skip", "jet_iter_skip", 2, &[false, false]),
-//RS         TBuiltinOp::StepBy if is_iter => {
-//RS             route("iter_step_by", "jet_iter_step_by", 2, &[false, false])
-//RS         }
-//RS         TBuiltinOp::Dedup if is_iter => route("iter_dedup", "jet_iter_dedup", 1, &[false]),
-//RS         TBuiltinOp::Chunks if is_iter => {
-//RS             route("iter_chunks", "jet_iter_chunks", 2, &[false, false])
-//RS         }
-//RS         TBuiltinOp::Windows if is_iter => {
-//RS             route("iter_windows", "jet_iter_windows", 2, &[false, false])
-//RS         }
-//RS         TBuiltinOp::Flatten if is_iter => route("iter_flatten", "jet_iter_flatten", 1, &[false]),
-//RS         TBuiltinOp::Flatten if is_list => route("list_flatten", "jet_list_flatten", 1, &[false]),
-//RS         TBuiltinOp::Intersperse if is_iter => route(
-//RS             "iter_intersperse",
-//RS             "jet_iter_intersperse",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         TBuiltinOp::IterRepeat if is_iter => {
-//RS             route("iter_repeat", "jet_iter_repeat", 2, &[false, false])
-//RS         }
-//RS         TBuiltinOp::IterCycle if is_iter => {
-//RS             route("iter_cycle", "jet_iter_cycle", 2, &[false, false])
-//RS         }
-//RS         TBuiltinOp::IterDropLast if is_iter => {
-//RS             route("iter_drop_last", "jet_iter_drop_last", 2, &[false, false])
-//RS         }
-//RS         TBuiltinOp::IterShuffle if is_iter => {
-//RS             route("iter_shuffle", "jet_iter_shuffle", 1, &[false])
-//RS         }
-//RS         TBuiltinOp::IterIsSorted if is_iter => {
-//RS             route("iter_is_sorted", "jet_iter_is_sorted", 1, &[false])
-//RS         }
-//RS         TBuiltinOp::IterLastIndexOf if is_iter => route(
-//RS             "iter_last_index_of",
-//RS             "jet_iter_last_index_of",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         TBuiltinOp::IterAverage { float: true } if is_iter => {
-//RS             route("iter_average_float", "jet_iter_average_float", 1, &[false])
-//RS         }
-//RS         TBuiltinOp::IterAverage { float: false } if is_iter => {
-//RS             route("iter_average_int", "jet_iter_average_int", 1, &[false])
-//RS         }
-//RS         TBuiltinOp::IterCompare if is_iter => {
-//RS             route("iter_compare", "jet_iter_compare", 2, &[false, false])
-//RS         }
-//RS         TBuiltinOp::JoinSep if is_iter => route("iter_join", "jet_iter_join", 2, &[false, true]),
-//RS         TBuiltinOp::TryCollect if is_iter => {
-//RS             route("try_collect", "jet_list_try_collect", 1, &[false])
-//RS         }
-//RS         _ => return None,
-//RS     };
-//RS     Some(plan)
-//RS }
-//RS 
-//RS fn map_from_keys_symbol(receiver: &Type) -> &'static str {
-//RS     let key = match receiver.without_user_tags() {
-//RS         Type::List(inner) => inner.without_user_tags(),
-//RS         Type::FixedList { elem, .. } => elem.without_user_tags(),
-//RS         other => other,
-//RS     };
-//RS     match key {
-//RS         Type::String => "jet_map_from_keys_kernel",
-//RS         Type::Int | Type::IntN { .. } => "jet_map_from_keys_int",
-//RS         Type::Named(name) if name == "Int" => "jet_map_from_keys_int",
-//RS         _ => "jet_map_from_keys_composite",
-//RS     }
-//RS }
-//RS 
-//RS impl TBuiltinOp {
-//RS     pub(super) fn route_plan(
-//RS         &self,
-//RS         result: &Type,
-//RS         carrier: &TFailureCarrier,
-//RS     ) -> Result<TRoutePlan, LowerError> {
-//RS         use TBuiltinOp::*;
-//RS         let plan = match self {
-//RS             AtomicMethod { method } => atomic_method_route(method, carrier)?,
-//RS             LenString => b("len_string", "jet_char_len", 1, 1, &[true], None, carrier),
-//RS             ListTryNew => b(
-//RS                 "list_try_new",
-//RS                 "jet_list_try_new",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             ListTryWithCapacity => b(
-//RS                 "list_try_with_capacity",
-//RS                 "jet_list_try_with_capacity",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             TryPush => b(
-//RS                 "list_try_push",
-//RS                 "jet_list_try_push",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             TryReserve => b(
-//RS                 "list_try_reserve",
-//RS                 "jet_list_try_reserve",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             TryInsertMap => b(
-//RS                 "map_try_insert",
-//RS                 "jet_map_try_insert",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             TryStringPush => b(
-//RS                 "string_try_push",
-//RS                 "jet_string_try_push",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             Pop => b(
-//RS                 "list_pop",
-//RS                 "jet_list_pop_kernel",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             PriorityQueuePop => b(
-//RS                 "priority_queue_pop",
-//RS                 "jet_priority_queue_pop_kernel",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             MapUpdate => b(
-//RS                 "map_update",
-//RS                 "jet_map_update_all",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             MapMerge => b(
-//RS                 "map_merge",
-//RS                 "jet_map_merge",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MapFromKeys => b(
-//RS                 "map_from_keys",
-//RS                 "jet_map_from_keys_kernel",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ListReplace => b(
-//RS                 "list_replace",
-//RS                 "jet_list_replace",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ListEqual => b(
-//RS                 "list_equal",
-//RS                 "jet_list_equal",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ByteBufferWithCapacity => b(
-//RS                 "byte_buffer_with_capacity",
-//RS                 "JetByteBuffer::with_capacity",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MatchGroup => b(
-//RS                 "match_group",
-//RS                 "jet_std::JetRegexMatch::group",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             IterSplit { .. } => b(
-//RS                 "iter_split",
-//RS                 "jet_iter_split_at",
-//RS                 3,
-//RS                 3,
-//RS                 &[false, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Indexed { .. } => b(
-//RS                 "iter_enumerate",
-//RS                 "jet_iter_enumerate",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Indexes => b("indexes", "jet_iter_indexes", 1, 1, &[false], None, carrier),
-//RS             MapMergeWith => b(
-//RS                 "map_merge_with",
-//RS                 "jet_map_merge_with",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, true, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             InsertList => b(
-//RS                 "list_insert",
-//RS                 "jet_list_insert",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             RemoveMap => b(
-//RS                 "map_remove",
-//RS                 "jet_map_pop_kernel",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SetFrom => b("set_from", "jet_set_from", 1, 1, &[false], None, carrier),
-//RS             SetToList => b(
-//RS                 "set_to_list",
-//RS                 "jet_set_to_list",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetSort => b("set_sort", "jet_set_sort", 1, 1, &[true], None, carrier),
-//RS             SetShuffle => b(
-//RS                 "set_shuffle",
-//RS                 "jet_set_shuffle",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetEqual => b(
-//RS                 "set_equal",
-//RS                 "jet_set_equal",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetFirst => b("set_first", "jet_set_first", 1, 1, &[true], None, carrier),
-//RS             SortedSetFrom => b(
-//RS                 "sorted_set_from",
-//RS                 "jet_sorted_set_from",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SortedSetToList => b(
-//RS                 "sorted_set_to_list",
-//RS                 "jet_sorted_set_to_list",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             RemoveList { mode, .. } => match mode {
-//RS                 ListRemoveMode::Value => b(
-//RS                     "list_remove_value",
-//RS                     "jet_list_remove_value",
-//RS                     2,
-//RS                     2,
-//RS                     &[true, false],
-//RS                     Some(Effect::Mem),
-//RS                     carrier,
-//RS                 ),
-//RS                 ListRemoveMode::Slot => b(
-//RS                     "list_remove_slot",
-//RS                     "jet_list_remove_slot",
-//RS                     2,
-//RS                     2,
-//RS                     &[true, false],
-//RS                     Some(Effect::Mem),
-//RS                     carrier,
-//RS                 ),
-//RS                 ListRemoveMode::Dynamic => primitive(),
-//RS             },
-//RS             Push => b(
-//RS                 "list_push",
-//RS                 "jet_list_push",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             IndexOf => b(
-//RS                 "list_index_of",
-//RS                 "jet_list_index_of",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             InsertMap => b(
-//RS                 "map_insert",
-//RS                 "jet_map_insert",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             AddNewMap => b(
-//RS                 "map_add_new",
-//RS                 "jet_map_add_new",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             MapSetDefault => b(
-//RS                 "map_setdefault",
-//RS                 "jet_map_setdefault",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             ExtendList => b(
-//RS                 "list_extend",
-//RS                 "jet_list_extend",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             Reverse => b(
-//RS                 "list_reverse",
-//RS                 "jet_list_reverse",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             Sort => b(
-//RS                 "list_sort",
-//RS                 "jet_list_sort",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             Clear => b(
-//RS                 "list_clear",
-//RS                 "jet_list_clear",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             MapPopFirst => b(
-//RS                 "map_pop_first",
-//RS                 "jet_map_pop_first",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             CountList => b(
-//RS                 "list_count",
-//RS                 "jet_list_count",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Counts => b(
-//RS                 "list_counts",
-//RS                 "jet_list_counts",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ConcatList => b(
-//RS                 "list_concat",
-//RS                 "jet_list_concat",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SortDesc => b(
-//RS                 "list_sort_desc",
-//RS                 "jet_list_sort_desc",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             OrderingThen => b(
-//RS                 "ordering_then",
-//RS                 "jet_ordering_then",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             OrderingReverse => b(
-//RS                 "ordering_reverse",
-//RS                 "jet_ordering_reverse",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Flatten => b(
-//RS                 "list_flatten",
-//RS                 "jet_list_flatten",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Intersperse => b(
-//RS                 "iter_intersperse",
-//RS                 "jet_iter_intersperse",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StringFromBytes => b(
-//RS                 "string_from_bytes",
-//RS                 "jet_string_from_bytes",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StringFromBytesLossy => b(
-//RS                 "string_from_bytes_lossy",
-//RS                 "jet_string_from_bytes_lossy",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Bytes { owned: true } => b("bytes", "jet_string_bytes", 1, 1, &[false], None, carrier),
-//RS             Bytes { owned: false } => b("bytes", "jet_string_bytes", 1, 1, &[true], None, carrier),
-//RS             Trim => b(
-//RS                 "string_trim",
-//RS                 "jet_unicode_trim",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             TrimStart => b(
-//RS                 "string_trim_start",
-//RS                 "jet_text_trim_start",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             TrimEnd => b(
-//RS                 "string_trim_end",
-//RS                 "jet_text_trim_end",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             PadStart => b(
-//RS                 "string_pad_start",
-//RS                 "jet_text_pad_start",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             PadEnd => b(
-//RS                 "string_pad_end",
-//RS                 "jet_text_pad_end",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StringIndexOf => b(
-//RS                 "string_index_of",
-//RS                 "jet_unicode_index_of",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StringCount => b(
-//RS                 "string_count",
-//RS                 "jet_unicode_count",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StringIsAlphabetic => b(
-//RS                 "string_is_alphabetic",
-//RS                 "jet_text_is_alphabetic",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StringIsNumeric => b(
-//RS                 "string_is_numeric",
-//RS                 "jet_text_is_numeric",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StringIsWhitespace => b(
-//RS                 "string_is_whitespace",
-//RS                 "jet_text_is_whitespace",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StringIsAscii => b(
-//RS                 "string_is_ascii",
-//RS                 "jet_text_unicode_is_ascii",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StringToTitle => b(
-//RS                 "string_to_title",
-//RS                 "jet_text_title",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Split => b(
-//RS                 "string_split",
-//RS                 "jet_iter_string_split",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Lines => b(
-//RS                 "string_lines",
-//RS                 "jet_string_lines",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Chars => b(
-//RS                 "string_chars",
-//RS                 "jet_string_chars",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ParseInt => b(
-//RS                 "int_parse",
-//RS                 "jet_std::jet_int_parse",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             IntToRadix { .. } => b(
-//RS                 "int_to_radix",
-//RS                 "jet_std::jet_int_to_radix",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             IntFromRadix { .. } => b(
-//RS                 "int_from_radix",
-//RS                 "jet_std::jet_int_from_radix",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ToUpper => b(
-//RS                 "string_upper",
-//RS                 "jet_unicode_upper",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ToLower => b(
-//RS                 "string_lower",
-//RS                 "jet_unicode_lower",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ToAsciiLower => b(
-//RS                 "string_ascii_lower",
-//RS                 "jet_text_ascii_lower",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ToAsciiUpper => b(
-//RS                 "string_ascii_upper",
-//RS                 "jet_text_ascii_upper",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Slice { .. } => b(
-//RS                 "string_slice",
-//RS                 "jet_string_slice_builtin",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             After => b(
-//RS                 "string_after",
-//RS                 "jet_string_after",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Before => b(
-//RS                 "string_before",
-//RS                 "jet_string_before",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             TrimView => b(
-//RS                 "string_trim_view",
-//RS                 "jet_unicode_trim_view",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             AfterView => b(
-//RS                 "string_after_view",
-//RS                 "jet_string_after_view",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             BeforeView => b(
-//RS                 "string_before_view",
-//RS                 "jet_string_before_view",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Keys => b("map_keys", "jet_map_keys", 1, 1, &[true], None, carrier),
-//RS             Values => b("map_values", "jet_map_values", 1, 1, &[true], None, carrier),
-//RS             MapTopN { .. } => b(
-//RS                 "map_top_n",
-//RS                 "jet_map_top_n",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MapMin => b(
-//RS                 "map_min",
-//RS                 "jet_map_min_value_kernel",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MapMax => b(
-//RS                 "map_max",
-//RS                 "jet_map_max_value_kernel",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetUnion => b(
-//RS                 "set_union",
-//RS                 "jet_set_union",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetIntersection => b(
-//RS                 "set_intersection",
-//RS                 "jet_set_intersection",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetDifference => b(
-//RS                 "set_difference",
-//RS                 "jet_set_difference",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetSymmetricDifference => b(
-//RS                 "set_symmetric_difference",
-//RS                 "jet_set_symmetric_difference",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetIsSubset => b(
-//RS                 "set_is_subset",
-//RS                 "jet_set_is_subset",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetIsSuperset => b(
-//RS                 "set_is_superset",
-//RS                 "jet_set_is_superset",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetIsDisjoint => b(
-//RS                 "set_is_disjoint",
-//RS                 "jet_set_is_disjoint",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SetValues => b("set_values", "jet_set_values", 1, 1, &[true], None, carrier),
-//RS             SetPop => b(
-//RS                 "set_pop",
-//RS                 "jet_set_pop_kernel",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SetReplace => b(
-//RS                 "set_replace",
-//RS                 "jet_set_replace_kernel",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SetInsert => b(
-//RS                 "set_insert",
-//RS                 "jet_set_insert",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SetUpdate => b(
-//RS                 "set_update",
-//RS                 "jet_set_update",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SetDifferenceUpdate => b(
-//RS                 "set_difference_update",
-//RS                 "jet_set_difference_update",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SetIntersectionUpdate => b(
-//RS                 "set_intersection_update",
-//RS                 "jet_set_intersection_update",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SetSymmetricDifferenceUpdate => b(
-//RS                 "set_symmetric_difference_update",
-//RS                 "jet_set_symmetric_difference_update",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SetRemove => b(
-//RS                 "set_remove",
-//RS                 "jet_set_remove",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SortedSetInsert => b(
-//RS                 "sorted_set_insert",
-//RS                 "jet_sorted_set_insert",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SortedSetRemove => b(
-//RS                 "sorted_set_remove",
-//RS                 "jet_sorted_set_remove",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             BitSetAdd => b(
-//RS                 "bitset_add",
-//RS                 "jet_bitset_add",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             BitSetRemove => b(
-//RS                 "bitset_remove",
-//RS                 "jet_bitset_remove",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             BagAdd => b(
-//RS                 "bag_add",
-//RS                 "jet_bag_add",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             BagRemove => b(
-//RS                 "bag_remove",
-//RS                 "jet_bag_remove",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             PriorityQueueRemove { mode, .. } => match mode {
-//RS                 ListRemoveMode::Value => b(
-//RS                     "priority_queue_remove_value",
-//RS                     "jet_priority_queue_remove_value",
-//RS                     2,
-//RS                     2,
-//RS                     &[true, false],
-//RS                     Some(Effect::Mem),
-//RS                     carrier,
-//RS                 ),
-//RS                 ListRemoveMode::Slot => b(
-//RS                     "priority_queue_remove_slot",
-//RS                     "jet_priority_queue_remove_slot_canonical",
-//RS                     2,
-//RS                     2,
-//RS                     &[true, false],
-//RS                     Some(Effect::Mem),
-//RS                     carrier,
-//RS                 ),
-//RS                 ListRemoveMode::Dynamic => primitive(),
-//RS             },
-//RS             LruPut => b(
-//RS                 "lru_put",
-//RS                 "jet_lru_put",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             LruAddNew => b(
-//RS                 "lru_add_new",
-//RS                 "jet_lru_add_new",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             LruGet => b(
-//RS                 "lru_get",
-//RS                 "jet_lru_get",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             DequePushFront => b(
-//RS                 "deque_push_front",
-//RS                 "jet_deque_push_front",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             ByteBufferMethod { method } => byte_buffer_method_route(method, carrier)?,
-//RS             StringMethod { method } => string_method_route(method, result, carrier)?,
-//RS             ByteBufferWrite { method } => byte_buffer_write_route(method, carrier)?,
-//RS             DequePushBack => b(
-//RS                 "deque_push_back",
-//RS                 "jet_deque_push_back",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             DequePopFront => b(
-//RS                 "deque_pop_front",
-//RS                 "jet_deque_pop_front_kernel",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             DequePopBack => b(
-//RS                 "deque_pop_back",
-//RS                 "jet_deque_pop_back_kernel",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             DequeDelete => b(
-//RS                 "deque_delete",
-//RS                 "jet_deque_delete",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             DequeReverse => b(
-//RS                 "deque_reverse",
-//RS                 "jet_deque_reverse",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             DequeSplit => b(
-//RS                 "deque_split",
-//RS                 "jet_deque_split",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SplitWrite { .. } => b(
-//RS                 "split_write",
-//RS                 "jet_split_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             SortedSetUnion => b(
-//RS                 "sorted_set_union",
-//RS                 "jet_sorted_set_union",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SortedSetIntersection => b(
-//RS                 "sorted_set_intersection",
-//RS                 "jet_sorted_set_intersection",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SortedSetDifference => b(
-//RS                 "sorted_set_difference",
-//RS                 "jet_sorted_set_difference",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SortedSetSymmetricDifference => b(
-//RS                 "sorted_set_symmetric_difference",
-//RS                 "jet_sorted_set_symmetric_difference",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SortedSetIsSubset => b(
-//RS                 "sorted_set_is_subset",
-//RS                 "jet_sorted_set_is_subset",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SortedSetIsSuperset => b(
-//RS                 "sorted_set_is_superset",
-//RS                 "jet_sorted_set_is_superset",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SortedSetIsDisjoint => b(
-//RS                 "sorted_set_is_disjoint",
-//RS                 "jet_sorted_set_is_disjoint",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             TryCollect => b(
-//RS                 "try_collect",
-//RS                 "jet_list_try_collect",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             BitSetCopy => b("bitset_copy", "jet_bits_copy", 1, 1, &[true], None, carrier),
-//RS             ViewNew { .. } => b(
-//RS                 "view_new",
-//RS                 "jet_view_new",
-//RS                 4,
-//RS                 4,
-//RS                 &[true, false, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             ViewMutNew { .. } => b(
-//RS                 "view_mut_new",
-//RS                 "jet_view_mut_new",
-//RS                 4,
-//RS                 4,
-//RS                 &[true, false, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             ComputeViewNew { .. } => b(
-//RS                 "compute_view_new",
-//RS                 "jet_compute_view",
-//RS                 5,
-//RS                 5,
-//RS                 &[true, false, false, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             ComputeViewMutNew { .. } => b(
-//RS                 "compute_view_mut_new",
-//RS                 "jet_compute_view_mut",
-//RS                 5,
-//RS                 5,
-//RS                 &[true, false, false, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             GetDisjointWrite => b(
-//RS                 "get_disjoint_write",
-//RS                 "jet_get_disjoint_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             // Receiver-sensitive, native, callback-building, or type-parameterized
-//RS             // forms are expanded by the TIR-to-MIR projection.
-//RS             Sum {
-//RS                 float: true,
-//RS                 f32: true,
-//RS             } => b(
-//RS                 "sum_fixed_f32",
-//RS                 "jet_list_sum_fixed_f32",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Sum {
-//RS                 float: true,
-//RS                 f32: false,
-//RS             } => b(
-//RS                 "sum_fixed_f64",
-//RS                 "jet_list_sum_fixed_f64",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Sum { float: false, .. } => b("sum", "jet_list_sum", 1, 1, &[false], None, carrier),
-//RS             Min { float: false, .. } => b("min", "jet_list_min", 1, 1, &[false], None, carrier),
-//RS             Max { float: false, .. } => b("max", "jet_list_max", 1, 1, &[false], None, carrier),
-//RS             // D-FLOATSORT1: Float extrema use the collection sort order, so a
-//RS             // NaN item is the greatest value and never the least.
-//RS             Min { float: true } => {
-//RS                 b("min_float", "jet_list_min_float", 1, 1, &[false], None, carrier)
-//RS             }
-//RS             Max { float: true } => {
-//RS                 b("max_float", "jet_list_max_float", 1, 1, &[false], None, carrier)
-//RS             }
-//RS             ListMinMax { .. } => prelude(
-//RS                 MirPreludeFamily::BuiltinMethod,
-//RS                 "core.list",
-//RS                 "min_max",
-//RS                 "jet_list_min_max",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Aggregate,
-//RS             ),
-//RS             Product { float: false, .. } => {
-//RS                 b("product", "jet_list_product", 1, 1, &[false], None, carrier)
-//RS             }
-//RS             StringSplitOnce { .. } => b(
-//RS                 "string_split_once",
-//RS                 "jet_unicode_split_once",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StringCutLast { .. } => b(
-//RS                 "string_cut_last",
-//RS                 "jet_unicode_cut_last",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ParseFloat => b(
-//RS                 "float_parse",
-//RS                 "jet_std::jet_float_parse",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             Repeat => b(
-//RS                 "string_repeat",
-//RS                 "jet_string_repeat",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             StartsWith => b(
-//RS                 "list_starts_with",
-//RS                 "jet_list_starts_with",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ListSlice => b(
-//RS                 "list_slice",
-//RS                 "jet_list_slice",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ListBinarySearch => b(
-//RS                 "list_binary_search",
-//RS                 "jet_list_binary_search",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ByteBufferToBytes => b(
-//RS                 "byte_buffer_to_bytes",
-//RS                 "JetByteBuffer::to_bytes",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ByteBufferFrom => b(
-//RS                 "byte_buffer_from",
-//RS                 "JetByteBuffer::from",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MapEqual => b(
-//RS                 "map_equal",
-//RS                 "jet_map_equal",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MapFirst => b(
-//RS                 "map_first",
-//RS                 "jet_map_first_key",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MapIntersection => b(
-//RS                 "map_intersection",
-//RS                 "jet_map_intersection",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MapSliceKeys { .. } => b(
-//RS                 "map_slice",
-//RS                 "jet_map_slice",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             BagCount => b(
-//RS                 "bag_count",
-//RS                 "jet_bag_count",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DequePeekFront => b(
-//RS                 "deque_peek_front",
-//RS                 "jet_deque_peek_front",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             PriorityQueuePeek => b(
-//RS                 "priority_queue_peek",
-//RS                 "jet_priority_queue_peek",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             PriorityQueueToSortedList => b(
-//RS                 "priority_queue_to_sorted_list",
-//RS                 "jet_priority_queue_to_sorted_list",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             PriorityQueueFrom => b(
-//RS                 "priority_queue_from",
-//RS                 "jet_priority_queue_from",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             BagHas => b("bag_has", "jet_bag_has", 2, 2, &[true, true], None, carrier),
-//RS             DequePeekBack => b(
-//RS                 "deque_peek_back",
-//RS                 "jet_deque_peek_back",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DequeCapacity => b(
-//RS                 "deque_capacity",
-//RS                 "jet_deque_capacity",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DequeContains => b(
-//RS                 "deque_contains",
-//RS                 "jet_deque_contains",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DequeGet => b(
-//RS                 "deque_get",
-//RS                 "jet_deque_get",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DequeToList => b(
-//RS                 "deque_to_list",
-//RS                 "jet_deque_to_list",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DequeJoin => b(
-//RS                 "deque_join",
-//RS                 "jet_deque_join",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DequeFrom => b(
-//RS                 "deque_from",
-//RS                 "jet_deque_from",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MapToList { .. } => prelude(
-//RS                 MirPreludeFamily::BuiltinMethod,
-//RS                 "core.map",
-//RS                 "to_list",
-//RS                 "jet_map_to_list",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Aggregate,
-//RS             ),
-//RS             MapContainsValue => b(
-//RS                 "map_contains_value",
-//RS                 "jet_map_contains_value",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ContainsKey => b(
-//RS                 "map_has_key",
-//RS                 "jet_map_has_key",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             LruKeys => b("lru_keys", "jet_lru_keys", 1, 1, &[true], None, carrier),
-//RS             BitSetToList => b(
-//RS                 "bit_set_to_list",
-//RS                 "jet_bit_set_to_list",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             BitSetCount => b(
-//RS                 "bit_set_count",
-//RS                 "jet_bit_set_count",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             // D-ITER-RESUME1=A: one exclusive pull; the source keeps its remainder.
-//RS             IterNext => b(
-//RS                 "iter_next",
-//RS                 "jet_iter_next",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS             ),
-//RS             LenList
-//RS             | IsEmpty
-//RS             | GetMap
-//RS             | GetList
-//RS             | First
-//RS             | Last
-//RS             | Contains
-//RS             | JoinSep
-//RS             | Product { .. }
-//RS             | Unzip { .. }
-//RS             | EndsWith
-//RS             | Replace
-//RS             | ToString
-//RS             | Take
-//RS             | Skip
-//RS             | IterToList
-//RS             | IterCollect
-//RS             | ListLazy
-//RS             | StepBy
-//RS             | Dedup
-//RS             | Chunks
-//RS             | Windows
-//RS             | IterRepeat
-//RS             | IterCycle
-//RS             | IterDropLast
-//RS             | IterShuffle
-//RS             | IterIsSorted
-//RS             | IterLastIndexOf
-//RS             | IterAverage { .. }
-//RS             | IterCompare
-//RS             | ListCopy
-//RS             | ListUnion
-//RS             | ListIntersection
-//RS             | ListDifference
-//RS             | ListRandom
-//RS             | SetCopy
-//RS             | SetCapacity
-//RS             | MapCopy
-//RS             | MapNew
-//RS             | Zip { .. }
-//RS             | OptionZip { .. }
-//RS             | LruCapacity
-//RS             | BitSetNew
-//RS             | ByteBufferNew
-//RS             | BagLen => primitive(),
-//RS         };
-//RS         Ok(plan)
-//RS     }
-//RS 
-// END-PORT-PENDING 0516 crates/jet-codegen/src/Codegen/TIR/routes.rs:4388-6688
+// Private continuation of canonical Codegen.TIR.Routes; checked handle/builtin rows.
+use jet_foundation.[Type, Syntax, Effect, TBuiltinOp, THandleOp, THardwareCall, TFailureCarrier, TDBQueryMetadata, ListRemoveMode]
+use JetCodegen.Codegen.TIR.[TRoutePlan, TPreludeRoute, LowerError]
+use jet_foundation.MIR.[MirPreludeFamily, MirPreludeAbi, MirAuthorityDecision]
+use JetCodegen.Codegen.TIR.Routes.[prelude, prelude_route_row, primitive, route_error, as_prelude, b, atomic_method_route, byte_buffer_method_route, string_method_route, byte_buffer_write_route]
+use JetCollections.is_iter_type
 
+impl THandleOp {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4388
+    pub fn prelude_route(self, receiver: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+        return as_prelude(self.route_plan(receiver, carrier)?, "handle method variant {std.mem.discriminant(self):?}")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4400
+pub fn hardware_route(op: THardwareCall, carrier: TFailureCarrier) -> TRoutePlan {
+    (member, symbol, arity, mask) :: if op == {
+        .RegisterRead{..} -> ("register_read", "jet_hardware_register_read", 0, [])
+        .RegisterWrite{..} -> ("register_write", "jet_hardware_register_write", 1, [false])
+        .DMAStart{..} -> ("dma_start", "jet_hardware_dma_start", 1, [false])
+        .DMAWait{..} -> ("dma_wait", "jet_hardware_dma_wait", 0, [])
+    }
+    return prelude(.HandleMethod, "core.hardware", member, symbol, arity, arity, mask, None, carrier, .Value)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4431
+pub fn devserver_route(method: String, carrier: TFailureCarrier) -> TRoutePlan {
+    (symbol, arity, mask, effect) :: if method == {
+        "html" -> ("jet_devserver_html", 2, [true, false], None)
+        "port" -> ("jet_devserver_port", 2, [true, false], None)
+        "serve" -> ("jet_devserver_serve", 1, [true], Val(.Net))
+        _ -> return primitive()
+    }
+    return prelude(.HandleMethod, "core.web.devserver", method, symbol, arity, arity, mask, effect, carrier, .Value)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4452
+pub fn app_route(method: String, args_len: USize, carrier: TFailureCarrier) -> TRoutePlan {
+    (symbol, arity, mask, effect) :: if (method, args_len) == {
+        ("route", 2) -> ("jet_app_route", 4, [true, false, false, false], None)
+        ("page", 2) -> ("jet_app_page", 4, [true, false, false, false], None)
+        ("layout", 2) -> ("jet_app_layout", 4, [true, false, false, false], None)
+        ("loader", 2) -> ("jet_app_loader", 4, [true, false, false, false], None)
+        ("loader", 3) -> ("jet_app_loader_preload", 5, [true, false, false, false, false], None)
+        ("pending", 1) -> ("jet_app_pending", 2, [true, false], None)
+        ("not_found", 1) -> ("jet_app_not_found", 2, [true, false], None)
+        ("error", 1) -> ("jet_app_error", 2, [true, false], None)
+        ("action", 2) -> ("jet_app_action", 3, [true, false, false], None)
+        ("form", 2) -> ("jet_app_form", 4, [true, false, false, false], None)
+        ("data", 2) -> ("jet_app_data", 3, [true, false, false], None)
+        ("mount", 2) -> ("jet_app_mount", 3, [true, false, false], None)
+        ("mount", 3) -> ("jet_app_mount_with_effect", 4, [true, false, false, false], None)
+        ("mount", 4) -> ("jet_app_mount_with_policy", 5, [true, false, false, false, false], None)
+        ("routes", 1) -> ("jet_app_routes", 2, [true, false], None)
+        ("security", 1) -> ("jet_app_security", 2, [true, false], None)
+        ("assets", 1) -> ("jet_app_assets", 2, [true, false], None)
+        ("split", 1) -> ("jet_app_split", 2, [true, false], None)
+        ("code_split", 1) -> ("jet_app_code_split", 2, [true, false], None)
+        ("cache", 1) -> ("jet_app_cache", 2, [true, false], None)
+        ("a11y", 1) -> ("jet_app_a11y", 2, [true, false], None)
+        ("adapter", 1) -> ("jet_app_adapter", 2, [true, false], None)
+        ("csr", 0) -> ("jet_app_csr", 1, [true], None)
+        ("ssr", 0) -> ("jet_app_ssr", 1, [true], None)
+        ("ssg", 0) -> ("jet_app_ssg", 1, [true], None)
+        ("stream", 0) -> ("jet_app_stream", 1, [true], None)
+        ("streaming", 0) -> ("jet_app_streaming", 1, [true], None)
+        ("island", 0) -> ("jet_app_island", 1, [true], None)
+        ("hydration_dev", 0) -> ("jet_app_hydration_dev", 1, [true], None)
+        ("hydration_release", 0) -> ("jet_app_hydration_release", 1, [true], None)
+        ("facts_json", 0) -> ("jet_app_facts_json", 1, [true], None)
+        ("serve", 0) -> ("jet_app_serve", 1, [true], Val(.Net))
+        ("serve", 1) -> ("jet_app_serve_with_port", 2, [true, false], Val(.Net))
+        ("serve_on", 1) -> ("jet_app_serve_on", 2, [true, false], Val(.Net))
+        _ -> return primitive()
+    }
+    return prelude(.HandleMethod, "core.web.app", method, symbol, arity, arity, mask, effect, carrier, .Value)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4525
+pub fn h(member: String, symbol: String, arity: USize, max_arity: USize, borrow_mask: [Bool], effect: Effect?, carrier: TFailureCarrier) -> TRoutePlan {
+    return prelude(.HandleMethod, "core.handle", member, symbol, arity, max_arity, borrow_mask, effect, carrier, .Value)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4547
+pub fn regex_route(kind: String, method: String, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    (symbol, mask) :: if (kind, method) == {
+        ("Regex", "pattern") -> ("jet_std::JetRegex::pattern", [true])
+        ("Regex", "source") -> ("jet_std::JetRegex::source", [true])
+        ("Regex", "flags") -> ("jet_std::JetRegex::flags", [true])
+        ("Regex", "options") -> ("jet_std::JetRegex::options", [true])
+        ("Regex", "names") -> ("jet_std::JetRegex::names", [true])
+        ("Regex", "count") -> ("jet_std::JetRegex::count", [true, true])
+        ("Regex", "is_match") -> ("jet_std::JetRegex::is_match", [true, true])
+        ("Regex", "full_match") -> ("jet_std::JetRegex::full_match", [true, true])
+        ("Regex", "match") -> ("jet_std::JetRegex::match_value", [true, true])
+        ("Regex", "find") -> ("jet_std::JetRegex::find", [true, true])
+        ("Regex", "find_all") -> ("jet_std::JetRegex::find_all", [true, true])
+        ("Regex", "matches") -> ("jet_std::JetRegex::matches", [true, true])
+        ("Regex", "split") -> ("jet_std::JetRegex::split", [true, true])
+        ("Regex", "replace") -> ("jet_std::JetRegex::replace", [true, true, true])
+        ("Regex", "replace_first") -> ("jet_std::JetRegex::replace_first", [true, true, true])
+        ("Regex", "replace_all_with") -> ("jet_std::JetRegex::replace_all_with", [true, true, false])
+        ("Regex", "split_limit") -> ("jet_std::JetRegex::split_limit", [true, true, false])
+        ("Match", "start") -> ("jet_std::JetRegexMatch::start", [true])
+        ("Match", "end") -> ("jet_std::JetRegexMatch::end", [true])
+        ("Match", "named_captures") -> ("jet_std::JetRegexMatch::named_captures", [true])
+        ("Match", "group") -> ("jet_std::JetRegexMatch::group", [true, false])
+        ("Match", "name") -> ("jet_std::JetRegexMatch::name", [true, true])
+        ("Match", "group_start") -> ("jet_std::JetRegexMatch::group_start", [true, false])
+        ("Match", "group_end") -> ("jet_std::JetRegexMatch::group_end", [true, false])
+        _ -> throw route_error("unknown checked regex method `{kind}.{method}`")
+    }
+    return h("{kind}.{method}", symbol, mask.len(), mask.len(), mask, None, carrier)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4600
+pub fn url_mime_route(kind: String, method: String, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    (symbol, mask) :: if (kind, method) == {
+        ("MIME", "media_type") -> ("jet_std::JetMIME::media_type", [true])
+        ("MIME", "subtype") -> ("jet_std::JetMIME::subtype", [true])
+        ("MIME", "essence") -> ("jet_std::JetMIME::essence", [true])
+        ("MIME", "params") -> ("jet_std::JetMIME::params", [true])
+        ("MIME", "to_string") -> ("jet_std::JetMIME::to_string_value", [true])
+        ("MIME", "param") -> ("jet_std::JetMIME::param", [true, true])
+        _ -> throw route_error("unknown checked URL/MIME method `{kind}.{method}`")
+    }
+    return h("{kind}.{method}", symbol, mask.len(), mask.len(), mask, None, carrier)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4630
+pub fn measurement_route(method: String, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    (symbol, mask) :: if method == {
+        "value" -> ("jet_std::JetMeasurement::value", [true])
+        "uncertainty" -> ("jet_std::JetMeasurement::uncertainty", [true])
+        "add" -> ("jet_std::JetMeasurement::add", [true, false])
+        "sub" -> ("jet_std::JetMeasurement::sub", [true, false])
+        "mul" -> ("jet_std::JetMeasurement::mul", [true, false])
+        "div" -> ("jet_std::JetMeasurement::div", [true, false])
+        "sqrt" -> ("jet_std::JetMeasurement::sqrt", [true])
+        _ -> throw route_error("unknown checked measurement method `{method}`")
+    }
+    return h("Measurement.{method}", symbol, mask.len(), mask.len(), mask, None, carrier)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4657
+pub fn reactive_method_route(receiver: Type, method: String, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    (member, symbol, mask) :: if (receiver.without_user_tags().base_name(), method) == {
+        (.Val("Signal"), "get") -> ("Signal.get", "jet_std::JetSignal::get", [true])
+        (.Val("Derived" | "Computed"), "get") -> ("Derived.get", "jet_std::JetDerived::get", [true])
+        (.Val("Signal"), "set") -> ("Signal.set", "jet_std::JetSignal::set", [true, false])
+        _ -> throw route_error("checked reactive method `{method}` has no receiver route for {receiver.name()}")
+    }
+    return prelude(.HandleMethod, "core.reactive", member, symbol, mask.len(), mask.len(), mask, None, carrier, .Value)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4690
+pub fn layout_method_route(method: String, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    (symbol, arity, mask) :: if method == {
+        "h" | "v" -> ("jet_layout::Handle::{method}", 3, [true, false, false])
+        "value" -> ("jet_layout::Handle::value", 2, [true, false])
+        "suggest" -> ("jet_layout::Handle::suggest", 3, [true, false, false])
+        "is_feasible" -> ("jet_layout::Handle::is_feasible", 1, [true])
+        "conflict" -> ("jet_layout::Handle::conflict", 1, [true])
+        "required" | "strong" | "medium" | "weak" -> ("jet_layout::Constraint::{method}", 1, [false])
+        _ -> throw route_error("unknown checked layout method `{method}`")
+    }
+    return .Prelude(prelude_route_row(.HandleMethod, "core.layout", "layout.{method}", symbol, arity, arity, mask, None, carrier, .Value, "layout method")?)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4734
+pub fn loadable_method_route(method: String, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    (arity, mask) :: if method == {
+        "is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded" -> (1, [true])
+        "or_else" -> (2, [true, false])
+        _ -> throw route_error("unknown checked Loadable method `{method}`")
+    }
+    return .Prelude(prelude_route_row(.HandleMethod, "core.pending", "loadable.{method}", "JetLoadable::{method}", arity, arity, mask, None, carrier, .Value, "loadable method")?)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4764
+pub fn ui_backend_method_route(method: String, receiver: Type, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    name :: if receiver == { .Named(name) | .Apply{name, ..} -> name; _ -> throw route_error("checked UI backend receiver has no nominal type") }
+    name :: name.rsplit("::").next().unwrap_or(name)
+    name :: name.rsplit('.').next().unwrap_or(name)
+    backend :: if name == { "NullBackend" -> "JetNullBackend"; "TUIBackend" -> "JetTuiBackend"; "GtkBackend" -> "JetGtkBackend"; _ -> throw route_error("checked UI backend type `{name}` has no Prelude carrier") }
+    (member, mask) :: if method == {
+        "measure" -> ("measure_node", [true, false, false])
+        "layout" -> ("layout_node", [true, false, false])
+        "paint" -> ("paint_node", [true, false])
+        "on_event" -> ("dispatch_event", [true, false])
+        "mount_default" -> ("mount_node_default", [true, false])
+        "mount" -> ("mount_node", [true, false, false])
+        "set_focus_group" -> ("set_focus_group", [true, false])
+        "focused_label" -> ("focused_label", [true])
+        "commands" if name == "NullBackend" -> ("paint_commands", [true])
+        "frame_lines" | "render_count" if name == "TUIBackend" -> (method, [true])
+        "present" if name == "GtkBackend" -> ("present", [true, false])
+        _ -> throw route_error("checked UI backend method `{name}.{method}` has no Prelude route")
+    }
+    return .Prelude(prelude_route_row(.HandleMethod, "core.ui", "{name}.{method}", "{backend}::{member}", mask.len(), mask.len(), mask, None, carrier, .Value, "UI backend method")?)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4823
+pub fn db_h(member: String, symbol: String, metadata: TDBQueryMetadata?, carrier: TFailureCarrier) -> TRoutePlan {
+    plan := prelude(.HandleMethod, "core.handle", member, symbol, 3, 3, [true, true, true], Val(.DB), carrier, .Value)
+    if plan != .Prelude(route) -> panic("database route is always a Prelude route")
+    route.db_metadata = ~metadata
+    return .Prelude(^route)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4847
+pub fn plugin_call_route(member: String, symbol: String, carrier: TFailureCarrier) -> TRoutePlan {
+    plan := prelude(.HandleMethod, "core.handle", member, symbol, 3, 3, [true, true, true], Val(.FFI), carrier, .Value)
+    if plan != .Prelude(route) -> panic("plugin call route is always a Prelude route")
+    route.authority = Val(MirAuthorityDecision.plugin_call())
+    return .Prelude(^route)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4866
+pub fn is_string_receiver(receiver: Type) -> Bool {
+    return if receiver == { .Tagged{inner, ..} -> is_string_receiver(inner); .String -> true; _ -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4874
+pub fn builtin_collection_route(op: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    if receiver == .Tagged{inner, ..} -> return builtin_collection_route(op, inner, carrier)
+    row :: (member, symbol, arity, mask) -> b(member, symbol, arity, arity, mask, None, carrier)
+    return if (op, receiver) == {
+        (.Contains, .List(_) | .FixedList{..}) -> row("contains", "jet_list_contains", 2, [true, true])
+        (.Contains, .Apply{name: "Set", ..}) -> row("contains", "jet_set_has", 2, [true, true])
+        (.Max{float: false, ..}, .Apply{name: "Set", ..}) -> row("max", "jet_set_max", 1, [true])
+        (.SetShuffle, .Apply{name: "Set", ..}) -> row("shuffle", "jet_set_shuffle", 1, [true])
+        (.Contains, .Apply{name: "View" | "ViewMut" | "ComputeViewMut", ..}) -> row("contains", "jet_list_contains", 2, [true, true])
+        (.Contains, .Named("Range") | .InlineRange{..}) -> row("contains", "jet_range_contains", 2, [true, false])
+        (.Contains, .Named(name)) if name == Syntax.TYPE_BITS -> row("bit_set_has", "jet_bit_set_has", 2, [true, false])
+        (.ListUnion, .List(_) | .FixedList{..}) -> row("union", "jet_list_union", 2, [true, true])
+        (.ListIntersection, .List(_) | .FixedList{..}) -> row("intersection", "jet_list_intersection", 2, [true, true])
+        (.ListDifference, .List(_) | .FixedList{..}) -> row("difference", "jet_list_difference", 2, [true, true])
+        (.ListRandom, .List(_) | .FixedList{..}) -> row("random", "jet_list_random", 1, [true])
+        (.LenList, .List(_) | .FixedList{..}) -> row("len", "jet_list_len", 1, [true])
+        (.LenList, .Apply{name: "Iter" | "ViewIter", ..}) -> row("len", "jet_iter_len", 1, [false])
+        (.LenList, .Apply{name: "View" | "ViewMut" | "ComputeViewMut", ..}) -> row("len", "jet_list_len", 1, [true])
+        (.LenList, .Map{..}) -> row("len", "jet_map_len", 1, [true])
+        (.ContainsKey, .Map{..}) -> row("map_has_key", "jet_map_has_key", 2, [true, true])
+        (.ContainsKey, .Apply{name, ..}) if name == Syntax.TYPE_LRU -> row("lru_has", "jet_lru_has", 2, [true, false])
+        (.LenList, .Apply{name: "Set", ..}) -> row("len", "jet_set_len", 1, [true])
+        (.SetCapacity, .Apply{name: "Set", ..}) -> row("capacity", "jet_set_capacity", 1, [true])
+        (.LenList, .Apply{name, ..}) if name == Syntax.TYPE_RANK -> row("len", "jet_sorted_set_len", 1, [true])
+        (.LenList, .Apply{name, ..}) if name == Syntax.TYPE_PRIORITY_QUEUE -> row("len", "jet_priority_queue_len", 1, [true])
+        (.LenList, .Apply{name, ..}) if name == Syntax.TYPE_LRU -> row("len", "jet_lru_len", 1, [true])
+        (.LenList, .Apply{name, ..}) if name == Syntax.TYPE_TALLY -> row("len", "jet_bag_len", 1, [true])
+        (.LenList, .Named(name)) if name == Syntax.TYPE_BITS -> row("len", "jet_bit_set_len", 1, [true])
+        (.LenList, .Apply{name, ..}) if name == Syntax.TYPE_QUEUE -> row("len", "jet_deque_len", 1, [true])
+        (.DequeCapacity, .Apply{name, ..}) if name == Syntax.TYPE_QUEUE -> row("capacity", "jet_deque_capacity", 1, [true])
+        (.LenList, .String) -> row("len", "jet_char_len", 1, [true])
+        (.IsEmpty, .List(_) | .FixedList{..}) -> row("is_empty", "jet_list_is_empty", 1, [true])
+        (.IsEmpty, .Apply{name: "Iter" | "ViewIter", ..}) -> row("is_empty", "jet_iter_is_empty", 1, [false])
+        (.IsEmpty, .Apply{name: "View" | "ViewMut" | "ComputeViewMut", ..}) -> row("is_empty", "jet_list_is_empty", 1, [true])
+        (.IsEmpty, .Map{..}) -> row("is_empty", "jet_map_is_empty", 1, [true])
+        (.IsEmpty, .String) -> row("is_empty", "jet_string_is_empty", 1, [true])
+        (.IsEmpty, .Apply{name: "Set", ..}) -> row("is_empty", "jet_set_is_empty", 1, [true])
+        (.IsEmpty, .Apply{name, ..}) if name == Syntax.TYPE_RANK -> row("is_empty", "jet_sorted_set_is_empty", 1, [true])
+        (.IsEmpty, .Apply{name, ..}) if name == Syntax.TYPE_PRIORITY_QUEUE -> row("is_empty", "jet_priority_queue_is_empty", 1, [true])
+        (.IsEmpty, .Apply{name, ..}) if name == Syntax.TYPE_LRU -> row("is_empty", "jet_lru_is_empty", 1, [true])
+        (.IsEmpty, .Apply{name, ..}) if name == Syntax.TYPE_TALLY -> row("is_empty", "jet_bag_is_empty", 1, [true])
+        (.IsEmpty, .Named(name)) if name == Syntax.TYPE_BITS -> row("is_empty", "jet_bit_set_is_empty", 1, [true])
+        (.IsEmpty, .Apply{name, ..}) if name == Syntax.TYPE_QUEUE -> row("is_empty", "jet_deque_is_empty", 1, [true])
+        (.GetList, .List(_) | .FixedList{..}) -> row("get", "jet_list_get_opt", 2, [true, false])
+        (.GetList, .Apply{name: "View" | "ViewMut" | "ComputeViewMut", ..}) -> row("get", "jet_list_get_opt", 2, [true, false])
+        (.GetMap, .Map{..}) -> row("get", "jet_map_get_opt", 2, [true, true])
+        (.First, .List(_) | .FixedList{..}) -> row("first", "jet_list_first", 1, [true])
+        (.First, .Apply{name: "Iter" | "ViewIter", ..}) -> row("first", "jet_iter_first", 1, [false])
+        (.First, .Apply{name: "View" | "ViewMut" | "ComputeViewMut", ..}) -> row("first", "jet_list_first", 1, [true])
+        (.First, .Apply{name, ..}) if name == Syntax.TYPE_RANK -> row("first", "jet_sorted_set_first", 1, [true])
+        (.Last, .List(_) | .FixedList{..}) -> row("last", "jet_list_last", 1, [true])
+        (.Last, .Apply{name: "View" | "ViewMut" | "ComputeViewMut", ..}) -> row("last", "jet_list_last", 1, [true])
+        (.Last, .Apply{name, ..}) if name == Syntax.TYPE_RANK -> row("last", "jet_sorted_set_last", 1, [true])
+        _ -> throw route_error("checked builtin operation `{op:?}` has an unsupported receiver type")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:5056
+pub fn iterator_builtin_route(op: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> TRoutePlan? {
+    if receiver == .Tagged{inner, ..} -> return iterator_builtin_route(op, inner, carrier)
+    is_iter :: is_iter_type(receiver)
+    is_list :: receiver == .List(_) || receiver == .FixedList{..}
+    route :: (member, symbol, arity, mask) -> b(member, symbol, arity, arity, mask, None, carrier)
+    plan :: if op == {
+        .IterToList if is_iter -> route("iter_to_list", "jet_iter_to_list", 1, [false])
+        .IterCollect if is_iter -> route("iter_collect", "jet_iter_collect", 1, [false])
+        .ListLazy if is_list -> route("list_lazy", "jet_iter_from_vec", 1, [false])
+        .Take if is_iter -> route("iter_take", "jet_iter_take", 2, [false, false])
+        .Skip if is_iter -> route("iter_skip", "jet_iter_skip", 2, [false, false])
+        .StepBy if is_iter -> route("iter_step_by", "jet_iter_step_by", 2, [false, false])
+        .Dedup if is_iter -> route("iter_dedup", "jet_iter_dedup", 1, [false])
+        .Chunks if is_iter -> route("iter_chunks", "jet_iter_chunks", 2, [false, false])
+        .Windows if is_iter -> route("iter_windows", "jet_iter_windows", 2, [false, false])
+        .Flatten if is_iter -> route("iter_flatten", "jet_iter_flatten", 1, [false])
+        .Flatten if is_list -> route("list_flatten", "jet_list_flatten", 1, [false])
+        .Intersperse if is_iter -> route("iter_intersperse", "jet_iter_intersperse", 2, [false, false])
+        .IterRepeat if is_iter -> route("iter_repeat", "jet_iter_repeat", 2, [false, false])
+        .IterCycle if is_iter -> route("iter_cycle", "jet_iter_cycle", 2, [false, false])
+        .IterDropLast if is_iter -> route("iter_drop_last", "jet_iter_drop_last", 2, [false, false])
+        .IterShuffle if is_iter -> route("iter_shuffle", "jet_iter_shuffle", 1, [false])
+        .IterIsSorted if is_iter -> route("iter_is_sorted", "jet_iter_is_sorted", 1, [false])
+        .IterLastIndexOf if is_iter -> route("iter_last_index_of", "jet_iter_last_index_of", 2, [false, false])
+        .IterAverage{float: true} if is_iter -> route("iter_average_float", "jet_iter_average_float", 1, [false])
+        .IterAverage{float: false} if is_iter -> route("iter_average_int", "jet_iter_average_int", 1, [false])
+        .IterCompare if is_iter -> route("iter_compare", "jet_iter_compare", 2, [false, false])
+        .JoinSep if is_iter -> route("iter_join", "jet_iter_join", 2, [false, true])
+        .TryCollect if is_iter -> route("try_collect", "jet_list_try_collect", 1, [false])
+        _ -> return None
+    }
+    return Val(plan)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:5135
+pub fn map_from_keys_symbol(receiver: Type) -> String {
+    key :: if receiver.without_user_tags() == { .List(inner) -> inner.without_user_tags(); .FixedList{elem, ..} -> elem.without_user_tags(); other -> other }
+    return if key == { .String -> "jet_map_from_keys_kernel"; .Int | .IntN{..} | .Named("Int") -> "jet_map_from_keys_int"; _ -> "jet_map_from_keys_composite" }
+}
+
+impl TBuiltinOp {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:5150
+    pub fn route_plan(self, result: Type, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+        return if self == {
+            .AtomicMethod{method} -> atomic_method_route(method, carrier)?
+            .LenString -> b("len_string", "jet_char_len", 1, 1, [true], None, carrier)
+            .ListTryNew -> b("list_try_new", "jet_list_try_new", 1, 1, [false], Val(.Mem), carrier)
+            .ListTryWithCapacity -> b("list_try_with_capacity", "jet_list_try_with_capacity", 2, 2, [false, false], Val(.Mem), carrier)
+            .TryPush -> b("list_try_push", "jet_list_try_push", 2, 2, [true, false], Val(.Mem), carrier)
+            .TryReserve -> b("list_try_reserve", "jet_list_try_reserve", 2, 2, [true, false], Val(.Mem), carrier)
+            .TryInsertMap -> b("map_try_insert", "jet_map_try_insert", 3, 3, [true, false, false], Val(.Mem), carrier)
+            .TryStringPush -> b("string_try_push", "jet_string_try_push", 2, 2, [true, true], Val(.Mem), carrier)
+            .Pop -> b("list_pop", "jet_list_pop_kernel", 1, 1, [true], Val(.Mem), carrier)
+            .PriorityQueuePop -> b("priority_queue_pop", "jet_priority_queue_pop_kernel", 1, 1, [true], Val(.Mem), carrier)
+            .MapUpdate -> b("map_update", "jet_map_update_all", 2, 2, [true, true], Val(.Mem), carrier)
+            .MapMerge -> b("map_merge", "jet_map_merge", 2, 2, [true, true], None, carrier)
+            .MapFromKeys -> b("map_from_keys", "jet_map_from_keys_kernel", 2, 2, [false, false], None, carrier)
+            .ListReplace -> b("list_replace", "jet_list_replace", 3, 3, [true, false, false], None, carrier)
+            .ListEqual -> b("list_equal", "jet_list_equal", 2, 2, [true, true], None, carrier)
+            .ByteBufferWithCapacity -> b("byte_buffer_with_capacity", "JetByteBuffer::with_capacity", 1, 1, [false], None, carrier)
+            .MatchGroup -> b("match_group", "jet_std::JetRegexMatch::group", 2, 2, [true, false], None, carrier)
+            .IterSplit{..} -> b("iter_split", "jet_iter_split_at", 3, 3, [false, false, false], None, carrier)
+            .Indexed{..} -> b("iter_enumerate", "jet_iter_enumerate", 2, 2, [false, false], None, carrier)
+            .Indexes -> b("indexes", "jet_iter_indexes", 1, 1, [false], None, carrier)
+            .MapMergeWith -> b("map_merge_with", "jet_map_merge_with", 3, 3, [true, true, false], None, carrier)
+            .InsertList -> b("list_insert", "jet_list_insert", 3, 3, [true, false, false], Val(.Mem), carrier)
+            .RemoveMap -> b("map_remove", "jet_map_pop_kernel", 2, 2, [true, true], Val(.Mem), carrier)
+            .SetFrom -> b("set_from", "jet_set_from", 1, 1, [false], None, carrier)
+            .SetToList -> b("set_to_list", "jet_set_to_list", 1, 1, [true], None, carrier)
+            .SetSort -> b("set_sort", "jet_set_sort", 1, 1, [true], None, carrier)
+            .SetShuffle -> b("set_shuffle", "jet_set_shuffle", 1, 1, [true], None, carrier)
+            .SetEqual -> b("set_equal", "jet_set_equal", 2, 2, [true, true], None, carrier)
+            .SetFirst -> b("set_first", "jet_set_first", 1, 1, [true], None, carrier)
+            .SortedSetFrom -> b("sorted_set_from", "jet_sorted_set_from", 1, 1, [false], None, carrier)
+            .SortedSetToList -> b("sorted_set_to_list", "jet_sorted_set_to_list", 1, 1, [true], None, carrier)
+            .RemoveList{mode, ..} -> if mode == {
+                .Value -> b("list_remove_value", "jet_list_remove_value", 2, 2, [true, false], Val(.Mem), carrier)
+                .Slot -> b("list_remove_slot", "jet_list_remove_slot", 2, 2, [true, false], Val(.Mem), carrier)
+                .Dynamic -> primitive()
+            }
+            .Push -> b("list_push", "jet_list_push", 2, 2, [true, false], Val(.Mem), carrier)
+            .IndexOf -> b("list_index_of", "jet_list_index_of", 2, 2, [true, true], None, carrier)
+            .InsertMap -> b("map_insert", "jet_map_insert", 3, 3, [true, false, false], Val(.Mem), carrier)
+            .AddNewMap -> b("map_add_new", "jet_map_add_new", 3, 3, [true, false, false], Val(.Mem), carrier)
+            .MapSetDefault -> b("map_setdefault", "jet_map_setdefault", 3, 3, [true, false, false], Val(.Mem), carrier)
+            .ExtendList -> b("list_extend", "jet_list_extend", 2, 2, [true, false], Val(.Mem), carrier)
+            .Reverse -> b("list_reverse", "jet_list_reverse", 1, 1, [true], Val(.Mem), carrier)
+            .Sort -> b("list_sort", "jet_list_sort", 1, 1, [true], Val(.Mem), carrier)
+            .Clear -> b("list_clear", "jet_list_clear", 1, 1, [true], Val(.Mem), carrier)
+            .MapPopFirst -> b("map_pop_first", "jet_map_pop_first", 1, 1, [true], Val(.Mem), carrier)
+            .CountList -> b("list_count", "jet_list_count", 2, 2, [true, true], None, carrier)
+            .Counts -> b("list_counts", "jet_list_counts", 1, 1, [false], None, carrier)
+            .ConcatList -> b("list_concat", "jet_list_concat", 2, 2, [true, true], None, carrier)
+            .SortDesc -> b("list_sort_desc", "jet_list_sort_desc", 1, 1, [true], Val(.Mem), carrier)
+            .OrderingThen -> b("ordering_then", "jet_ordering_then", 2, 2, [true, true], None, carrier)
+            .OrderingReverse -> b("ordering_reverse", "jet_ordering_reverse", 1, 1, [true], None, carrier)
+            .Flatten -> b("list_flatten", "jet_list_flatten", 1, 1, [false], None, carrier)
+            .Intersperse -> b("iter_intersperse", "jet_iter_intersperse", 2, 2, [false, false], None, carrier)
+            .StringFromBytes -> b("string_from_bytes", "jet_string_from_bytes", 1, 1, [true], None, carrier)
+            .StringFromBytesLossy -> b("string_from_bytes_lossy", "jet_string_from_bytes_lossy", 1, 1, [true], None, carrier)
+            .Bytes{owned: true} -> b("bytes", "jet_string_bytes", 1, 1, [false], None, carrier)
+            .Bytes{owned: false} -> b("bytes", "jet_string_bytes", 1, 1, [true], None, carrier)
+            .Trim -> b("string_trim", "jet_unicode_trim", 1, 1, [true], None, carrier)
+            .TrimStart -> b("string_trim_start", "jet_text_trim_start", 1, 1, [true], None, carrier)
+            .TrimEnd -> b("string_trim_end", "jet_text_trim_end", 1, 1, [true], None, carrier)
+            .PadStart -> b("string_pad_start", "jet_text_pad_start", 3, 3, [true, false, true], None, carrier)
+            .PadEnd -> b("string_pad_end", "jet_text_pad_end", 3, 3, [true, false, true], None, carrier)
+            .StringIndexOf -> b("string_index_of", "jet_unicode_index_of", 2, 2, [true, true], None, carrier)
+            .StringCount -> b("string_count", "jet_unicode_count", 2, 2, [true, true], None, carrier)
+            .StringIsAlphabetic -> b("string_is_alphabetic", "jet_text_is_alphabetic", 1, 1, [true], None, carrier)
+            .StringIsNumeric -> b("string_is_numeric", "jet_text_is_numeric", 1, 1, [true], None, carrier)
+            .StringIsWhitespace -> b("string_is_whitespace", "jet_text_is_whitespace", 1, 1, [true], None, carrier)
+            .StringIsAscii -> b("string_is_ascii", "jet_text_unicode_is_ascii", 1, 1, [true], None, carrier)
+            .StringToTitle -> b("string_to_title", "jet_text_title", 1, 1, [true], None, carrier)
+            .Split -> b("string_split", "jet_iter_string_split", 2, 2, [true, true], None, carrier)
+            .Lines -> b("string_lines", "jet_string_lines", 1, 1, [true], None, carrier)
+            .Chars -> b("string_chars", "jet_string_chars", 1, 1, [true], None, carrier)
+            .ParseInt -> b("int_parse", "jet_std::jet_int_parse", 1, 1, [true], None, carrier)
+            .IntToRadix{..} -> b("int_to_radix", "jet_std::jet_int_to_radix", 2, 2, [false, false], None, carrier)
+            .IntFromRadix{..} -> b("int_from_radix", "jet_std::jet_int_from_radix", 2, 2, [true, false], None, carrier)
+            .ToUpper -> b("string_upper", "jet_unicode_upper", 1, 1, [true], None, carrier)
+            .ToLower -> b("string_lower", "jet_unicode_lower", 1, 1, [true], None, carrier)
+            .ToAsciiLower -> b("string_ascii_lower", "jet_text_ascii_lower", 1, 1, [true], None, carrier)
+            .ToAsciiUpper -> b("string_ascii_upper", "jet_text_ascii_upper", 1, 1, [true], None, carrier)
+            .Slice{..} -> b("string_slice", "jet_string_slice_builtin", 3, 3, [true, false, false], None, carrier)
+            .After -> b("string_after", "jet_string_after", 2, 2, [true, true], None, carrier)
+            .Before -> b("string_before", "jet_string_before", 2, 2, [true, true], None, carrier)
+            .TrimView -> b("string_trim_view", "jet_unicode_trim_view", 1, 1, [true], None, carrier)
+            .AfterView -> b("string_after_view", "jet_string_after_view", 2, 2, [true, true], None, carrier)
+            .BeforeView -> b("string_before_view", "jet_string_before_view", 2, 2, [true, true], None, carrier)
+            .Keys -> b("map_keys", "jet_map_keys", 1, 1, [true], None, carrier)
+            .Values -> b("map_values", "jet_map_values", 1, 1, [true], None, carrier)
+            .MapTopN{..} -> b("map_top_n", "jet_map_top_n", 2, 2, [true, false], None, carrier)
+            .MapMin -> b("map_min", "jet_map_min_value_kernel", 1, 1, [true], None, carrier)
+            .MapMax -> b("map_max", "jet_map_max_value_kernel", 1, 1, [true], None, carrier)
+            .SetUnion -> b("set_union", "jet_set_union", 2, 2, [true, true], None, carrier)
+            .SetIntersection -> b("set_intersection", "jet_set_intersection", 2, 2, [true, true], None, carrier)
+            .SetDifference -> b("set_difference", "jet_set_difference", 2, 2, [true, true], None, carrier)
+            .SetSymmetricDifference -> b("set_symmetric_difference", "jet_set_symmetric_difference", 2, 2, [true, true], None, carrier)
+            .SetIsSubset -> b("set_is_subset", "jet_set_is_subset", 2, 2, [true, true], None, carrier)
+            .SetIsSuperset -> b("set_is_superset", "jet_set_is_superset", 2, 2, [true, true], None, carrier)
+            .SetIsDisjoint -> b("set_is_disjoint", "jet_set_is_disjoint", 2, 2, [true, true], None, carrier)
+            .SetValues -> b("set_values", "jet_set_values", 1, 1, [true], None, carrier)
+            .SetPop -> b("set_pop", "jet_set_pop_kernel", 2, 2, [true, true], Val(.Mem), carrier)
+            .SetReplace -> b("set_replace", "jet_set_replace_kernel", 2, 2, [true, false], Val(.Mem), carrier)
+            .SetInsert -> b("set_insert", "jet_set_insert", 2, 2, [true, false], Val(.Mem), carrier)
+            .SetUpdate -> b("set_update", "jet_set_update", 2, 2, [true, true], Val(.Mem), carrier)
+            .SetDifferenceUpdate -> b("set_difference_update", "jet_set_difference_update", 2, 2, [true, true], Val(.Mem), carrier)
+            .SetIntersectionUpdate -> b("set_intersection_update", "jet_set_intersection_update", 2, 2, [true, true], Val(.Mem), carrier)
+            .SetSymmetricDifferenceUpdate -> b("set_symmetric_difference_update", "jet_set_symmetric_difference_update", 2, 2, [true, true], Val(.Mem), carrier)
+            .SetRemove -> b("set_remove", "jet_set_remove", 2, 2, [true, false], Val(.Mem), carrier)
+            .SortedSetInsert -> b("sorted_set_insert", "jet_sorted_set_insert", 2, 2, [true, false], Val(.Mem), carrier)
+            .SortedSetRemove -> b("sorted_set_remove", "jet_sorted_set_remove", 2, 2, [true, false], Val(.Mem), carrier)
+            .BitSetAdd -> b("bitset_add", "jet_bitset_add", 2, 2, [true, false], Val(.Mem), carrier)
+            .BitSetRemove -> b("bitset_remove", "jet_bitset_remove", 2, 2, [true, false], Val(.Mem), carrier)
+            .BagAdd -> b("bag_add", "jet_bag_add", 2, 2, [true, false], Val(.Mem), carrier)
+            .BagRemove -> b("bag_remove", "jet_bag_remove", 2, 2, [true, false], Val(.Mem), carrier)
+            .PriorityQueueRemove{mode, ..} -> if mode == {
+                .Value -> b("priority_queue_remove_value", "jet_priority_queue_remove_value", 2, 2, [true, false], Val(.Mem), carrier)
+                .Slot -> b("priority_queue_remove_slot", "jet_priority_queue_remove_slot_canonical", 2, 2, [true, false], Val(.Mem), carrier)
+                .Dynamic -> primitive()
+            }
+            .LruPut -> b("lru_put", "jet_lru_put", 3, 3, [true, false, false], Val(.Mem), carrier)
+            .LruAddNew -> b("lru_add_new", "jet_lru_add_new", 3, 3, [true, false, false], Val(.Mem), carrier)
+            .LruGet -> b("lru_get", "jet_lru_get", 2, 2, [true, false], Val(.Mem), carrier)
+            .DequePushFront -> b("deque_push_front", "jet_deque_push_front", 2, 2, [true, false], Val(.Mem), carrier)
+            .ByteBufferMethod{method} -> byte_buffer_method_route(method, carrier)?
+            .StringMethod{method} -> string_method_route(method, result, carrier)?
+            .ByteBufferWrite{method} -> byte_buffer_write_route(method, carrier)?
+            .DequePushBack -> b("deque_push_back", "jet_deque_push_back", 2, 2, [true, false], Val(.Mem), carrier)
+            .DequePopFront -> b("deque_pop_front", "jet_deque_pop_front_kernel", 1, 1, [true], Val(.Mem), carrier)
+            .DequePopBack -> b("deque_pop_back", "jet_deque_pop_back_kernel", 1, 1, [true], Val(.Mem), carrier)
+            .DequeDelete -> b("deque_delete", "jet_deque_delete", 2, 2, [true, false], Val(.Mem), carrier)
+            .DequeReverse -> b("deque_reverse", "jet_deque_reverse", 1, 1, [true], Val(.Mem), carrier)
+            .DequeSplit -> b("deque_split", "jet_deque_split", 2, 2, [true, false], Val(.Mem), carrier)
+            .SplitWrite{..} -> b("split_write", "jet_split_write", 2, 2, [true, false], Val(.Mem), carrier)
+            .SortedSetUnion -> b("sorted_set_union", "jet_sorted_set_union", 2, 2, [true, true], None, carrier)
+            .SortedSetIntersection -> b("sorted_set_intersection", "jet_sorted_set_intersection", 2, 2, [true, true], None, carrier)
+            .SortedSetDifference -> b("sorted_set_difference", "jet_sorted_set_difference", 2, 2, [true, true], None, carrier)
+            .SortedSetSymmetricDifference -> b("sorted_set_symmetric_difference", "jet_sorted_set_symmetric_difference", 2, 2, [true, true], None, carrier)
+            .SortedSetIsSubset -> b("sorted_set_is_subset", "jet_sorted_set_is_subset", 2, 2, [true, true], None, carrier)
+            .SortedSetIsSuperset -> b("sorted_set_is_superset", "jet_sorted_set_is_superset", 2, 2, [true, true], None, carrier)
+            .SortedSetIsDisjoint -> b("sorted_set_is_disjoint", "jet_sorted_set_is_disjoint", 2, 2, [true, true], None, carrier)
+            .TryCollect -> b("try_collect", "jet_list_try_collect", 1, 1, [false], None, carrier)
+            .BitSetCopy -> b("bitset_copy", "jet_bits_copy", 1, 1, [true], None, carrier)
+            .ViewNew{..} -> b("view_new", "jet_view_new", 4, 4, [true, false, false, false], Val(.Mem), carrier)
+            .ViewMutNew{..} -> b("view_mut_new", "jet_view_mut_new", 4, 4, [true, false, false, false], Val(.Mem), carrier)
+            .ComputeViewNew{..} -> b("compute_view_new", "jet_compute_view", 5, 5, [true, false, false, false, false], Val(.Mem), carrier)
+            .ComputeViewMutNew{..} -> b("compute_view_mut_new", "jet_compute_view_mut", 5, 5, [true, false, false, false, false], Val(.Mem), carrier)
+            .GetDisjointWrite -> b("get_disjoint_write", "jet_get_disjoint_write", 2, 2, [true, true], Val(.Mem), carrier)
+            .Sum{float: true, f32: true} -> b("sum_fixed_f32", "jet_list_sum_fixed_f32", 1, 1, [false], None, carrier)
+            .Sum{float: true, f32: false} -> b("sum_fixed_f64", "jet_list_sum_fixed_f64", 1, 1, [false], None, carrier)
+            .Sum{float: false, ..} -> b("sum", "jet_list_sum", 1, 1, [false], None, carrier)
+            .Min{float: false, ..} -> b("min", "jet_list_min", 1, 1, [false], None, carrier)
+            .Max{float: false, ..} -> b("max", "jet_list_max", 1, 1, [false], None, carrier)
+            .Min{float: true} -> b("min_float", "jet_list_min_float", 1, 1, [false], None, carrier)
+            .Max{float: true} -> b("max_float", "jet_list_max_float", 1, 1, [false], None, carrier)
+            .ListMinMax{..} -> prelude(.BuiltinMethod, "core.list", "min_max", "jet_list_min_max", 1, 1, [true], None, carrier, .Aggregate)
+            .Product{float: false, ..} -> b("product", "jet_list_product", 1, 1, [false], None, carrier)
+            .StringSplitOnce{..} -> b("string_split_once", "jet_unicode_split_once", 2, 2, [true, true], None, carrier)
+            .StringCutLast{..} -> b("string_cut_last", "jet_unicode_cut_last", 2, 2, [true, true], None, carrier)
+            .ParseFloat -> b("float_parse", "jet_std::jet_float_parse", 1, 1, [true], None, carrier)
+            .Repeat -> b("string_repeat", "jet_string_repeat", 2, 2, [true, false], None, carrier)
+            .StartsWith -> b("list_starts_with", "jet_list_starts_with", 2, 2, [true, true], None, carrier)
+            .ListSlice -> b("list_slice", "jet_list_slice", 3, 3, [true, false, false], None, carrier)
+            .ListBinarySearch -> b("list_binary_search", "jet_list_binary_search", 2, 2, [true, true], None, carrier)
+            .ByteBufferToBytes -> b("byte_buffer_to_bytes", "JetByteBuffer::to_bytes", 1, 1, [true], None, carrier)
+            .ByteBufferFrom -> b("byte_buffer_from", "JetByteBuffer::from", 1, 1, [true], None, carrier)
+            .MapEqual -> b("map_equal", "jet_map_equal", 2, 2, [true, true], None, carrier)
+            .MapFirst -> b("map_first", "jet_map_first_key", 1, 1, [true], None, carrier)
+            .MapIntersection -> b("map_intersection", "jet_map_intersection", 2, 2, [true, true], None, carrier)
+            .MapSliceKeys{..} -> b("map_slice", "jet_map_slice", 2, 2, [true, false], None, carrier)
+            .BagCount -> b("bag_count", "jet_bag_count", 2, 2, [true, true], None, carrier)
+            .DequePeekFront -> b("deque_peek_front", "jet_deque_peek_front", 1, 1, [true], None, carrier)
+            .PriorityQueuePeek -> b("priority_queue_peek", "jet_priority_queue_peek", 1, 1, [true], None, carrier)
+            .PriorityQueueToSortedList -> b("priority_queue_to_sorted_list", "jet_priority_queue_to_sorted_list", 1, 1, [true], None, carrier)
+            .PriorityQueueFrom -> b("priority_queue_from", "jet_priority_queue_from", 1, 1, [false], None, carrier)
+            .BagHas -> b("bag_has", "jet_bag_has", 2, 2, [true, true], None, carrier)
+            .DequePeekBack -> b("deque_peek_back", "jet_deque_peek_back", 1, 1, [true], None, carrier)
+            .DequeCapacity -> b("deque_capacity", "jet_deque_capacity", 1, 1, [true], None, carrier)
+            .DequeContains -> b("deque_contains", "jet_deque_contains", 2, 2, [true, true], None, carrier)
+            .DequeGet -> b("deque_get", "jet_deque_get", 2, 2, [true, false], None, carrier)
+            .DequeToList -> b("deque_to_list", "jet_deque_to_list", 1, 1, [true], None, carrier)
+            .DequeJoin -> b("deque_join", "jet_deque_join", 2, 2, [true, true], None, carrier)
+            .DequeFrom -> b("deque_from", "jet_deque_from", 1, 1, [false], None, carrier)
+            .MapToList{..} -> prelude(.BuiltinMethod, "core.map", "to_list", "jet_map_to_list", 1, 1, [true], None, carrier, .Aggregate)
+            .MapContainsValue -> b("map_contains_value", "jet_map_contains_value", 2, 2, [true, true], None, carrier)
+            .ContainsKey -> b("map_has_key", "jet_map_has_key", 2, 2, [true, true], None, carrier)
+            .LruKeys -> b("lru_keys", "jet_lru_keys", 1, 1, [true], None, carrier)
+            .BitSetToList -> b("bit_set_to_list", "jet_bit_set_to_list", 1, 1, [true], None, carrier)
+            .BitSetCount -> b("bit_set_count", "jet_bit_set_count", 1, 1, [true], None, carrier)
+            .IterNext -> b("iter_next", "jet_iter_next", 1, 1, [true], Val(.Mem), carrier)
+            // These checked operations are structurally expanded by TIR-to-MIR, as in Rust.
+            .LenList | .IsEmpty | .GetMap | .GetList | .First | .Last | .Contains | .JoinSep | .Product{..} | .Unzip{..} | .EndsWith | .Replace | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage{..} | .IterCompare | .ListCopy | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .SetCopy | .SetCapacity | .MapCopy | .MapNew | .Zip{..} | .OptionZip{..} | .LruCapacity | .BitSetNew | .ByteBufferNew | .BagLen -> primitive()
+        }
+    }
+}

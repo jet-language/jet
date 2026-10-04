@@ -1,0 +1,18 @@
+use jet_codegen.Codegen.Web.[json_quote, encode_base64_vlq, encode_source_mappings, JSMapping, rust_marker_table]
+
+// Rust: crates/jet-codegen/src/Codegen/Web.rs:414-524 (behavioral controls; no inline Rust tests)
+#Test("web_source_map_encoding_controls") {
+    assert(json_quote("\"\\\n\r\t") == "\"\\\"\\\\\\n\\r\\t\"")
+    out := String.new()
+    encode_base64_vlq(0, &out)
+    encode_base64_vlq(1, &out)
+    encode_base64_vlq(-1, &out)
+    encode_base64_vlq(16, &out)
+    assert(out == "ACDgB")
+    assert(encode_source_mappings([]) == "")
+    assert(encode_source_mappings([JSMapping{generated_line: 0, generated_column: 0, source: 0, original_line: 0}]) == "AAAA")
+    table :: rust_marker_table("// jet:source-map source=sample.jet\n// jet:line 7\nfn generated() {{}}\nnext\n")
+    assert(table.jet_for_rust_line(2) == None)
+    assert(table.jet_for_rust_line(3) == Val(("sample.jet", 7)))
+    assert(table.jet_for_rust_line(4) == Val(("sample.jet", 7)))
+}

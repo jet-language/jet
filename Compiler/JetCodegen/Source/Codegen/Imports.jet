@@ -1,2003 +1,1234 @@
-// PORT-PENDING 0459 crates-jet-codegen-src-codegen-imports: crates/jet-codegen/src/Codegen/Imports.rs:1-1999
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS use crate::AST::{
-//RS     AccessConvention, ImportDecl, ImportKind, Item, ProgramBundle, Type, VariantPayload,
-//RS };
-//RS use std::collections::{HashMap, HashSet};
-//RS 
-//RS fn all_imports(
-//RS     module: &crate::AST::LoadedModule,
-//RS ) -> impl Iterator<Item = (Option<&str>, &ImportDecl)> {
-//RS     crate::AST::walk_imports(module)
-//RS         .into_iter()
-//RS         .map(|(scope, import)| (scope, import))
-//RS }
-//RS 
-//RS fn foreign_imports_after_frontend(imp: &ImportDecl) -> Vec<(crate::AST::ForeignNamespace, String)> {
-//RS     imp.foreign_imports().unwrap_or_else(|error| {
-//RS         unreachable!(
-//RS             "invalid foreign import reached codegen after sema: {}",
-//RS             error.path
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn is_c_import_after_frontend(imp: &ImportDecl) -> bool {
-//RS     imp.is_c_import().unwrap_or_else(|error| {
-//RS         unreachable!(
-//RS             "invalid foreign import reached codegen after sema: {}",
-//RS             error.path
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn is_foreign_member_list(imp: &ImportDecl) -> bool {
-//RS     matches!(imp.kind, ImportKind::Unqualified { .. })
-//RS         && !foreign_imports_after_frontend(imp).is_empty()
-//RS }
-//RS 
-//RS /// Look up the pre-resolved module index for an import. Returns `None` for
-//RS /// core modules, C imports, and unqualified imports (they have no file target).
-//RS #[inline]
-//RS fn resolve_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> Option<usize> {
-//RS     bundle.name_ledger.import_target(module_idx, imp.span)
-//RS }
-//RS 
-//RS fn required_import_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> usize {
-//RS     resolve_target(bundle, module_idx, imp).unwrap_or_else(|| {
-//RS         unreachable!(
-//RS             "import target missing after sema: module={} alias={} span={:?}",
-//RS             module_idx,
-//RS             imp.import_alias(),
-//RS             imp.span
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn required_c_target(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS     scope: Option<&str>,
-//RS     alias: &str,
-//RS ) -> usize {
-//RS     bundle
-//RS         .cffi
-//RS         .target_for_scope(module_idx, scope, alias)
-//RS         .unwrap_or_else(|| {
-//RS             unreachable!(
-//RS                 "C import target missing after sema: module={} scope={scope:?} alias={alias}",
-//RS                 module_idx
-//RS             )
-//RS         })
-//RS }
-//RS 
-//RS fn foreign_target(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS     namespace: crate::AST::ForeignNamespace,
-//RS     alias: String,
-//RS     scope: Option<&str>,
-//RS ) -> Option<(String, usize)> {
-//RS     let target = if namespace.language == crate::AST::ForeignLanguage::C {
-//RS         bundle.cffi.target_for_scope(module_idx, scope, &alias)
-//RS     } else {
-//RS         bundle
-//RS             .modules
-//RS             .iter()
-//RS             .position(|module| module.display == namespace.display())
-//RS     }?;
-//RS     Some((alias, target))
-//RS }
-//RS 
-//RS /// Resolve the targets named by any foreign import. The parser and AST keep
-//RS /// member lists in `ImportKind::Unqualified`; single-library imports remain
-//RS /// `Module` imports and share this resolver at inline scope.
-//RS 
-//RS pub(crate) fn foreign_import_targets_in_scope(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS     imp: &ImportDecl,
-//RS     scope: Option<&str>,
-//RS ) -> Vec<(String, usize)> {
-//RS     foreign_imports_after_frontend(imp)
-//RS         .into_iter()
-//RS         .map(|(namespace, alias)| {
-//RS             foreign_target(bundle, module_idx, namespace, alias, scope).unwrap_or_else(|| {
-//RS                 unreachable!(
-//RS                     "foreign import target missing after sema: module={} scope={scope:?}",
-//RS                     module_idx
-//RS                 )
-//RS             })
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Resolve only a foreign member-list import. This keeps the list branch
-//RS /// explicit for file-wide maps that still handle the single `Module` form in
-//RS /// their existing path.
-//RS pub(crate) fn foreign_list_targets(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS     imp: &ImportDecl,
-//RS ) -> Vec<(String, usize)> {
-//RS     foreign_list_targets_in_scope(bundle, module_idx, imp, None)
-//RS }
-//RS 
-//RS pub(crate) fn foreign_list_targets_in_scope(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS     imp: &ImportDecl,
-//RS     scope: Option<&str>,
-//RS ) -> Vec<(String, usize)> {
-//RS     matches!(imp.kind, ImportKind::Unqualified { .. })
-//RS         .then(|| foreign_import_targets_in_scope(bundle, module_idx, imp, scope))
-//RS         .unwrap_or_default()
-//RS }
-//RS 
-//RS fn file_import_target(bundle: &ProgramBundle, module_idx: usize, alias: &str) -> Option<usize> {
-//RS     bundle.modules[module_idx]
-//RS         .imports
-//RS         .iter()
-//RS         .filter(|imp| !matches!(imp.kind, ImportKind::Unqualified { .. }))
-//RS         .filter(|imp| imp.import_alias() == alias)
-//RS         .find_map(|imp| resolve_target(bundle, module_idx, imp))
-//RS }
-//RS 
-//RS fn inline_code_module_named(bundle: &ProgramBundle, module_idx: usize, name: &str) -> bool {
-//RS     bundle.modules[module_idx].items.iter().any(|item| {
-//RS         matches!(
-//RS             item,
-//RS             Item::CodeModule(cm) if cm.body.is_some() && cm.name == name
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// Resolve nominal declarations reached through `use module.Item`. The
-//RS /// selective spelling has no module import edge of its own, so its canonical
-//RS /// owner comes from the ledger alias recorded for the local item binding.
-//RS pub(crate) fn selective_nominal_targets(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> Vec<(usize, String)> {
-//RS     let mut targets = Vec::new();
-//RS     for import in &bundle.modules[module_idx].imports {
-//RS         if !matches!(import.kind, ImportKind::Unqualified { .. }) {
-//RS             continue;
-//RS         }
-//RS         for binding in import.walk_bindings() {
-//RS             let Some(original) = binding.original else {
-//RS                 continue;
-//RS             };
-//RS             let local = binding.local;
-//RS             let Some(target) = bundle
-//RS                 .name_ledger
-//RS                 .alias(module_idx, &local)
-//RS                 .and_then(|alias| alias.target_module)
-//RS                 .or_else(|| {
-//RS                     crate::AST::core_list_prefix(binding.module_alias)
-//RS                         .and_then(|path| core_source_target(bundle, &path).map(|(_, target)| target))
-//RS                 })
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             let leaf = original.rsplit('.').next().unwrap_or(original);
-//RS             let is_nominal = bundle.modules[target].items.iter().any(|item| match item {
-//RS                 Item::Struct(definition) => definition.name == leaf,
-//RS                 Item::Enum(definition) => definition.name == leaf,
-//RS                 Item::Distinct(definition) => definition.name == leaf,
-//RS                 Item::UnitFamily(family) => family
-//RS                     .distinct_defs()
-//RS                     .iter()
-//RS                     .any(|member| member.name == leaf),
-//RS                 _ => false,
-//RS             });
-//RS             if is_nominal && bundle.name_ledger.visible(module_idx, target, leaf) {
-//RS                 targets.push((target, leaf.to_string()));
-//RS             }
-//RS         }
-//RS     }
-//RS     targets.sort_unstable();
-//RS     targets.dedup();
-//RS     targets
-//RS }
-//RS 
-//RS fn qualify_unit_type(bundle: &ProgramBundle, target: usize, ty: &Type) -> Type {
-//RS     ty.map_named_types(&|name| {
-//RS         bundle.modules[target]
-//RS             .items
-//RS             .iter()
-//RS             .any(|item| matches!(item, Item::UnitFamily(family) if family.distinct_defs().iter().any(|member| member.name == name)))
-//RS             .then(|| {
-//RS                 bundle
-//RS                     .name_ledger
-//RS                     .nominal_identity(target, name)
-//RS                     .expect("name ledger must contain every loaded module")
-//RS             })
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn qualify_imported_call_type(
-//RS     bundle: &ProgramBundle,
-//RS     target: usize,
-//RS     _alias: &str,
-//RS     ty: &Type,
-//RS ) -> Type {
-//RS     let unit_qualified = qualify_unit_type(bundle, target, ty);
-//RS     let owner = bundle
-//RS         .name_ledger
-//RS         .module_identity(target)
-//RS         .expect("name ledger must contain every loaded module");
-//RS     crate::Codegen::TIR::qualify_imported_type(bundle, target, &owner, &[], &unit_qualified)
-//RS }
-//RS /// After `cx.foreign_types` is populated, add the foreign type names to
-//RS /// `cx.type_names` and re-run the cloneability/hashability checks for any local
-//RS /// structs or enums that reference those foreign types as fields.
-//RS pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]) {
-//RS     let mut foreign_leaf_counts: HashMap<String, usize> = HashMap::new();
-//RS     for name in cx.foreign_types.keys() {
-//RS         cx.type_names.insert(name.clone());
-//RS         *foreign_leaf_counts
-//RS             .entry(crate::Codegen::nominal_leaf(name).to_string())
-//RS             .or_default() += 1;
-//RS     }
-//RS     // Local field types retain the visible leaf (`NoteType`), while the import
-//RS     // map stores the canonical nominal (`<module>::NoteType`). Make the leaf
-//RS     // available to the existing cloneability walk only when it identifies one
-//RS     // foreign nominal; ambiguous leaves must remain unresolved.
-//RS     for (leaf, count) in foreign_leaf_counts {
-//RS         if count == 1 {
-//RS             cx.type_names.insert(leaf);
-//RS         }
-//RS     }
-//RS     let secret = cx.secret_containing_types();
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Struct(s) => {
-//RS                 if !cx.cloneable.contains(&s.name)
-//RS                     && type_is_cloneable_struct(s, &cx.type_names)
-//RS                     && !secret.contains(&s.name)
-//RS                 {
-//RS                     cx.cloneable.insert(s.name.clone());
-//RS                 }
-//RS                 if !cx.hashable.contains(&s.name) && type_is_hashable_struct(s, &cx.hashable) {
-//RS                     cx.hashable.insert(s.name.clone());
-//RS                 }
-//RS             }
-//RS             Item::Enum(e) => {
-//RS                 if !cx.cloneable.contains(&e.name)
-//RS                     && type_is_cloneable_enum(e, &cx.type_names)
-//RS                     && !secret.contains(&e.name)
-//RS                 {
-//RS                     cx.cloneable.insert(e.name.clone());
-//RS                 }
-//RS                 if !cx.hashable.contains(&e.name) && type_is_hashable_enum(e, &cx.hashable) {
-//RS                     cx.hashable.insert(e.name.clone());
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Build the cross-module type map with one canonical nominal key per owner.
-//RS /// Import aliases are source lookup projections, never semantic identities.
-//RS pub(crate) fn foreign_type_map(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> HashMap<String, String> {
-//RS     let mut map = HashMap::new();
-//RS     let module = &bundle.modules[module_idx];
-//RS     let is_local = |name: &str| {
-//RS         module.items.iter().any(|item| match item {
-//RS             Item::Struct(structure) => structure.name == name,
-//RS             Item::Enum(enumeration) => enumeration.name == name,
-//RS             _ => false,
-//RS         })
-//RS     };
-//RS     let mut add_target = |target: usize| {
-//RS         let rust_mod = mangle(&bundle.modules[target].alias);
-//RS         // `Ordering` is deliberately absent here. It is declared once per
-//RS         // generated crate (`push_cached_runtime_traits`) and imported into every
-//RS         // module by `MOD_USE`, so it has exactly one Rust identity and nothing
-//RS         // to qualify. Mapping it to an imported module made this module's own
-//RS         // bare `Ordering` leaf-resolve to that module's copy — including in the
-//RS         // `impl __jet_Comparable` blocks whose trait comes from the Prelude
-//RS         // (E0053, I2).
-//RS         for item in &bundle.modules[target].items {
-//RS             match item {
-//RS                 Item::Struct(s)
-//RS                     if bundle.name_ledger.visible(module_idx, target, &s.name)
-//RS                         && !is_local(&s.name) =>
-//RS                 {
-//RS                     if let Some(identity) = bundle.name_ledger.nominal_identity(target, &s.name) {
-//RS                         map.insert(identity, rust_mod.clone());
-//RS                     }
-//RS                 }
-//RS                 Item::Enum(e)
-//RS                     if bundle.name_ledger.visible(module_idx, target, &e.name)
-//RS                         && !is_local(&e.name) =>
-//RS                 {
-//RS                     if let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name) {
-//RS                         map.insert(identity, rust_mod.clone());
-//RS                     }
-//RS                 }
-//RS                 Item::Distinct(d) if bundle.name_ledger.visible(module_idx, target, &d.name) => {
-//RS                     if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
-//RS                         map.insert(identity, rust_mod.clone());
-//RS                     }
-//RS                 }
-//RS                 Item::UnitFamily(family) => {
-//RS                     for member in family.distinct_defs() {
-//RS                         // A public function may expose a private unit-family member in
-//RS                         // its resolved signature. Codegen still needs the canonical Rust
-//RS                         // module for that carrier; sema has already enforced source
-//RS                         // visibility at the call boundary.
-//RS                         if let Some(identity) =
-//RS                             bundle.name_ledger.nominal_identity(target, &member.name)
-//RS                         {
-//RS                             map.insert(identity, rust_mod.clone());
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     };
-//RS     for (scope, imp) in all_imports(module) {
-//RS         for (_, target) in foreign_list_targets_in_scope(bundle, module_idx, imp, scope) {
-//RS             add_target(target);
-//RS         }
-//RS         if is_foreign_member_list(imp)
-//RS             || is_c_import_after_frontend(imp)
-//RS             || matches!(imp.kind, ImportKind::Unqualified { .. })
-//RS             || imp.core_module_path().is_some()
-//RS         {
-//RS             continue;
-//RS         }
-//RS         add_target(required_import_target(bundle, module_idx, imp));
-//RS     }
-//RS     for (target, leaf) in selective_nominal_targets(bundle, module_idx) {
-//RS         let Some(identity) = bundle.name_ledger.nominal_identity(target, &leaf) else {
-//RS             continue;
-//RS         };
-//RS         map.insert(identity, mangle(&bundle.modules[target].alias));
-//RS     }
-//RS     for ((_, _), (rust_mod, _)) in reexport_call_map(bundle, module_idx) {
-//RS         let Some(target) = bundle
-//RS             .modules
-//RS             .iter()
-//RS             .position(|candidate| mangle(&candidate.alias) == rust_mod)
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         for item in &bundle.modules[target].items {
-//RS             match item {
-//RS                 Item::Struct(s) if bundle.name_ledger.visible(module_idx, target, &s.name) => {
-//RS                     if let Some(identity) = bundle.name_ledger.nominal_identity(target, &s.name) {
-//RS                         map.insert(identity, rust_mod.clone());
-//RS                     }
-//RS                 }
-//RS                 Item::Enum(e) if bundle.name_ledger.visible(module_idx, target, &e.name) => {
-//RS                     if let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name) {
-//RS                         map.insert(identity, rust_mod.clone());
-//RS                     }
-//RS                 }
-//RS                 Item::Distinct(d) if bundle.name_ledger.visible(module_idx, target, &d.name) => {
-//RS                     if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
-//RS                         map.insert(identity, rust_mod.clone());
-//RS                     }
-//RS                 }
-//RS                 Item::UnitFamily(family) => {
-//RS                     for member in family.distinct_defs() {
-//RS                         if let Some(identity) =
-//RS                             bundle.name_ledger.nominal_identity(target, &member.name)
-//RS                         {
-//RS                             map.insert(identity, rust_mod.clone());
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     map
-//RS }
-//RS 
-//RS pub(crate) fn register_foreign_enum_variants(
-//RS     cx: &mut Cx,
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) {
-//RS     let module = &bundle.modules[module_idx];
-//RS     for (scope, imp) in all_imports(module) {
-//RS         for (_, target) in foreign_list_targets_in_scope(bundle, module_idx, imp, scope) {
-//RS             for item in &bundle.modules[target].items {
-//RS                 if let Item::Enum(e) = item {
-//RS                     if bundle.name_ledger.visible(module_idx, target, &e.name) {
-//RS                         let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name)
-//RS                         else {
-//RS                             continue;
-//RS                         };
-//RS                         let binders = e
-//RS                             .type_params
-//RS                             .iter()
-//RS                             .map(|param| param.name.clone())
-//RS                             .collect::<Vec<_>>();
-//RS                         cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
-//RS                             e.variants
-//RS                                 .iter()
-//RS                                 .map(|v| {
-//RS                                     (
-//RS                                         v.name.clone(),
-//RS                                         qualify_imported_variant_payload(
-//RS                                             bundle, target, &identity, &binders, &v.payload,
-//RS                                         ),
-//RS                                     )
-//RS                                 })
-//RS                                 .collect()
-//RS                         });
-//RS                         for v in &e.variants {
-//RS                             cx.variant_owner
-//RS                                 .entry(v.name.clone())
-//RS                                 .or_insert_with(|| identity.clone());
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         if is_foreign_member_list(imp) {
-//RS             continue;
-//RS         }
-//RS         if is_c_import_after_frontend(imp) {
-//RS             continue;
-//RS         }
-//RS         if let Some(core_module) = imp.core_module_path() {
-//RS             if let Some((_, target)) = core_source_target(bundle, &core_module) {
-//RS                 register_core_source_enum_layouts(cx, bundle, target);
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if matches!(imp.kind, ImportKind::Unqualified { .. }) {
-//RS             continue;
-//RS         }
-//RS         let target = required_import_target(bundle, module_idx, imp);
-//RS         for item in &bundle.modules[target].items {
-//RS             if let Item::Enum(e) = item {
-//RS                 if bundle.name_ledger.visible(module_idx, target, &e.name) {
-//RS                     let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name)
-//RS                     else {
-//RS                         continue;
-//RS                     };
-//RS                     let binders = e
-//RS                         .type_params
-//RS                         .iter()
-//RS                         .map(|param| param.name.clone())
-//RS                         .collect::<Vec<_>>();
-//RS                     cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
-//RS                         e.variants
-//RS                             .iter()
-//RS                             .map(|v| {
-//RS                                 (
-//RS                                     v.name.clone(),
-//RS                                     qualify_imported_variant_payload(
-//RS                                         bundle, target, &identity, &binders, &v.payload,
-//RS                                     ),
-//RS                                 )
-//RS                             })
-//RS                             .collect()
-//RS                     });
-//RS                     for v in &e.variants {
-//RS                         cx.variant_owner
-//RS                             .entry(v.name.clone())
-//RS                             .or_insert_with(|| identity.clone());
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     for (target, leaf) in selective_nominal_targets(bundle, module_idx) {
-//RS         let Some(item) = bundle.modules[target]
-//RS             .items
-//RS             .iter()
-//RS             .find(|item| matches!(item, Item::Enum(definition) if definition.name == leaf))
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         let Item::Enum(e) = item else { continue };
-//RS         let Some(identity) = bundle.name_ledger.nominal_identity(target, &leaf) else {
-//RS             continue;
-//RS         };
-//RS         let binders = e
-//RS             .type_params
-//RS             .iter()
-//RS             .map(|param| param.name.clone())
-//RS             .collect::<Vec<_>>();
-//RS         cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
-//RS             e.variants
-//RS                 .iter()
-//RS                 .map(|variant| {
-//RS                     (
-//RS                         variant.name.clone(),
-//RS                         qualify_imported_variant_payload(
-//RS                             bundle,
-//RS                             target,
-//RS                             &identity,
-//RS                             &binders,
-//RS                             &variant.payload,
-//RS                         ),
-//RS                     )
-//RS                 })
-//RS                 .collect()
-//RS         });
-//RS         for variant in &e.variants {
-//RS             cx.variant_owner
-//RS                 .entry(variant.name.clone())
-//RS                 .or_insert_with(|| identity.clone());
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-PERF-ERR1 / D-MOD-ERR1: a Core source function can fail with its own
-//RS /// module's enum (`PerfError`, `ModError`) even when the module does not export
-//RS /// the type by name. The consumer still destructures the payload
-//RS /// (`.Err(.OutOfRange(rejected))`), so it needs the enum's layout under its
-//RS /// canonical identity; without it the payload binding lost its type and the
-//RS /// resident JIT rendered a `Float` as its raw bits. Variant owners stay unset:
-//RS /// leading-dot resolution in the consumer belongs to sema, and a Core leaf
-//RS /// must not claim a bare variant name.
-//RS fn register_core_source_enum_layouts(cx: &mut Cx, bundle: &ProgramBundle, target: usize) {
-//RS     let rust_mod = mangle(&bundle.modules[target].alias);
-//RS     for item in &bundle.modules[target].items {
-//RS         let Item::Enum(e) = item else { continue };
-//RS         if !e.is_pub || !e.type_params.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name) else {
-//RS             continue;
-//RS         };
-//RS         cx.foreign_types
-//RS             .entry(identity.clone())
-//RS             .or_insert_with(|| rust_mod.clone());
-//RS         cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
-//RS             e.variants
-//RS                 .iter()
-//RS                 .map(|variant| {
-//RS                     (
-//RS                         variant.name.clone(),
-//RS                         qualify_imported_variant_payload(
-//RS                             bundle,
-//RS                             target,
-//RS                             &identity,
-//RS                             &[],
-//RS                             &variant.payload,
-//RS                         ),
-//RS                     )
-//RS                 })
-//RS                 .collect()
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS fn qualify_imported_variant_payload(
-//RS     bundle: &ProgramBundle,
-//RS     target: usize,
-//RS     owner: &str,
-//RS     binders: &[String],
-//RS     payload: &VariantPayload,
-//RS ) -> VariantPayload {
-//RS     match payload {
-//RS         VariantPayload::Unit => VariantPayload::Unit,
-//RS         VariantPayload::Single(ty, span) => VariantPayload::Single(
-//RS             crate::Codegen::TIR::qualify_imported_type(bundle, target, owner, binders, ty),
-//RS             *span,
-//RS         ),
-//RS         VariantPayload::Named(fields) => VariantPayload::Named(
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|field| {
-//RS                     let mut qualified = field.clone();
-//RS                     qualified.ty = crate::Codegen::TIR::qualify_imported_type(
-//RS                         bundle, target, owner, binders, &field.ty,
-//RS                     );
-//RS                     qualified
-//RS                 })
-//RS                 .collect(),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn core_source_target(
-//RS     bundle: &ProgramBundle,
-//RS     module: &str,
-//RS ) -> Option<(jet_foundation::CoreModuleExports::CoreSourceModule, usize)> {
-//RS     let source = *jet_foundation::CoreModuleExports::core_source_module(module)?;
-//RS     let target = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .position(|loaded| loaded.alias == source.alias)?;
-//RS     Some((source, target))
-//RS }
-//RS 
-//RS pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
-//RS     let mut map = HashMap::new();
-//RS     let module = &bundle.modules[module_idx];
-//RS     for imp in &module.imports {
-//RS         for (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
-//RS             let stem = &bundle.modules[target].alias;
-//RS             map.insert(alias, mangle(stem));
-//RS         }
-//RS         if is_foreign_member_list(imp) {
-//RS             continue;
-//RS         }
-//RS         let alias = imp.import_alias();
-//RS         // S59: C `use` forms target a synthetic merged module by alias.
-//RS         if is_c_import_after_frontend(imp) {
-//RS             let target = required_c_target(bundle, module_idx, None, &alias);
-//RS             let stem = &bundle.modules[target].alias;
-//RS             map.insert(alias, mangle(stem));
-//RS             continue;
-//RS         }
-//RS         if matches!(imp.kind, ImportKind::Unqualified { .. }) {
-//RS             continue;
-//RS         }
-//RS         if let Some(core_module) = imp.core_module_path() {
-//RS             if let Some((source, _)) = core_source_target(bundle, &core_module) {
-//RS                 map.insert(alias, mangle(source.alias));
-//RS             }
-//RS             continue;
-//RS         }
-//RS         let target = required_import_target(bundle, module_idx, imp);
-//RS         let stem = &bundle.modules[target].alias;
-//RS         map.insert(alias, mangle(stem));
-//RS     }
-//RS     for (local, target) in unqualified_file_module_targets(bundle, module_idx) {
-//RS         map.insert(local, mangle(&bundle.modules[target].alias));
-//RS     }
-//RS     map
-//RS }
-//RS 
-//RS /// Resolve every ordinary file-module alias path reachable from module_idx.
-//RS /// Synthetic calls can retain the whole source path even though the emitted
-//RS /// Rust function lives in the final module's namespace.
-//RS fn imported_module_paths(bundle: &ProgramBundle, module_idx: usize) -> Vec<(String, usize)> {
-//RS     let mut paths = Vec::new();
-//RS     let mut pending = vec![(String::new(), module_idx, HashSet::from([module_idx]))];
-//RS     while let Some((prefix, owner, seen)) = pending.pop() {
-//RS         for imp in &bundle.modules[owner].imports {
-//RS             if is_foreign_member_list(imp)
-//RS                 || is_c_import_after_frontend(imp)
-//RS                 || matches!(imp.kind, ImportKind::Unqualified { .. })
-//RS                 || imp.core_module_path().is_some()
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let alias = imp.import_alias();
-//RS             let target = required_import_target(bundle, owner, imp);
-//RS             let path = if prefix.is_empty() {
-//RS                 alias
-//RS             } else {
-//RS                 format!("{prefix}.{alias}")
-//RS             };
-//RS             paths.push((path.clone(), target));
-//RS             if seen.contains(&target) {
-//RS                 continue;
-//RS             }
-//RS             let mut next_seen = seen.clone();
-//RS             next_seen.insert(target);
-//RS             pending.push((path, target, next_seen));
-//RS         }
-//RS     }
-//RS     paths
-//RS }
-//RS 
-//RS /// Return selective-import aliases that name a visible bodyless child module.
-//RS /// Sema installs the same child edge in its module-import map; codegen only
-//RS /// projects that edge to the generated Rust module name.
-//RS fn unqualified_file_module_targets(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> Vec<(String, usize)> {
-//RS     let module = &bundle.modules[module_idx];
-//RS     let mut targets = Vec::new();
-//RS     for imp in &module.imports {
-//RS         let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
-//RS             continue;
-//RS         };
-//RS         if is_foreign_member_list(imp) {
-//RS             continue;
-//RS         }
-//RS         let Some(parent) = file_import_target(bundle, module_idx, module_alias) else {
-//RS             continue;
-//RS         };
-//RS         for binding in imp.walk_bindings() {
-//RS             let Some(original) = binding.original else {
-//RS                 continue;
-//RS             };
-//RS             let Some(declaration) = bundle.name_ledger.declaration(parent, original) else {
-//RS                 continue;
-//RS             };
-//RS             if declaration.kind != "file_module"
-//RS                 || !bundle.name_ledger.visible(module_idx, parent, original)
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let Some(target) = bundle
-//RS                 .name_ledger
-//RS                 .alias(parent, original)
-//RS                 .and_then(|alias| alias.target_module)
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             targets.push((binding.local, target));
-//RS         }
-//RS     }
-//RS     targets
-//RS }
-//RS 
-//RS /// D-MOD4: build the `pub use` re-export call map for `module_idx`. For each
-//RS /// imported module `A` (e.g. a directory module `text`), scan its own imports for
-//RS /// `pub use sub.Item` and map `(A, Item)` to the Rust module that really defines
-//RS /// it (`user_wrap`, `wrap`). Resolution is one level (matches sema's `reexports`).
-//RS pub(crate) fn reexport_call_map(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> HashMap<(String, String), (String, String)> {
-//RS     let mut map = HashMap::new();
-//RS     let module = &bundle.modules[module_idx];
-//RS     for imp in &module.imports {
-//RS         if matches!(imp.kind, ImportKind::Unqualified { .. }) {
-//RS             continue;
-//RS         }
-//RS         if imp.core_module_path().is_some() || is_c_import_after_frontend(imp) {
-//RS             continue;
-//RS         }
-//RS         let alias = imp.import_alias();
-//RS         let target_idx = required_import_target(bundle, module_idx, imp);
-//RS         let target = &bundle.modules[target_idx];
-//RS         for reimp in &target.imports {
-//RS             let ImportKind::Unqualified { module_alias, .. } = &reimp.kind else {
-//RS                 continue;
-//RS             };
-//RS             if !reimp.is_pub {
-//RS                 continue;
-//RS             }
-//RS             // Resolve `module_alias` within the target module's own imports.
-//RS             if is_foreign_member_list(reimp) || crate::AST::core_list_prefix(module_alias).is_some()
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let real_idx =
-//RS                 file_import_target(bundle, target_idx, module_alias).unwrap_or_else(|| {
-//RS                     unreachable!(
-//RS                         "re-export target missing after sema: module={} alias={module_alias}",
-//RS                         target_idx
-//RS                     )
-//RS                 });
-//RS             let real_mod = mangle(&bundle.modules[real_idx].alias);
-//RS             for binding in reimp.walk_bindings() {
-//RS                 let orig = binding
-//RS                     .original
-//RS                     .expect("member walker returned a binding without a member");
-//RS                 let local = binding.local;
-//RS                 map.insert((alias.clone(), local), (real_mod.clone(), orig.to_string()));
-//RS             }
-//RS         }
-//RS     }
-//RS     // D-NAME-WALK1=A: an inline module can re-export a file-module item from
-//RS     // the enclosing file. It lowers through the same qualified map as a
-//RS     // top-level file-module re-export; inline-to-inline re-exports use the
-//RS     // separate InlineMangled map below.
-//RS     for item in &module.items {
-//RS         let Item::CodeModule(cm) = item else {
-//RS             continue;
-//RS         };
-//RS         for reimp in &cm.imports {
-//RS             let ImportKind::Unqualified { module_alias, .. } = &reimp.kind else {
-//RS                 continue;
-//RS             };
-//RS             if !reimp.is_pub {
-//RS                 continue;
-//RS             }
-//RS             if is_foreign_member_list(reimp) || crate::AST::core_list_prefix(module_alias).is_some()
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let real_idx = file_import_target(bundle, module_idx, module_alias)
-//RS                 .unwrap_or_else(|| {
-//RS                     unreachable!(
-//RS                         "inline re-export target missing after sema: module={} alias={module_alias}",
-//RS                         module_idx
-//RS                     )
-//RS                 });
-//RS             let real_mod = mangle(&bundle.modules[real_idx].alias);
-//RS             for binding in reimp.walk_bindings() {
-//RS                 let orig = binding
-//RS                     .original
-//RS                     .expect("member walker returned a binding without a member");
-//RS                 let local = binding.local;
-//RS                 map.insert(
-//RS                     (cm.name.clone(), local),
-//RS                     (real_mod.clone(), orig.to_string()),
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     map
-//RS }
-//RS 
-//RS pub(crate) fn core_import_map(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> HashMap<String, String> {
-//RS     let mut map = HashMap::new();
-//RS     let module = &bundle.modules[module_idx];
-//RS     for imp in &module.imports {
-//RS         if let Some(core_module) = imp.core_module_path() {
-//RS             map.insert(imp.import_alias(), core_module);
-//RS             continue;
-//RS         }
-//RS         // D-MOD3: `use core.item` / `use core.[a, b]` — bind each item name to its
-//RS         // full std path so that `item.method(...)` resolves the same way as
-//RS         // `use core.item as item` would.
-//RS         if let ImportKind::Unqualified { module_alias, .. } = &imp.kind {
-//RS             if crate::AST::core_list_prefix(module_alias).is_some() {
-//RS                 for binding in imp.walk_bindings() {
-//RS                     let orig = binding
-//RS                         .original
-//RS                         .expect("member walker returned a binding without a member");
-//RS                     let local = binding.local;
-//RS                     match crate::AST::core_list_path(module_alias, orig) {
-//RS                         Some(crate::AST::CoreListPath::Module(module)) => {
-//RS                             map.insert(local.to_string(), module);
-//RS                         }
-//RS                         Some(crate::AST::CoreListPath::Item { module, .. }) => {
-//RS                             // A bare imported Core item lowers as
-//RS                             // `module.item`; keep the module in the ordinary
-//RS                             // core-import map for every backend.
-//RS                             map.insert(local.to_string(), module);
-//RS                         }
-//RS                         None => unreachable!(
-//RS                             "invalid Core member import reached codegen after sema: {module_alias}.{orig}"
-//RS                         ),
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     map
-//RS }
-//RS 
-//RS /// D-MOD3: build unqualified-import maps for codegen.
-//RS /// Returns (inline_map, file_map) where:
-//RS ///   inline_map: unqualified name → "alias__method" (for inline code modules)
-//RS ///   file_map:   unqualified name → (rust_mod_name, fn_name) (for file modules)
-//RS pub(crate) fn unqualified_import_maps(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> (HashMap<String, String>, HashMap<String, (String, String)>) {
-//RS     let mut inline_map: HashMap<String, String> = HashMap::new();
-//RS     let mut file_map: HashMap<String, (String, String)> = HashMap::new();
-//RS     let module = &bundle.modules[module_idx];
-//RS     // Build a set of inline code module aliases for this module.
-//RS     let code_mod_aliases: std::collections::HashSet<String> = module
-//RS         .items
-//RS         .iter()
-//RS         .filter_map(|item| {
-//RS             if let crate::AST::Item::CodeModule(cm) = item {
-//RS                 if cm.body.is_some() {
-//RS                     return Some(cm.name.clone());
-//RS                 }
-//RS             }
-//RS             None
-//RS         })
-//RS         .collect();
-//RS     for imp in &module.imports {
-//RS         let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
-//RS             continue;
-//RS         };
-//RS         if is_foreign_member_list(imp) {
-//RS             // Foreign member lists are mounted namespaces, not ordinary
-//RS             // unqualified functions; `foreign_list_targets` handles them.
-//RS             continue;
-//RS         }
-//RS         if crate::AST::core_list_prefix(module_alias).is_some() {
-//RS             // Std namespace — handled separately by core_import_map.
-//RS             continue;
-//RS         }
-//RS         for binding in imp.walk_bindings() {
-//RS             let orig = binding
-//RS                 .original
-//RS                 .expect("member walker returned a binding without a member");
-//RS             let local = binding.local;
-//RS             let alias = bundle.name_ledger.effective_alias(module_idx, &local);
-//RS             if code_mod_aliases.contains(module_alias.as_str()) {
-//RS                 // Inline code module. Sema stores the canonical member identity,
-//RS                 // including generic-module substitutions, in the ledger.
-//RS                 let target = alias
-//RS                     .map(|name| name.target.clone())
-//RS                     .unwrap_or_else(|| jet_foundation::Names::member_name(module_alias, orig));
-//RS                 inline_map.insert(local, target);
-//RS             } else if let Some(target) = alias
-//RS                 .and_then(|name| name.target_module)
-//RS                 .or_else(|| file_import_target(bundle, module_idx, module_alias))
-//RS             {
-//RS                 let real_name = alias
-//RS                     .and_then(|name| {
-//RS                         name.target
-//RS                             .rsplit_once('.')
-//RS                             .map(|(_, leaf)| leaf.to_string())
-//RS                     })
-//RS                     .unwrap_or_else(|| orig.to_string());
-//RS                 file_map.insert(local, (mangle(&bundle.modules[target].alias), real_name));
-//RS             }
-//RS         }
-//RS     }
-//RS     for (path, rust_mod, function, _, _) in nested_file_function_entries(bundle, module_idx) {
-//RS         file_map.insert(format!("{path}.{function}"), (rust_mod, function));
-//RS     }
-//RS     (inline_map, file_map)
-//RS }
-//RS 
-//RS /// D-NAME-WALK1=A: build the import scopes for functions inside inline
-//RS /// modules. The enclosing file's unqualified maps remain in `Cx`; these maps
-//RS /// contain only body-local bindings and are selected by the emitted mangled
-//RS /// function name.
-//RS pub(crate) fn inline_import_maps(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> (
-//RS     HashMap<String, HashMap<String, String>>,
-//RS     HashMap<String, HashMap<String, (String, String)>>,
-//RS     HashSet<String>,
-//RS     HashMap<(String, String), String>,
-//RS ) {
-//RS     let module = &bundle.modules[module_idx];
-//RS     let code_module_names: std::collections::HashSet<String> = module
-//RS         .items
-//RS         .iter()
-//RS         .filter_map(|item| match item {
-//RS             Item::CodeModule(cm) if cm.body.is_some() => Some(cm.name.clone()),
-//RS             _ => None,
-//RS         })
-//RS         .collect();
-//RS     let mut inline_scopes = HashMap::new();
-//RS     let mut file_scopes = HashMap::new();
-//RS     let mut names = std::collections::HashSet::new();
-//RS     let mut inline_reexports = HashMap::new();
-//RS     for item in &module.items {
-//RS         let Item::CodeModule(cm) = item else {
-//RS             continue;
-//RS         };
-//RS         let Some(body) = &cm.body else {
-//RS             continue;
-//RS         };
-//RS         let mut inline_scope = HashMap::new();
-//RS         let mut file_scope = HashMap::new();
-//RS         for imp in &cm.imports {
-//RS             let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
-//RS                 continue;
-//RS             };
-//RS             if is_foreign_member_list(imp) {
-//RS                 continue;
-//RS             }
-//RS             if code_module_names.contains(module_alias) {
-//RS                 for binding in imp.walk_bindings() {
-//RS                     let orig = binding
-//RS                         .original
-//RS                         .expect("member walker returned a binding without a member");
-//RS                     let local = binding.local;
-//RS                     let target = bundle
-//RS                         .name_ledger
-//RS                         .effective_alias(module_idx, &local)
-//RS                         .map(|name| name.target.clone())
-//RS                         .unwrap_or_else(|| jet_foundation::Names::member_name(module_alias, orig));
-//RS                     inline_scope.insert(local.clone(), target.clone());
-//RS                     names.insert(local.clone());
-//RS                     if imp.is_pub {
-//RS                         inline_reexports.insert((cm.name.clone(), local), target);
-//RS                     }
-//RS                 }
-//RS             } else if imp.core_module_path().is_none()
-//RS                 && crate::AST::core_list_prefix(module_alias).is_none()
-//RS             {
-//RS                 let target = file_import_target(bundle, module_idx, module_alias);
-//RS                 let target = target.unwrap_or_else(|| {
-//RS                     unreachable!(
-//RS                         "inline unqualified import target missing after sema: module={} alias={module_alias}",
-//RS                         module_idx
-//RS                     )
-//RS                 });
-//RS                 for binding in imp.walk_bindings() {
-//RS                     let orig = binding
-//RS                         .original
-//RS                         .expect("member walker returned a binding without a member");
-//RS                     let local = binding.local;
-//RS                     // D-MOD2: type, trait and constant members bind as
-//RS                     // NameLedger aliases, not function-call scope entries.
-//RS                     if matches!(
-//RS                         bundle
-//RS                             .name_ledger
-//RS                             .declaration(target, orig)
-//RS                             .map(|declaration| declaration.kind.as_str()),
-//RS                         Some("type" | "trait" | "const" | "tag" | "protocol")
-//RS                     ) {
-//RS                         continue;
-//RS                     }
-//RS                     let real_name = bundle
-//RS                         .name_ledger
-//RS                         .effective_alias(module_idx, &local)
-//RS                         .and_then(|name| {
-//RS                             name.target
-//RS                                 .rsplit_once('.')
-//RS                                 .map(|(_, leaf)| leaf.to_string())
-//RS                         })
-//RS                         .unwrap_or_else(|| orig.to_string());
-//RS                     file_scope.insert(
-//RS                         local.clone(),
-//RS                         (mangle(&bundle.modules[target].alias), real_name),
-//RS                     );
-//RS                     names.insert(local);
-//RS                 }
-//RS             }
-//RS         }
-//RS         for inner in body {
-//RS             let Item::Func(function) = inner else {
-//RS                 continue;
-//RS             };
-//RS             let key = jet_foundation::Names::member_name(&cm.name, &function.name);
-//RS             if !inline_scope.is_empty() {
-//RS                 inline_scopes.insert(key.clone(), inline_scope.clone());
-//RS             }
-//RS             if !file_scope.is_empty() {
-//RS                 file_scopes.insert(key, file_scope.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     (inline_scopes, file_scopes, names, inline_reexports)
-//RS }
-//RS 
-//RS /// D-NAME-WALK1=A / D-VERDICT-1867-1: foreign namespace aliases imported
-//RS /// inside an inline module body. They use the same foreign member-list
-//RS /// resolver as file-level imports, but remain scoped to each emitted function.
-//RS pub(crate) fn inline_foreign_import_maps(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> HashMap<String, HashMap<String, String>> {
-//RS     let module = &bundle.modules[module_idx];
-//RS     let mut scopes = HashMap::new();
-//RS     for item in &module.items {
-//RS         let Item::CodeModule(cm) = item else {
-//RS             continue;
-//RS         };
-//RS         let Some(body) = &cm.body else {
-//RS             continue;
-//RS         };
-//RS         let mut scope = HashMap::new();
-//RS         for imp in &cm.imports {
-//RS             for (alias, target) in
-//RS                 foreign_import_targets_in_scope(bundle, module_idx, imp, Some(&cm.name))
-//RS             {
-//RS                 scope.insert(alias, mangle(&bundle.modules[target].alias));
-//RS             }
-//RS         }
-//RS         if scope.is_empty() {
-//RS             continue;
-//RS         }
-//RS         for inner in body {
-//RS             let Item::Func(function) = inner else {
-//RS                 continue;
-//RS             };
-//RS             scopes.insert(
-//RS                 jet_foundation::Names::member_name(&cm.name, &function.name),
-//RS                 scope.clone(),
-//RS             );
-//RS         }
-//RS     }
-//RS     scopes
-//RS }
-//RS 
-//RS /// D-NAME-WALK1=A / D-VERDICT-1867-1: build the foreign call facts for each
-//RS /// emitted inline function. Signature and return facts are deliberately not
-//RS /// merged into the file-wide `(alias, method)` maps: sibling inline modules
-//RS /// may reuse an alias without sharing its target library.
-//RS pub(crate) fn inline_foreign_import_signature_maps(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> (
-//RS     HashMap<String, HashMap<(String, String), Vec<(AccessConvention, Type)>>>,
-//RS     HashMap<String, HashMap<(String, String), Option<Type>>>,
-//RS ) {
-//RS     let module = &bundle.modules[module_idx];
-//RS     let mut signatures = HashMap::new();
-//RS     let mut returns = HashMap::new();
-//RS     for item in &module.items {
-//RS         let Item::CodeModule(cm) = item else {
-//RS             continue;
-//RS         };
-//RS         let Some(body) = &cm.body else {
-//RS             continue;
-//RS         };
-//RS         let mut sig_scope = HashMap::new();
-//RS         let mut ret_scope = HashMap::new();
-//RS         for imp in &cm.imports {
-//RS             for (alias, target) in
-//RS                 foreign_import_targets_in_scope(bundle, module_idx, imp, Some(&cm.name))
-//RS             {
-//RS                 for item in &bundle.modules[target].items {
-//RS                     match item {
-//RS                         Item::Func(function) if function.is_pub => {
-//RS                             sig_scope.insert(
-//RS                                 (alias.clone(), function.name.clone()),
-//RS                                 function
-//RS                                     .params
-//RS                                     .iter()
-//RS                                     .map(|param| {
-//RS                                         (
-//RS                                             param.convention,
-//RS                                             qualify_unit_type(bundle, target, &param.ty),
-//RS                                         )
-//RS                                     })
-//RS                                     .collect(),
-//RS                             );
-//RS                             ret_scope.insert(
-//RS                                 (alias.clone(), function.name.clone()),
-//RS                                 function
-//RS                                     .return_type
-//RS                                     .as_ref()
-//RS                                     .map(|ty| qualify_unit_type(bundle, target, ty)),
-//RS                             );
-//RS                         }
-//RS                         Item::CModule(c_module) => {
-//RS                             for function in &c_module.functions {
-//RS                                 sig_scope.insert(
-//RS                                     (alias.clone(), function.name.clone()),
-//RS                                     function
-//RS                                         .params
-//RS                                         .iter()
-//RS                                         .map(|param| (param.convention, param.ty.clone()))
-//RS                                         .collect(),
-//RS                                 );
-//RS                                 ret_scope.insert(
-//RS                                     (alias.clone(), function.name.clone()),
-//RS                                     function.return_type.clone(),
-//RS                                 );
-//RS                             }
-//RS                         }
-//RS                         _ => {}
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         if sig_scope.is_empty() && ret_scope.is_empty() {
-//RS             continue;
-//RS         }
-//RS         for inner in body {
-//RS             let Item::Func(function) = inner else {
-//RS                 continue;
-//RS             };
-//RS             let key = jet_foundation::Names::member_name(&cm.name, &function.name);
-//RS             signatures.insert(key.clone(), sig_scope.clone());
-//RS             returns.insert(key, ret_scope.clone());
-//RS         }
-//RS     }
-//RS     (signatures, returns)
-//RS }
-//RS 
-//RS /// D-VERDICT-1867-1: an inline module may publicly re-export a foreign
-//RS /// namespace. The exported namespace is still just the same mounted Rust
-//RS /// module; callers reach it as `inline_alias.exported_alias.method(...)`.
-//RS pub(crate) fn inline_foreign_reexport_maps(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> HashMap<(String, String), String> {
-//RS     let module = &bundle.modules[module_idx];
-//RS     let mut map = HashMap::new();
-//RS     for item in &module.items {
-//RS         let Item::CodeModule(cm) = item else {
-//RS             continue;
-//RS         };
-//RS         if cm.body.is_none() {
-//RS             continue;
-//RS         }
-//RS         for imp in &cm.imports {
-//RS             if !imp.is_pub {
-//RS                 continue;
-//RS             }
-//RS             for (alias, target) in
-//RS                 foreign_import_targets_in_scope(bundle, module_idx, imp, Some(&cm.name))
-//RS             {
-//RS                 map.insert(
-//RS                     (cm.name.clone(), alias),
-//RS                     mangle(&bundle.modules[target].alias),
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     map
-//RS }
-//RS 
-//RS /// Build signature and return facts for calls through an inline module's
-//RS /// public foreign namespace re-export. These calls occur in the enclosing
-//RS /// module, so their facts are keyed by the exporting inline module rather than
-//RS /// by the caller's emitted function.
-//RS pub(crate) fn inline_foreign_reexport_signature_maps(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> (
-//RS     HashMap<(String, String, String), Vec<(AccessConvention, Type)>>,
-//RS     HashMap<(String, String, String), Option<Type>>,
-//RS ) {
-//RS     let module = &bundle.modules[module_idx];
-//RS     let mut signatures = HashMap::new();
-//RS     let mut returns = HashMap::new();
-//RS     for item in &module.items {
-//RS         let Item::CodeModule(cm) = item else {
-//RS             continue;
-//RS         };
-//RS         if cm.body.is_none() {
-//RS             continue;
-//RS         }
-//RS         for imp in &cm.imports {
-//RS             if !imp.is_pub {
-//RS                 continue;
-//RS             }
-//RS             for (alias, target) in
-//RS                 foreign_import_targets_in_scope(bundle, module_idx, imp, Some(&cm.name))
-//RS             {
-//RS                 for item in &bundle.modules[target].items {
-//RS                     match item {
-//RS                         Item::Func(function) if function.is_pub => {
-//RS                             signatures.insert(
-//RS                                 (cm.name.clone(), alias.clone(), function.name.clone()),
-//RS                                 function
-//RS                                     .params
-//RS                                     .iter()
-//RS                                     .map(|param| {
-//RS                                         (
-//RS                                             param.convention,
-//RS                                             qualify_unit_type(bundle, target, &param.ty),
-//RS                                         )
-//RS                                     })
-//RS                                     .collect(),
-//RS                             );
-//RS                             returns.insert(
-//RS                                 (cm.name.clone(), alias.clone(), function.name.clone()),
-//RS                                 function
-//RS                                     .return_type
-//RS                                     .as_ref()
-//RS                                     .map(|ty| qualify_unit_type(bundle, target, ty)),
-//RS                             );
-//RS                         }
-//RS                         Item::CModule(c_module) => {
-//RS                             for function in &c_module.functions {
-//RS                                 signatures.insert(
-//RS                                     (cm.name.clone(), alias.clone(), function.name.clone()),
-//RS                                     function
-//RS                                         .params
-//RS                                         .iter()
-//RS                                         .map(|param| (param.convention, param.ty.clone()))
-//RS                                         .collect(),
-//RS                                 );
-//RS                                 returns.insert(
-//RS                                     (cm.name.clone(), alias.clone(), function.name.clone()),
-//RS                                     function.return_type.clone(),
-//RS                                 );
-//RS                             }
-//RS                         }
-//RS                         _ => {}
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     (signatures, returns)
-//RS }
-//RS 
-//RS /// D-NAME-WALK1=A: build the Core portion of every inline-module import
-//RS /// scope, plus Core items re-exported by that inline module. Core aliases are
-//RS /// keyed by the emitted `module__function` name so a body-local import cannot
-//RS /// leak into a sibling or enclosing function.
-//RS pub(crate) fn inline_core_import_maps(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> (
-//RS     HashMap<String, HashMap<String, String>>,
-//RS     HashMap<(String, String), (String, String)>,
-//RS ) {
-//RS     let module = &bundle.modules[module_idx];
-//RS     let mut scopes = HashMap::new();
-//RS     let mut reexports = HashMap::new();
-//RS     for item in &module.items {
-//RS         let Item::CodeModule(cm) = item else {
-//RS             continue;
-//RS         };
-//RS         let Some(body) = &cm.body else {
-//RS             continue;
-//RS         };
-//RS         let mut scope = HashMap::new();
-//RS         for imp in &cm.imports {
-//RS             if let Some(core_module) = imp.core_module_path() {
-//RS                 scope.insert(imp.import_alias(), core_module);
-//RS                 continue;
-//RS             }
-//RS             let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
-//RS                 continue;
-//RS             };
-//RS             if crate::AST::core_list_prefix(module_alias).is_none() {
-//RS                 continue;
-//RS             }
-//RS             for binding in imp.walk_bindings() {
-//RS                 let orig = binding
-//RS                     .original
-//RS                     .expect("member walker returned a binding without a member");
-//RS                 let local = binding.local;
-//RS                 let path = crate::AST::core_list_path(module_alias, orig).unwrap_or_else(|| {
-//RS                     unreachable!(
-//RS                         "invalid Core member import reached codegen after sema: {module_alias}.{orig}"
-//RS                     )
-//RS                 });
-//RS                 match path {
-//RS                     crate::AST::CoreListPath::Module(core_module) => {
-//RS                         scope.insert(local, core_module);
-//RS                     }
-//RS                     crate::AST::CoreListPath::Item { module, item } => {
-//RS                         scope.insert(local.clone(), module.clone());
-//RS                         if imp.is_pub {
-//RS                             reexports.insert((cm.name.clone(), local), (module, item));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         if scope.is_empty() {
-//RS             continue;
-//RS         }
-//RS         for inner in body {
-//RS             let Item::Func(function) = inner else {
-//RS                 continue;
-//RS             };
-//RS             scopes.insert(
-//RS                 jet_foundation::Names::member_name(&cm.name, &function.name),
-//RS                 scope.clone(),
-//RS             );
-//RS         }
-//RS     }
-//RS     (scopes, reexports)
-//RS }
-//RS 
-//RS /// D-MOD-CYCLE1=A: the member file of `target`'s package that declares the
-//RS /// top-level `name`: `target` itself, else the sibling that declares it, else
-//RS /// `target` (so a missing name keeps its ordinary diagnostic path).
-//RS pub(crate) fn namespace_member_owner(bundle: &ProgramBundle, target: usize, name: &str) -> usize {
-//RS     let declares = |module: usize| {
-//RS         bundle.name_ledger.declaration(module, name).is_some()
-//RS             || bundle.modules[module]
-//RS                 .items
-//RS                 .iter()
-//RS                 .any(|item| matches!(item, Item::Func(function) if function.name == name))
-//RS     };
-//RS     if declares(target) {
-//RS         return target;
-//RS     }
-//RS     bundle
-//RS         .name_ledger
-//RS         .namespace_siblings(target)
-//RS         .into_iter()
-//RS         .find(|&sibling| declares(sibling))
-//RS         .unwrap_or(target)
-//RS }
-//RS 
-//RS /// Build signature/return entries for selective imports whose target is a file
-//RS /// module. The local key is the spelling used in the body; the second key is
-//RS /// the target's declared function name. This is needed for both top-level and
-//RS /// inline-module `use mod.[item]` calls.
-//RS fn unqualified_file_function_entries(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS     imports: &[ImportDecl],
-//RS ) -> Vec<(String, String, Vec<(AccessConvention, Type)>, Option<Type>)> {
-//RS     let mut entries = Vec::new();
-//RS     for imp in imports {
-//RS         let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
-//RS             continue;
-//RS         };
-//RS         if imp.core_module_path().is_some() {
-//RS             continue;
-//RS         }
-//RS         // Inline code modules have no file import edge. Their selective
-//RS         // bindings are projected by the inline maps, so they must not enter
-//RS         // the file-module signature resolver below.
-//RS         if bundle.modules[module_idx].items.iter().any(|item| {
-//RS             matches!(
-//RS                 item,
-//RS                 Item::CodeModule(cm) if cm.body.is_some() && cm.name == module_alias.as_str()
-//RS             )
-//RS         }) {
-//RS             continue;
-//RS         }
-//RS         let Some(target) = file_import_target(bundle, module_idx, module_alias) else {
-//RS             if is_foreign_member_list(imp)
-//RS                 || crate::AST::core_list_prefix(module_alias).is_some()
-//RS                 || inline_code_module_named(bundle, module_idx, module_alias)
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             unreachable!(
-//RS                 "file import target missing after sema: module={module_idx} alias={module_alias}"
-//RS             );
-//RS         };
-//RS         for binding in imp.walk_bindings() {
-//RS             let orig = binding
-//RS                 .original
-//RS                 .expect("member walker returned a binding without a member");
-//RS             let local = binding.local;
-//RS             // D-MOD-CYCLE1=A: a dependency package is bound through one member
-//RS             // file; the member belongs to whichever of its files declares it.
-//RS             let target = namespace_member_owner(bundle, target, orig);
-//RS             let Some(item) = bundle.modules[target].items.iter().find(|item| match item {
-//RS                 Item::Func(f) => {
-//RS                     f.name == orig && bundle.name_ledger.visible(module_idx, target, &f.name)
-//RS                 }
-//RS                 _ => false,
-//RS             }) else {
-//RS                 if let Some(Item::CModule(cm)) = bundle.modules[target]
-//RS                     .items
-//RS                     .iter()
-//RS                     .find(|item| matches!(item, Item::CModule(_)))
-//RS                 {
-//RS                     if let Some(function) =
-//RS                         cm.functions.iter().find(|function| function.name == orig)
-//RS                     {
-//RS                         entries.push((
-//RS                             local,
-//RS                             orig.to_string(),
-//RS                             function
-//RS                                 .params
-//RS                                 .iter()
-//RS                                 .map(|param| {
-//RS                                     let ty = if param.variadic {
-//RS                                         Type::List(Box::new(param.ty.clone()))
-//RS                                     } else {
-//RS                                         param.ty.clone()
-//RS                                     };
-//RS                                     (param.convention, ty)
-//RS                                 })
-//RS                                 .collect(),
-//RS                             function.return_type.clone(),
-//RS                         ));
-//RS                         continue;
-//RS                     }
-//RS                 }
-//RS                 // D-ONEFORM1 (#1803): a member list may name a submodule
-//RS                 // (`use lib.[helper]` where `helper` is `module helper;` inside
-//RS                 // lib). A module member needs no function-signature entry; the
-//RS                 // qualified call path resolves it as a module alias.
-//RS                 if bundle.modules[target].items.iter().any(|item| match item {
-//RS                     Item::Module(m) => m.name == orig,
-//RS                     Item::CodeModule(cm) => cm.name == orig,
-//RS                     _ => false,
-//RS                 }) {
-//RS                     continue;
-//RS                 }
-//RS                 // D-MOD2: a type, trait or constant member binds as a
-//RS                 // NameLedger alias; nominal lookup and constant keys read it,
-//RS                 // so it needs no function-signature entry.
-//RS                 if bundle
-//RS                     .name_ledger
-//RS                     .effective_alias(module_idx, &local)
-//RS                     .is_some_and(|alias| alias.target_module == Some(target))
-//RS                 {
-//RS                     continue;
-//RS                 }
-//RS                 unreachable!(
-//RS                     "imported member missing after sema: module={module_idx} alias={module_alias} member={orig}"
-//RS                 );
-//RS             };
-//RS             let Item::Func(function) = item else {
-//RS                 unreachable!(
-//RS                     "imported member is not a function after sema: module={module_idx} alias={module_alias} member={orig}"
-//RS                 );
-//RS             };
-//RS             entries.push((
-//RS                 local,
-//RS                 orig.to_string(),
-//RS                 function
-//RS                     .params
-//RS                     .iter()
-//RS                     .map(|param| {
-//RS                         let ty = if param.variadic {
-//RS                             Type::List(Box::new(param.ty.clone()))
-//RS                         } else {
-//RS                             param.ty.clone()
-//RS                         };
-//RS                         (
-//RS                             param.convention,
-//RS                             qualify_imported_call_type(bundle, target, "", &ty),
-//RS                         )
-//RS                     })
-//RS                     .collect(),
-//RS                 function
-//RS                     .return_type
-//RS                     .as_ref()
-//RS                     .map(|ty| qualify_imported_call_type(bundle, target, "", ty)),
-//RS             ));
-//RS         }
-//RS     }
-//RS     entries
-//RS }
-//RS 
-//RS fn nested_file_function_entries(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> Vec<(
-//RS     String,
-//RS     String,
-//RS     String,
-//RS     Vec<(AccessConvention, Type)>,
-//RS     Option<Type>,
-//RS )> {
-//RS     let mut entries = Vec::new();
-//RS     for (path, target) in imported_module_paths(bundle, module_idx) {
-//RS         for item in &bundle.modules[target].items {
-//RS             let Item::Func(function) = item else {
-//RS                 continue;
-//RS             };
-//RS             if !bundle
-//RS                 .name_ledger
-//RS                 .visible(module_idx, target, &function.name)
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let params = function
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|param| {
-//RS                     let ty = if param.variadic {
-//RS                         Type::List(Box::new(param.ty.clone()))
-//RS                     } else {
-//RS                         param.ty.clone()
-//RS                     };
-//RS                     (
-//RS                         param.convention,
-//RS                         qualify_imported_call_type(bundle, target, &path, &ty),
-//RS                     )
-//RS                 })
-//RS                 .collect();
-//RS             let ret = function
-//RS                 .return_type
-//RS                 .as_ref()
-//RS                 .map(|ty| qualify_imported_call_type(bundle, target, &path, ty));
-//RS             entries.push((
-//RS                 path.clone(),
-//RS                 mangle(&bundle.modules[target].alias),
-//RS                 function.name.clone(),
-//RS                 params,
-//RS                 ret,
-//RS             ));
-//RS         }
-//RS     }
-//RS     entries
-//RS }
-//RS 
-//RS pub(crate) fn core_source_sig_map(
-//RS     bundle: &ProgramBundle,
-//RS ) -> HashMap<(String, String), super::CoreSourceFunctionSignature> {
-//RS     let mut map = HashMap::new();
-//RS     // Qualified calls can reach any loaded Core source module, not only a
-//RS     // module imported directly by the caller.
-//RS     for (target, module) in bundle.modules.iter().enumerate() {
-//RS         let Some(source) =
-//RS             jet_foundation::CoreModuleExports::core_source_module_by_alias(&module.alias)
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         for item in &bundle.modules[target].items {
-//RS             let Item::Func(function) = item else {
-//RS                 continue;
-//RS             };
-//RS             if !function.is_pub
-//RS                 || !jet_foundation::CoreModuleExports::core_source_owns(
-//RS                     source.module,
-//RS                     &function.name,
-//RS                 )
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let params = function
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|param| {
-//RS                     let ty = if param.variadic {
-//RS                         Type::List(Box::new(param.ty.clone()))
-//RS                     } else {
-//RS                         param.ty.clone()
-//RS                     };
-//RS                     (
-//RS                         param.convention,
-//RS                         qualify_imported_call_type(bundle, target, source.alias, &ty),
-//RS                     )
-//RS                 })
-//RS                 .collect();
-//RS             let return_type = function
-//RS                 .return_type
-//RS                 .as_ref()
-//RS                 .map(|ty| qualify_imported_call_type(bundle, target, source.alias, ty));
-//RS             map.insert(
-//RS                 (source.module.to_string(), function.name.clone()),
-//RS                 super::CoreSourceFunctionSignature {
-//RS                     module_identity: super::Context::module_identity(bundle, target),
-//RS                     type_params: function
-//RS                         .type_params
-//RS                         .iter()
-//RS                         .map(|param| param.name.clone())
-//RS                         .collect(),
-//RS                     params,
-//RS                     return_type,
-//RS                 },
-//RS             );
-//RS         }
-//RS     }
-//RS     // Compiler-private Core source parts do not have public imports or
-//RS     // `CoreSourceModule` rows. Their receiver-first functions still need the
-//RS     // same typed signature map so source String methods can emit a checked
-//RS     // `ModuleCall` rather than an inherent Rust impl.
-//RS     if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-//RS         jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-//RS     ) {
-//RS         if let Some(target) = bundle
-//RS             .modules
-//RS             .iter()
-//RS             .position(|loaded| loaded.alias == part.source.alias)
-//RS         {
-//RS             for item in &bundle.modules[target].items {
-//RS                 let Item::Func(function) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 if function.is_pub {
-//RS                     continue;
-//RS                 }
-//RS                 let params = function
-//RS                     .params
-//RS                     .iter()
-//RS                     .map(|param| {
-//RS                         let ty = if param.variadic {
-//RS                             Type::List(Box::new(param.ty.clone()))
-//RS                         } else {
-//RS                             param.ty.clone()
-//RS                         };
-//RS                         (
-//RS                             param.convention,
-//RS                             qualify_imported_call_type(
-//RS                                 bundle,
-//RS                                 target,
-//RS                                 part.source.alias,
-//RS                                 &ty,
-//RS                             ),
-//RS                         )
-//RS                     })
-//RS                     .collect();
-//RS                 let return_type = function.return_type.as_ref().map(|ty| {
-//RS                     qualify_imported_call_type(bundle, target, part.source.alias, ty)
-//RS                 });
-//RS                 map.insert(
-//RS                     (part.source.module.to_string(), function.name.clone()),
-//RS                     super::CoreSourceFunctionSignature {
-//RS                         module_identity: super::Context::module_identity(bundle, target),
-//RS                         type_params: function
-//RS                             .type_params
-//RS                             .iter()
-//RS                             .map(|param| param.name.clone())
-//RS                             .collect(),
-//RS                         params,
-//RS                         return_type,
-//RS                     },
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     map
-//RS }
-//RS 
-//RS pub(crate) fn import_sig_map(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> HashMap<(String, String), Vec<(AccessConvention, Type)>> {
-//RS     let mut map = HashMap::new();
-//RS     let module = &bundle.modules[module_idx];
-//RS     for imp in &module.imports {
-//RS         for (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
-//RS             for item in &bundle.modules[target].items {
-//RS                 match item {
-//RS                     Item::Func(f) if f.is_pub => {
-//RS                         map.insert(
-//RS                             (alias.clone(), f.name.clone()),
-//RS                             f.params
-//RS                                 .iter()
-//RS                                 .map(|p| (p.convention, qualify_unit_type(bundle, target, &p.ty)))
-//RS                                 .collect(),
-//RS                         );
-//RS                     }
-//RS                     Item::CModule(cm) => {
-//RS                         for ef in &cm.functions {
-//RS                             map.insert(
-//RS                                 (alias.clone(), ef.name.clone()),
-//RS                                 ef.params
-//RS                                     .iter()
-//RS                                     .map(|p| (p.convention, p.ty.clone()))
-//RS                                     .collect(),
-//RS                             );
-//RS                         }
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS         }
-//RS         if is_foreign_member_list(imp) {
-//RS             continue;
-//RS         }
-//RS         let alias = imp.import_alias();
-//RS         // S59: C `use` forms — pull boundary fn sigs from the synthetic module.
-//RS         let target = if is_c_import_after_frontend(imp) {
-//RS             required_c_target(bundle, module_idx, None, &alias)
-//RS         } else if matches!(imp.kind, ImportKind::Unqualified { .. })
-//RS             || imp.core_module_path().is_some()
-//RS         {
-//RS             continue;
-//RS         } else {
-//RS             required_import_target(bundle, module_idx, imp)
-//RS         };
-//RS         for item in &bundle.modules[target].items {
-//RS             match item {
-//RS                 Item::Func(f) if bundle.name_ledger.visible(module_idx, target, &f.name) => {
-//RS                     map.insert(
-//RS                         (alias.clone(), f.name.clone()),
-//RS                         f.params
-//RS                             .iter()
-//RS                             .map(|p| {
-//RS                                 let ty = if p.variadic {
-//RS                                     Type::List(Box::new(p.ty.clone()))
-//RS                                 } else {
-//RS                                     p.ty.clone()
-//RS                                 };
-//RS                                 (
-//RS                                     p.convention,
-//RS                                     qualify_imported_call_type(bundle, target, &alias, &ty),
-//RS                                 )
-//RS                             })
-//RS                             .collect(),
-//RS                     );
-//RS                 }
-//RS                 Item::CModule(cm) => {
-//RS                     for ef in &cm.functions {
-//RS                         map.insert(
-//RS                             (alias.clone(), ef.name.clone()),
-//RS                             ef.params
-//RS                                 .iter()
-//RS                                 .map(|p| {
-//RS                                     let ty = if p.variadic {
-//RS                                         Type::List(Box::new(p.ty.clone()))
-//RS                                     } else {
-//RS                                         p.ty.clone()
-//RS                                     };
-//RS                                     (p.convention, ty)
-//RS                                 })
-//RS                                 .collect(),
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     for (local, original, params, _) in
-//RS         unqualified_file_function_entries(bundle, module_idx, &module.imports)
-//RS     {
-//RS         map.insert((local, original), params);
-//RS     }
-//RS     for item in &module.items {
-//RS         if let Item::CodeModule(cm) = item {
-//RS             for (local, original, params, _) in
-//RS                 unqualified_file_function_entries(bundle, module_idx, &cm.imports)
-//RS             {
-//RS                 map.insert((local, original), params);
-//RS             }
-//RS         }
-//RS     }
-//RS     for (local, target) in unqualified_file_module_targets(bundle, module_idx) {
-//RS         for item in &bundle.modules[target].items {
-//RS             if let Item::Func(function) = item {
-//RS                 if bundle
-//RS                     .name_ledger
-//RS                     .visible(module_idx, target, &function.name)
-//RS                 {
-//RS                     map.insert(
-//RS                         (local.clone(), function.name.clone()),
-//RS                         function
-//RS                             .params
-//RS                             .iter()
-//RS                             .map(|param| {
-//RS                                 let ty = if param.variadic {
-//RS                                     Type::List(Box::new(param.ty.clone()))
-//RS                                 } else {
-//RS                                     param.ty.clone()
-//RS                                 };
-//RS                                 (
-//RS                                     param.convention,
-//RS                                     qualify_imported_call_type(bundle, target, "", &ty),
-//RS                                 )
-//RS                             })
-//RS                             .collect(),
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     // D-MOD4: re-exported items (`pub use sub.Item`) must carry the *real*
-//RS     // function's parameter conventions under the re-exporting alias, or calls
-//RS     // through the re-export would pass by value where a borrow is expected.
-//RS     for (path, _, function, params, _) in nested_file_function_entries(bundle, module_idx) {
-//RS         map.insert((format!("{path}.{function}"), function), params);
-//RS     }
-//RS     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
-//RS         let stem = crate::Syntax::generated_suffix(&real_mod);
-//RS         if let Some((real_idx, real)) = bundle
-//RS             .modules
-//RS             .iter()
-//RS             .enumerate()
-//RS             .find(|(_, m)| m.alias == stem)
-//RS         {
-//RS             for it in &real.items {
-//RS                 if let Item::Func(f) = it {
-//RS                     if f.name == real_fn
-//RS                         && bundle.name_ledger.visible(module_idx, real_idx, &f.name)
-//RS                     {
-//RS                         map.insert(
-//RS                             (alias.clone(), item.clone()),
-//RS                             f.params
-//RS                                 .iter()
-//RS                                 .map(|p| {
-//RS                                     let ty = if p.variadic {
-//RS                                         Type::List(Box::new(p.ty.clone()))
-//RS                                     } else {
-//RS                                         p.ty.clone()
-//RS                                     };
-//RS                                     (
-//RS                                         p.convention,
-//RS                                         qualify_imported_call_type(bundle, real_idx, &alias, &ty),
-//RS                                     )
-//RS                                 })
-//RS                                 .collect(),
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     map
-//RS }
-//RS 
-//RS /// c109 Phase 14: build a map from `(import alias, function)` → the function's return
-//RS /// type, mirroring `import_sig_map`. The TIR carries this as the total result type of
-//RS /// a cross-module call. Covers file-module pub funcs, C-boundary funcs, and `pub use`
-//RS /// re-exports (the same shapes `import_sig_map` covers).
-//RS pub(crate) fn import_ret_map(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS ) -> HashMap<(String, String), Option<Type>> {
-//RS     let mut map = HashMap::new();
-//RS     let module = &bundle.modules[module_idx];
-//RS     for imp in &module.imports {
-//RS         for (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
-//RS             for item in &bundle.modules[target].items {
-//RS                 match item {
-//RS                     Item::Func(f) if f.is_pub => {
-//RS                         let ret = f
-//RS                             .return_type
-//RS                             .as_ref()
-//RS                             .map(|ty| qualify_unit_type(bundle, target, ty));
-//RS                         map.insert((alias.clone(), f.name.clone()), ret);
-//RS                     }
-//RS                     Item::CModule(cm) => {
-//RS                         for ef in &cm.functions {
-//RS                             map.insert((alias.clone(), ef.name.clone()), ef.return_type.clone());
-//RS                         }
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS         }
-//RS         if is_foreign_member_list(imp) {
-//RS             continue;
-//RS         }
-//RS         let alias = imp.import_alias();
-//RS         let target = if is_c_import_after_frontend(imp) {
-//RS             required_c_target(bundle, module_idx, None, &alias)
-//RS         } else if matches!(imp.kind, ImportKind::Unqualified { .. })
-//RS             || imp.core_module_path().is_some()
-//RS         {
-//RS             continue;
-//RS         } else {
-//RS             required_import_target(bundle, module_idx, imp)
-//RS         };
-//RS         for item in &bundle.modules[target].items {
-//RS             match item {
-//RS                 Item::Func(f) if bundle.name_ledger.visible(module_idx, target, &f.name) => {
-//RS                     let ret = f
-//RS                         .return_type
-//RS                         .as_ref()
-//RS                         .map(|ty| qualify_imported_call_type(bundle, target, &alias, ty));
-//RS                     map.insert((alias.clone(), f.name.clone()), ret);
-//RS                 }
-//RS                 Item::CModule(cm) => {
-//RS                     for ef in &cm.functions {
-//RS                         map.insert((alias.clone(), ef.name.clone()), ef.return_type.clone());
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     for (local, original, _, ret) in
-//RS         unqualified_file_function_entries(bundle, module_idx, &module.imports)
-//RS     {
-//RS         map.insert((local, original), ret);
-//RS     }
-//RS     for item in &module.items {
-//RS         if let Item::CodeModule(cm) = item {
-//RS             for (local, original, _, ret) in
-//RS                 unqualified_file_function_entries(bundle, module_idx, &cm.imports)
-//RS             {
-//RS                 map.insert((local, original), ret);
-//RS             }
-//RS         }
-//RS     }
-//RS     for (local, target) in unqualified_file_module_targets(bundle, module_idx) {
-//RS         for item in &bundle.modules[target].items {
-//RS             if let Item::Func(function) = item {
-//RS                 if bundle
-//RS                     .name_ledger
-//RS                     .visible(module_idx, target, &function.name)
-//RS                 {
-//RS                     map.insert(
-//RS                         (local.clone(), function.name.clone()),
-//RS                         function
-//RS                             .return_type
-//RS                             .as_ref()
-//RS                             .map(|ty| qualify_imported_call_type(bundle, target, "", ty)),
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     for (path, _, function, _, ret) in nested_file_function_entries(bundle, module_idx) {
-//RS         map.insert((format!("{path}.{function}"), function), ret);
-//RS     }
-//RS     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
-//RS         let stem = crate::Syntax::generated_suffix(&real_mod);
-//RS         if let Some((real_idx, real)) = bundle
-//RS             .modules
-//RS             .iter()
-//RS             .enumerate()
-//RS             .find(|(_, m)| m.alias == stem)
-//RS         {
-//RS             for it in &real.items {
-//RS                 if let Item::Func(f) = it {
-//RS                     if f.name == real_fn
-//RS                         && bundle.name_ledger.visible(module_idx, real_idx, &f.name)
-//RS                     {
-//RS                         map.insert(
-//RS                             (alias.clone(), item.clone()),
-//RS                             f.return_type
-//RS                                 .as_ref()
-//RS                                 .map(|ty| qualify_imported_call_type(bundle, real_idx, &alias, ty)),
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     map
-//RS }
-// END-PORT-PENDING 0459 crates/jet-codegen/src/Codegen/Imports.rs:1-1999
+use jet_codegen.AST.[AccessConvention, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle, Type, VariantPayload, ForeignNamespace, ForeignLanguage, CoreListPath, walk_imports, core_list_prefix, core_list_path, mangle]
+use jet_codegen.Codegen.[Cx, CoreSourceFunctionSignature, type_is_cloneable_struct, type_is_hashable_struct, type_is_cloneable_enum, type_is_hashable_enum, nominal_leaf]
+use jet_codegen.Codegen.TIR.[qualify_imported_type]
+use jet_codegen.Codegen.Context.[module_identity]
+use jet_foundation.CoreModuleExports.[CoreSourceModule, core_source_module, core_source_module_by_alias, core_source_owns]
+use jet_foundation.CoreSourceParts.[core_private_source_part, CORE_TEXT_STRING_OWNER]
+use jet_foundation.Names.[member_name]
+use jet_codegen.Syntax.[generated_suffix]
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:7
+fn all_imports(module: LoadedModule) -> [(String?, ImportDecl)] {
+    walk_imports(module)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:15
+fn foreign_imports_after_frontend(imp: ImportDecl) -> [(ForeignNamespace, String)] {
+    imp.foreign_imports() catch error {
+        panic("invalid foreign import reached codegen after sema: {error.path}")
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:24
+fn is_c_import_after_frontend(imp: ImportDecl) -> Bool {
+    imp.is_c_import() catch error {
+        panic("invalid foreign import reached codegen after sema: {error.path}")
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:33
+fn is_foreign_member_list(imp: ImportDecl) -> Bool {
+    if imp.kind == {
+        Unqualified{..} -> !foreign_imports_after_frontend(imp).is_empty()
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:41
+fn resolve_target(bundle: ProgramBundle, module_idx: USize, imp: ImportDecl) -> USize? {
+    bundle.name_ledger.import_target(module_idx, imp.span)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:45
+fn required_import_target(bundle: ProgramBundle, module_idx: USize, imp: ImportDecl) -> USize {
+    resolve_target(bundle, module_idx, imp) ?? panic("import target missing after sema: module={module_idx} alias={imp.import_alias()} span={imp.span:?}")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:56
+fn required_c_target(bundle: ProgramBundle, module_idx: USize, scope: String?, alias: String) -> USize {
+    bundle.cffi.target_for_scope(module_idx, scope, alias) ?? panic("C import target missing after sema: module={module_idx} scope={scope:?} alias={alias}")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:73
+fn foreign_target(bundle: ProgramBundle, module_idx: USize, namespace: ForeignNamespace, alias: String, scope: String?) -> (String, USize)? {
+    target :: if namespace.language == ForeignLanguage.C {
+        bundle.cffi.target_for_scope(module_idx, scope, alias)
+    } else {
+        bundle.modules.position(fn(module) { module.display == namespace.display() })
+    }
+    if target == {
+        Val(index) -> Val((alias, index))
+        None -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:95
+fn foreign_import_targets_in_scope(bundle: ProgramBundle, module_idx: USize, imp: ImportDecl, scope: String?) -> [(String, USize)] {
+    loop (namespace, alias) in foreign_imports_after_frontend(imp) ->
+        foreign_target(bundle, module_idx, namespace, alias, scope) ?? panic("foreign import target missing after sema: module={module_idx} scope={scope:?}")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:117
+fn foreign_list_targets(bundle: ProgramBundle, module_idx: USize, imp: ImportDecl) -> [(String, USize)] {
+    foreign_list_targets_in_scope(bundle, module_idx, imp, None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:125
+fn foreign_list_targets_in_scope(bundle: ProgramBundle, module_idx: USize, imp: ImportDecl, scope: String?) -> [(String, USize)] {
+    if imp.kind == {
+        Unqualified{..} -> foreign_import_targets_in_scope(bundle, module_idx, imp, scope)
+        _ -> []
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:136
+fn file_import_target(bundle: ProgramBundle, module_idx: USize, alias: String) -> USize? {
+    loop imp in bundle.modules[module_idx].imports {
+        if imp.kind == { Unqualified{..} -> true _ -> false } { continue }
+        if imp.import_alias() != alias { continue }
+        if resolve_target(bundle, module_idx, imp) == { Val(target) -> return Val(target) None -> {} }
+    }
+    None
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:145
+fn inline_code_module_named(bundle: ProgramBundle, module_idx: USize, name: String) -> Bool {
+    bundle.modules[module_idx].items.any(fn(item) {
+        if item == { CodeModule(cm) -> cm.body != None && cm.name == name _ -> false }
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:157
+fn selective_nominal_targets(bundle: ProgramBundle, module_idx: USize) -> [(USize, String)] {
+    targets := [(USize, String)]{}
+    loop import in bundle.modules[module_idx].imports {
+        if !(if import.kind == { Unqualified{..} -> true _ -> false }) { continue }
+        loop binding in import.walk_bindings() {
+            original :: binding.original ?? continue
+            local :: binding.local
+            target :: bundle.name_ledger.alias(module_idx, local).and_then(fn(alias) { alias.target_module })
+                ?? core_list_prefix(binding.module_alias).and_then(fn(path) { core_source_target(bundle, path).map(fn(pair) { pair.1 }) })
+                ?? continue
+            leaf :: original.rsplit('.').next() ?? original
+            is_nominal :: bundle.modules[target].items.any(fn(item) {
+                if item == {
+                    Struct(definition) -> definition.name == leaf
+                    Enum(definition) -> definition.name == leaf
+                    Distinct(definition) -> definition.name == leaf
+                    UnitFamily(family) -> family.distinct_defs().any(fn(member) { member.name == leaf })
+                    _ -> false
+                }
+            })
+            if is_nominal && bundle.name_ledger.visible(module_idx, target, leaf) {
+                &targets.push((target, leaf.to_string()))
+            }
+        }
+    }
+    &targets.sort()
+    &targets.dedup()
+    targets
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:203
+fn qualify_unit_type(bundle: ProgramBundle, target: USize, ty: Type) -> Type {
+    ty.map_named_types(fn(name) {
+        found :: bundle.modules[target].items.any(fn(item) {
+            if item == {
+                UnitFamily(family) -> family.distinct_defs().any(fn(member) { member.name == name })
+                _ -> false
+            }
+        })
+        if found {
+            Val(bundle.name_ledger.nominal_identity(target, name) ?? panic("name ledger must contain every loaded module"))
+        } else { None }
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:218
+fn qualify_imported_call_type(bundle: ProgramBundle, target: USize, _alias: String, ty: Type) -> Type {
+    unit_qualified :: qualify_unit_type(bundle, target, ty)
+    owner :: bundle.name_ledger.module_identity(target) ?? panic("name ledger must contain every loaded module")
+    qualify_imported_type(bundle, target, owner, [], unit_qualified)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:234
+fn update_cloneability_with_foreign_types(mut cx: Cx, items: [Item]) {
+    foreign_leaf_counts := [String:USize]{}
+    loop name in cx.foreign_types.keys() {
+        &cx.type_names.insert(name.clone())
+        leaf :: nominal_leaf(name).to_string()
+        &foreign_leaf_counts.insert(leaf, (foreign_leaf_counts.get(leaf) ?? 0) + 1)
+    }
+    // Only unique leaves may participate in the existing cloneability walk.
+    loop (leaf, count) in foreign_leaf_counts {
+        if count == 1 { &cx.type_names.insert(leaf) }
+    }
+    secret :: cx.secret_containing_types()
+    loop item in items {
+        if item == {
+            Struct(s) -> {
+                if !cx.cloneable.contains(s.name) && type_is_cloneable_struct(s, cx.type_names) && !secret.contains(s.name) {
+                    &cx.cloneable.insert(s.name.clone())
+                }
+                if !cx.hashable.contains(s.name) && type_is_hashable_struct(s, cx.hashable) {
+                    &cx.hashable.insert(s.name.clone())
+                }
+            }
+            Enum(e) -> {
+                if !cx.cloneable.contains(e.name) && type_is_cloneable_enum(e, cx.type_names) && !secret.contains(e.name) {
+                    &cx.cloneable.insert(e.name.clone())
+                }
+                if !cx.hashable.contains(e.name) && type_is_hashable_enum(e, cx.hashable) {
+                    &cx.hashable.insert(e.name.clone())
+                }
+            }
+            _ -> {}
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:283
+fn foreign_type_map(bundle: ProgramBundle, module_idx: USize) -> [String:String] {
+    map := [String:String]{}
+    module :: bundle.modules[module_idx]
+    is_local :: fn(name: String) {
+        module.items.any(fn(item) {
+            if item == { Struct(s) -> s.name == name Enum(e) -> e.name == name _ -> false }
+        })
+    }
+    add_target :: fn(target: USize) {
+        rust_mod :: mangle(bundle.modules[target].alias)
+        // Ordering is a crate-wide runtime identity, not an imported nominal.
+        loop item in bundle.modules[target].items {
+            if item == {
+                Struct(s) -> {
+                    if bundle.name_ledger.visible(module_idx, target, s.name) && !is_local(s.name) {
+                        if bundle.name_ledger.nominal_identity(target, s.name) == {
+                            Val(identity) -> &map.insert(identity, rust_mod.clone())
+                            None -> {}
+                        }
+                    }
+                }
+                Enum(e) -> {
+                    if bundle.name_ledger.visible(module_idx, target, e.name) && !is_local(e.name) {
+                        if bundle.name_ledger.nominal_identity(target, e.name) == {
+                            Val(identity) -> &map.insert(identity, rust_mod.clone())
+                            None -> {}
+                        }
+                    }
+                }
+                Distinct(d) -> {
+                    if bundle.name_ledger.visible(module_idx, target, d.name) {
+                        if bundle.name_ledger.nominal_identity(target, d.name) == {
+                            Val(identity) -> &map.insert(identity, rust_mod.clone())
+                            None -> {}
+                        }
+                    }
+                }
+                UnitFamily(family) -> {
+                    // Public signatures can expose private unit-family carriers.
+                    loop member in family.distinct_defs() {
+                        if bundle.name_ledger.nominal_identity(target, member.name) == {
+                            Val(identity) -> &map.insert(identity, rust_mod.clone())
+                            None -> {}
+                        }
+                    }
+                }
+                _ -> {}
+            }
+        }
+    }
+    loop (scope, imp) in all_imports(module) {
+        loop (_, target) in foreign_list_targets_in_scope(bundle, module_idx, imp, scope) { add_target(target) }
+        if is_foreign_member_list(imp) || is_c_import_after_frontend(imp)
+            || (if imp.kind == { Unqualified{..} -> true _ -> false }) || imp.core_module_path() != None { continue }
+        add_target(required_import_target(bundle, module_idx, imp))
+    }
+    loop (target, leaf) in selective_nominal_targets(bundle, module_idx) {
+        identity :: bundle.name_ledger.nominal_identity(target, leaf) ?? continue
+        &map.insert(identity, mangle(bundle.modules[target].alias))
+    }
+    loop ((_, _), (rust_mod, _)) in reexport_call_map(bundle, module_idx) {
+        target :: bundle.modules.position(fn(candidate) { mangle(candidate.alias) == rust_mod }) ?? continue
+        loop item in bundle.modules[target].items {
+            if item == {
+                Struct(s) -> {
+                    if bundle.name_ledger.visible(module_idx, target, s.name) {
+                        if bundle.name_ledger.nominal_identity(target, s.name) == {
+                            Val(identity) -> &map.insert(identity, rust_mod.clone())
+                            None -> {}
+                        }
+                    }
+                }
+                Enum(e) -> {
+                    if bundle.name_ledger.visible(module_idx, target, e.name) {
+                        if bundle.name_ledger.nominal_identity(target, e.name) == {
+                            Val(identity) -> &map.insert(identity, rust_mod.clone())
+                            None -> {}
+                        }
+                    }
+                }
+                Distinct(d) -> {
+                    if bundle.name_ledger.visible(module_idx, target, d.name) {
+                        if bundle.name_ledger.nominal_identity(target, d.name) == {
+                            Val(identity) -> &map.insert(identity, rust_mod.clone())
+                            None -> {}
+                        }
+                    }
+                }
+                UnitFamily(family) -> {
+                    loop member in family.distinct_defs() {
+                        if bundle.name_ledger.nominal_identity(target, member.name) == {
+                            Val(identity) -> &map.insert(identity, rust_mod.clone())
+                            None -> {}
+                        }
+                    }
+                }
+                _ -> {}
+            }
+        }
+    }
+    map
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:405
+fn register_foreign_enum_variants(mut cx: Cx, bundle: ProgramBundle, module_idx: USize) {
+    module :: bundle.modules[module_idx]
+    loop (scope, imp) in all_imports(module) {
+        loop (_, target) in foreign_list_targets_in_scope(bundle, module_idx, imp, scope) {
+            loop item in bundle.modules[target].items {
+                if item == {
+                    Enum(e) -> {
+                        if !bundle.name_ledger.visible(module_idx, target, e.name) { continue }
+                        identity :: bundle.name_ledger.nominal_identity(target, e.name) ?? continue
+                        binders :: loop param in e.type_params -> param.name.clone()
+                        if !cx.enum_variants.contains_key(identity) {
+                            variants :: loop v in e.variants -> (v.name.clone(), qualify_imported_variant_payload(bundle, target, identity, binders, v.payload))
+                            &cx.enum_variants.insert(identity.clone(), variants)
+                        }
+                        loop v in e.variants {
+                            if !cx.variant_owner.contains_key(v.name) { &cx.variant_owner.insert(v.name.clone(), identity.clone()) }
+                        }
+                    }
+                    _ -> {}
+                }
+            }
+        }
+        if is_foreign_member_list(imp) { continue }
+        if is_c_import_after_frontend(imp) { continue }
+        if imp.core_module_path() == {
+            Val(core_module) -> {
+                if core_source_target(bundle, core_module) == {
+                    Val((_, target)) -> register_core_source_enum_layouts(&cx, bundle, target)
+                    None -> {}
+                }
+                continue
+            }
+            None -> {}
+        }
+        if imp.kind == { Unqualified{..} -> true _ -> false } { continue }
+        target :: required_import_target(bundle, module_idx, imp)
+        loop item in bundle.modules[target].items {
+            if item == {
+                Enum(e) -> {
+                    if !bundle.name_ledger.visible(module_idx, target, e.name) { continue }
+                    identity :: bundle.name_ledger.nominal_identity(target, e.name) ?? continue
+                    binders :: loop param in e.type_params -> param.name.clone()
+                    if !cx.enum_variants.contains_key(identity) {
+                        variants :: loop v in e.variants -> (v.name.clone(), qualify_imported_variant_payload(bundle, target, identity, binders, v.payload))
+                        &cx.enum_variants.insert(identity.clone(), variants)
+                    }
+                    loop v in e.variants {
+                        if !cx.variant_owner.contains_key(v.name) { &cx.variant_owner.insert(v.name.clone(), identity.clone()) }
+                    }
+                }
+                _ -> {}
+            }
+        }
+    }
+    loop (target, leaf) in selective_nominal_targets(bundle, module_idx) {
+        item :: bundle.modules[target].items.find(fn(item) {
+            if item == { Enum(definition) -> definition.name == leaf _ -> false }
+        }) ?? continue
+        if item == {
+            Enum(e) -> {
+                identity :: bundle.name_ledger.nominal_identity(target, leaf) ?? continue
+                binders :: loop param in e.type_params -> param.name.clone()
+                if !cx.enum_variants.contains_key(identity) {
+                    variants :: loop variant in e.variants -> (variant.name.clone(), qualify_imported_variant_payload(bundle, target, identity, binders, variant.payload))
+                    &cx.enum_variants.insert(identity.clone(), variants)
+                }
+                loop variant in e.variants {
+                    if !cx.variant_owner.contains_key(variant.name) { &cx.variant_owner.insert(variant.name.clone(), identity.clone()) }
+                }
+            }
+            _ -> continue
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:547
+// Core error layouts are needed even without a named import; do not claim bare variants.
+fn register_core_source_enum_layouts(mut cx: Cx, bundle: ProgramBundle, target: USize) {
+    rust_mod :: mangle(bundle.modules[target].alias)
+    loop item in bundle.modules[target].items {
+        if item == {
+            Enum(e) -> {
+                if !e.is_pub || !e.type_params.is_empty() { continue }
+                identity :: bundle.name_ledger.nominal_identity(target, e.name) ?? continue
+                if !cx.foreign_types.contains_key(identity) { &cx.foreign_types.insert(identity.clone(), rust_mod.clone()) }
+                if !cx.enum_variants.contains_key(identity) {
+                    variants :: loop variant in e.variants -> (variant.name.clone(), qualify_imported_variant_payload(bundle, target, identity, [], variant.payload))
+                    &cx.enum_variants.insert(identity.clone(), variants)
+                }
+            }
+            _ -> continue
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:580
+fn qualify_imported_variant_payload(bundle: ProgramBundle, target: USize, owner: String, binders: [String], payload: VariantPayload) -> VariantPayload {
+    if payload == {
+        Unit -> VariantPayload.Unit
+        Single(ty, span) -> VariantPayload.Single(qualify_imported_type(bundle, target, owner, binders, ty), span)
+        Named(fields) -> VariantPayload.Named(loop field in fields {
+            qualified := field.clone()
+            qualified.ty = qualify_imported_type(bundle, target, owner, binders, field.ty)
+            qualified
+        })
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:608
+fn core_source_target(bundle: ProgramBundle, module: String) -> (CoreSourceModule, USize)? {
+    source :: core_source_module(module) ?? return None
+    target :: bundle.modules.position(fn(loaded) { loaded.alias == source.alias }) ?? return None
+    Val((source, target))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:620
+fn import_mod_map(bundle: ProgramBundle, module_idx: USize) -> [String:String] {
+    map := [String:String]{}
+    module :: bundle.modules[module_idx]
+    loop imp in module.imports {
+        loop (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
+            &map.insert(alias, mangle(bundle.modules[target].alias))
+        }
+        if is_foreign_member_list(imp) { continue }
+        alias :: imp.import_alias()
+        if is_c_import_after_frontend(imp) {
+            target :: required_c_target(bundle, module_idx, None, alias)
+            &map.insert(alias, mangle(bundle.modules[target].alias))
+            continue
+        }
+        if imp.kind == { Unqualified{..} -> true _ -> false } { continue }
+        if imp.core_module_path() == {
+            Val(core_module) -> {
+                if core_source_target(bundle, core_module) == {
+                    Val((source, _)) -> &map.insert(alias, mangle(source.alias))
+                    None -> {}
+                }
+                continue
+            }
+            None -> {}
+        }
+        target :: required_import_target(bundle, module_idx, imp)
+        &map.insert(alias, mangle(bundle.modules[target].alias))
+    }
+    loop (local, target) in unqualified_file_module_targets(bundle, module_idx) {
+        &map.insert(local, mangle(bundle.modules[target].alias))
+    }
+    map
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:661
+fn imported_module_paths(bundle: ProgramBundle, module_idx: USize) -> [(String, USize)] {
+    paths := [(String, USize)]{}
+    pending := [(String, USize, [USize:Bool])]{("", module_idx, [module_idx:true])}
+    loop {
+        (prefix, owner, seen) :: &pending.pop() ?? break
+        loop imp in bundle.modules[owner].imports {
+            if is_foreign_member_list(imp) || is_c_import_after_frontend(imp)
+                || (if imp.kind == { Unqualified{..} -> true _ -> false }) || imp.core_module_path() != None { continue }
+            alias :: imp.import_alias()
+            target :: required_import_target(bundle, owner, imp)
+            path :: if prefix.is_empty() { alias } else { "{prefix}.{alias}" }
+            &paths.push((path.clone(), target))
+            if seen.contains_key(target) { continue }
+            next_seen := seen.clone()
+            &next_seen.insert(target, true)
+            &pending.push((path, target, next_seen))
+        }
+    }
+    paths
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:695
+fn unqualified_file_module_targets(bundle: ProgramBundle, module_idx: USize) -> [(String, USize)] {
+    module :: bundle.modules[module_idx]
+    targets := [(String, USize)]{}
+    loop imp in module.imports {
+        if imp.kind == {
+            Unqualified{module_alias, ..} -> {
+                if is_foreign_member_list(imp) { continue }
+                parent :: file_import_target(bundle, module_idx, module_alias) ?? continue
+                loop binding in imp.walk_bindings() {
+                    original :: binding.original ?? continue
+                    declaration :: bundle.name_ledger.declaration(parent, original) ?? continue
+                    if declaration.kind != "file_module" || !bundle.name_ledger.visible(module_idx, parent, original) { continue }
+                    target :: bundle.name_ledger.alias(parent, original).and_then(fn(alias) { alias.target_module }) ?? continue
+                    &targets.push((binding.local, target))
+                }
+            }
+            _ -> continue
+        }
+    }
+    targets
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:740
+// GATE #4499: tuple map keys preserve structural equality/hash.
+fn reexport_call_map(bundle: ProgramBundle, module_idx: USize) -> [(String, String):(String, String)] {
+    map := [(String, String):(String, String)]{}
+    module :: bundle.modules[module_idx]
+    loop imp in module.imports {
+        if imp.kind == { Unqualified{..} -> true _ -> false } { continue }
+        if imp.core_module_path() != None || is_c_import_after_frontend(imp) { continue }
+        alias :: imp.import_alias()
+        target_idx :: required_import_target(bundle, module_idx, imp)
+        target :: bundle.modules[target_idx]
+        loop reimp in target.imports {
+            if reimp.kind == {
+                Unqualified{module_alias, ..} -> {
+                    if !reimp.is_pub { continue }
+                    if is_foreign_member_list(reimp) || core_list_prefix(module_alias) != None { continue }
+                    real_idx :: file_import_target(bundle, target_idx, module_alias)
+                        ?? panic("re-export target missing after sema: module={target_idx} alias={module_alias}")
+                    real_mod :: mangle(bundle.modules[real_idx].alias)
+                    loop binding in reimp.walk_bindings() {
+                        orig :: binding.original ?? panic("member walker returned a binding without a member")
+                        &map.insert((alias.clone(), binding.local), (real_mod.clone(), orig.to_string()))
+                    }
+                }
+                _ -> continue
+            }
+        }
+    }
+    // Inline-to-file reexports share the qualified map; inline-to-inline do not.
+    loop item in module.items {
+        if item == {
+            CodeModule(cm) -> {
+                loop reimp in cm.imports {
+                    if reimp.kind == {
+                        Unqualified{module_alias, ..} -> {
+                            if !reimp.is_pub { continue }
+                            if is_foreign_member_list(reimp) || core_list_prefix(module_alias) != None { continue }
+                            real_idx :: file_import_target(bundle, module_idx, module_alias)
+                                ?? panic("inline re-export target missing after sema: module={module_idx} alias={module_alias}")
+                            real_mod :: mangle(bundle.modules[real_idx].alias)
+                            loop binding in reimp.walk_bindings() {
+                                orig :: binding.original ?? panic("member walker returned a binding without a member")
+                                &map.insert((cm.name.clone(), binding.local), (real_mod.clone(), orig.to_string()))
+                            }
+                        }
+                        _ -> continue
+                    }
+                }
+            }
+            _ -> continue
+        }
+    }
+    map
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:827
+fn core_import_map(bundle: ProgramBundle, module_idx: USize) -> [String:String] {
+    map := [String:String]{}
+    module :: bundle.modules[module_idx]
+    loop imp in module.imports {
+        if imp.core_module_path() == {
+            Val(core_module) -> { &map.insert(imp.import_alias(), core_module); continue }
+            None -> {}
+        }
+        if imp.kind == {
+            Unqualified{module_alias, ..} -> {
+                if core_list_prefix(module_alias) == None { continue }
+                loop binding in imp.walk_bindings() {
+                    orig :: binding.original ?? panic("member walker returned a binding without a member")
+                    local :: binding.local
+                    if core_list_path(module_alias, orig) == {
+                        Val(CoreListPath.Module(module)) -> &map.insert(local.to_string(), module)
+                        Val(CoreListPath.Item{module, ..}) -> &map.insert(local.to_string(), module)
+                        None -> panic("invalid Core member import reached codegen after sema: {module_alias}.{orig}")
+                    }
+                }
+            }
+            _ -> {}
+        }
+    }
+    map
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:873
+fn unqualified_import_maps(bundle: ProgramBundle, module_idx: USize) -> ([String:String], [String:(String, String)]) {
+    inline_map := [String:String]{}
+    file_map := [String:(String, String)]{}
+    module :: bundle.modules[module_idx]
+    code_mod_aliases := [String:Bool]{}
+    loop item in module.items {
+        if item == { CodeModule(cm) -> { if cm.body != None { &code_mod_aliases.insert(cm.name.clone(), true) } } _ -> {} }
+    }
+    loop imp in module.imports {
+        if imp.kind == {
+            Unqualified{module_alias, ..} -> {
+                if is_foreign_member_list(imp) || core_list_prefix(module_alias) != None { continue }
+                loop binding in imp.walk_bindings() {
+                    orig :: binding.original ?? panic("member walker returned a binding without a member")
+                    local :: binding.local
+                    alias :: bundle.name_ledger.effective_alias(module_idx, local)
+                    if code_mod_aliases.contains_key(module_alias) {
+                        target :: alias.map(fn(name) { name.target.clone() }) ?? member_name(module_alias, orig)
+                        &inline_map.insert(local, target)
+                    } else {
+                        target :: alias.and_then(fn(name) { name.target_module }) ?? file_import_target(bundle, module_idx, module_alias) ?? continue
+                        real_name :: alias.and_then(fn(name) {
+                            name.target.rsplit_once('.').map(fn(pair) { pair.1.to_string() })
+                        }) ?? orig.to_string()
+                        &file_map.insert(local, (mangle(bundle.modules[target].alias), real_name))
+                    }
+                }
+            }
+            _ -> continue
+        }
+    }
+    loop (path, rust_mod, function, _, _) in nested_file_function_entries(bundle, module_idx) {
+        &file_map.insert("{path}.{function}", (rust_mod, function))
+    }
+    (inline_map, file_map)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:944
+// GATE #4499: inline reexport keys are structural tuples.
+fn inline_import_maps(bundle: ProgramBundle, module_idx: USize) -> ([String:[String:String]], [String:[String:(String, String)]], [String:Bool], [(String, String):String]) {
+    module :: bundle.modules[module_idx]
+    code_module_names := [String:Bool]{}
+    loop item in module.items {
+        if item == { CodeModule(cm) -> { if cm.body != None { &code_module_names.insert(cm.name.clone(), true) } } _ -> {} }
+    }
+    inline_scopes := [String:[String:String]]{}
+    file_scopes := [String:[String:(String, String)]]{}
+    names := [String:Bool]{}
+    inline_reexports := [(String, String):String]{}
+    loop item in module.items {
+        if item == {
+            CodeModule(cm) -> {
+                body :: cm.body ?? continue
+                inline_scope := [String:String]{}
+                file_scope := [String:(String, String)]{}
+                loop imp in cm.imports {
+                    if imp.kind == {
+                        Unqualified{module_alias, ..} -> {
+                            if is_foreign_member_list(imp) { continue }
+                            if code_module_names.contains_key(module_alias) {
+                                loop binding in imp.walk_bindings() {
+                                    orig :: binding.original ?? panic("member walker returned a binding without a member")
+                                    local :: binding.local
+                                    target :: bundle.name_ledger.effective_alias(module_idx, local).map(fn(name) { name.target.clone() }) ?? member_name(module_alias, orig)
+                                    &inline_scope.insert(local.clone(), target.clone())
+                                    &names.insert(local.clone(), true)
+                                    if imp.is_pub { &inline_reexports.insert((cm.name.clone(), local), target) }
+                                }
+                            } else if imp.core_module_path() == None && core_list_prefix(module_alias) == None {
+                                target :: file_import_target(bundle, module_idx, module_alias)
+                                    ?? panic("inline unqualified import target missing after sema: module={module_idx} alias={module_alias}")
+                                loop binding in imp.walk_bindings() {
+                                    orig :: binding.original ?? panic("member walker returned a binding without a member")
+                                    local :: binding.local
+                                    kind :: bundle.name_ledger.declaration(target, orig).map(fn(declaration) { declaration.kind })
+                                    if kind == { Val("type" | "trait" | "const" | "tag" | "protocol") -> true _ -> false } { continue }
+                                    real_name :: bundle.name_ledger.effective_alias(module_idx, local).and_then(fn(name) {
+                                        name.target.rsplit_once('.').map(fn(pair) { pair.1.to_string() })
+                                    }) ?? orig.to_string()
+                                    &file_scope.insert(local.clone(), (mangle(bundle.modules[target].alias), real_name))
+                                    &names.insert(local, true)
+                                }
+                            }
+                        }
+                        _ -> continue
+                    }
+                }
+                loop inner in body {
+                    if inner == {
+                        Func(function) -> {
+                            key :: member_name(cm.name, function.name)
+                            if !inline_scope.is_empty() { &inline_scopes.insert(key.clone(), inline_scope.clone()) }
+                            if !file_scope.is_empty() { &file_scopes.insert(key, file_scope.clone()) }
+                        }
+                        _ -> continue
+                    }
+                }
+            }
+            _ -> continue
+        }
+    }
+    (inline_scopes, file_scopes, names, inline_reexports)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1061
+fn inline_foreign_import_maps(bundle: ProgramBundle, module_idx: USize) -> [String:[String:String]] {
+    module :: bundle.modules[module_idx]
+    scopes := [String:[String:String]]{}
+    loop item in module.items {
+        if item == {
+            CodeModule(cm) -> {
+                body :: cm.body ?? continue
+                scope := [String:String]{}
+                loop imp in cm.imports {
+                    loop (alias, target) in foreign_import_targets_in_scope(bundle, module_idx, imp, Val(cm.name)) {
+                        &scope.insert(alias, mangle(bundle.modules[target].alias))
+                    }
+                }
+                if scope.is_empty() { continue }
+                loop inner in body {
+                    if inner == {
+                        Func(function) -> &scopes.insert(member_name(cm.name, function.name), scope.clone())
+                        _ -> continue
+                    }
+                }
+            }
+            _ -> continue
+        }
+    }
+    scopes
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1102
+// GATE #4499: preserve (alias, method) keys within each emitted function's scope.
+fn inline_foreign_import_signature_maps(bundle: ProgramBundle, module_idx: USize) -> ([String:[(String, String):[(AccessConvention, Type)]]], [String:[(String, String):Type?]]) {
+    module :: bundle.modules[module_idx]
+    signatures := [String:[(String, String):[(AccessConvention, Type)]]]{}
+    returns := [String:[(String, String):Type?]]{}
+    loop item in module.items {
+        if item == {
+            CodeModule(cm) -> {
+                body :: cm.body ?? continue
+                sig_scope := [(String, String):[(AccessConvention, Type)]]{}
+                ret_scope := [(String, String):Type?]{}
+                loop imp in cm.imports {
+                    loop (alias, target) in foreign_import_targets_in_scope(bundle, module_idx, imp, Val(cm.name)) {
+                        loop item in bundle.modules[target].items {
+                            if item == {
+                                Func(function) -> {
+                                    if !function.is_pub { continue }
+                                    params :: loop param in function.params -> (param.convention, qualify_unit_type(bundle, target, param.ty))
+                                    &sig_scope.insert((alias.clone(), function.name.clone()), params)
+                                    &ret_scope.insert((alias.clone(), function.name.clone()), function.return_type.map(fn(ty) { qualify_unit_type(bundle, target, ty) }))
+                                }
+                                CModule(c_module) -> {
+                                    loop function in c_module.functions {
+                                        params :: loop param in function.params -> (param.convention, param.ty.clone())
+                                        &sig_scope.insert((alias.clone(), function.name.clone()), params)
+                                        &ret_scope.insert((alias.clone(), function.name.clone()), function.return_type.clone())
+                                    }
+                                }
+                                _ -> {}
+                            }
+                        }
+                    }
+                }
+                if sig_scope.is_empty() && ret_scope.is_empty() { continue }
+                loop inner in body {
+                    if inner == {
+                        Func(function) -> {
+                            key :: member_name(cm.name, function.name)
+                            &signatures.insert(key.clone(), sig_scope.clone())
+                            &returns.insert(key, ret_scope.clone())
+                        }
+                        _ -> continue
+                    }
+                }
+            }
+            _ -> continue
+        }
+    }
+    (signatures, returns)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1188
+// GATE #4499: public foreign reexports retain their tuple keys.
+fn inline_foreign_reexport_maps(bundle: ProgramBundle, module_idx: USize) -> [(String, String):String] {
+    module :: bundle.modules[module_idx]
+    map := [(String, String):String]{}
+    loop item in module.items {
+        if item == {
+            CodeModule(cm) -> {
+                if cm.body == None { continue }
+                loop imp in cm.imports {
+                    if !imp.is_pub { continue }
+                    loop (alias, target) in foreign_import_targets_in_scope(bundle, module_idx, imp, Val(cm.name)) {
+                        &map.insert((cm.name.clone(), alias), mangle(bundle.modules[target].alias))
+                    }
+                }
+            }
+            _ -> continue
+        }
+    }
+    map
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1222
+// GATE #4499: (exporting module, namespace, function) keys are structural triples.
+fn inline_foreign_reexport_signature_maps(bundle: ProgramBundle, module_idx: USize) -> ([(String, String, String):[(AccessConvention, Type)]], [(String, String, String):Type?]) {
+    module :: bundle.modules[module_idx]
+    signatures := [(String, String, String):[(AccessConvention, Type)]]{}
+    returns := [(String, String, String):Type?]{}
+    loop item in module.items {
+        if item == {
+            CodeModule(cm) -> {
+                if cm.body == None { continue }
+                loop imp in cm.imports {
+                    if !imp.is_pub { continue }
+                    loop (alias, target) in foreign_import_targets_in_scope(bundle, module_idx, imp, Val(cm.name)) {
+                        loop item in bundle.modules[target].items {
+                            if item == {
+                                Func(function) -> {
+                                    if !function.is_pub { continue }
+                                    params :: loop param in function.params -> (param.convention, qualify_unit_type(bundle, target, param.ty))
+                                    &signatures.insert((cm.name.clone(), alias.clone(), function.name.clone()), params)
+                                    &returns.insert((cm.name.clone(), alias.clone(), function.name.clone()), function.return_type.map(fn(ty) { qualify_unit_type(bundle, target, ty) }))
+                                }
+                                CModule(c_module) -> {
+                                    loop function in c_module.functions {
+                                        params :: loop param in function.params -> (param.convention, param.ty.clone())
+                                        &signatures.insert((cm.name.clone(), alias.clone(), function.name.clone()), params)
+                                        &returns.insert((cm.name.clone(), alias.clone(), function.name.clone()), function.return_type.clone())
+                                    }
+                                }
+                                _ -> {}
+                            }
+                        }
+                    }
+                }
+            }
+            _ -> continue
+        }
+    }
+    (signatures, returns)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1299
+// GATE #4499: Core item reexports preserve (module, local) keys.
+fn inline_core_import_maps(bundle: ProgramBundle, module_idx: USize) -> ([String:[String:String]], [(String, String):(String, String)]) {
+    module :: bundle.modules[module_idx]
+    scopes := [String:[String:String]]{}
+    reexports := [(String, String):(String, String)]{}
+    loop item in module.items {
+        if item == {
+            CodeModule(cm) -> {
+                body :: cm.body ?? continue
+                scope := [String:String]{}
+                loop imp in cm.imports {
+                    if imp.core_module_path() == {
+                        Val(core_module) -> { &scope.insert(imp.import_alias(), core_module); continue }
+                        None -> {}
+                    }
+                    if imp.kind == {
+                        Unqualified{module_alias, ..} -> {
+                            if core_list_prefix(module_alias) == None { continue }
+                            loop binding in imp.walk_bindings() {
+                                orig :: binding.original ?? panic("member walker returned a binding without a member")
+                                local :: binding.local
+                                path :: core_list_path(module_alias, orig) ?? panic("invalid Core member import reached codegen after sema: {module_alias}.{orig}")
+                                if path == {
+                                    Module(core_module) -> &scope.insert(local, core_module)
+                                    Item{module, item} -> {
+                                        &scope.insert(local.clone(), module.clone())
+                                        if imp.is_pub { &reexports.insert((cm.name.clone(), local), (module, item)) }
+                                    }
+                                }
+                            }
+                        }
+                        _ -> continue
+                    }
+                }
+                if scope.is_empty() { continue }
+                loop inner in body {
+                    if inner == {
+                        Func(function) -> &scopes.insert(member_name(cm.name, function.name), scope.clone())
+                        _ -> continue
+                    }
+                }
+            }
+            _ -> continue
+        }
+    }
+    (scopes, reexports)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1370
+fn namespace_member_owner(bundle: ProgramBundle, target: USize, name: String) -> USize {
+    declares :: fn(module: USize) {
+        bundle.name_ledger.declaration(module, name) != None || bundle.modules[module].items.any(fn(item) {
+            if item == { Func(function) -> function.name == name _ -> false }
+        })
+    }
+    if declares(target) { return target }
+    bundle.name_ledger.namespace_siblings(target).find(fn(sibling) { declares(sibling) }) ?? target
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1393
+fn unqualified_file_function_entries(bundle: ProgramBundle, module_idx: USize, imports: [ImportDecl]) -> [(String, String, [(AccessConvention, Type)], Type?)] {
+    entries := [(String, String, [(AccessConvention, Type)], Type?)]{}
+    loop imp in imports {
+        if imp.kind == {
+            Unqualified{module_alias, ..} -> {
+                if imp.core_module_path() != None { continue }
+                if inline_code_module_named(bundle, module_idx, module_alias) { continue }
+                maybe_target :: file_import_target(bundle, module_idx, module_alias)
+                target :: if maybe_target == {
+                    Val(target) -> target
+                    None -> {
+                        if is_foreign_member_list(imp) || core_list_prefix(module_alias) != None || inline_code_module_named(bundle, module_idx, module_alias) { continue }
+                        panic("file import target missing after sema: module={module_idx} alias={module_alias}")
+                    }
+                }
+                loop binding in imp.walk_bindings() {
+                    orig :: binding.original ?? panic("member walker returned a binding without a member")
+                    local :: binding.local
+                    owner :: namespace_member_owner(bundle, target, orig)
+                    maybe_item :: bundle.modules[owner].items.find(fn(item) {
+                        if item == { Func(f) -> f.name == orig && bundle.name_ledger.visible(module_idx, owner, f.name) _ -> false }
+                    })
+                    item :: if maybe_item == {
+                        Val(item) -> item
+                        None -> {
+                            c_item :: bundle.modules[owner].items.find(fn(item) {
+                                if item == { CModule(_) -> true _ -> false }
+                            })
+                            if c_item == {
+                                Val(Item.CModule(cm)) -> {
+                                    if cm.functions.find(fn(function) { function.name == orig }) == {
+                                        Val(function) -> {
+                                            params :: loop param in function.params {
+                                                ty :: if param.variadic { Type.List(param.ty.clone()) } else { param.ty.clone() }
+                                                (param.convention, ty)
+                                            }
+                                            &entries.push((local, orig.to_string(), params, function.return_type.clone()))
+                                            continue
+                                        }
+                                        None -> {}
+                                    }
+                                }
+                                _ -> {}
+                            }
+                            is_module :: bundle.modules[owner].items.any(fn(item) {
+                                if item == { Module(m) -> m.name == orig CodeModule(cm) -> cm.name == orig _ -> false }
+                            })
+                            if is_module { continue }
+                            if bundle.name_ledger.effective_alias(module_idx, local).is_some_and(fn(alias) { alias.target_module == Val(owner) }) { continue }
+                            panic("imported member missing after sema: module={module_idx} alias={module_alias} member={orig}")
+                        }
+                    }
+                    if item == {
+                        Func(function) -> {
+                            params :: loop param in function.params {
+                                ty :: if param.variadic { Type.List(param.ty.clone()) } else { param.ty.clone() }
+                                (param.convention, qualify_imported_call_type(bundle, owner, "", ty))
+                            }
+                            ret :: function.return_type.map(fn(ty) { qualify_imported_call_type(bundle, owner, "", ty) })
+                            &entries.push((local, orig.to_string(), params, ret))
+                        }
+                        _ -> panic("imported member is not a function after sema: module={module_idx} alias={module_alias} member={orig}")
+                    }
+                }
+            }
+            _ -> continue
+        }
+    }
+    entries
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1528
+fn nested_file_function_entries(bundle: ProgramBundle, module_idx: USize) -> [(String, String, String, [(AccessConvention, Type)], Type?)] {
+    entries := [(String, String, String, [(AccessConvention, Type)], Type?)]{}
+    loop (path, target) in imported_module_paths(bundle, module_idx) {
+        loop item in bundle.modules[target].items {
+            if item == {
+                Func(function) -> {
+                    if !bundle.name_ledger.visible(module_idx, target, function.name) { continue }
+                    params :: loop param in function.params {
+                        ty :: if param.variadic { Type.List(param.ty.clone()) } else { param.ty.clone() }
+                        (param.convention, qualify_imported_call_type(bundle, target, path, ty))
+                    }
+                    ret :: function.return_type.map(fn(ty) { qualify_imported_call_type(bundle, target, path, ty) })
+                    &entries.push((path.clone(), mangle(bundle.modules[target].alias), function.name.clone(), params, ret))
+                }
+                _ -> continue
+            }
+        }
+    }
+    entries
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1581
+// GATE #4499: Core source signatures preserve structural (module, function) keys.
+fn core_source_sig_map(bundle: ProgramBundle) -> [(String, String):CoreSourceFunctionSignature] {
+    map := [(String, String):CoreSourceFunctionSignature]{}
+    // Qualified calls may reach any loaded Core module.
+    loop (target, module) in bundle.modules.enumerate() {
+        source :: core_source_module_by_alias(module.alias) ?? continue
+        loop item in bundle.modules[target].items {
+            if item == {
+                Func(function) -> {
+                    if !function.is_pub || !core_source_owns(source.module, function.name) { continue }
+                    params :: loop param in function.params {
+                        ty :: if param.variadic { Type.List(param.ty.clone()) } else { param.ty.clone() }
+                        (param.convention, qualify_imported_call_type(bundle, target, source.alias, ty))
+                    }
+                    return_type :: function.return_type.map(fn(ty) { qualify_imported_call_type(bundle, target, source.alias, ty) })
+                    type_params :: loop param in function.type_params -> param.name.clone()
+                    &map.insert((source.module.to_string(), function.name.clone()), CoreSourceFunctionSignature{
+                        module_identity: module_identity(bundle, target),
+                        type_params: type_params,
+                        params: params,
+                        return_type: return_type,
+                    })
+                }
+                _ -> continue
+            }
+        }
+    }
+    // Private receiver-first String functions use the same typed ModuleCall facts.
+    if core_private_source_part(CORE_TEXT_STRING_OWNER) == {
+        Val(part) -> {
+            if bundle.modules.position(fn(loaded) { loaded.alias == part.source.alias }) == {
+                Val(target) -> {
+                    loop item in bundle.modules[target].items {
+                        if item == {
+                            Func(function) -> {
+                                if function.is_pub { continue }
+                                params :: loop param in function.params {
+                                    ty :: if param.variadic { Type.List(param.ty.clone()) } else { param.ty.clone() }
+                                    (param.convention, qualify_imported_call_type(bundle, target, part.source.alias, ty))
+                                }
+                                return_type :: function.return_type.map(fn(ty) { qualify_imported_call_type(bundle, target, part.source.alias, ty) })
+                                type_params :: loop param in function.type_params -> param.name.clone()
+                                &map.insert((part.source.module.to_string(), function.name.clone()), CoreSourceFunctionSignature{
+                                    module_identity: module_identity(bundle, target),
+                                    type_params: type_params,
+                                    params: params,
+                                    return_type: return_type,
+                                })
+                            }
+                            _ -> continue
+                        }
+                    }
+                }
+                None -> {}
+            }
+        }
+        None -> {}
+    }
+    map
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1700
+// GATE #4499: signatures retain structural (import alias, function) keys.
+fn import_sig_map(bundle: ProgramBundle, module_idx: USize) -> [(String, String):[(AccessConvention, Type)]] {
+    map := [(String, String):[(AccessConvention, Type)]]{}
+    module :: bundle.modules[module_idx]
+    loop imp in module.imports {
+        loop (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
+            loop item in bundle.modules[target].items {
+                if item == {
+                    Func(f) -> {
+                        if !f.is_pub { continue }
+                        params :: loop p in f.params -> (p.convention, qualify_unit_type(bundle, target, p.ty))
+                        &map.insert((alias.clone(), f.name.clone()), params)
+                    }
+                    CModule(cm) -> {
+                        loop ef in cm.functions {
+                            params :: loop p in ef.params -> (p.convention, p.ty.clone())
+                            &map.insert((alias.clone(), ef.name.clone()), params)
+                        }
+                    }
+                    _ -> {}
+                }
+            }
+        }
+        if is_foreign_member_list(imp) { continue }
+        alias :: imp.import_alias()
+        target :: if is_c_import_after_frontend(imp) {
+            required_c_target(bundle, module_idx, None, alias)
+        } else if (if imp.kind == { Unqualified{..} -> true _ -> false }) || imp.core_module_path() != None {
+            continue
+        } else {
+            required_import_target(bundle, module_idx, imp)
+        }
+        loop item in bundle.modules[target].items {
+            if item == {
+                Func(f) -> {
+                    if !bundle.name_ledger.visible(module_idx, target, f.name) { continue }
+                    params :: loop p in f.params {
+                        ty :: if p.variadic { Type.List(p.ty.clone()) } else { p.ty.clone() }
+                        (p.convention, qualify_imported_call_type(bundle, target, alias, ty))
+                    }
+                    &map.insert((alias.clone(), f.name.clone()), params)
+                }
+                CModule(cm) -> {
+                    loop ef in cm.functions {
+                        params :: loop p in ef.params {
+                            ty :: if p.variadic { Type.List(p.ty.clone()) } else { p.ty.clone() }
+                            (p.convention, ty)
+                        }
+                        &map.insert((alias.clone(), ef.name.clone()), params)
+                    }
+                }
+                _ -> {}
+            }
+        }
+    }
+    loop (local, original, params, _) in unqualified_file_function_entries(bundle, module_idx, module.imports) {
+        &map.insert((local, original), params)
+    }
+    loop item in module.items {
+        if item == {
+            CodeModule(cm) -> {
+                loop (local, original, params, _) in unqualified_file_function_entries(bundle, module_idx, cm.imports) {
+                    &map.insert((local, original), params)
+                }
+            }
+            _ -> {}
+        }
+    }
+    loop (local, target) in unqualified_file_module_targets(bundle, module_idx) {
+        loop item in bundle.modules[target].items {
+            if item == {
+                Func(function) -> {
+                    if !bundle.name_ledger.visible(module_idx, target, function.name) { continue }
+                    params :: loop param in function.params {
+                        ty :: if param.variadic { Type.List(param.ty.clone()) } else { param.ty.clone() }
+                        (param.convention, qualify_imported_call_type(bundle, target, "", ty))
+                    }
+                    &map.insert((local.clone(), function.name.clone()), params)
+                }
+                _ -> {}
+            }
+        }
+    }
+    loop (path, _, function, params, _) in nested_file_function_entries(bundle, module_idx) {
+        &map.insert(("{path}.{function}", function), params)
+    }
+    // Reexports carry the real function's borrow/take conventions.
+    loop ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
+        stem :: generated_suffix(real_mod)
+        real_idx :: bundle.modules.position(fn(m) { m.alias == stem }) ?? continue
+        real :: bundle.modules[real_idx]
+        loop it in real.items {
+            if it == {
+                Func(f) -> {
+                    if f.name != real_fn || !bundle.name_ledger.visible(module_idx, real_idx, f.name) { continue }
+                    params :: loop p in f.params {
+                        ty :: if p.variadic { Type.List(p.ty.clone()) } else { p.ty.clone() }
+                        (p.convention, qualify_imported_call_type(bundle, real_idx, alias, ty))
+                    }
+                    &map.insert((alias.clone(), item.clone()), params)
+                }
+                _ -> {}
+            }
+        }
+    }
+    map
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Imports.rs:1882
+// GATE #4499: return facts retain structural (import alias, function) keys.
+fn import_ret_map(bundle: ProgramBundle, module_idx: USize) -> [(String, String):Type?] {
+    map := [(String, String):Type?]{}
+    module :: bundle.modules[module_idx]
+    loop imp in module.imports {
+        loop (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
+            loop item in bundle.modules[target].items {
+                if item == {
+                    Func(f) -> {
+                        if !f.is_pub { continue }
+                        ret :: f.return_type.map(fn(ty) { qualify_unit_type(bundle, target, ty) })
+                        &map.insert((alias.clone(), f.name.clone()), ret)
+                    }
+                    CModule(cm) -> {
+                        loop ef in cm.functions { &map.insert((alias.clone(), ef.name.clone()), ef.return_type.clone()) }
+                    }
+                    _ -> {}
+                }
+            }
+        }
+        if is_foreign_member_list(imp) { continue }
+        alias :: imp.import_alias()
+        target :: if is_c_import_after_frontend(imp) {
+            required_c_target(bundle, module_idx, None, alias)
+        } else if (if imp.kind == { Unqualified{..} -> true _ -> false }) || imp.core_module_path() != None {
+            continue
+        } else {
+            required_import_target(bundle, module_idx, imp)
+        }
+        loop item in bundle.modules[target].items {
+            if item == {
+                Func(f) -> {
+                    if !bundle.name_ledger.visible(module_idx, target, f.name) { continue }
+                    ret :: f.return_type.map(fn(ty) { qualify_imported_call_type(bundle, target, alias, ty) })
+                    &map.insert((alias.clone(), f.name.clone()), ret)
+                }
+                CModule(cm) -> {
+                    loop ef in cm.functions { &map.insert((alias.clone(), ef.name.clone()), ef.return_type.clone()) }
+                }
+                _ -> {}
+            }
+        }
+    }
+    loop (local, original, _, ret) in unqualified_file_function_entries(bundle, module_idx, module.imports) {
+        &map.insert((local, original), ret)
+    }
+    loop item in module.items {
+        if item == {
+            CodeModule(cm) -> {
+                loop (local, original, _, ret) in unqualified_file_function_entries(bundle, module_idx, cm.imports) {
+                    &map.insert((local, original), ret)
+                }
+            }
+            _ -> {}
+        }
+    }
+    loop (local, target) in unqualified_file_module_targets(bundle, module_idx) {
+        loop item in bundle.modules[target].items {
+            if item == {
+                Func(function) -> {
+                    if !bundle.name_ledger.visible(module_idx, target, function.name) { continue }
+                    ret :: function.return_type.map(fn(ty) { qualify_imported_call_type(bundle, target, "", ty) })
+                    &map.insert((local.clone(), function.name.clone()), ret)
+                }
+                _ -> {}
+            }
+        }
+    }
+    loop (path, _, function, _, ret) in nested_file_function_entries(bundle, module_idx) {
+        &map.insert(("{path}.{function}", function), ret)
+    }
+    loop ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
+        stem :: generated_suffix(real_mod)
+        real_idx :: bundle.modules.position(fn(m) { m.alias == stem }) ?? continue
+        real :: bundle.modules[real_idx]
+        loop it in real.items {
+            if it == {
+                Func(f) -> {
+                    if f.name != real_fn || !bundle.name_ledger.visible(module_idx, real_idx, f.name) { continue }
+                    ret :: f.return_type.map(fn(ty) { qualify_imported_call_type(bundle, real_idx, alias, ty) })
+                    &map.insert((alias.clone(), item.clone()), ret)
+                }
+                _ -> {}
+            }
+        }
+    }
+    map
+}
 

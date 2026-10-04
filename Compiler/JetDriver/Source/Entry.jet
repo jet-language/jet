@@ -1,97 +1,37 @@
-// PORT-PENDING 0613 crates-jet-driver-src-pluginexport-module-group: crates/jet-driver/src/lib.rs:1-93
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #![allow(non_snake_case)]
-//RS #![deny(warnings)]
-//RS // Re-export all lower seams so driver source files can use `crate::AST`, `crate::Sema` etc.
-//RS pub use jet_codegen::{
-//RS     development_receipt, program_allocator, scheduler, CanonicalAST, Codegen, Collections,
-//RS     Comptime, Diagnostics, Generics, Lexer, Parser, Sema, Syntax, TargetMachine, Traits, AST,
-//RS     SHA256,
-//RS };
-//RS // The embedded Core module bodies; the self-hosted compiler's host passes them
-//RS // to the Jet loader exactly as `Loader.rs` loads them.
-//RS pub use jet_sema::CoreSources;
-//RS 
-//RS /// Install the canonical MIR evaluator into comptime/REPL/dev entry points.
-//RS #[inline]
-//RS pub fn boot_mir_eval() {
-//RS     Codegen::MIREval::install_mir_bridge();
-//RS }
-//RS 
-//RS /// Run front-end work on Jet's canonical compiler worker.
-//RS ///
-//RS /// Every compile / check / run entry point funnels through here, so no caller
-//RS /// has to know the compiler's stack requirement: `jet` itself, the LSP, a
-//RS /// test-harness thread, and an embedder's thread all get the same budget.
-//RS /// The size, the const assert tying it to the accepted nesting depth, and the
-//RS /// re-entrancy flag live in [`jet_foundation::CompilerStack`], because
-//RS /// `jet-jit` installs the same boundary at its own public entries and I6
-//RS /// forbids it from depending on this crate. Nested entry points reuse the
-//RS /// active worker, so one invocation crosses the boundary exactly once and
-//RS /// never nests worker threads — on either side of that seam.
-//RS ///
-//RS /// The worker is a different thread, so thread-local state a caller
-//RS /// established does not follow it. Comptime ambient hooks and the scoped
-//RS /// terminator-pass driver are carried across explicitly. Other compiler
-//RS /// thread-locals are established inside the work, from bundle facts
-//RS /// (`PackageEdition`), or are per-thread caches.
-//RS ///
-//RS /// Values and panics propagate unchanged: a panic is re-raised with
-//RS /// `resume_unwind`, so the ICE path and the diagnostics a caller catches keep
-//RS /// their shape instead of being reshaped into an error.
-//RS pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
-//RS     if jet_foundation::CompilerStack::on_compiler_worker() {
-//RS         return work();
-//RS     }
-//RS     let (ambient_core_call, ambient_handle, ambient_extern_call) = Comptime::ambient_hooks();
-//RS     let terminator_driver = Lexer::terminator_driver();
-//RS     jet_foundation::CompilerStack::run_on_compiler_stack(move || {
-//RS         boot_mir_eval();
-//RS         Lexer::with_terminator_driver(terminator_driver, || {
-//RS             Comptime::with_ambient(ambient_core_call, ambient_handle, ambient_extern_call, work)
-//RS         })
-//RS     })
-//RS }
-//RS 
-//RS pub mod BudgetView;
-//RS pub mod Compile;
-//RS pub mod Formatter;
-//RS pub mod Driver;
-//RS pub mod FixEngine;
-//RS pub mod Foreign;
-//RS pub mod InterpreterBoundary;
-//RS pub mod Loader;
-//RS pub mod ProjectParts;
-//RS pub mod QueryService;
-//RS pub mod Trace;
-//RS pub mod Migrations;
-//RS // Card #367 / D-PRODUCT-SPLIT1=C: the compiler's module loader needs the
-//RS // read-only package/config data model (manifest/lock/store-listing/script-
-//RS // deps/FFI-binding parsing), never the `jetpack` package-manager engine
-//RS // (provider/network/shell). `PluginExport` is driver-only (plugin export
-//RS // API-freeze validation via Sema) and was never used by `jetpack` itself, so
-//RS // it lives directly in this crate instead of the shared model.
-//RS pub mod BuildPluginHook;
-//RS pub mod CompilerExtensionHook;
-//RS pub mod LibraryExport;
-//RS pub mod PluginExport;
-//RS // Card #367 / D-PRODUCT-SPLIT1=C slice 3: `EffectBudget`/`LintPolicy` are
-//RS // pure policy computation over the manifest/effect-fixpoint data (no
-//RS // network/provider/shell), so they live in the shared read-only model too —
-//RS // the root `jet` package needs them for `build`/`run`'s effect-budget
-//RS // summary and lint-policy enforcement without depending on the full
-//RS // `jetpack` engine for that.
-//RS pub use jet_pkg_model::Authority;
-//RS pub use jet_pkg_model::JetLib;
-//RS pub use jet_pkg_model::JetLib::{JetLibAccess, JetLibArtifact, JetLibExport, JetLibScalar, JetLibStamp};
-//RS pub use jet_pkg_model::{
-//RS     AdaBind, Bindgen, CBind, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget,
-//RS     ForeignBridge,
-//RS     FortranBind,
-//RS     GoBind, JavaBind, JavaScriptBind, LintPolicy, Lock, LuaBind, Manifest, OctaveBind, Package, PascalBind,
-//RS     PerlBind, PhpBind, Policy, PowerShellBind, Public, PythonBind, RBind, RubyBind, ScriptDeps,
-//RS     Store, TclBind, CFFI, FFI,
-//RS };
-//RS pub use Compile::CompileOutput;
-// END-PORT-PENDING 0613 crates/jet-driver/src/lib.rs:1-93
+// Rust: crates/jet-driver/src/lib.rs:1
+// Consumers import lower seams directly from their canonical owners; no root reexports.
+use jet_codegen.[development_receipt, program_allocator, scheduler, Codegen, TargetMachine]
+use jet_comptime.Comptime
+use jet_sema.CoreSources
+use jet_sema.Sema
+use jet_foundation.[CanonicalAST, Collections, Diagnostics, Generics, Lexer, Parser, Syntax, Traits, AST, SHA256, CompilerStack]
 
+// Rust: crates/jet-driver/src/lib.rs:15
+pub fn boot_mir_eval() { Codegen.MIREval.install_mir_bridge() }
+
+// Rust: crates/jet-driver/src/lib.rs:40
+// GATE #4494: canonical compiler worker owns stack/thread/TLS/unwind primitives.
+// Reentrant work reuses the active worker; hooks cross the thread boundary explicitly.
+pub fn run_compiler_work<R: Send>(work: fn() -> R) -> R {
+    if CompilerStack.on_compiler_worker() { return work() }
+    (ambient_core_call, ambient_handle, ambient_extern_call) :: Comptime.ambient_hooks()
+    terminator_driver :: Lexer.terminator_driver()
+    CompilerStack.run_on_compiler_stack(fn() {
+        boot_mir_eval()
+        Lexer.with_terminator_driver(terminator_driver, fn() {
+            Comptime.with_ambient(ambient_core_call, ambient_handle, ambient_extern_call, ^work)
+        })
+    })
+}
+
+// Rust: crates/jet-driver/src/lib.rs:54
+use jet_driver.[BudgetView, Compile, Formatter, Driver, FixEngine, Foreign, InterpreterBoundary, Loader, ProjectParts, QueryService, Trace, Migrations]
+// Rust: crates/jet-driver/src/lib.rs:72
+use jet_driver.[BuildPluginHook, CompilerExtensionHook, LibraryExport, PluginExport]
+// Rust: crates/jet-driver/src/lib.rs:82
+// Read-only package/config ownership, never the package-manager engine.
+use jet_pkg_model.[Authority, JetLib, AdaBind, Bindgen, CBind, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, ForeignBridge, FortranBind, GoBind, JavaBind, JavaScriptBind, LintPolicy, Lock, LuaBind, Manifest, OctaveBind, Package, PascalBind, PerlBind, PhpBind, Policy, PowerShellBind, Public, PythonBind, RBind, RubyBind, ScriptDeps, Store, TclBind, CFFI, FFI]
+// Rust: crates/jet-driver/src/lib.rs:84
+use jet_pkg_model.JetLib.[JetLibAccess, JetLibArtifact, JetLibExport, JetLibScalar, JetLibStamp]
+// Rust: crates/jet-driver/src/lib.rs:93
+use jet_driver.Compile.CompileOutput

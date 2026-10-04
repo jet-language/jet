@@ -1,0 +1,56 @@
+use jet_codegen.Codegen.TIR.Lower.CoreCalls.*
+use jet_codegen.Codegen.TIR.[TExpr, TExprKind, TFnValueKind, unit_type]
+use jet_foundation.AST.[Type]
+use jet_foundation.Diagnostics.[Span]
+use jet_foundation.Syntax as Syntax
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/core_calls.rs:30
+#Test("core_invariant_retains_never_type_construct_and_span") {
+    span :: Span.new(4, 12)
+    value :: invariant_violation_expr(span, "missing checked row")
+    assert(value.ty == Type.Named(Syntax.TYPE_NEVER))
+    if value.kind == {
+        .InvariantViolation(construct, actual_span) -> {
+            assert(construct == "missing checked row")
+            assert(actual_span == span)
+        }
+        else -> assert(false, "expected typed invariant violation")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/core_calls.rs:86
+#Test("core_callback_types_keep_raw_unit_and_ui_return_slots") {
+    assert(unit_callback_type() == Type.Fn(params: [], ret: Val(unit_type()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None))
+    assert(ui_drop_callback_type() == Type.Fn(params: [Type.List(Type.Named("UIDropItem"))], ret: Val(unit_type()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None))
+    assert(ui_preview_callback_type() == Type.Fn(params: [], ret: Val(Type.Named("UINode")), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/core_calls.rs:154
+#Test("query_callback_native_returns_are_slot_specific") {
+    assert(query_callback_return_type("filter", 0) == Val(Type.Bool))
+    assert(query_callback_return_type("sort_by", 0) == Val(Type.String))
+    loop method in ["inner_join", "left_join"] {
+        assert(query_callback_return_type(method, 0) == None)
+        assert(query_callback_return_type(method, 1) == Val(Type.String))
+        assert(query_callback_return_type(method, 2) == Val(Type.String))
+    }
+    assert(query_callback_return_type("map", 0) == None)
+    assert(query_callback_return_type("group_by", 0) == None)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/core_calls.rs:163
+#Test("core_no_widening_retains_argument_count") {
+    args :: [TExpr{ty: Type.String, kind: TExprKind.StrLit([])}, TExpr{ty: Type.String, kind: TExprKind.StrLit([])}]
+    assert(no_widening(&args) == [false, false])
+    assert(no_widening(&[]) == [])
+    assert(data_widening(&args, &[(0, &Type.String), (8, &Type.String)]) == [false, false])
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/core_calls.rs:220
+#Test("interrupt_send_wrapper_retains_callable_type_and_value") {
+    callable :: unit_callback_type()
+    value :: TExpr{ty: callable.clone(), kind: TExprKind.FnValue(kind: TFnValueKind.NamedFn(name: Val("handler"), lambda: None))}
+    wrapped :: interrupt_callback_value(value.clone())
+    assert(wrapped.ty == callable)
+    if wrapped.kind == {
+        .FnValue(kind: .Send(value: inner)) -> assert(inner == value)
+        else -> assert(false, "expected send function-value wrapper")
+    }
+    assert(normalize_interrupt_named_value(value.clone()) == value)
+}

@@ -1,0 +1,180 @@
+use jet_comptime.CompilerServices02.*
+use jet_comptime.Comptime.Reflect.*
+use jet_foundation.[Span, CtValue]
+use jet_foundation.AST.[AccessConvention, Dimension, Field, QuantityKind, Type, Func, StructDef, DistinctDef, TypeParam, ArithmeticPolicyFact, ArithmeticMode, ArithmeticOperation, CallArgFlags, Stmt, Expr, Call, CallArg, StateTransition, KnowledgeFact, Measure, MeasureRule]
+use jet_foundation.Facts.[FactRegistry, FactKind]
+use jet_foundation.Syntax
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3191
+fn span() -> Span { Span.new(0, 1) }
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3195
+fn field(name: String, ty: String, is_pub: Bool) -> Field {
+    Field {
+        is_pub: is_pub, is_package_pub: false, name: name.to_string(), name_span: span(),
+        ty: Type.Named(ty.to_string()), ty_span: span(), serde_markers: [], redact: false,
+        computed: None, default: None, default_ct: None,
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3211
+fn method(name: String, is_pub: Bool) -> Func {
+    Func {
+        span: span(), is_pub: is_pub, is_comptime: false, is_package_pub: false,
+        external_type: None, meta: None, name: name.to_string(), name_span: span(), type_params: [],
+        head_pattern: None, params: [], return_type: Val(Type.Named("String")), return_type_span: Val(span()),
+        is_unsafe: false, unsafe_reason: None, unsafe_span: None, is_pure: false, is_sanitizer: false,
+        scrub_tag: None, is_reactive: false, reactive_upgrades: [], declared_effects: None, effect_via: None,
+        state_requires: None, state_transition: None, web_marker: None, pre: [], post: [],
+        is_must_use: false, must_use_span: None, maturity: None, maturity_span: None, is_inline: false,
+        is_inline_always: false, is_replayable: false, replayable_span: None, is_job: false, job_span: None,
+        every: None, job_metadata: None, inline_foreign: None, undo: None, inline_span: None,
+        return_view_provenance: None, declared_return_view_provenance: None, gc_return: false,
+        diverges: false, gc_scope: false, kernel: None, markers: [], compiler_generated: false, body: [],
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3268
+fn struct_field(value: &CtValue, name: String) -> &CtValue {
+    if value != .Struct { fields, .. } { panic("expected struct, got {value:?}") }
+    fields.iter().find(fn((field, _)) { field == name }).map(fn((_, value)) { value }).unwrap_or_else(fn() { panic("missing field `{name}` in {value:?}") })
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3280
+#Test("method_info_includes_arithmetic_operation_provenance") {
+    m := method("increment", true)
+    fact :: ArithmeticPolicyFact { mode: .Saturating, scope_span: Span.new(10, 40), operation_span: Span.new(24, 33), operation: Val(.Add) }
+    flags := CallArgFlags.default()
+    flags.arithmetic_policy = Val(fact)
+    m.body = [Stmt.Expr(Expr.Call(Call {
+        name: Syntax.BUILTIN_SATURATING, name_span: fact.operation_span, type_args: [],
+        args: [CallArg { convention: .Read, expr: Expr.Int(1, fact.operation_span, None, None), span: fact.operation_span, flags: ^flags, label: None, spread: false }],
+        resolved_ret: None, range_checked: false, widen_approx: false,
+    }))]
+    info :: build_method_info(&m)
+    arithmetic :: if struct_field(&info, "arithmetic") == { .List(rows) -> rows; _ -> panic("arithmetic") }
+    row :: arithmetic.first().expect("arithmetic row")
+    if row != .Struct { fields, .. } { panic("arithmetic row") }
+    assert(fields.iter().any(fn((name, value)) { name == "operation" && if value == { .Str(operation) -> operation == "add"; _ -> false } }))
+    assert(fields.iter().any(fn((name, value)) { name == "policy" && if value == { .Str(policy) -> policy == ".Saturating"; _ -> false } }))
+    assert(fields.iter().any(fn((name, value)) {
+        name == "scope_span" && if value == {
+            .Struct { fields, .. } -> fields.iter().any(fn((n, v)) { n == "start" && v == CtValue.Int(10) }) && fields.iter().any(fn((n, v)) { n == "end" && v == CtValue.Int(40) })
+            _ -> false
+        }
+    }))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3331
+#Test("reflection_exposes_effective_failure_contract_and_source") {
+    function :: method("load", true)
+    expected_contract :: function.failure_contract().effective_type().name()
+    expected_source :: function.failure_contract().source()
+    method_info :: build_method_info(&function)
+    assert(struct_field(&method_info, "failure_contract") == CtValue.Str(expected_contract.clone()))
+    assert(struct_field(&method_info, "failure_source") == CtValue.Str(expected_source.to_string()))
+    function_info :: build_function_type_info(&function)
+    assert(struct_field(&function_info, "failure_contract") == CtValue.Str(expected_contract))
+    assert(struct_field(&function_info, "failure_source") == CtValue.Str(expected_source.to_string()))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3358
+#Test("type_info_includes_methods_and_type_params") {
+    s :: StructDef {
+        span: span(), is_pub: true, is_package_pub: false, name: "Point", name_span: span(),
+        type_params: [TypeParam { name: "T", name_span: span(), bounds: ["Comparable"], prep: None }],
+        fields: [field("x", "T", true), field("secret", "Int", false)], state: None,
+        methods: [method("tag", true)], cli_bindings: [], trait_impls: [], derives: [("Debug", span())],
+        auto_derive_default: true, is_published_schema: false, published_schema_span: None,
+        is_single_use: false, single_use_span: None, is_must_use: false, must_use_span: None,
+        layout: None, layout_span: None, serde_markers: [], type_markers: [], validate_block: [], validate_span: None,
+    }
+    info :: build_struct_type_info(&s)
+    if info != .Struct { fields, .. } { panic("expected struct") }
+    get :: fn(name: String) { fields.iter().find(fn((n, _)) { n == name }).map(fn((_, v)) { v.clone() }).unwrap() }
+    assert(get("name") == CtValue.Str("Point"))
+    assert(get("path") == CtValue.Str("Point"))
+    qualified :: build_struct_type_info_with_path(&s, &[], "app.Point")
+    assert(struct_field(&qualified, "name") == CtValue.Str("Point"))
+    assert(struct_field(&qualified, "path") == CtValue.Str("app.Point"))
+    reflected_fields :: if get("fields") == { .List(rows) -> ^rows; _ -> panic("fields") }
+    assert(reflected_fields.len() == 2)
+    methods :: if get("methods") == { .List(rows) -> ^rows; _ -> panic("methods") }
+    assert(methods.len() == 1)
+    type_params :: if get("type_params") == { .List(rows) -> ^rows; _ -> panic("type_params") }
+    assert(type_params.len() == 1)
+    markers :: if get("markers") == { .List(rows) -> ^rows; _ -> panic("markers") }
+    assert(markers.iter().any(fn(marker) {
+        if marker == { .Struct { fields, .. } -> fields.iter().any(fn((name, value)) { name == "name" && value == CtValue.Str("Debug") }); _ -> false }
+    }))
+    assert(if get("expanded_markers") == { .List(expanded) -> expanded.is_empty(); _ -> false })
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3441
+#Test("transition_reflection_normalizes_state_paths") {
+    transition := method("open", true)
+    transition.state_transition = Val(StateTransition { from: Val("Closed"), to: "Door.State.Open", span: span() })
+    info :: transition_info("Door", &transition).expect("transition")
+    assert(if info == { .Struct { .. } -> true; _ -> false })
+    if info != .Struct { fields, .. } { return }
+    state_path :: fn(value: &CtValue, expected: String) {
+        if value == {
+            .Struct { type_name, fields } -> type_name == "StateRef" && fields.iter().any(fn((name, value)) { name == "path" && value == CtValue.Str(expected) })
+            _ -> false
+        }
+    }
+    assert(fields.iter().any(fn((name, value)) { name == "from" && state_path(value, "Door.State.Closed") }))
+    assert(fields.iter().any(fn((name, value)) { name == "to" && state_path(value, "Door.State.Open") }))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3471
+#Test("unified_fact_reflection_contains_effect_tag_and_state_rows") {
+    registry := FactRegistry.default()
+    registry.declare(.Effect, "Exec", [])
+    registry.declare_with_rules(.Tag, "PII", [], ["Exec"], [])
+    registry.declare(.State, "Door.State", ["Open"])
+    rows :: "{reflected_facts(&registry):?}"
+    assert(rows.contains("Effect") && rows.contains("Exec"), rows)
+    assert(rows.contains("Tag") && rows.contains("PII"), rows)
+    assert(rows.contains("State") && rows.contains("Door.State.Open"), rows)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3500
+#Test("range_and_dimension_facts_are_typed_records") {
+    info :: build_distinct_type_info(&DistinctDef {
+        is_pub: true, is_package_pub: false, type_markers: [], derives: [],
+        quantity: Val((Dimension.base("Length"), QuantityKind.Linear)), name: "Severity", name_span: span(),
+        base: Type.Int, base_span: span(), range: Val((0, 10, span())), span: span(),
+    }, "main")
+    facts :: if struct_field(&info, "facts") == { .List(rows) -> rows; _ -> panic("facts") }
+    is_kind :: fn(fact: &CtValue, expected: String) {
+        if struct_field(fact, "kind") == { .Enum { variant, .. } -> variant == expected; other -> panic("expected typed fact kind, got {other:?}") }
+    }
+    range :: facts.iter().find(fn(fact) { is_kind(fact, "Range") }).expect("range fact")
+    range_value :: if struct_field(struct_field(range, "value"), "range") == { .Present(value) -> value; _ -> panic("range fact must carry a present Range") }
+    assert(struct_field(range_value, "start") == CtValue.Int(0))
+    assert(struct_field(range_value, "end") == CtValue.Int(10))
+    dimension :: facts.iter().find(fn(fact) { is_kind(fact, "Dimension") }).expect("dimension fact")
+    dimension_value :: if struct_field(struct_field(dimension, "value"), "dimension") == { .Present(value) -> value; _ -> panic("dimension fact must carry a present DimensionInfo") }
+    axes :: if struct_field(dimension_value, "axes") == { .List(rows) -> rows; _ -> panic("dimension axes") }
+    assert(axes.iter().any(fn(axis) { struct_field(axis, "name") == CtValue.Str("Length") && struct_field(axis, "exponent") == CtValue.Int(1) }))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3560
+#Test("reflected_interval_bounds_preserve_wide_exact_ints") {
+    magnitude :: I128.from(I64.MAX) + 1
+    value :: knowledge_fact_value("Range", &KnowledgeFact.Interval { lo: -magnitude, hi: magnitude })
+    range :: struct_field(struct_field(&value, "value"), "range")
+    if range != .Present(range) { panic("wide interval must carry a present Range") }
+    assert(if struct_field(range, "start") == { .BigInt(value) -> value.try_i128() == Val(-magnitude); _ -> false })
+    assert(if struct_field(range, "end") == { .BigInt(value) -> value.try_i128() == Val(magnitude); _ -> false })
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Reflect.rs:3584
+#Test("measure_reflection_preserves_signed_and_symbolic_values") {
+    signed :: measure_info(&Measure.signed_literal("exponent", -2))
+    assert(if struct_field(&signed, "value") == { .Present(value) -> value.as_ref() == CtValue.Int(-2); _ -> false })
+    combined :: Measure.symbol("length", "N").combine(&Measure.symbol("length", "M"), MeasureRule.Add).expect("matching measure kinds combine")
+    symbolic :: measure_info(&combined)
+    assert(if struct_field(&symbolic, "symbol") == { .Present(symbol) -> symbol.as_ref() == CtValue.Str("(N + M)"); _ -> false })
+    resolved :: combined.resolve_symbols(&fn(name) { if name == { "N" -> Val(2); "M" -> Val(3); _ -> None } })
+    info :: measure_info(&resolved)
+    assert(if struct_field(&info, "value") == { .Present(value) -> value.as_ref() == CtValue.Int(5); _ -> false })
+}

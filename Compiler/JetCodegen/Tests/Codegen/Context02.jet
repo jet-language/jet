@@ -1,0 +1,76 @@
+use jet_codegen.Codegen.Context.[Cx, ExternFn, build_cx_items]
+use jet_foundation.AST.[Type, Item, FfiLink, VariantPayload]
+use jet_foundation.Syntax
+use jet_foundation.Diagnostics.Span
+
+fn context02_empty() -> Cx Never! {
+    items := [Item]{}
+    link := None as FfiLink?
+    extern_funcs := [String:ExternFn]{}
+    build_cx_items(&items, "", "context02.jet", &link, &extern_funcs, "")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1796-1842
+#Test("context_boxed_edge_reachability_terminates_on_cycles") {
+    cx := context02_empty()
+    cx.struct_fields["A"] = [("next", Type.Named("B"))]
+    cx.struct_fields["B"] = [("next", Type.Named("A"))]
+    assert(!cx.type_contains_boxed_edge(Type.Named("A")))
+    _ :: cx.boxed_edges.insert(("B", "next"))
+    assert(cx.type_contains_boxed_edge(Type.Named("A")))
+    assert(!cx.type_contains_boxed_edge(Type.Int))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1849-1905
+#Test("context_typed_literals_reach_enum_payloads") {
+    cx := context02_empty()
+    cx.enum_variants["Payload"] = [("Small", VariantPayload.Single(Type.IntN(false, 8), Span.new(0, 0)))]
+    assert(cx.type_contains_typed_literal_edge(Type.Named("Payload")))
+    assert(cx.type_contains_typed_literal_edge(Type.List(Type.IntN(true, 16))))
+    assert(!cx.type_contains_typed_literal_edge(Type.List(Type.Int)))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:1908-2064
+#Test("context_mutable_windows_and_shared_guards_are_distinct") {
+    cx :: context02_empty()
+    assert(!cx.type_contains_mutable_view(Type.Apply("View", [Type.Int])))
+    assert(cx.type_contains_mutable_view(Type.Apply("ViewMut", [Type.Int])))
+    assert(cx.type_contains_mutable_view(Type.Apply(Syntax.TYPE_PIN, [Type.Int])))
+    assert(cx.type_contains_shared_guard(Type.Option(Type.Apply(Syntax.TYPE_SHARED_GUARD, [Type.Int]))))
+    assert(!cx.type_contains_shared_guard(Type.Apply("ViewMut", [Type.Int])))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:2074-2167
+#Test("context_secret_reverse_reachability_propagates_through_cycles") {
+    cx := context02_empty()
+    cx.struct_fields["A"] = [("b", Type.Named("B"))]
+    cx.struct_fields["B"] = [("a", Type.Named("A")), ("secret", Type.Tagged(.Internal(.CoreCryptoNominal), Type.Int))]
+    cx.struct_fields["Plain"] = [("value", Type.Int)]
+    secret :: cx.secret_containing_types()
+    assert(secret.contains("A"))
+    assert(secret.contains("B"))
+    assert(!secret.contains("Plain"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:2172-2298,2533-3739
+#Test("context_view_lifetimes_preserve_wrapper_shapes") {
+    cx :: context02_empty()
+    assert(cx.rust_type(Type.Apply("View", [Type.Int])) == "&[i64]")
+    assert(cx.rust_type(Type.Apply("View", [Type.List(Type.Int)])) == "&[i64]")
+    assert(cx.rust_type(Type.Apply("View", [Type.Named("str")])) == "&str")
+    rendered :: cx.rust_type_with_view_lifetime(Type.List(Type.Apply("ViewMut", [Type.Int])))
+    assert(rendered.starts_with("Vec<&'"))
+    assert(rendered.ends_with("view mut [i64]>"))
+    assert(cx.rust_type(Type.IntN(false, 32)) == "u32")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:2304-2340
+#Test("context_columnar_stored_field_indices_and_list_carrier") {
+    cx := context02_empty()
+    _ :: cx.columnar.insert("Row")
+    cx.struct_fields["Row"] = [("x", Type.Int), ("y", Type.Float)]
+    assert(cx.columnar_column_index("Row", "y") == Val(1))
+    assert(cx.columnar_column_index("Row", "computed") == None)
+    assert(cx.columnar_list_type(Type.Named("Row")).is_some())
+    assert(cx.columnar_list_type(Type.Int) == None)
+}

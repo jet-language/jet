@@ -1,0 +1,710 @@
+use jet_foundation.[Type, Expr, Stmt, Item, Measure, Span, AutoVectorizationFacts, TExpr, TExprKind, TNumericOp, TCallArg, TLocal, TStmt, TFunc, TFuncKind, TFailureCarrier, TEffectFacts, TTargetApplicability, TVisibility, TIntegerBounds, TFactChannel, TFactExclusivity, TFactPurity, TComptimeValue, MIRArtifactRequest, MIRArtifactTarget, MIRArtifactKind, MIRArtifactBuildMode, MIROperation, MIRCallee, MIRTerminator, MIRTypeKind, MIRTypeDefKind, MIRVariantPayload, MIRFunctionForm, MIRRuntimePartID, tir_user_local]
+use jet_foundation.Syntax.[KW_SELF, SIMD_LANE_TYPE_NAMES]
+use jet_foundation.CompilerStack.[run_on_compiler_stack]
+use jet_lexer.[lex]
+use jet_parser.[parse]
+use jet_sema.Sema.[core_fixed_sig, is_polymorphic_core_special]
+use jet_codegen.Codegen.Context.[build_cx]
+use jet_codegen.Codegen.MIREval.[install_mir_bridge]
+use jet_codegen.Codegen.TIR.[lower_checked_mir_program_for, unit_type]
+use jet_codegen.Codegen.TIR.Tests.[emitted_rust, stable_loop_probe, checked_bundle, covers, covers_after_sema, covers_method, lower_after_sema]
+use jet_codegen.Codegen.TIR.Subset.[is_covered_builtin_name, handle_method_op, core_call_covered, is_intercepted_method_name, is_covered_struct_ty, fn_field_call_ty, field_ty_covered, is_concurrency_method_name, is_reactive_method_name, is_covered_reactive_ty, is_subset_param_ty, is_event_handle_type, is_event_method_name, is_covered_concurrency_ty, is_covered_collection_ty, fallible_payload_covered, core_closure_call_in_subset]
+use jet_foundation.[MIRFunctionID, MIRFunction]
+use jet_foundation.CallArg
+use std.[include_str, eprintln] // GATE #4494: retained source-artifact text and test stderr.
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1815
+fn non_scalar_clone_count(rust: String) -> Int Never! {
+    scalars := [String:Bool]{}
+    loop line in rust.lines() {
+        rest :: line.trim_start().strip_prefix("let ") ?? continue
+        rest :: rest.strip_prefix("mut ") ?? rest
+        (name, ty) :: rest.split_once(':') ?? continue
+        ty :: ty.trim_start() // #4303
+        if ty.contains("JetInt") || ty.starts_with("bool") || ty.starts_with("Option<bool>") -> &scalars.insert(name.trim(), true)
+    }
+    count := 0
+    loop (at, _) in rust.match_indices(".clone()") {
+        prefix :: rust[0..<at]
+        prefix :: prefix.strip_suffix(".as_ref().expect(\"MIR local\")") ?? prefix.strip_suffix(".as_ref().expect(\"MIR value\")") ?? prefix
+        start :: prefix.rfind(fn(c) { !(c.is_alphanumeric() || c == '_') }).map(fn(index) { index + 1 }) ?? 0
+        if !scalars.has_key(prefix[start..]) -> count += 1
+    }
+    count
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1846
+fn emitted_fn_body(rust: String, name: String) -> View<U8> Never! {
+    start :: rust.find("{name}(__jet_") ?? panic("`{name}` was not emitted:\n{rust}")
+    rest :: rust[start..]
+    rest[0..<rest.find("\n}\n").expect("emitted function has a closing brace")]
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1855
+#Test("borrowed_builtin_arguments_are_never_copied") {
+    run_on_compiler_stack(fn() {
+        src :: "struct Sym {\n    name: String\n    id: Int\n}\n\nfn has_value(items: [String], value: String) -> Bool {\n    items.contains(value)\n}\n\nfn find_sym(m: [String:Int], s: Sym) -> Int? {\n    m.get(s.name)\n}\n\nfn keep_value(items: &[String], value: String) {\n    &items.push(value)\n}\n\nfn run() {\n    m :: [String:Int]{}\n    names := [String]{}\n    keep_value(&names, \"b\")\n    print(has_value(names, \"a\"))\n    print(find_sym(m, Sym{name: \"a\", id: 1}) ?? 0)\n}\n"
+        (_, rust) :: emitted_rust(src)
+        loop name in ["has_uvalue", "find_usym"] {
+            body :: emitted_fn_body(rust, name)
+            assert(!body.contains(".clone()"), "a borrowed builtin argument must be borrowed in place, not copied:\n{body}")
+        }
+        keep :: emitted_fn_body(rust, "keep_uvalue")
+        assert(keep.matches(".clone()").count() == 1, "a stored builtin argument is copied exactly once:\n{keep}")
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1879
+#Test("mir_walks_stable_loop_sources_in_place") {
+    run_on_compiler_stack(fn() {
+        program :: fn(setup: String, source: String, inside: String, after: String) {
+            "struct Bag {{\n    names: [String]\n}}\nfn make_names(count: Int) -> [String] {{\n    names := [String]{{}}\n    loop i in 0..count {{\n        &names.push(\"name\")\n    }}\n    return names\n}}\nfn run() {{\n    {setup}\n    n := 0\n    loop name in {source} {{\n        n = n + name.len()\n        {inside}\n    }}\n    {after}\n    print(n)\n}}\n"
+        }
+        loop (setup, source) in [("names := make_names(3)", "names"), ("bag := Bag{names: make_names(3)}", "bag.names")] {
+            mention :: "_ := {source}.len()"
+            (stable_cursors, stable_clones) :: stable_loop_probe(program(setup, source, "", mention))
+            (snapshot_cursors, snapshot_clones) :: stable_loop_probe(program(setup, source, mention, ""))
+            eprintln("stable loop source `{source}`: non-scalar .clone() {snapshot_clones} (body mentions source) -> {stable_clones} (stable); cursors {snapshot_cursors:?} -> {stable_cursors:?}")
+            assert(stable_cursors.get("run") == Val(0), "`{source}`: {stable_cursors:?}")
+            assert(snapshot_cursors.get("run") == Val(1), "`{source}`: {snapshot_cursors:?}")
+            assert(stable_clones < snapshot_clones, "`{source}`: stable walk emitted {stable_clones} clones, snapshot {snapshot_clones}")
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1937
+#Test("mir_keeps_full_call_carriers_and_drops_partial_move_remainders") {
+    run_on_compiler_stack(fn() {
+        src :: "struct Pair {\n    shared: Shared<String>\n    remaining: String\n}\nfn child() -> Int Err! { return Ok(7) }\nfn caller() -> Int Err! { return child() }\nfn generic_child<T>(value: ^T) -> T Err! { return Ok(value) }\nfn generic_caller() -> Int Err! { return generic_child<Int>(7) }\nfn take_shared(pair: ^Pair) -> Shared<String> { return ^pair.shared }\nstruct Box<T> {\n    value: T\n    fn get(self) -> T Err! { return Ok(self.value) }\n}\nfn boxed(item: Box<Int>) -> Int Err! { return item.get() }\nfn run() {}\n"
+        bundle :: checked_bundle(src)
+        request :: MIRArtifactRequest.new(MIRArtifactTarget.RustAot, MIRArtifactKind.NativeExecutable, MIRArtifactBuildMode.Dev)
+        (mir, _) :: lower_checked_mir_program_for(bundle, request).expect("full-carrier ownership fixture failed to lower")
+        mir.validate().expect("full-carrier ownership fixture failed validation")
+        child :: mir.functions.find(fn(f) { f.name == "child" }).expect("child function")
+        caller :: mir.functions.find(fn(f) { f.name == "caller" }).expect("caller function")
+        call :: caller.blocks.flat_map(fn(b) { b.instructions }).find(fn(i) { if i.operation == { .Call{callee: .User(target), ..} -> target == child.id else -> false } }).expect("caller invokes child")
+        assert(call.ty == Val(child.return_type))
+        call_result :: call.result.expect("typed call result")
+        returned :: caller.blocks.find_map(fn(b) { if b.terminator == { .Return(Val(value)) -> Val(value) else -> None } }).expect("caller returns the child result")
+        assert(returned == call_result)
+        returned_type :: caller.values.find(fn(row) { row.0 == returned }).map(fn(row) { row.1 }).expect("returned call value has a type fact")
+        assert(returned_type == caller.return_type)
+        generic_child :: mir.functions.find(fn(f) { f.name == "generic_child" }).expect("generic child function")
+        generic_caller :: mir.functions.find(fn(f) { f.name == "generic_caller" }).expect("generic caller function")
+        generic_call :: generic_caller.blocks.flat_map(fn(b) { b.instructions }).find(fn(i) { if i.operation == { .Call{callee: .User(target), ..} -> target == generic_child.id else -> false } }).expect("generic caller invokes generic child")
+        assert(generic_call.ty == Val(generic_caller.return_type), "generic call preserves its instantiated full carrier")
+        assert(generic_call.ty != Val(generic_child.return_type), "generic call does not retain the uninstantiated callee carrier")
+        boxed :: mir.functions.find(fn(f) { f.name == "boxed" }).expect("generic-owner method caller")
+        (method_call, get_id) :: boxed.blocks.flat_map(fn(b) { b.instructions }).find_map(fn(i) { if i.operation == { .Call{callee: .Method{function, ..}, ..} -> Val((i, function)) else -> None } }).expect("generic-owner method call")
+        get :: mir.functions.find(fn(f) { f.id == get_id }).expect("generic-owner method target")
+        assert(method_call.ty == Val(boxed.return_type), "method call uses its owner-instantiated full carrier")
+        assert(method_call.ty != Val(get.return_type), "method call does not retain the generic owner carrier")
+        take_shared :: mir.functions.find(fn(f) { f.name == "take_shared" }).expect("take_shared function")
+        pair :: take_shared.locals.find(fn(l) { l.name == "pair" }).expect("owned Pair parameter")
+        projected_move :: take_shared.blocks.flat_map(fn(b) { b.instructions }).find(fn(i) { if i.operation == { .MovePlace(place) -> take_shared.places.any(fn(p) { p.id == place && !p.projections.is_empty() }) else -> false } }).expect("projected Shared field is moved")
+        assert(projected_move.result.is_some())
+        assert(!take_shared.locals.any(fn(l) { l.name.starts_with("owned_live_") }), "a projected move must not clear whole-owner liveness")
+        instructions :: take_shared.blocks.flat_map(fn(b) { b.instructions }).collect()
+        root_move :: instructions.find(fn(i) { if i.operation == { .MovePlace(place) -> place == pair.place else -> false } }).expect("remaining Pair fields are moved for cleanup")
+        root_value :: root_move.result.expect("root cleanup move result")
+        assert(instructions.any(fn(i) { if i.operation == { .Drop{value, ..} -> value == root_value else -> false } }))
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2135
+#Test("mir_types_absent_match_arm_from_its_checked_option_peer") {
+    run_on_compiler_stack(fn() {
+        src :: "fn canonical_device(device: String) -> String? {\n    if device == {\n        \"CPU\" | \"cpu\" -> Val(\"CPU\")\n        \"Auto\" | \"auto\" -> Val(\"Auto\")\n        \"CUDA\" | \"cuda\" -> Val(\"CUDA\")\n        \"Metal\" | \"metal\" -> Val(\"Metal\")\n        \"Vulkan\" | \"vulkan\" -> Val(\"Vulkan\")\n        \"WebGPU\" | \"webgpu\" -> Val(\"WebGPU\")\n        else -> None\n    }\n}\nfn run() {}\n"
+        bundle :: checked_bundle(src)
+        request :: MIRArtifactRequest.new(MIRArtifactTarget.RustAot, MIRArtifactKind.NativeExecutable, MIRArtifactBuildMode.Dev)
+        (mir, _) :: lower_checked_mir_program_for(bundle, request).expect("canonical_device failed to lower to MIR")
+        mir.validate().expect("canonical_device MIR failed validation")
+        function :: mir.functions.find(fn(f) { f.name == "canonical_device" }).expect("canonical_device MIR function")
+        assert(function.blocks.flat_map(fn(b) { b.instructions }).any(fn(i) { i.operation == .Absent && i.ty.is_some_and(fn(t) { if t.kind == { .Option(inner) -> inner.kind == .String else -> false } }) }), "the final None arm must retain the checked Option<String> type")
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2189
+#Test("mir_lowers_core_net_error_constructors_as_typed_enums") {
+    run_on_compiler_stack(fn() {
+        src :: "fn net_err(op: String, addr: String, message: String) -> NetError {\n    return NetError.InvalidInput(NetErrorDetail{\n        operation: op,\n        address: Val(addr),\n        name: None,\n        message: message,\n        os_code: None,\n    })\n}\nfn dns_err(name: String) -> NetError {\n    return NetError.DNS(NetDnsError.NotFound(name))\n}\nfn run() {}\n"
+        bundle :: checked_bundle(src)
+        request :: MIRArtifactRequest.new(MIRArtifactTarget.RustAot, MIRArtifactKind.NativeExecutable, MIRArtifactBuildMode.Dev)
+        (mir, _) :: lower_checked_mir_program_for(bundle, request).expect("NetError construction failed to lower to MIR")
+        mir.validate().expect("NetError MIR failed validation")
+        net_err_fn :: mir.functions.find(fn(f) { f.name == "net_err" }).expect("net_err MIR function")
+        has_absent_payload :: fn(matches_payload: fn(MIRTypeKind) -> Bool) { net_err_fn.blocks.flat_map(fn(b) { b.instructions }).any(fn(i) { i.operation == .Absent && i.ty.is_some_and(fn(t) { if t.kind == { .Option(inner) -> matches_payload(inner.kind) else -> false } }) }) }
+        assert(has_absent_payload(fn(kind) { kind == .String }), "NetErrorDetail.name must retain its checked Option<String> type")
+        assert(has_absent_payload(fn(kind) { kind == .Int }), "NetErrorDetail.os_code must retain its checked Option<Int> type")
+        net_error :: mir.types.find(fn(t) { t.key == "NetError" }).expect("compiler-owned NetError type row")
+        net_dns_error :: mir.types.find(fn(t) { t.key == "NetDnsError" }).expect("compiler-owned NetDnsError type row")
+        detail :: mir.types.find(fn(t) { t.key == "NetErrorDetail" }).expect("compiler-owned NetErrorDetail type row")
+        net_error_variants :: if net_error.kind == { .Enum(variants, _) -> variants else -> panic("NetError must be an enum row") }
+        assert(net_error_variants.map(fn(v) { v.name }) == ["InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable", "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout", "Cancelled", "Unsupported", "TLS", "Protocol", "Other", "DNS"])
+        invalid_input :: net_error_variants.find(fn(v) { v.name == "InvalidInput" }).expect("NetError.InvalidInput variant row")
+        payload :: if invalid_input.payload == { .Single(payload) -> payload else -> panic("NetError.InvalidInput must carry NetErrorDetail") }
+        assert(payload.identity == Val(detail.id))
+        net_dns_variants :: if net_dns_error.kind == { .Enum(variants, _) -> variants else -> panic("NetDnsError must be an enum row") }
+        assert(net_dns_variants.map(fn(v) { v.name }) == ["NotFound", "Failure"])
+        has_enum :: fn(function_name: String, type_id, variant_name: String) {
+            function :: mir.functions.find(fn(f) { f.name == function_name }).expect("missing MIR function {function_name}")
+            function.blocks.flat_map(fn(b) { b.instructions }).any(fn(i) { if i.operation == { .Enum{type_id: owner, variant, ..} -> owner == type_id && variant == variant_name else -> false } })
+        }
+        assert(has_enum("net_err", net_error.id, "InvalidInput"))
+        assert(has_enum("dns_err", net_error.id, "DNS"))
+        assert(has_enum("dns_err", net_dns_error.id, "NotFound"))
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2353
+#Test("mir_is_finite_selects_math_runtime_part") {
+    run_on_compiler_stack(fn() {
+        src :: "fn checked(x: Float) -> Bool {\n return x.is_finite()\n}\nfn run() { print(checked(1.0)) }\n"
+        bundle :: checked_bundle(src)
+        request :: MIRArtifactRequest.new(MIRArtifactTarget.RustAot, MIRArtifactKind.NativeExecutable, MIRArtifactBuildMode.Dev)
+        (mir, _) :: lower_checked_mir_program_for(bundle, request).expect("is_finite failed to lower to MIR")
+        assert(mir.artifacts.any(fn(a) { a.runtime_parts.contains(MIRRuntimePartID.Math) }), "Float.is_finite must select the Math runtime part so AOT emits jet_std_math_is_finite")
+        assert(mir.prelude_calls.any(fn(row) { row.symbol.name() == "jet_std_math_is_finite" }), "Float.is_finite must intern the Prelude symbol jet_std_math_is_finite")
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2383
+#Test("mir_lowers_user_struct_and_instance_method") {
+    run_on_compiler_stack(fn() {
+        src :: "pub struct Gauge {\n n: Int\n}\nfn Gauge.value(self) -> Int { self.n }\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n"
+        bundle :: checked_bundle(src)
+        request :: MIRArtifactRequest.new(MIRArtifactTarget.RustAot, MIRArtifactKind.NativeExecutable, MIRArtifactBuildMode.Dev)
+        (mir, _) :: lower_checked_mir_program_for(bundle, request).expect("user struct method failed to lower to MIR")
+        mir.validate().expect("user struct MIR failed validate")
+        method :: mir.functions.find(fn(f) { f.name == "Gauge::value" || f.name.ends_with("::value") || f.name == "value" }).expect("instance method value")
+        assert(if method.form == { .Method{self_access: Val(_), ..} -> true else -> false }, "value must be an instance method, got {method.form:?}")
+        receiver :: method.params.first().expect("instance method must declare parameter 0")
+        assert(receiver.name == KW_SELF && receiver.index == 0)
+        assert(mir.impls.any(fn(row) { row.trait_ref.is_none() && row.methods.contains(method.id) }), "instance method must belong to an inherent impl row so AOT can emit it")
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2431
+#Test("mir_resolves_same_named_methods_on_indexed_receivers") {
+    run_on_compiler_stack(fn() {
+        src :: "struct First { value: Int }\nstruct Second { value: Int }\nfn Second.mark(&self, delta: Int) -> Int { self.value + delta * 10 }\nfn First.mark(&self, delta: Int) -> Int { self.value + delta }\nfn run() {\n    firsts := [First]{ First{ value: 1 } }\n    seconds := [Second]{ Second{ value: 2 } }\n    first_value :: &firsts[0].mark(3)\n    second_value :: &seconds[0].mark(4)\n    print(\"{first_value}:{second_value}\")\n}\n"
+        bundle :: checked_bundle(src)
+        request :: MIRArtifactRequest.new(MIRArtifactTarget.RustAot, MIRArtifactKind.NativeExecutable, MIRArtifactBuildMode.Dev)
+        (mir, _) :: lower_checked_mir_program_for(bundle, request).expect("indexed same-name methods failed")
+        mir.validate().expect("indexed same-name MIR failed validate")
+        called_method_names := [String:Bool]{}
+        run :: mir.functions.find(fn(f) { f.name == "run" || f.name.ends_with("::run") }).expect("run function")
+        // Build an ID index once instead of repeatedly scanning every function.
+        functions := [MIRFunctionID:MIRFunction]{}
+        loop f in mir.functions -> &functions.insert(f.id, f)
+        loop instruction in run.blocks.flat_map(fn(b) { b.instructions }) {
+            if instruction.operation == .Call{callee: .Method{function, ..}, ..} {
+                if functions.get(function) == .Val(target) {
+                    name :: if target.name == "First::mark" || target.name.ends_with("::First::mark") -> "First::mark" else -> if target.name == "Second::mark" || target.name.ends_with("::Second::mark") -> "Second::mark" else -> target.name
+                    &called_method_names.insert(name, true)
+                }
+            }
+        }
+        assert(called_method_names == [String:Bool]{"First::mark": true, "Second::mark": true})
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2497
+#Test("mir_lowers_computed_field_getter_onto_inherent_impl") {
+    run_on_compiler_stack(fn() {
+        src :: "struct Stats {\n n: Int\n doubled: Int -> n * 2\n}\nfn run() {\n s :: Stats{ n: 1 }\n print(\"{s.doubled}\")\n}\n"
+        bundle :: checked_bundle(src)
+        request :: MIRArtifactRequest.new(MIRArtifactTarget.RustAot, MIRArtifactKind.NativeExecutable, MIRArtifactBuildMode.Dev)
+        (mir, _) :: lower_checked_mir_program_for(bundle, request).expect("computed field failed to lower to MIR")
+        mir.validate().expect("computed field MIR failed validate")
+        method :: mir.functions.find(fn(f) { f.name == "Stats::doubled" || f.name.ends_with("::doubled") || f.name == "doubled" }).expect("computed field getter doubled")
+        assert(if method.form == { .Method{..} -> true else -> false }, "computed getter must be an inherent method, got {method.form:?}")
+        assert(mir.impls.any(fn(row) { row.trait_ref.is_none() && row.methods.contains(method.id) }), "computed field getter must belong to an inherent impl row")
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2535
+#Test("covers_optional_return_and_chaining") {
+    src :: "struct Addr {\n city: String\n}\nfn opt(x: Int) -> Int? {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: Addr?) -> String? {\n return a?.city\n}\n"
+    assert(covers_after_sema(src, "opt"))
+    assert(covers(src, "ch"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2554
+#Test("covers_or_fallback_value_and_return") {
+    src :: "fn v(x: Int?) -> Int {\n return x ?? 0\n}\nfn r(x: Int?) -> Int {\n return x ?? return -1\n}\n"
+    assert(covers(src, "v")); assert(covers(src, "r"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2562
+#Test("covers_or_fallback_panic_form") {
+    assert(covers("fn p(x: Int?) -> Int {\n return x ?? panic(\"missing\")\n}\n", "p"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2570
+#Test("covers_comptime_if") {
+    assert(covers("fn f(x: Int) -> Int {\n prep if true {\n return x\n } else {\n return 0\n }\n}\n", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2580
+#Test("covers_mixed_bool_switch") {
+    assert(covers("fn f(x: Int) -> Int {\n if x == {\n 0 -> {\n return 2\n }\n 1..10 -> {\n return 1\n }\n else -> {\n return 0\n }\n }\n}\n", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2594
+#Test("covers_list_builtin_methods") {
+    assert(covers("fn f(xs: [Int]) -> Int {\n ys := xs\n ys.push(1)\n ys.reverse()\n ys.sort()\n n := ys.len()\n c := ys.contains(3)\n return n\n}\n", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2602
+#Test("covers_map_builtin_methods") {
+    assert(covers_after_sema("fn f(m: [String:Int]) -> Int {\n m2 := ~m\n old := &m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n &m2.clear()\n return n\n}\nfn run() {}\n", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2611
+#Test("rejects_unsupported_map_builtin_handoff") {
+    assert(!covers("fn f(m: [String:Int]) -> Bool {\n return m.contains_key(\"a\")\n}\n", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2619
+#Test("covers_string_builtin_methods") {
+    assert(covers("fn f(s: String) -> String {\n up := s.to_upper()\n tr := s.trim()\n sp := s.split(\",\")\n sw := s.starts_with(\"a\")\n rp := s.replace(\"a\", \"b\")\n rep := s.repeat(2)\n sl := s.slice(0, 2)\n ch := s.chars()\n by := s.bytes()\n return up\n}\n", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2626
+#Test("rejects_closure_builtin_method") {
+    loop name in ["map", "filter", "each", "find", "any", "all", "sort_by", "reduce"] -> assert(!is_covered_builtin_name(name, 1), "{name} (closure method) must NOT be a covered builtin")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2641
+#Test("covers_is_empty_builtin") {
+    assert(is_covered_builtin_name("is_empty", 0))
+    assert(covers("fn f(xs: [Int]) -> Int {\n e := xs.is_empty()\n if e {\n return 1\n }\n return 0\n}\n", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2651
+#Test("covers_full_byte_buffer_write_matrix") {
+    loop name in ["write_u8", "write_byte", "write_i8", "write_u16_le", "write_u16_be", "write_i16_le", "write_i16_be", "write_u32_le", "write_u32_be", "write_i32_le", "write_i32_be", "write_u64_le", "write_u64_be", "write_i64_le", "write_i64_be", "write_f32_le", "write_f32_be", "write_f64_le", "write_f64_be", "write_bytes", "write"] -> assert(is_covered_builtin_name(name, 1), "{name} must remain in the covered Bytes write matrix")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2683
+#Test("source_owned_numeric_aliases_are_not_builtins") {
+    loop name in ["to_i32", "to_u8", "to_f64"] -> assert(!is_covered_builtin_name(name, 0), "{name} is retired by D-SHAPE-CONVERT1")
+    loop name in ["is_nan", "count_ones"] -> assert(!is_covered_builtin_name(name, 0), "{name} is a Phase-12 query")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2699
+#Test("covers_string_payload_error_enum") {
+    assert(covers_after_sema("#Error\nenum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int Oops! {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\nfn run() {}\n", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2709
+#Test("covers_fn_typed_param") {
+    assert(covers("fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {\n return f(f(x))\n}\n", "apply_twice"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2718
+#Test("covers_fn_name_value_arg") {
+    assert(covers("fn callit(f: fn(Int) -> Int) -> Int {\n return f(1)\n}\nfn dbl(x: Int) -> Int {\n return (x * 2)\n}\nfn use_it() -> Int {\n return callit(dbl)\n}\n", "use_it"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2727
+#Test("handle_method_op_table") {
+    loop (owner, method, arity) in [
+        ("FileReader", "read_line", 0), ("FileWriter", "write_line", 1), ("FileWriter", "flush", 0),
+        ("TcpStream", "read", 0), ("TcpStream", "close", 0), ("TcpListener", "accept", 0),
+        ("Arena", "alloc", 1), ("Bump", "reset", 0),
+        ("HTTPRequest", "method", 0), ("HTTPRequest", "path", 0), ("HTTPRequest", "header", 1),
+        ("HTTPRequest", "param", 1), ("HTTPRequest", "trailers", 0), ("HTTPResponse", "status", 0),
+        ("HTTPResponse", "body", 0), ("HTTPResponse", "trailers", 1),
+        ("ArgsSpec", "flag", 2), ("ArgsSpec", "option", 3), ("ArgsSpec", "positional", 2),
+        ("ArgsSpec", "description", 1), ("ArgsSpec", "help", 0), ("ArgsSpec", "parse", 1),
+        ("ParsedArgs", "flag", 1), ("ParsedArgs", "option", 1), ("ParsedArgs", "positional", 1),
+        ("Value", "type_name", 0), ("Value", "display", 0), ("Value", "fields", 0),
+        ("Field", "name", 0), ("Field", "value", 0)
+    ] -> assert(handle_method_op(owner, method, arity).is_some())
+    assert(handle_method_op("Pool", "free", 0).is_none())
+    assert(handle_method_op("FileReader", "lines", 0).is_none())
+    assert(handle_method_op("FileWriter", "write_line", 0).is_none())
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2774
+#Test("polymorphic_core_specials_covered") {
+    loop (owner, member) in [
+        ("core.math", "abs"), ("core.math", "min"), ("core.math", "max"), ("core.math", "clamp"),
+        ("core.math.random", "pick"), ("core.math.random", "weighted_pick"), ("core.math.random", "sample"),
+        ("core.math.random", "shuffle"), ("core.term", "eprint"), ("core.tasks", "yield_now"),
+        ("core.http", "router"), ("core.http", "parse"), ("core.http", "dispatch"), ("core.http", "serve"),
+        ("core.term", "input")
+    ] -> assert(core_call_covered(owner, member))
+    assert(!core_fixed_sig("core.term", "input").is_some())
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2809
+#Test("covers_static_new_constructor") {
+    src :: "struct Rect { width: Int height: Int }\nimpl Rect {\n    fn new(width: Int, height: Int) -> Rect { return Rect{width: width, height: height} }\n}\nfn build() -> Rect { return Rect.new(4, 3) }\n"
+    assert(covers(src, "build"))
+    assert(is_intercepted_method_name("new"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2828
+#Test("covers_ambient_input") {
+    assert(covers("fn greet() -> String {\n    name :: input() ?? \"world\"\n    return \"hi {name}\"\n}\n", "greet"))
+    assert(covers("fn input() -> String { return \"x\" }\nfn greet() -> String { return input() }\n", "greet"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2848
+#Test("covers_assert_builtins") {
+    assert(covers("fn f() { assert((1 + 1) == 2) }", "f"))
+    assert(covers("fn f() { assert(false, \"nope\") }", "f"))
+    assert(covers("fn f() { assert_eq(2, 2) }", "f"))
+    assert(covers("fn f() { panic(\"stop\") }", "f"))
+    assert(covers("fn assert(x: Int) -> Int { return x }\nfn f() -> Int { return assert(3) }", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2865
+#Test("covers_caps_block") {
+    assert(covers("fn f() { #FX(IO) { print(\"x\") } }", "f"))
+    assert(covers("struct P { x: Int }\nfn f() { p :: P{x: 1}\n#FX(IO) { P{x} :: p\nprint(x) } }", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2881
+#Test("covers_free_call_arg_conventions") {
+    assert(covers("fn bump(n: &Int) { n += 1 }\nfn f() { s := 1\nbump(&s) }", "f"))
+    assert(covers("fn keep(s: ^String) -> String { return s }\nfn f() -> String { return keep(^\"v\") }", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2895
+#Test("covers_list_destructure") {
+    assert(covers("fn f() { xs :: [1, 2, 3]\n[a, b, c] :: xs\nprint(a) }", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2905
+#Test("covers_struct_destructure") {
+    assert(covers("struct Point { x: Int, y: Int }\nfn f() { p :: Point{ x: 1, y: 2 }\nPoint{ x, y } :: p\nprint(x + y) }", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2916
+#Test("covers_named_fn_value_binding") {
+    assert(covers("fn dbl(x: Int) -> Int { return (x * 2) }\nfn f() { g :: dbl\nprint(g(3)) }", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2929
+#Test("covers_fn_field_struct_value_type") {
+    src :: "struct Worker { step: fn(Int) -> Int }\nfn f() {}"
+    (toks, _) :: lex(src)
+    prog :: parse(toks).expect("parse")
+    cx :: build_cx(prog, src, "test.jet")
+    assert(is_covered_struct_ty(Type.Named("Worker"), cx))
+    assert(fn_field_call_ty("step", Val("Worker"), cx).is_some())
+    assert(fn_field_call_ty("missing", Val("Worker"), cx).is_none())
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2953
+#Test("covers_fn_field_type_covered") {
+    src :: "fn f() {}"
+    (toks, _) :: lex(src)
+    prog :: parse(toks).expect("parse")
+    cx :: build_cx(prog, src, "test.jet")
+    fn_ty :: Type.Fn{params: [Type.Int], ret: Val(Type.Int), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    visiting := [String:Bool]{}
+    assert(field_ty_covered(fn_ty, cx, &visiting))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:2971
+#Test("concurrency_method_names") {
+    loop (name, arity) in [("join", 0), ("detach", 0), ("pause", 0), ("pause", 1), ("resume", 0), ("cancel", 0), ("receive", 0), ("close", 0), ("send", 1)] -> assert(is_concurrency_method_name(name, arity))
+    loop (name, arity) in [("sender", 0), ("wait", 0), ("trace", 0), ("exception", 0), ("wait_all", 0), ("join_all", 0), ("cancel_all", 0), ("join", 1), ("send", 0), ("receive", 1), ("len", 0)] -> assert(!is_concurrency_method_name(name, arity))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3008
+#Test("reactive_method_names_and_value_types") {
+    assert(is_reactive_method_name("get", 0)); assert(is_reactive_method_name("set", 1))
+    assert(!is_reactive_method_name("get", 1)); assert(!is_reactive_method_name("set", 0))
+    cx_src :: "fn f() {}\n"
+    (toks, _) :: lex(cx_src)
+    prog :: parse(toks).expect("parse")
+    cx :: build_cx(prog, cx_src, "t.jet")
+    apply :: fn(n: String) { Type.Apply(n, [Type.Int]) }
+    assert(is_covered_reactive_ty(apply("Signal"), cx))
+    assert(is_covered_reactive_ty(apply("Derived"), cx))
+    assert(is_subset_param_ty(apply("Signal"), cx))
+    assert(is_subset_param_ty(apply("Derived"), cx))
+    assert(!is_covered_reactive_ty(apply("Receiver"), cx))
+    assert(core_call_covered("core.reactive", "signal"))
+    assert(is_polymorphic_core_special("core.reactive", "derived"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3036
+#Test("event_method_names_and_core_calls") {
+    loop name in ["Event", "Hook", "Subscription", "EventScope", "EventTrace", "DecisionHook"] -> assert(is_event_handle_type(Val(name)))
+    assert(!is_event_handle_type(Val("Signal")))
+    loop (name, arity) in [("on", 2), ("once", 2), ("on_priority", 3), ("emit", 1), ("emit_async", 1), ("run", 2), ("run", 1), ("unsubscribe", 0), ("active_count", 0), ("summary", 0)] -> assert(is_event_method_name(name, arity))
+    assert(!is_event_method_name("on", 1)); assert(!is_event_method_name("emit", 0))
+    loop name in ["new", "with_policy", "hook", "decision_hook", "scope", "policy_sync"] -> assert(core_call_covered("core.event", name))
+    assert(!core_call_covered("core.event", "policy_async"))
+    assert(!core_call_covered("core.event", "subscribe"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3069
+#Test("concurrency_value_types_covered") {
+    cx_src :: "fn f() {}\n"
+    (toks, _) :: lex(cx_src)
+    prog :: parse(toks).expect("parse")
+    cx :: build_cx(prog, cx_src, "t.jet")
+    apply :: fn(n: String) { Type.Apply(n, [Type.Int]) }
+    assert(is_covered_concurrency_ty(apply("Task"), cx))
+    assert(is_covered_concurrency_ty(apply("Receiver"), cx))
+    assert(is_covered_concurrency_ty(apply("Sender"), cx))
+    assert(is_subset_param_ty(apply("Task"), cx))
+    assert(is_covered_collection_ty(Type.List(Type.Apply("Task", [unit_type()])), cx))
+    assert(fallible_payload_covered(Type.Named("Closed"), cx))
+    assert(!is_covered_concurrency_ty(apply("Pair"), cx))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3101
+#Test("covers_concurrency_methods") {
+    src :: "use core.tasks as tasks\nfn produce(s: Sender<Int>) {\n    s.send(7)\n}\nfn consume(ch: Receiver<Int>) -> Int {\n    return ch.receive() ?? panic(\"closed\")\n}\n"
+    assert(covers(src, "produce")); assert(covers(src, "consume"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3127
+#Test("covers_pure_fn") { assert(covers("fn double(n: Int) -[]> Int {\n return (n * 2)\n}\n", "double")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3136
+#Test("covers_todo_hole") { assert(!covers("fn f(n: Int) -> Int {\n return #Todo\n}\n", "f")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3149
+#Test("covers_default_params") { assert(covers("fn box_dims(w: Int, h: Int{w}, d: Int{h}) -> String {\n return \"{w}{h}{d}\"\n}\n", "box_dims")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3159
+#Test("covers_distinct_value_type_and_ctor") {
+    assert(covers("UserID :: distinct Int\nfn greet(id: UserID) -> Int {\n return (id.raw())\n}\n", "greet"))
+    assert(covers("UserID :: distinct Int\nfn mk() -> UserID {\n return UserID.from_int(42)\n}\n", "mk"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3169
+#Test("covers_tuple_value_type") { assert(covers("fn first(p: (x: Int, y: Int)) -> Int {\n return p.x\n}\n", "first")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3180
+#Test("covers_named_args_at_call_site") { assert(covers("fn area(width: Int, height: Int) -> Int {\n return (width * height)\n}\nfn use_it() -> Int {\n return area(width: 4, height: 3)\n}\n", "use_it")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3189
+#Test("covers_default_param_method") { assert(covers_method("struct Rect {\n w: Int\n fn scale(self, factor: Int, clamp: Bool{false}) -> Int {\n return (self.w * factor)\n }\n}\n", "Rect", "scale")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3198
+#Test("core_closure_calls_covered") {
+    cx_src :: "fn f() {}\n"
+    (toks, _) :: lex(cx_src)
+    prog :: parse(toks).expect("parse")
+    cx :: build_cx(prog, cx_src, "t.jet")
+    locals :: [String:Bool]{}
+    lam :: fn(body: String) -> [CallArg] {
+        s :: "fn g() {{ x :: scope.guard({body})\n}}\n"
+        (t, _) :: lex(s)
+        p :: parse(t).expect("parse lam")
+        loop item in p.items {
+            if item == .Func(f) {
+                loop st in f.body {
+                    if st == .Val(b) {
+                        if b.init == .MethodCall{args, ..} -> return args
+                    }
+                }
+            }
+        }
+        []
+    }
+    guard_args :: lam("() -> { print(\"x\") }")
+    assert(core_closure_call_in_subset("core.mem.scope", "guard", guard_args, cx, locals))
+    assert(core_closure_call_in_subset("core.tasks", "spawn", guard_args, cx, locals))
+    assert(!core_closure_call_in_subset("core.files", "read", guard_args, cx, locals))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3250
+#Test("covers_json_construction_and_collection") {
+    assert(covers("fn build() -> DataTree {\n    items := []\n    items.push(DataTree.Text(\"jet\"))\n    items.push(DataTree.Bool(true))\n    items.push(DataTree.Null)\n    return DataTree.Array(items)\n}\n", "build"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3272
+#Test("covers_json_value_param_and_array") { assert(covers("fn wrap(x: DataTree) -> DataTree {\n    items := []\n    items.push(x)\n    return DataTree.Array(items)\n}\n", "wrap")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3285
+#Test("covers_enum_field_struct") { assert(covers("enum NoteType { User Feedback }\nstruct Note {\n    name: String\n    note_type: NoteType\n}\nfn name_of(n: Note) -> String {\n    return n.name\n}\n", "name_of")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3303
+#Test("covers_local_enum_with_foreign_payload_value_type") { assert(covers("enum Kind { A B }\nenum Query {\n    Tag(String)\n    OfKind(Kind)\n}\nfn mk(k: Kind) -> Query {\n    return Query.OfKind(k)\n}\n", "mk")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3323
+#Test("covers_comptime_const_in_interpolation") {
+    install_mir_bridge()
+    assert(covers_after_sema("HEADER :: prep { \"<html>\" }\nfn wrap(s: String) -> String {\n    return \"{HEADER}: {s}\"\n}\nfn run() {\n    print(wrap(\"body\"))\n}\n", "wrap"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3340
+#Test("covers_comptime_local_binding") {
+    src :: "fn build() -> [Int] {\n    xs := [Int]{}\n    loop i in 1..3 {\n        &xs.push(i * 10)\n    }\n    return xs\n}\nfn run() {\n    built :: prep { build() }\n    print(\"{built}\")\n}\n"
+    install_mir_bridge()
+    assert(covers_after_sema(src, "run"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3364
+#Test("covers_shared_auto_clone_in_free_call_arg") {
+    src :: "fn noop(h: Shared<Int>) {\n    print(0)\n}\nfn loop_user(h: Shared<Int>) {\n    loop {\n        noop(h)\n    }\n}\nfn run() {\n    print(0)\n}\n"
+    assert(covers_after_sema(src, "noop")); assert(covers_after_sema(src, "loop_user"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3390
+#Test("covers_optional_struct_field") { assert(covers_after_sema("struct PR {\n    file_path: String\n    note: String?\n}\nfn mk(p: String) -> PR {\n    return PR{file_path: ~p, note: None}\n}\nfn run() {}\n", "mk")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3407
+#Test("covers_numeric_bounds_const") { assert(covers("fn bounds() {\n    print(U8.MAX)\n    print(I32.MIN)\n    print(Float.INFINITY)\n}\n", "bounds")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3422
+#Test("rejects_unknown_numeric_member") { assert(!covers("fn bad() {\n    print(U8.NOPE)\n}\n", "bad")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3435
+#Test("covers_overflow_opt_builtins") { assert(covers("fn ops(a: U8, b: U8) {\n    print(wrapping(a + b))\n    print(saturating(a * b))\n}\n", "ops")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3449
+#Test("rejects_overflow_opt_nonbinary") { assert(!covers("fn nope(x: U8) {\n    print(wrapping(x))\n}\n", "nope")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3462
+#Test("covers_generic_optional_return") { assert(covers_after_sema("fn opt_id<T>(x: ^T) -> T? {\n    return Val(x)\n}\nfn run() {\n}\n", "opt_id")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3487
+#Test("rejects_optional_return_uncovered_payload") { assert(!covers("trait Shape {\n    fn area(self) -> Float\n}\nfn maybe_shape(s: Shape) -> Shape? {\n    return Val(s)\n}\n", "maybe_shape")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3502
+#Test("covers_trait_object_param") { assert(covers("trait Shape {\n    fn area(self) -> Float\n    fn name(self) -> String\n}\nfn takes_shape(s: Shape) {\n}\n", "takes_shape")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3520
+#Test("covers_trait_object_list_param") { assert(covers("trait Shape {\n    fn area(self) -> Float\n}\nfn takes_shapes(xs: [Shape]) {\n}\n", "takes_shapes")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3535
+#Test("rejects_non_trait_object_named") { assert(!covers("fn bad(s: Nonexistent) {\n}\n", "bad")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3547
+#Test("covers_recursive_struct_construction") { assert(covers_after_sema("struct Tree {\n    value: Int\n    child: Tree?\n}\nfn build() {\n    root :: Tree{ value: 1, child: Val(Tree{ value: 2, child: None }) }\n    print(root.value)\n}\n", "build")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3573
+#Test("covers_recursive_struct_boxed_field_read") { assert(covers("struct Tree {\n    value: Int\n    child: Tree?\n}\nfn first_child(t: Tree) -> Int {\n    kid :: t.child\n    if kid == {\n        .Val(c) -> {\n            return c.value\n        }\n        .None -> {\n            return 0\n        }\n    }\n    return 0\n}\n", "first_child")) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3600
+#Test("covers_owning_nonscalar_field_read_clone") { assert(covers_after_sema("\nstruct P {\n    name: String\n}\n\nfn run() {\n    p :: P{ name: \"x\" }\n    s :: p.name\n    t :: p.name\n    print(s)\n    print(t)\n}\n", "run"), "owning field-read clone not covered") }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3626
+#Test("covers_indexed_map_assign_through_field") { assert(covers_after_sema("\nstruct S {\n    scores: [String:Int]\n}\n\nfn run() {\n    s := S{ scores: [] }\n    s.scores[\"a\"] = 1\n    print(s.scores[\"a\"])\n}\n", "run"), "map-assign through field not covered") }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3651
+#Test("covers_map_builtin_on_struct_field_receiver") { assert(covers_after_sema("\nstruct S {\n    scores: [String:Int]\n}\n\nfn run() {\n    s := S{ scores: [] }\n    print(s.scores.len())\n}\n", "run"), "map builtin on field receiver not covered") }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3676
+#Test("covers_field_read_and_eq_on_inlined_comptime_values") {
+    install_mir_bridge()
+    src :: "\nstruct Pair {\n    left: Int\n    right: String\n}\n\nenum Light {\n    Red\n    Green\n}\n\nPAIR_VALUE :: prep { Pair{left: 7, right: \"seven\"} }\nLIGHT_VALUE :: prep { Light.Green }\n\nfn run() {\n    print(\"{PAIR_VALUE.left}\")\n    print(\"{PAIR_VALUE.right}\")\n    print(\"{LIGHT_VALUE == Light.Green}\")\n}\n"
+    assert(covers_after_sema(src, "run"), "field-read/== on inlined comptime values not covered")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3711
+#Test("covers_wildcard_enum_payload_if_let") { assert(covers("enum Wrapper {\n    Some(Int)\n    Empty\n}\nfn run() {\n    w :: Wrapper.Some(42)\n    if w == .Some(_) {\n        print(\"has value\")\n    }\n}\n", "run"), "wildcard enum-payload if-let not covered") }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3734
+fn auto_facts_after_sema(src: String, fn_name: String) -> AutoVectorizationFacts? Never! {
+    run_on_compiler_stack(fn() {
+        bundle :: checked_bundle(src)
+        module :: bundle.modules[bundle.entry]
+        function :: module.items.find_map(fn(item) { if item == { .Func(f) if f.name == fn_name -> Val(f) else -> None } }).expect("no fn {fn_name}")
+        function.body.find_map(fn(stmt) { if stmt == { .For{auto_vectorization, ..} -> auto_vectorization else -> None } })
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3761
+#Test("named_task_all_preserves_authored_spawn_order") {
+    source :: "\nfn first() -> Int {\n    print(\"z\")\n    return 1\n}\nfn second() -> Int {\n    print(\"a\")\n    return 2\n}\nfn run() {\n    values :: (task.all {\n        z: first(),\n        a: second()\n    }) ?? panic(\"named task.all failed\")\n    print(values.z, values.a)\n}\n"
+    tir :: lower_after_sema(source, "run")
+    tasks :: tir.body.find_map(fn(stmt) {
+        if stmt == {
+            .Let{init, ..} -> if init.kind == {
+                .OrFallback(value, _, _) -> if value.kind == { .TaskGroupAll(tasks) -> Val(tasks) else -> None }
+                else -> None
+            }
+            else -> None
+        }
+    }).expect("named task.all must lower through its existing group node")
+    fields :: if tasks.kind == { .TupleLit(fields, _) -> fields else -> panic("named task.all must keep its tuple carrier") }
+    assert(fields.map(fn(field) { field.name }) == ["z", "a"])
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3807
+#Test("d_simd3_default_fact_reaches_native_emission") {
+    source :: "\nfn auto(values: [Float#4]) -> [Float#4] {\n    output := [Float#4]{0.0, 0.0, 0.0, 0.0}\n    loop i in 0..<4 {\n        output[i] = values[i] * 2.0 + 1.0\n    }\n    return output\n}\n"
+    tir :: lower_after_sema(source, "auto")
+    facts :: tir.body.find_map(fn(stmt) { if stmt == { .Range{vectorization, ..} -> vectorization else -> None } }).expect("sema must attach the default loop proof")
+    assert(facts.no_cross_iteration_deps)
+    assert(facts.no_aliasing)
+    assert(facts.no_early_exit)
+    assert(facts.effect_free_body)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3832
+#Test("d_simd3_wide_float_loop_selects_wide_native_kernel") {
+    source :: "\nfn auto(values: [Float#8]) -> [Float#8] {\n    output := [Float#8]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}\n    loop i in 0..<8 {\n        output[i] = values[i] * 2.0\n    }\n    return output\n}\n"
+    tir :: lower_after_sema(source, "auto")
+    assert(tir.body.any(fn(stmt) { if stmt == { .Range{vectorization: Val(_), ..} -> true else -> false } }))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3853
+#Test("d_simd3_accepts_loop_invariant_scalar_captures") {
+    scalar_capture :: "\nfn auto(values: [Float#4], scale: Float) -> [Float#4] {\n    output := [Float#4]{0.0, 0.0, 0.0, 0.0}\n    mirror := [Float#4]{0.0, 0.0, 0.0, 0.0}\n    loop i in 0..<4 {\n        output[i] = values[i] * scale\n        mirror[i] = values[i] + scale\n    }\n    return output\n}\n"
+    assert(auto_facts_after_sema(scalar_capture, "auto").is_some(), "independent stores may use loop-invariant scalar captures")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3872
+#Test("d_simd3_rejects_output_alias_and_cross_iteration_reads") {
+    output_alias :: "\nfn auto(values: [Float#4]) -> [Float#4] {\n    output := [Float#4]{0.0, 0.0, 0.0, 0.0}\n    loop i in 0..<4 {\n        output[i] = output[i] + values[i]\n    }\n    return output\n}\n"
+    assert(auto_facts_after_sema(output_alias, "auto").is_none(), "an output read must not be marked independent")
+    cross_iteration :: "\nfn auto(values: [Float#4]) -> [Float#4] {\n    output := [Float#4]{0.0, 0.0, 0.0, 0.0}\n    loop i in 0..<4 {\n        output[i] = values[i - 1]\n    }\n    return output\n}\n"
+    assert(auto_facts_after_sema(cross_iteration, "auto").is_none(), "a non-lane-index read must not be marked independent")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3903
+#Test("d_simd3_rejects_impure_and_early_exit_bodies") {
+    impure :: "\nfn noisy(value: Float) -> Float {\n    print(value)\n    return value\n}\nfn auto(values: [Float#4]) -> [Float#4] {\n    output := [Float#4]{0.0, 0.0, 0.0, 0.0}\n    loop i in 0..<4 {\n        output[i] = noisy(values[i])\n    }\n    return output\n}\n"
+    assert(auto_facts_after_sema(impure, "auto").is_none(), "an impure call must remain scalar")
+    early_exit :: "\nfn auto(values: [Float#4]) -> [Float#4] {\n    output := [Float#4]{0.0, 0.0, 0.0, 0.0}\n    loop i in 0..<4 {\n        if values[i] > 0.0 {\n            break\n        }\n        output[i] = values[i]\n    }\n    return output\n}\n"
+    assert(auto_facts_after_sema(early_exit, "auto").is_none(), "an early exit must remain scalar")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3941
+#Test("d_simd3_scalar_marker_suppresses_native_hint") {
+    source :: "\n#Scalar fn scalar(values: [Float#4]) -> [Float#4] {\n    output := [Float#4]{0.0, 0.0, 0.0, 0.0}\n    loop i in 0..<4 {\n        output[i] = values[i] * 2.0 + 1.0\n    }\n    return output\n}\n"
+    tir :: lower_after_sema(source, "scalar")
+    assert(tir.is_scalar, "#Scalar must survive sema-to-TIR lowering")
+    assert(tir.body.any(fn(stmt) { if stmt == { .Range{vectorization: Val(_), ..} -> true else -> false } }), "#Scalar changes codegen policy, not the sema proof")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:3966
+#Test("d_simd3_native_prelude_has_float_kernels_and_f64x4_value_path") {
+    // GATE #4494: includes are retained native artifact text, not a Rust execution bridge.
+    prelude :: include_str("crates/jet-codegen/src/Prelude/Core/SimdLanes.rs")
+    lane_ops :: include_str("crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs")
+    linalg :: include_str("crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs")
+    loop lane in SIMD_LANE_TYPE_NAMES {
+        assert(lane_ops.contains("jet_lane_type!({lane},"), "MathTaskMem is missing the registered lane type {lane}")
+        assert(linalg.contains("jet_math_{lane}_new"), "LinalgFns is missing the registered lane surface {lane}")
+    }
+    loop (width, feature) in [("f32x4", "sse"), ("f64x2", "sse2"), ("f32x8", "avx"), ("f64x4", "avx")] {
+        assert(prelude.contains("fn {width}_binary"), "native Prelude is missing the {width} kernel")
+        assert(prelude.contains("is_x86_feature_detected!(\"{feature}\")"), "{width} must fall back when {feature} is unavailable")
+        lane_entry :: if width == "f64x4" -> "crate::jet_simd_f64x4_add_value" else -> "crate::jet_simd_{width}_add_array"
+        assert(lane_ops.contains(lane_entry), "lane operators must use the expected native-capable Prelude entry point")
+    }
+    assert(prelude.contains("mod jet_simd_f64x4_avx"), "F64x4 must have a dedicated host-native value backend")
+    assert(prelude.contains("target_feature = \"avx\""), "the F64x4 value backend must be compile-time AVX gated")
+    loop op in ["add", "sub", "mul", "div"] -> assert(prelude.contains("fn jet_simd_f64x4_{op}_value(left: [f64; 4], right: [f64; 4])"), "F64x4 {op} must expose a by-value native entry point")
+    loop needle in [
+        "#[target_feature(enable = \"sse\")]", "#[target_feature(enable = \"sse2\")]", "#[target_feature(enable = \"avx\")]",
+        "_mm_add_ps", "_mm_add_pd", "_mm256_add_ps", "_mm256_add_pd", "_mm_mul_ps", "_mm_mul_pd",
+        "_mm256_mul_ps", "_mm256_mul_pd", "jet_simd_f32x4_splat_array", "jet_simd_f64x4_splat_array"
+    ] -> assert(prelude.contains(needle), "native Prelude artifact is missing authoritative instruction path: {needle}")
+    assert(prelude.contains("fn jet_scalar_loop_barrier"), "scalar opt-out must use the shared Prelude boundary")
+    assert(prelude.contains("fn jet_simd_f32_binary_slice") && prelude.contains("fn jet_simd_f64_binary_slice"), "resident float carriers must use the shared native-capable slice kernels")
+    assert(prelude.contains("jet_simd_f64x4_mul_lane_scale_native"), "native F64x4 lane scaling must stay in the shared Prelude")
+    assert(linalg.contains("jet_math_F64x4_mul_lane_scale"), "AOT lane scaling must marshal through the shared math wrapper")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:4061
+#Test("optimizer_fact_channel_type_reaches_literal_consumer") {
+    narrow :: TExpr{ty: Type.Float32, kind: TExprKind.FloatLit(Float.NAN), span: Span.new(0, 0), integer_bounds: None, cost: None}
+    wide :: TExpr{ty: Type.Float, kind: TExprKind.FloatLit(Float.NAN), span: Span.new(0, 0), integer_bounds: None, cost: None}
+    assert(narrow.fact_channel().ty == Val(Type.Float32))
+    assert(wide.fact_channel().ty == Val(Type.Float))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:4076
+#Test("optimizer_fact_channel_integer_bounds_reach_range_consumer") {
+    expr :: TExpr{ty: Type.Int, kind: TExprKind.NumericMethod(
+        TExpr{ty: Type.Int, kind: TExprKind.IntLit(4, None), span: Span.new(0, 0), integer_bounds: None, cost: None},
+        TNumericOp.InlineRange(2, 8, true)), span: Span.new(0, 0), integer_bounds: None, cost: None}
+    assert(expr.fact_channel().integer_bounds == Val(TIntegerBounds{lo: 2, hi: 8}))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:4099
+#Test("optimizer_fact_channel_exclusivity_reaches_argument_consumer") {
+    arg :: fn(borrow: Bool, mut_borrow: Bool) {
+        TCallArg{value: TExpr{ty: Type.Int, kind: TExprKind.IntLit(7, None), span: Span.new(0, 0), integer_bounds: None, cost: None},
+            template_items: [], borrow: borrow, mut_borrow: mut_borrow, clone: false, arc_clone: false, fn_coerce: None,
+            widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    }
+    loop (borrow, mut_borrow, expected_access) in [(true, false, TFactExclusivity.Shared), (false, true, TFactExclusivity.Exclusive), (false, false, TFactExclusivity.Unknown)] -> assert(arg(borrow, mut_borrow).fact_channel().exclusivity == expected_access)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:4126
+fn optimizer_fact_test_range(auto_vectorization: AutoVectorizationFacts?) -> TStmt Never! {
+    span :: Span.new(0, 0)
+    int :: fn(value: Int) { TExpr{ty: Type.Int, kind: TExprKind.IntLit(value, None), span: span, integer_bounds: None, cost: None} }
+    output_ty :: Type.FixedList(Type.Float, Measure.literal("length", 4))
+    output := tir_user_local("output", span)
+    output.mutable = true
+    TStmt.Range{label: None, variable: tir_user_local("i", span), source: None, start: int(0), end: int(4), step: None, exclusive: true, vectorization: auto_vectorization, span: span,
+        body: [TStmt.IndexAssign{uninit: false,
+            base: TExpr{ty: output_ty, kind: TExprKind.Local(output), span: span, integer_bounds: None, cost: None},
+            index: TExpr{ty: Type.Int, kind: TExprKind.Local(tir_user_local("i", span)), span: span, integer_bounds: None, cost: None}, is_map: false,
+            value: TExpr{ty: Type.Float, kind: TExprKind.FloatLit(1.0), span: span, integer_bounds: None, cost: None}, span: span}]}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:4165
+fn optimizer_fact_test_func(body: [TStmt], is_scalar: Bool) -> TFunc Never! {
+    TFunc{name: "optimizer_fact_probe", module_name: "test", module_identity: "test", key: "test::optimizer_fact_probe", source_file: "test.jet",
+        failure_carrier: TFailureCarrier.Infallible,
+        effects: TEffectFacts{direct: [], solved: [], call_edges: [], maximal: false, direct_spans: []},
+        target_applicability: TTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: true},
+        web_bucket: None, web_marker: None, visibility: TVisibility.Private, foreign: None, source_span: Span.new(0, 0),
+        params: [], web_param_reconstructions: [], ret: None, gc_return: false, gc_scope: false, return_view_provenance: None,
+        generic_params: [], clone_types: [], is_main: false, line: 1, synthetic: false, is_unsafe: false, unsafe_gate: None, is_pure: false,
+        memo_bound: None, memo_unbounded: false, is_reactive: false, reactive_upgrades: [], is_inline: false, is_inline_always: false,
+        is_scalar: is_scalar, kernel_proof: None, memo_field: None, uses_stack_sentry: false, body: body, kind: TFuncKind.TopLevel}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:4213
+#Test("optimizer_fact_channel_purity_reaches_vectorization_consumer") {
+    proven :: AutoVectorizationFacts{element_type: Type.Float, no_aliasing: true, no_early_exit: true, effect_free_body: true, no_cross_iteration_deps: true}
+    vectorized :: optimizer_fact_test_func([optimizer_fact_test_range(Val(proven))], false)
+    vectorized_facts :: vectorized.body[0].fact_channel()
+    assert(vectorized_facts.purity == TFactPurity.Pure)
+    assert(vectorized_facts.no_cross_iteration_deps)
+    incomplete := proven
+    incomplete.no_aliasing = false
+    incomplete :: optimizer_fact_test_func([optimizer_fact_test_range(Val(incomplete))], false)
+    assert(incomplete.body[0].fact_channel().purity == TFactPurity.Unknown)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:4237
+#Test("optimizer_fact_channel_comptime_value_reaches_literal_consumer") {
+    value :: TComptimeValue.Int(7)
+    expr :: TExpr{ty: Type.Int, kind: TExprKind.CtLit(value), span: Span.new(0, 0), integer_bounds: None, cost: None}
+    assert(expr.fact_channel().comptime_value == Val(TComptimeValue.Int(7)))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:4251
+#Test("optimizer_fact_channel_absence_keeps_conservative_defaults") {
+    facts :: TFactChannel.unknown()
+    assert(facts.ty.is_none())
+    assert(facts.integer_bounds.is_none())
+    assert(facts.exclusivity == TFactExclusivity.Unknown)
+    assert(facts.purity == TFactPurity.Unknown)
+    assert(!facts.no_cross_iteration_deps)
+    assert(facts.comptime_value.is_none())
+    assert(facts.cost.is_none())
+}

@@ -1,0 +1,50 @@
+use jet_codegen.Codegen.Context.*
+use jet_codegen.Codegen.TIR.tir_to_mir_types.[is_compiler_owned_type]
+use jet_foundation.AST.[Type]
+use jet_foundation.Syntax as Syntax
+use jet_lexer.Lexer.[lex]
+use jet_parser.Parser.[parse]
+
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:7499
+#Test("source_file_handles_use_the_native_owned_carriers") {
+    prefix :: "<corelib>/Core/files::Core/files/files.jet::"
+    loop (leaf, rust) in [("FileReader", "JetFileReader"), ("FileWriter", "JetFileWriter"), ("FileScope", "JetFileScope")] {
+        assert(file_handle_rust_type("{prefix}{leaf}") == Val(rust))
+    }
+    assert(file_handle_rust_type("user::FileReader") == None)
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:7512
+#Test("source_owned_router_enums_are_not_elided_as_native_enums") {
+    prefix :: "<corelib>/Core/web::Core/web/router.jet::"
+    loop leaf in ["WebNavigationStatus", "WebRouterCacheStatus", "WebRouterSearchCodec", "WebRouterValueType", "WebRouterError"] {
+        assert(!is_compiler_owned_type("{prefix}{leaf}"))
+    }
+    assert(is_compiler_owned_type("<corelib>/Core/process::Core/process/process.jet::ProcessStreamMode"))
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:7531
+#Test("raylib_skeleton_types_lower_to_core_prelude_types") {
+    assert(core_rust_type_name("RaylibWindow") == Val("RaylibWindow"))
+    assert(core_rust_type_name("RaylibColor") == Val("RaylibColor"))
+    assert(raylib_handle_rust_type("RaylibWindow") == Val("RaylibWindow"))
+    assert(raylib_handle_rust_type("RaylibColor") == Val("RaylibColor"))
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:7541
+#Test("memo_stats_lowers_to_the_generated_root_record") {
+    source :: "fn run() {}\n"
+    (tokens, lex_diags) :: lex(source)
+    assert(lex_diags.is_empty(), "lex errors: {lex_diags}")
+    program :: parse(&tokens).expect("parse failed")
+    cx :: build_cx(&program, source, "test.jet")
+    assert(cx.rust_type(&Type.Named(Syntax.TYPE_MEMO_STATS)) == "JetMemoStats")
+    assert(core_rust_type_name(Syntax.TYPE_MEMO_STATS) == None)
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:7555
+#Test("type_alias_expansion_preserves_function_parameter_contract") {
+    source :: "alias Callback<T> :: fn(*, force: T) -> Int\nfn run() {}\n"
+    (tokens, lex_diags) :: lex(source)
+    assert(lex_diags.is_empty(), "lex errors: {lex_diags}")
+    program :: parse(&tokens).expect("parse failed")
+    cx :: build_cx(&program, source, "test.jet")
+    expanded :: cx.expand_type_aliases(&Type.Apply(name: "Callback", args: [Type.Bool]))
+    assert(expanded.name() == "fn(*, force: Bool) -> Int")
+}

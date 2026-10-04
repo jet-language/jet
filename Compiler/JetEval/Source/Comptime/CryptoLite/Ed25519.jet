@@ -1,401 +1,192 @@
-// PORT-PENDING 0579 crates-jet-comptime-src-comptime-cryptolite-aes256gcm-module-group: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:1-397
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Dependency-free Ed25519 verification matching `ed25519_dalek::verify_strict`.
-//RS 
-//RS use super::{add, multiply, pack, select, square, sub, Field};
-//RS 
-//RS type Point = [Field; 4];
-//RS 
-//RS const ZERO: Field = [0; 16];
-//RS const ONE: Field = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-//RS const D: Field = [
-//RS     0x78a3, 0x1359, 0x4dca, 0x75eb, 0xd8ab, 0x4141, 0x0a4d, 0x0070, 0xe898, 0x7779, 0x4079, 0x8cc7,
-//RS     0xfe73, 0x2b6f, 0x6cee, 0x5203,
-//RS ];
-//RS const D2: Field = [
-//RS     0xf159, 0x26b2, 0x9b94, 0xebd6, 0xb156, 0x8283, 0x149a, 0x00e0, 0xd130, 0xeef3, 0x80f2, 0x198e,
-//RS     0xfce7, 0x56df, 0xd9dc, 0x2406,
-//RS ];
-//RS const BASE_X: Field = [
-//RS     0xd51a, 0x8f25, 0x2d60, 0xc956, 0xa7b2, 0x9525, 0xc760, 0x692c, 0xdc5c, 0xfdd6, 0xe231, 0xc0a4,
-//RS     0x53fe, 0xcd6e, 0x36d3, 0x2169,
-//RS ];
-//RS const BASE_Y: Field = [
-//RS     0x6658, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666,
-//RS     0x6666, 0x6666, 0x6666, 0x6666,
-//RS ];
-//RS const SQRT_M1: Field = [
-//RS     0xa0b0, 0x4a0e, 0x1b27, 0xc4ee, 0xe478, 0xad2f, 0x1806, 0x2f43, 0xd7a7, 0x3dfb, 0x0099, 0x2b4d,
-//RS     0xdf0b, 0x4fc1, 0x2480, 0x2b83,
-//RS ];
-//RS const ORDER: [u8; 32] = [
-//RS     0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
-//RS     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
-//RS ];
-//RS 
-//RS pub(super) fn verify_strict(
-//RS     public: &[u8; 32],
-//RS     message: &[u8],
-//RS     signature: &[u8; 64],
-//RS ) -> Result<bool, ()> {
-//RS     if !scalar_is_canonical(&signature[32..]) {
-//RS         return Ok(false);
-//RS     }
-//RS     let mut public_point = decode_neg(public).ok_or(())?;
-//RS     let signature_r: [u8; 32] = signature[..32].try_into().unwrap();
-//RS     let signature_point = match decode_neg(&signature_r) {
-//RS         Some(point) => point,
-//RS         None => return Ok(false),
-//RS     };
-//RS     if is_small_order(public_point) || is_small_order(signature_point) {
-//RS         return Ok(false);
-//RS     }
-//RS 
-//RS     let mut hash_input = Vec::with_capacity(64 + message.len());
-//RS     hash_input.extend_from_slice(&signature_r);
-//RS     hash_input.extend_from_slice(public);
-//RS     hash_input.extend_from_slice(message);
-//RS     let mut challenge = super::SHA512::digest(&hash_input);
-//RS     reduce(&mut challenge);
-//RS 
-//RS     scalar_multiply_in_place(&mut public_point, &challenge);
-//RS     let mut scalar_base = basepoint_multiply(&signature[32..]);
-//RS     point_add(&mut public_point, &mut scalar_base);
-//RS     Ok(encode(&public_point) == signature_r)
-//RS }
-//RS 
-//RS /// RFC 8032 §5.1.6 Ed25519 signing from a 32-byte seed.
-//RS pub(super) fn sign(seed: &[u8; 32], message: &[u8]) -> [u8; 64] {
-//RS     let digest = super::SHA512::digest(seed);
-//RS     let mut az = digest;
-//RS     az[0] &= 248;
-//RS     az[31] &= 63;
-//RS     az[31] |= 64;
-//RS     let public = encode(&basepoint_multiply(&az[..32]));
-//RS 
-//RS     let mut nonce_input = Vec::with_capacity(32 + message.len());
-//RS     nonce_input.extend_from_slice(&digest[32..]);
-//RS     nonce_input.extend_from_slice(message);
-//RS     let mut nonce = super::SHA512::digest(&nonce_input);
-//RS     reduce(&mut nonce);
-//RS     let r_point = encode(&basepoint_multiply(&nonce[..32]));
-//RS 
-//RS     let mut challenge_input = Vec::with_capacity(64 + message.len());
-//RS     challenge_input.extend_from_slice(&r_point);
-//RS     challenge_input.extend_from_slice(&public);
-//RS     challenge_input.extend_from_slice(message);
-//RS     let mut challenge = super::SHA512::digest(&challenge_input);
-//RS     reduce(&mut challenge);
-//RS 
-//RS     let mut signature = [0u8; 64];
-//RS     signature[..32].copy_from_slice(&r_point);
-//RS     // S = (r + k*a) mod L
-//RS     let mut product = [0i64; 64];
-//RS     for i in 0..32 {
-//RS         for j in 0..32 {
-//RS             product[i + j] += i64::from(challenge[i]) * i64::from(az[j]);
-//RS         }
-//RS     }
-//RS     for i in 0..32 {
-//RS         product[i] += i64::from(nonce[i]);
-//RS     }
-//RS     let mut carry = 0i64;
-//RS     for slot in &mut product {
-//RS         let value = *slot + carry;
-//RS         *slot = value & 255;
-//RS         carry = value >> 8;
-//RS     }
-//RS     let mut reduced = [0u8; 32];
-//RS     mod_order(&mut reduced, &mut product);
-//RS     signature[32..].copy_from_slice(&reduced);
-//RS     signature
-//RS }
-//RS 
-//RS fn scalar_is_canonical(scalar: &[u8]) -> bool {
-//RS     for index in (0..32).rev() {
-//RS         if scalar[index] != ORDER[index] {
-//RS             return scalar[index] < ORDER[index];
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn decode_neg(bytes: &[u8; 32]) -> Option<Point> {
-//RS     let mut point = [ZERO, ZERO, ONE, ZERO];
-//RS     unpack(&mut point[1], bytes);
-//RS     let mut numerator = ZERO;
-//RS     square(&mut numerator, &point[1]);
-//RS     let mut denominator = ZERO;
-//RS     multiply(&mut denominator, &numerator, &D);
-//RS     let numerator0 = numerator;
-//RS     sub(&mut numerator, &numerator0, &ONE);
-//RS     let denominator0 = denominator;
-//RS     add(&mut denominator, &denominator0, &ONE);
-//RS 
-//RS     let mut denominator2 = ZERO;
-//RS     square(&mut denominator2, &denominator);
-//RS     let mut denominator4 = ZERO;
-//RS     square(&mut denominator4, &denominator2);
-//RS     let mut denominator6 = ZERO;
-//RS     multiply(&mut denominator6, &denominator4, &denominator2);
-//RS     let mut root = ZERO;
-//RS     multiply(&mut root, &denominator6, &numerator);
-//RS     let root0 = root;
-//RS     multiply(&mut root, &root0, &denominator);
-//RS     let root0 = root;
-//RS     pow2523(&mut root, &root0);
-//RS     let root0 = root;
-//RS     multiply(&mut root, &root0, &numerator);
-//RS     let root0 = root;
-//RS     multiply(&mut root, &root0, &denominator);
-//RS     let root0 = root;
-//RS     multiply(&mut root, &root0, &denominator);
-//RS     multiply(&mut point[0], &root, &denominator);
-//RS 
-//RS     let mut check = ZERO;
-//RS     square(&mut check, &point[0]);
-//RS     let check0 = check;
-//RS     multiply(&mut check, &check0, &denominator);
-//RS     if !field_equal(&check, &numerator) {
-//RS         let x = point[0];
-//RS         multiply(&mut point[0], &x, &SQRT_M1);
-//RS     }
-//RS     square(&mut check, &point[0]);
-//RS     let check0 = check;
-//RS     multiply(&mut check, &check0, &denominator);
-//RS     if !field_equal(&check, &numerator) {
-//RS         return None;
-//RS     }
-//RS     if field_parity(&point[0]) == (bytes[31] >> 7) {
-//RS         let x = point[0];
-//RS         sub(&mut point[0], &ZERO, &x);
-//RS     }
-//RS     let x = point[0];
-//RS     let y = point[1];
-//RS     multiply(&mut point[3], &x, &y);
-//RS     Some(point)
-//RS }
-//RS 
-//RS fn unpack(out: &mut Field, bytes: &[u8; 32]) {
-//RS     for index in 0..16 {
-//RS         out[index] = i64::from(bytes[index * 2]) + (i64::from(bytes[index * 2 + 1]) << 8);
-//RS     }
-//RS     out[15] &= 0x7fff;
-//RS }
-//RS 
-//RS fn pow2523(out: &mut Field, value: &Field) {
-//RS     let mut result = *value;
-//RS     for exponent in (0..=250).rev() {
-//RS         let snapshot = result;
-//RS         square(&mut result, &snapshot);
-//RS         if exponent != 1 {
-//RS             let snapshot = result;
-//RS             multiply(&mut result, &snapshot, value);
-//RS         }
-//RS     }
-//RS     *out = result;
-//RS }
-//RS 
-//RS fn field_equal(left: &Field, right: &Field) -> bool {
-//RS     let mut left_bytes = [0; 32];
-//RS     let mut right_bytes = [0; 32];
-//RS     pack(&mut left_bytes, left);
-//RS     pack(&mut right_bytes, right);
-//RS     left_bytes == right_bytes
-//RS }
-//RS 
-//RS fn field_parity(value: &Field) -> u8 {
-//RS     let mut bytes = [0; 32];
-//RS     pack(&mut bytes, value);
-//RS     bytes[0] & 1
-//RS }
-//RS 
-//RS fn point_add(left: &mut Point, right: &mut Point) {
-//RS     let mut a = ZERO;
-//RS     let mut b = ZERO;
-//RS     let mut c = ZERO;
-//RS     let mut d = ZERO;
-//RS     let mut e = ZERO;
-//RS     let mut f = ZERO;
-//RS     let mut g = ZERO;
-//RS     let mut h = ZERO;
-//RS     let mut temp = ZERO;
-//RS     sub(&mut a, &left[1], &left[0]);
-//RS     sub(&mut temp, &right[1], &right[0]);
-//RS     let a0 = a;
-//RS     multiply(&mut a, &a0, &temp);
-//RS     add(&mut b, &left[0], &left[1]);
-//RS     add(&mut temp, &right[0], &right[1]);
-//RS     let b0 = b;
-//RS     multiply(&mut b, &b0, &temp);
-//RS     multiply(&mut c, &left[3], &right[3]);
-//RS     let c0 = c;
-//RS     multiply(&mut c, &c0, &D2);
-//RS     multiply(&mut d, &left[2], &right[2]);
-//RS     let d0 = d;
-//RS     add(&mut d, &d0, &d0);
-//RS     sub(&mut e, &b, &a);
-//RS     sub(&mut f, &d, &c);
-//RS     add(&mut g, &d, &c);
-//RS     add(&mut h, &b, &a);
-//RS     multiply(&mut left[0], &e, &f);
-//RS     multiply(&mut left[1], &h, &g);
-//RS     multiply(&mut left[2], &g, &f);
-//RS     multiply(&mut left[3], &e, &h);
-//RS }
-//RS 
-//RS fn point_select(left: &mut Point, right: &mut Point, swap: i64) {
-//RS     for index in 0..4 {
-//RS         select(&mut left[index], &mut right[index], swap);
-//RS     }
-//RS }
-//RS 
-//RS fn scalar_multiply(point: &mut Point, scalar: &[u8]) {
-//RS     let mut result = [ZERO, ONE, ONE, ZERO];
-//RS     for bit in (0..=255).rev() {
-//RS         let swap = i64::from((scalar[bit >> 3] >> (bit & 7)) & 1);
-//RS         point_select(&mut result, point, swap);
-//RS         point_add(point, &mut result);
-//RS         let mut duplicate = result;
-//RS         point_add(&mut result, &mut duplicate);
-//RS         point_select(&mut result, point, swap);
-//RS     }
-//RS     *point = result;
-//RS }
-//RS 
-//RS fn scalar_multiply_in_place(point: &mut Point, scalar: &[u8; 64]) {
-//RS     scalar_multiply(point, scalar);
-//RS }
-//RS 
-//RS fn basepoint_multiply(scalar: &[u8]) -> Point {
-//RS     let mut point = [BASE_X, BASE_Y, ONE, ZERO];
-//RS     multiply(&mut point[3], &BASE_X, &BASE_Y);
-//RS     scalar_multiply(&mut point, scalar);
-//RS     point
-//RS }
-//RS 
-//RS fn encode(point: &Point) -> [u8; 32] {
-//RS     let mut inverse = ZERO;
-//RS     super::invert(&mut inverse, &point[2]);
-//RS     let mut x = ZERO;
-//RS     let mut y = ZERO;
-//RS     multiply(&mut x, &point[0], &inverse);
-//RS     multiply(&mut y, &point[1], &inverse);
-//RS     let mut output = [0; 32];
-//RS     pack(&mut output, &y);
-//RS     output[31] ^= field_parity(&x) << 7;
-//RS     output
-//RS }
-//RS 
-//RS fn is_small_order(mut point: Point) -> bool {
-//RS     for _ in 0..3 {
-//RS         let mut copy = point;
-//RS         point_add(&mut point, &mut copy);
-//RS     }
-//RS     encode(&point)
-//RS         == [
-//RS             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//RS             0, 0, 0,
-//RS         ]
-//RS }
-//RS 
-//RS fn reduce(bytes: &mut [u8; 64]) {
-//RS     let mut wide = [0_i64; 64];
-//RS     for (out, byte) in wide.iter_mut().zip(bytes.iter()) {
-//RS         *out = i64::from(*byte);
-//RS     }
-//RS     let mut reduced = [0; 32];
-//RS     mod_order(&mut reduced, &mut wide);
-//RS     bytes[..32].copy_from_slice(&reduced);
-//RS }
-//RS 
-//RS fn mod_order(out: &mut [u8; 32], value: &mut [i64; 64]) {
-//RS     for index in (32..64).rev() {
-//RS         let mut carry = 0;
-//RS         let mut target = index - 32;
-//RS         while target < index - 12 {
-//RS             value[target] += carry - 16 * value[index] * i64::from(ORDER[target - (index - 32)]);
-//RS             carry = (value[target] + 128) >> 8;
-//RS             value[target] -= carry << 8;
-//RS             target += 1;
-//RS         }
-//RS         value[target] += carry;
-//RS         value[index] = 0;
-//RS     }
-//RS     let mut carry = 0;
-//RS     for index in 0..32 {
-//RS         value[index] += carry - (value[31] >> 4) * i64::from(ORDER[index]);
-//RS         carry = value[index] >> 8;
-//RS         value[index] &= 255;
-//RS     }
-//RS     for index in 0..32 {
-//RS         value[index] -= carry * i64::from(ORDER[index]);
-//RS     }
-//RS     for index in 0..32 {
-//RS         value[index + 1] += value[index] >> 8;
-//RS         out[index] = value[index] as u8;
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn bytes<const N: usize>(hex: &str) -> [u8; N] {
-//RS         let decoded = hex
-//RS             .as_bytes()
-//RS             .chunks_exact(2)
-//RS             .map(|pair| {
-//RS                 let digit = |byte: u8| {
-//RS                     if byte <= b'9' {
-//RS                         byte - b'0'
-//RS                     } else {
-//RS                         byte - b'a' + 10
-//RS                     }
-//RS                 };
-//RS                 digit(pair[0]) * 16 + digit(pair[1])
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         decoded.try_into().ok().unwrap()
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn rfc_8032_empty_message() {
-//RS         let public = bytes("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
-//RS         let signature = bytes(
-//RS             "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155\
-//RS                                5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
-//RS         );
-//RS         assert_eq!(verify_strict(&public, b"", &signature), Ok(true));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn rfc_8032_sign_empty_message() {
-//RS         let seed = bytes::<32>("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
-//RS         let expected = bytes::<64>(
-//RS             "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155\
-//RS              5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
-//RS         );
-//RS         let signature = sign(&seed, b"");
-//RS         assert_eq!(signature, expected);
-//RS         let public =
-//RS             bytes::<32>("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
-//RS         assert_eq!(verify_strict(&public, b"", &signature), Ok(true));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn strict_rejects_modified_and_weak_signatures() {
-//RS         let public = bytes("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
-//RS         let mut signature = bytes("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155\
-//RS                                    5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b");
-//RS         signature[0] ^= 1;
-//RS         assert_eq!(verify_strict(&public, b"", &signature), Ok(false));
-//RS         let weak = [
-//RS             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//RS             0, 0, 0,
-//RS         ];
-//RS         assert_eq!(verify_strict(&weak, b"", &signature), Ok(false));
-//RS     }
-//RS }
-// END-PORT-PENDING 0579 crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:1-397
+// Dependency-free Ed25519 strict verification and RFC 8032 signing.
+use jet_comptime.Comptime.CryptoLite.[add, multiply, pack, select, square, sub, invert, Field]
+use jet_comptime.Comptime.CryptoLite.SHA512
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:5
+type Point = [Field#4]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:7
+const ZERO: Field = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:8
+const ONE: Field = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:9
+const D: Field = [0x78a3, 0x1359, 0x4dca, 0x75eb, 0xd8ab, 0x4141, 0x0a4d, 0x0070, 0xe898, 0x7779, 0x4079, 0x8cc7, 0xfe73, 0x2b6f, 0x6cee, 0x5203]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:13
+const D2: Field = [0xf159, 0x26b2, 0x9b94, 0xebd6, 0xb156, 0x8283, 0x149a, 0x00e0, 0xd130, 0xeef3, 0x80f2, 0x198e, 0xfce7, 0x56df, 0xd9dc, 0x2406]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:17
+const BASE_X: Field = [0xd51a, 0x8f25, 0x2d60, 0xc956, 0xa7b2, 0x9525, 0xc760, 0x692c, 0xdc5c, 0xfdd6, 0xe231, 0xc0a4, 0x53fe, 0xcd6e, 0x36d3, 0x2169]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:21
+const BASE_Y: Field = [0x6658, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:25
+const SQRT_M1: Field = [0xa0b0, 0x4a0e, 0x1b27, 0xc4ee, 0xe478, 0xad2f, 0x1806, 0x2f43, 0xd7a7, 0x3dfb, 0x0099, 0x2b4d, 0xdf0b, 0x4fc1, 0x2480, 0x2b83]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:29
+const ORDER: [U8#32] = [0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10]
 
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:34
+fn verify_strict(public: &[U8#32], message: &[U8], signature: &[U8#64]) -> Bool Unit! {
+    if !scalar_is_canonical(&signature[32..]) -> return Ok(false)
+    public_point := decode_neg(public) ?? return Err(())
+    signature_r := signature[..32].try_into::<[U8#32]>().unwrap()
+    signature_point := decode_neg(&signature_r) ?? return Ok(false)
+    if is_small_order(public_point.clone()) || is_small_order(signature_point.clone()) -> return Ok(false)
+    hash_input := [U8].with_capacity(64 + message.len())
+    hash_input.extend_from_slice(&signature_r); hash_input.extend_from_slice(public); hash_input.extend_from_slice(message)
+    challenge := SHA512.digest(&hash_input); reduce(&challenge)
+    scalar_multiply_in_place(&public_point, &challenge)
+    scalar_base := basepoint_multiply(&signature[32..])
+    point_add(&public_point, &scalar_base)
+    Ok(encode(&public_point) == signature_r)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:66
+fn sign(seed: &[U8#32], message: &[U8]) -> [U8#64] {
+    digest := SHA512.digest(seed)
+    az := digest.clone(); az[0] &= 248; az[31] &= 63; az[31] |= 64
+    public := encode(&basepoint_multiply(&az[..32]))
+    nonce_input := [U8].with_capacity(32 + message.len())
+    nonce_input.extend_from_slice(&digest[32..]); nonce_input.extend_from_slice(message)
+    nonce := SHA512.digest(&nonce_input); reduce(&nonce)
+    r_point := encode(&basepoint_multiply(&nonce[..32]))
+    challenge_input := [U8].with_capacity(64 + message.len())
+    challenge_input.extend_from_slice(&r_point); challenge_input.extend_from_slice(&public); challenge_input.extend_from_slice(message)
+    challenge := SHA512.digest(&challenge_input); reduce(&challenge)
+    signature := [U8#64]{uninit}
+    signature[..32].copy_from_slice(&r_point)
+    product := [I64#64]{uninit}; product.fill(0)
+    for i in 0..32 { for j in 0..32 { product[i + j] += challenge[i] as I64 * az[j] as I64 } }
+    for i in 0..32 { product[i] += nonce[i] as I64 }
+    carry := I64{0}
+    for i in 0..64 { value := product[i] + carry; product[i] = value & 255; carry = value >> 8 }
+    reduced := [U8#32]{uninit}
+    mod_order(&reduced, &product)
+    signature[32..].copy_from_slice(&reduced)
+    signature
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:112
+fn scalar_is_canonical(scalar: &[U8]) -> Bool {
+    for index in (0..32).rev() { if scalar[index] != ORDER[index] -> return scalar[index] < ORDER[index] }
+    false
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:121
+fn decode_neg(bytes: &[U8#32]) -> Point? {
+    point: Point = [ZERO, ZERO, ONE, ZERO]
+    unpack(&point[1], bytes)
+    numerator := ZERO.clone(); square(&numerator, &point[1])
+    denominator := ZERO.clone(); multiply(&denominator, &numerator, &D)
+    numerator0 := numerator.clone(); sub(&numerator, &numerator0, &ONE)
+    denominator0 := denominator.clone(); add(&denominator, &denominator0, &ONE)
+    denominator2 := ZERO.clone(); square(&denominator2, &denominator)
+    denominator4 := ZERO.clone(); square(&denominator4, &denominator2)
+    denominator6 := ZERO.clone(); multiply(&denominator6, &denominator4, &denominator2)
+    root := ZERO.clone(); multiply(&root, &denominator6, &numerator)
+    root0 := root.clone(); multiply(&root, &root0, &denominator)
+    root0 := root.clone(); pow2523(&root, &root0)
+    root0 := root.clone(); multiply(&root, &root0, &numerator)
+    root0 := root.clone(); multiply(&root, &root0, &denominator)
+    root0 := root.clone(); multiply(&root, &root0, &denominator)
+    multiply(&point[0], &root, &denominator)
+    check := ZERO.clone(); square(&check, &point[0])
+    check0 := check.clone(); multiply(&check, &check0, &denominator)
+    if !field_equal(&check, &numerator) { x := point[0].clone(); multiply(&point[0], &x, &SQRT_M1) }
+    square(&check, &point[0])
+    check0 := check.clone(); multiply(&check, &check0, &denominator)
+    if !field_equal(&check, &numerator) -> return None
+    if field_parity(&point[0]) == (bytes[31] >> 7) { x := point[0].clone(); sub(&point[0], &ZERO, &x) }
+    x := point[0].clone(); y := point[1].clone(); multiply(&point[3], &x, &y)
+    Some(point)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:177
+fn unpack(out: &Field, bytes: &[U8#32]) {
+    for index in 0..16 { out[index] = bytes[index * 2] as I64 + ((bytes[index * 2 + 1] as I64) << 8) }
+    out[15] &= 0x7fff
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:184
+fn pow2523(out: &Field, value: &Field) {
+    result := value.clone()
+    for exponent in (0..=250).rev() {
+        snapshot := result.clone(); square(&result, &snapshot)
+        if exponent != 1 { snapshot := result.clone(); multiply(&result, &snapshot, value) }
+    }
+    out.copy_from_slice(&result)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:197
+fn field_equal(left: &Field, right: &Field) -> Bool {
+    left_bytes := [U8#32]{uninit}; right_bytes := [U8#32]{uninit}
+    pack(&left_bytes, left); pack(&right_bytes, right)
+    left_bytes == right_bytes
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:205
+fn field_parity(value: &Field) -> U8 { bytes := [U8#32]{uninit}; pack(&bytes, value); bytes[0] & 1 }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:211
+fn point_add(left: &Point, right: &Point) {
+    a := ZERO.clone(); b := ZERO.clone(); c := ZERO.clone(); d := ZERO.clone()
+    e := ZERO.clone(); f := ZERO.clone(); g := ZERO.clone(); h := ZERO.clone(); temp := ZERO.clone()
+    sub(&a, &left[1], &left[0]); sub(&temp, &right[1], &right[0])
+    a0 := a.clone(); multiply(&a, &a0, &temp)
+    add(&b, &left[0], &left[1]); add(&temp, &right[0], &right[1])
+    b0 := b.clone(); multiply(&b, &b0, &temp)
+    multiply(&c, &left[3], &right[3]); c0 := c.clone(); multiply(&c, &c0, &D2)
+    multiply(&d, &left[2], &right[2]); d0 := d.clone(); add(&d, &d0, &d0)
+    sub(&e, &b, &a); sub(&f, &d, &c); add(&g, &d, &c); add(&h, &b, &a)
+    multiply(&left[0], &e, &f); multiply(&left[1], &h, &g); multiply(&left[2], &g, &f); multiply(&left[3], &e, &h)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:245
+fn point_select(left: &Point, right: &Point, swap: I64) { for index in 0..4 { select(&left[index], &right[index], swap) } }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:251
+fn scalar_multiply(point: &Point, scalar: &[U8]) {
+    result: Point = [ZERO, ONE, ONE, ZERO]
+    for bit in (0..=255).rev() {
+        swap := ((scalar[bit >> 3] >> (bit & 7)) & 1) as I64
+        point_select(&result, point, swap); point_add(point, &result)
+        duplicate := result.clone(); point_add(&result, &duplicate)
+        point_select(&result, point, swap)
+    }
+    point.copy_from_slice(&result)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:264
+fn scalar_multiply_in_place(point: &Point, scalar: &[U8#64]) { scalar_multiply(point, scalar) }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:268
+fn basepoint_multiply(scalar: &[U8]) -> Point {
+    point: Point = [BASE_X, BASE_Y, ONE, ZERO]
+    multiply(&point[3], &BASE_X, &BASE_Y); scalar_multiply(&point, scalar)
+    point
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:275
+fn encode(point: &Point) -> [U8#32] {
+    inverse := ZERO.clone(); invert(&inverse, &point[2])
+    x := ZERO.clone(); y := ZERO.clone()
+    multiply(&x, &point[0], &inverse); multiply(&y, &point[1], &inverse)
+    output := [U8#32]{uninit}; pack(&output, &y)
+    output[31] ^= field_parity(&x) << 7
+    output
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:288
+fn is_small_order(point: Point) -> Bool {
+    for _ in 0..3 { copy := point.clone(); point_add(&point, &copy) }
+    identity := [U8#32]{uninit}; identity.fill(0); identity[0] = 1
+    encode(&point) == identity
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:300
+fn reduce(bytes: &[U8#64]) {
+    wide := [I64#64]{uninit}
+    for i in 0..64 { wide[i] = bytes[i] as I64 }
+    reduced := [U8#32]{uninit}; mod_order(&reduced, &wide)
+    bytes[..32].copy_from_slice(&reduced)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:310
+fn mod_order(out: &[U8#32], value: &[I64#64]) {
+    for index in (32..64).rev() {
+        carry := I64{0}; target := index - 32
+        while target < index - 12 {
+            value[target] += carry - 16 * value[index] * ORDER[target - (index - 32)] as I64
+            carry = (value[target] + 128) >> 8
+            value[target] -= carry << 8
+            target += 1
+        }
+        value[target] += carry; value[index] = 0
+    }
+    carry := I64{0}
+    for index in 0..32 {
+        value[index] += carry - (value[31] >> 4) * ORDER[index] as I64
+        carry = value[index] >> 8; value[index] &= 255
+    }
+    for index in 0..32 { value[index] -= carry * ORDER[index] as I64 }
+    for index in 0..32 { value[index + 1] += value[index] >> 8; out[index] = value[index] as U8 }
+}

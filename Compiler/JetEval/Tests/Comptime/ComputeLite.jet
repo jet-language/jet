@@ -1,0 +1,66 @@
+use jet_codegen.Prelude.CoreLib.Top.Compute.*
+use jet_compute_vulkan
+use std.sync.Arc
+// GATE #4494: this suite exercises actual Vulkan placement/streams when available.
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1997
+fn f32_tensor(shape: [I64], values: [F32]) -> JetTensor {
+    tensor := jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice.Cpu).unwrap()
+    tensor.data = Arc.new(values.into_iter().map(fn(v) { v as F64 }).collect())
+    tensor.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string()
+    tensor.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES.iter().map(fn(a) { a.to_string() }).collect()
+    jet_compute_validate_tensor(&tensor).unwrap()
+    tensor
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:2010
+#Test("scalar_access_rejects_invalid_tensor_storage") {
+    tensor := jet_compute_full(&[2], 1.0).unwrap()
+    tensor.data = Arc.new([1.0, F64.NAN])
+    assert(jet_compute_get(&tensor, &[0]) == { Err(Arithmetic(_)) -> true; _ -> false })
+    assert(jet_compute_set(&tensor, &[0], 2.0) == { Err(Arithmetic(_)) -> true; _ -> false })
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:2024
+#Test("portable_backend_seams_use_real_vulkan_and_fail_closed_webgpu") {
+    cpu := f32_tensor([2], [2.0, 3.0])
+    vulkan := jet_compute_on_device(&cpu, JetComputeDevice.Vulkan)
+    if jet_compute_vulkan.available() {
+        vulkan := vulkan.expect("available Vulkan must accept placement")
+        result := jet_compute_binary("add", &vulkan, &vulkan).unwrap()
+        assert_eq(jet_compute_tensor_values(&result), [4.0, 6.0])
+        assert_eq(result.last_placement.backend, VULKAN_BACKEND)
+        unary := jet_compute_unary("sqrt", &result).unwrap()
+        unary_values := jet_compute_tensor_values(&unary)
+        assert_eq(unary_values[0], 2.0)
+        assert((unary_values[1] - (6.0 as F32).sqrt() as F64).abs() <= 1e-6)
+        left := jet_compute_on_device(&f32_tensor([1, 2], [1.0, 2.0]), JetComputeDevice.Vulkan).unwrap()
+        right := jet_compute_on_device(&f32_tensor([2, 1], [3.0, 4.0]), JetComputeDevice.Vulkan).unwrap()
+        product := jet_compute_matmul(&left, &right).unwrap()
+        assert_eq(jet_compute_tensor_values(&product), [11.0])
+        reduced := jet_compute_sum_axis(&product, 0).unwrap()
+        assert_eq(jet_compute_tensor_values(&reduced), [11.0])
+        prediction := jet_compute_on_device(&f32_tensor([2], [3.0, 1.0]), JetComputeDevice.Vulkan).unwrap()
+        target := jet_compute_on_device(&f32_tensor([2], [1.0, 1.0]), JetComputeDevice.Vulkan).unwrap()
+        (tape, traced) := jet_compute_trace_inputs([prediction, target])
+        loss := jet_compute_mse_loss(&traced[0], &traced[1]).unwrap()
+        assert_eq(jet_compute_tensor_values(&loss), [2.0])
+        state := jet_compute_vjp_begin(loss, tape)
+        seed := jet_compute_gradient_seed(&state).unwrap()
+        gradients := jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap()
+        assert_eq(jet_compute_tensor_values(&gradients[0]), [2.0, 0.0])
+        assert_eq(jet_compute_tensor_values(&gradients[1]), [-2.0, 0.0])
+        parameter := jet_compute_on_device(&f32_tensor([2], [3.0, 1.0]), JetComputeDevice.Vulkan).unwrap()
+        gradient := jet_compute_on_device(&f32_tensor([2], [1.0, 2.0]), JetComputeDevice.Vulkan).unwrap()
+        updated := jet_compute_sgd_step(&parameter, &gradient, 0.5).unwrap()
+        assert_eq(jet_compute_tensor_values(&updated), [2.5, 0.0])
+        downloaded := jet_compute_transfer(&result, JetComputeDevice.Cpu).unwrap()
+        assert_eq(jet_compute_tensor_values(&downloaded), [4.0, 6.0])
+        assert_eq(downloaded.last_transfer.unwrap().bytes, 8)
+        stream := jet_compute_stream_new_on_device(JetComputeDevice.Vulkan).unwrap()
+        assert(stream.vulkan.is_some())
+        jet_compute_stream_sync(&stream).unwrap()
+    } else {
+        assert(vulkan == { Err(Unsupported(_)) | Err(Device(_)) -> true; _ -> false })
+    }
+    assert(jet_compute_on_device(&cpu, JetComputeDevice.WebGpu) == { Err(Unsupported(_)) | Err(Device(_)) -> true; _ -> false })
+    f64_tensor := jet_compute_full(&[1], 2.0).unwrap()
+    assert(jet_compute_on_device(&f64_tensor, JetComputeDevice.Vulkan) == { Err(Unsupported(_)) -> true; _ -> false })
+}

@@ -1,0 +1,50 @@
+use jet_comptime.Comptime.DataPipeline.[ct_value_type_name, plot_value, plot_enum_arg, plot_domain, plot_domain_value, plot_axis, plot_axis_value, plot_layout, plot_layout_value, schema_columns_for_type, ct_struct]
+use jet_foundation.AST.[CtValue, CtReport, Type]
+use jet_foundation.Diagnostics.Span
+use jet_foundation.Prelude.CoreLib.Top.DataPlot.*
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:3955,4044 (behavioral controls; no original inline tests)
+#Test("data_plot_carrier_names_and_absence_preserve_meaning") {
+    assert(ct_value_type_name(CtValue.Present(Box.new(CtValue.Int(2)))) == "Int?")
+    assert(ct_value_type_name(CtValue.absent(Type.Bool)) == "Bool?")
+    assert(ct_value_type_name(CtValue.Unit) == "()")
+    assert(plot_value(CtValue.Int(-3)) == JetDataPlotValue.Integer(-3))
+    assert(plot_value(CtValue.absent(Type.Int)) == JetDataPlotValue.Null)
+    assert(plot_value(CtValue.Unit) == JetDataPlotValue.Null)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:4085,4270,4613
+#Test("data_plot_enum_payloads_prefer_labels_and_domains_roundtrip") {
+    enum_value := CtValue.Enum { type_name: "JetDataPlotDomain", variant: "Numeric", args: [(Val("max"), CtValue.Int(9)), (Val("min"), CtValue.Int(1))] }
+    assert(plot_enum_arg(enum_value, "min", 0) == Val(CtValue.Int(1)))
+    assert(plot_enum_arg(enum_value, "unknown", 0) == Val(CtValue.Int(9)))
+    span := Span.new(0, 0)
+    domain := plot_domain(enum_value, span)!
+    assert(domain == JetDataPlotDomain.Numeric { min: 1.0, max: 9.0 })
+    assert(plot_domain(plot_domain_value(domain), span)! == domain)
+    categories := JetDataPlotDomain.Categories(["alpha", "beta"])
+    assert(plot_domain(plot_domain_value(categories), span)! == categories)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:4411,4560
+#Test("data_plot_option_defaults_and_axis_layout_roundtrip") {
+    span := Span.new(0, 0)
+    axis_value := ct_struct("JetDataPlotAxis", [("channel", CtValue.Enum { type_name: "JetDataPlotChannel", variant: "X", args: [] }), ("title", CtValue.Str("time"))])
+    axis := plot_axis(axis_value, span)!
+    assert(axis.visible && axis.grid)
+    assert(axis.ticks == 5)
+    assert(plot_axis(plot_axis_value(axis), span)! == axis)
+    layout := plot_layout(ct_struct("JetDataPlotLayout", []), span)!
+    assert(layout == JetDataPlotLayout.default())
+    assert(plot_layout(plot_layout_value(layout), span)! == layout)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5461
+#Test("data_schema_uses_declared_type_and_rejects_generic_arity_mismatch") {
+    scalar := schema_columns_for_type(Type.Int, false, fn(_) { None })
+    assert(scalar.is_some())
+    assert(scalar.unwrap().len() == 1)
+    applied := Type.Apply { name: "Row", args: [] }
+    assert(schema_columns_for_type(applied, true, fn(_) { Val((["T"], [("value", Type.Named("T"))])) }) == None)
+    assert(schema_columns_for_type(Type.Named("Row"), true, fn(_) { Val(([], [("value", Type.Int)])) }).unwrap().len() == 1)
+}

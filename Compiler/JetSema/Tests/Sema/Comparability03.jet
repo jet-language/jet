@@ -1,0 +1,121 @@
+use jet_foundation.[Type, TypeTupleField, InternalTag, TagMarker, Measure]
+use jet_sema.[core_crypto_nominal, is_secret_bearing_crypto_type, suggest_field, suggest_method]
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2409
+fn count_core_crypto_markers(ty: Type) -> Int Never! {
+    if ty == {
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .Quantity(inner, _) | .InlineRange(inner, _, _) -> count_core_crypto_markers(inner)
+        .Map(key, _, value) | .Result(key, value) -> count_core_crypto_markers(key) + count_core_crypto_markers(value)
+        .Fn(params, ret, _, _, _, _) -> {
+            count := 0
+            loop param in params -> count += count_core_crypto_markers(param)
+            if ret == .Val(value) -> count += count_core_crypto_markers(value)
+            count
+        }
+        .Apply(_, args) | .Union(args) -> {
+            count := 0
+            loop arg in args -> count += count_core_crypto_markers(arg)
+            count
+        }
+        .Tuple(fields) -> {
+            count := 0
+            loop field in fields -> count += count_core_crypto_markers(field.ty)
+            count
+        }
+        .Tagged(marker, inner) -> {
+            count := count_core_crypto_markers(inner)
+            if marker == TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal} -> count += 1
+            count
+        }
+        .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .Measure(_) | .Float32 -> 0
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2453
+#Test("crypto_nominal_provenance_is_recursive_and_never_inferred_from_a_leaf_name") {
+    loop leaf in [String]{"Secret", "SigningKey", "X25519SecretKey", "SharedSecret"} {
+        local_generic :: Type.Named{name: leaf}
+        assert(!is_secret_bearing_crypto_type(local_generic))
+        assert(is_secret_bearing_crypto_type(core_crypto_nominal(local_generic)))
+    }
+    wrapped :: Type.Fn{
+        params: [Type]{
+            Type.Shared{inner: Type.Named{name: "Secret"}},
+            Type.FixedList{elem: Type.Named{name: "SigningKey"}, len: Measure.literal("length", 1)},
+            Type.Tagged{marker: TagMarker.User{name: "Audit"}, inner: Type.Named{name: "X25519SecretKey"}},
+            Type.Apply{name: "Holder", args: [Type]{Type.Named{name: "SharedSecret"}}},
+        },
+        ret: Val(Type.Tuple{fields: [TypeTupleField]{
+            TypeTupleField{name: "list", ty: Type.List{inner: Type.Named{name: "Secret"}}},
+            TypeTupleField{name: "maybe", ty: Type.Option{inner: Type.Named{name: "SigningKey"}}},
+            TypeTupleField{name: "result", ty: Type.Result{ok: Type.Named{name: "X25519SecretKey"}, err: Type.Named{name: "SharedSecret"}}},
+            TypeTupleField{name: "map", ty: Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "Secret"}}},
+        }}),
+        effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None,
+    }
+    resolved :: core_crypto_nominal(wrapped)
+    assert(count_core_crypto_markers(resolved) == 9)
+    flow_inner_is_secret := false
+    flow_tag_is_secret := false
+    if resolved == .Fn(params, _, _, _, _, _) {
+        if params.get(2) == .Val(tag) {
+            if tag == .Tagged(_, inner) {
+                flow_inner_is_secret = is_secret_bearing_crypto_type(inner)
+                flow_tag_is_secret = is_secret_bearing_crypto_type(tag)
+            }
+        }
+    }
+    assert(flow_inner_is_secret, "flow tag must preserve inner provenance")
+    assert(flow_tag_is_secret, "flow tag must remain secret-bearing")
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2531
+#Test("suggest_field_never_echoes_the_rejected_identifier") {
+    only_itself :: [String]{"decode"}
+    assert(suggest_field("decode", only_itself) == None)
+    family :: [String]{"decode", "encode", "parse"}
+    assert(suggest_field("decode", family) != Val("decode"))
+    assert(suggest_field("decod", family) == Val("decode"))
+    tied :: [String]{"decode", "decord"}
+    assert(suggest_field("decod", tied) == None)
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2546
+#Test("foreign_method_names_reach_the_jet_spelling") {
+    list :: [String]{"all", "any", "len", "push"}
+    loop foreign in [String]{"append", "add", "push_back"} {
+        assert(suggest_method(foreign, list).map(s -> s.name) == Val("push"), "{foreign} should reach `push`")
+    }
+    loop foreign in [String]{"size", "length", "count"} {
+        assert(suggest_method(foreign, list).map(s -> s.name) == Val("len"), "{foreign} should reach `len`")
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2572
+#Test("one_alias_row_serves_every_receiver_that_carries_the_target") {
+    map :: [String]{"add", "has_key", "len"}
+    set :: [String]{"add", "has", "len"}
+    assert(suggest_method("contains_key", map).map(s -> s.name) == Val("has_key"))
+    assert(suggest_method("contains_key", set).map(s -> s.name) == Val("has"))
+    assert(suggest_method("add", map).map(s -> s.name) == None)
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2593
+#Test("camel_case_reaches_the_snake_case_method_without_a_table_row") {
+    text :: [String]{"index_of", "to_string", "to_upper"}
+    suggestion :: suggest_method("indexOf", text) ?? panic("camelCase should resolve")
+    assert(suggestion.name == "index_of")
+    assert(suggestion.fix == "did you mean `index_of`? Jet method names are snake_case")
+    assert(suggest_method("toString", text).map(s -> s.name) == Val("to_string"))
+    map :: [String]{"add", "has_key"}
+    assert(suggest_method("containsKey", map).map(s -> s.name) == Val("has_key"))
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2622
+#Test("true_typos_keep_the_edit_distance_fix_byte_for_byte") {
+    list :: [String]{"len", "push", "try_push"}
+    suggestion :: suggest_method("psh", list) ?? panic("close typo should resolve")
+    assert(suggestion.name == "push")
+    assert(suggestion.fix == "did you mean `push`?")
+    assert(suggest_method("frobnicate", list) == None)
+}

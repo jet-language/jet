@@ -1,1793 +1,613 @@
-// PORT-PENDING 0506 crates-jet-codegen-src-codegen-tir-mod-slice-3241: crates/jet-codegen/src/Codegen/TIR/mod.rs:3241-5029
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn lower_mir_fragment(
-//RS     expr: &crate::AST::Expr,
-//RS     stmts: &[crate::AST::Stmt],
-//RS     context: &MirFragmentContext<'_>,
-//RS ) -> Result<
-//RS     (
-//RS         jet_foundation::MIR::MirProgram,
-//RS         jet_foundation::MIR::MirFunctionId,
-//RS     ),
-//RS     LowerError,
-//RS > {
-//RS     let mut expr = expr.clone();
-//RS     expr.for_each_expr_mut(lift_receiver_mark);
-//RS     let mut stmts = stmts.to_vec();
-//RS     lift_body_receiver_marks(&mut stmts);
-//RS     let (expr, stmts) = (&expr, stmts.as_slice());
-//RS     let module = "__comptime".to_string();
-//RS     let name = "__fragment".to_string();
-//RS     let file = module.clone();
-//RS     let span = if stmts.is_empty() {
-//RS         expr.span()
-//RS     } else {
-//RS         stmts
-//RS             .first()
-//RS             .map(crate::AST::Stmt::span)
-//RS             .unwrap_or(crate::Diagnostics::Span::new(0, 0))
-//RS     };
-//RS     // An implicit fold may reference a runtime capture. Its value and type
-//RS     // are absent from this fragment environment; reject the fold before
-//RS     // lowering a checked closure that requires that capture slot.
-//RS     let mut free_reads = None;
-//RS     let mut missing_capture = None;
-//RS     let mut check_captures = |candidate: &crate::AST::Expr| {
-//RS         if missing_capture.is_some() {
-//RS             return;
-//RS         }
-//RS         if let crate::AST::Expr::Lambda(lambda) = candidate {
-//RS             // The checked capture lists are authoritative.  Include every
-//RS             // capture class that the lambda lowerer can pack; otherwise a
-//RS             // runtime-only moved/mutable capture reaches the strict TIR
-//RS             // capture-type invariant below before this fragment can reject
-//RS             // the non-closed fold.
-//RS             for capture in lambda
-//RS                 .meta
-//RS                 .cloned_captures
-//RS                 .iter()
-//RS                 .chain(lambda.meta.moved_captures.iter())
-//RS                 .chain(lambda.meta.mut_captures.iter())
-//RS                 .chain(lambda.take_names.iter().map(|(name, _)| name))
-//RS             {
-//RS                 let free_reads = free_reads.get_or_insert_with(|| {
-//RS                     let (mut reads, calls) = if stmts.is_empty() {
-//RS                         crate::Sema::expr_free_reads_and_calls(expr)
-//RS                     } else {
-//RS                         crate::Sema::block_free_reads_and_calls(stmts)
-//RS                     };
-//RS                     reads.extend(calls);
-//RS                     reads
-//RS                 });
-//RS                 if free_reads.contains(capture) && !context.binding_types.contains_key(capture) {
-//RS                     missing_capture = Some(LowerError::new(
-//RS                         candidate.span(),
-//RS                         format!("capture `{capture}` has no value in the compile-time environment"),
-//RS                     ));
-//RS                     break;
-//RS                 }
-//RS             }
-//RS         }
-//RS     };
-//RS     expr.for_each_expr(&mut check_captures);
-//RS     for stmt in stmts {
-//RS         stmt.for_each_expr(&mut check_captures);
-//RS     }
-//RS     if let Some(error) = missing_capture {
-//RS         return Err(error);
-//RS     }
-//RS     let reachable = fragment_callable_closure(expr, stmts, context);
-//RS     let mut items = Vec::new();
-//RS     for (name, function) in context.funcs {
-//RS         if !reachable.contains(&FragmentCallable::Function(name.clone())) {
-//RS             continue;
-//RS         }
-//RS         items.push(crate::AST::Item::Func((*function).clone()));
-//RS     }
-//RS     for structure in context.structs.values() {
-//RS         let mut structure = (*structure).clone();
-//RS         // Fragment declarations carry field/type shape, not the enclosing
-//RS         // module's derived-trait references. Those traits are not part of the
-//RS         // fragment item set and would otherwise leave dangling MIR IDs.
-//RS         structure.derives.clear();
-//RS         items.push(crate::AST::Item::Struct(structure));
-//RS     }
-//RS     if let Some(facts) = context.checked_nominals {
-//RS         for (identity, structure) in &facts.structs {
-//RS             if context.structs.contains_key(identity) {
-//RS                 continue;
-//RS             }
-//RS             let mut structure = structure.clone();
-//RS             structure.derives.clear();
-//RS             items.push(crate::AST::Item::Struct(structure));
-//RS         }
-//RS         items.extend(facts.enums.values().cloned().map(crate::AST::Item::Enum));
-//RS     }
-//RS     // Fragment Cx omits enum/struct items that exist only as config-surface
-//RS     // literals (`Prompt{…}`, `.Short`, `Light.Green`). Seed those types from
-//RS     // the Field / EnumLit / StructLit spellings actually present.
-//RS     {
-//RS         let mut enum_variants: std::collections::BTreeMap<
-//RS             String,
-//RS             std::collections::BTreeSet<String>,
-//RS         > = std::collections::BTreeMap::new();
-//RS         let mut struct_fields: std::collections::BTreeMap<
-//RS             String,
-//RS             std::collections::BTreeSet<String>,
-//RS         > = std::collections::BTreeMap::new();
-//RS         let skip_named = |name: &str| {
-//RS             context.structs.contains_key(name)
-//RS                 || context.checked_nominals.is_some_and(|facts| {
-//RS                     facts.structs.contains_key(name)
-//RS                         || facts.enums.contains_key(name)
-//RS                         || facts.nominal_identities.get(name).is_some_and(|identity| {
-//RS                             facts.structs.contains_key(identity)
-//RS                                 || facts.enums.contains_key(identity)
-//RS                         })
-//RS                 })
-//RS                 || crate::AST::numeric_type_from_name(name).is_some()
-//RS                 || crate::Codegen::is_json_type_name(name)
-//RS                 // Compiler-owned rows (`Ordering`, Core exports) are always
-//RS                 // declared; a seeded unit shadow would claim the fragment's
-//RS                 // bare spelling with only the variants this block names.
-//RS                 || tir_to_mir_types::is_compiler_owned_type(name)
-//RS         };
-//RS         let mut collect = |candidate: &crate::AST::Expr| match candidate {
-//RS             crate::AST::Expr::Field(receiver, member, _) => {
-//RS                 let crate::AST::Expr::Ident(name, _) = receiver.as_ref() else {
-//RS                     return;
-//RS                 };
-//RS                 if skip_named(name) {
-//RS                     return;
-//RS                 }
-//RS                 if name.chars().next().is_some_and(char::is_uppercase)
-//RS                     && member.chars().next().is_some_and(char::is_uppercase)
-//RS                 {
-//RS                     enum_variants
-//RS                         .entry(name.clone())
-//RS                         .or_default()
-//RS                         .insert(member.clone());
-//RS                 }
-//RS             }
-//RS             crate::AST::Expr::EnumLit {
-//RS                 type_name, variant, ..
-//RS             } if !type_name.is_empty() && !skip_named(type_name) => {
-//RS                 enum_variants
-//RS                     .entry(type_name.clone())
-//RS                     .or_default()
-//RS                     .insert(variant.clone());
-//RS             }
-//RS             crate::AST::Expr::StructLit {
-//RS                 type_name, fields, ..
-//RS             } if !type_name.is_empty() && !skip_named(type_name) => {
-//RS                 let entry = struct_fields.entry(type_name.clone()).or_default();
-//RS                 for (name, _, _) in fields {
-//RS                     entry.insert(name.clone());
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         };
-//RS         expr.for_each_expr(&mut collect);
-//RS         for stmt in stmts {
-//RS             stmt.for_each_expr(&mut collect);
-//RS         }
-//RS         struct_fields
-//RS             .entry(crate::Syntax::TYPE_PROGRAM_INFO.to_string())
-//RS             .or_default()
-//RS             .extend(
-//RS                 [
-//RS                     "packages",
-//RS                     "types",
-//RS                     "functions",
-//RS                     "definitions",
-//RS                     "references",
-//RS                     "call_edges",
-//RS                     "structural_nodes",
-//RS                 ]
-//RS                 .into_iter()
-//RS                 .map(str::to_string),
-//RS             );
-//RS         struct_fields
-//RS             .entry(crate::Syntax::TYPE_TYPE_INFO.to_string())
-//RS             .or_default()
-//RS             .extend(
-//RS                 [
-//RS                     "name",
-//RS                     "path",
-//RS                     "layout",
-//RS                     "span",
-//RS                     "fields",
-//RS                     "methods",
-//RS                     "type_params",
-//RS                     "markers",
-//RS                     "expanded_markers",
-//RS                     "states",
-//RS                     "transitions",
-//RS                     "facts",
-//RS                     "dimensions",
-//RS                     "implements",
-//RS                     "trait_contracts",
-//RS                 ]
-//RS                 .into_iter()
-//RS                 .map(str::to_string),
-//RS             );
-//RS         struct_fields
-//RS             .entry(crate::Syntax::TYPE_BUILD_CONTEXT.to_string())
-//RS             .or_default()
-//RS             .insert("program".to_string());
-//RS         let empty_span = crate::Diagnostics::Span::new(0, 0);
-//RS         for (name, variants) in enum_variants {
-//RS             struct_fields.remove(&name);
-//RS             items.push(crate::AST::Item::Enum(crate::AST::EnumDef {
-//RS                 span: empty_span,
-//RS                 is_pub: false,
-//RS                 is_package_pub: false,
-//RS                 name,
-//RS                 name_span: empty_span,
-//RS                 type_params: Vec::new(),
-//RS                 variants: variants
-//RS                     .into_iter()
-//RS                     .map(|variant| crate::AST::Variant {
-//RS                         name: variant,
-//RS                         name_span: empty_span,
-//RS                         payload: crate::AST::VariantPayload::Unit,
-//RS                         discriminant: None,
-//RS                         discriminant_expr: None,
-//RS                         serde_markers: Vec::new(),
-//RS                     })
-//RS                     .collect(),
-//RS                 methods: Vec::new(),
-//RS                 trait_impls: Vec::new(),
-//RS                 derives: Vec::new(),
-//RS                 auto_derive_default: false,
-//RS                 is_single_use: false,
-//RS                 single_use_span: None,
-//RS                 is_must_use: false,
-//RS                 must_use_span: None,
-//RS                 serde_markers: Vec::new(),
-//RS                 type_markers: Vec::new(),
-//RS                 groups: Vec::new(),
-//RS             }));
-//RS         }
-//RS         for (name, fields) in struct_fields {
-//RS             items.push(crate::AST::Item::Struct(crate::AST::StructDef {
-//RS                 span: empty_span,
-//RS                 is_pub: false,
-//RS                 is_package_pub: false,
-//RS                 name: name.clone(),
-//RS                 name_span: empty_span,
-//RS                 type_params: Vec::new(),
-//RS                 fields: fields
-//RS                     .into_iter()
-//RS                     .map(|field_name| crate::AST::Field {
-//RS                         is_pub: false,
-//RS                         is_package_pub: false,
-//RS                         name: field_name.clone(),
-//RS                         name_span: empty_span,
-//RS                         ty: fragment_host_field_type(&name, &field_name),
-//RS                         ty_span: empty_span,
-//RS                         serde_markers: Vec::new(),
-//RS                         redact: false,
-//RS                         computed: None,
-//RS                         default: None,
-//RS                         default_ct: None,
-//RS                     })
-//RS                     .collect(),
-//RS                 state: None,
-//RS                 methods: Vec::new(),
-//RS                 cli_bindings: Vec::new(),
-//RS                 trait_impls: Vec::new(),
-//RS                 derives: Vec::new(),
-//RS                 auto_derive_default: false,
-//RS                 is_published_schema: false,
-//RS                 published_schema_span: None,
-//RS                 is_single_use: false,
-//RS                 single_use_span: None,
-//RS                 is_must_use: false,
-//RS                 must_use_span: None,
-//RS                 layout: None,
-//RS                 layout_span: None,
-//RS                 serde_markers: Vec::new(),
-//RS                 type_markers: Vec::new(),
-//RS                 validate_block: Vec::new(),
-//RS                 validate_span: None,
-//RS             }));
-//RS         }
-//RS     }
-//RS     // Unit-family members are already supplied by their family item. The
-//RS     // distinct-base map carries the same checked rows for evaluator lookup,
-//RS     // but adding them as synthetic items would lower each member twice.
-//RS     let unit_family_members = context
-//RS         .unit_families
-//RS         .iter()
-//RS         .flat_map(|family| family.distinct_defs())
-//RS         .map(|definition| definition.name)
-//RS         .collect::<std::collections::HashSet<_>>();
-//RS     for (name, base) in context.distinct_bases {
-//RS         if context.structs.contains_key(name) || unit_family_members.contains(name) {
-//RS             continue;
-//RS         }
-//RS         let range = context.distinct_ranges.get(name).and_then(|bounds| {
-//RS             bounds
-//RS                 .as_ref()
-//RS                 .map(|(lo, hi)| (*lo, *hi, crate::Diagnostics::Span::new(0, 0)))
-//RS         });
-//RS         items.push(crate::AST::Item::Distinct(crate::AST::DistinctDef {
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             type_markers: Vec::new(),
-//RS             derives: Vec::new(),
-//RS             quantity: None,
-//RS             name: name.clone(),
-//RS             name_span: crate::Diagnostics::Span::new(0, 0),
-//RS             base: base.clone(),
-//RS             base_span: crate::Diagnostics::Span::new(0, 0),
-//RS             range,
-//RS             span: crate::Diagnostics::Span::new(0, 0),
-//RS         }));
-//RS     }
-//RS     for conversion in context.error_conversions {
-//RS         items.push(crate::AST::Item::ErrorConv(conversion.clone()));
-//RS     }
-//RS     for family in context.unit_families {
-//RS         items.push(crate::AST::Item::UnitFamily(family.clone()));
-//RS     }
-//RS     // Checked-text comptime evaluation supplies method bodies but historically
-//RS     // omits the trait map. Reconstruct only this exact nominal contract from
-//RS     // the retained String-backed declaration rows; never infer an owner from a
-//RS     // lowered receiver value.
-//RS     let fragment_checked_text_owners = context
-//RS         .distinct_bases
-//RS         .iter()
-//RS         .filter(|(owner, base)| {
-//RS             matches!(base, Type::String)
-//RS                 && context
-//RS                     .methods
-//RS                     .contains_key(&(owner.to_string(), "check".to_string()))
-//RS                 && context
-//RS                     .methods
-//RS                     .contains_key(&(owner.to_string(), "encode_hole".to_string()))
-//RS         })
-//RS         .map(|(owner, _)| owner.clone())
-//RS         .collect::<std::collections::HashSet<_>>();
-//RS     let fragment_trait_name =
-//RS         |owner: &str, method_name: &str, method: &crate::AST::Func| -> Option<String> {
-//RS             if let Some(trait_name) = context
-//RS                 .method_traits
-//RS                 .get(&(owner.to_string(), method_name.to_string()))
-//RS             {
-//RS                 return Some(trait_name.clone());
-//RS             }
-//RS             if fragment_checked_text_owners.contains(owner)
-//RS                 && matches!(method_name, "check" | "encode_hole")
-//RS                 && !method
-//RS                     .params
-//RS                     .iter()
-//RS                     .any(|param| param.name == crate::Syntax::KW_SELF)
-//RS             {
-//RS                 return Some(crate::Generics::CHECKED_TEXT.to_string());
-//RS             }
-//RS             None
-//RS         };
-//RS     for ((owner, method_name), method) in context.methods {
-//RS         if !reachable.contains(&FragmentCallable::Method {
-//RS             owner: owner.clone(),
-//RS             name: method_name.clone(),
-//RS         }) {
-//RS             continue;
-//RS         }
-//RS         if matches!(method_name.as_str(), "encode" | "decode") {
-//RS             continue;
-//RS         }
-//RS         let declared = context.structs.get(owner).is_some_and(|structure| {
-//RS             structure
-//RS                 .methods
-//RS                 .iter()
-//RS                 .any(|candidate| candidate.name == *method_name)
-//RS                 || structure.trait_impls.iter().any(|implementation| {
-//RS                     implementation
-//RS                         .methods
-//RS                         .iter()
-//RS                         .any(|candidate| candidate.name == *method_name)
-//RS                 })
-//RS         });
-//RS         if declared {
-//RS             continue;
-//RS         }
-//RS         let trait_name = fragment_trait_name(owner, method_name, method);
-//RS         let operator_rhs = trait_name
-//RS             .as_deref()
-//RS             .filter(|trait_name| {
-//RS                 matches!(
-//RS                     *trait_name,
-//RS                     crate::Syntax::TRAIT_ADD
-//RS                         | crate::Syntax::TRAIT_SUB
-//RS                         | crate::Syntax::TRAIT_MUL
-//RS                         | crate::Syntax::TRAIT_DIV
-//RS                         | crate::Syntax::TRAIT_EQUATABLE
-//RS                         | crate::Syntax::TRAIT_COMPARABLE
-//RS                 )
-//RS             })
-//RS             .and_then(|_| {
-//RS                 method
-//RS                     .params
-//RS                     .iter()
-//RS                     .find(|param| param.name != crate::Syntax::KW_SELF)
-//RS                     .map(|param| param.ty.clone())
-//RS             });
-//RS         items.push(crate::AST::Item::Impl(crate::AST::ImplDef {
-//RS             span: method.span,
-//RS             type_name: owner.clone(),
-//RS             type_span: method.span,
-//RS             trait_name,
-//RS             trait_span: None,
-//RS             operator_rhs,
-//RS             operator_marker: None,
-//RS             methods: vec![(*method).clone()],
-//RS             delegation_field: None,
-//RS             assoc_type_impls: Vec::new(),
-//RS             is_generated_serde: false,
-//RS             os_target: None,
-//RS         }));
-//RS     }
-//RS     let declared_variants = fragment_declared_variants(&items);
-//RS     for item in &mut items {
-//RS         for_each_item_body(item, |body| {
-//RS             lift_body_receiver_marks(body);
-//RS             normalize_fragment_body_patterns(body, &declared_variants);
-//RS         });
-//RS     }
-//RS     let mut cx = build_cx_items(
-//RS         &items,
-//RS         "",
-//RS         &file,
-//RS         None,
-//RS         &std::collections::HashMap::new(),
-//RS         "2026",
-//RS     );
-//RS     if let Some(facts) = context.checked_nominals {
-//RS         cx.import_mods = facts
-//RS             .import_modules
-//RS             .iter()
-//RS             .map(|(alias, module)| (alias.clone(), crate::Codegen::mangle(module)))
-//RS             .collect();
-//RS         cx.foreign_types = facts
-//RS             .foreign_modules
-//RS             .iter()
-//RS             .map(|(identity, module)| (identity.clone(), crate::Codegen::mangle(module)))
-//RS             .collect();
-//RS         // Each signature names the loaded module whose body the fragment
-//RS         // lowers on demand, so the call keys the same target as at runtime.
-//RS         cx.core_source_sigs = facts
-//RS             .core_source_sigs
-//RS             .iter()
-//RS             .filter_map(|(key, signature)| {
-//RS                 let source = facts.core_source_bodies.get(&key.0)?;
-//RS                 Some((
-//RS                     key.clone(),
-//RS                     crate::Codegen::CoreSourceFunctionSignature {
-//RS                         module_identity: source.module_identity.clone(),
-//RS                         type_params: signature.type_params.clone(),
-//RS                         params: signature.params.clone(),
-//RS                         return_type: signature.return_type.clone(),
-//RS                     },
-//RS                 ))
-//RS             })
-//RS             .collect();
-//RS         cx.local_type_identities
-//RS             .extend(facts.nominal_identities.clone());
-//RS         cx.type_names.extend(facts.structs.keys().cloned());
-//RS         cx.type_names.extend(facts.enums.keys().cloned());
-//RS         install_fragment_module_imports(
-//RS             &mut cx,
-//RS             facts,
-//RS             &facts.import_modules,
-//RS             &facts.imported_functions,
-//RS             &facts.import_signatures,
-//RS         );
-//RS     }
-//RS     cx.module_identity = module.clone();
-//RS     cx.core_imports = context.core_imports.clone();
-//RS     for (alias, module) in &cx.core_imports {
-//RS         if let Some(source) = jet_foundation::CoreModuleExports::core_source_module(module) {
-//RS             cx.import_mods
-//RS                 .insert(alias.clone(), crate::Codegen::mangle(source.alias));
-//RS             cx.core_source_modules
-//RS                 .insert(module.clone(), source.alias.to_string());
-//RS         }
-//RS     }
-//RS     cx.const_values = context.globals.clone();
-//RS     cx.consts = cx
-//RS         .const_values
-//RS         .keys()
-//RS         .map(|name| (name.clone(), name.clone()))
-//RS         .collect();
-//RS     cx.computed_fields.clear();
-//RS     for ((owner, field), _) in context.computed_fields {
-//RS         cx.computed_fields
-//RS             .entry(owner.clone())
-//RS             .or_default()
-//RS             .insert(field.clone());
-//RS     }
-//RS     cx.distinct_ranges = context
-//RS         .distinct_ranges
-//RS         .iter()
-//RS         .filter_map(|(name, bounds)| bounds.map(|bounds| (name.clone(), bounds)))
-//RS         .collect();
-//RS     for (name, base) in context.distinct_bases {
-//RS         cx.distinct_types
-//RS             .insert(name.clone(), (base.clone(), false));
-//RS     }
-//RS     let declaration_items = fragment_declaration_items(&items, &reachable);
-//RS     let declarations = lower_declarations_from_items_with_boxed_edges(
-//RS         &declaration_items,
-//RS         &module,
-//RS         &context.target_layout,
-//RS         &cx.boxed_edges,
-//RS         &cx.auto_printable,
-//RS         &cx.auto_debug,
-//RS         context.checked_nominals,
-//RS     );
-//RS     let mut extra_funcs = Vec::new();
-//RS     for (function_name, function) in context.funcs {
-//RS         if !reachable.contains(&FragmentCallable::Function(function_name.clone())) {
-//RS             continue;
-//RS         }
-//RS         if !function.type_params.is_empty() || matches!(function.name.as_str(), "encode" | "decode")
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let mut function = lift_func_receiver_marks(function);
-//RS         normalize_fragment_body_patterns(&mut function.body, &declared_variants);
-//RS         if let Some(facts) = context.checked_nominals {
-//RS             annotate_fragment_module_calls(
-//RS                 &mut function,
-//RS                 &facts.import_signatures,
-//RS                 &facts.imported_functions,
-//RS             );
-//RS         }
-//RS         extra_funcs.push(lower::lower_func(&function, &cx));
-//RS     }
-//RS     if let Some(facts) = context.checked_nominals {
-//RS         lower_fragment_core_source_bodies(facts, &reachable, &cx, &mut extra_funcs)?;
-//RS     }
-//RS     let mut trait_method_traits = std::collections::HashMap::new();
-//RS     for ((owner, method_name), method) in context.methods {
-//RS         if !reachable.contains(&FragmentCallable::Method {
-//RS             owner: owner.clone(),
-//RS             name: method_name.clone(),
-//RS         }) {
-//RS             continue;
-//RS         }
-//RS         if matches!(method_name.as_str(), "encode" | "decode") || !method.type_params.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let mut method = lift_func_receiver_marks(method);
-//RS         normalize_fragment_body_patterns(&mut method.body, &declared_variants);
-//RS         let trait_name = fragment_trait_name(owner, method_name, &method);
-//RS         let mut lowered = if let Some(trait_name) = trait_name.as_deref() {
-//RS             trait_method_traits
-//RS                 .insert((owner.clone(), method_name.clone()), trait_name.to_string());
-//RS             let operator_rhs = matches!(
-//RS                 trait_name,
-//RS                 crate::Syntax::TRAIT_ADD
-//RS                     | crate::Syntax::TRAIT_SUB
-//RS                     | crate::Syntax::TRAIT_MUL
-//RS                     | crate::Syntax::TRAIT_DIV
-//RS                     | crate::Syntax::TRAIT_EQUATABLE
-//RS                     | crate::Syntax::TRAIT_COMPARABLE
-//RS             )
-//RS             .then(|| {
-//RS                 method
-//RS                     .params
-//RS                     .iter()
-//RS                     .find(|param| param.name != crate::Syntax::KW_SELF)
-//RS                     .map(|param| param.ty.clone())
-//RS             })
-//RS             .flatten();
-//RS             lower::lower_trait_method(&method, owner, &cx, trait_name, false, operator_rhs.as_ref())
-//RS         } else {
-//RS             lower::lower_method(&method, owner, &cx)
-//RS         };
-//RS         lowered.name = method_name.clone();
-//RS         extra_funcs.push(lowered);
-//RS     }
-//RS     *cx.current_fn.borrow_mut() = name.clone();
-//RS     let mut env = lower::LowerEnv::new(name.clone());
-//RS     let mut names = context.binding_types.keys().cloned().collect::<Vec<_>>();
-//RS     names.sort();
-//RS     let params = names
-//RS         .iter()
-//RS         .map(|binding| {
-//RS             let ty = context
-//RS                 .binding_types
-//RS                 .get(binding)
-//RS                 .cloned()
-//RS                 .expect("comptime fragment binding type must be present");
-//RS             env.bind(binding, TLocal::user(binding), Some(ty.clone()));
-//RS             (binding.clone(), ty, crate::AST::AccessConvention::Move)
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let value = if stmts.is_empty() {
-//RS         lower::lower_expr(expr, &cx, &mut env)
-//RS     } else {
-//RS         let body = lower::lower_stmts(stmts, &cx, &mut env);
-//RS         // S57 / D-PREP-SURFACE2=A: incoming fragment params round-trip. Names
-//RS         // the `prep { … }` block binds stay inside it like any block local;
-//RS         // a build-time value that outlives the block is bound explicitly as
-//RS         // `name :: prep { value }` (owner ruling, 2026-09-30).
-//RS         let tuple_shape = params
-//RS             .iter()
-//RS             .map(|(binding, ty, _)| (binding.clone(), ty.clone()))
-//RS             .collect::<Vec<_>>();
-//RS         let tuple_ty = crate::AST::Type::Tuple(
-//RS             tuple_shape
-//RS                 .iter()
-//RS                 .map(|(binding, ty)| (binding.clone(), Box::new(ty.clone())))
-//RS                 .collect(),
-//RS         );
-//RS         let fields = tuple_shape
-//RS             .iter()
-//RS             .map(|(binding, ty)| {
-//RS                 (
-//RS                     binding.clone(),
-//RS                     TExpr {
-//RS                         ty: ty.clone(),
-//RS                         kind: TExprKind::Local(TLocal::user(binding)),
-//RS                     },
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let mut body = body;
-//RS         body.push(TStmt::Return(Some(TExpr {
-//RS             ty: tuple_ty.clone(),
-//RS             kind: TExprKind::TupleLit {
-//RS                 struct_name: tuple_struct_name(&tuple_shape),
-//RS                 fields,
-//RS             },
-//RS         })));
-//RS         lower_demanded_generic_methods(&items, &cx, &mut extra_funcs)?;
-//RS         specialize_generic_free_functions(&items, &cx, &mut extra_funcs);
-//RS         if let Some(facts) = context.checked_nominals {
-//RS             specialize_fragment_core_source_generics(facts, &cx, &mut extra_funcs)?;
-//RS         }
-//RS         return lower_mir_fragment_program(
-//RS             module,
-//RS             name,
-//RS             file,
-//RS             span,
-//RS             params,
-//RS             tuple_ty,
-//RS             body,
-//RS             &extra_funcs,
-//RS             &declarations,
-//RS             &trait_method_traits,
-//RS             context,
-//RS         );
-//RS     };
-//RS     let tuple_shape = std::iter::once(("value".to_string(), value.ty.clone()))
-//RS         .chain(
-//RS             params
-//RS                 .iter()
-//RS                 .map(|(binding, ty, _)| (binding.clone(), ty.clone())),
-//RS         )
-//RS         .collect::<Vec<_>>();
-//RS     let tuple_ty = crate::AST::Type::Tuple(
-//RS         tuple_shape
-//RS             .iter()
-//RS             .map(|(binding, ty)| (binding.clone(), Box::new(ty.clone())))
-//RS             .collect(),
-//RS     );
-//RS     let mut body = Vec::new();
-//RS     let mut fields = vec![("value".to_string(), value.clone())];
-//RS     fields.extend(params.iter().map(|(binding, ty, _)| {
-//RS         (
-//RS             binding.clone(),
-//RS             TExpr {
-//RS                 ty: ty.clone(),
-//RS                 kind: TExprKind::Local(TLocal::user(binding)),
-//RS             },
-//RS         )
-//RS     }));
-//RS     body.push(TStmt::Return(Some(TExpr {
-//RS         ty: tuple_ty.clone(),
-//RS         kind: TExprKind::TupleLit {
-//RS             struct_name: tuple_struct_name(&tuple_shape),
-//RS             fields,
-//RS         },
-//RS     })));
-//RS     lower_demanded_generic_methods(&items, &cx, &mut extra_funcs)?;
-//RS     specialize_generic_free_functions(&items, &cx, &mut extra_funcs);
-//RS     if let Some(facts) = context.checked_nominals {
-//RS         specialize_fragment_core_source_generics(facts, &cx, &mut extra_funcs)?;
-//RS     }
-//RS     lower_mir_fragment_program(
-//RS         module,
-//RS         name,
-//RS         file,
-//RS         span,
-//RS         params,
-//RS         tuple_ty,
-//RS         body,
-//RS         &extra_funcs,
-//RS         &declarations,
-//RS         &trait_method_traits,
-//RS         context,
-//RS     )
-//RS }
-//RS 
-//RS /// Build the lowering context of one loaded source module for a comptime
-//RS /// fragment, the way runtime lowering builds it for an imported module: the
-//RS /// module's own functions and imports, its loader alias as the local call
-//RS /// prefix and its checked identity as the owner of every lowered body. A user
-//RS /// file module also sees every checked nominal row by its canonical identity
-//RS /// and spells its own and imported types through its identity table.
-//RS fn fragment_core_source_cx(
-//RS     facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
-//RS     source: &crate::Comptime::MirBridge::MirFragmentCoreSourceModule,
-//RS     fragment_cx: &Cx,
-//RS ) -> (Vec<Item>, Cx) {
-//RS     let user_module =
-//RS         jet_foundation::CoreModuleExports::core_source_module_by_alias(&source.alias).is_none();
-//RS     let mut functions = source.functions.values().collect::<Vec<_>>();
-//RS     functions.sort_by(|left, right| left.name.cmp(&right.name));
-//RS     let mut items = functions
-//RS         .into_iter()
-//RS         .map(|function| {
-//RS             let mut function = lift_func_receiver_marks(function);
-//RS             annotate_fragment_module_calls(
-//RS                 &mut function,
-//RS                 &source.import_signatures,
-//RS                 &source.imported_functions,
-//RS             );
-//RS             Item::Func(function)
-//RS         })
-//RS         .chain(source.constants.iter().cloned().map(Item::Const))
-//RS         .collect::<Vec<_>>();
-//RS     let function_count = items.len();
-//RS     if user_module {
-//RS         items.extend(facts.structs.values().cloned().map(Item::Struct));
-//RS         items.extend(facts.enums.values().cloned().map(Item::Enum));
-//RS     }
-//RS     let mut cx = build_cx_items(
-//RS         &items,
-//RS         "",
-//RS         &source.module_identity,
-//RS         None,
-//RS         &std::collections::HashMap::new(),
-//RS         "2026",
-//RS     );
-//RS     // A same-module constant read lowers to the `Global` key its declaration
-//RS     // row carries in the fragment program (`fragment_core_source_constants`),
-//RS     // exactly as `populate_cx_from_bundle` keys it for runtime lowering.
-//RS     for constant in &source.constants {
-//RS         let Some(ty) = cx.const_types.get(&constant.name).cloned() else {
-//RS             continue;
-//RS         };
-//RS         let row = tir_to_mir_types::lower_constant(constant, &source.module_identity);
-//RS         cx.const_ref_keys.insert(constant.name.clone(), row.key);
-//RS         cx.const_ref_types.insert(constant.name.clone(), ty);
-//RS     }
-//RS     cx.module_alias = source.alias.clone();
-//RS     cx.module_identity = source.module_identity.clone();
-//RS     cx.jit_local_call_prefix = Some(format!("{}::", mangle(&source.alias)));
-//RS     cx.core_source_sigs = fragment_cx.core_source_sigs.clone();
-//RS     cx.core_source_modules = facts
-//RS         .core_source_bodies
-//RS         .iter()
-//RS         .map(|(module, loaded)| (module.clone(), loaded.alias.clone()))
-//RS         .collect();
-//RS     cx.core_imports = source.core_imports.clone();
-//RS     for (alias, module) in &source.core_imports {
-//RS         if let Some(loaded) = facts.core_source_bodies.get(module) {
-//RS             cx.import_mods.insert(alias.clone(), mangle(&loaded.alias));
-//RS         }
-//RS     }
-//RS     if user_module {
-//RS         install_fragment_module_imports(
-//RS             &mut cx,
-//RS             facts,
-//RS             &source.module_imports,
-//RS             &source.imported_functions,
-//RS             &source.import_signatures,
-//RS         );
-//RS         cx.foreign_types = fragment_cx.foreign_types.clone();
-//RS         cx.local_type_identities
-//RS             .extend(source.nominal_identities.clone());
-//RS         cx.type_names.extend(facts.structs.keys().cloned());
-//RS         cx.type_names.extend(facts.enums.keys().cloned());
-//RS         // The nominal rows shape this context only; the fragment program
-//RS         // declares them once from its own item set.
-//RS         items.truncate(function_count);
-//RS     }
-//RS     (items, cx)
-//RS }
-//RS 
-//RS /// Install a module's user-module call surface on its fragment lowering
-//RS /// context as `populate_cx_from_bundle` does for runtime lowering: import
-//RS /// aliases and member imports name the loaded module rows, and each callee's
-//RS /// declared signature supplies the call's conventions and return.
-//RS fn install_fragment_module_imports(
-//RS     cx: &mut Cx,
-//RS     facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
-//RS     module_imports: &std::collections::HashMap<String, String>,
-//RS     imported_functions: &std::collections::HashMap<String, (String, String)>,
-//RS     signatures: &std::collections::HashMap<
-//RS         (String, String),
-//RS         crate::Comptime::MirBridge::MirFragmentCoreSourceSignature,
-//RS     >,
-//RS ) {
-//RS     for (alias, module) in module_imports {
-//RS         if let Some(loaded) = facts.core_source_bodies.get(module) {
-//RS             cx.import_mods.insert(alias.clone(), mangle(&loaded.alias));
-//RS         }
-//RS     }
-//RS     for (local, (module, name)) in imported_functions {
-//RS         if let Some(loaded) = facts.core_source_bodies.get(module) {
-//RS             cx.unqualified_file
-//RS                 .insert(local.clone(), (mangle(&loaded.alias), name.clone()));
-//RS         }
-//RS     }
-//RS     for (key, signature) in signatures {
-//RS         cx.import_sigs.insert(key.clone(), signature.params.clone());
-//RS         cx.import_rets
-//RS             .insert(key.clone(), signature.return_type.clone());
-//RS     }
-//RS }
-//RS 
-//RS /// Lower the source-owned Core bodies a fragment reaches under the key and
-//RS /// name runtime lowering gives them, so `prep` code calls the same Core
-//RS /// function a runtime call reaches.
-//RS fn lower_fragment_core_source_bodies(
-//RS     facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
-//RS     reachable: &std::collections::BTreeSet<FragmentCallable>,
-//RS     fragment_cx: &Cx,
-//RS     funcs: &mut Vec<TFunc>,
-//RS ) -> Result<(), LowerError> {
-//RS     let mut demanded = std::collections::BTreeMap::<&str, Vec<&str>>::new();
-//RS     for callable in reachable {
-//RS         if let FragmentCallable::CoreSource { module, name } = callable {
-//RS             demanded
-//RS                 .entry(module.as_str())
-//RS                 .or_default()
-//RS                 .push(name.as_str());
-//RS         }
-//RS     }
-//RS     for (module, names) in demanded {
-//RS         let Some(source) = facts.core_source_bodies.get(module) else {
-//RS             continue;
-//RS         };
-//RS         let (items, cx) = fragment_core_source_cx(facts, source, fragment_cx);
-//RS         for item in &items {
-//RS             let Item::Func(function) = item else {
-//RS                 continue;
-//RS             };
-//RS             // Generic bodies are lowered per checked instantiation below;
-//RS             // an inline-foreign function has no Jet body.
-//RS             if !names.contains(&function.name.as_str())
-//RS                 || !function.type_params.is_empty()
-//RS                 || function.inline_foreign.is_some()
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let mut lowered = lower_func(function, &cx);
-//RS             lowered.name = format!("{}::{}", mangle(&source.alias), mangle(&function.name));
-//RS             funcs.push(lowered);
-//RS         }
-//RS         lower_demanded_generic_methods(&items, &cx, funcs)?;
-//RS         specialize_generic_free_functions(&items, &cx, funcs);
-//RS         merge_core_source_generic_calls(fragment_cx, &cx);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Lower every checked instantiation of a source-owned Core generic function
-//RS /// the fragment demanded, as runtime lowering does for imported Core modules.
-//RS fn specialize_fragment_core_source_generics(
-//RS     facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
-//RS     fragment_cx: &Cx,
-//RS     funcs: &mut Vec<TFunc>,
-//RS ) -> Result<(), LowerError> {
-//RS     loop {
-//RS         let calls = std::mem::take(&mut *fragment_cx.jit_core_source_generic_calls.borrow_mut());
-//RS         if calls.is_empty() {
-//RS             return Ok(());
-//RS         }
-//RS         for ((owner, method), mut instantiations) in calls {
-//RS             instantiations.sort_by_key(|types| format!("{types:?}"));
-//RS             instantiations.dedup();
-//RS             let missing_target = || {
-//RS                 LowerError::new(
-//RS                     crate::Diagnostics::Span::new(0, 0),
-//RS                     format!("checked Core source generic target `{owner}::{method}` has no loaded template"),
-//RS                 )
-//RS             };
-//RS             let source = facts
-//RS                 .core_source_bodies
-//RS                 .values()
-//RS                 .find(|source| source.module_identity == owner)
-//RS                 .ok_or_else(missing_target)?;
-//RS             let template = source
-//RS                 .functions
-//RS                 .get(&method)
-//RS                 .filter(|template| !template.type_params.is_empty())
-//RS                 .ok_or_else(missing_target)?;
-//RS             let (items, cx) = fragment_core_source_cx(facts, source, fragment_cx);
-//RS             for type_args in instantiations {
-//RS                 if type_args.len() != template.type_params.len() {
-//RS                     return Err(LowerError::new(
-//RS                         template.span,
-//RS                         format!("checked Core source generic target `{owner}::{method}` has inconsistent type parameters"),
-//RS                     ));
-//RS                 }
-//RS                 let emitted_name = generic_free_function_instance_key(&method, &type_args);
-//RS                 let emitted_key = function_semantic_key(&owner, &emitted_name);
-//RS                 if funcs.iter().any(|function| function.key == emitted_key) {
-//RS                     continue;
-//RS                 }
-//RS                 let (_, mut lowered) = lower_core_source_generic_template(
-//RS                     lift_func_receiver_marks(template),
-//RS                     &type_args,
-//RS                     &emitted_name,
-//RS                     &cx,
-//RS                 );
-//RS                 lowered.key = emitted_key;
-//RS                 lowered.name = format!("{}::{}", mangle(&source.alias), mangle(&emitted_name));
-//RS                 funcs.push(lowered);
-//RS             }
-//RS             lower_demanded_generic_methods(&items, &cx, funcs)?;
-//RS             specialize_generic_free_functions(&items, &cx, funcs);
-//RS             merge_core_source_generic_calls(fragment_cx, &cx);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn lower_mir_fragment_program(
-//RS     module: String,
-//RS     name: String,
-//RS     file: String,
-//RS     span: crate::Diagnostics::Span,
-//RS     params: Vec<(String, crate::AST::Type, crate::AST::AccessConvention)>,
-//RS     ret: crate::AST::Type,
-//RS     body: Vec<TStmt>,
-//RS     extra_funcs: &[TFunc],
-//RS     declarations: &TirDeclarations,
-//RS     trait_method_traits: &std::collections::HashMap<(String, String), String>,
-//RS     context: &MirFragmentContext<'_>,
-//RS ) -> Result<
-//RS     (
-//RS         jet_foundation::MIR::MirProgram,
-//RS         jet_foundation::MIR::MirFunctionId,
-//RS     ),
-//RS     LowerError,
-//RS > {
-//RS     let key = format!("{module}::{name}");
-//RS     let function_ref = artifact_plan::TirFunctionRef {
-//RS         key: key.clone(),
-//RS         module: module.clone(),
-//RS         name: name.clone(),
-//RS         span,
-//RS         visibility: crate::Names::NameVisibility::Private,
-//RS     };
-//RS     let param_facts = params
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(index, (name, ty, access))| artifact_plan::TirParamFact {
-//RS             index,
-//RS             name: name.clone(),
-//RS             span,
-//RS             ty: ty.clone(),
-//RS             access: match access {
-//RS                 crate::AST::AccessConvention::Read => artifact_plan::TirAccess::Read,
-//RS                 crate::AST::AccessConvention::Write => artifact_plan::TirAccess::Write,
-//RS                 crate::AST::AccessConvention::Move => artifact_plan::TirAccess::Move,
-//RS             },
-//RS             label: name.clone(),
-//RS             zone: crate::AST::ParamZone::Either,
-//RS             variadic: false,
-//RS             default_present: false,
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let entry = artifact_plan::TirEntrySpec {
-//RS         kind: artifact_plan::TirArtifactEntryKind::Command,
-//RS         function: Some(function_ref.clone()),
-//RS         cli: None,
-//RS         output: artifact_plan::TirEntryOutput::ReturnValue,
-//RS         output_kind: crate::AST::OutputKind::Executable,
-//RS         initialize_environment: false,
-//RS         initialize_gc: false,
-//RS         serves_until_stopped: false,
-//RS         package_version: "0.0.0".to_string(),
-//RS     };
-//RS     let artifact_key = "__comptime_fragment".to_string();
-//RS     // Core source bodies lowered into the fragment keep their defining
-//RS     // module as owner; each owner needs its module row.
-//RS     let core_source_modules = extra_funcs
-//RS         .iter()
-//RS         .filter(|function| function.module != module)
-//RS         .map(|function| (function.module.clone(), function.source_file.clone()))
-//RS         .collect::<std::collections::BTreeMap<_, _>>();
-//RS     // Their same-module constants are declaration rows too, so a body's
-//RS     // `Global` read of a Core table (`C_SHA256_K[t]`) finds its value.
-//RS     let mut declarations = declarations.clone();
-//RS     if let Some(facts) = context.checked_nominals {
-//RS         for source in facts.core_source_bodies.values() {
-//RS             if !core_source_modules.contains_key(&source.module_identity) {
-//RS                 continue;
-//RS             }
-//RS             declarations.constants.extend(source.constants.iter().map(|constant| {
-//RS                 tir_to_mir_types::lower_constant(constant, &source.module_identity)
-//RS             }));
-//RS         }
-//RS     }
-//RS     let artifact_facts = artifact_plan::TirArtifactFacts {
-//RS         package_identity: "comptime-fragment".to_string(),
-//RS         package_version: "0.0.0".to_string(),
-//RS         target: artifact_plan::TirArtifactTarget::Interpreter,
-//RS         build_mode: MirArtifactBuildMode::Dev,
-//RS         build: crate::Facts::BuildFactSnapshot::default(),
-//RS         names: artifact_plan::TirNameFacts::default(),
-//RS         functions: vec![artifact_plan::TirFunctionFact {
-//RS             reference: function_ref.clone(),
-//RS             params: param_facts,
-//RS             return_type: Some(ret.clone()),
-//RS             is_pure: false,
-//RS         }],
-//RS         modules: std::iter::once(artifact_plan::TirModuleFact {
-//RS             key: module.clone(),
-//RS             name: module.clone(),
-//RS             path: file.clone(),
-//RS             source_path: file.clone(),
-//RS             imports: Vec::new(),
-//RS             item_order: vec![artifact_plan::TirItemRef::Function(key.clone())],
-//RS         })
-//RS         .chain(core_source_modules.iter().map(|(owner, source)| {
-//RS             artifact_plan::TirModuleFact {
-//RS                 key: owner.clone(),
-//RS                 name: owner.clone(),
-//RS                 path: source.clone(),
-//RS                 source_path: source.clone(),
-//RS                 imports: Vec::new(),
-//RS                 item_order: Vec::new(),
-//RS             }
-//RS         }))
-//RS         .collect(),
-//RS         imports: Vec::new(),
-//RS         foreign: Vec::new(),
-//RS         links: Vec::new(),
-//RS         callbacks: Vec::new(),
-//RS         handles: Vec::new(),
-//RS         entry: Some(entry.clone()),
-//RS         cli: None,
-//RS         jobs: Vec::new(),
-//RS         tests: Vec::new(),
-//RS         output_checks: Vec::new(),
-//RS         coverage_points: Vec::new(),
-//RS         harnesses: Vec::new(),
-//RS         artifacts: vec![artifact_plan::TirArtifactPlan {
-//RS             key: artifact_key,
-//RS             kind: artifact_plan::TirArtifactKind::NativeExecutable,
-//RS             name: "comptime fragment".to_string(),
-//RS             target: artifact_plan::TirArtifactTarget::Interpreter,
-//RS             modules: std::iter::once(module.clone())
-//RS                 .chain(core_source_modules.keys().cloned())
-//RS                 .collect(),
-//RS             links: Vec::new(),
-//RS             jobs: Vec::new(),
-//RS             runtime_parts: std::collections::BTreeSet::new(),
-//RS             exports: Vec::new(),
-//RS             provider_identity: "comptime".to_string(),
-//RS             closure_identity: "comptime".to_string(),
-//RS             artifact_identity: "comptime".to_string(),
-//RS             entry: Some(entry),
-//RS             harness: None,
-//RS         }],
-//RS         cffi: artifact_plan::TirCffiFacts::default(),
-//RS     };
-//RS     let function = TFunc {
-//RS         name,
-//RS         module: module.clone(),
-//RS         key,
-//RS         source_file: file.clone(),
-//RS         source_span: span,
-//RS         failure_carrier: TFailureCarrier::from_checked_type(&ret),
-//RS         effects: TEffectFacts::default(),
-//RS         target_applicability: TTargetApplicability {
-//RS             rust_aot: false,
-//RS             cranelift: false,
-//RS             interpreter: true,
-//RS             web: false,
-//RS         },
-//RS         web_bucket: None,
-//RS         web_marker: None,
-//RS         visibility: TVisibility::Private,
-//RS         foreign: None,
-//RS         params,
-//RS         web_param_reconstructions: Vec::new(),
-//RS         ret: Some(ret),
-//RS         gc_return: false,
-//RS         gc_scope: false,
-//RS         return_view_provenance: None,
-//RS         generic_params: Vec::new(),
-//RS         clone_types: Vec::new(),
-//RS         is_main: true,
-//RS         line: 0,
-//RS         synthetic: true,
-//RS         is_unsafe: false,
-//RS         unsafe_gate: None,
-//RS         is_pure: false,
-//RS         memo_bound: None,
-//RS         is_reactive: false,
-//RS         reactive_upgrades: Vec::new(),
-//RS         is_inline: false,
-//RS         is_inline_always: false,
-//RS         is_scalar: false,
-//RS         kernel_proof: None,
-//RS         memo_field: None,
-//RS         uses_stack_sentry: false,
-//RS         body,
-//RS         kind: TFuncKind::TopLevel,
-//RS     };
-//RS     let mut tir = TirProgram {
-//RS         package_identity: "comptime-fragment".to_string(),
-//RS         entry_sibling_calls: None,
-//RS         facts: TirPackageFacts::default(),
-//RS         source_file: file.clone(),
-//RS         source_text: String::new(),
-//RS         source_files: std::iter::once((file.clone(), String::new())).collect(),
-//RS         package_hardened: false,
-//RS         application_authority: jet_foundation::Authority::ApplicationAuthority::default(),
-//RS         edition: "2026".to_string(),
-//RS         funcs: std::iter::once(function)
-//RS             .chain(extra_funcs.iter().cloned())
-//RS             .collect(),
-//RS         declarations,
-//RS         artifact_facts,
-//RS         core_calls: crate::Syntax::CORE_CALLS
-//RS             .iter()
-//RS             .chain(tir_core_call_records().iter())
-//RS             .collect(),
-//RS         unreachable: Vec::new(),
-//RS         spawn_lambdas: Vec::new(),
-//RS         struct_fields: std::collections::HashMap::new(),
-//RS         struct_field_types: std::collections::HashMap::new(),
-//RS         memo_dependencies: std::collections::HashMap::new(),
-//RS         reflection_fields: std::collections::HashMap::new(),
-//RS         reflect_paths: std::collections::HashMap::new(),
-//RS         nominal_identities: context
-//RS             .checked_nominals
-//RS             .map(|facts| facts.nominal_identities.clone())
-//RS             .unwrap_or_default(),
-//RS         struct_type_params: std::collections::HashMap::new(),
-//RS         enum_variants: std::collections::HashMap::new(),
-//RS         enum_variant_payload_types: std::collections::HashMap::new(),
-//RS         canonical_deopt: std::collections::HashSet::new(),
-//RS         canonical_calls: std::collections::HashSet::new(),
-//RS         int_constants: std::collections::HashMap::new(),
-//RS         constants: context.globals.clone(),
-//RS         distinct_bases: context.distinct_bases.clone(),
-//RS         distinct_ranges: context
-//RS             .distinct_ranges
-//RS             .iter()
-//RS             .filter_map(|(name, bounds)| bounds.map(|bounds| (name.clone(), bounds)))
-//RS             .collect(),
-//RS         codec_migrations: std::collections::HashMap::new(),
-//RS         trait_method_traits: trait_method_traits.clone(),
-//RS         iterable_item_types: std::collections::HashMap::new(),
-//RS     };
-//RS     opt::optimize_program(&mut tir);
-//RS     let fragment_key = tir.funcs[0].key.clone();
-//RS     let mir = lower_tir_to_mir(tir)?;
-//RS     let function_id = mir
-//RS         .functions
-//RS         .iter()
-//RS         .find(|function| function.key == fragment_key)
-//RS         .map(|function| function.id)
-//RS         .ok_or_else(|| LowerError::new(span, "MIR fragment function row was not emitted"))?;
-//RS     let mir = jet_foundation::MIR::optimize_mir_program(
-//RS         mir,
-//RS         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
-//RS     )
-//RS     .map_err(|error| {
-//RS         LowerError::new(span, format!("canonical MIR optimization failed: {error}"))
-//RS     })?;
-//RS     Ok((mir, function_id))
-//RS }
-//RS 
-//RS /// Lower one explicitly requested checked artifact into analytical TIR.
-//RS pub fn lower_checked_tir_program_for(
-//RS     bundle: &ProgramBundle,
-//RS     request: MirArtifactRequest,
-//RS ) -> Result<TirProgram, LowerError> {
-//RS     lower_checked_tir_program_for_with_debug(bundle, request, false)
-//RS }
-//RS 
-//RS /// Lower checked TIR with the native debug source-map markers enabled.
-//RS pub fn lower_checked_tir_program_for_with_debug(
-//RS     bundle: &ProgramBundle,
-//RS     request: MirArtifactRequest,
-//RS     debug_linemap: bool,
-//RS ) -> Result<TirProgram, LowerError> {
-//RS     if jet_foundation::CompilerStack::on_compiler_worker() {
-//RS         return lower_checked_tir_program_on_stack(bundle, request, debug_linemap);
-//RS     }
-//RS     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-//RS         lower_checked_tir_program_on_stack(bundle, request, debug_linemap)
-//RS     })
-//RS }
-//RS 
-//RS /// #2252: build [`TirProgram::nominal_identities`].
-//RS ///
-//RS /// The name ledger already owns both halves of this fact: `nominal_identity`
-//RS /// gives a declaration its canonical module-qualified name, and the recorded
-//RS /// import aliases give every consumer spelling that reaches it. This is the one
-//RS /// place the two are joined, so no engine reconstructs an owner by searching
-//RS /// table keys for a matching suffix.
-//RS ///
-//RS /// Two rules keep the projection honest:
-//RS /// - The entry module's own nominals keep their source spelling: the shape
-//RS ///   tables register them that way, so remapping them would break the rows the
-//RS ///   entry itself lowers against.
-//RS /// - A spelling shared by two consumer modules keeps its checked module-local
-//RS ///   projection; the unscoped projection is retained only when unambiguous.
-//RS ///   MIR asks for the projection in the function's declaring module first.
-//RS fn nominal_identity_projection(
-//RS     bundle: &ProgramBundle,
-//RS ) -> std::collections::HashMap<String, String> {
-//RS     let mut claims: std::collections::HashMap<String, std::collections::HashSet<String>> =
-//RS         std::collections::HashMap::new();
-//RS     let mut scoped = std::collections::HashMap::new();
-//RS     // Loaded dependency items may be copied into the entry module's merged
-//RS     // item list. Only ledger-owned declarations are entry-local; imported
-//RS     // leaves must remain eligible for the declaring module's bare spelling.
-//RS     let entry_names = bundle
-//RS         .modules
-//RS         .get(bundle.entry)
-//RS         .map(|module| {
-//RS             module_owned_type_names(&module.items)
-//RS                 .into_iter()
-//RS                 .filter(|name| bundle.name_ledger.declaration(bundle.entry, name).is_some())
-//RS                 .collect::<std::collections::HashSet<_>>()
-//RS         })
-//RS         .unwrap_or_default();
-//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
-//RS         // Every spelling a program can write for an imported nominal: the bare
-//RS         // leaf inside its declaring module, and `alias.Leaf` in each consumer.
-//RS         let mut spellings: Vec<String> = Vec::new();
-//RS         if module_idx != bundle.entry {
-//RS             spellings.extend(module_owned_type_names(&module.items));
-//RS         }
-//RS         for import in &module.imports {
-//RS             let alias = import.import_alias();
-//RS             let Some(target) = lower::nominal_import_target(bundle, module_idx, import)
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             spellings.extend(
-//RS                 module_owned_type_names(&bundle.modules[target].items)
-//RS                     .into_iter()
-//RS                     .map(|leaf| format!("{alias}.{leaf}")),
-//RS             );
-//RS         }
-//RS         for spelling in spellings {
-//RS             if !spelling.contains('.') && entry_names.contains(&spelling) {
-//RS                 continue;
-//RS             }
-//RS             let Some(identity) = canonical_nominal_from(bundle, module_idx, &spelling) else {
-//RS                 continue;
-//RS             };
-//RS             scoped.insert(
-//RS                 (crate::Codegen::Context::module_identity(bundle, module_idx), spelling.clone()),
-//RS                 identity.clone(),
-//RS             );
-//RS             claims.entry(spelling).or_default().insert(identity);
-//RS         }
-//RS     }
-//RS     let mut unique: std::collections::HashMap<_, _> = claims
-//RS         .into_iter()
-//RS         .filter_map(|(spelling, identities)| {
-//RS             let mut identities = identities.into_iter();
-//RS             let identity = identities.next()?;
-//RS             identities.next().is_none().then_some((spelling, identity))
-//RS         })
-//RS         .collect();
-//RS     unique.extend(scoped.into_iter().map(|((module, spelling), identity)| {
-//RS         (format!("{module}::{spelling}"), identity)
-//RS     }));
-//RS     unique
-//RS }
-//RS /// Select zero-argument entries by canonical module-qualified semantic keys.
-//RS /// Loader aliases and generated Rust names are display projections only.
-//RS ///
-//RS /// Check Outputs are plural test-harness entries, not a singular JIT entry.
-//RS fn selected_imported_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String> {
-//RS     let module = bundle.modules.get(bundle.entry)?;
-//RS     module.items.iter().find_map(|item| {
-//RS         let Item::Const(value) = item else {
-//RS             return None;
-//RS         };
-//RS         let output = value.resolved_output.as_ref()?;
-//RS         if !output.selected
-//RS             || output.module == bundle.entry
-//RS             || !output.params.is_empty()
-//RS             || !matches!(
-//RS                 output.kind,
-//RS                 crate::AST::OutputKind::Executable | crate::AST::OutputKind::Service
-//RS             )
-//RS         {
-//RS             return None;
-//RS         }
-//RS         let module = artifact_plan::module_identity(bundle, output.module);
-//RS         Some(function_semantic_key(&module, &output.semantic_name))
-//RS     })
-//RS }
-//RS fn selected_test_override_tir_entry(
-//RS     bundle: &ProgramBundle,
-//RS     request: &MirArtifactRequest,
-//RS ) -> Option<String> {
-//RS     if !matches!(
-//RS         (request.kind, request.mode),
-//RS         (
-//RS             jet_foundation::MIR::MirArtifactKind::TestOverride,
-//RS             MirArtifactBuildMode::Test
-//RS         )
-//RS     ) {
-//RS         return None;
-//RS     }
-//RS     let module = bundle.modules.get(bundle.entry)?;
-//RS     module
-//RS         .items
-//RS         .iter()
-//RS         .any(|item| matches!(item, Item::Func(function) if function.name == "test"))
-//RS         .then(|| {
-//RS             let module = artifact_plan::module_identity(bundle, bundle.entry);
-//RS             function_semantic_key(&module, "test")
-//RS         })
-//RS }
-//RS fn selected_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String> {
-//RS     let module = bundle.modules.get(bundle.entry)?;
-//RS     let entry_module = artifact_plan::module_identity(bundle, bundle.entry);
-//RS     selected_imported_zero_arg_tir_entry(bundle)
-//RS         .or_else(|| {
-//RS             module.items.iter().find_map(|item| match item {
-//RS                 Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
-//RS                     (output.selected && output.module == bundle.entry && output.params.is_empty())
-//RS                         .then(|| function_semantic_key(&entry_module, &output.semantic_name))
-//RS                 }),
-//RS                 _ => None,
-//RS             })
-//RS         })
-//RS         .or_else(|| {
-//RS             module.items.iter().find_map(|item| match item {
-//RS                 Item::Func(function) if function.name == "run" && function.params.is_empty() => {
-//RS                     Some(function_semantic_key(&entry_module, "run"))
-//RS                 }
-//RS                 _ => None,
-//RS             })
-//RS         })
-//RS }
-//RS fn lower_test_item(test: &TestDef, module: &str, cx: &Cx) -> TFunc {
-//RS     let test_name = test.name.as_deref().unwrap_or("anonymous");
-//RS     let mut synthetic = Func::implicit_run(test.body.clone(), test.span);
-//RS     synthetic.name = format!("__test_{test_name}");
-//RS     synthetic.name_span = test.name_span;
-//RS     synthetic.params = test.params.clone();
-//RS     synthetic.compiler_generated = true;
-//RS 
-//RS     let mut lowered = lower_func(&synthetic, cx);
-//RS     let key = artifact_plan::test_key(module, test);
-//RS     lowered.module = module.to_string();
-//RS     lowered.key = key.clone();
-//RS     lowered.name = key;
-//RS     lowered.source_span = test.span;
-//RS     lowered.synthetic = true;
-//RS     lowered
-//RS }
-//RS 
-//RS fn lower_contract_test_item(function: &Func, module: &str, cx: &Cx, target_name: &str) -> TFunc {
-//RS     let key = artifact_plan::contract_key(module, function);
-//RS     let call_args = function
-//RS         .params
-//RS         .iter()
-//RS         .map(|param| crate::AST::CallArg {
-//RS             convention: param.convention,
-//RS             expr: Expr::Ident(param.name.clone(), param.name_span),
-//RS             span: param.name_span,
-//RS             flags: crate::AST::CallArgFlags::default(),
-//RS             label: param
-//RS                 .public_label
-//RS                 .as_ref()
-//RS                 .map(|(label, span)| (label.clone(), *span)),
-//RS             spread: param.variadic,
-//RS         })
-//RS         .collect();
-//RS     let call = Expr::Call(crate::AST::Call {
-//RS         name: target_name.to_string(),
-//RS         name_span: function.name_span,
-//RS         type_args: Vec::new(),
-//RS         args: call_args,
-//RS         resolved_ret: None,
-//RS         range_checked: false,
-//RS         widen_approx: false,
-//RS     });
-//RS     let mut synthetic = function.clone();
-//RS     synthetic.name = format!("__contract_{}", function.name);
-//RS     synthetic.name_span = function.name_span;
-//RS     synthetic.pre.clear();
-//RS     synthetic.post.clear();
-//RS     synthetic.body = vec![crate::AST::Stmt::Return(Some(call), function.span)];
-//RS     synthetic.compiler_generated = true;
-//RS 
-//RS     let mut lowered = lower_func(&synthetic, cx);
-//RS     lowered.module = module.to_string();
-//RS     lowered.key = key.clone();
-//RS     lowered.name = key;
-//RS     lowered.source_span = function.span;
-//RS     lowered.synthetic = true;
-//RS     lowered
-//RS }
-//RS 
-//RS /// Synthesize the pre-call eligibility predicate for one sampled contract
-//RS /// candidate (#2502): a Read-convention callable over the candidate's own
-//RS /// parameters whose body is the conjunction of its checked `#Pre` conditions.
-//RS /// The generated harness evaluates this predicate BEFORE invoking the
-//RS /// contract wrapper, so a rejected input never executes the callable, and a
-//RS /// failure inside the callable (its own clauses or a nested callee's `#Pre`)
-//RS /// is never reclassified as input rejection.
-//RS fn lower_contract_eligibility_item(function: &Func, module: &str, cx: &Cx) -> TFunc {
-//RS     let key = artifact_plan::contract_eligibility_key(module, function);
-//RS     let condition = function
-//RS         .pre
-//RS         .iter()
-//RS         .map(|clause| clause.cond.clone())
-//RS         .reduce(|lhs, rhs| {
-//RS             Expr::Binary(
-//RS                 crate::AST::BinOp::And,
-//RS                 Box::new(lhs),
-//RS                 Box::new(rhs),
-//RS                 function.span,
-//RS             )
-//RS         })
-//RS         .expect("a sampled contract candidate has at least one #Pre clause");
-//RS     let mut synthetic = function.clone();
-//RS     synthetic.name = format!("__contract_pre_{}", function.name);
-//RS     synthetic.name_span = function.name_span;
-//RS     synthetic.pre.clear();
-//RS     synthetic.post.clear();
-//RS     for param in &mut synthetic.params {
-//RS         // A sampled candidate's conditions only read their arguments (a
-//RS         // condition that calls a function is classified unavailable), so the
-//RS         // predicate borrows every parameter.
-//RS         param.convention = crate::AST::AccessConvention::Read;
-//RS     }
-//RS     synthetic.return_type = Some(Type::Named(crate::Syntax::TYPE_BOOL.to_string()));
-//RS     synthetic.return_type_span = None;
-//RS     synthetic.return_view_provenance = None;
-//RS     synthetic.declared_return_view_provenance = None;
-//RS     synthetic.gc_return = false;
-//RS     synthetic.diverges = false;
-//RS     synthetic.body = vec![crate::AST::Stmt::Return(Some(condition), function.span)];
-//RS     synthetic.compiler_generated = true;
-//RS 
-//RS     let mut lowered = lower_func(&synthetic, cx);
-//RS     lowered.module = module.to_string();
-//RS     lowered.key = key.clone();
-//RS     lowered.name = key;
-//RS     lowered.source_span = function.span;
-//RS     lowered.synthetic = true;
-//RS     lowered
-//RS }
-//RS 
-//RS /// Materialize the trivial callable behind an explicit unavailable contract
-//RS /// row (#2502). The harness reports the row's stable reason without invoking
-//RS /// anything, but the row still resolves to a real lowered function, so no
-//RS /// contract key is ever left unresolved.
-//RS fn lower_contract_unavailable_item(function: &Func, module: &str, cx: &Cx) -> TFunc {
-//RS     let key = artifact_plan::contract_key(module, function);
-//RS     let mut synthetic = Func::implicit_run(Vec::new(), function.span);
-//RS     synthetic.name = format!("__contract_unavailable_{}", function.name);
-//RS     synthetic.name_span = function.name_span;
-//RS     synthetic.compiler_generated = true;
-//RS 
-//RS     let mut lowered = lower_func(&synthetic, cx);
-//RS     lowered.module = module.to_string();
-//RS     lowered.key = key.clone();
-//RS     lowered.name = key;
-//RS     lowered.source_span = function.span;
-//RS     lowered.synthetic = true;
-//RS     lowered
-//RS }
-//RS 
-//RS /// Record one contract candidate under the canonical sampling fact
-//RS /// (`artifact_plan::contract_sampling_reason`) and materialize exactly the
-//RS /// synthetic callables the recorded plan promises: predicate + wrapper for a
-//RS /// sampled candidate, the trivial unavailable callable otherwise. Artifact
-//RS /// discovery consumes the same recorded plan, so a contract row can never
-//RS /// name a callable this walk did not lower.
-//RS #[allow(clippy::too_many_arguments)]
-//RS fn materialize_contract_sampling(
-//RS     function: &Func,
-//RS     module: &str,
-//RS     covered: bool,
-//RS     target_name: &str,
-//RS     cx: &Cx,
-//RS     funcs: &mut Vec<TFunc>,
-//RS     contract_rows: &mut artifact_plan::ContractSamplingPlan,
-//RS ) {
-//RS     let Some(reason) = artifact_plan::contract_sampling_reason(function, covered) else {
-//RS         return;
-//RS     };
-//RS     match &reason {
-//RS         None => {
-//RS             funcs.push(lower_contract_eligibility_item(function, module, cx));
-//RS             funcs.push(lower_contract_test_item(function, module, cx, target_name));
-//RS         }
-//RS         Some(_) => funcs.push(lower_contract_unavailable_item(function, module, cx)),
-//RS     }
-//RS     contract_rows.insert(artifact_plan::contract_key(module, function), reason);
-//RS }
-//RS 
-//RS /// Mirror sema's canonical callable partition identity and retain the source
-//RS /// span that survives lowering. TIR function names are deliberately rewritten
-//RS /// for imported and inline modules, so the source row is the stable bridge back
-//RS /// to `ProgramBundle::web_partitions`.
-//RS fn record_web_partition_key(
-//RS     function: &Func,
-//RS     callable_name: &str,
-//RS     source_file: &str,
-//RS     file_alias: &str,
-//RS     is_entry: bool,
-//RS     module_prefix: Option<&str>,
-//RS     out: &mut std::collections::HashMap<(String, usize, usize), String>,
-//RS ) {
-//RS     let file_prefix = (!is_entry && module_prefix.is_none()).then_some(file_alias);
-//RS     let key =
-//RS         jet_foundation::WebPartition::partition_key(file_prefix, module_prefix, callable_name);
-//RS     out.insert(
-//RS         (
-//RS             source_file.to_string(),
-//RS             function.span.start,
-//RS             function.span.end,
-//RS         ),
-//RS         key,
-//RS     );
-//RS }
-//RS 
-//RS fn collect_web_partition_keys(
-//RS     items: &[Item],
-//RS     source_file: &str,
-//RS     file_alias: &str,
-//RS     is_entry: bool,
-//RS     module_prefix: Option<&str>,
-//RS     out: &mut std::collections::HashMap<(String, usize, usize), String>,
-//RS ) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) => record_web_partition_key(
-//RS                 function,
-//RS                 &function.name,
-//RS                 source_file,
-//RS                 file_alias,
-//RS                 is_entry,
-//RS                 module_prefix,
-//RS                 out,
-//RS             ),
-//RS             Item::Struct(structure) => {
-//RS                 for method in &structure.methods {
-//RS                     let callable_name = format!("{}::{}", structure.name, method.name);
-//RS                     record_web_partition_key(
-//RS                         method,
-//RS                         &callable_name,
-//RS                         source_file,
-//RS                         file_alias,
-//RS                         is_entry,
-//RS                         module_prefix,
-//RS                         out,
-//RS                     );
-//RS                 }
-//RS                 for implementation in &structure.trait_impls {
-//RS                     for method in &implementation.methods {
-//RS                         let callable_name = format!("{}::{}", structure.name, method.name);
-//RS                         record_web_partition_key(
-//RS                             method,
-//RS                             &callable_name,
-//RS                             source_file,
-//RS                             file_alias,
-//RS                             is_entry,
-//RS                             module_prefix,
-//RS                             out,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Enum(enumeration) => {
-//RS                 for method in &enumeration.methods {
-//RS                     let callable_name = format!("{}::{}", enumeration.name, method.name);
-//RS                     record_web_partition_key(
-//RS                         method,
-//RS                         &callable_name,
-//RS                         source_file,
-//RS                         file_alias,
-//RS                         is_entry,
-//RS                         module_prefix,
-//RS                         out,
-//RS                     );
-//RS                 }
-//RS                 for implementation in &enumeration.trait_impls {
-//RS                     for method in &implementation.methods {
-//RS                         let callable_name = format!("{}::{}", enumeration.name, method.name);
-//RS                         record_web_partition_key(
-//RS                             method,
-//RS                             &callable_name,
-//RS                             source_file,
-//RS                             file_alias,
-//RS                             is_entry,
-//RS                             module_prefix,
-//RS                             out,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 for method in &implementation.methods {
-//RS                     let callable_name = format!("{}::{}", implementation.type_name, method.name);
-//RS                     record_web_partition_key(
-//RS                         method,
-//RS                         &callable_name,
-//RS                         source_file,
-//RS                         file_alias,
-//RS                         is_entry,
-//RS                         module_prefix,
-//RS                         out,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     collect_web_partition_keys(
-//RS                         body,
-//RS                         source_file,
-//RS                         file_alias,
-//RS                         is_entry,
-//RS                         Some(&module.name),
-//RS                         out,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn apply_checked_web_partitions(bundle: &ProgramBundle, funcs: &mut [TFunc]) {
-//RS     let mut source_rows = std::collections::HashMap::new();
-//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
-//RS         collect_web_partition_keys(
-//RS             &module.items,
-//RS             &module.display,
-//RS             &module.alias,
-//RS             module_idx == bundle.entry,
-//RS             None,
-//RS             &mut source_rows,
-//RS         );
-//RS     }
-//RS 
-//RS     for function in funcs {
-//RS         if function.web_bucket.is_some() {
-//RS             continue;
-//RS         }
-//RS         let source_key = (
-//RS             function.source_file.clone(),
-//RS             function.source_span.start,
-//RS             function.source_span.end,
-//RS         );
-//RS         let bucket = source_rows
-//RS             .get(&source_key)
-//RS             .and_then(|key| bundle.web_partitions.get(key))
-//RS             .copied()
-//RS             // Inline members already use the canonical partition key as their
-//RS             // lowered name. These candidates also cover source-less fragments.
-//RS             .or_else(|| bundle.web_partitions.get(&function.name).copied())
-//RS             .or_else(|| bundle.web_partitions.get(&function.key).copied())
-//RS             // Source rows carry sema's inherited file/module ceiling. Any
-//RS             // remaining generated row still uses the same sema policy.
-//RS             .or_else(|| {
-//RS                 Some(crate::Sema::checked_web_bucket(
-//RS                     function.web_marker,
-//RS                     None,
-//RS                     &function.effects.solved,
-//RS                     function.ret.as_ref(),
-//RS                 ))
-//RS             });
-//RS         if bucket.is_some() {
-//RS             function.web_bucket = bucket;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn child_module_identity(module: &str, child: &str) -> String {
-//RS     if module.is_empty() {
-//RS         child.to_string()
-//RS     } else {
-//RS         format!("{module}::{child}")
-//RS     }
-//RS }
-//RS /// Collect every named callback handed directly to an HTTP router/mux.
-//RS ///
-//RS /// Route registration is a checked callback boundary: sema has already
-//RS /// validated the handler's Send/Sync contract, while the checked TIR lowering
-//RS /// still needs a concrete TFunc row for the named-function value. Keep this
-//RS /// discovery on the AST side of the one lowering walk so entry and imported
-//RS /// modules use the same helper path.
-//RS fn collect_http_route_handlers(items: &[Item], out: &mut std::collections::HashSet<String>) {
-//RS     fn collect_body(body: &[crate::AST::Stmt], out: &mut std::collections::HashSet<String>) {
-//RS         for statement in body {
-//RS             statement.for_each_expr(|expr| {
-//RS                 let Expr::MethodCall {
-//RS                     recv_type: Some(recv_type),
-//RS                     method,
-//RS                     args,
-//RS                     ..
-//RS                 } = expr
-//RS                 else {
-//RS                     return;
-//RS                 };
-//RS                 if !matches!(recv_type.as_str(), "HTTPRouter" | "HTTPMux")
-//RS                     || !matches!(
-//RS                         method.as_str(),
-//RS                         "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
-//RS                     )
-//RS                     || args.len() != 2
-//RS                 {
-//RS                     return;
-//RS                 }
-//RS                 let mut handler = &args[1].expr;
-//RS                 while let Expr::Paren(inner, _) = handler {
-//RS                     handler = inner;
-//RS                 }
-//RS                 if let Expr::Ident(name, _) = handler {
-//RS                     out.insert(name.clone());
-//RS                 }
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) => collect_body(&function.body, out),
-//RS             Item::Struct(definition) => {
-//RS                 for method in &definition.methods {
-//RS                     collect_body(&method.body, out);
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     for method in &implementation.methods {
-//RS                         collect_body(&method.body, out);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 for method in &definition.methods {
-//RS                     collect_body(&method.body, out);
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     for method in &implementation.methods {
-//RS                         collect_body(&method.body, out);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 for method in &implementation.methods {
-//RS                     collect_body(&method.body, out);
-//RS                 }
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     collect_http_route_handlers(body, out);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0506 crates/jet-codegen/src/Codegen/TIR/mod.rs:3241-5029
+use jet_foundation.AST.[Expr, Stmt, Item, Type, Func, TestDef, EnumDef, StructDef, DistinctDef, ImplDef, Variant, VariantPayload, Field, AccessConvention, ParamZone, OutputKind, Call, CallArg, CallArgFlags, BinOp]
+use jet_foundation.Diagnostics.Span
+use jet_foundation.MIR.[MirProgram, MirFunctionId, MirArtifactRequest, MirArtifactKind, MirArtifactBuildMode, MirOptimizationPolicy, optimize_mir_program]
+use jet_foundation.[CompilerStack, CoreModuleExports, WebPartition, Authority]
+use jet_codegen.Codegen.Context.[Cx, ProgramBundle, build_cx_items, module_identity]
+use jet_codegen.Comptime.MirBridge.[MirFragmentNominalFacts, MirFragmentCoreSourceModule, MirFragmentCoreSourceSignature]
+use jet_codegen.Codegen.TIR.[TExpr, TExprKind, TLocal, TStmt, TFunc, TFuncKind, TFailureCarrier, TEffectFacts, TTargetApplicability, TVisibility, TirProgram, TirDeclarations, TirPackageFacts, LowerError, function_semantic_key, generic_free_function_instance_key]
+use jet_codegen.Codegen.TIR.Lower.[LowerEnv, lower_func, lower_method, lower_trait_method, lower_expr, lower_stmts, nominal_import_target]
+use jet_codegen.Codegen.TIR.[artifact_plan, tir_to_mir_types, opt]
+use jet_codegen.Codegen.TIR.[MirFragmentContext, FragmentCallable, lift_receiver_mark, lift_body_receiver_marks, lift_func_receiver_marks, fragment_callable_closure, fragment_host_field_type, fragment_declared_variants, for_each_item_body, normalize_fragment_body_patterns, annotate_fragment_module_calls, fragment_declaration_items, lower_declarations_from_items_with_boxed_edges, lower_demanded_generic_methods, specialize_generic_free_functions, merge_core_source_generic_calls, lower_core_source_generic_template, tir_core_call_records, lower_tir_to_mir, lower_checked_tir_program_on_stack, module_owned_type_names, canonical_nominal_from]
+use jet_codegen.Codegen.[mangle, tuple_struct_name, is_json_type_name, CoreSourceFunctionSignature]
+use jet_codegen.[Syntax, Sema, Generics, Facts, Names]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3241
+fn lower_mir_fragment(input_expr: &Expr, input_stmts: &[Stmt], context: &MirFragmentContext) -> (MirProgram, MirFunctionId) LowerError! {
+    expr := input_expr.clone()
+    expr.for_each_expr_mut(lift_receiver_mark)
+    stmts := input_stmts.clone()
+    lift_body_receiver_marks(&stmts)
+    module :: "__comptime"
+    name :: "__fragment"
+    file :: module.clone()
+    span :: if stmts.is_empty() -> expr.span() else -> stmts.first().map(fn(stmt) { stmt.span() }) ?? Span.new(0, 0)
+    free_reads := None
+    missing_capture := None
+    check_captures :: fn(candidate: &Expr) {
+        if missing_capture.is_some() -> return
+        if candidate == .Lambda(lambda) {
+            captures :: lambda.meta.cloned_captures.iter().chain(lambda.meta.moved_captures.iter()).chain(lambda.meta.mut_captures.iter()).chain(lambda.take_names.iter().map(fn(pair) { pair.0 }))
+            loop capture in captures {
+                if free_reads.is_none() {
+                    (reads, calls) := if stmts.is_empty() -> Sema.expr_free_reads_and_calls(expr) else -> Sema.block_free_reads_and_calls(stmts)
+                    reads.extend(calls)
+                    free_reads = Val(reads)
+                }
+                if (free_reads ?? panic("fragment free reads were initialized")).contains(capture) && !context.binding_types.contains_key(capture) {
+                    missing_capture = Val(LowerError.new(candidate.span(), "capture `{capture}` has no value in the compile-time environment"))
+                    break
+                }
+            }
+        }
+    }
+    expr.for_each_expr(check_captures)
+    loop stmt in stmts { stmt.for_each_expr(check_captures) }
+    if missing_capture == Val(error) -> fail error
+    reachable :: fragment_callable_closure(expr, stmts, context)
+    items := [Item]{}
+    loop (function_name, function) in context.funcs {
+        if reachable.contains(FragmentCallable.Function(function_name)) { items.push(Item.Func(function.clone())) }
+    }
+    loop structure in context.structs.values() {
+        structure := structure.clone()
+        structure.derives.clear()
+        items.push(Item.Struct(structure))
+    }
+    if context.checked_nominals == Val(facts) {
+        loop (identity, source_structure) in facts.structs {
+            if context.structs.contains_key(identity) -> continue
+            structure := source_structure.clone()
+            structure.derives.clear()
+            items.push(Item.Struct(structure))
+        }
+        items.extend(facts.enums.values().map(fn(value) { Item.Enum(value.clone()) }))
+    }
+    // Ordered config-surface declaration seeding, excluding retained checked nominals.
+    enum_variants := [String:Set<String>]{}
+    struct_fields := [String:Set<String>]{}
+    skip_named :: fn(name: &String) -> Bool {
+        context.structs.contains_key(name) || context.checked_nominals.is_some_and(fn(facts) {
+            facts.structs.contains_key(name) || facts.enums.contains_key(name) || facts.nominal_identities.get(name).is_some_and(fn(identity) { facts.structs.contains_key(identity) || facts.enums.contains_key(identity) })
+        }) || jet_foundation.AST.numeric_type_from_name(name).is_some() || is_json_type_name(name) || tir_to_mir_types.is_compiler_owned_type(name)
+    }
+    collect :: fn(candidate: &Expr) {
+        if candidate == {
+            .Field(.Ident(name, _), member, _) -> {
+                if skip_named(name) -> return
+                if name.chars().next().is_some_and(fn(c) { c.is_uppercase() }) && member.chars().next().is_some_and(fn(c) { c.is_uppercase() }) {
+                    enum_variants.entry(name).or_default().insert(member)
+                }
+            }
+            .EnumLit{type_name: type_name, variant: variant, ..} where !type_name.is_empty() && !skip_named(type_name) -> { enum_variants.entry(type_name).or_default().insert(variant) }
+            .StructLit{type_name: type_name, fields: fields, ..} where !type_name.is_empty() && !skip_named(type_name) -> {
+                entry := struct_fields.entry(type_name).or_default()
+                loop (field_name, _, _) in fields { entry.insert(field_name) }
+            }
+            else -> {}
+        }
+    }
+    expr.for_each_expr(collect)
+    loop stmt in stmts { stmt.for_each_expr(collect) }
+    struct_fields.entry(Syntax.TYPE_PROGRAM_INFO).or_default().extend(["packages", "types", "functions", "definitions", "references", "call_edges", "structural_nodes"])
+    struct_fields.entry(Syntax.TYPE_TYPE_INFO).or_default().extend(["name", "path", "layout", "span", "fields", "methods", "type_params", "markers", "expanded_markers", "states", "transitions", "facts", "dimensions", "implements", "trait_contracts"])
+    struct_fields.entry(Syntax.TYPE_BUILD_CONTEXT).or_default().insert("program")
+    empty_span :: Span.new(0, 0)
+    enum_names := enum_variants.keys().collect()
+    enum_names.sort()
+    loop enum_name in enum_names {
+        variants := (enum_variants.get(enum_name) ?? panic("seeded enum key")).iter().collect()
+        variants.sort()
+        struct_fields.remove(enum_name)
+        items.push(Item.Enum(EnumDef{span: empty_span, is_pub: false, is_package_pub: false, name: enum_name, name_span: empty_span, type_params: [], variants: loop variant in variants -> Variant{name: variant, name_span: empty_span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: []}, methods: [], trait_impls: [], derives: [], auto_derive_default: false, is_single_use: false, single_use_span: None, is_must_use: false, must_use_span: None, serde_markers: [], type_markers: [], groups: []}))
+    }
+    struct_names := struct_fields.keys().collect()
+    struct_names.sort()
+    loop struct_name in struct_names {
+        fields := (struct_fields.get(struct_name) ?? panic("seeded struct key")).iter().collect()
+        fields.sort()
+        items.push(Item.Struct(StructDef{span: empty_span, is_pub: false, is_package_pub: false, name: struct_name, name_span: empty_span, type_params: [], fields: loop field_name in fields -> Field{is_pub: false, is_package_pub: false, name: field_name.clone(), name_span: empty_span, ty: fragment_host_field_type(struct_name, field_name), ty_span: empty_span, serde_markers: [], redact: false, computed: None, default: None, default_ct: None}, state: None, methods: [], cli_bindings: [], trait_impls: [], derives: [], auto_derive_default: false, is_published_schema: false, published_schema_span: None, is_single_use: false, single_use_span: None, is_must_use: false, must_use_span: None, layout: None, layout_span: None, serde_markers: [], type_markers: [], validate_block: [], validate_span: None}))
+    }
+    unit_family_members :: Set<String>.from(context.unit_families.iter().flat_map(fn(family) { family.distinct_defs() }).map(fn(definition) { definition.name }))
+    loop (distinct_name, base) in context.distinct_bases {
+        if context.structs.contains_key(distinct_name) || unit_family_members.contains(distinct_name) -> continue
+        range :: context.distinct_ranges.get(distinct_name).and_then(fn(bounds) { bounds.map(fn(pair) { (pair.0, pair.1, empty_span) }) })
+        items.push(Item.Distinct(DistinctDef{is_pub: false, is_package_pub: false, type_markers: [], derives: [], quantity: None, name: distinct_name, name_span: empty_span, base: base.clone(), base_span: empty_span, range: range, span: empty_span}))
+    }
+    loop conversion in context.error_conversions { items.push(Item.ErrorConv(conversion.clone())) }
+    loop family in context.unit_families { items.push(Item.UnitFamily(family.clone())) }
+    fragment_checked_text_owners :: Set<String>.from(context.distinct_bases.iter().filter(fn(pair) { pair.1 == Type.String && context.methods.contains_key((pair.0, "check")) && context.methods.contains_key((pair.0, "encode_hole")) }).map(fn(pair) { pair.0 }))
+    fragment_trait_name :: fn(owner: &String, method_name: &String, method: &Func) -> String? {
+        if context.method_traits.get((owner, method_name)) == Val(trait_name) -> return Val(trait_name.clone())
+        if fragment_checked_text_owners.contains(owner) && (method_name == "check" || method_name == "encode_hole") && !method.params.iter().any(fn(param) { param.name == Syntax.KW_SELF }) -> return Val(Generics.CHECKED_TEXT)
+        None
+    }
+    loop ((owner, method_name), method) in context.methods {
+        if !reachable.contains(FragmentCallable.Method{owner: owner, name: method_name}) -> continue
+        if method_name == "encode" || method_name == "decode" -> continue
+        declared :: context.structs.get(owner).is_some_and(fn(structure) { structure.methods.iter().any(fn(candidate) { candidate.name == method_name }) || structure.trait_impls.iter().any(fn(implementation) { implementation.methods.iter().any(fn(candidate) { candidate.name == method_name }) }) })
+        if declared -> continue
+        trait_name :: fragment_trait_name(owner, method_name, method)
+        operator_rhs :: trait_name.filter(fn(trait_name) { [Syntax.TRAIT_ADD, Syntax.TRAIT_SUB, Syntax.TRAIT_MUL, Syntax.TRAIT_DIV, Syntax.TRAIT_EQUATABLE, Syntax.TRAIT_COMPARABLE].contains(trait_name) }).and_then(fn(_) { method.params.iter().find(fn(param) { param.name != Syntax.KW_SELF }).map(fn(param) { param.ty.clone() }) })
+        items.push(Item.Impl(ImplDef{span: method.span, type_name: owner, type_span: method.span, trait_name: trait_name, trait_span: None, operator_rhs: operator_rhs, operator_marker: None, methods: [method.clone()], delegation_field: None, assoc_type_impls: [], is_generated_serde: false, os_target: None}))
+    }
+    declared_variants :: fragment_declared_variants(items)
+    loop item in &items {
+        for_each_item_body(&item, fn(body) { lift_body_receiver_marks(&body); normalize_fragment_body_patterns(&body, declared_variants) })
+    }
+    cx := build_cx_items(items, "", file, None, [:], "2026")
+    if context.checked_nominals == Val(facts) {
+        cx.import_mods = facts.import_modules.iter().map(fn(pair) { (pair.0, mangle(pair.1)) }).collect()
+        cx.foreign_types = facts.foreign_modules.iter().map(fn(pair) { (pair.0, mangle(pair.1)) }).collect()
+        cx.core_source_sigs = facts.core_source_sigs.iter().filter_map(fn(pair) {
+            (key, signature) :: pair
+            facts.core_source_bodies.get(key.0).map(fn(source) { (key, CoreSourceFunctionSignature{module_identity: source.module_identity.clone(), type_params: signature.type_params.clone(), params: signature.params.clone(), return_type: signature.return_type.clone()}) })
+        }).collect()
+        cx.local_type_identities.extend(facts.nominal_identities.clone())
+        cx.type_names.extend(facts.structs.keys())
+        cx.type_names.extend(facts.enums.keys())
+        install_fragment_module_imports(&cx, facts, facts.import_modules, facts.imported_functions, facts.import_signatures)
+    }
+    cx.module_identity = module
+    cx.core_imports = context.core_imports.clone()
+    loop (alias, core_module) in cx.core_imports {
+        if CoreModuleExports.core_source_module(core_module) == Val(source) {
+            cx.import_mods.insert(alias, mangle(source.alias))
+            cx.core_source_modules.insert(core_module, source.alias)
+        }
+    }
+    cx.const_values = context.globals.clone()
+    cx.consts = cx.const_values.keys().map(fn(name) { (name, name) }).collect()
+    cx.computed_fields.clear()
+    loop ((owner, field), _) in context.computed_fields { cx.computed_fields.entry(owner).or_default().insert(field) }
+    cx.distinct_ranges = context.distinct_ranges.iter().filter_map(fn(pair) { pair.1.map(fn(bounds) { (pair.0, bounds) }) }).collect()
+    loop (distinct_name, base) in context.distinct_bases { cx.distinct_types.insert(distinct_name, (base.clone(), false)) }
+    declaration_items :: fragment_declaration_items(items, reachable)
+    declarations :: lower_declarations_from_items_with_boxed_edges(declaration_items, module, context.target_layout, cx.boxed_edges, cx.auto_printable, cx.auto_debug, context.checked_nominals)
+    extra_funcs := [TFunc]{}
+    loop (function_name, function) in context.funcs {
+        if !reachable.contains(FragmentCallable.Function(function_name)) -> continue
+        if !function.type_params.is_empty() || function.name == "encode" || function.name == "decode" -> continue
+        function := lift_func_receiver_marks(function)
+        normalize_fragment_body_patterns(&function.body, declared_variants)
+        if context.checked_nominals == Val(facts) { annotate_fragment_module_calls(&function, facts.import_signatures, facts.imported_functions) }
+        extra_funcs.push(lower_func(function, cx))
+    }
+    if context.checked_nominals == Val(facts) { lower_fragment_core_source_bodies(facts, reachable, cx, &extra_funcs)! }
+    trait_method_traits := [(String, String):String]{} // GATE #4499 exact composite keys.
+    loop ((owner, method_name), method) in context.methods {
+        if !reachable.contains(FragmentCallable.Method{owner: owner, name: method_name}) -> continue
+        if method_name == "encode" || method_name == "decode" || !method.type_params.is_empty() -> continue
+        method := lift_func_receiver_marks(method)
+        normalize_fragment_body_patterns(&method.body, declared_variants)
+        trait_name :: fragment_trait_name(owner, method_name, method)
+        lowered := if trait_name == Val(trait_name) -> {
+            trait_method_traits.insert((owner, method_name), trait_name)
+            operator_rhs :: if [Syntax.TRAIT_ADD, Syntax.TRAIT_SUB, Syntax.TRAIT_MUL, Syntax.TRAIT_DIV, Syntax.TRAIT_EQUATABLE, Syntax.TRAIT_COMPARABLE].contains(trait_name) -> method.params.iter().find(fn(param) { param.name != Syntax.KW_SELF }).map(fn(param) { param.ty.clone() }) else -> None
+            lower_trait_method(method, owner, cx, trait_name, false, operator_rhs)
+        } else -> lower_method(method, owner, cx)
+        lowered.name = method_name
+        extra_funcs.push(lowered)
+    }
+    cx.current_fn = name // GATE #4494 canonical interior lowering context cell.
+    env := LowerEnv.new(name)
+    names := context.binding_types.keys().collect()
+    names.sort()
+    params :: loop binding in names {
+        ty :: context.binding_types.get(binding) ?? panic("comptime fragment binding type must be present")
+        env.bind(binding, TLocal.user(binding), Val(ty.clone()))
+        (binding, ty, AccessConvention.Move)
+    }
+    value :: if stmts.is_empty() -> lower_expr(expr, cx, &env) else -> {
+        body := lower_stmts(stmts, cx, &env)
+        tuple_shape :: loop (binding, ty, _) in params -> (binding.clone(), ty.clone())
+        tuple_ty :: Type.Tuple(loop (binding, ty) in tuple_shape -> (binding.clone(), ty.clone()))
+        fields :: loop (binding, ty) in tuple_shape -> (binding.clone(), TExpr{ty: ty.clone(), kind: TExprKind.Local(TLocal.user(binding))})
+        body.push(TStmt.Return(Val(TExpr{ty: tuple_ty.clone(), kind: TExprKind.TupleLit{struct_name: tuple_struct_name(tuple_shape), fields: fields}})))
+        lower_demanded_generic_methods(items, cx, &extra_funcs)!
+        specialize_generic_free_functions(items, cx, &extra_funcs)
+        if context.checked_nominals == Val(facts) { specialize_fragment_core_source_generics(facts, cx, &extra_funcs)! }
+        return lower_mir_fragment_program(module, name, file, span, params, tuple_ty, body, extra_funcs, declarations, trait_method_traits, context)!
+    }
+    tuple_shape := [(String, Type)]{("value", value.ty.clone())}
+    tuple_shape.extend(params.iter().map(fn(param) { (param.0.clone(), param.1.clone()) }))
+    tuple_ty :: Type.Tuple(loop (binding, ty) in tuple_shape -> (binding.clone(), ty.clone()))
+    fields := [(String, TExpr)]{("value", value)}
+    fields.extend(params.iter().map(fn(param) { (param.0.clone(), TExpr{ty: param.1.clone(), kind: TExprKind.Local(TLocal.user(param.0))}) }))
+    body :: [TStmt.Return(Val(TExpr{ty: tuple_ty.clone(), kind: TExprKind.TupleLit{struct_name: tuple_struct_name(tuple_shape), fields: fields}}))]
+    lower_demanded_generic_methods(items, cx, &extra_funcs)!
+    specialize_generic_free_functions(items, cx, &extra_funcs)
+    if context.checked_nominals == Val(facts) { specialize_fragment_core_source_generics(facts, cx, &extra_funcs)! }
+    lower_mir_fragment_program(module, name, file, span, params, tuple_ty, body, extra_funcs, declarations, trait_method_traits, context)!
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3963
+fn fragment_core_source_cx(facts: &MirFragmentNominalFacts, source: &MirFragmentCoreSourceModule, fragment_cx: &Cx) -> ([Item], Cx) {
+    user_module :: CoreModuleExports.core_source_module_by_alias(source.alias).is_none()
+    functions := source.functions.values().collect()
+    functions.sort_by(fn(left, right) { left.name.compare(right.name) })
+    items := loop function in functions {
+        function := lift_func_receiver_marks(function)
+        annotate_fragment_module_calls(&function, source.import_signatures, source.imported_functions)
+        Item.Func(function)
+    }
+    items.extend(source.constants.iter().map(fn(constant) { Item.Const(constant.clone()) }))
+    function_count :: items.len()
+    if user_module {
+        items.extend(facts.structs.values().map(fn(structure) { Item.Struct(structure.clone()) }))
+        items.extend(facts.enums.values().map(fn(enumeration) { Item.Enum(enumeration.clone()) }))
+    }
+    cx := build_cx_items(items, "", source.module_identity, None, [:], "2026")
+    loop constant in source.constants {
+        if cx.const_types.get(constant.name) == Val(ty) {
+            row :: tir_to_mir_types.lower_constant(constant, source.module_identity)
+            cx.const_ref_keys.insert(constant.name, row.key)
+            cx.const_ref_types.insert(constant.name, ty)
+        }
+    }
+    cx.module_alias = source.alias.clone()
+    cx.module_identity = source.module_identity.clone()
+    cx.jit_local_call_prefix = Val("{mangle(source.alias)}::")
+    cx.core_source_sigs = fragment_cx.core_source_sigs.clone()
+    cx.core_source_modules = facts.core_source_bodies.iter().map(fn(pair) { (pair.0, pair.1.alias.clone()) }).collect()
+    cx.core_imports = source.core_imports.clone()
+    loop (alias, core_module) in source.core_imports {
+        if facts.core_source_bodies.get(core_module) == Val(loaded) { cx.import_mods.insert(alias, mangle(loaded.alias)) }
+    }
+    if user_module {
+        install_fragment_module_imports(&cx, facts, source.module_imports, source.imported_functions, source.import_signatures)
+        cx.foreign_types = fragment_cx.foreign_types.clone()
+        cx.local_type_identities.extend(source.nominal_identities.clone())
+        cx.type_names.extend(facts.structs.keys())
+        cx.type_names.extend(facts.enums.keys())
+        items.truncate(function_count)
+    }
+    (items, cx)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4048
+fn install_fragment_module_imports(cx: &Cx, facts: &MirFragmentNominalFacts, module_imports: &[String:String], imported_functions: &[String:(String, String)], signatures: &[(String, String):MirFragmentCoreSourceSignature]) {
+    loop (alias, module) in module_imports {
+        if facts.core_source_bodies.get(module) == Val(loaded) { cx.import_mods.insert(alias, mangle(loaded.alias)) }
+    }
+    loop (local, (module, name)) in imported_functions {
+        if facts.core_source_bodies.get(module) == Val(loaded) { cx.unqualified_file.insert(local, (mangle(loaded.alias), name)) }
+    }
+    loop (key, signature) in signatures {
+        cx.import_sigs.insert(key, signature.params.clone())
+        cx.import_rets.insert(key, signature.return_type.clone())
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4079
+fn lower_fragment_core_source_bodies(facts: &MirFragmentNominalFacts, reachable: &Set<FragmentCallable>, fragment_cx: &Cx, funcs: &[TFunc]) -> Unit LowerError! {
+    demanded := [String:[String]]{}
+    loop callable in reachable {
+        if callable == .CoreSource{module: module, name: name} { demanded.entry(module).or_default().push(name) }
+    }
+    modules := demanded.keys().collect()
+    modules.sort()
+    loop module in modules {
+        if facts.core_source_bodies.get(module) == Val(source) {
+            names :: Set<String>.from(demanded.get(module) ?? [])
+            (items, cx) :: fragment_core_source_cx(facts, source, fragment_cx)
+            loop item in items {
+                if item == .Func(function) {
+                    if !names.contains(function.name) || !function.type_params.is_empty() || function.inline_foreign.is_some() -> continue
+                    lowered := lower_func(function, cx)
+                    lowered.name = "{mangle(source.alias)}::{mangle(function.name)}"
+                    funcs.push(lowered)
+                }
+            }
+            lower_demanded_generic_methods(items, cx, &funcs)!
+            specialize_generic_free_functions(items, cx, &funcs)
+            merge_core_source_generic_calls(fragment_cx, cx)
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4124
+fn specialize_fragment_core_source_generics(facts: &MirFragmentNominalFacts, fragment_cx: &Cx, funcs: &[TFunc]) -> Unit LowerError! {
+    loop {
+        calls :: &fragment_cx.jit_core_source_generic_calls.take() // GATE #4494 context interior cell, no Rust bridge.
+        if calls.is_empty() -> return
+        loop ((owner, method), instantiations) in calls {
+            instantiations := instantiations
+            instantiations.sort_by_key(fn(types) { "{types:?}" })
+            instantiations.dedup()
+            missing_target :: fn() -> LowerError { LowerError.new(Span.new(0, 0), "checked Core source generic target `{owner}::{method}` has no loaded template") }
+            source :: facts.core_source_bodies.values().find(fn(source) { source.module_identity == owner }) ?? fail missing_target()
+            template :: source.functions.get(method).filter(fn(template) { !template.type_params.is_empty() }) ?? fail missing_target()
+            (items, cx) :: fragment_core_source_cx(facts, source, fragment_cx)
+            loop type_args in instantiations {
+                if type_args.len() != template.type_params.len() -> fail LowerError.new(template.span, "checked Core source generic target `{owner}::{method}` has inconsistent type parameters")
+                emitted_name :: generic_free_function_instance_key(method, type_args)
+                emitted_key :: function_semantic_key(owner, emitted_name)
+                if funcs.iter().any(fn(function) { function.key == emitted_key }) -> continue
+                (_, lowered) := lower_core_source_generic_template(lift_func_receiver_marks(template), type_args, emitted_name, cx)
+                lowered.key = emitted_key
+                lowered.name = "{mangle(source.alias)}::{mangle(emitted_name)}"
+                funcs.push(lowered)
+            }
+            lower_demanded_generic_methods(items, cx, &funcs)!
+            specialize_generic_free_functions(items, cx, &funcs)
+            merge_core_source_generic_calls(fragment_cx, cx)
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4183
+fn lower_mir_fragment_program(module: String, name: String, file: String, span: Span, params: [(String, Type, AccessConvention)], ret: Type, body: [TStmt], extra_funcs: &[TFunc], input_declarations: &TirDeclarations, trait_method_traits: &[(String, String):String], context: &MirFragmentContext) -> (MirProgram, MirFunctionId) LowerError! {
+    key :: "{module}::{name}"
+    function_ref :: artifact_plan.TirFunctionRef{key: key, module: module, name: name, span: span, visibility: Names.NameVisibility.Private}
+    param_facts :: loop (index, (param_name, ty, access)) in params.iter().enumerate() -> artifact_plan.TirParamFact{index: index, name: param_name, span: span, ty: ty.clone(), access: if access == { .Read -> artifact_plan.TirAccess.Read .Write -> artifact_plan.TirAccess.Write .Move -> artifact_plan.TirAccess.Move }, label: param_name, zone: ParamZone.Either, variadic: false, default_present: false}
+    entry :: artifact_plan.TirEntrySpec{kind: artifact_plan.TirArtifactEntryKind.Command, function: Val(function_ref.clone()), cli: None, output: artifact_plan.TirEntryOutput.ReturnValue, output_kind: OutputKind.Executable, initialize_environment: false, initialize_gc: false, serves_until_stopped: false, package_version: "0.0.0"}
+    core_source_modules :: extra_funcs.iter().filter(fn(function) { function.module != module }).map(fn(function) { (function.module.clone(), function.source_file.clone()) }).collect<[String:String]>()
+    declarations := input_declarations.clone()
+    if context.checked_nominals == Val(facts) {
+        loop source in facts.core_source_bodies.values() {
+            if !core_source_modules.contains_key(source.module_identity) -> continue
+            declarations.constants.extend(source.constants.iter().map(fn(constant) { tir_to_mir_types.lower_constant(constant, source.module_identity) }))
+        }
+    }
+    owners := core_source_modules.keys().collect()
+    owners.sort()
+    modules := [artifact_plan.TirModuleFact{key: module, name: module, path: file, source_path: file, imports: [], item_order: [artifact_plan.TirItemRef.Function(key)]}]
+    loop owner in owners {
+        source :: core_source_modules.get(owner) ?? panic("core source module key")
+        modules.push(artifact_plan.TirModuleFact{key: owner, name: owner, path: source, source_path: source, imports: [], item_order: []})
+    }
+    artifact_modules := [module]
+    artifact_modules.extend(owners)
+    artifact_facts :: artifact_plan.TirArtifactFacts{package_identity: "comptime-fragment", package_version: "0.0.0", target: artifact_plan.TirArtifactTarget.Interpreter, build_mode: MirArtifactBuildMode.Dev, build: Facts.BuildFactSnapshot.default(), names: artifact_plan.TirNameFacts.default(), functions: [artifact_plan.TirFunctionFact{reference: function_ref, params: param_facts, return_type: Val(ret.clone()), is_pure: false}], modules: modules, imports: [], foreign: [], links: [], callbacks: [], handles: [], entry: Val(entry.clone()), cli: None, jobs: [], tests: [], output_checks: [], coverage_points: [], harnesses: [], artifacts: [artifact_plan.TirArtifactPlan{key: "__comptime_fragment", kind: artifact_plan.TirArtifactKind.NativeExecutable, name: "comptime fragment", target: artifact_plan.TirArtifactTarget.Interpreter, modules: artifact_modules, links: [], jobs: [], runtime_parts: Set<String>{}, exports: [], provider_identity: "comptime", closure_identity: "comptime", artifact_identity: "comptime", entry: Val(entry), harness: None}], cffi: artifact_plan.TirCffiFacts.default()}
+    function :: TFunc{name: name, module: module, key: key, source_file: file, source_span: span, failure_carrier: TFailureCarrier.from_checked_type(ret), effects: TEffectFacts.default(), target_applicability: TTargetApplicability{rust_aot: false, cranelift: false, interpreter: true, web: false}, web_bucket: None, web_marker: None, visibility: TVisibility.Private, foreign: None, params: params, web_param_reconstructions: [], ret: Val(ret), gc_return: false, gc_scope: false, return_view_provenance: None, generic_params: [], clone_types: [], is_main: true, line: 0, synthetic: true, is_unsafe: false, unsafe_gate: None, is_pure: false, memo_bound: None, is_reactive: false, reactive_upgrades: [], is_inline: false, is_inline_always: false, is_scalar: false, kernel_proof: None, memo_field: None, uses_stack_sentry: false, body: body, kind: TFuncKind.TopLevel}
+    funcs := [function]
+    funcs.extend(extra_funcs.clone())
+    core_calls := Syntax.CORE_CALLS.clone()
+    core_calls.extend(tir_core_call_records())
+    tir := TirProgram{package_identity: "comptime-fragment", entry_sibling_calls: None, facts: TirPackageFacts.default(), source_file: file, source_text: "", source_files: [file:""], package_hardened: false, application_authority: Authority.ApplicationAuthority.default(), edition: "2026", funcs: funcs, declarations: declarations, artifact_facts: artifact_facts, core_calls: core_calls, unreachable: [], spawn_lambdas: [], struct_fields: [:], struct_field_types: [:], memo_dependencies: [:], reflection_fields: [:], reflect_paths: [:], nominal_identities: context.checked_nominals.map(fn(facts) { facts.nominal_identities.clone() }) ?? [:], struct_type_params: [:], enum_variants: [:], enum_variant_payload_types: [:], canonical_deopt: Set<String>{}, canonical_calls: Set<String>{}, int_constants: [:], constants: context.globals.clone(), distinct_bases: context.distinct_bases.clone(), distinct_ranges: context.distinct_ranges.iter().filter_map(fn(pair) { pair.1.map(fn(bounds) { (pair.0, bounds) }) }).collect(), codec_migrations: [:], trait_method_traits: trait_method_traits.clone(), iterable_item_types: [:]}
+    opt.optimize_program(&tir)
+    fragment_key :: tir.funcs[0].key.clone()
+    mir :: lower_tir_to_mir(^tir)!
+    function_id :: mir.functions.iter().find(fn(function) { function.key == fragment_key }).map(fn(function) { function.id }) ?? fail LowerError.new(span, "MIR fragment function row was not emitted")
+    mir :: optimize_mir_program(mir, MirOptimizationPolicy.conservative()) catch error -> fail LowerError.new(span, "canonical MIR optimization failed: {error}")
+    (mir, function_id)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4436
+pub fn lower_checked_tir_program_for(bundle: &ProgramBundle, request: MirArtifactRequest) -> TirProgram LowerError! {
+    lower_checked_tir_program_for_with_debug(bundle, request, false)!
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4444
+pub fn lower_checked_tir_program_for_with_debug(bundle: &ProgramBundle, request: MirArtifactRequest, debug_linemap: Bool) -> TirProgram LowerError! {
+    // GATE #4494 canonical compiler-worker stack substrate.
+    if CompilerStack.on_compiler_worker() -> return lower_checked_tir_program_on_stack(bundle, request, debug_linemap)!
+    CompilerStack.run_on_compiler_stack(fn() { lower_checked_tir_program_on_stack(bundle, request, debug_linemap)! })!
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4472
+fn nominal_identity_projection(bundle: &ProgramBundle) -> [String:String] {
+    claims := [String:Set<String>]{}
+    scoped := [(String, String):String]{}
+    entry_names :: bundle.modules.get(bundle.entry).map(fn(module) { Set<String>.from(module_owned_type_names(module.items).iter().filter(fn(name) { bundle.name_ledger.declaration(bundle.entry, name).is_some() })) }) ?? Set<String>{}
+    loop (module_idx, module) in bundle.modules.iter().enumerate() {
+        spellings := [String]{}
+        if module_idx != bundle.entry { spellings.extend(module_owned_type_names(module.items)) }
+        loop import in module.imports {
+            alias :: import.import_alias()
+            if nominal_import_target(bundle, module_idx, import) == Val(target) { spellings.extend(module_owned_type_names(bundle.modules[target].items).iter().map(fn(leaf) { "{alias}.{leaf}" })) }
+        }
+        loop spelling in spellings {
+            if !spelling.contains('.') && entry_names.contains(spelling) -> continue
+            if canonical_nominal_from(bundle, module_idx, spelling) == Val(identity) {
+                scoped.insert((module_identity(bundle, module_idx), spelling), identity.clone())
+                claims.entry(spelling).or_default().insert(identity)
+            }
+        }
+    }
+    unique := [String:String]{}
+    loop (spelling, identities) in claims {
+        if identities.len() == 1 { unique.insert(spelling, identities.iter().next() ?? panic("single nominal identity")) }
+    }
+    loop ((module, spelling), identity) in scoped { unique.insert("{module}::{spelling}", identity) }
+    unique
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4541
+fn selected_imported_zero_arg_tir_entry(bundle: &ProgramBundle) -> String? {
+    if bundle.modules.get(bundle.entry) == Val(module) {
+        return module.items.iter().find_map(fn(item) {
+            if item == .Const(value) {
+                if value.resolved_output == Val(output) {
+                    if !output.selected || output.module == bundle.entry || !output.params.is_empty() || (output.kind != OutputKind.Executable && output.kind != OutputKind.Service) -> return None
+                    owner :: artifact_plan.module_identity(bundle, output.module)
+                    return Val(function_semantic_key(owner, output.semantic_name))
+                }
+            }
+            None
+        })
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4562
+fn selected_test_override_tir_entry(bundle: &ProgramBundle, request: &MirArtifactRequest) -> String? {
+    if request.kind != MirArtifactKind.TestOverride || request.mode != MirArtifactBuildMode.Test -> return None
+    if bundle.modules.get(bundle.entry) == Val(module) {
+        if module.items.iter().any(fn(item) { if item == .Func(function) -> function.name == "test" else -> false }) -> return Val(function_semantic_key(artifact_plan.module_identity(bundle, bundle.entry), "test"))
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4585
+fn selected_zero_arg_tir_entry(bundle: &ProgramBundle) -> String? {
+    if bundle.modules.get(bundle.entry) == Val(module) {
+        entry_module :: artifact_plan.module_identity(bundle, bundle.entry)
+        return selected_imported_zero_arg_tir_entry(bundle).or_else(fn() {
+            module.items.iter().find_map(fn(item) {
+                if item == .Const(value) {
+                    if value.resolved_output == Val(output) {
+                        if output.selected && output.module == bundle.entry && output.params.is_empty() -> return Val(function_semantic_key(entry_module, output.semantic_name))
+                    }
+                }
+                None
+            })
+        }).or_else(fn() { module.items.iter().find_map(fn(item) { if item == .Func(function) { if function.name == "run" && function.params.is_empty() -> return Val(function_semantic_key(entry_module, "run")) }; None }) })
+    }
+    None
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4607
+fn lower_test_item(test: &TestDef, module: &String, cx: &Cx) -> TFunc {
+    test_name :: test.name ?? "anonymous"
+    synthetic := Func.implicit_run(test.body.clone(), test.span)
+    synthetic.name = "__test_{test_name}"
+    synthetic.name_span = test.name_span
+    synthetic.params = test.params.clone()
+    synthetic.compiler_generated = true
+    lowered := lower_func(synthetic, cx)
+    key :: artifact_plan.test_key(module, test)
+    lowered.module = module.clone(); lowered.key = key.clone(); lowered.name = key
+    lowered.source_span = test.span; lowered.synthetic = true
+    lowered
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4625
+fn lower_contract_test_item(function: &Func, module: &String, cx: &Cx, target_name: &String) -> TFunc {
+    key :: artifact_plan.contract_key(module, function)
+    call_args :: loop param in function.params -> CallArg{convention: param.convention, expr: Expr.Ident(param.name.clone(), param.name_span), span: param.name_span, flags: CallArgFlags.default(), label: param.public_label.clone(), spread: param.variadic}
+    call :: Expr.Call(Call{name: target_name.clone(), name_span: function.name_span, type_args: [], args: call_args, resolved_ret: None, range_checked: false, widen_approx: false})
+    synthetic := function.clone()
+    synthetic.name = "__contract_{function.name}"
+    synthetic.name_span = function.name_span
+    synthetic.pre.clear(); synthetic.post.clear()
+    synthetic.body = [Stmt.Return(Val(call), function.span)]
+    synthetic.compiler_generated = true
+    lowered := lower_func(synthetic, cx)
+    lowered.module = module.clone(); lowered.key = key.clone(); lowered.name = key
+    lowered.source_span = function.span; lowered.synthetic = true
+    lowered
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4675
+// Eligibility executes only checked preconditions, borrowing all candidate parameters.
+fn lower_contract_eligibility_item(function: &Func, module: &String, cx: &Cx) -> TFunc {
+    key :: artifact_plan.contract_eligibility_key(module, function)
+    condition :: function.pre.iter().map(fn(clause) { clause.cond.clone() }).reduce(fn(lhs, rhs) { Expr.Binary(BinOp.And, lhs, rhs, function.span) }) ?? panic("a sampled contract candidate has at least one #Pre clause")
+    synthetic := function.clone()
+    synthetic.name = "__contract_pre_{function.name}"
+    synthetic.name_span = function.name_span
+    synthetic.pre.clear(); synthetic.post.clear()
+    loop param in &synthetic.params { param.convention = AccessConvention.Read }
+    synthetic.return_type = Val(Type.Named(Syntax.TYPE_BOOL))
+    synthetic.return_type_span = None
+    synthetic.return_view_provenance = None
+    synthetic.declared_return_view_provenance = None
+    synthetic.gc_return = false; synthetic.diverges = false
+    synthetic.body = [Stmt.Return(Val(condition), function.span)]
+    synthetic.compiler_generated = true
+    lowered := lower_func(synthetic, cx)
+    lowered.module = module.clone(); lowered.key = key.clone(); lowered.name = key
+    lowered.source_span = function.span; lowered.synthetic = true
+    lowered
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4723
+// Unavailable sampling rows deliberately resolve to this real, never-invoked callable.
+fn lower_contract_unavailable_item(function: &Func, module: &String, cx: &Cx) -> TFunc {
+    key :: artifact_plan.contract_key(module, function)
+    synthetic := Func.implicit_run([], function.span)
+    synthetic.name = "__contract_unavailable_{function.name}"
+    synthetic.name_span = function.name_span; synthetic.compiler_generated = true
+    lowered := lower_func(synthetic, cx)
+    lowered.module = module.clone(); lowered.key = key.clone(); lowered.name = key
+    lowered.source_span = function.span; lowered.synthetic = true
+    lowered
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4746
+fn materialize_contract_sampling(function: &Func, module: &String, covered: Bool, target_name: &String, cx: &Cx, funcs: &[TFunc], contract_rows: &artifact_plan.ContractSamplingPlan) {
+    if artifact_plan.contract_sampling_reason(function, covered) == Val(reason) {
+        if reason == None {
+            funcs.push(lower_contract_eligibility_item(function, module, cx))
+            funcs.push(lower_contract_test_item(function, module, cx, target_name))
+        } else { funcs.push(lower_contract_unavailable_item(function, module, cx)) }
+        contract_rows.insert(artifact_plan.contract_key(module, function), reason)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4772
+fn record_web_partition_key(function: &Func, callable_name: &String, source_file: &String, file_alias: &String, is_entry: Bool, module_prefix: &String?, out: &[(String, USize, USize):String]) {
+    file_prefix :: if !is_entry && module_prefix.is_none() -> Val(file_alias) else -> None
+    key :: WebPartition.partition_key(file_prefix, module_prefix, callable_name)
+    out.insert((source_file.clone(), function.span.start, function.span.end), key)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4794
+fn collect_web_partition_keys(items: &[Item], source_file: &String, file_alias: &String, is_entry: Bool, module_prefix: &String?, out: &[(String, USize, USize):String]) {
+    loop item in items {
+        if item == {
+            .Func(function) -> record_web_partition_key(function, function.name, source_file, file_alias, is_entry, module_prefix, &out)
+            .Struct(structure) -> {
+                loop method in structure.methods { record_web_partition_key(method, "{structure.name}::{method.name}", source_file, file_alias, is_entry, module_prefix, &out) }
+                loop implementation in structure.trait_impls { loop method in implementation.methods { record_web_partition_key(method, "{structure.name}::{method.name}", source_file, file_alias, is_entry, module_prefix, &out) } }
+            }
+            .Enum(enumeration) -> {
+                loop method in enumeration.methods { record_web_partition_key(method, "{enumeration.name}::{method.name}", source_file, file_alias, is_entry, module_prefix, &out) }
+                loop implementation in enumeration.trait_impls { loop method in implementation.methods { record_web_partition_key(method, "{enumeration.name}::{method.name}", source_file, file_alias, is_entry, module_prefix, &out) } }
+            }
+            .Impl(implementation) -> { loop method in implementation.methods { record_web_partition_key(method, "{implementation.type_name}::{method.name}", source_file, file_alias, is_entry, module_prefix, &out) } }
+            .CodeModule(module) -> { if module.body == Val(body) { collect_web_partition_keys(body, source_file, file_alias, is_entry, Val(module.name), &out) } }
+            else -> {}
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4900
+fn apply_checked_web_partitions(bundle: &ProgramBundle, funcs: &[TFunc]) {
+    source_rows := [(String, USize, USize):String]{}
+    loop (module_idx, module) in bundle.modules.iter().enumerate() { collect_web_partition_keys(module.items, module.display, module.alias, module_idx == bundle.entry, None, &source_rows) }
+    loop function in &funcs {
+        if function.web_bucket.is_some() -> continue
+        source_key :: (function.source_file.clone(), function.source_span.start, function.source_span.end)
+        bucket :: source_rows.get(source_key).and_then(fn(key) { bundle.web_partitions.get(key) }).or_else(fn() { bundle.web_partitions.get(function.name) }).or_else(fn() { bundle.web_partitions.get(function.key) }).or_else(fn() { Val(Sema.checked_web_bucket(function.web_marker, None, function.effects.solved, function.ret)) })
+        if bucket.is_some() { function.web_bucket = bucket }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4946
+fn child_module_identity(module: &String, child: &String) -> String {
+    if module.is_empty() -> child.clone() else -> "{module}::{child}"
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4960
+fn collect_http_route_handlers(items: &[Item], out: &Set<String>) {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4961
+    fn collect_body(body: &[Stmt], out: &Set<String>) {
+        loop statement in body {
+            statement.for_each_expr(fn(expr) {
+                if expr == .MethodCall{recv_type: Val(recv_type), method: method, args: args, ..} {
+                    if (recv_type != "HTTPRouter" && recv_type != "HTTPMux") || !["get", "post", "put", "delete", "patch", "head", "options"].contains(method) || args.len() != 2 -> return
+                    handler := args[1].expr
+                    loop {
+                        if handler == .Paren(inner, _) { handler = inner } else -> break
+                    }
+                    if handler == .Ident(name, _) { out.insert(name.clone()) }
+                }
+            })
+        }
+    }
+    loop item in items {
+        if item == {
+            .Func(function) -> collect_body(function.body, &out)
+            .Struct(definition) -> {
+                loop method in definition.methods { collect_body(method.body, &out) }
+                loop implementation in definition.trait_impls { loop method in implementation.methods { collect_body(method.body, &out) } }
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods { collect_body(method.body, &out) }
+                loop implementation in definition.trait_impls { loop method in implementation.methods { collect_body(method.body, &out) } }
+            }
+            .Impl(implementation) -> { loop method in implementation.methods { collect_body(method.body, &out) } }
+            .CodeModule(module) -> { if module.body == Val(body) { collect_http_route_handlers(body, &out) } }
+            else -> {}
+        }
+    }
+}

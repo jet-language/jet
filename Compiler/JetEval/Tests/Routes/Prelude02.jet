@@ -1,0 +1,32 @@
+use jet_comptime.Builtins.[apply_method]
+use jet_foundation.[CtValue, CtReport, CtEnumArg, Type, Span]
+
+// Rust: crates/jet-comptime/src/Comptime/Builtins.rs:1642
+#Test("ordering_then_checks_enum_identity_and_preserves_non_equal_receiver") {
+    less :: CtValue.Enum{type_name: "Ordering", variant: "Less", args: [CtEnumArg]{}}
+    greater :: CtValue.Enum{type_name: "Ordering", variant: "Greater", args: [CtEnumArg]{}}
+    actual :: apply_method(&less, "then", [CtValue]{greater}, Span.default())!
+    assert(actual == less)
+    wrong :: CtValue.Enum{type_name: "Other", variant: "Greater", args: [CtEnumArg]{}}
+    assert(apply_method(&less, "then", [CtValue]{wrong}, Span.default()).is_err())
+}
+// Rust: crates/jet-comptime/src/Comptime/Builtins.rs:1799
+#Test("optional_zip_is_absent_when_the_other_input_is_absent") {
+    recv :: CtValue.Present{value: CtValue.Int{value: 4}}
+    other :: CtValue.Failed{report: CtReport.Clean{ty: Type.Int}}
+    actual :: apply_method(&recv, "zip", [CtValue]{other}, Span.default())!
+    assert(actual == CtValue.Failed{report: CtReport.Clean{ty: Type.Int}})
+}
+// Rust: crates/jet-comptime/src/Comptime/Builtins.rs:2066
+#Test("bounded_cycle_produces_exactly_the_requested_item_count") {
+    recv :: CtValue.List{values: [CtValue]{CtValue.Int{value: 1}, CtValue.Int{value: 2}}}
+    actual :: apply_method(&recv, "cycle", [CtValue]{CtValue.Int{value: 5}}, Span.default())!
+    assert(actual == CtValue.List{values: [CtValue]{CtValue.Int{value: 1}, CtValue.Int{value: 2}, CtValue.Int{value: 1}, CtValue.Int{value: 2}, CtValue.Int{value: 1}}})
+}
+// Rust: crates/jet-comptime/src/Comptime/Builtins.rs:2835
+#Test("text_slice_bounds_are_unicode_scalar_counts") {
+    recv :: CtValue.Str{value: "aé漢z"}
+    actual :: apply_method(&recv, "slice", [CtValue]{CtValue.Int{value: 1}, CtValue.Int{value: 3}}, Span.default())!
+    assert(actual == CtValue.Str{value: "é漢"})
+    assert(apply_method(&recv, "slice", [CtValue]{CtValue.Int{value: 0}, CtValue.Int{value: 5}}, Span.default()).is_err())
+}

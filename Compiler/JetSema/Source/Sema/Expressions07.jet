@@ -1,1442 +1,539 @@
-// PORT-PENDING 0408 crates-jet-sema-src-sema-checkerinfer-expr-slice-1832: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:1832-3269
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(crate) fn rewrite_typed_boundary_literal(
-//RS         &mut self,
-//RS         e: &mut Expr,
-//RS         type_name: String,
-//RS         span: Span,
-//RS     ) -> Option<Type> {
-//RS         let Some(kind) = Syntax::typed_head_kind(&type_name).filter(|kind| kind.is_boundary())
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         let Expr::Str(parts, literal_span) = e else {
-//RS             return self
-//RS                 .rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
-//RS                 .map(|_| Type::Named(kind.internal_type_name().to_string()));
-//RS         };
-//RS         let has_holes = parts.iter().any(|part| matches!(part, StrPart::Interp(..)));
-//RS         if kind.forbids_holes() && has_holes {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0155",
-//RS                 "a `DateTime` literal cannot contain interpolation".to_string(),
-//RS                 "DateTime values are checked as complete RFC3339 literals before the program runs"
-//RS                     .to_string(),
-//RS                 "write a complete `DateTime{\"…\"}` literal, or parse a runtime String explicitly"
-//RS                     .to_string(),
-//RS                 Some(*literal_span),
-//RS             ));
-//RS             return None;
-//RS         }
-//RS         let mut literals = vec![String::new()];
-//RS         for part in parts.iter() {
-//RS             match part {
-//RS                 StrPart::Lit(text) => literals.last_mut().unwrap().push_str(text),
-//RS                 StrPart::Interp(..) => literals.push(String::new()),
-//RS             }
-//RS         }
-//RS         let validation = crate::Comptime::validate_typed_boundary_literal(kind, &literals);
-//RS         if let Err(reason) = validation {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0155",
-//RS                 format!("this `{type_name}` literal is invalid"),
-//RS                 reason,
-//RS                 format!(
-//RS                     "fix the literal, or parse a runtime String with the ordinary `{type_name}` constructor"
-//RS                 ),
-//RS                 Some(*literal_span),
-//RS             ));
-//RS             return None;
-//RS         }
-//RS         self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
-//RS             .map(|_| Type::Named(kind.internal_type_name().to_string()))
-//RS     }
-//RS 
-//RS     /// D-REGEX-LIT1=D: validate `Regex.{"…"}` / inferred `.{"…"}` with the
-//RS     /// same grammar gate used by the generated linear runtime.
-//RS     pub(crate) fn rewrite_regex_literal(&mut self, e: &mut Expr, span: Span) -> Option<Type> {
-//RS         let old = std::mem::replace(e, Expr::Absent(span));
-//RS         let Expr::Str(parts, literal_span) = old else {
-//RS             *e = old;
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0152",
-//RS                 "`Regex.{ … }` needs one quoted pattern".to_string(),
-//RS                 "a regex typed literal contains pattern text, not another expression shape"
-//RS                     .to_string(),
-//RS                 "write `Regex.{\"...\"}`".to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS             return None;
-//RS         };
-//RS         let [StrPart::Lit(pattern)] = parts.as_slice() else {
-//RS             *e = Expr::Str(parts, literal_span);
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0152",
-//RS                 "a `Regex` literal cannot contain interpolation".to_string(),
-//RS                 "the compiler must know the complete pattern before the program runs".to_string(),
-//RS                 "use a fixed `Regex.{\"...\"}` pattern, or build text and call `re.compile(text)`"
-//RS                     .to_string(),
-//RS                 Some(literal_span),
-//RS             ));
-//RS             return None;
-//RS         };
-//RS         if let Err(error) = jet_foundation::RegexSyntax::validate(pattern) {
-//RS             *e = Expr::Str(parts, literal_span);
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0152",
-//RS                 format!("this regex pattern is invalid at position {}", error.offset),
-//RS                 error.reason,
-//RS                 "fix the pattern at the reported position".to_string(),
-//RS                 Some(literal_span),
-//RS             ));
-//RS             return None;
-//RS         }
-//RS         *e = Expr::Call(Call {
-//RS             name: Syntax::TYPE_REGEX.to_string(),
-//RS             name_span: span,
-//RS             type_args: Vec::new(),
-//RS             args: vec![CallArg {
-//RS                 convention: AccessConvention::Read,
-//RS                 expr: Expr::Str(parts, literal_span),
-//RS                 span: literal_span,
-//RS                 flags: CallArgFlags::default(),
-//RS                 label: None,
-//RS                 spread: false,
-//RS             }],
-//RS             resolved_ret: None,
-//RS             range_checked: false,
-//RS             widen_approx: false,
-//RS         });
-//RS         Some(Type::Named(Syntax::TYPE_REGEX.to_string()))
-//RS     }
-//RS 
-//RS     /// Statement inference has a special direct-call path for valueless
-//RS     /// functions. Keep that path shared with ordinary expression propagation.
-//RS     pub(crate) fn infer_statement_expr(&mut self, expr: &mut Expr) -> Option<Type> {
-//RS         self.normalize_imported_core_expr(expr);
-//RS         self.normalize_prelude_expr(expr);
-//RS         let saved_statement_expr_inference = self.statement_expr_inference;
-//RS         let saved_statement_expr_root_depth = self.statement_expr_root_depth;
-//RS         self.statement_expr_inference = true;
-//RS         // `infer_statement_expr` is called for a Stmt::Expr after the
-//RS         // statement checker has entered its source depth. `infer` enters one
-//RS         // more depth for the root expression; nested argument/value
-//RS         // expressions enter still deeper levels and must retain their value
-//RS         // tails. Parentheses are transparent, but their inference wrapper
-//RS         // still consumes one source-nesting slot per wrapper.
-//RS         let mut paren_depth = 0;
-//RS         let mut root: &Expr = &*expr;
-//RS         while let Expr::Paren(inner, _) = root {
-//RS             paren_depth += 1;
-//RS             root = inner;
-//RS         }
-//RS         let direct_call_root = matches!(root, Expr::Call(..));
-//RS         self.statement_expr_root_depth =
-//RS             Some(self.source_nesting + paren_depth + if direct_call_root { 0 } else { 1 });
-//RS         let result = self.infer_fallible_stmt(expr);
-//RS         self.statement_expr_inference = saved_statement_expr_inference;
-//RS         self.statement_expr_root_depth = saved_statement_expr_root_depth;
-//RS         result
-//RS     }
-//RS 
-//RS     /// Infer and check an expression. Returns None when a problem was
-//RS     /// already reported (avoids error cascades).
-//RS     ///
-//RS     /// This wrapper owns the rule that depends on *where* the expression
-//RS     /// appears (`borrow_ctx`): a struct-field read in owning position is
-//RS     /// rewritten to `.clone()` so the generated Rust never moves a field out
-//RS     /// of its struct.
-//RS     /// D-FAILURE-FOUNDATION1=A: a call is a value-producing expression at the
-//RS     /// source level, but its Result carrier is transparent in ordinary value
-//RS     /// positions. Elaborate that one rule into the existing `Try` node so
-//RS     /// lowering, conversion, context frames, and all engines keep one path.
-//RS     pub(crate) fn auto_propagate_call(
-//RS         &mut self,
-//RS         e: &mut Expr,
-//RS         result: Option<Type>,
-//RS     ) -> Option<Type> {
-//RS         // An open callback has no return row yet. If its callee does, retain
-//RS         // that row as the callback's carrier; applying the enclosing function's
-//RS         // `?` here would put a raw Result-returning closure in the wrong row.
-//RS         // A nested callee is checked under its argument's success type, so the
-//RS         // carrier is recorded for both the direct callback root and that
-//RS         // nested success-position call. A real Result expectation remains a
-//RS         // carrier position and must not be reinterpreted as callback failure.
-//RS         //
-//RS         // A statement-root call can itself have a value-producing call nested
-//RS         // in one of its arguments (`print(f())`). When the enclosing callback
-//RS         // slot is already a Result, that nested call is still a source value:
-//RS         // consume its carrier once here, rather than handing Result<T, E> to
-//RS         // the outer display/argument checker.
-//RS         // Before propagation is decided, both direct and method calls retain
-//RS         // the callee's declared return contract on `resolved_ret`; their
-//RS         // checker result may be the effective Result-shaped ABI carrier.
-//RS         let declared_call_return = match e.without_parens() {
-//RS             Expr::Call(call) => call.resolved_ret.as_ref(),
-//RS             Expr::MethodCall { resolved_ret, .. } => resolved_ret.as_ref(),
-//RS             _ => None,
-//RS         };
-//RS         // D-STREAMYIELD1: a generator's declared `Stream<T>` is its executable
-//RS         // protocol, not a failure carrier. Its callable keeps that raw return
-//RS         // in every tier (TIR `lower_func` and `consume_plain_helper_route`), so
-//RS         // a generator call is a stream value and never enters the failure rail.
-//RS         if let Some(stream @ Type::Apply { name, args }) = declared_call_return {
-//RS             if name == Syntax::TYPE_STREAM && args.len() == 1 {
-//RS                 return Some(stream.clone());
-//RS             }
-//RS         }
-//RS         // D-FAILURE-FOUNDATION1=A: `!Never` is a proven-unreachable
-//RS         // failure rail. Ordinary value positions still need the existing
-//RS         // `Try` node so every backend unwraps the shared Result carrier once;
-//RS         // only an explicit Result expectation keeps the carrier.
-//RS         let declared_never_failure = matches!(
-//RS             declared_call_return,
-//RS             Some(Type::Result { err, .. }) if err.is_never()
-//RS         );
-//RS         if declared_never_failure && matches!(self.expected_type.as_ref(), Some(Type::Result { .. })) {
-//RS             return result;
-//RS         }
-//RS         if !declared_never_failure {
-//RS             if let Some(ret) = declared_call_return.filter(|ty| !ty.is_fallible()) {
-//RS                 // The call node retains its declared return, while `result`
-//RS                 // carries the effective failure contract. Keep the declared
-//RS                 // success type only when no carrier was produced or an open
-//RS                 // callback owns that carrier; ordinary value positions must
-//RS                 // propagate an implicit `!Err` just like an explicit `!E`.
-//RS                 if self.failure_carrier_inference
-//RS                     && result
-//RS                         .as_ref()
-//RS                         .is_some_and(|ty| matches!(ty, Type::Result { .. } | Type::Option(_)))
-//RS                 {
-//RS                     if self.failure_carrier.is_none() {
-//RS                         self.failure_carrier = result.clone();
-//RS                     }
-//RS                     self.task_body_propagates = true;
-//RS                     return Some(ret.clone());
-//RS                 }
-//RS                 if !result.as_ref().is_some_and(Type::is_fallible) {
-//RS                     return Some(ret.clone());
-//RS                 }
-//RS             }
-//RS         }
-//RS         let propagation_result = match e.without_parens() {
-//RS             Expr::MethodCall {
-//RS                 resolved_ret: Some(carrier),
-//RS                 ..
-//RS             } if carrier.is_fallible() => Some(carrier.clone()),
-//RS             _ => result.clone(),
-//RS         };
-//RS         // D-CHOOSE-FIND1=A: a finite value/collecting loop is an
-//RS         // immediately evaluated expression, not a fallible function-value
-//RS         // call. Preserve its CallValue shape so the exhaustion route can
-//RS         // attach to the generated loop before ordinary propagation.
-//RS         let inline_loop_call = matches!(
-//RS             e.without_parens(),
-//RS             Expr::CallValue { callee, args, .. }
-//RS                 if args.is_empty()
-//RS                     && matches!(
-//RS                         callee.as_ref(),
-//RS                         Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop
-//RS                     )
-//RS         );
-//RS         let nested_statement_value = self.statement_expr_inference
-//RS             && self
-//RS                 .statement_expr_root_depth
-//RS                 .is_some_and(|root| self.source_nesting > root)
-//RS             && (self.failure_carrier_inference
-//RS                 || matches!(self.ret.as_ref(), Some(Type::Result { .. })));
-//RS         // A `Never` failure is not a callback failure row: an open callback
-//RS         // that reaches a `T Never!` callee still produces plain `T`, so the
-//RS         // call falls through to the `Try` below, which unwraps it directly
-//RS         // (`TryConvert::Never`) wherever it sits in the callback body.
-//RS         let never_carrier = matches!(
-//RS             propagation_result.as_ref(),
-//RS             Some(Type::Result { err, .. }) if err.is_never()
-//RS         );
-//RS         if self.failure_carrier_inference
-//RS             && !never_carrier
-//RS             && matches!(propagation_result, Some(Type::Result { .. }))
-//RS             && (!matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))
-//RS                 || nested_statement_value)
-//RS         {
-//RS             if self.failure_carrier.is_none() {
-//RS                 self.failure_carrier = propagation_result.clone();
-//RS             }
-//RS             if nested_statement_value {
-//RS                 self.ret = self
-//RS                     .expected_type
-//RS                     .clone()
-//RS                     .or_else(|| propagation_result.clone());
-//RS             } else if self.ret.is_none() {
-//RS                 self.ret = propagation_result.clone();
-//RS             }
-//RS             self.task_body_propagates = true;
-//RS             if self.expected_type.is_none() && !nested_statement_value {
-//RS                 return result;
-//RS             }
-//RS         }
-//RS         if inline_loop_call || self.compiler_generated
-//RS             || !matches!(
-//RS                 e.without_parens(),
-//RS                 Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
-//RS             )
-//RS             || !matches!(propagation_result, Some(Type::Result { .. }))
-//RS             || self.expected_type.as_ref().is_some_and(|expected| {
-//RS                 matches!(
-//RS                     expected,
-//RS                     Type::Result { err, .. }
-//RS                         if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
-//RS                 )
-//RS             })
-//RS         {
-//RS             // D-FAIL-CARRIER1=A: a `T !E` expectation is the carrier itself.
-//RS             // That includes a statement-nested argument (`report(import_rows())`).
-//RS             // `print(f())` still unwraps, because print does not expect Result.
-//RS             return result;
-//RS         }
-//RS         // `infer_try_with_inner_type` owns the compatibility check and E2404
-//RS         // provenance. Returning the unchecked carrier here bypasses that
-//RS         // contract for nested calls whose failure cannot reach this return.
-//RS         let span = e.span();
-//RS         let inner = std::mem::replace(e, Expr::Absent(span));
-//RS         let mut wrapped = Expr::Try(Box::new(inner), span, TryConvert::None, None);
-//RS         let result = match &mut wrapped {
-//RS             Expr::Try(inner, try_span, convert, note) => {
-//RS                 self.infer_try_with_inner_type(inner, *try_span, convert, note, propagation_result)
-//RS             }
-//RS             _ => unreachable!("automatic failure propagation builds a Try node"),
-//RS         };
-//RS         *e = wrapped;
-//RS         result
-//RS     }
-//RS 
-//RS     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
-//RS         let suppress_auto = self.failure_auto_root_suppression > 0;
-//RS         // Grouping is semantically transparent. Keep the one-shot token alive
-//RS         // until it reaches the carrier-owned expression beneath any number of
-//RS         // parentheses; otherwise `(fallible())` would acquire a second `Try`
-//RS         // while the unparenthesized form did not.
-//RS         if suppress_auto && !matches!(e, Expr::Paren(..)) {
-//RS             self.failure_auto_root_suppression -= 1;
-//RS         }
-//RS         if !self.enter_source_nesting(e.span()) {
-//RS             return None;
-//RS         }
-//RS         self.check_scoped_loan_read(e);
-//RS         // A callable's Result contract is the carrier at its boundary, but
-//RS         // ordinary composite expressions consume the success value. Keep the
-//RS         // carrier expectation for direct calls and explicit constructors so
-//RS         // `return fallible()` and `return Ok/Err(...)` stay intact; expose the
-//RS         // success type to everything else so a nested call can propagate at
-//RS         // its own expression boundary.
-//RS         let saved_expected = self.expected_type.clone();
-//RS         let preserves_result_carrier = matches!(
-//RS             e.without_parens(),
-//RS             Expr::Call(..)
-//RS                 | Expr::MethodCall { .. }
-//RS                 | Expr::CallValue { .. }
-//RS                 | Expr::Lambda(..)
-//RS                 | Expr::Ok(..)
-//RS                 | Expr::Err(..)
-//RS                 | Expr::Try(..)
-//RS                 | Expr::If { .. }
-//RS         ) || matches!(
-//RS             e.without_parens(),
-//RS             Expr::EnumLit {
-//RS                 type_name,
-//RS                 variant,
-//RS                 leading_dot: true,
-//RS                 ..
-//RS             } if type_name.is_empty()
-//RS                 && matches!(
-//RS                     contextual_literal(variant),
-//RS                     Some(ContextualLiteral::Ok | ContextualLiteral::Err)
-//RS                 )
-//RS         );
-//RS         if !preserves_result_carrier {
-//RS             if let Some(Type::Result { ok, .. }) = saved_expected.as_ref() {
-//RS                 self.expected_type = Some((**ok).clone());
-//RS             }
-//RS         }
-//RS         if matches!(e, Expr::If { .. }) {
-//RS             self.note_carrier_chain_subject(e);
-//RS         }
-//RS         // Card #1440: an else-less all-pattern dispatch chain proves coverage
-//RS         // once (E0307) before ordinary per-level inference walks its arms. A
-//RS         // pattern table with an `else` arm gets the L0303 check (#3716).
-//RS         if matches!(e, Expr::If { cond, .. } if matches!(cond.as_ref(), Expr::PatternTest { .. }))
-//RS             || (matches!(e, Expr::If { .. }) && noelse_terminated(e))
-//RS         {
-//RS             self.check_noelse_dispatch_chain(e);
-//RS         }
-//RS         let result = if let Some(result) = self.fold_reflect_call(e) {
-//RS             result
-//RS         } else {
-//RS             // Nested `id(id(...))` must not inherit infer_inner's match-arm
-//RS             // frame: a 96-deep cliff overflowed the compiler stack while still
-//RS             // under MAX_SOURCE_NESTING. Keep that Call shortcut. Contextual
-//RS             // `Ok`/`Err`/`Val`/`None` constructors parse as Calls and must be
-//RS             // rewritten first; otherwise they take the function-lookup path
-//RS             // and surface E0102.
-//RS             if matches!(e, Expr::Call(_)) {
-//RS                 self.normalize_contextual_expr(e);
-//RS             }
-//RS             if self.implicit_loop_subject_depth > 0
-//RS                 || self
-//RS                     .expected_type
-//RS                     .as_ref()
-//RS                     .is_some_and(|ty| {
-//RS                         matches!(ty, Type::Fn { .. })
-//RS                             || matches!(ty, Type::Named(name) if name == "UIShortcut")
-//RS                     })
-//RS             {
-//RS                 // CallValue dispatch skips infer_inner; canonicalize a bare
-//RS                 // method head before it can be mistaken for a field projection.
-//RS                 normalize_bare_method_head(e);
-//RS             }
-//RS             if matches!(e, Expr::Call(_) | Expr::CallValue { .. }) {
-//RS                 self.infer_call_like(e)
-//RS             } else {
-//RS                 self.infer_checked(e)
-//RS             }
-//RS         };
-//RS         self.expected_type = saved_expected;
-//RS         let result = if suppress_auto {
-//RS             result
-//RS         } else {
-//RS             self.auto_propagate_call(e, result)
-//RS         };
-//RS         if self.expr_definitely_diverges(e)
-//RS             || result
-//RS                 .as_ref()
-//RS                 .is_some_and(|ty| matches!(ty, Type::Named(name) if name == Syntax::TYPE_NEVER))
-//RS         {
-//RS             self.flow.reachable = false;
-//RS         }
-//RS         if result
-//RS             .as_ref()
-//RS             .is_some_and(crate::Sema::type_uses_default_int)
-//RS         {
-//RS             self.uses_exact_int = true;
-//RS         }
-//RS         self.leave_source_nesting();
-//RS         result
-//RS     }
-//RS 
-//RS     /// Infer one carrier-owned root while leaving child expressions eligible
-//RS     /// for the same automatic propagation rule.
-//RS     pub(crate) fn infer_without_auto_propagation(&mut self, e: &mut Expr) -> Option<Type> {
-//RS         let previous = self.failure_auto_root_suppression;
-//RS         self.failure_auto_root_suppression += 1;
-//RS         let result = self.infer(e);
-//RS         // A nesting-limit failure can return before the token reaches the
-//RS         // expression below transparent grouping. Do not let that failed root
-//RS         // suppress a later, unrelated expression.
-//RS         if self.failure_auto_root_suppression > previous {
-//RS             self.failure_auto_root_suppression = previous;
-//RS         }
-//RS         result
-//RS     }
-//RS 
-//RS     pub(crate) fn infer_with_expected(&mut self, e: &mut Expr, expected: &Type) -> Option<Type> {
-//RS         if crate::Sema::type_uses_default_int(expected) {
-//RS             self.uses_exact_int = true;
-//RS         }
-//RS         let saved = self.expected_type.replace(expected.clone());
-//RS         let result = self.infer(e);
-//RS         self.expected_type = saved;
-//RS         result
-//RS     }
-//RS     /// Infer a value that is being placed into an aggregate slot.
-//RS     ///
-//RS     /// A lambda in a list/tuple/map (or another owning literal) is retained
-//RS     /// after the current expression, so its captures must use the escaping
-//RS     /// ownership path even when the aggregate element has an expected type.
-//RS     /// Keep this context local: `infer_owning_value` also serves direct local
-//RS     /// bindings, where a non-escaping `FnMut` may borrow its captures.
-//RS     fn infer_aggregate_value(
-//RS         &mut self,
-//RS         e: &mut Expr,
-//RS         expected: Option<&Type>,
-//RS     ) -> Option<Type> {
-//RS         let escapes = matches!(e.without_parens(), Expr::Lambda(_));
-//RS         let saved_escapes = self.lambda_escapes;
-//RS         if escapes {
-//RS             self.lambda_escapes = true;
-//RS         }
-//RS         let result = match expected {
-//RS             Some(expected) => self.infer_with_expected(e, expected),
-//RS             None => self.infer_owning_value(e),
-//RS         };
-//RS         self.lambda_escapes = saved_escapes;
-//RS         result
-//RS     }
-//RS 
-//RS     pub(super) fn implicit_copy_target(&mut self, e: &Expr, ty: &Type) -> Option<Type> {
-//RS         if let Some(target) = owned_type_for_read_view(ty) {
-//RS             return Some(target);
-//RS         }
-//RS         if matches!(e, Expr::Ident(name, _) if self.is_string_view(name))
-//RS             && matches!(ty, Type::String)
-//RS         {
-//RS             return Some(Type::String);
-//RS         }
-//RS         // Read-only list, buffer, and matrix windows keep the selected
-//RS         // element's surface type when indexed (for example, `window[0]` is a
-//RS         // `String`, not a `View<String>`). Their borrow shape lives in the
-//RS         // provenance graph, so the owning-copy rule must consult that graph
-//RS         // instead of looking only for the explicit `View<T>` type. A mutable
-//RS         // window is never an implicit copy source: its `Write` fact keeps the
-//RS         // existing refusal path live. Keep the path empty so a struct
-//RS         // containing a declared view field is not copied wholesale.
-//RS         let sources = self.view_call_sources(e);
-//RS         if !sources.is_empty()
-//RS             && sources.iter().all(|(path, _, kind, access)| {
-//RS                 path.is_empty()
-//RS                     && *access == crate::Sema::ViewAccess::Read
-//RS                     && matches!(
-//RS                         kind,
-//RS                         crate::Sema::ViewKind::List
-//RS                             | crate::Sema::ViewKind::Buffer
-//RS                             | crate::Sema::ViewKind::Matrix
-//RS                     )
-//RS             })
-//RS         {
-//RS             return Some(ty.clone());
-//RS         }
-//RS         if !type_is_copy(ty)
-//RS             && matches!(e, Expr::Ident(..) | Expr::Field(..) | Expr::Index { .. })
-//RS             && expr_root_ident(e).is_some_and(|root| {
-//RS                 self.lookup(root).is_some_and(|info| {
-//RS                     matches!(
-//RS                         info.param_conv,
-//RS                         Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS                     )
-//RS                 })
-//RS             })
-//RS         {
-//RS             return Some(ty.clone());
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS     /// Infer an expression that is about to occupy an owning aggregate slot.
-//RS     ///
-//RS     /// Most owning positions provide an expected type, so `infer_checked` can
-//RS     /// insert the copy while it is checking that type. Collection literals,
-//RS     /// tuple/map entries, and unannotated payloads do not always have that
-//RS     /// context. Give those positions the same default materialization rule,
-//RS     /// with the same `Expr::Copy` node and the same policy gate.
-//RS     pub(crate) fn infer_owning_value(&mut self, e: &mut Expr) -> Option<Type> {
-//RS         let owns_if_arms = matches!(e.without_parens(), Expr::If { .. })
-//RS             && !matches!(
-//RS                 self.expected_type.as_ref(),
-//RS                 Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
-//RS             );
-//RS         let saved_if_depth = self.owning_if_value_depth;
-//RS         if owns_if_arms {
-//RS             self.owning_if_value_depth += 1;
-//RS         }
-//RS         let result = self.infer_owning_value_inner(e);
-//RS         self.owning_if_value_depth = saved_if_depth;
-//RS         result
-//RS     }
-//RS 
-//RS     fn infer_owning_value_inner(&mut self, e: &mut Expr) -> Option<Type> {
-//RS         let default_copy = !self.copies_explicit();
-//RS         let borrowed_param_place = matches!(e, Expr::Field(..) | Expr::Index { .. })
-//RS             && crate::Sema::Diagnostics::expr_root_ident(e).is_some_and(|root| {
-//RS                 self.lookup(root).is_some_and(|info| {
-//RS                     matches!(
-//RS                         info.param_conv,
-//RS                         Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS                     )
-//RS                 })
-//RS             });
-//RS         let saved_borrow_ctx = self.borrow_ctx;
-//RS         let saved_string_view_read = self.allow_string_view_read;
-//RS         if default_copy && borrowed_param_place {
-//RS             // A borrowed parameter projection is readable here because this
-//RS             // caller is an owning slot; defer the ownership decision until the
-//RS             // source type is known, then materialize it below.
-//RS             self.borrow_ctx = true;
-//RS         }
-//RS         if default_copy && matches!(e, Expr::Ident(name, _) if self.is_string_view(name)) {
-//RS             // String views keep `String` as their Jet type. Allow the read long
-//RS             // enough to turn it into the shared owning-copy node.
-//RS             self.allow_string_view_read = true;
-//RS         }
-//RS         let ty = self.infer(e);
-//RS         self.borrow_ctx = saved_borrow_ctx;
-//RS         self.allow_string_view_read = saved_string_view_read;
-//RS         let Some(ty) = ty else {
-//RS             return None;
-//RS         };
-//RS         if !default_copy
-//RS             || matches!(
-//RS                 self.expected_type.as_ref(),
-//RS                 Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
-//RS             )
-//RS         {
-//RS             return Some(ty);
-//RS         }
-//RS         let Some(target) = self.implicit_copy_target(e, &ty) else {
-//RS             return Some(ty);
-//RS         };
-//RS         if self
-//RS             .expected_type
-//RS             .as_ref()
-//RS             .is_some_and(|expected| expected != &target)
-//RS         {
-//RS             return Some(ty);
-//RS         }
-//RS         if self.is_cloneable_type(&target) {
-//RS             Some(self.insert_implicit_copy(e, &ty, &target))
-//RS         } else {
-//RS             Some(ty)
-//RS         }
-//RS     }
-//RS     /// Materialize a plain owned local read when it is the value of an
-//RS     /// owning `if` arm. Direct list/tuple/map elements retain their existing
-//RS     /// move semantics; only this conditional arm boundary needs the extra
-//RS     /// copy because the conditional itself is the owning value.
-//RS     fn materialize_if_arm_local_read(&mut self, e: &mut Expr, ty: &Type) {
-//RS         let Expr::Ident(name, name_span) = e else {
-//RS             return;
-//RS         };
-//RS         if type_is_copy(ty) {
-//RS             return;
-//RS         }
-//RS         if self.copies_explicit() {
-//RS             let diagnostic = Diagnostic::error(
-//RS                 "E0120",
-//RS                 format!("`{name}` was not copied here, so it cannot fill an owned conditional value"),
-//RS                 "this arm supplies a non-Copy value to an owning conditional result under `copies: .Explicit`"
-//RS                     .to_string(),
-//RS                 format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
-//RS                 Some(*name_span),
-//RS             );
-//RS             self.diags
-//RS                 .push(self.with_ownership_copy_edit(diagnostic, *name_span, Some(ty)));
-//RS             return;
-//RS         }
-//RS         if self.type_is_single_use(ty) || !self.is_cloneable_type(ty) {
-//RS             return;
-//RS         }
-//RS         let span = e.span();
-//RS         let old = std::mem::replace(e, Expr::Absent(span));
-//RS         *e = Expr::Copy(Box::new(old), span);
-//RS     }
-//RS 
-//RS     fn active_arithmetic_policy(
-//RS         &self,
-//RS         operation: crate::AST::ArithmeticOperation,
-//RS         operation_span: Span,
-//RS     ) -> Option<crate::AST::ArithmeticPolicyFact> {
-//RS         self.arithmetic_policy_stack
-//RS             .last()
-//RS             .copied()
-//RS             .map(|mut fact| {
-//RS                 fact.operation_span = operation_span;
-//RS                 fact.operation = Some(operation);
-//RS                 fact
-//RS             })
-//RS     }
-//RS 
-//RS     fn policy_call(
-//RS         &self,
-//RS         mode: crate::AST::ArithmeticMode,
-//RS         inner: Expr,
-//RS         fact: crate::AST::ArithmeticPolicyFact,
-//RS     ) -> Expr {
-//RS         let span = fact.operation_span;
-//RS         Expr::Call(Call {
-//RS             name: mode.builtin().to_string(),
-//RS             name_span: span,
-//RS             type_args: Vec::new(),
-//RS             args: vec![crate::AST::CallArg {
-//RS                 convention: AccessConvention::Read,
-//RS                 expr: inner,
-//RS                 span,
-//RS                 flags: CallArgFlags {
-//RS                     arithmetic_policy: Some(fact),
-//RS                     ..CallArgFlags::default()
-//RS                 },
-//RS                 label: None,
-//RS                 spread: false,
-//RS             }],
-//RS             resolved_ret: None,
-//RS             range_checked: false,
-//RS             widen_approx: false,
-//RS         })
-//RS     }
-//RS 
-//RS     fn push_hidden_cost_lint(
-//RS         &mut self,
-//RS         operation: &str,
-//RS         fix: &str,
-//RS         span: Span,
-//RS         edit: TextEdit,
-//RS     ) {
-//RS         let diagnostic = Diagnostic::from_row(
-//RS             "L2510",
-//RS             &[("operation", operation), ("fix", fix)],
-//RS             Some(span),
-//RS         )
-//RS         .with_edit(edit);
-//RS         if !self.diags.iter().any(|previous| {
-//RS             previous.code == diagnostic.code
-//RS                 && previous.span == diagnostic.span
-//RS                 && previous.what == diagnostic.what
-//RS         }) {
-//RS             self.diags.push(diagnostic);
-//RS         }
-//RS     }
-//RS 
-//RS     fn report_hidden_cost_in_loop(&mut self, e: &Expr, source: &Type, target: &Type) {
-//RS         if self.loop_depth == 0 || !type_owns_heap(target, self.registry) {
-//RS             return;
-//RS         }
-//RS         let view_source = owned_type_for_read_view(source).is_some()
-//RS             || (matches!(source, Type::String)
-//RS                 && matches!(e, Expr::Ident(name, _) if self.is_string_view(name)))
-//RS             || (matches!(source, Type::List(_)) && {
-//RS                 let sources = self.view_call_sources(e);
-//RS                 !sources.is_empty()
-//RS                     && sources.into_iter().all(|(_, _, kind, access)| {
-//RS                         access == crate::Sema::ViewAccess::Read
-//RS                             && matches!(
-//RS                                 kind,
-//RS                                 crate::Sema::ViewKind::List
-//RS                                     | crate::Sema::ViewKind::Buffer
-//RS                                     | crate::Sema::ViewKind::Matrix
-//RS                             )
-//RS                     })
-//RS             });
-//RS         // A generic owning clone has no safe local rewrite that reduces its
-//RS         // cost. Keep this lint for view materialization only, where the
-//RS         // explicit `~` source edit is concrete and applicable.
-//RS         if !view_source {
-//RS             return;
-//RS         }
-//RS         let Some(edit) = super::stdlib_lints::explicit_copy_edit(self, e) else {
-//RS             return;
-//RS         };
-//RS         let operation = format!("this copy of `{}` view into an owned slot", target.show());
-//RS         self.push_hidden_cost_lint(
-//RS             &operation,
-//RS             Syntax::SIGIL_COPY,
-//RS             e.span(),
-//RS             edit,
-//RS         );
-//RS     }
-//RS 
-//RS     pub(crate) fn insert_implicit_copy(
-//RS         &mut self,
-//RS         e: &mut Expr,
-//RS         source: &Type,
-//RS         target: &Type,
-//RS     ) -> Type {
-//RS         let span = e.span();
-//RS         self.report_hidden_cost_in_loop(e, source, target);
-//RS         let old = std::mem::replace(e, Expr::Absent(span));
-//RS         *e = Expr::Copy(Box::new(old), span);
-//RS         if matches!(target, Type::Shared(_)) {
-//RS             self.record_memory_event(crate::Sema::MemoryEvent::new(
-//RS                 crate::Sema::MemoryEventKind::RetainRelease,
-//RS                 span,
-//RS                 format!(
-//RS                     "implicit copy of `{}` retains a shared reference",
-//RS                     target.show()
-//RS                 ),
-//RS             ));
-//RS         } else if type_owns_heap(target, self.registry) {
-//RS             self.record_memory_event(crate::Sema::MemoryEvent::new(
-//RS                 crate::Sema::MemoryEventKind::Allocation,
-//RS                 span,
-//RS                 format!(
-//RS                     "implicit copy of `{}` allocates owned heap data",
-//RS                     target.show()
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         target.clone()
-//RS     }
-//RS 
-//RS     /// D-FOUND-LITERAL1=A (card #2789): an expected nominal type may opt into
-//RS     /// the existing `Int`/`Float` literal carriers through one validated
-//RS     /// compile-time constructor. This rewrites only the typed tree; all
-//RS     /// backends continue to lower an ordinary resolved method call.
-//RS     fn rewrite_contextual_literal(&mut self, e: &mut Expr) {
-//RS         let expected = match self.expected_type.clone() {
-//RS             Some(Type::Tagged { inner, .. }) => *inner,
-//RS             Some(expected) => expected,
-//RS             None => return,
-//RS         };
-//RS         let (type_name, owner_type_args) = match &expected {
-//RS             Type::Named(name) => (name.clone(), Vec::new()),
-//RS             Type::Apply { name, args } => (name.clone(), args.clone()),
-//RS             _ => return,
-//RS         };
-//RS         let (capability, source) = match e {
-//RS             Expr::Int(..) => (crate::Generics::LITERAL_INT, true),
-//RS             Expr::Float(..) => (crate::Generics::LITERAL_FLOAT, false),
-//RS             _ => return,
-//RS         };
-//RS         if !self.type_implements_trait_for_name(&type_name, capability) {
-//RS             return;
-//RS         }
-//RS         let span = e.span();
-//RS         let original = std::mem::replace(e, Expr::Absent(span));
-//RS         let argument = match (source, original) {
-//RS             (true, literal @ Expr::Int(..)) => literal,
-//RS             (false, Expr::Float(value, _, _, raw)) => Expr::Str(
-//RS                 vec![StrPart::Lit(raw.unwrap_or_else(|| value.to_string()))],
-//RS                 span,
-//RS             ),
-//RS             (_, original) => {
-//RS                 *e = original;
-//RS                 return;
-//RS             }
-//RS         };
-//RS         *e = Expr::MethodCall {
-//RS             receiver: Box::new(Expr::Ident(type_name, span)),
-//RS             method: crate::Generics::LITERAL_FROM_LITERAL.to_string(),
-//RS             method_span: span,
-//RS             owner_type_args,
-//RS             type_args: Vec::new(),
-//RS             args: vec![CallArg {
-//RS                 convention: AccessConvention::Read,
-//RS                 expr: argument,
-//RS                 span,
-//RS                 flags: CallArgFlags::default(),
-//RS                 label: None,
-//RS                 spread: false,
-//RS             }],
-//RS             recv_type: None,
-//RS             resolved_ret: None,
-//RS             operator_rhs: None,
-//RS             checked_widen: false,
-//RS         };
-//RS     }
-//RS 
-//RS     fn infer_call_like(&mut self, e: &mut Expr) -> Option<Type> {
-//RS         if super::optional_chain::is_optional_method_call(e) {
-//RS             return self.infer_optional_method_call(e);
-//RS         }
-//RS         match e {
-//RS             Expr::Call(call) => {
-//RS                 let span = call.name_span;
-//RS                 self.clear_uninit_mut_args(&call.args);
-//RS                 match self.check_call(call, true) {
-//RS                     Some(Some(t)) => Some(t),
-//RS                     Some(None) => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0116",
-//RS                             format!("`{}` doesn't hand back a value", call.name),
-//RS                             "a call is a value only when its function declares a result after the parameter list"
-//RS                                 .to_string(),
-//RS                             format!(
-//RS                                 "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) Type -> …`",
-//RS                                 call.name, call.name
-//RS                             ),
-//RS                             Some(span),
-//RS                         ));
-//RS                         None
-//RS                     }
-//RS                     None => None,
-//RS                 }
-//RS             }
-//RS             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
-//RS             other => {
-//RS                 jet_foundation::ice!(
-//RS                     Some(other.span()),
-//RS                     "infer_call_like requires Call or CallValue, got {other:?}"
-//RS                 )
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn infer_checked(&mut self, e: &mut Expr) -> Option<Type> {
-//RS         if super::optional_chain::is_optional_method_call(e) {
-//RS             return self.infer_optional_method_call(e);
-//RS         }
-//RS         self.rewrite_contextual_literal(e);
-//RS         if matches!(
-//RS             e,
-//RS             Expr::Field(..) | Expr::Index { .. } | Expr::MethodCall { .. }
-//RS         ) {
-//RS             if let Some(ty) = self.fold_comptime_struct_field(e) {
-//RS                 return Some(ty);
-//RS             }
-//RS         }
-//RS         // D-QUANTITY-CONVERT1=B: destination-owned exact conversion is
-//RS         // fallible at runtime; the explicit `_rounded` spelling carries the
-//RS         // ratified mode and destination decimal precision. Codegen emits these
-//RS         // real methods on the concrete destination type from the same UnitFact
-//RS         // coefficients.
-//RS         let conversion_span = e.span();
-//RS         let explicit_unit_conversion = if let Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             resolved_ret,
-//RS             ..
-//RS         } = &mut *e
-//RS         {
-//RS             if matches!(args.len(), 1 | 3) && method.starts_with("from_") {
-//RS                 if let Expr::Ident(destination_name, _) = receiver.as_ref() {
-//RS                     if let Some((destination_name, destination_fact)) =
-//RS                         self.unit_fact_for_type(&Type::Named(destination_name.clone()))
-//RS                     {
-//RS                         let source_ty = self.infer(&mut args[0].expr);
-//RS                         if let Some((source_name, source_fact)) = source_ty
-//RS                             .as_ref()
-//RS                             .and_then(|ty| self.unit_fact_for_type(ty))
-//RS                         {
-//RS                             let source_leaf =
-//RS                                 source_name.rsplit('.').next().unwrap_or(&source_name);
-//RS                             let expected = Syntax::conversion_method_for_source(source_leaf);
-//RS                             let exact = args.len() == 1 && method == &expected;
-//RS                             let rounded = args.len() == 3
-//RS                                 && method == &format!("{expected}_rounded")
-//RS                                 && matches!(
-//RS                                     &args[1].expr,
-//RS                                     Expr::EnumLit { type_name, variant, args, .. }
-//RS                                         if type_name.is_empty()
-//RS                                             && Syntax::unit_rounding_mode(variant).is_some()
-//RS                                             && args.is_empty()
-//RS                                 )
-//RS                                 && matches!(
-//RS                                     args[2].label.as_ref(),
-//RS                                     Some((label, _)) if label == "digits"
-//RS                                 );
-//RS                             let measured_crossing =
-//RS                                 source_fact.is_measured() || destination_fact.is_measured();
-//RS                             let rounded_gate = rounded
-//RS                                 && crate::Sema::knowledge_gate_allows(
-//RS                                     crate::Sema::KnowledgePlane::Unit,
-//RS                                     crate::Sema::KnowledgeGate::RoundedConversion,
-//RS                                 );
-//RS                             if ((exact && !measured_crossing) || rounded_gate)
-//RS                                 && source_fact.package == destination_fact.package
-//RS                                 && source_fact.family == destination_fact.family
-//RS                                 && source_fact.dimension == destination_fact.dimension
-//RS                                 && source_fact.kind == destination_fact.kind
-//RS                             {
-//RS                                 if !source_fact.conversion_is_finite_to(&destination_fact) {
-//RS                                     self.diags.push(
-//RS                                         self.unit_conversion_overflow_diagnostic(conversion_span),
-//RS                                     );
-//RS                                     return Some(Type::Named(destination_name));
-//RS                                 }
-//RS                                 if rounded {
-//RS                                     self.expect_core_arg(method, 2, &Type::Int, &mut args[2]);
-//RS                                     if matches!(
-//RS                                         &args[2].expr,
-//RS                                         Expr::Unary(
-//RS                                             crate::AST::UnOp::Neg,
-//RS                                             inner,
-//RS                                             _
-//RS                                         ) if matches!(inner.as_ref(), Expr::Int(..))
-//RS                                     ) {
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0127",
-//RS                                             "rounded unit conversion needs nonnegative digits"
-//RS                                                 .to_string(),
-//RS                                             "digits counts destination decimal places".to_string(),
-//RS                                             "write `digits: 0` or another nonnegative Int"
-//RS                                                 .to_string(),
-//RS                                             Some(args[2].expr.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                                 let converted = if measured_crossing {
-//RS                                     Type::Apply {
-//RS                                         name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
-//RS                                         args: vec![Type::Float],
-//RS                                     }
-//RS                                 } else {
-//RS                                     Type::Named(destination_name)
-//RS                                 };
-//RS                                 let ty = Type::Result {
-//RS                                     ok: Box::new(converted),
-//RS                                     err: Box::new(Type::String),
-//RS                                 };
-//RS                                 *resolved_ret = Some(ty.clone());
-//RS                                 Some(ty)
-//RS                             } else {
-//RS                                 None
-//RS                             }
-//RS                         } else {
-//RS                             None
-//RS                         }
-//RS                     } else {
-//RS                         None
-//RS                     }
-//RS                 } else {
-//RS                     None
-//RS                 }
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         } else {
-//RS             None
-//RS         };
-//RS         if let Some(ty) = explicit_unit_conversion {
-//RS             return Some(ty);
-//RS         }
-//RS 
-//RS         let borrowed = std::mem::take(&mut self.borrow_ctx);
-//RS         let implicit_string_view_copy = !borrowed
-//RS             && !self.copies_explicit()
-//RS             && matches!(self.expected_type.as_ref(), Some(Type::String))
-//RS             && matches!(e, Expr::Ident(name, _) if self.is_string_view(name));
-//RS         let saved_string_view_read = self.allow_string_view_read;
-//RS         if implicit_string_view_copy {
-//RS             self.allow_string_view_read = true;
-//RS         }
-//RS         // D-FMTPARENS1=A: grouping is transparent, so a borrow position stays
-//RS         // a borrow position for the parenthesized expression.
-//RS         if borrowed && matches!(e, Expr::Paren(..)) {
-//RS             self.borrow_ctx = true;
-//RS         }
-//RS         let ty = self.infer_inner(e);
-//RS         self.allow_string_view_read = saved_string_view_read;
-//RS         if let Some(aggregate_ty) = ty.as_ref() {
-//RS             let constructs_value = matches!(
-//RS                 e,
-//RS                 Expr::ListLit(..)
-//RS                     | Expr::MapLit(..)
-//RS                     | Expr::TupleLit(..)
-//RS                     | Expr::Call(..)
-//RS                     | Expr::MethodCall { .. }
-//RS                     | Expr::CallValue { .. }
-//RS                     | Expr::StructLit { .. }
-//RS                     | Expr::EnumLit { .. }
-//RS                     | Expr::Present(..)
-//RS                     | Expr::Ok(..)
-//RS                     | Expr::Err(..)
-//RS             );
-//RS             if constructs_value && self.cell_guard_storage_is_unsupported(aggregate_ty) {
-//RS                 self.report_cell_guard_storage(
-//RS                     format!(
-//RS                         "a Cell guard cannot be stored inside `{}`",
-//RS                         aggregate_ty.show()
-//RS                     ),
-//RS                     e.span(),
-//RS                 );
-//RS             }
-//RS         }
-//RS         if !borrowed {
-//RS             if !self.copies_explicit() {
-//RS                 if let Some((source, target)) = ty.as_ref().and_then(|source| {
-//RS                     self.implicit_copy_target(e, source)
-//RS                         .map(|target| (source.clone(), target))
-//RS                 }) {
-//RS                     if self
-//RS                         .expected_type
-//RS                         .as_ref()
-//RS                         .is_some_and(|expected| self.nominal_type_identity(expected, &target))
-//RS                         && self.is_cloneable_type(&target)
-//RS                     {
-//RS                         return Some(self.insert_implicit_copy(e, &source, &target));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if let Some(t) = &ty {
-//RS                 let borrowed_param_place = !type_is_copy(t)
-//RS                     && matches!(e, Expr::Field(..) | Expr::Index { .. })
-//RS                     && expr_root_ident(e).is_some_and(|root| {
-//RS                         self.lookup(root).is_some_and(|info| {
-//RS                             matches!(
-//RS                                 info.param_conv,
-//RS                                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS                             )
-//RS                         })
-//RS                     });
-//RS                 // D-MEM-COPYSEM1=A: a borrowed window (`View`/`ViewMut`/`Pin`)
-//RS                 // is not a value to duplicate. An `Expr::Copy` over a read view
-//RS                 // MEANS "materialize an owned value", so it erases the window's
-//RS                 // owner relation (`view_call_sources`' `Expr::Copy` arm) — the
-//RS                 // returned/bound window would then prove no source (E2307) and
-//RS                 // a later owner replacement would go unreported. The one place a
-//RS                 // read view becomes owned is the `implicit_copy_target` branch
-//RS                 // above, which fires only when the destination type IS the owned
-//RS                 // target (`View<T>` -> `[T]`, `View<str>` -> `String`).
-//RS                 if !borrowed_param_place
-//RS                     && !type_is_copy(t)
-//RS                     && !crate::Sema::CheckerCore::is_core_view_generic(t)
-//RS                     && field_read_to_clone(e, self.registry, self.imports)
-//RS                 {
-//RS                     if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(e) {
-//RS                         let borrowed_param = self.lookup(root).is_some_and(|info| {
-//RS                             matches!(
-//RS                                 info.param_conv,
-//RS                                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS                             )
-//RS                         });
-//RS                         if borrowed_param {
-//RS                             let path = field_path(e).unwrap_or_else(|| root.to_string());
-//RS                             let diagnostic = Diagnostic::error(
-//RS                                 "E0120",
-//RS                                 format!(
-//RS                                     "`{path}` is borrowed, so it cannot escape as an owned value"
-//RS                                 ),
-//RS                                 format!(
-//RS                                     "`{root}` is a parameter with read access; its fields are borrowed with it"
-//RS                                 ),
-//RS                                 format!(
-//RS                                     "copy it explicitly with `{}{path}`, or take `{root}` with the move marker `^` (`^{root}`)",
-//RS                                     Syntax::SIGIL_COPY
-//RS                                 ),
-//RS                                 Some(e.span()),
-//RS                             );
-//RS                             self.diags.push(self.with_ownership_copy_edit(
-//RS                                 diagnostic,
-//RS                                 crate::Sema::CheckerOwnership::copy_edit_anchor(e),
-//RS                                 Some(t),
-//RS                             ));
-//RS                             return ty;
-//RS                         }
-//RS                     }
-//RS                     // Only auto-copy when the field type is actually cloneable.
-//RS                     // A task-handle list (and other non-cloneable fields) must
-//RS                     // partial-move; wrapping them in `Copy` skips the E0211
-//RS                     // check and becomes a rustc rejection the user sees as an
-//RS                     // ICE (I2).
-//RS                     if self.is_cloneable_type(t) {
-//RS                         // D-CAP2 (D-MEM1/S4): the same `copy` node the user can write
-//RS                         // explicitly — one mechanism for "duplicate this value",
-//RS                         // whether the compiler inserts it or the user spells it.
-//RS                         let span = e.span();
-//RS                         let old = std::mem::replace(e, Expr::Absent(span));
-//RS                         *e = Expr::Copy(Box::new(old), span);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         ty
-//RS     }
-//RS 
-//RS     pub(crate) fn normalize_imported_core_expr(&mut self, e: &mut Expr) {
-//RS         let name = match &*e {
-//RS             Expr::Call(call) => call.name.clone(),
-//RS             _ => return,
-//RS         };
-//RS         if self.funcs.contains_key(&name) && !self.core_item_imports.contains_key(&name) {
-//RS             return;
-//RS         }
-//RS         let Some(item) = self.core_item_imports.get(&name).cloned() else {
-//RS             return;
-//RS         };
-//RS         crate::AST::rewrite_core_item_call(e, &item);
-//RS     }
-//RS 
-//RS     pub(crate) fn normalize_prelude_expr(&mut self, e: &mut Expr) {
-//RS         let (name, span) = match &*e {
-//RS             Expr::Call(call) => (call.name.clone(), call.name_span),
-//RS             _ => return,
-//RS         };
-//RS         if self.no_prelude
-//RS             || self.core_item_imports.contains_key(&name)
-//RS             || self.funcs.contains_key(&name)
-//RS             || self.lookup(&name).is_some()
-//RS         {
-//RS             return;
-//RS         }
-//RS         let Some(entry) = CorePrelude::entry(&name) else {
-//RS             return;
-//RS         };
-//RS         match entry.target {
-//RS             Target::Core { module, item } => {
-//RS                 let Some(alias) = crate::Sema::Prelude::core_alias_for(self.core_imports, module)
-//RS                     .map(str::to_owned)
-//RS                 else {
-//RS                     return;
-//RS                 };
-//RS                 let old = std::mem::replace(e, Expr::Absent(span));
-//RS                 let Expr::Call(call) = old else {
-//RS                     unreachable!("prelude normalization only replaces calls");
-//RS                 };
-//RS                 *e = Expr::MethodCall {
-//RS                     receiver: Box::new(Expr::Ident(alias.to_string(), call.name_span)),
-//RS                     method: item.to_string(),
-//RS                     method_span: call.name_span,
-//RS                     owner_type_args: Vec::new(),
-//RS                     type_args: call.type_args,
-//RS                     args: call.args,
-//RS                     recv_type: None,
-//RS                     resolved_ret: call.resolved_ret,
-//RS                     operator_rhs: None,
-//RS                     checked_widen: false,
-//RS                 };
-//RS             }
-//RS             // The existing assertion kernel is shared by AOT, JIT, and the
-//RS             // interpreter. These readable names only select that kernel.
-//RS             Target::Builtin if name == "assert" => {
-//RS                 if let Expr::Call(call) = e {
-//RS                     call.name = Syntax::BUILTIN_ASSERT.to_string();
-//RS                 }
-//RS             }
-//RS             Target::Builtin if name == "assert_eq" => {
-//RS                 if let Expr::Call(call) = e {
-//RS                     call.name = Syntax::BUILTIN_ASSERT_EQ.to_string();
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS 
-//RS     fn normalize_contextual_expr(&mut self, e: &mut Expr) {
-//RS         self.normalize_imported_core_expr(e);
-//RS         self.normalize_prelude_expr(e);
-//RS         // D-FAIL-ERROR1=A: labels make the default-error constructor
-//RS         // unambiguous. Outside a Result expectation, the one-message form is
-//RS         // also the constructor. In a Result expectation, one positional value
-//RS         // remains the existing typed `Err(e)` arm until sema sees its type.
-//RS         let err_constructor = match e {
-//RS             Expr::Call(call)
-//RS                 if call.name == Syntax::LIT_ERR
-//RS                     && !self.funcs.contains_key(&call.name)
-//RS                     && (call.args.len() != 1
-//RS                         || call.args.first().is_some_and(|arg| arg.label.is_some())
-//RS                         || !matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))) =>
-//RS             {
-//RS                 let wrap = matches!(self.expected_type.as_ref(), Some(Type::Result { .. }));
-//RS                 let placeholder = Expr::Absent(call.name_span);
-//RS                 let Expr::Call(call) = std::mem::replace(e, placeholder) else {
-//RS                     unreachable!()
-//RS                 };
-//RS                 Some(self.default_err_value(call, wrap))
-//RS             }
-//RS             _ => None,
-//RS         };
-//RS         if let Some(replacement) = err_constructor {
-//RS             *e = replacement;
-//RS         }
-//RS 
-//RS         // D-SHAPE3b: contextual Optional/Result spellings share one generic
-//RS         // literal path before sema lowers them to the existing dedicated nodes.
-//RS         // A user function still wins for bare `Ok`/`Err` calls.
-//RS         let contextual_result = match &mut *e {
-//RS             Expr::Call(call)
-//RS                 if !self.funcs.contains_key(&call.name)
-//RS                     && contextual_literal(&call.name) == Some(ContextualLiteral::Ok)
-//RS                     && call.args.is_empty()
-//RS                     && matches!(
-//RS                         self.expected_type.as_ref(),
-//RS                         Some(Type::Result { ok, .. })
-//RS                             if matches!(
-//RS                                 ok.as_ref(),
-//RS                                 Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE
-//RS                             )
-//RS                     ) =>
-//RS             {
-//RS                 let span = call.name_span;
-//RS                 Some(Expr::Ok(Box::new(Expr::Unit(span)), span))
-//RS             }
-//RS             Expr::Call(call)
-//RS                 if !self.funcs.contains_key(&call.name)
-//RS                     && matches!(
-//RS                         contextual_literal(&call.name),
-//RS                         Some(ContextualLiteral::Ok) | Some(ContextualLiteral::Err)
-//RS                     )
-//RS                     && call.args.len() == 1
-//RS                     && call.args[0].label.is_none() =>
-//RS             {
-//RS                 let is_ok = matches!(contextual_literal(&call.name), Some(ContextualLiteral::Ok));
-//RS                 let arg = call.args.pop().unwrap().expr;
-//RS                 let span = Span::new(call.name_span.start, arg.span().end);
-//RS                 Some(if is_ok {
-//RS                     Expr::Ok(Box::new(arg), span)
-//RS                 } else {
-//RS                     Expr::Err(Box::new(arg), span)
-//RS                 })
-//RS             }
-//RS             _ => None,
-//RS         };
-//RS         if let Some(replacement) = contextual_result {
-//RS             *e = replacement;
-//RS         }
-//RS 
-//RS         let contextual_variant = match (&mut *e, self.expected_type.as_ref()) {
-//RS             (
-//RS                 Expr::EnumLit {
-//RS                     type_name,
-//RS                     variant,
-//RS                     args,
-//RS                     leading_dot,
-//RS                     span,
-//RS                     variant_span: _,
-//RS                 },
-//RS                 expected,
-//RS             ) if type_name.is_empty() => {
-//RS                 let kind = contextual_literal(variant);
-//RS                 let allowed = if !*leading_dot {
-//RS                     matches!(
-//RS                         kind,
-//RS                         Some(ContextualLiteral::Value) | Some(ContextualLiteral::Null)
-//RS                     )
-//RS                 } else {
-//RS                     match (kind, expected) {
-//RS                         (
-//RS                             Some(ContextualLiteral::Value) | Some(ContextualLiteral::Null),
-//RS                             Some(Type::Option(_)),
-//RS                         )
-//RS                         | (
-//RS                             Some(ContextualLiteral::Ok) | Some(ContextualLiteral::Err),
-//RS                             Some(Type::Result { .. }),
-//RS                         ) => true,
-//RS                         _ => false,
-//RS                     }
-//RS                 };
-//RS                 if !allowed {
-//RS                     None
-//RS                 } else {
-//RS                     match (kind, args.len()) {
-//RS                         (Some(ContextualLiteral::Null), 0) => Some(Expr::Absent(*span)),
-//RS                         (Some(ContextualLiteral::Value), 1) => match args.pop().unwrap() {
-//RS                             EnumLitArg::Positional(inner) => {
-//RS                                 Some(Expr::Present(Box::new(inner), *span))
-//RS                             }
-//RS                             named @ EnumLitArg::Named { .. } => {
-//RS                                 args.push(named);
-//RS                                 None
-//RS                             }
-//RS                         },
-//RS                         (Some(ContextualLiteral::Ok), 1) => match args.pop().unwrap() {
-//RS                             EnumLitArg::Positional(inner) => Some(Expr::Ok(Box::new(inner), *span)),
-//RS                             named @ EnumLitArg::Named { .. } => {
-//RS                                 args.push(named);
-//RS                                 None
-//RS                             }
-//RS                         },
-//RS                         (Some(ContextualLiteral::Err), 1) => match args.pop().unwrap() {
-//RS                             EnumLitArg::Positional(inner) => {
-//RS                                 Some(Expr::Err(Box::new(inner), *span))
-//RS                             }
-//RS                             named @ EnumLitArg::Named { .. } => {
-//RS                                 args.push(named);
-//RS                                 None
-//RS                             }
-//RS                         },
-//RS                         _ => None,
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => None,
-//RS         };
-//RS         if let Some(replacement) = contextual_variant {
-//RS             *e = replacement;
-//RS         }
-//RS     }
-//RS 
-//RS     /// A direct valueless call is a legal effectful Result-handler branch when
-//RS     /// the handler itself is used as a statement. Ordinary expression calls
-//RS     /// still use `infer`, so a value-producing call keeps its normal type and
-//RS     /// ownership checks. This is the same call checker used by statement
-//RS     /// position; the handler adds no carrier or runtime operation.
-//RS     fn infer_pattern_branch_value(&mut self, cond: &Expr, value: &mut Expr) -> Option<Type> {
-//RS         // A value-if checked under a callable's Result contract still has
-//RS         // success-valued branches. Keep explicit `Ok`/`Err` constructors on
-//RS         // the carrier path, but let every other branch call use the normal
-//RS         // automatic propagation rule.
-//RS         let saved_expected = self.expected_type.clone();
-//RS         self.normalize_contextual_expr(value);
-//RS         if let Some(Type::Result { ok, .. }) = saved_expected.as_ref() {
-//RS             // A nested value-if (the next arm of a decision table) keeps the
-//RS             // carrier: its own arms decide between `Ok`/`Err` and plain values.
-//RS             if !matches!(
-//RS                 value.without_parens(),
-//RS                 Expr::Ok(..) | Expr::Err(..) | Expr::If { .. }
-//RS             ) {
-//RS                 self.expected_type = Some((**ok).clone());
-//RS             }
-//RS         }
-//RS         let result_pattern = matches!(
-//RS             cond,
-//RS             Expr::PatternTest {
-//RS                 pattern: crate::AST::Pattern::Ok { .. } | crate::AST::Pattern::Err { .. },
-//RS                 ..
-//RS             }
-//RS         );
-//RS         if !result_pattern {
-//RS             let branch_diverges = self.expr_definitely_diverges(value);
-//RS             let owning_arm = self.owning_if_value_depth > 0;
-//RS             if owning_arm {
-//RS                 // Consume one level while inferring the arm itself. A nested
-//RS                 // value-if gets its own level from `infer_owning_value`;
-//RS                 // ordinary reads inside this arm must keep their own mode.
-//RS                 self.owning_if_value_depth -= 1;
-//RS             }
-//RS             // Only a dispatch that is itself the statement root has statement
-//RS             // arms. A value-if nested in a statement's argument
-//RS             // (`print(if c -> f() else -> g())`) is an ordinary value, so its
-//RS             // arm calls unwrap their carriers like any other value position.
-//RS             let statement_arm = self.statement_expr_inference
-//RS                 && self.statement_expr_root_depth == Some(self.source_nesting);
-//RS             let saved_statement_root = self.statement_expr_root_depth;
-//RS             if statement_arm && matches!(value, Expr::If { .. }) {
-//RS                 // The next arm of a statement decision table continues the
-//RS                 // same statement root one source level deeper.
-//RS                 self.statement_expr_root_depth = Some(self.source_nesting + 1);
-//RS             }
-//RS             let result = if statement_arm || branch_diverges {
-//RS                 // A braced dispatch arm is a statement arm when the whole
-//RS                 // dispatch is used as a statement. Use the statement call
-//RS                 // checker for its tail so `print(...)` contributes Unit
-//RS                 // instead of entering value-only call inference (E0116).
-//RS                 // A diverging tail is also statement-shaped: it cannot
-//RS                 // contribute a value to the surrounding branch.
-//RS                 self.infer_fallible_stmt(value)
-//RS             } else if owning_arm {
-//RS                 self.infer_owning_value(value)
-//RS             } else {
-//RS                 self.infer(value)
-//RS             };
-//RS             self.statement_expr_root_depth = saved_statement_root;
-//RS             if owning_arm {
-//RS                 self.owning_if_value_depth += 1;
-//RS                 if let Some(arm_ty) = result.clone() {
-//RS                     self.materialize_if_arm_local_read(value, &arm_ty);
-//RS                 }
-//RS             }
-//RS             self.expected_type = saved_expected;
-//RS             return result;
-//RS         }
-//RS         let owning_arm = self.owning_if_value_depth > 0;
-//RS         if owning_arm {
-//RS             self.owning_if_value_depth -= 1;
-//RS         }
-//RS         self.normalize_contextual_expr(value);
-//RS         let Expr::Call(call) = value else {
-//RS             let result = if owning_arm {
-//RS                 self.infer_owning_value(value)
-//RS             } else {
-//RS                 self.infer(value)
-//RS             };
-//RS             if owning_arm {
-//RS                 self.owning_if_value_depth += 1;
-//RS                 if let Some(arm_ty) = result.clone() {
-//RS                     self.materialize_if_arm_local_read(value, &arm_ty);
-//RS                 }
-//RS             }
-//RS             self.expected_type = saved_expected;
-//RS             return result;
-//RS         };
-//RS         self.clear_uninit_mut_args(&call.args);
-//RS         let result = match self.check_call(call, true) {
-//RS             Some(Some(ty)) => self.auto_propagate_call(value, Some(ty)),
-//RS             Some(None) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-//RS             None => None,
-//RS         };
-//RS         if owning_arm {
-//RS             self.owning_if_value_depth += 1;
-//RS         }
-//RS         self.expected_type = saved_expected;
-//RS         result
-//RS     }
-//RS 
-// END-PORT-PENDING 0408 crates/jet-sema/src/Sema/CheckerInfer/expr.rs:1832-3269
+use jet_foundation.[AccessConvention, Type, Expr, StrPart, Call, CallArg, CallArgFlags, EnumLitArg, Span, Diagnostic, TextEdit, TryConvert, UnOp, Pattern, ArithmeticOperation, ArithmeticPolicyFact, ArithmeticMode]
+use jet_foundation.Syntax as Syntax
+use jet_foundation.Prelude as CorePrelude
+use jet_foundation.Prelude.[Target]
+use jet_foundation.RegexSyntax as RegexSyntax
+use jet_sema.[Checker, ViewAccess, ViewKind, MemoryEvent, MemoryEventKind, type_is_copy, type_owns_heap, type_uses_default_int, KnowledgePlane, KnowledgeGate, knowledge_gate_allows]
+use jet_sema.Diagnostics.[owned_type_for_read_view, expr_root_ident]
+use jet_sema.CheckerCore.[contextual_literal, ContextualLiteral, is_core_view_generic]
+use jet_sema.CheckerOwnership.[copy_edit_anchor]
+use jet_sema.CheckerInfer.expr.[field_path, field_read_to_clone, normalize_bare_method_head]
+use jet_sema.CheckerInfer.optional_chain.[is_optional_method_call]
+use jet_sema.CheckerInfer.stdlib_lints.[explicit_copy_edit]
+use jet_sema.Prelude.[core_alias_for]
+use jet_sema.Comptime.[validate_typed_boundary_literal]
+use jet_foundation.[noelse_terminated, rewrite_core_item_call]
+use jet_foundation.Generics as Generics
 
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:1832
+    pub fn rewrite_typed_boundary_literal(self: &Self, e: &Expr, type_name: String, span: Span) -> Type? {
+        kind :: Syntax.typed_head_kind(type_name).filter(value -> value.is_boundary()) ?? return None
+        if e != .Str(parts, literal_span) {
+            return self.rewrite_typed_text_literal(&e, kind.source_name(), span).map(_ -> Type.Named(kind.internal_type_name()))
+        }
+        has_holes :: parts.iter().any(part -> if part == { .Interp -> true; _ -> false })
+        if kind.forbids_holes() && has_holes {
+            self.diags.push(Diagnostic.error("E0155", "a `DateTime` literal cannot contain interpolation", "DateTime values are checked as complete RFC3339 literals before the program runs", "write a complete `DateTime{{\"…\"}}` literal, or parse a runtime String explicitly", Val(literal_span)))
+            return None
+        }
+        literals := [String]{""}
+        loop part in parts {
+            if part == {
+                .Lit(text) -> literals[literals.len() - 1].push_str(text)
+                .Interp -> literals.push("")
+            }
+        }
+        if validate_typed_boundary_literal(kind, literals) == .Err(reason) {
+            self.diags.push(Diagnostic.error("E0155", "this `{type_name}` literal is invalid", reason, "fix the literal, or parse a runtime String with the ordinary `{type_name}` constructor", Val(literal_span)))
+            return None
+        }
+        self.rewrite_typed_text_literal(&e, kind.source_name(), span).map(_ -> Type.Named(kind.internal_type_name()))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:1886
+    pub fn rewrite_regex_literal(self: &Self, e: &Expr, span: Span) -> Type? {
+        old :: e.replace(Expr.Absent(span))
+        if old != .Str(parts, literal_span) {
+            e = ^old
+            self.diags.push(Diagnostic.error("E0152", "`Regex.{{ … }}` needs one quoted pattern", "a regex typed literal contains pattern text, not another expression shape", "write `Regex.{{\"...\"}}`", Val(span)))
+            return None
+        }
+        if parts.len() != 1 || !(if parts[0] == { .Lit -> true; _ -> false }) {
+            e = Expr.Str(^parts, literal_span)
+            self.diags.push(Diagnostic.error("E0152", "a `Regex` literal cannot contain interpolation", "the compiler must know the complete pattern before the program runs", "use a fixed `Regex.{{\"...\"}}` pattern, or build text and call `re.compile(text)`", Val(literal_span)))
+            return None
+        }
+        if parts[0] == .Lit(pattern) {
+            if RegexSyntax.validate(pattern) == .Err(error) {
+                e = Expr.Str(^parts, literal_span)
+                self.diags.push(Diagnostic.error("E0152", "this regex pattern is invalid at position {error.offset}", error.reason, "fix the pattern at the reported position", Val(literal_span)))
+                return None
+            }
+        }
+        e = Expr.Call(Call{name: Syntax.TYPE_REGEX, name_span: span, type_args: [], args: [CallArg{convention: AccessConvention.Read, expr: Expr.Str(^parts, literal_span), span: literal_span, flags: CallArgFlags.default(), label: None, spread: false}], resolved_ret: None, range_checked: false, widen_approx: false})
+        Val(Type.Named(Syntax.TYPE_REGEX))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:1944
+    pub fn infer_statement_expr(self: &Self, expr: &Expr) -> Type? {
+        self.normalize_imported_core_expr(&expr)
+        self.normalize_prelude_expr(&expr)
+        saved_statement :: self.statement_expr_inference
+        saved_root :: self.statement_expr_root_depth
+        self.statement_expr_inference = true
+        paren_depth := 0
+        root := &expr
+        loop {
+            if root == .Paren(inner, _) { paren_depth += 1; root = &inner }
+            else { break }
+        }
+        direct_call :: if root == { .Call -> true; _ -> false }
+        self.statement_expr_root_depth = Val(self.source_nesting + paren_depth + if direct_call { 0 } else { 1 })
+        result :: self.infer_fallible_stmt(&expr)
+        self.statement_expr_inference = saved_statement
+        self.statement_expr_root_depth = saved_root
+        result
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:1982
+    pub fn auto_propagate_call(self: &Self, e: &Expr, result: Type?) -> Type? {
+        declared :: if e.without_parens() == {
+            .Call(call) -> ~call.resolved_ret
+            .MethodCall(resolved_ret: ret, ..) -> ~ret
+            _ -> None
+        }
+        // Stream is the executable protocol, never a failure rail.
+        if declared == .Val(.Apply(name, args)) && name == Syntax.TYPE_STREAM && args.len() == 1 -> return declared
+        never_failure :: if declared == { .Val(.Result(_, err)) -> err.is_never(); _ -> false }
+        if never_failure && (if self.expected_type == { .Val(.Result) -> true; _ -> false }) -> return result
+        if !never_failure {
+            if declared.filter(ty -> !ty.is_fallible()) == .Val(ret) {
+                carrier :: if result == { .Val(.Result), .Val(.Option) -> true; _ -> false }
+                if self.failure_carrier_inference && carrier {
+                    if self.failure_carrier == None { self.failure_carrier = ~result }
+                    self.task_body_propagates = true
+                    return Val(^ret)
+                }
+                if !result.is_some_and(ty -> ty.is_fallible()) -> return Val(^ret)
+            }
+        }
+        propagation_result :: if e.without_parens() == {
+            .MethodCall(resolved_ret: .Val(carrier), ..) && carrier.is_fallible() -> Val(~carrier)
+            _ -> ~result
+        }
+        inline_loop :: if e.without_parens() == {
+            .CallValue(callee, args, _) && args.is_empty() -> if callee == { .Lambda(lam) -> lam.meta.collecting_loop || lam.meta.result_loop; _ -> false }
+            _ -> false
+        }
+        nested_statement_value :: self.statement_expr_inference && self.statement_expr_root_depth.is_some_and(root -> self.source_nesting > root) && (self.failure_carrier_inference || (if self.ret == { .Val(.Result) -> true; _ -> false }))
+        never_carrier :: if propagation_result == { .Val(.Result(_, err)) -> err.is_never(); _ -> false }
+        result_carrier :: if propagation_result == { .Val(.Result) -> true; _ -> false }
+        expected_carrier :: if self.expected_type == { .Val(.Result) -> true; _ -> false }
+        if self.failure_carrier_inference && !never_carrier && result_carrier && (!expected_carrier || nested_statement_value) {
+            if self.failure_carrier == None { self.failure_carrier = ~propagation_result }
+            if nested_statement_value { self.ret = self.expected_type.or_else(fn() { ~propagation_result }) }
+            else if self.ret == None { self.ret = ~propagation_result }
+            self.task_body_propagates = true
+            if self.expected_type == None && !nested_statement_value -> return result
+        }
+        call_shape :: if e.without_parens() == { .Call, .MethodCall, .CallValue -> true; _ -> false }
+        expected_real_failure :: if self.expected_type == {
+            .Val(.Result(_, err)) -> !(if err == { .Named(name) -> name == Syntax.TYPE_NEVER; _ -> false })
+            _ -> false
+        }
+        if inline_loop || self.compiler_generated || !call_shape || !result_carrier || expected_real_failure -> return result
+        span :: e.span()
+        inner := e.replace(Expr.Absent(span))
+        convert := TryConvert.None
+        note := None
+        checked :: self.infer_try_with_inner_type(&inner, span, &convert, &note, ^propagation_result)
+        e = Expr.Try(^inner, span, ^convert, ^note)
+        checked
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2142
+    pub fn infer(self: &Self, e: &Expr) -> Type? {
+        suppress_auto :: self.failure_auto_root_suppression > 0
+        is_paren :: if e == { .Paren -> true; _ -> false }
+        if suppress_auto && !is_paren { self.failure_auto_root_suppression -= 1 }
+        if !self.enter_source_nesting(e.span()) -> return None
+        self.check_scoped_loan_read(e)
+        saved_expected :: ~self.expected_type
+        preserves_carrier :: if e.without_parens() == {
+            .Call, .MethodCall, .CallValue, .Lambda, .Ok, .Err, .Try, .If -> true
+            .EnumLit(type_name: type_name, variant: variant, leading_dot: true, ..) && type_name.is_empty() -> if contextual_literal(variant) == { .Val(.Ok), .Val(.Err) -> true; _ -> false }
+            _ -> false
+        }
+        if !preserves_carrier && saved_expected == .Val(.Result(ok, _)) { self.expected_type = Val(~ok) }
+        if e == .If { self.note_carrier_chain_subject(e) }
+        pattern_if :: if e == { .If(cond: cond, ..) -> if cond == { .PatternTest -> true; _ -> false }; _ -> false }
+        if pattern_if || ((if e == { .If -> true; _ -> false }) && noelse_terminated(e)) { self.check_noelse_dispatch_chain(e) }
+        result := Type?{None}
+        if self.fold_reflect_call(&e) == .Val(folded) { result = ^folded }
+        else {
+            if e == .Call { self.normalize_contextual_expr(&e) }
+            if self.implicit_loop_subject_depth > 0 || self.expected_type.is_some_and(ty -> if ty == { .Fn -> true; .Named(name) -> name == "UIShortcut"; _ -> false }) { normalize_bare_method_head(&e) }
+            if e == .Call || e == .CallValue { result = self.infer_call_like(&e) }
+            else { result = self.infer_checked(&e) }
+        }
+        self.expected_type = ^saved_expected
+        if !suppress_auto { result = self.auto_propagate_call(&e, ^result) }
+        if self.expr_definitely_diverges(e) || result.is_some_and(ty -> if ty == { .Named(name) -> name == Syntax.TYPE_NEVER; _ -> false }) { self.flow.reachable = false }
+        if result.is_some_and(ty -> type_uses_default_int(ty)) { self.uses_exact_int = true }
+        self.leave_source_nesting()
+        result
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2257
+    pub fn infer_without_auto_propagation(self: &Self, e: &Expr) -> Type? {
+        previous :: self.failure_auto_root_suppression
+        self.failure_auto_root_suppression += 1
+        result :: self.infer(&e)
+        if self.failure_auto_root_suppression > previous { self.failure_auto_root_suppression = previous }
+        result
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2270
+    pub fn infer_with_expected(self: &Self, e: &Expr, expected: &Type) -> Type? {
+        if type_uses_default_int(expected) { self.uses_exact_int = true }
+        saved :: self.expected_type.replace(Val(~expected))
+        result :: self.infer(&e)
+        self.expected_type = ^saved
+        result
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2286
+    fn infer_aggregate_value(self: &Self, e: &Expr, expected: &Type?) -> Type? {
+        escapes :: if e.without_parens() == { .Lambda -> true; _ -> false }
+        saved :: self.lambda_escapes
+        if escapes { self.lambda_escapes = true }
+        result :: if expected == { .Val(ty) -> self.infer_with_expected(&e, ty); .None -> self.infer_owning_value(&e) }
+        self.lambda_escapes = saved
+        result
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2304
+    pub fn implicit_copy_target(self: &Self, e: &Expr, ty: &Type) -> Type? {
+        if owned_type_for_read_view(ty) == .Val(target) -> return Val(^target)
+        if e == .Ident(name, _) && self.is_string_view(name) && ty == Type.String -> return Val(Type.String)
+        sources :: self.view_call_sources(e)
+        if !sources.is_empty() && sources.iter().all(fn((path, _, kind, access)) { path.is_empty() && access == ViewAccess.Read && (kind == ViewKind.List || kind == ViewKind.Buffer || kind == ViewKind.Matrix) }) -> return Val(~ty)
+        place :: if e == { .Ident, .Field, .Index -> true; _ -> false }
+        if !type_is_copy(ty) && place && expr_root_ident(e).is_some_and(root -> self.lookup(root).is_some_and(info -> info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write))) -> return Val(~ty)
+        None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2359
+    pub fn infer_owning_value(self: &Self, e: &Expr) -> Type? {
+        owns_arms :: (if e.without_parens() == { .If -> true; _ -> false }) && !self.expected_type.is_some_and(ty -> if ty == { .Apply(name, _) -> name == "View" || name == "ViewMut"; _ -> false })
+        saved :: self.owning_if_value_depth
+        if owns_arms { self.owning_if_value_depth += 1 }
+        result :: self.infer_owning_value_inner(&e)
+        self.owning_if_value_depth = saved
+        result
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2374
+    fn infer_owning_value_inner(self: &Self, e: &Expr) -> Type? {
+        default_copy :: !self.copies_explicit()
+        projection :: if e == { .Field, .Index -> true; _ -> false }
+        borrowed_place :: projection && expr_root_ident(e).is_some_and(root -> self.lookup(root).is_some_and(info -> info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write)))
+        saved_borrow :: self.borrow_ctx
+        saved_string :: self.allow_string_view_read
+        if default_copy && borrowed_place { self.borrow_ctx = true }
+        if default_copy && e == .Ident(name, _) && self.is_string_view(name) { self.allow_string_view_read = true }
+        inferred :: self.infer(&e)
+        self.borrow_ctx = saved_borrow
+        self.allow_string_view_read = saved_string
+        ty :: inferred ?? return None
+        expected_view :: self.expected_type.is_some_and(expected -> if expected == { .Apply(name, _) -> name == "View" || name == "ViewMut"; _ -> false })
+        if !default_copy || expected_view -> return Val(^ty)
+        target :: self.implicit_copy_target(e, ty) ?? return Val(^ty)
+        if self.expected_type.is_some_and(expected -> expected != target) -> return Val(^ty)
+        if self.is_cloneable_type(target) -> Val(self.insert_implicit_copy(&e, ty, target)) else -> Val(^ty)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2432
+    fn materialize_if_arm_local_read(self: &Self, e: &Expr, ty: &Type) {
+        if e != .Ident(name, name_span) -> return
+        if type_is_copy(ty) -> return
+        if self.copies_explicit() {
+            diagnostic :: Diagnostic.error("E0120", "`{name}` was not copied here, so it cannot fill an owned conditional value", "this arm supplies a non-Copy value to an owning conditional result under `copies: .Explicit`", "copy it explicitly with `{Syntax.SIGIL_COPY}{name}`", Val(name_span))
+            self.diags.push(self.with_ownership_copy_edit(diagnostic, name_span, Val(~ty)))
+            return
+        }
+        if self.type_is_single_use(ty) || !self.is_cloneable_type(ty) -> return
+        span :: e.span()
+        old :: e.replace(Expr.Absent(span))
+        e = Expr.Copy(^old, span)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2460
+    fn active_arithmetic_policy(self: &Self, operation: ArithmeticOperation, operation_span: Span) -> ArithmeticPolicyFact? {
+        fact := self.arithmetic_policy_stack.last().copied() ?? return None
+        fact.operation_span = operation_span
+        fact.operation = Val(operation)
+        Val(^fact)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2475
+    fn policy_call(self: &Self, mode: ArithmeticMode, inner: Expr, fact: ArithmeticPolicyFact) -> Expr {
+        span :: fact.operation_span
+        flags := CallArgFlags.default()
+        flags.arithmetic_policy = Val(^fact)
+        Expr.Call(Call{name: mode.builtin(), name_span: span, type_args: [], args: [CallArg{convention: AccessConvention.Read, expr: ^inner, span: span, flags: ^flags, label: None, spread: false}], resolved_ret: None, range_checked: false, widen_approx: false})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2503
+    fn push_hidden_cost_lint(self: &Self, operation: String, fix: String, span: Span, edit: TextEdit) {
+        diagnostic :: Diagnostic.from_row("L2510", [("operation", operation), ("fix", fix)], Val(span)).with_edit(edit)
+        if !self.diags.iter().any(previous -> previous.code == diagnostic.code && previous.span == diagnostic.span && previous.what == diagnostic.what) { self.diags.push(^diagnostic) }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2525
+    fn report_hidden_cost_in_loop(self: &Self, e: &Expr, source: &Type, target: &Type) {
+        if self.loop_depth == 0 || !type_owns_heap(target, self.registry) -> return
+        view_source := owned_type_for_read_view(source) != None || (source == Type.String && (if e == { .Ident(name, _) -> self.is_string_view(name); _ -> false }))
+        if !view_source && source == .List {
+            sources :: self.view_call_sources(e)
+            view_source = view_source || (!sources.is_empty() && sources.iter().all(fn((_, _, kind, access)) { access == ViewAccess.Read && (kind == ViewKind.List || kind == ViewKind.Buffer || kind == ViewKind.Matrix) }))
+        }
+        if !view_source -> return
+        edit :: explicit_copy_edit(self, e) ?? return
+        self.push_hidden_cost_lint("this copy of `{target.show()}` view into an owned slot", Syntax.SIGIL_COPY, e.span(), edit)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2563
+    pub fn insert_implicit_copy(self: &Self, e: &Expr, source: &Type, target: &Type) -> Type {
+        span :: e.span()
+        self.report_hidden_cost_in_loop(e, source, target)
+        old :: e.replace(Expr.Absent(span))
+        e = Expr.Copy(^old, span)
+        if target == .Shared {
+            self.record_memory_event(MemoryEvent.new(MemoryEventKind.RetainRelease, span, "implicit copy of `{target.show()}` retains a shared reference"))
+        } else if type_owns_heap(target, self.registry) {
+            self.record_memory_event(MemoryEvent.new(MemoryEventKind.Allocation, span, "implicit copy of `{target.show()}` allocates owned heap data"))
+        }
+        ~target
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2599
+    fn rewrite_contextual_literal(self: &Self, e: &Expr) {
+        expected :: if self.expected_type == { .Val(.Tagged(_, inner)) -> ~inner; .Val(ty) -> ~ty; .None -> return }
+        (type_name, owner_args) :: if expected == { .Named(name) -> (~name, []); .Apply(name, args) -> (~name, ~args); _ -> return }
+        (capability, source) :: if e == { .Int -> (Generics.LITERAL_INT, true); .Float -> (Generics.LITERAL_FLOAT, false); _ -> return }
+        if !self.type_implements_trait_for_name(type_name, capability) -> return
+        span :: e.span()
+        original :: e.replace(Expr.Absent(span))
+        argument :: if (source, original) == {
+            (true, .Int) -> ^original
+            (false, .Float(value, _, _, raw)) -> Expr.Str([StrPart.Lit(raw.unwrap_or_else(fn() { value.to_string() }))], span)
+            _ -> { e = ^original; return }
+        }
+        e = Expr.MethodCall{receiver: Expr.Ident(^type_name, span), method: Generics.LITERAL_FROM_LITERAL, method_span: span, owner_type_args: ^owner_args, type_args: [], args: [CallArg{convention: AccessConvention.Read, expr: ^argument, span: span, flags: CallArgFlags.default(), label: None, spread: false}], recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2652
+    fn infer_call_like(self: &Self, e: &Expr) -> Type? {
+        if is_optional_method_call(e) -> return self.infer_optional_method_call(&e)
+        if e == {
+            .Call(call) -> {
+                span :: call.name_span
+                self.clear_uninit_mut_args(call.args)
+                if self.check_call(&call, true) == {
+                    .Val(.Val(ty)) -> Val(^ty)
+                    .Val(.None) -> {
+                        self.diags.push(Diagnostic.error("E0116", "`{call.name}` doesn't hand back a value", "a call is a value only when its function declares a result after the parameter list", "inside an arm, wrap the call in `{{ … }}`; otherwise put `{call.name}` on its own line, or declare it as `fn {call.name}(…) Type -> …`", Val(span)))
+                        None
+                    }
+                    .None -> None
+                }
+            }
+            .CallValue(callee, args, span) -> self.infer_call_value(&callee, &args, span)
+            _ -> ice(Val(e.span()), "infer_call_like requires Call or CallValue, got {e}")
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2689
+    fn infer_checked(self: &Self, e: &Expr) -> Type? {
+        if is_optional_method_call(e) -> return self.infer_optional_method_call(&e)
+        self.rewrite_contextual_literal(&e)
+        if e == .Field || e == .Index || e == .MethodCall {
+            if self.fold_comptime_struct_field(&e) == .Val(ty) -> return Val(^ty)
+        }
+        conversion_span :: e.span()
+        // Destination-owned exact conversion is fallible; rounded carries the mode and precision.
+        if e == .MethodCall(receiver: receiver, method: method, args: args, resolved_ret: resolved_ret, ..) {
+            if (args.len() == 1 || args.len() == 3) && method.starts_with("from_") && receiver == .Ident(destination, _) {
+                if self.unit_fact_for_type(Type.Named(destination)) == .Val((destination_name, destination_fact)) {
+                    source_ty :: self.infer(&args[0].expr)
+                    if source_ty.and_then(ty -> self.unit_fact_for_type(ty)) == .Val((source_name, source_fact)) {
+                        source_leaf :: source_name.rsplit('.').next().unwrap_or(source_name)
+                        expected :: Syntax.conversion_method_for_source(source_leaf)
+                        exact :: args.len() == 1 && method == expected
+                        rounding_mode :: if args.len() == 3 {
+                            if args[1].expr == { .EnumLit(type_name: type_name, variant: variant, args: mode_args, ..) -> type_name.is_empty() && Syntax.unit_rounding_mode(variant) != None && mode_args.is_empty(); _ -> false }
+                        } else { false }
+                        rounded :: args.len() == 3 && method == "{expected}_rounded" && rounding_mode && args[2].label.is_some_and(fn((label, _)) { label == "digits" })
+                        measured_crossing :: source_fact.is_measured() || destination_fact.is_measured()
+                        rounded_gate :: rounded && knowledge_gate_allows(KnowledgePlane.Unit, KnowledgeGate.RoundedConversion)
+                        if ((exact && !measured_crossing) || rounded_gate) && source_fact.package == destination_fact.package && source_fact.family == destination_fact.family && source_fact.dimension == destination_fact.dimension && source_fact.kind == destination_fact.kind {
+                            if !source_fact.conversion_is_finite_to(destination_fact) {
+                                self.diags.push(self.unit_conversion_overflow_diagnostic(conversion_span))
+                                return Val(Type.Named(^destination_name))
+                            }
+                            if rounded {
+                                self.expect_core_arg(method, 2, Type.Int, &args[2])
+                                negative_digits :: if args[2].expr == { .Unary(UnOp.Neg, inner, _) -> if inner == { .Int -> true; _ -> false }; _ -> false }
+                                if negative_digits { self.diags.push(Diagnostic.error("E0127", "rounded unit conversion needs nonnegative digits", "digits counts destination decimal places", "write `digits: 0` or another nonnegative Int", Val(args[2].expr.span()))) }
+                            }
+                            converted :: if measured_crossing { Type.Apply(Syntax.TYPE_MEASUREMENT, [Type.Float]) } else { Type.Named(^destination_name) }
+                            ty :: Type.Result(^converted, Type.String)
+                            resolved_ret = Val(~ty)
+                            return Val(^ty)
+                        }
+                    }
+                }
+            }
+        }
+        borrowed :: self.borrow_ctx
+        self.borrow_ctx = false
+        implicit_string_copy :: !borrowed && !self.copies_explicit() && self.expected_type == Val(Type.String) && (if e == { .Ident(name, _) -> self.is_string_view(name); _ -> false })
+        saved_string :: self.allow_string_view_read
+        if implicit_string_copy { self.allow_string_view_read = true }
+        if borrowed && e == .Paren { self.borrow_ctx = true }
+        ty :: self.infer_inner(&e)
+        self.allow_string_view_read = saved_string
+        if ty == .Val(aggregate_ty) {
+            constructs :: if e == { .ListLit, .MapLit, .TupleLit, .Call, .MethodCall, .CallValue, .StructLit, .EnumLit, .Present, .Ok, .Err -> true; _ -> false }
+            if constructs && self.cell_guard_storage_is_unsupported(aggregate_ty) { self.report_cell_guard_storage("a Cell guard cannot be stored inside `{aggregate_ty.show()}`", e.span()) }
+        }
+        if !borrowed {
+            if !self.copies_explicit() && ty == .Val(source) {
+                if self.implicit_copy_target(e, source) == .Val(target) {
+                    if self.expected_type.is_some_and(expected -> self.nominal_type_identity(expected, target)) && self.is_cloneable_type(target) -> return Val(self.insert_implicit_copy(&e, source, target))
+                }
+            }
+            if ty == .Val(t) {
+                projection :: if e == { .Field, .Index -> true; _ -> false }
+                borrowed_place :: !type_is_copy(t) && projection && expr_root_ident(e).is_some_and(root -> self.lookup(root).is_some_and(info -> info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write)))
+                // Copy of a read view erases its source relation; only an owned destination materializes it.
+                if !borrowed_place && !type_is_copy(t) && !is_core_view_generic(t) && field_read_to_clone(e, self.registry, self.imports) {
+                    if expr_root_ident(e) == .Val(root) {
+                        borrowed_param :: self.lookup(root).is_some_and(info -> info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write))
+                        if borrowed_param {
+                            path :: field_path(e).unwrap_or_else(fn() { ~root })
+                            diagnostic :: Diagnostic.error("E0120", "`{path}` is borrowed, so it cannot escape as an owned value", "`{root}` is a parameter with read access; its fields are borrowed with it", "copy it explicitly with `{Syntax.SIGIL_COPY}{path}`, or take `{root}` with the move marker `^` (`^{root}`)", Val(e.span()))
+                            self.diags.push(self.with_ownership_copy_edit(diagnostic, copy_edit_anchor(e), Val(~t)))
+                            return ty
+                        }
+                    }
+                    // Noncloneable fields partial-move; they must not acquire a Copy node.
+                    if self.is_cloneable_type(t) {
+                        span :: e.span()
+                        old :: e.replace(Expr.Absent(span))
+                        e = Expr.Copy(^old, span)
+                    }
+                }
+            }
+        }
+        ty
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2951
+    pub fn normalize_imported_core_expr(self: &Self, e: &Expr) {
+        name :: if e == { .Call(call) -> ~call.name; _ -> return }
+        if self.funcs.contains_key(name) && !self.core_item_imports.contains_key(name) -> return
+        item :: self.core_item_imports.get(name) ?? return
+        rewrite_core_item_call(&e, item)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2965
+    pub fn normalize_prelude_expr(self: &Self, e: &Expr) {
+        (name, span) :: if e == { .Call(call) -> (~call.name, call.name_span); _ -> return }
+        if self.no_prelude || self.core_item_imports.contains_key(name) || self.funcs.contains_key(name) || self.lookup(name) != None -> return
+        entry :: CorePrelude.entry(name) ?? return
+        if entry.target == {
+            .Core(module, item) -> {
+                alias :: core_alias_for(self.core_imports, module) ?? return
+                old :: e.replace(Expr.Absent(span))
+                if old != .Call(call) -> unreachable("prelude normalization only replaces calls")
+                e = Expr.MethodCall{receiver: Expr.Ident(alias, call.name_span), method: item, method_span: call.name_span, owner_type_args: [], type_args: ^call.type_args, args: ^call.args, recv_type: None, resolved_ret: ^call.resolved_ret, operator_rhs: None, checked_widen: false}
+            }
+            .Builtin && name == "assert" -> if e == .Call(call) { call.name = Syntax.BUILTIN_ASSERT }
+            .Builtin && name == "assert_eq" -> if e == .Call(call) { call.name = Syntax.BUILTIN_ASSERT_EQ }
+            _ -> {}
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3020
+    fn normalize_contextual_expr(self: &Self, e: &Expr) {
+        self.normalize_imported_core_expr(&e)
+        self.normalize_prelude_expr(&e)
+        expects_result :: if self.expected_type == { .Val(.Result) -> true; _ -> false }
+        if e == .Call(call) && call.name == Syntax.LIT_ERR && !self.funcs.contains_key(call.name) && (call.args.len() != 1 || call.args.first().is_some_and(arg -> arg.label != None) || !expects_result) {
+            placeholder :: Expr.Absent(call.name_span)
+            old :: e.replace(placeholder)
+            if old != .Call(call) -> unreachable("default error constructor is a call")
+            e = self.default_err_value(^call, expects_result)
+        }
+        replacement := Expr?{None}
+        if e == .Call(call) && !self.funcs.contains_key(call.name) {
+            kind :: contextual_literal(call.name)
+            unit_result :: if self.expected_type == { .Val(.Result(.Named(name), _)) -> name == Syntax.INTERNAL_UNIT_TYPE; _ -> false }
+            if kind == Val(ContextualLiteral.Ok) && call.args.is_empty() && unit_result {
+                replacement = Val(Expr.Ok(Expr.Unit(call.name_span), call.name_span))
+            } else if (kind == Val(ContextualLiteral.Ok) || kind == Val(ContextualLiteral.Err)) && call.args.len() == 1 && call.args[0].label == None {
+                arg :: call.args.pop().unwrap().expr
+                span :: Span.new(call.name_span.start, arg.span().end)
+                replacement = Val(if kind == Val(ContextualLiteral.Ok) { Expr.Ok(^arg, span) } else { Expr.Err(^arg, span) })
+            }
+        }
+        if replacement == .Val(value) { e = ^value }
+        replacement = None
+        if e == .EnumLit(type_name: type_name, variant: variant, args: args, leading_dot: leading_dot, span: span, ..) && type_name.is_empty() {
+            kind :: contextual_literal(variant)
+            optional_kind :: kind == Val(ContextualLiteral.Value) || kind == Val(ContextualLiteral.Null)
+            result_kind :: kind == Val(ContextualLiteral.Ok) || kind == Val(ContextualLiteral.Err)
+            allowed :: if !leading_dot { optional_kind } else { (optional_kind && (if self.expected_type == { .Val(.Option) -> true; _ -> false })) || (result_kind && expects_result) }
+            if allowed {
+                if kind == Val(ContextualLiteral.Null) && args.len() == 0 { replacement = Val(Expr.Absent(span)) }
+                else if args.len() == 1 && (kind == Val(ContextualLiteral.Value) || result_kind) {
+                    arg :: args.pop().unwrap()
+                    if arg == {
+                        .Positional(inner) -> {
+                            replacement = Val(if kind == { .Val(.Value) -> Expr.Present(^inner, span); .Val(.Ok) -> Expr.Ok(^inner, span); _ -> Expr.Err(^inner, span) })
+                        }
+                        .Named -> args.push(^arg)
+                    }
+                }
+            }
+        }
+        if replacement == .Val(value) { e = ^value }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3169
+    fn infer_pattern_branch_value(self: &Self, cond: &Expr, value: &Expr) -> Type? {
+        saved_expected :: ~self.expected_type
+        self.normalize_contextual_expr(&value)
+        if saved_expected == .Val(.Result(ok, _)) && !(if value.without_parens() == { .Ok, .Err, .If -> true; _ -> false }) { self.expected_type = Val(~ok) }
+        result_pattern :: if cond == { .PatternTest(pattern: pattern, ..) -> if pattern == { .Ok, .Err -> true; _ -> false }; _ -> false }
+        if !result_pattern {
+            diverges :: self.expr_definitely_diverges(value)
+            owning_arm :: self.owning_if_value_depth > 0
+            if owning_arm { self.owning_if_value_depth -= 1 }
+            statement_arm :: self.statement_expr_inference && self.statement_expr_root_depth == Val(self.source_nesting)
+            saved_root :: self.statement_expr_root_depth
+            if statement_arm && value == .If { self.statement_expr_root_depth = Val(self.source_nesting + 1) }
+            result :: if statement_arm || diverges { self.infer_fallible_stmt(&value) } else if owning_arm { self.infer_owning_value(&value) } else { self.infer(&value) }
+            self.statement_expr_root_depth = saved_root
+            if owning_arm {
+                self.owning_if_value_depth += 1
+                if result == .Val(arm_ty) { self.materialize_if_arm_local_read(&value, arm_ty) }
+            }
+            self.expected_type = ^saved_expected
+            return result
+        }
+        owning_arm :: self.owning_if_value_depth > 0
+        if owning_arm { self.owning_if_value_depth -= 1 }
+        self.normalize_contextual_expr(&value)
+        if value != .Call(call) {
+            result :: if owning_arm { self.infer_owning_value(&value) } else { self.infer(&value) }
+            if owning_arm {
+                self.owning_if_value_depth += 1
+                if result == .Val(arm_ty) { self.materialize_if_arm_local_read(&value, arm_ty) }
+            }
+            self.expected_type = ^saved_expected
+            return result
+        }
+        self.clear_uninit_mut_args(call.args)
+        checked :: self.check_call(&call, true)
+        result :: if checked == {
+            .Val(.Val(ty)) -> self.auto_propagate_call(&value, Val(^ty))
+            .Val(.None) -> Val(Type.Named(Syntax.INTERNAL_UNIT_TYPE))
+            .None -> None
+        }
+        if owning_arm { self.owning_if_value_depth += 1 }
+        self.expected_type = ^saved_expected
+        result
+    }
+}

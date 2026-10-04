@@ -1,0 +1,11 @@
+use JetCodegen.Codegen.Receipt.[encode_byte_values, is_u8]
+use JetFoundation.MIR.[MirRuntimeValue, MirType, MirTypeKind]
+
+// Rust: crates/jet-codegen/src/Codegen/Receipt.rs:37-60
+#Test("receipt_checked_bytes_and_carrier_errors") {
+    assert(is_u8(&MirType.from_kind(MirTypeKind.IntN { signed: false, bits: 8 })))
+    assert(!is_u8(&MirType.from_kind(MirTypeKind.IntN { signed: true, bits: 8 })))
+    assert(encode_byte_values([MirRuntimeValue.Int(0), MirRuntimeValue.BigInt("255")]) == Ok(MirRuntimeValue.Bytes([0, 255])))
+    assert(encode_byte_values([MirRuntimeValue.Int(256)]) == Err("receipt byte list contains an out-of-range value"))
+    assert(encode_byte_values([MirRuntimeValue.Bool(true)]) == Err("receipt byte list contains a non-integer value"))
+}

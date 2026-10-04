@@ -1,1858 +1,407 @@
-// PORT-PENDING 0510 crates-jet-codegen-src-codegen-tir-mod-slice-10432: crates/jet-codegen/src/Codegen/TIR/mod.rs:10432-12285
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     fn direct_and_import_alias_core_calls_share_checked_source_target() {
-//RS         let source_path = "Core/http/http.jet";
-//RS         let direct_span = crate::Diagnostics::Span::new(0, 4);
-//RS         let alias_span = crate::Diagnostics::Span::new(20, 28);
-//RS         let mut name_ledger = jet_foundation::Names::NameLedger::default();
-//RS         for span in [direct_span, alias_span] {
-//RS             name_ledger.record_reference(
-//RS                 source_path.to_string(),
-//RS                 span.start,
-//RS                 span.end,
-//RS                 jet_foundation::Names::NameReference {
-//RS                     module_path: source_path.to_string(),
-//RS                     kind: "import_alias".to_string(),
-//RS                     def_span: span,
-//RS                     semantic_identity: None,
-//RS                 },
-//RS             );
-//RS         }
-//RS         let imports = std::collections::HashMap::from([
-//RS             ("core".to_string(), "core".to_string()),
-//RS             ("provider".to_string(), "core.http.client".to_string()),
-//RS         ]);
-//RS         let direct_receiver = Expr::Field(
-//RS             Box::new(Expr::Field(
-//RS                 Box::new(Expr::Ident("core".to_string(), direct_span)),
-//RS                 "http".to_string(),
-//RS                 crate::Diagnostics::Span::new(4, 8),
-//RS             )),
-//RS             "client".to_string(),
-//RS             crate::Diagnostics::Span::new(8, 14),
-//RS         );
-//RS         let alias_receiver = Expr::Ident("provider".to_string(), alias_span);
-//RS         let signature = crate::Codegen::CoreSourceFunctionSignature {
-//RS             module_identity: "<corelib>/Core/http::Core/http/client.jet".to_string(),
-//RS             type_params: Vec::new(),
-//RS             params: Vec::new(),
-//RS             return_type: Some(Type::Named("HTTPRequest".to_string())),
-//RS         };
-//RS         let signatures = std::collections::HashMap::from([(
-//RS             ("core.http.client".to_string(), "request".to_string()),
-//RS             signature,
-//RS         )]);
-//RS         let resolved_return = Type::Named("HTTPRequest".to_string());
-//RS 
-//RS         for receiver in [&direct_receiver, &alias_receiver] {
-//RS             let module = checked_core_module_path_from_receiver(
-//RS                 receiver,
-//RS                 &imports,
-//RS                 &name_ledger,
-//RS                 source_path,
-//RS             )
-//RS             .expect("checked Core import receiver");
-//RS             let signature = checked_core_source_signature(
-//RS                 &module,
-//RS                 "request",
-//RS                 Some(&resolved_return),
-//RS                 &signatures,
-//RS             )
-//RS             .expect("loaded source-owned Core function");
-//RS             assert_eq!(
-//RS                 signature.module_identity,
-//RS                 "<corelib>/Core/http::Core/http/client.jet"
-//RS             );
-//RS         }
-//RS         assert!(checked_core_source_signature(
-//RS             "core.http.client",
-//RS             "request",
-//RS             None,
-//RS             &signatures,
-//RS         )
-//RS         .is_none());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn private_core_function_edge_requires_checked_local_declaration() {
-//RS         let declaration_span = crate::Diagnostics::Span::new(40, 50);
-//RS         let declaration = jet_foundation::Names::NameDeclaration {
-//RS             module: 3,
-//RS             name: "trim_ascii".to_string(),
-//RS             path: "trim_ascii".to_string(),
-//RS             kind: "function".to_string(),
-//RS             span: declaration_span,
-//RS             visibility: jet_foundation::Names::NameVisibility::Private,
-//RS         };
-//RS         let resolved_return = Type::String;
-//RS 
-//RS         assert_eq!(
-//RS             checked_local_function_declaration_span(
-//RS                 3,
-//RS                 "trim_ascii",
-//RS                 Some(&resolved_return),
-//RS                 Some(&declaration),
-//RS             ),
-//RS             Some(declaration_span)
-//RS         );
-//RS         assert_eq!(
-//RS             checked_local_function_declaration_span(3, "trim_ascii", None, Some(&declaration)),
-//RS             None
-//RS         );
-//RS     }
-//RS     #[test]
-//RS     fn checked_database_template_uses_core_source_namespace_key() {
-//RS         let source =
-//RS             jet_foundation::CoreModuleExports::core_source_module("core.data")
-//RS                 .expect("database belongs to the loaded Core data source");
-//RS         assert_eq!(source.alias, "core_core_data");
-//RS         assert_eq!(source.module, "core.data");
-//RS 
-//RS         let owner = "<corelib>/Core/data::Core/data/data.jet";
-//RS         let signature = crate::Codegen::CoreSourceFunctionSignature {
-//RS             module_identity: owner.to_string(),
-//RS             type_params: vec!["T".to_string()],
-//RS             params: Vec::new(),
-//RS             return_type: None,
-//RS         };
-//RS         let signatures = std::collections::HashMap::from([(
-//RS             (source.module.to_string(), "database".to_string()),
-//RS             signature,
-//RS         )]);
-//RS         let checked = checked_imported_core_source_signature(
-//RS             source.alias,
-//RS             "database",
-//RS             owner,
-//RS             &signatures,
-//RS         )
-//RS         .expect("checked Core source signature resolves through its module namespace");
-//RS         assert_eq!(checked.type_params, ["T"]);
-//RS         assert!(checked_imported_core_source_signature(
-//RS             source.alias,
-//RS             "database",
-//RS             "wrong source identity",
-//RS             &signatures,
-//RS         )
-//RS         .is_none());
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn collect_test_spans(
-//RS     items: &[Item],
-//RS     module: usize,
-//RS     include_tests: bool,
-//RS     out: &mut Vec<(usize, crate::Diagnostics::Span, bool)>,
-//RS ) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Test(test) => out.push((module, test.span, include_tests && test.name.is_some())),
-//RS             Item::CodeModule(code_module) => {
-//RS                 if let Some(body) = &code_module.body {
-//RS                     collect_test_spans(body, module, include_tests, out);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn test_reference_enabled(
-//RS     bundle: &ProgramBundle,
-//RS     tests: &[(usize, crate::Diagnostics::Span, bool)],
-//RS     source: &str,
-//RS     start: usize,
-//RS     end: usize,
-//RS ) -> Option<bool> {
-//RS     tests
-//RS         .iter()
-//RS         .find(|(module, span, _)| {
-//RS             cost_module_path_matches(bundle, *module, source)
-//RS                 && start >= span.start
-//RS                 && end <= span.end
-//RS         })
-//RS         .map(|(_, _, included)| *included)
-//RS }
-//RS 
-//RS fn collect_trait_impl_callable_groups(
-//RS     items: &[Item],
-//RS     module: usize,
-//RS     index: &CostCallableIndex,
-//RS     groups: &mut Vec<Vec<usize>>,
-//RS ) {
-//RS     fn push_group(
-//RS         methods: &[crate::AST::Func],
-//RS         module: usize,
-//RS         index: &CostCallableIndex,
-//RS         groups: &mut Vec<Vec<usize>>,
-//RS     ) {
-//RS         let indices = methods
-//RS             .iter()
-//RS             .filter_map(|method| index.declared(module, method.name_span))
-//RS             .collect::<Vec<_>>();
-//RS         if !indices.is_empty() {
-//RS             groups.push(indices);
-//RS         }
-//RS     }
-//RS 
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Struct(definition) => {
-//RS                 for implementation in &definition.trait_impls {
-//RS                     push_group(&implementation.methods, module, index, groups);
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 for implementation in &definition.trait_impls {
-//RS                     push_group(&implementation.methods, module, index, groups);
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) if implementation.trait_name.is_some() => {
-//RS                 push_group(&implementation.methods, module, index, groups);
-//RS             }
-//RS             Item::CodeModule(code_module) => {
-//RS                 if let Some(body) = &code_module.body {
-//RS                     collect_trait_impl_callable_groups(body, module, index, groups);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-SHAPE-RESOURCE1=A: a Core `Close` implementation is reached implicitly by
-//RS /// scope-end cleanup of a live value, never through a source reference, so
-//RS /// reference reachability alone would prune it and leave the automatic close
-//RS /// without a lowered target. Collect its methods so they stay rooted.
-//RS fn collect_core_close_callables(
-//RS     items: &[Item],
-//RS     module: usize,
-//RS     index: &CostCallableIndex,
-//RS     out: &mut Vec<usize>,
-//RS ) {
-//RS     fn push_close(
-//RS         trait_name: &str,
-//RS         methods: &[crate::AST::Func],
-//RS         module: usize,
-//RS         index: &CostCallableIndex,
-//RS         out: &mut Vec<usize>,
-//RS     ) {
-//RS         if trait_name.rsplit('.').next() != Some(crate::Syntax::TRAIT_CLOSE) {
-//RS             return;
-//RS         }
-//RS         out.extend(
-//RS             methods
-//RS                 .iter()
-//RS                 .filter_map(|method| index.declared(module, method.name_span)),
-//RS         );
-//RS     }
-//RS 
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Struct(definition) => {
-//RS                 for implementation in &definition.trait_impls {
-//RS                     push_close(&implementation.trait_name, &implementation.methods, module, index, out);
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 for implementation in &definition.trait_impls {
-//RS                     push_close(&implementation.trait_name, &implementation.methods, module, index, out);
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 if let Some(trait_name) = &implementation.trait_name {
-//RS                     push_close(trait_name, &implementation.methods, module, index, out);
-//RS                 }
-//RS             }
-//RS             Item::CodeModule(code_module) => {
-//RS                 if let Some(body) = &code_module.body {
-//RS                     collect_core_close_callables(body, module, index, out);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn reachable_core_source_callables(
-//RS     bundle: &ProgramBundle,
-//RS     callables: &[TCostCallable],
-//RS     core_modules: &std::collections::HashSet<usize>,
-//RS     include_tests: bool,
-//RS     request: &MirArtifactRequest,
-//RS     entry_name: Option<&str>,
-//RS ) -> Vec<bool> {
-//RS     if core_modules.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS     let mut tests = Vec::new();
-//RS     for (module, data) in bundle.modules.iter().enumerate() {
-//RS         collect_test_spans(&data.items, module, include_tests, &mut tests);
-//RS     }
-//RS     let lookup = CostCallableIndex::new(bundle, callables);
-//RS     let functions = CostFunctionIndex::new(bundle);
-//RS     let mut rooted = callables.to_vec();
-//RS     for callable in &mut rooted {
-//RS         let is_core = core_modules.contains(&callable.module);
-//RS         let artifact_export = matches!(
-//RS             request.kind,
-//RS             jet_foundation::MIR::MirArtifactKind::NativeLibrary
-//RS                 | jet_foundation::MIR::MirArtifactKind::SandboxPlugin
-//RS         ) && callable.module == bundle.entry
-//RS             && bundle
-//RS                 .name_ledger
-//RS                 .declaration(callable.module, &callable.declaration_name)
-//RS                 .is_some_and(|declaration| declaration.visibility.is_exported());
-//RS         let selected_entry = entry_name.is_some_and(|entry| {
-//RS             let identity = artifact_plan::module_identity(bundle, callable.module);
-//RS             format!("{identity}::{}", callable.declaration_name) == entry
-//RS                 || (callable.module == bundle.entry && callable.source_name.as_deref() == Some(entry))
-//RS         });
-//RS         let ffi_callback = callable_semantic_identity(bundle, callable)
-//RS             .is_some_and(|identity| bundle.ffi_callback_fns.contains(&identity));
-//RS         let sampled_contract = functions
-//RS             .get(callable.module, callable.declaration_span)
-//RS             .is_some_and(|(function, _)| {
-//RS                 !function.pre.is_empty() && !function.params.is_empty()
-//RS             });
-//RS         // Keep private source-part bodies rooted because receiver resolution for
-//RS         // those compiler-owned callables has no source declaration to reference.
-//RS         let private_source = bundle
-//RS             .modules
-//RS             .get(callable.module)
-//RS             .is_some_and(|module| {
-//RS                 jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
-//RS                     .iter()
-//RS                     .any(|part| {
-//RS                         part.source.alias == module.alias
-//RS                             && part.source.path == module.display.as_str()
-//RS                     })
-//RS             });
-//RS         callable.root |= !is_core
-//RS             || (is_core && private_source)
-//RS             || artifact_export
-//RS             || selected_entry
-//RS             || ffi_callback
-//RS             || sampled_contract;
-//RS     }
-//RS 
-//RS     for ((source, start, end), reference) in bundle.name_ledger.references() {
-//RS         if !is_checked_function_reference(reference) {
-//RS             continue;
-//RS         }
-//RS         if test_reference_enabled(bundle, &tests, source, *start, *end) == Some(false) {
-//RS             continue;
-//RS         }
-//RS         if !callables_containing_reference(&lookup, source, *start, *end).is_empty() {
-//RS             continue;
-//RS         }
-//RS         if let Some(target) = callable_for_reference(bundle, &rooted, &lookup, reference) {
-//RS             // Selected outputs and enabled test bodies have no enclosing
-//RS             // callable row, but still contribute direct checked references.
-//RS             rooted[target].root = true;
-//RS         }
-//RS     }
-//RS 
-//RS     // An imported Core trait implementation is emitted as one Rust impl. Once
-//RS     // any explicit method is live, its siblings are required to keep that impl
-//RS     // complete; an otherwise unreachable implementation stays pruned.
-//RS     let mut trait_impl_groups = Vec::new();
-//RS     let mut close_callables = Vec::new();
-//RS     for (module, data) in bundle.modules.iter().enumerate() {
-//RS         if core_modules.contains(&module) {
-//RS             collect_trait_impl_callable_groups(
-//RS                 &data.items,
-//RS                 module,
-//RS                 &lookup,
-//RS                 &mut trait_impl_groups,
-//RS             );
-//RS             collect_core_close_callables(&data.items, module, &lookup, &mut close_callables);
-//RS         }
-//RS     }
-//RS     for index in close_callables {
-//RS         rooted[index].root = true;
-//RS     }
-//RS     let callees = cost_call_graph(bundle, &rooted, &lookup);
-//RS     let mut reachable = reachable_from_roots(&callees, &rooted);
-//RS     loop {
-//RS         let mut added_impl_method = false;
-//RS         for group in &trait_impl_groups {
-//RS             if group.iter().any(|index| reachable[*index]) {
-//RS                 for index in group {
-//RS                     if !rooted[*index].root {
-//RS                         rooted[*index].root = true;
-//RS                         added_impl_method = true;
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         if !added_impl_method {
-//RS             return reachable;
-//RS         }
-//RS         reachable = reachable_from_roots(&callees, &rooted);
-//RS     }
-//RS }
-//RS 
-//RS fn reachable_core_source_bodies(
-//RS     callables: &[TCostCallable],
-//RS     core_modules: &std::collections::HashSet<usize>,
-//RS     reachable: &[bool],
-//RS ) -> std::collections::HashSet<(usize, usize, usize)> {
-//RS     callables
-//RS         .iter()
-//RS         .zip(reachable)
-//RS         .filter_map(|(callable, reachable)| {
-//RS             (core_modules.contains(&callable.module) && *reachable).then_some((
-//RS                 callable.module,
-//RS                 callable.declaration_span.start,
-//RS                 callable.declaration_span.end,
-//RS             ))
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn should_lower_imported_core_body(
-//RS     core_modules: &std::collections::HashSet<usize>,
-//RS     reachable_bodies: &std::collections::HashSet<(usize, usize, usize)>,
-//RS     module: usize,
-//RS     function: &Func,
-//RS ) -> bool {
-//RS     !core_modules.contains(&module)
-//RS         || reachable_bodies.contains(&(module, function.name_span.start, function.name_span.end))
-//RS }
-//RS 
-//RS fn lowered_cost_method_matches(lowered: &str, expected: &str) -> bool {
-//RS     if lowered == expected || lowered.starts_with(&format!("{expected}__generic__")) {
-//RS         return true;
-//RS     }
-//RS     let Some((owner, method)) = expected.rsplit_once("::") else {
-//RS         return false;
-//RS     };
-//RS     lowered.starts_with(&format!("{owner}<")) && lowered.ends_with(&format!("::{method}"))
-//RS }
-//RS 
-//RS fn lowered_cost_function_matches(lowered: &str, expected: &str) -> bool {
-//RS     lowered == expected
-//RS         || lowered.starts_with(&format!("{expected}__va"))
-//RS         || lowered.starts_with(&format!("{expected}__generic__"))
-//RS }
-//RS 
-//RS fn cost_callable_lowered_name(bundle: &ProgramBundle, callable: &TCostCallable) -> Option<String> {
-//RS     if callable.module == bundle.entry {
-//RS         return Some(if callable.method {
-//RS             callable.declaration_name.replace('.', "::")
-//RS         } else {
-//RS             callable.declaration_name.clone()
-//RS         });
-//RS     }
-//RS     if callable.method {
-//RS         // D-MOD-CYCLE1=A: an impl in a package sibling lowers under the
-//RS         // identity of the file that declares its owner type.
-//RS         let owner_type = callable
-//RS             .declaration_name
-//RS             .split('.')
-//RS             .next()
-//RS             .unwrap_or(&callable.declaration_name);
-//RS         let owner = bundle
-//RS             .name_ledger
-//RS             .module_identity(impl_owner_module(bundle, callable.module, owner_type))?;
-//RS         return Some(format!(
-//RS             "{owner}::{}",
-//RS             callable.declaration_name.replace('.', "::")
-//RS         ));
-//RS     }
-//RS     let module = bundle.modules.get(callable.module)?;
-//RS     let module_alias = bundle.name_ledger.module_alias(callable.module)?;
-//RS     let relative_path = callable
-//RS         .declaration_path
-//RS         .strip_prefix(&format!("{module_alias}."))
-//RS         .unwrap_or(callable.declaration_path.as_str());
-//RS     let namespace = relative_path
-//RS         .rsplit_once('.')
-//RS         .map(|(parent, _)| parent.rsplit('.').next().unwrap_or(parent))
-//RS         .map_or_else(|| mangle(module.alias.as_str()), mangle);
-//RS     let source_name = callable.source_name.as_deref()?;
-//RS     Some(format!("{namespace}::{}", mangle(source_name)))
-//RS }
-//RS 
-//RS fn cost_callable_is_covered(
-//RS     bundle: &ProgramBundle,
-//RS     callable: &TCostCallable,
-//RS     lowered: &std::collections::HashMap<crate::Diagnostics::Span, Vec<&TFunc>>,
-//RS ) -> bool {
-//RS     let Some(source_span) = callable.source_span else {
-//RS         return false;
-//RS     };
-//RS     let Some(functions) = lowered.get(&source_span) else {
-//RS         return false;
-//RS     };
-//RS     let Some(expected) = cost_callable_lowered_name(bundle, callable) else {
-//RS         return false;
-//RS     };
-//RS     functions.iter().any(|function| {
-//RS         if !callable.method {
-//RS             return lowered_cost_function_matches(&function.name, &expected);
-//RS         }
-//RS         match &function.kind {
-//RS             // A trait-impl method keeps its bare trait-owned name (`compare`)
-//RS             // and carries its owner on the kind, so qualify it here instead of
-//RS             // reporting a lowered derive or hand-written impl as a gap.
-//RS             TFuncKind::TraitMethod { owner_type, .. } => {
-//RS                 lowered_cost_trait_method_matches(owner_type, &function.name, &expected)
-//RS             }
-//RS             _ => lowered_cost_method_matches(&function.name, &expected),
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn lowered_cost_trait_method_matches(owner_type: &Type, method: &str, expected: &str) -> bool {
-//RS     let Some((owner, expected_method)) = expected.rsplit_once("::") else {
-//RS         return false;
-//RS     };
-//RS     // Compare owner leaves: the entry module keeps source spellings, an
-//RS     // imported owner carries its module identity, and a generic owner its
-//RS     // arguments; the matching source span already pins the declaration.
-//RS     fn owner_leaf(name: &str) -> &str {
-//RS         let base = name.split('<').next().unwrap_or(name);
-//RS         base.rsplit("::").next().unwrap_or(base)
-//RS     }
-//RS     method == expected_method && owner_leaf(&owner_type.name()) == owner_leaf(owner)
-//RS }
-//RS 
-//RS fn collect_cost_typed_conversions(
-//RS     body: &[crate::AST::Stmt],
-//RS     names: &mut std::collections::BTreeSet<String>,
-//RS ) {
-//RS     for statement in body {
-//RS         statement.for_each_expr(|expression| {
-//RS             if let Expr::Try(_, _, crate::AST::TryConvert::Typed { fn_name, .. }, _) = expression {
-//RS                 names.insert(fn_name.clone());
-//RS             }
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS fn find_cost_error_conversion<'a>(
-//RS     items: &'a [Item],
-//RS     name: &str,
-//RS ) -> Option<&'a crate::AST::ErrorConvDef> {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::ErrorConv(conversion)
-//RS                 if crate::Sema::error_conv_fn_name(&conversion.from_ty, &conversion.to_ty)
-//RS                     == name =>
-//RS             {
-//RS                 return Some(conversion);
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     if let Some(conversion) = find_cost_error_conversion(body, name) {
-//RS                         return Some(conversion);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn cost_error_conversion_gaps(
-//RS     bundle: &ProgramBundle,
-//RS     program: &TirProgram,
-//RS     callables: &[TCostCallable],
-//RS     reachable: &[bool],
-//RS ) -> Vec<String> {
-//RS     let functions = CostFunctionIndex::new(bundle);
-//RS     let mut required = std::collections::BTreeSet::new();
-//RS     for (callable, is_reachable) in callables.iter().zip(reachable.iter().copied()) {
-//RS         if !is_reachable || callable.foreign {
-//RS             continue;
-//RS         }
-//RS         let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
-//RS             continue;
-//RS         };
-//RS         collect_cost_typed_conversions(&function.body, &mut required);
-//RS     }
-//RS 
-//RS     // A conversion body is itself checked code. Keep following its typed
-//RS     // conversions so a filtered conversion cannot hide a second omitted body.
-//RS     loop {
-//RS         let mut changed = false;
-//RS         for name in required.iter().cloned().collect::<Vec<_>>() {
-//RS             let Some(conversion) = bundle
-//RS                 .modules
-//RS                 .iter()
-//RS                 .find_map(|module| find_cost_error_conversion(&module.items, &name))
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             let before = required.len();
-//RS             collect_cost_typed_conversions(&conversion.body, &mut required);
-//RS             changed |= required.len() != before;
-//RS         }
-//RS         if !changed {
-//RS             break;
-//RS         }
-//RS     }
-//RS 
-//RS     required
-//RS         .into_iter()
-//RS         .filter_map(|name| {
-//RS             let conversion = bundle
-//RS                 .modules
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .find_map(|(module, data)| {
-//RS                     find_cost_error_conversion(&data.items, &name)
-//RS                         .map(|conversion| (module, conversion))
-//RS                 });
-//RS             let Some((module, conversion)) = conversion else {
-//RS                 return Some(format!(
-//RS                     "typed error conversion `{name}` has no checked declaration"
-//RS                 ));
-//RS             };
-//RS             let covered = program.funcs.iter().any(|function| {
-//RS                 function.name == name && function.source_span == conversion.from_span
-//RS             });
-//RS             if covered {
-//RS                 return None;
-//RS             }
-//RS             let module_label = bundle
-//RS                 .modules
-//RS                 .get(module)
-//RS                 .map(|module| module.display.as_str())
-//RS                 .unwrap_or("<unknown module>");
-//RS             Some(format!(
-//RS                 "{module_label}:{name} (reachable typed error conversion has no complete TIR body)"
-//RS             ))
-//RS         })
-//RS         .collect()
-//RS }
-//RS fn cost_coverage_gaps(bundle: &ProgramBundle, program: &TirProgram) -> Vec<String> {
-//RS     let app_graph = crate::Sema::extract_app_graph(bundle).0;
-//RS     let callables = cost_callables(bundle, app_graph.as_ref());
-//RS     let reachable = reachable_cost_callables(bundle, &callables);
-//RS     let mut lowered = std::collections::HashMap::<_, Vec<&TFunc>>::new();
-//RS     for function in &program.funcs {
-//RS         lowered.entry(function.source_span).or_default().push(function);
-//RS     }
-//RS     let mut gaps = callables
-//RS         .iter()
-//RS         .zip(reachable.iter().copied())
-//RS         .filter_map(|(callable, reachable)| {
-//RS             (reachable && !callable.foreign && !cost_callable_is_covered(bundle, callable, &lowered))
-//RS                 .then(|| {
-//RS                     let reason = if callable.type_parameterized {
-//RS                         "type-parameterized callable has no complete TIR specialization"
-//RS                     } else {
-//RS                         "sema-checked callable is outside typed TIR coverage"
-//RS                     };
-//RS                     format!("{} ({reason})", callable.label)
-//RS                 })
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     gaps.extend(cost_error_conversion_gaps(
-//RS         bundle, program, &callables, &reachable,
-//RS     ));
-//RS     gaps.sort();
-//RS     gaps.dedup();
-//RS     gaps
-//RS }
-//RS 
-//RS /// Project typed cost facts from the frozen TIR.  Lowering remains the sole
-//RS /// producer of the fact channel; CLI tooling and linting consume this one
-//RS /// report instead of reconstructing cost from emitted Rust.
-//RS pub fn cost_report(bundle: &ProgramBundle) -> Result<TCostReport, TCostReportError> {
-//RS     let request = MirArtifactRequest::new(
-//RS         jet_foundation::MIR::MirArtifactTarget::RustAot,
-//RS         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-//RS         MirArtifactBuildMode::Dev,
-//RS     );
-//RS     let program = match lower_checked_tir_program_for(bundle, request) {
-//RS         Ok(program) => program,
-//RS         Err(error)
-//RS             if matches!(
-//RS                 error.message.as_str(),
-//RS                 NO_RUNNABLE_ENTRY | CLI_ENTRY_MISSING_RUN
-//RS             ) =>
-//RS         {
-//RS             return Ok(TCostReport::default());
-//RS         }
-//RS         Err(error) => {
-//RS             return Err(TCostReportError::Lowering {
-//RS                 reason: error.message,
-//RS             });
-//RS         }
-//RS     };
-//RS     let gaps = cost_coverage_gaps(bundle, &program);
-//RS     if !gaps.is_empty() {
-//RS         return Err(TCostReportError::Incomplete { surfaces: gaps });
-//RS     }
-//RS     // Cost lints describe the user's program. Core library bodies and
-//RS     // compiler-synthesized functions (derive/serde builders) are not code the
-//RS     // user wrote, and their spans do not index the user's source.
-//RS     let core_files = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .filter(|module| module.is_core_source())
-//RS         .map(|module| module.display.as_str())
-//RS         .collect::<std::collections::HashSet<_>>();
-//RS     let mut report = TCostReport::default();
-//RS     for function in program
-//RS         .funcs
-//RS         .iter()
-//RS         .filter(|function| {
-//RS             !function.synthetic && !core_files.contains(function.source_file.as_str())
-//RS         })
-//RS     {
-//RS         collect_cost_stmts(
-//RS             &function.body,
-//RS             &function.name,
-//RS             function.source_span,
-//RS             0,
-//RS             &mut report.sites,
-//RS         );
-//RS     }
-//RS     Ok(report)
-//RS }
-//RS 
-//RS /// The result of the read-only lowering coverage pass used by project checks.
-//RS ///
-//RS /// This is deliberately separate from [`cost_report`].  The cost projection
-//RS /// consumes a completed JIT program; a check must not use that lowerer's
-//RS /// omission behavior as a coverage oracle.  This pass walks the sema-owned
-//RS /// callable denominator and asks the same TIR coverage predicates that the
-//RS /// emitters use, without emitting Rust, invoking rustc, or starting a runtime.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct TirCoverageIssue {
-//RS     /// Adapter whose checked route could not cover the callable.
-//RS     pub tier: &'static str,
-//RS     /// Stable sema declaration label, including its module path.
-//RS     pub callable: String,
-//RS     /// The structural refusal or missing route that needs attention.
-//RS     pub reason: String,
-//RS     /// Source declaration span for the diagnostic row.
-//RS     pub span: crate::Diagnostics::Span,
-//RS }
-//RS 
-//RS /// Validate the native AOT and default JIT TIR routes without probing either
-//RS /// emitter.  `AOT` validates every callable the native item emitter would
-//RS /// visit; `JIT` validates only sema-reachable callables, matching the existing
-//RS /// call-graph denominator used by cost coverage.
-//RS pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
-//RS     let app_graph = crate::Sema::extract_app_graph(bundle).0;
-//RS     let callables = cost_callables(bundle, app_graph.as_ref());
-//RS     let reachable = reachable_cost_callables(bundle, &callables);
-//RS     let mut contexts = std::collections::HashMap::new();
-//RS     let mut issues = Vec::new();
-//RS 
-//RS     for (index, callable) in callables.iter().enumerate() {
-//RS         if callable.foreign {
-//RS             // Foreign and inline-foreign bodies are checked by their bridge,
-//RS             // not by Jet TIR. They remain in the denominator for graph
-//RS             // reachability but are not a TIR coverage miss.
-//RS             continue;
-//RS         }
-//RS         let Some(module) = bundle.modules.get(callable.module) else {
-//RS             issues.push(TirCoverageIssue {
-//RS                 tier: "AOT",
-//RS                 callable: callable.label.clone(),
-//RS                 reason: "callable points at a missing module".to_string(),
-//RS                 span: callable.declaration_span,
-//RS             });
-//RS             if reachable[index] {
-//RS                 issues.push(TirCoverageIssue {
-//RS                     tier: "JIT",
-//RS                     callable: callable.label.clone(),
-//RS                     reason: "callable points at a missing module".to_string(),
-//RS                     span: callable.declaration_span,
-//RS                 });
-//RS             }
-//RS             continue;
-//RS         };
-//RS         let cx = contexts.entry(callable.module).or_insert_with(|| {
-//RS             let extern_funcs = bundle_extern_funcs(bundle);
-//RS             let mut cx = build_cx_items(
-//RS                 &module.items,
-//RS                 &module.source,
-//RS                 &module.display,
-//RS                 None,
-//RS                 &extern_funcs,
-//RS                 &bundle.edition,
-//RS             );
-//RS             populate_cx_from_bundle(&mut cx, bundle, callable.module);
-//RS             register_own_struct_shapes(&mut cx, bundle, callable.module);
-//RS             crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
-//RS             register_foreign_enum_variants(&mut cx, bundle, callable.module);
-//RS             update_cloneability_with_foreign_types(&mut cx, &module.items);
-//RS             cx
-//RS         });
-//RS         let outcome = validate_tir_callable(&module.items, callable.declaration_span, cx);
-//RS         match outcome {
-//RS             Some(Ok(())) => {}
-//RS             Some(Err(reason)) => {
-//RS                 issues.push(TirCoverageIssue {
-//RS                     tier: "AOT",
-//RS                     callable: callable.label.clone(),
-//RS                     reason: reason.clone(),
-//RS                     span: callable.declaration_span,
-//RS                 });
-//RS                 if reachable[index] {
-//RS                     issues.push(TirCoverageIssue {
-//RS                         tier: "JIT",
-//RS                         callable: callable.label.clone(),
-//RS                         reason,
-//RS                         span: callable.declaration_span,
-//RS                     });
-//RS                 }
-//RS             }
-//RS             None => {
-//RS                 let reason = "checked callable has no TIR validation route".to_string();
-//RS                 issues.push(TirCoverageIssue {
-//RS                     tier: "AOT",
-//RS                     callable: callable.label.clone(),
-//RS                     reason: reason.clone(),
-//RS                     span: callable.declaration_span,
-//RS                 });
-//RS                 if reachable[index] {
-//RS                     issues.push(TirCoverageIssue {
-//RS                         tier: "JIT",
-//RS                         callable: callable.label.clone(),
-//RS                         reason,
-//RS                         span: callable.declaration_span,
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     issues.sort_by(|left, right| {
-//RS         left.tier
-//RS             .cmp(right.tier)
-//RS             .then(left.callable.cmp(&right.callable))
-//RS             .then(left.span.start.cmp(&right.span.start))
-//RS     });
-//RS     issues.dedup();
-//RS     issues
-//RS }
-//RS 
-//RS /// Return `Some(Ok)` when the declaration is on the checked TIR route,
-//RS /// `Some(Err)` when the route is known but unsupported, and `None` when the
-//RS /// sema declaration cannot be matched to an AST item.
-//RS fn validate_tir_callable(
-//RS     items: &[Item],
-//RS     declaration_span: crate::Diagnostics::Span,
-//RS     cx: &mut Cx,
-//RS ) -> Option<Result<(), String>> {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) if function.name_span == declaration_span => {
-//RS                 if function.inline_foreign.is_some() {
-//RS                     return Some(Ok(()));
-//RS                 }
-//RS                 if tir_covers(function, cx) {
-//RS                     return Some(Ok(()));
-//RS                 }
-//RS                 return Some(Err(format!(
-//RS                     "function is outside tir_covers ({})",
-//RS                     refusal::describe(cx)
-//RS                 )));
-//RS             }
-//RS             Item::Struct(definition) => {
-//RS                 if let Some(method) = definition
-//RS                     .methods
-//RS                     .iter()
-//RS                     .find(|method| method.name_span == declaration_span)
-//RS                 {
-//RS                     return Some(validate_tir_method(
-//RS                         method,
-//RS                         &definition.name,
-//RS                         None,
-//RS                         false,
-//RS                         cx,
-//RS                     ));
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     if let Some(method) = implementation
-//RS                         .methods
-//RS                         .iter()
-//RS                         .find(|method| method.name_span == declaration_span)
-//RS                     {
-//RS                         return Some(validate_tir_method(
-//RS                             method,
-//RS                             &definition.name,
-//RS                             Some(implementation.trait_name.as_str()),
-//RS                             implementation.compiler_generated,
-//RS                             cx,
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 if let Some(method) = definition
-//RS                     .methods
-//RS                     .iter()
-//RS                     .find(|method| method.name_span == declaration_span)
-//RS                 {
-//RS                     return Some(validate_tir_method(
-//RS                         method,
-//RS                         &definition.name,
-//RS                         None,
-//RS                         false,
-//RS                         cx,
-//RS                     ));
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     if let Some(method) = implementation
-//RS                         .methods
-//RS                         .iter()
-//RS                         .find(|method| method.name_span == declaration_span)
-//RS                     {
-//RS                         return Some(validate_tir_method(
-//RS                             method,
-//RS                             &definition.name,
-//RS                             Some(implementation.trait_name.as_str()),
-//RS                             implementation.compiler_generated,
-//RS                             cx,
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 if implementation
-//RS                     .os_target
-//RS                     .is_some_and(|target| target != cx.active_os)
-//RS                 {
-//RS                     if implementation
-//RS                         .methods
-//RS                         .iter()
-//RS                         .any(|method| method.name_span == declaration_span)
-//RS                     {
-//RS                         return Some(Ok(()));
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS                 if let Some(method) = implementation
-//RS                     .methods
-//RS                     .iter()
-//RS                     .find(|method| method.name_span == declaration_span)
-//RS                 {
-//RS                     return Some(validate_tir_method(
-//RS                         method,
-//RS                         &implementation.type_name,
-//RS                         implementation.trait_name.as_deref(),
-//RS                         implementation.is_generated_serde,
-//RS                         cx,
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     if let Some(result) = validate_tir_callable(body, declaration_span, cx) {
-//RS                         return Some(result);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn validate_tir_method(
-//RS     method: &crate::AST::Func,
-//RS     owner: &str,
-//RS     trait_name: Option<&str>,
-//RS     compiler_generated: bool,
-//RS     cx: &mut Cx,
-//RS ) -> Result<(), String> {
-//RS     let covered = match trait_name {
-//RS         Some(trait_name) => {
-//RS             tir_covers_trait_method(method, owner, cx, trait_name)
-//RS                 || (compiler_generated && tir_covers_compiler_derive_method(method, cx))
-//RS         }
-//RS         None => tir_covers_method(method, owner, cx),
-//RS     };
-//RS     if covered {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(format!(
-//RS             "method is outside tir_covers ({})",
-//RS             refusal::describe(cx)
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS /// D-MEM-COPYSEM1=A: classify a checked AST read-window source once and use
-//RS /// Foundation's `MirViewCopyKind::symbol` for the shared Prelude kernel name.
-//RS /// MIR consumers repeat the same classification on canonical `MirType`; no
-//RS /// tier-specific symbol ladder is allowed at this producer boundary.
-//RS 
-//RS pub fn view_copy_kind(source: &Type) -> Option<MirViewCopyKind> {
-//RS     match source {
-//RS         Type::Tagged { inner, .. } => view_copy_kind(inner),
-//RS         Type::String => Some(MirViewCopyKind::String),
-//RS         Type::List(_) | Type::FixedList { .. } => Some(MirViewCopyKind::List),
-//RS         Type::Apply { name, args }
-//RS             if args.len() == 1 && matches!(name.as_str(), "View" | "ViewMut") =>
-//RS         {
-//RS             if matches!(
-//RS                 &args[0],
-//RS                 Type::Named(element) if element == "str"
-//RS             ) {
-//RS                 Some(MirViewCopyKind::String)
-//RS             } else {
-//RS                 Some(MirViewCopyKind::List)
-//RS             }
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn view_copy_view_element(source: &Type) -> Option<&Type> {
-//RS     match source {
-//RS         Type::Tagged { inner, .. } => view_copy_view_element(inner),
-//RS         Type::Apply { name, args }
-//RS             if args.len() == 1 && matches!(name.as_str(), "View" | "ViewMut") =>
-//RS         {
-//RS             Some(&args[0])
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-MEM-COPYSEM1=A: the owned destination type a `View<T>` window
-//RS /// materializes into. `None` means the source is not a declared view window
-//RS /// and the caller keeps its own type.
-//RS pub fn view_copy_owned_type(source: &Type) -> Option<Type> {
-//RS     let element = view_copy_view_element(source)?;
-//RS     if matches!(element, Type::Named(name) if name == "str") {
-//RS         Some(Type::String)
-//RS     } else {
-//RS         Some(Type::List(Box::new(element.clone())))
-//RS     }
-//RS }
-//RS 
-//RS /// Typed allocator constructor fact carried by TIR into the shared MIR
-//RS /// allocation operation. No backend constructor spelling crosses this seam.
-//RS #[derive(Clone)]
-//RS pub enum TAllocCtor {
-//RS     Arena,
-//RS     Bump,
-//RS     Pool,
-//RS     /// `Fixed.new(size: N)` carries sema's positive comptime capacity.
-//RS     Fixed {
-//RS         size: usize,
-//RS     },
-//RS     /// `Fixed.over` borrows an existing mutable fixed byte buffer.
-//RS     FixedOver,
-//RS }
-//RS /// Return the allocator constructor owner from sema's checked method facts.
-//RS ///
-//RS /// The front end rewrites core-module constructor receivers to their nominal
-//RS /// sentinel (`Arena`, `Bump`, `Pool`, or `Fixed`) before TIR sees the checked
-//RS /// AST. Keep constructor admission on that carried dispatch fact rather than
-//RS /// re-walking source spelling or guessing from a backend name.
-//RS pub(crate) fn allocator_constructor_owner<'a>(
-//RS     recv_type: Option<&'a str>,
-//RS     method: &str,
-//RS ) -> Option<&'a str> {
-//RS     let owner = recv_type?;
-//RS     let valid = match owner {
-//RS         "Arena" | "Bump" | "Pool" => method == "new",
-//RS         "Fixed" => matches!(method, "new" | "over"),
-//RS         _ => false,
-//RS     };
-//RS     valid.then_some(owner)
-//RS }
-//RS 
-//RS /// #4318: the copy fact of a call argument sema marked for copying: a
-//RS /// shared-reference retain is a share; an owning parameter filled from a
-//RS /// value the caller keeps materializes (D-MEM-COPYSEM1).
-//RS pub(crate) fn call_arg_copy_fact(arc_clone: bool) -> jet_foundation::MIR::MirCopyFact {
-//RS     if arc_clone {
-//RS         jet_foundation::MIR::MirCopyFact::Share
-//RS     } else {
-//RS         jet_foundation::MIR::MirCopyFact::Materialize
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub enum TExprKind {
-//RS     /// Integer literal with its D-SG9 width (`None` = default `Int`/i64). The
-//RS     /// width is the elaborated `(signed, bits)` sema attached to the AST node.
-//RS     IntLit(i64, Option<(bool, u8)>),
-//RS     FloatLit(f64),
-//RS     BoolLit(bool),
-//RS     CharLit(char),
-//RS     /// String literal / interpolation. Each part is literal text or an
-//RS     /// interpolated TExpr (totally typed, like every other node).
-//RS     StrLit(Vec<TStrPart>),
-//RS     /// A local or parameter slot, resolved to its Jet binding name plus the
-//RS     /// by-reference deref fact. Emit spells the Rust place; no engine parses it.
-//RS     Local(TLocal),
-//RS     /// Unit / default / uninit / comptime / host forms — structured facts only.
-//RS     /// Scalar comptime values use IntLit/BoolLit/CharLit via `lower_comptime_scalar`.
-//RS     Unit,
-//RS     /// Compiler-private result block used by finite yielding loops. Unlike a
-//RS     /// lambda, it executes in the current function, so `return` and cleanup
-//RS     /// retain ordinary loop semantics.
-//RS     InlineBlock(Vec<TStmt>),
-//RS     DefaultLit,
-//RS     Uninit,
-//RS     CtLit(crate::AST::CtValue),
-//RS     HostCall(Box<THostCall>),
-//RS     /// A reference to a declared (non-comptime) const, by its Jet name. Emit
-//RS     /// resolves the Rust static name; other engines look the value up by the
-//RS     /// same Jet name in their own const table.
-//RS     ConstRef(String),
-//RS     /// D-ENC-DYN1: collect the ordered `Data` object entries a
-//RS     /// `TPatternPosition::DataEntries` test captured into the user-visible map.
-//RS     DataEntriesToMap(TLocal),
-//RS     /// Call to a plain top-level function. Each arg carries its emit decisions.
-//RS     Call {
-//RS         name: String,
-//RS         /// D-GENERIC-CALL1=A: explicit source-level type arguments. This is
-//RS         /// separate from value arguments so result-only generics retain their
-//RS         /// specialization in every execution tier.
-//RS         type_args: Vec<Type>,
-//RS         args: Vec<TCallArg>,
-//RS     },
-//RS     /// Transparent constructor for an unchecked distinct value. Resident JIT
-//RS     /// lowers this to the base scalar; AOT emits the nominal tuple constructor.
-//RS     DistinctCtor {
-//RS         name: String,
-//RS         arg: Box<TExpr>,
-//RS         base: Type,
-//RS     },
-//RS     /// D-RANGETYPE1: checked constructor for `distinct Int(lo..hi)` under
-//RS     /// postfix `?`. Emits `__jet_T::try_new(arg)` returning `Result<__jet_T,
-//RS     /// String>`; the enclosing `Try` node handles propagation.
-//RS     RangeCheckedCtor {
-//RS         name: String,
-//RS         arg: Box<TExpr>,
-//RS     },
-//RS     /// D-SHAPE-CONVERT1=A: numeric-backed distinct/unit conversion. `op`
-//RS     /// converts the named source into the distinct base; emit then wraps the
-//RS     /// value, composing a fallible numeric conversion and/or range check.
-//RS     DistinctConvert {
-//RS         name: String,
-//RS         arg: Box<TExpr>,
-//RS         op: TNumericOp,
-//RS         range: Option<(i64, i64)>,
-//RS         /// Sema's authoritative return contract. A literal may discharge a
-//RS         /// distinct range check, but never a conversion declared fallible.
-//RS         fallible: bool,
-//RS     },
-//RS     /// D-QUANTITY-CONVERT1=B: a checked or explicitly rounded conversion
-//RS     /// between two members of one package-owned unit family. The backend sees
-//RS     /// only erased Float values and resolved conversion coefficients.
-//RS     UnitConvert {
-//RS         destination: String,
-//RS         arg: Box<TExpr>,
-//RS         scale: crate::AST::UnitRatio,
-//RS         offset: crate::AST::UnitRatio,
-//RS         rounding: Option<(jet_foundation::UnitRoundingMode, Box<TExpr>)>,
-//RS         fallible: bool,
-//RS         /// First-order relative standard uncertainty contributed by measured
-//RS         /// unit scales. `None` keeps the ordinary exact quantity result.
-//RS         relative_uncertainty: Option<f64>,
-//RS         file: String,
-//RS         line: u32,
-//RS     },
-//RS     /// D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
-//RS     /// `Vec3(x,y,z)` / `Mat3(…)`, or a static method `F32x4.splat(x)` /
-//RS     /// `Vec3.from_array(a)`. Emits the prelude free function `{root}jet_math_<T>_<fn>(…)`
-//RS     /// (`_new` for the constructor) with plainly-lowered float/array args.
-//RS     MathBuiltin {
-//RS         type_name: String,
-//RS         func: String,
-//RS         args: Vec<TExpr>,
-//RS     },
-//RS     /// D-DECIMAL1 / D-NUMTYPE1: precise numeric ctor/method/binop.
-//RS     PreciseBuiltin {
-//RS         type_name: String,
-//RS         func: String,
-//RS         args: Vec<TExpr>,
-//RS     },
-//RS     /// `print(x)` — the one builtin the subset covers.
-//RS     Print(Box<TExpr>),
-//RS     /// Explicit terminal ownership consumption.
-//RS     Drop(Box<TExpr>),
-//RS     /// Explicit resource close operation.
-//RS     Close(Box<TExpr>),
-//RS     /// D-LIN1-DROP (ratified 2026-06-25): `drop(x)` — deliberately discard a
-//RS     /// value (a `#SingleUse` value's audited terminal consumption). Lowers to a
-//RS     /// plain `drop(arg)` in Rust: a move-to-nowhere whose `Drop` runs. No
-//RS     /// `unsafe` is emitted (I3) — the `#Unsafe` gate is a sema-only audit.
-//RS     /// Explicit source `AccessConvention::Move` for a Core argument.  This
-//RS     /// ownership marker is distinct from the Core row's borrow mask: a
-//RS     /// non-borrowed scalar/value argument may still be read or copied, while
-//RS     /// this node is emitted only when sema proved an owning move.
-//RS     Move(Box<TExpr>),
-//RS     ResourceNew(Box<TExpr>),
-//RS     ResourceTake(TLocal),
-//RS     /// c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). A bare call
-//RS     /// (no module alias) lowering to `{root}jet_std_io_input(None|Some(&(prompt)))`,
-//RS     /// byte-for-byte the ambient-input call branch. `prompt` is `Some` when a String
-//RS     /// prompt arg is given, else `None`.
-//RS     /// parity: guard tests/tir_language_features.rs::ambient_input
-//RS     AmbientInput {
-//RS         prompt: Option<Box<TExpr>>,
-//RS     },
-//RS     /// c109 Phase 26: an `assert(cond[, msg])` / `assert_eq(a, b)` / `panic(msg)`
-//RS     /// rich-runtime-report builtin (S36). Structured facts only — emit formats
-//RS     /// `jet_panic_rich` / test-mode `return Err` (I3: no `cx.src` re-read for
-//RS     /// location; `loc` was captured at lowering).
-//RS     RequireStop {
-//RS         kind: TRequireKind,
-//RS         loc: TPanicLoc,
-//RS         /// True only for the unconditional builtin `panic(...)`; `assert`
-//RS         /// may fall through when the condition holds.
-//RS         always_stops: bool,
-//RS     },
-//RS     /// Binary op. `overflow` is the *computed* decision (true → emit the
-//RS     /// trapping `jet_add`/… helper). It mirrors today's `operand_is_integer`
-//RS     /// logic but is decided here, at lowering, from the total operand types.
-//RS     /// `line` is the source line of the operator, resolved at lowering, so the
-//RS     /// trapping helper's panic location matches the AST path byte-for-byte (the
-//RS     /// emitter never touches `cx.src`).
-//RS     Binary {
-//RS         op: BinOp,
-//RS         overflow: bool,
-//RS         line: u32,
-//RS         lhs: Box<TExpr>,
-//RS         rhs: Box<TExpr>,
-//RS     },
-//RS     /// D-CHAINCMP1: `0 <= sev < 10` — a same-direction relational chain,
-//RS     /// `operands.len() == ops.len() + 1`. Dumb lowering (R1): emit binds each
-//RS     /// shared middle operand to a temp exactly once (a Rust block expression),
-//RS     /// then ANDs the adjacent-pair comparisons over those temps. Relational
-//RS     /// ops never trap on overflow (only `+ - * / << >>` do), so no `overflow`
-//RS     /// flag is needed here.
-//RS     CompareChain {
-//RS         operands: Vec<TExpr>,
-//RS         ops: Vec<BinOp>,
-//RS         hooks: Vec<bool>,
-//RS     },
-//RS     /// D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 1): `>=`/`<=`/`==` between layout
-//RS     /// values (`HVar`/`VVar`/`LengthVar`) produce a `Constraint`, which Rust's
-//RS     /// comparison operators can't do via operator syntax (`PartialOrd`/
-//RS     /// `PartialEq` are hard-locked to `bool`) — so this is a DEDICATED node,
-//RS     /// not `Binary`. Emits the matching `jet_layout::{ge,le,eq_}(lhs, rhs)`
-//RS     /// free function (registers the constraint on whichever side's `LinExpr`
-//RS     /// carries the owning handle). `Add`/`Sub` between layout values stay
-//RS     /// plain `Binary` — `jet_layout::LinExpr` implements `std::ops::{Add,Sub}`.
-//RS     LayoutCompare {
-//RS         op: BinOp,
-//RS         lhs: Box<TExpr>,
-//RS         rhs: Box<TExpr>,
-//RS     },
-//RS     /// D-LAYOUT1: a plain `Int`/`Float` operand used on the other side of a
-//RS     /// layout `+`/`-`/`>=`/`<=`/`==` (axis-neutral, elaborates to `LengthVar`
-//RS     /// — see `layout_axis_of`). Wraps the numeric Rust value into a
-//RS     /// `jet_layout::LinExpr` constant so `Add`/`Sub`/`ge`/`le`/`eq_` only
-//RS     /// ever operate on `LinExpr` (no foreign-type operator-overload games
-//RS     /// with bare `f64`/`i64`).
-//RS     LayoutLit {
-//RS         inner: Box<TExpr>,
-//RS     },
-//RS     Unary {
-//RS         op: UnOp,
-//RS         operand: Box<TExpr>,
-//RS     },
-//RS     /// c109 Phase 3: a struct literal `S { f: v, … }`. The head type is `TExpr.ty`;
-//RS     /// each field carries its Jet name (emit mangles) and value. No clone/coercion
-//RS     /// at the literal site (mirrors the AST path).
-//RS     StructLit {
-//RS         /// Each field: Jet name, value, and `boxed` for self-referential `Box<…>` edges.
-//RS         fields: Vec<(String, TExpr, bool)>,
-//RS         /// c109 Phase 17: injected prelude fields (HTTPRequest route metadata).
-//RS         /// Structured — emit spells the Rust field lines.
-//RS         extra: Option<TStructExtra>,
-//RS         /// c109 Phase 30: TRAIT-OBJECT coercion — `(trait, concrete owner)`.
-//RS         as_trait: Option<(String, String)>,
-//RS     },
-//RS     /// c109 Phase 3: a struct field *read* `recv.field` in borrow position.
-//RS     /// `field` is the Jet field name (emit mangles / core-renames).
-//RS     Field {
-//RS         recv: Box<TExpr>,
-//RS         field: String,
-//RS         boxed: bool,
-//RS     },
-//RS     /// D-SHAREDGUARD2=A: compiler-known `guard.value` projection. The public
-//RS     /// guard has no Rust field; it dereferences its owned lock lease.
-//RS     SharedGuardValue {
-//RS         guard: Box<TExpr>,
-//RS         editable: bool,
-//RS     },
-//RS     /// D-SHAREDGUARD1=A: consume one guard and retain the same lock lease while
-//RS     /// narrowing its visible value to a sema-validated field path.
-//RS     SharedGuardMap {
-//RS         guard: Box<TExpr>,
-//RS         path: Vec<String>,
-//RS         editable: bool,
-//RS     },
-//RS     /// D-SHAREDGUARD1=A: consume one guard and create two disjoint views backed
-//RS     /// by the same lock lease. Sema proved the paths do not overlap.
-//RS     SharedGuardSplit {
-//RS         guard: Box<TExpr>,
-//RS         first: Vec<String>,
-//RS         second: Vec<String>,
-//RS         editable: bool,
-//RS     },
-//RS     /// D-SHAREDGUARD1=A: wait on a condition while retaining ownership of the
-//RS     /// edit guard. The runtime performs register/release/park/reacquire/recheck.
-//RS     SharedGuardWait {
-//RS         guard: Box<TExpr>,
-//RS         condition: Box<TExpr>,
-//RS         predicate: Box<TLambda>,
-//RS     },
-//RS     /// D-SHAREDGUARD1=A: wake one or every waiter registered on a Condition.
-//RS     ConditionNotify {
-//RS         condition: Box<TExpr>,
-//RS         all: bool,
-//RS     },
-//RS     /// c109 Phase 18: `mem.Ptr<T>.from_addr(addr)`. `elem` is the Jet element type;
-//RS     /// emit spells `(({addr}) as usize as *mut {elem})`.
-//RS     PtrFromAddr {
-//RS         elem: Type,
-//RS         addr: Box<TExpr>,
-//RS     },
-//RS     /// D-CAP9: postfix `p.*` — dereference a raw pointer. Emits Rust `(*(p))`. The
-//RS     /// `unsafe` needed to read through a raw pointer is supplied by the enclosing
-//RS     /// `#Unsafe` region/fn (sema-gated by E0208), so this node adds no `unsafe`.
-//RS     Deref(Box<TExpr>),
-//RS     /// D-CAP9: prefix `*x` — take a raw pointer to `x`. Emits `(&(x) as *const _)`.
-//RS     /// Forming a pointer is safe Rust; *using* it needs the surrounding `#Unsafe`
-//RS     /// region. Gated by E0208 in sema (raw-of only legal inside `#Unsafe`).
-//RS     RawOf(Box<TExpr>),
-//RS     /// Allocator constructor. The constructor family and checked arguments
-//RS     /// remain structured until each target consumes the shared MIR fact.
-//RS     AllocNew {
-//RS         ctor: TAllocCtor,
-//RS         args: Vec<TCallArg>,
-//RS     },
-//RS     EnumLit {
-//RS         /// Jet enum type name. Emit spells the Rust path via `tir_enum_lit_prefix`.
-//RS         enum_type: String,
-//RS         /// Jet variant name.
-//RS         variant: String,
-//RS         payload: TEnumPayload,
-//RS     },
-//RS     /// c109 Phase 24: a prelude `JSON` enum construction (`JSON.Null` /
-//RS     /// `JSON.Boolean(b)` / `JSON.Number(n)` / `JSON.Text(s)` / `JSON.Array(xs)` /
-//RS     /// `JSON.Object(map)`). The JSON enum is FOREIGN: its variants render non-mangled
-//RS     /// (`{root}jet_std::JSON::Object`, NOT `__jet_…`), distinct from a user enum's
-//RS     /// `EnumLit`. `variant` is the bare variant name (`Object`/`Text`/…). `arg` is the
-//RS     /// payload `TExpr` plus the resolved `implicit_clone` flag (sema's `CallArg.flags`,
-//RS     /// total) — `true` → `(…).clone()`, reproducing `emit_core_json_lit` (Expression.rs)
-//RS     /// byte-for-byte. `JSON.Null` has no arg (`None`). The `{root}jet_std::JSON` prefix
-//RS     /// is rendered at emit (`cx.root_prefix` is program-level, read there).
-//RS     /// parity: guard tests/tir_language_features.rs::json_value_construct_match_render
-//RS     JSONLit {
-//RS         variant: String,
-//RS         arg: Option<Box<(TExpr, bool)>>,
-//RS     },
-//RS     /// D-DBDRIVER1: a `DBValue` construction (`DBValue.Int(n)` / `.Float(f)` /
-//RS     /// `.Text(s)` / `.Bool(b)` / `.Blob(bytes)` / `.Null`) — the tagged SQL
-//RS     /// parameter/column value. Same shape as `JSONLit` (a FOREIGN prelude enum,
-//RS     /// not a user `EnumLit`), kept as its own node rather than reusing `JSONLit`
-//RS     /// because `DBValue` renders to a DIFFERENT prelude type (`jet_std::DBValue`,
-//RS     /// not `jet_std::DataTree`) and has no recursive `Array`/`Object`-style
-//RS     /// payload to special-case.
-//RS     DBValueLit {
-//RS         variant: String,
-//RS         arg: Option<Box<(TExpr, bool)>>,
-//RS     },
-//RS     /// c109 Phase 5: a list literal `[a, b, c]`. Lowers to Rust `vec![…]`. Each
-//RS     /// element is lowered as-is (the AST path applies no clone/coercion at the
-//RS     /// literal site — `emit_expr` per element).
-//RS     ListLit(Vec<TExpr>),
-//RS     /// D-VARIADIC1: `[a, ...xs, b]` — one growable list built via `extend`.
-//RS     ListSpread {
-//RS         parts: Vec<ListSpreadPart>,
-//RS     },
-//RS     /// D-SOA1 / D-SOA-TIER1=A: a list literal whose element is a
-//RS     /// `#layout(columnar)` struct `S`. The elements build the array-of-structs,
-//RS     /// then the shared column store scatters them across the columns.
-//RS     /// `columns_ty` is the resolved `[S]` Rust type — the Prelude-owned
-//RS     /// `JetColumnList<S>`, never a per-struct storage type.
-//RS     ColumnarListLit {
-//RS         columns_ty: String,
-//RS         elems: Vec<TExpr>,
-//RS     },
-//RS     /// D-SOA1 / D-SOA-TIER1=A: index-read `xs[i]` on a columnar list — pulls the
-//RS     /// logical `S` out of the columns at `i` through THE shared gather read,
-//RS     /// bounds-checked with the same list stop an array-of-structs `xs[i]` uses.
-//RS     ColumnarGather {
-//RS         base: Box<TExpr>,
-//RS         index: Box<TExpr>,
-//RS         line: usize,
-//RS     },
-//RS     /// D-SOA1 / D-SOA-TIER1=A: a fused `xs[i].field` field-read on a columnar
-//RS     /// list — one cell straight out of that field's column, with no whole-`S`
-//RS     /// gather. This is the cache-friendly fast path.
-//RS     ///
-//RS     /// `owner` and `field` are checked semantic identities. `column` is the
-//RS     /// field's position in declaration order among stored fields, exactly the
-//RS     /// column order used by the shared store.
-//RS     ColumnarColumnRead {
-//RS         base: Box<TExpr>,
-//RS         index: Box<TExpr>,
-//RS         owner: String,
-//RS         field: String,
-//RS         column: usize,
-//RS         line: usize,
-//RS     },
-//RS     /// c109 Phase 23: a named-tuple literal `(x: 1, y: 2)` (S73/D-SG7). The generated
-//RS     /// struct name (`JetTup_<hash>`) and the CANONICAL field order are resolved at
-//RS     /// lowering from the literal's sema-attached `Type::Tuple`; each field's value is
-//RS     /// reordered to that canonical order (a `(y: 3, x: 4)` literal becomes
-//RS     /// `(x: 4, y: 3)`). `fields` pair each CHECKED field name with its lowered value:
-//RS     /// MIR resolves a tuple field by `<instance>::<name>` against the `Type::Tuple`
-//RS     /// shape, and every backend mangles from its own field row.
-//RS     TupleLit {
-//RS         struct_name: String,
-//RS         fields: Vec<(String, TExpr)>,
-//RS     },
-//RS     /// c109 Phase 5: a map literal `[k: v, …]` or empty `[:]`. A map remains
-//RS     /// one typed value through TIR; each engine constructs it from these
-//RS     /// ordered pairs, so nested maps are ordinary value expressions.
-//RS     MapLit(Vec<(TExpr, TExpr)>),
-//RS     /// c109 Phase 5: indexing `coll[i]` (`Expr::Index`). `is_map` is the resolved
-//RS     /// `IndexKind` carried TOTALLY from sema (never re-inferred): `true` → the
-//RS     /// `jet_index_map` helper, `false` → `jet_index_vec`. `line` is the source line
-//RS     /// for the bounds/missing-key panic message, resolved at lowering.
-//RS     Index {
-//RS         base: Box<TExpr>,
-//RS         index: Box<TExpr>,
-//RS         is_map: bool,
-//RS         /// The base uses the vetted `JetUninitFixed` prelude wrapper in AOT.
-//RS         uninit_fixed: bool,
-//RS         line: usize,
-//RS     },
-//RS     /// D-MEM1 S6: `pool[id]` / `pool[id].field` — a generation-checked slot in a
-//RS     /// `Pool<T>`. `mutable` selects the in-place `jet_pool_get_mut` place over the
-//RS     /// `jet_pool_get` value clone, so a write or a mutating receiver edits the
-//RS     /// stored element instead of a throwaway copy. `field_rust` narrows the place
-//RS     /// to one mangled field. `src_line` is captured at lowering so every engine
-//RS     /// receives the stop's own source line rather than a function-frame fallback.
-//RS     PoolSlot {
-//RS         pool: Box<TExpr>,
-//RS         id: Box<TExpr>,
-//RS         mutable: bool,
-//RS         /// Jet field name when narrowing `pool[id].field`; emit mangles.
-//RS         field: Option<String>,
-//RS         line: usize,
-//RS         src_line: String,
-//RS     },
-//RS     /// D-INDEX-HOOK: `mytype[k]` when the type implements `Index`.
-//RS     IndexHook {
-//RS         type_name: String,
-//RS         base: Box<TExpr>,
-//RS         index: Box<TExpr>,
-//RS         line: usize,
-//RS     },
-//RS     /// D-SIMD2: `v[i]` lane access on a SIMD lane type. Lowers to the bounds-checked
-//RS     /// prelude helper `{root}jet_math_<T>_lane(&v, i, file, line)`.
-//RS     MathLaneIndex {
-//RS         lane_ty: String,
-//RS         base: Box<TExpr>,
-//RS         index: Box<TExpr>,
-//RS         line: u32,
-//RS     },
-//RS     /// D-SWIZZLE1: a read swizzle `v.xyz` on a vector/SIMD lane type. `lanes` holds
-//RS     /// source indices (x=0…w=3); length 1 → scalar, 2..4 → `VecN` constructor.
-//RS     MathSwizzleRead {
-//RS         type_name: String,
-//RS         recv: Box<TExpr>,
-//RS         lanes: Vec<u8>,
-//RS     },
-//RS     /// An owned slice expression. Place contexts lower the same source shape to
-//RS     /// `ViewNew` or `ViewMutNew`; explicit copy stays here. `line` identifies
-//RS     /// bounds failures.
-//RS     Slice {
-//RS         base: Box<TExpr>,
-//RS         start: Box<TExpr>,
-//RS         end: Box<TExpr>,
-//RS         /// D-RANGE-VALUE1=A: a stored Range source, evaluated once.
-//RS         range: Option<Box<TExpr>>,
-//RS         line: usize,
-//RS     },
-//RS     /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read
-//RS     /// or borrowed value. This is ordinary sharing/cloning semantics. The
-//RS     /// user-written `~` copy has its own `ExplicitCopy` node so a Tensor does not
-//RS     /// silently turn compiler-inserted clones into deep storage copies. The
-//RS     /// fact (#4318) is the sema decision behind the copy; MIR keeps it on `Copy`.
-//RS     Clone(Box<TExpr>, jet_foundation::MIR::MirCopyFact),
-//RS     /// D-MEM1/D-CAP2: the explicit Jet `~` copy signal. Backends route Tensor
-//RS     /// values through the shared Prelude copy operation; non-Tensor values keep
-//RS     /// their ordinary clone/materialization semantics.
-//RS     ExplicitCopy(Box<TExpr>),
-//RS     /// D-SHAPE-PLACE1=A: a checked local whole/field/index place borrow.
-//RS     /// Range places use `ViewNew`/`ViewMutNew` so bounds are checked once.
-//RS     Borrow {
-//RS         place: Box<TExpr>,
-//RS         mutable: bool,
-//RS     },
-//RS     /// D-MEM-COPYSEM1: an explicit `~` or an implicit read-only view crossing
-//RS     /// an owning destination materializes the owned target through the shared
-//RS     /// Prelude. A plain `.clone()` is not sufficient for string views: cloning
-//RS     /// a `&str` hands back another `&str`, not the owned `String` needed to leave
-//RS     /// the view's scope. Generic `View<T>` uses the same path to produce `[T]`.
-//RS     MaterializeView(Box<TExpr>),
-//RS     /// c109 Phase 6: a user-defined instance method call `recv.method(args)` on a
-//RS     /// covered struct/enum. All dispatch facts are resolved at lowering (totality):
-//RS     /// `recv` is the lowered receiver (emitted as the AST path emits it — autoref
-//RS     /// handles `&self`/`&mut self`/`self`); `method_rust` is the already-resolved
-//RS     /// Rust method name (mangled `__jet_<m>`, or the bare name for a trait-impl
-//RS     /// method, decided here from `cx.trait_methods`); each arg carries its
-//RS     /// borrow/clone decisions, mirroring `emit_call_args`.
-//RS     MethodCall {
-//RS         recv: Box<TExpr>,
-//RS         method: TMethodRef,
-//RS         /// D-GENERIC-CALL1=A: resolved method-owned call arguments, explicit or
-//RS         /// inferred. Empty for a non-generic method.
-//RS         type_args: Vec<Type>,
-//RS         args: Vec<TCallArg>,
-//RS         /// First source argument when it is one plain string literal. The
-//RS         /// comptime BuildContext host surface uses this to preserve the
-//RS         /// auditability rule for `b.find("glob")`.
-//RS         source_first_string_literal: Option<String>,
-//RS         /// Hidden source bridge for generic arithmetic trait dispatch. User
-//RS         /// methods keep their two-argument surface; primitive impls receive
-//RS         /// the Jet operator line through the synthetic trait's default helper.
-//RS         operator_line: Option<u32>,
-//RS     },
-//RS     /// c109 Phase 7: a STATIC (associated) method call `Type.make(args)`. Resolved
-//RS     /// at lowering to `__jet_<Type>::__jet_<method>(args)` — `type_prefix` is the
-//RS     /// already-resolved Rust type head (`__jet_<Type>`), `method_rust` the mangled
-//RS     /// method name. Mirrors the AST type-name dispatch (Expression.rs ~L1644).
-//RS     StaticCall {
-//RS         owner: TStaticOwner,
-//RS         owner_type: Option<Type>,
-//RS         method: TMethodRef,
-//RS         /// D-GENERIC-CALL1=A: resolved method-owned call arguments on a static
-//RS         /// method, explicit or inferred. Receiver/owner arguments live in
-//RS         /// `owner_type`.
-//RS         type_args: Vec<Type>,
-//RS         args: Vec<TCallArg>,
-//RS     },
-//RS     /// D-VALIDATE-DECODE1=B: prefix every error in a typed child result while
-//RS     /// preserving its success value. The segment and result are already
-//RS     /// lowered; every execution tier applies the same list transform.
-//RS     DecodeUnder {
-//RS         segment: Box<TExpr>,
-//RS         inner: Box<TExpr>,
-//RS     },
-//RS     /// c109 Phase 9: a built-in collection/string method (`emit_builtin_method`).
-//RS     /// The receiver-type dispatch (`expr_jet_ty(receiver)` → Map/List/String) is
-//RS     /// resolved at lowering into a concrete `op`, so emit makes no type decision
-//RS     /// (I3). The args are lowered as PLAIN expressions — `emit_builtin_method`
-//RS     /// emits each arg via a raw `emit_expr`, with NO clone/borrow convention
-//RS     /// wrappers (unlike `emit_call_args`), so the TIR carries no `TCallArg` here.
-//RS     BuiltinMethod {
-//RS         recv: Box<TExpr>,
-//RS         op: TBuiltinOp,
-//RS         args: Vec<TExpr>,
-//RS     },
-//RS     /// A checked Core registry row plus its typed argument facts.  The record
-//RS     /// owns module/member identity and all ABI/effect/interpreter metadata;
-//RS     /// TIR never reconstructs those facts from strings.  `type_args` retains
-//RS     /// the explicit generic arguments for Core calls whose runtime behavior
-//RS     /// depends on a checked operation schema (notably `testing.histories<T>`).
-//RS     CoreCall {
-//RS         record: &'static crate::Syntax::CoreCallRecord,
-//RS         args: Vec<TExpr>,
-//RS         source_span: crate::Diagnostics::Span,
-//RS         type_args: Vec<Type>,
-//RS         /// D-FIXARR1: per-argument `[T#N]` to `[T]` widening, resolved from
-//RS         /// the authoritative Core signature during lowering.
-//RS         widen_to_vec: Vec<bool>,
-//RS         /// Checked table-plan fact, present only for recognized `core.data`
-//RS         /// calls.  Backends must consume this fact rather than reclassifying
-//RS         /// the call from the registry row.
-//RS         data_plan: Option<TDataPlan>,
-//RS         /// Checked result failure transport, shared by every CoreCall route.
-//RS         fallibility: TFailureCarrier,
-//RS     },
-//RS     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
-//RS     IfExpr {
-//RS         cond: Box<TIfCond>,
-//RS         then_body: Vec<TStmt>,
-//RS         then_value: Box<TExpr>,
-//RS         else_body: Vec<TStmt>,
-//RS         else_value: Box<TExpr>,
-//RS     },
-//RS     /// A checked Result handler evaluates its carrier once, borrows it for the
-//RS     /// variant tests, and consumes exactly the selected payload. The parser's
-//RS     /// duplicated pattern-test AST must not become two owned Result reads.
-//RS     ResultHandler {
-//RS         subject: Box<TExpr>,
-//RS         ok_pattern: TPattern,
-//RS         ok_body: Vec<TStmt>,
-//RS         ok_value: Box<TExpr>,
-//RS         err_pattern: TPattern,
-//RS         err_body: Vec<TStmt>,
-//RS         err_value: Box<TExpr>,
-//RS         terminal: Box<TExpr>,
-//RS     },
-//RS     /// D-FAIL-BREACH1=A: a `#Todo` typed goal (`Expr::Todo`, D-TOOL2, E2-M11)
-//RS     /// emits the registered E3011 Prelude stop. The enclosing `TExpr.ty` is
-//RS     /// the checked expected type; `line` is the source line resolved at lowering.
-//RS     Todo {
-//RS         line: usize,
-//RS     },
-//RS     /// A structurally impossible post-sema shape. Old adapters surface this
-//RS     /// as an ICE; canonical MIR returns a typed lowering error.
-//RS     InvariantViolation {
-//RS         construct: String,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     /// Card #1440: the synthesized dead end of an else-less exhaustive value
-//RS     /// dispatch (`Expr::NoElse`). Sema proved the pattern arms cover the
-//RS     /// subject's whole type (E0307), so no execution reaches it on any tier —
-//RS     /// AOT emits a diverging `unreachable!(…)`, JIT traps, TIR-eval errors.
-//RS     Unreachable {
-//RS         line: usize,
-//RS     },
-//RS     /// c109 Phase 23: `.raw()` on a distinct type (`Expr::MethodCall { method: "raw" }`,
-//RS     /// D-DIST3). The AST `emit_method_call` special-cases this BEFORE any user dispatch:
-//RS     /// `({recv}).0` (the newtype's inner field). The receiver is lowered as-is; the
-//RS     /// result `ty` is the distinct base type (total, read from `cx.distinct_types`).
-//RS     DistinctRaw(Box<TExpr>),
-//RS     /// c109 Phase 8: `value(x)` — a present optional (`Some(x)`).
-//RS     Present(Box<TExpr>),
-//RS     /// c109 Phase 8: bare `null` — an absent optional (`None`).
-//RS     Absent,
-//RS     /// c109 Phase 8: `Ok(x)` — a success value of `T !E` (`Ok(x)`).
-//RS     Ok(Box<TExpr>),
-//RS     /// c109 Phase 8: `Err(e)` — a failure value of `T !E` (`Err(e)`). The
-//RS     /// origin is set when the value is the function's own returned failure
-//RS     /// (#3713): that `Err(...)` is where the failure's journey starts.
-//RS     Err(Box<TExpr>, Option<TFailureOrigin>),
-//RS     /// c109 Phase 8: the `?` propagation operator (`Expr::Try`). The error
-//RS     /// conversion (`convert`) is the TOTAL sema fact (`TryConvert`): a `None` is a
-//RS     /// bare propagate or a declared typed conversion calls the declared
-//RS     /// conversion. The frame-trace location (`file`, `line`, `column`,
-//RS     /// `fn_name`) is resolved at lowering so every tier records the same hop
-//RS     /// (the emitter never reads `cx.current_fn`/`cx.src`).
-//RS     Try {
-//RS         inner: Box<TExpr>,
-//RS         /// Optional D-FAIL-CTX1 note. Lowered as a closure/cold branch so its
-//RS         /// interpolation is never evaluated when the operand succeeds.
-//RS         note: Option<Box<TExpr>>,
-//RS         convert: TTryConvert,
-//RS         /// Pre-escaped Rust string literal for the source file (`escape_rust_str`).
-//RS         file: String,
-//RS         line: usize,
-//RS         /// 1-based character column of the propagating call.
-//RS         column: usize,
-//RS         /// Pre-escaped Rust string literal for the enclosing function name.
-//RS         fn_name: String,
-//RS     },
-//RS     /// c109 Phase 8: the `??` fallback operator (`Expr::OrFallback`).
-//RS     /// D-FAIL-CARRIER1=A: one carrier, so one lowering —
-//RS     /// `match … { Ok(v) => v, Err(_) => fb }` reads `?T` and `T !E` alike.
-//RS     /// The fallback is a value or an early `return` (the panic form is deferred —
-//RS     /// its `safe_locals_expr` reproduction is out of subset).
-//RS     OrFallback {
-//RS         value: Box<TExpr>,
-//RS         fallback: TOrFallback,
-//RS     },
-//RS     /// c109 Phase 8: optional field/chain `base?.member` (`Expr::OptField`). The
-//RS     /// `flatten` fact (TOTAL, from sema) picks the combinator: `true` → `.and_then`
-//RS     /// (the field is itself optional), `false` → `.map`. Mirrors the AST path's
-//RS     /// `(base).clone().{and_then|map}(|__optv| __optv.{member})` exactly.
-//RS     OptField {
-//RS         base: Box<TExpr>,
-//RS         /// Jet member name; emit mangles.
-//RS         member: String,
-//RS         flatten: bool,
-//RS     },
-//RS     /// c109 Phase 11: a lambda/closure literal (`Expr::Lambda`). Every capture/
-//RS     /// escape/Fn-vs-FnMut decision is the TOTAL sema fact (`Lambda.meta`), resolved
-//RS     /// at lowering — emit reads them, never recomputes capture analysis (I3). The
-//RS     /// `prep` holds the per-`cloned_capture` `let __jet_cap_<n> = (place).clone();`
-//RS     /// prelude (resolved from the *outer* env at lowering, since the cap's source
-//RS     /// place is an outer local); `params` is the already-rendered `name[: ty]` list;
-//RS     /// `body` is the lowered closure body; `is_move`/`boxed` reproduce the AST path's
-//RS     /// `move ` keyword (off `needs_fn_mut`/`escapes`) and `Box::new(…)` (off `escapes`)
-//RS     /// wrappers. The whole thing is wrapped in `{ <prep> <closure> }` when `prep` is
-//RS     /// non-empty — byte-for-byte the TIR lambda encoding.
-//RS     Lambda(Box<TLambda>),
-//RS     /// D-TAG1: a binding-free enum variant/group pattern test (`d == .Fire`,
-//RS     /// `d == .Fire.Burn` in expression position). Lowers to `matches!(&subj, pat)`
-//RS     /// where `pat` is the same Rust pattern string `emit_match_pattern` uses for
-//RS     /// switch arms (group names expand to or-patterns over their leaves).
-//RS     PatternMatches {
-//RS         subj: Box<TExpr>,
-//RS         pattern: TPattern,
-//RS     },
-//RS     /// D-HOLE1: `Option.lift2(f, a, b)` — apply `f` to both payloads only when both
-//RS     /// `a`/`b` are present; `null` otherwise. `f`/`a`/`b` are lowered plainly as
-//RS     /// values (`f` via the generic `Expr::Lambda`/fn-value lowering, same as any
-//RS     /// other function-typed argument); emit destructures the zipped pair inside a
-//RS     /// closure. No user-visible tuple struct — the pair never surfaces as a Jet
-//RS     /// value.
-//RS     OptionLift2 {
-//RS         f: Box<TExpr>,
-//RS         a: Box<TExpr>,
-//RS         b: Box<TExpr>,
-//RS     },
-//RS     /// c109 Phase 11: a closure-taking collection method (`map`/`filter`/`each`/
-//RS     /// `find`/`any`/`all`/`sort_by`/`reduce`). The receiver-type + Fn-vs-FnMut
-//RS     /// dispatch (`emit_builtin_method`'s closure arms) is resolved at lowering into a
-//RS     /// concrete `op`; emit only formats. `recv` is the lowered receiver, `args` the
-//RS     /// lowered closure arg(s) (a `reduce` carries the seed first, then the lambda) —
-//RS     /// emitted PLAINLY, exactly as `emit_builtin_method`'s `arg(i)`.
-//RS     ClosureMethod {
-//RS         recv: Box<TExpr>,
-//RS         op: TClosureOp,
-//RS         args: Vec<TExpr>,
-//RS     },
-//RS     /// Adapt a Jet callback to a collection helper's borrowed host inputs.
-//RS     /// Scalar reads dereference the host borrow; owned/non-scalar reads keep it.
-//RS     HostBorrowCallback {
-//RS         callable: Box<TExpr>,
-//RS         params: Vec<Type>,
-//RS     },
-//RS     /// c109 Phase 12: a numeric predicate / bit-population query
-//RS     /// (D-NUMOPS1: `is_nan`/`count_ones`/…) on a numeric receiver. These
-//RS     /// carry `recv_type == Some(<numeric name>)` (sema sets it for numeric receivers
-//RS     /// — CheckerInfer ~L2248). The receiver width source/target and the
-//RS     /// operation is resolved at lowering into a total `TNumericOp`, so emit makes no
-//RS     /// type decision (I3). No args (all numeric queries are nullary).
-//RS     NumericMethod {
-//RS         recv: Box<TExpr>,
-//RS         op: TNumericOp,
-//RS     },
-//RS     /// D-GO127-STDLIB1=A: a binary exact-Int method whose operation is
-//RS     /// resolved at lowering and whose right-hand operand remains a TIR child.
-//RS     /// Keeping the operand in its own node preserves the nullary NumericMethod
-//RS     /// shape used by predicates and conversions.
-//RS     NumericBinaryMethod {
-//RS         recv: Box<TExpr>,
-//RS         op: TNumericOp,
-//RS         arg: Box<TExpr>,
-//RS     },
-//RS     /// c109 Phase 28: an overflow opt-out builtin `wrapping(e)`/`saturating(e)`/
-//RS     /// `checked(e)` (D-NUMOPS1). The single integer `Expr::Binary` argument lowers to
-//RS     /// Rust's matching
-//RS     /// method: `(lhs).{prefix}_{op}(rhs)` where `prefix ∈ {wrapping, saturating,
-//RS     /// checked}` and `op ∈ {add, sub, mul, div, rem}`, or a standard fixed-width
-//RS     /// rotation with `prefix ∈ {rotate_left, rotate_right}`. PLAIN operands (no
-//RS     /// overflow trap).
-//RS     /// `prefix` + `op` are resolved at lowering (total facts), emit only assembles.
-//RS     OverflowOpt {
-//RS         prefix: String,
-//RS         op: &'static str,
-//RS         line: u32,
-//RS         /// D-WRAP-SCOPE1=A: the lexical policy fact that caused this node.
-//RS         /// Explicit receiver methods have no policy fact.
-//RS         policy: Option<crate::AST::ArithmeticPolicyFact>,
-//RS         lhs: Box<TExpr>,
-//RS         rhs: Box<TExpr>,
-//RS     },
-//RS     /// c109 Phase 13: a method ON a handle (FileReader/FileWriter/StdinHandle/
-//RS     /// Stopwatch/TcpListener/TcpStream/HTTPRequest/HTTPResponse) — the handle arms of
-//RS     /// built-in method lowering. The handle-receiver
-//RS     /// dispatch (`rty == Some(Named(<handle>))`) is resolved at lowering into a total
-//RS     /// `THandleOp`, so emit makes no type decision (I3). Args are emitted PLAINLY
-//RS     /// (`emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
-//RS     HandleMethod {
-//RS         recv: Box<TExpr>,
-//RS         op: THandleOp,
-//RS         args: Vec<TExpr>,
-//RS     },
-//RS     /// c109 Phase 13: a closure-taking core/stdlib call.
-//RS     /// `task`, `http.serve`, and `scope.guard` are NOT in `core_fixed_sig` and each
-//RS     /// has a bespoke emit shape the plain `CoreCall` cannot reproduce: `task` wraps a
-//RS     /// `emit_spawn_lambda` (`move |…|`,
-//RS     /// NEVER `Box::new`) in `JetTask::spawn(…)`; `serve` (lambda handler) emits
-//RS     /// `jet_http_serve(&(addr), <lambda>)`; `guard` emits `jet_scope_guard(<lambda>)`.
-//RS     /// The closure body is lowered + rendered at lowering (the lambda is in subset —
-//RS     /// Phase 11), so emit only assembles. `kind` selects the bespoke shape.
-//RS     CoreClosureCall {
-//RS         kind: TCoreClosureKind,
-//RS     },
-//RS     /// D-CONC-SPAWN1=D: `task.all { … }` — join every child, collect results.
-//RS     TaskGroupAll {
-//RS         tasks: Box<TExpr>,
-//RS     },
-//RS     /// D-CONC-SPAWN1=D: `task.race { … }` — first successful child wins.
-//RS     TaskGroupRace {
-//RS         tasks: Box<TExpr>,
-//RS     },
-//RS     /// D-CONC-SPAWN1=D: `task.any { … }` — first completed child wins.
-//RS     TaskGroupAny {
-//RS         tasks: Box<TExpr>,
-//RS     },
-//RS     /// Compiler-private readiness-table carrier. Source `if { ... }` lowers
-//RS     /// to this chain without exposing a public builder spelling.
-//RS     SelectStart,
-//RS     /// Compiler-private receiver arm in the readiness-table carrier.
-//RS     SelectRecv {
-//RS         builder: Box<TExpr>,
-//RS         channel: Box<TExpr>,
-//RS     },
-//RS     /// Compiler-private timer arm in the readiness-table carrier.
-//RS     SelectAfter {
-//RS         builder: Box<TExpr>,
-//RS         duration: Box<TExpr>,
-//RS         value: Option<Box<TExpr>>,
-//RS     },
-//RS     /// D-CONC-CHAN2=D: a readiness table with `else` uses the same tagged door
-//RS     /// without parking; `nonblocking` is compiler-owned, not user syntax.
-//RS     SelectWait {
-//RS         builder: Box<TExpr>,
-//RS         nonblocking: bool,
-//RS     },
-//RS     /// c109 Phase 13: a fn-typed-VALUE form. Either a bare function name used as a
-//RS     /// value (`Expr::Ident` resolving to a top-level fn) or a call THROUGH a fn-value
-//RS     /// (`Expr::CallValue` / sema's `.call(args)` projection). A bare fn-name value emits the
-//RS     /// `Box::new(move |…| name(…)) as <fn-type>` wrapper (`emit_named_fn_value`,
-//RS     /// Source/Codegen/Statement.rs), resolved at lowering into `wrapper`. A
-//RS     /// `CallValue` emits `({callee})({args})` with the args lowered PLAINLY (the AST
-//RS     /// `Expr::CallValue` passes `None` to `emit_call_args` → no clone/borrow/convention
-//RS     /// wrappers). `kind` selects the form.
-//RS     FnValue {
-//RS         kind: TFnValueKind,
-//RS     },
-//RS     /// c109 Phase 14: a cross-module function call. The various module-call forms
-//RS     /// (qualified `mod.fn()` via `import_mods`, `pub use` re-exports via
-//RS     /// `reexport_calls`, inline code modules via `code_modules`, and the unqualified
-//RS     /// inline/file imports in `emit_call`) all resolve at LOWERING to a fully-decided
-//RS     /// `TModuleCallForm` — emit makes no table lookup or decision (I3). `args` carry
-//RS     /// their borrow/clone wrappers, resolved exactly as `emit_call_args` does from the
-//RS     /// callee's import signature. `cx.root_prefix` is the only program-level value the
-//RS     /// emitter reads (like Phase 9/10's `cx.file`/`cx.root_prefix`), placed exactly
-//RS     /// where the AST path prepends it.
-//RS     ModuleCall {
-//RS         form: TModuleCallForm,
-//RS         /// Effective return type of the lowered target function. `ty` remains the
-//RS         /// source-visible call type; the AOT emitter uses this separate fact only
-//RS         /// to adapt a hidden `Result` carrier to its raw success payload.
-//RS         target_return: Option<Type>,
-//RS         /// D-GENERIC-CALL1=A: explicit generic arguments for the target.
-//RS         type_args: Vec<Type>,
-//RS         args: Vec<TCallArg>,
-//RS     },
-//RS     /// A resolved foreign symbol and its checked ABI/arguments. The symbol is
-//RS     /// consumed by the canonical MIR foreign-call row; no backend wrapper text
-//RS     /// is stored.
-//RS     ExternCall {
-//RS         symbol: String,
-//RS         c_abi: bool,
-//RS         args: Vec<TExternArg>,
-//RS     },
-//RS }
-//RS 
-//RS /// c109 Phase 14: a resolved cross-module call form. Each variant pre-resolves the
-//RS /// path pieces of one `emit_call`/`emit_method_call` module-call arm; emit prepends
-//RS /// `cx.root_prefix` exactly where the AST path does (or omits it where the AST does).
-//RS #[derive(Clone)]
-// END-PORT-PENDING 0510 crates/jet-codegen/src/Codegen/TIR/mod.rs:10432-12285
+// Private continuation of canonical Codegen.TIR: source reachability and coverage.
+use jet_foundation.[Item, Expr, Stmt, Func, Type, ProgramBundle, Span, ErrorConvDef, TryConvert, Syntax, CoreModuleExports, CoreSourceParts, TExpr, TFunc, TFuncKind]
+use core.collections.Set
+use JetCodegen.Codegen.[Cx, mangle, build_cx_items, bundle_extern_funcs, populate_cx_from_bundle, register_own_struct_shapes, register_foreign_enum_variants, update_cloneability_with_foreign_types, impl_owner_module]
+use JetCodegen.Codegen.Context.collect_iterable_hooks
+use JetCodegen.Codegen.TIR.[TCostCallable, CostCallableIndex, CostFunctionIndex, TCostReport, TCostReportError, TirProgram, MirArtifactRequest, MirArtifactBuildMode, cost_module_path_matches, callable_semantic_identity, is_checked_function_reference, callables_containing_reference, callable_for_reference, cost_call_graph, reachable_from_roots, cost_callables, reachable_cost_callables, collect_cost_stmts, lower_checked_tir_program_for, NO_RUNNABLE_ENTRY, CLI_ENTRY_MISSING_RUN, tir_covers, tir_covers_method, tir_covers_trait_method, tir_covers_compiler_derive_method]
+use JetCodegen.Codegen.TIR.artifact_plan.module_identity
+use JetCodegen.Codegen.TIR.refusal.describe
+use JetSema.Sema.[extract_app_graph, error_conv_fn_name]
+use jet_foundation.MIR.[MirArtifactTarget, MirArtifactKind, MirViewCopyKind, MirCopyFact]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10570
+fn collect_test_spans(items: [Item], module: USize, include_tests: Bool, out: &[(USize, Span, Bool)]) {
+    loop item in items {
+        if item == {
+            .Test(test) -> out.push((module, test.span, include_tests && test.name.is_some()))
+            .CodeModule(code_module) -> { if code_module.body == .Val(body) -> collect_test_spans(body, module, include_tests, &out) }
+            _ -> {}
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10589
+fn test_reference_enabled(bundle: ProgramBundle, tests: [(USize, Span, Bool)], source: String, start: USize, end: USize) -> Bool? {
+    return tests.iter().find((module, span, _) -> cost_module_path_matches(bundle, module, source) && start >= span.start && end <= span.end).map((_, _, included) -> included)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10606
+fn collect_trait_impl_callable_groups(items: [Item], module: USize, index: CostCallableIndex, groups: &[[USize]]) {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10612
+    fn push_group(methods: [Func], module: USize, index: CostCallableIndex, groups: &[[USize]]) {
+        indices: [USize] :: methods.iter().filter_map(method -> index.declared(module, method.name_span)).collect()
+        if !indices.is_empty() -> groups.push(indices)
+    }
+    loop item in items {
+        if item == {
+            .Struct(definition) | .Enum(definition) -> { loop implementation in definition.trait_impls -> push_group(implementation.methods, module, index, &groups) }
+            .Impl(implementation) if implementation.trait_name.is_some() -> push_group(implementation.methods, module, index, &groups)
+            .CodeModule(code_module) -> { if code_module.body == .Val(body) -> collect_trait_impl_callable_groups(body, module, index, &groups) }
+            _ -> {}
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10656
+// Scope-end cleanup implicitly roots Core Close implementations.
+fn collect_core_close_callables(items: [Item], module: USize, index: CostCallableIndex, out: &[USize]) {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10662
+    fn push_close(trait_name: String, methods: [Func], module: USize, index: CostCallableIndex, out: &[USize]) {
+        if trait_name.rsplit('.').next() != Val(Syntax.TRAIT_CLOSE) -> return
+        out.extend(methods.iter().filter_map(method -> index.declared(module, method.name_span)))
+    }
+    loop item in items {
+        if item == {
+            .Struct(definition) | .Enum(definition) -> { loop implementation in definition.trait_impls -> push_close(implementation.trait_name, implementation.methods, module, index, &out) }
+            .Impl(implementation) -> { if implementation.trait_name == .Val(trait_name) -> push_close(trait_name, implementation.methods, module, index, &out) }
+            .CodeModule(code_module) -> { if code_module.body == .Val(body) -> collect_core_close_callables(body, module, index, &out) }
+            _ -> {}
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10706
+pub fn reachable_core_source_callables(bundle: ProgramBundle, callables: [TCostCallable], core_modules: Set<USize>, include_tests: Bool, request: MirArtifactRequest, entry_name: String?) -> [Bool] {
+    if core_modules.is_empty() -> return []
+    tests: [(USize, Span, Bool)] := []
+    loop (module, data) in bundle.modules.iter().enumerate() -> collect_test_spans(data.items, module, include_tests, &tests)
+    lookup :: CostCallableIndex.new(bundle, callables)
+    functions :: CostFunctionIndex.new(bundle)
+    rooted := ~callables
+    loop callable in &rooted {
+        is_core :: core_modules.contains(callable.module)
+        artifact_export :: (request.kind == .NativeLibrary || request.kind == .SandboxPlugin) && callable.module == bundle.entry && bundle.name_ledger.declaration(callable.module, callable.declaration_name).is_some_and(declaration -> declaration.visibility.is_exported())
+        selected_entry :: entry_name.is_some_and(entry -> {
+            identity :: module_identity(bundle, callable.module)
+            "{identity}::{callable.declaration_name}" == entry || (callable.module == bundle.entry && callable.source_name == Val(entry))
+        })
+        ffi_callback :: callable_semantic_identity(bundle, callable).is_some_and(identity -> bundle.ffi_callback_fns.contains(identity))
+        sampled_contract :: functions.get(callable.module, callable.declaration_span).is_some_and((function, _) -> !function.pre.is_empty() && !function.params.is_empty())
+        private_source :: bundle.modules.get(callable.module).is_some_and(module -> CoreSourceParts.CORE_PRIVATE_SOURCE_PARTS.iter().any(part -> part.source.alias == module.alias && part.source.path == module.display))
+        callable.root = callable.root || !is_core || (is_core && private_source) || artifact_export || selected_entry || ffi_callback || sampled_contract
+    }
+    loop ((source, start, end), reference) in bundle.name_ledger.references() {
+        if !is_checked_function_reference(reference) -> continue
+        if test_reference_enabled(bundle, tests, source, start, end) == Val(false) -> continue
+        if !callables_containing_reference(lookup, source, start, end).is_empty() -> continue
+        if callable_for_reference(bundle, rooted, lookup, reference) == .Val(target) -> rooted[target].root = true
+    }
+    trait_impl_groups: [[USize]] := []
+    close_callables: [USize] := []
+    loop (module, data) in bundle.modules.iter().enumerate() {
+        if core_modules.contains(module) {
+            collect_trait_impl_callable_groups(data.items, module, lookup, &trait_impl_groups)
+            collect_core_close_callables(data.items, module, lookup, &close_callables)
+        }
+    }
+    loop index in close_callables -> rooted[index].root = true
+    callees :: cost_call_graph(bundle, rooted, lookup)
+    reachable := reachable_from_roots(callees, rooted)
+    loop {
+        added_impl_method := false
+        loop group in trait_impl_groups {
+            if group.iter().any(index -> reachable[index]) {
+                loop index in group { if !rooted[index].root { rooted[index].root = true; added_impl_method = true } }
+            }
+        }
+        if !added_impl_method -> return ^reachable
+        reachable = reachable_from_roots(callees, rooted)
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10825
+// GATE #4499: exact equality/hash for module/span tuple keys.
+pub fn reachable_core_source_bodies(callables: [TCostCallable], core_modules: Set<USize>, reachable: [Bool]) -> Set<(USize, USize, USize)> {
+    return callables.iter().zip(reachable).filter_map((callable, live) -> if core_modules.contains(callable.module) && live { Val((callable.module, callable.declaration_span.start, callable.declaration_span.end)) } else { None }).collect()
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10843
+pub fn should_lower_imported_core_body(core_modules: Set<USize>, reachable_bodies: Set<(USize, USize, USize)>, module: USize, function: Func) -> Bool {
+    return !core_modules.contains(module) || reachable_bodies.contains((module, function.name_span.start, function.name_span.end))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10853
+fn lowered_cost_method_matches(lowered: String, expected: String) -> Bool {
+    if lowered == expected || lowered.starts_with("{expected}__generic__") -> return true
+    if expected.rsplit_once("::") != .Val((owner, method)) -> return false
+    return lowered.starts_with("{owner}<") && lowered.ends_with("::{method}")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10863
+fn lowered_cost_function_matches(lowered: String, expected: String) -> Bool {
+    return lowered == expected || lowered.starts_with("{expected}__va") || lowered.starts_with("{expected}__generic__")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10869
+fn cost_callable_lowered_name(bundle: ProgramBundle, callable: TCostCallable) -> String? {
+    if callable.module == bundle.entry -> return Val(if callable.method { callable.declaration_name.replace('.', "::") } else { ~callable.declaration_name })
+    if callable.method {
+        owner_type :: callable.declaration_name.split('.').next().unwrap_or(callable.declaration_name)
+        owner :: bundle.name_ledger.module_identity(impl_owner_module(bundle, callable.module, owner_type))?
+        return Val("{owner}::{callable.declaration_name.replace('.', "::")}")
+    }
+    module :: bundle.modules.get(callable.module)?
+    module_alias :: bundle.name_ledger.module_alias(callable.module)?
+    relative_path :: callable.declaration_path.strip_prefix("{module_alias}.").unwrap_or(callable.declaration_path)
+    namespace :: relative_path.rsplit_once('.').map((parent, _) -> parent.rsplit('.').next().unwrap_or(parent)).map_or_else(() -> mangle(module.alias), parent -> mangle(parent))
+    source_name :: callable.source_name?
+    return Val("{namespace}::{mangle(source_name)}")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10907
+// GATE #4499: source-span keys retain exact Span equality/hash.
+fn cost_callable_is_covered(bundle: ProgramBundle, callable: TCostCallable, lowered: [Span: [TFunc]]) -> Bool {
+    if callable.source_span != .Val(source_span) -> return false
+    if lowered.get(source_span) != .Val(functions) -> return false
+    if cost_callable_lowered_name(bundle, callable) != .Val(expected) -> return false
+    return functions.iter().any(function -> {
+        if !callable.method -> return lowered_cost_function_matches(function.name, expected)
+        return if function.kind == { .TraitMethod{owner_type, ..} -> lowered_cost_trait_method_matches(owner_type, function.name, expected); _ -> lowered_cost_method_matches(function.name, expected) }
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10937
+fn lowered_cost_trait_method_matches(owner_type: Type, method: String, expected: String) -> Bool {
+    if expected.rsplit_once("::") != .Val((owner, expected_method)) -> return false
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10944
+    fn owner_leaf(name: String) -> String {
+        base :: name.split('<').next().unwrap_or(name)
+        return base.rsplit("::").next().unwrap_or(base)
+    }
+    return method == expected_method && owner_leaf(owner_type.name()) == owner_leaf(owner)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10951
+fn collect_cost_typed_conversions(body: [Stmt], names: &Set<String>) {
+    loop statement in body {
+        statement.for_each_expr(expression -> { if expression == .Try(_, _, .Typed{fn_name, ..}, _) -> names.insert(~fn_name) })
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10964
+fn find_cost_error_conversion(items: [Item], name: String) -> ErrorConvDef? {
+    loop item in items {
+        if item == {
+            .ErrorConv(conversion) if error_conv_fn_name(conversion.from_ty, conversion.to_ty) == name -> return Val(conversion)
+            .CodeModule(module) -> { if module.body == .Val(body) { if find_cost_error_conversion(body, name) == .Val(conversion) -> return Val(conversion) } }
+            _ -> {}
+        }
+    }
+    return None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10989
+fn cost_error_conversion_gaps(bundle: ProgramBundle, program: TirProgram, callables: [TCostCallable], reachable: [Bool]) -> [String] {
+    functions :: CostFunctionIndex.new(bundle)
+    required: Set<String> := Set.new()
+    loop (callable, live) in callables.iter().zip(reachable) {
+        if !live || callable.foreign -> continue
+        if functions.get(callable.module, callable.declaration_span) != .Val((function, _)) -> continue
+        collect_cost_typed_conversions(function.body, &required)
+    }
+    loop {
+        changed := false
+        snapshot :: required.iter().cloned().collect()
+        loop name in snapshot {
+            if bundle.modules.iter().find_map(module -> find_cost_error_conversion(module.items, name)) != .Val(conversion) -> continue
+            before :: required.len()
+            collect_cost_typed_conversions(conversion.body, &required)
+            changed = changed || required.len() != before
+        }
+        if !changed -> break
+    }
+    names := required.into_iter().collect()
+    names.sort()
+    gaps: [String] := []
+    loop name in names {
+        conversion :: bundle.modules.iter().enumerate().find_map((module, data) -> find_cost_error_conversion(data.items, name).map(conversion -> (module, conversion)))
+        if conversion != .Val((module, conversion)) { gaps.push("typed error conversion `{name}` has no checked declaration"); continue }
+        covered :: program.funcs.iter().any(function -> function.name == name && function.source_span == conversion.from_span)
+        if covered -> continue
+        module_label :: bundle.modules.get(module).map(module -> module.display).unwrap_or("<unknown module>")
+        gaps.push("{module_label}:{name} (reachable typed error conversion has no complete TIR body)")
+    }
+    return ^gaps
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11061
+fn cost_coverage_gaps(bundle: ProgramBundle, program: TirProgram) -> [String] {
+    app_graph :: extract_app_graph(bundle).0
+    callables :: cost_callables(bundle, app_graph)
+    reachable :: reachable_cost_callables(bundle, callables)
+    lowered: [Span: [TFunc]] := [:]
+    loop function in program.funcs -> lowered.entry(function.source_span).or_default().push(function)
+    gaps: [String] := callables.iter().zip(reachable).filter_map((callable, live) -> {
+        if !live || callable.foreign || cost_callable_is_covered(bundle, callable, lowered) -> return None
+        reason :: if callable.type_parameterized { "type-parameterized callable has no complete TIR specialization" } else { "sema-checked callable is outside typed TIR coverage" }
+        return Val("{callable.label} ({reason})")
+    }).collect()
+    gaps.extend(cost_error_conversion_gaps(bundle, program, callables, reachable))
+    gaps.sort()
+    gaps.dedup()
+    return ^gaps
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11095
+pub fn cost_report(bundle: ProgramBundle) -> TCostReport TCostReportError! {
+    request :: MirArtifactRequest.new(.RustAot, .NativeExecutable, .Dev)
+    program :: lower_checked_tir_program_for(bundle, request) catch error -> {
+        if error.message == NO_RUNNABLE_ENTRY || error.message == CLI_ENTRY_MISSING_RUN -> return TCostReport.default()
+        throw TCostReportError.Lowering{reason: error.message}
+    }
+    gaps :: cost_coverage_gaps(bundle, program)
+    if !gaps.is_empty() -> throw TCostReportError.Incomplete{surfaces: gaps}
+    core_files: Set<String> :: bundle.modules.iter().filter(module -> module.is_core_source()).map(module -> module.display).collect()
+    report := TCostReport.default()
+    loop function in program.funcs {
+        if !function.synthetic && !core_files.contains(function.source_file) -> collect_cost_stmts(function.body, function.name, function.source_span, 0, &report.sites)
+    }
+    return ^report
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11157
+pub struct TirCoverageIssue {
+    pub tier: String
+    pub callable: String
+    pub reason: String
+    pub span: Span
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11172
+pub fn validate_tir_support(bundle: ProgramBundle) -> [TirCoverageIssue] {
+    app_graph :: extract_app_graph(bundle).0
+    callables :: cost_callables(bundle, app_graph)
+    reachable :: reachable_cost_callables(bundle, callables)
+    contexts: [USize: Cx] := [:]
+    issues: [TirCoverageIssue] := []
+    loop (index, callable) in callables.iter().enumerate() {
+        if callable.foreign -> continue
+        if bundle.modules.get(callable.module) != .Val(module) {
+            issues.push(TirCoverageIssue.{tier: "AOT", callable: ~callable.label, reason: "callable points at a missing module", span: callable.declaration_span})
+            if reachable[index] -> issues.push(TirCoverageIssue.{tier: "JIT", callable: ~callable.label, reason: "callable points at a missing module", span: callable.declaration_span})
+            continue
+        }
+        cx :: contexts.entry(callable.module).or_insert_with(() -> {
+            extern_funcs :: bundle_extern_funcs(bundle)
+            cx := build_cx_items(module.items, module.source, module.display, None, extern_funcs, bundle.edition)
+            populate_cx_from_bundle(&cx, bundle, callable.module)
+            register_own_struct_shapes(&cx, bundle, callable.module)
+            collect_iterable_hooks(&cx, module.items)
+            register_foreign_enum_variants(&cx, bundle, callable.module)
+            update_cloneability_with_foreign_types(&cx, module.items)
+            return ^cx
+        })
+        outcome :: validate_tir_callable(module.items, callable.declaration_span, &cx)
+        if outcome == {
+            .Val(.Ok(_)) -> {}
+            .Val(.Err(reason)) -> {
+                issues.push(TirCoverageIssue.{tier: "AOT", callable: ~callable.label, reason: ~reason, span: callable.declaration_span})
+                if reachable[index] -> issues.push(TirCoverageIssue.{tier: "JIT", callable: ~callable.label, reason, span: callable.declaration_span})
+            }
+            .None -> {
+                reason :: "checked callable has no TIR validation route"
+                issues.push(TirCoverageIssue.{tier: "AOT", callable: ~callable.label, reason, span: callable.declaration_span})
+                if reachable[index] -> issues.push(TirCoverageIssue.{tier: "JIT", callable: ~callable.label, reason, span: callable.declaration_span})
+            }
+        }
+    }
+    issues.sort_by((left, right) -> left.tier.cmp(right.tier).then(left.callable.cmp(right.callable)).then(left.span.start.cmp(right.span.start)))
+    issues.dedup()
+    return ^issues
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11272
+// Optional route result distinguishes missing AST routes from unsupported checked routes.
+fn validate_tir_callable(items: [Item], declaration_span: Span, cx: &Cx) -> Result<Void, String>? {
+    loop item in items {
+        if item == {
+            .Func(function) if function.name_span == declaration_span -> {
+                if function.inline_foreign.is_some() || tir_covers(function, cx) -> return Val(Ok({}))
+                return Val(Err("function is outside tir_covers ({describe(cx)})"))
+            }
+            .Struct(definition) | .Enum(definition) -> {
+                if definition.methods.iter().find(method -> method.name_span == declaration_span) == .Val(method) -> return Val(validate_tir_method(method, definition.name, None, false, &cx))
+                loop implementation in definition.trait_impls {
+                    if implementation.methods.iter().find(method -> method.name_span == declaration_span) == .Val(method) -> return Val(validate_tir_method(method, definition.name, Val(implementation.trait_name), implementation.compiler_generated, &cx))
+                }
+            }
+            .Impl(implementation) -> {
+                if implementation.os_target.is_some_and(target -> target != cx.active_os) {
+                    if implementation.methods.iter().any(method -> method.name_span == declaration_span) -> return Val(Ok({}))
+                    continue
+                }
+                if implementation.methods.iter().find(method -> method.name_span == declaration_span) == .Val(method) -> return Val(validate_tir_method(method, implementation.type_name, implementation.trait_name, implementation.is_generated_serde, &cx))
+            }
+            .CodeModule(module) -> { if module.body == .Val(body) { if validate_tir_callable(body, declaration_span, &cx) == .Val(result) -> return Val(result) } }
+            _ -> {}
+        }
+    }
+    return None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11392
+fn validate_tir_method(method: Func, owner: String, trait_name: String?, compiler_generated: Bool, cx: &Cx) -> Result<Void, String> {
+    covered :: if trait_name == {
+        .Val(name) -> tir_covers_trait_method(method, owner, cx, name) || (compiler_generated && tir_covers_compiler_derive_method(method, cx))
+        .None -> tir_covers_method(method, owner, cx)
+    }
+    return if covered { Ok({}) } else { Err("method is outside tir_covers ({describe(cx)})") }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11421
+pub fn view_copy_kind(source: Type) -> MirViewCopyKind? {
+    return if source == {
+        .Tagged{inner, ..} -> view_copy_kind(inner)
+        .String -> Val(.String)
+        .List(_) | .FixedList{..} -> Val(.List)
+        .Apply{name, args} if args.len() == 1 && (name == "View" || name == "ViewMut") -> Val(if args[0] == .Named("str") { .String } else { .List })
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11442
+fn view_copy_view_element(source: Type) -> Type? {
+    return if source == {
+        .Tagged{inner, ..} -> view_copy_view_element(inner)
+        .Apply{name, args} if args.len() == 1 && (name == "View" || name == "ViewMut") -> Val(args[0])
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11457
+pub fn view_copy_owned_type(source: Type) -> Type? {
+    element :: view_copy_view_element(source)?
+    return Val(if element == .Named("str") { .String } else { .List(~element) })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11486
+pub fn allocator_constructor_owner(recv_type: String?, method: String) -> String? {
+    owner :: recv_type?
+    valid :: if owner == { "Arena" | "Bump" | "Pool" -> method == "new"; "Fixed" -> method == "new" || method == "over"; _ -> false }
+    return if valid { Val(owner) } else { None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11502
+pub fn call_arg_copy_fact(arc_clone: Bool) -> MirCopyFact { return if arc_clone { .Share } else { .Materialize } }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11469
+// Existing canonical owner: JetFoundation.TIR.TAllocCtor (TIR.jet:161-167).
+// Arena, Bump, Pool, Fixed(size), FixedOver retain the constructor family and capacity.
+use jet_foundation.TAllocCtor
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:11511
+// Existing canonical owner: JetFoundation.TIR.TExprKind (TIR.jet:484-605).
+// No second enum is introduced here; backend-neutral fields are consumed by all producers.
+use jet_foundation.TExprKind
+// Exact Rust variant -> canonical variant mapping (payload facts are kept at the owner):
+// IntLit -> IntLit; FloatLit -> FloatLit; BoolLit -> BoolLit; CharLit -> CharLit;
+// StrLit -> StrLit; Local -> Local; Unit -> Unit; InlineBlock -> InlineBlock;
+// DefaultLit -> DefaultLit; Uninit -> Uninit; CtLit -> CtLit; HostCall -> HostCall;
+// ConstRef -> ConstRef; DataEntriesToMap -> DataEntriesToMap; Call -> Call;
+// DistinctCtor -> DistinctCtor; RangeCheckedCtor -> RangeCheckedCtor;
+// DistinctConvert -> DistinctConvert; UnitConvert -> UnitConvert;
+// MathBuiltin -> MathBuiltin; PreciseBuiltin -> PreciseBuiltin; Print -> Print;
+// Drop -> Drop; Close -> Close; Move -> Move; ResourceNew -> ResourceNew;
+// ResourceTake -> ResourceTake; AmbientInput -> AmbientInput; RequireStop -> RequireStop;
+// Binary -> Binary; CompareChain -> CompareChain; LayoutCompare -> LayoutCompare;
+// LayoutLit -> LayoutLit; Unary -> Unary; StructLit -> StructLit; Field -> Field;
+// SharedGuardValue -> SharedGuardValue; SharedGuardMap -> SharedGuardMap;
+// SharedGuardSplit -> SharedGuardSplit; SharedGuardWait -> SharedGuardWait;
+// ConditionNotify -> ConditionNotify; PtrFromAddr -> PtrFromAddr; Deref -> Deref;
+// RawOf -> RawOf; AllocNew -> AllocNew; EnumLit -> EnumLit; JSONLit -> JSONLit;
+// DBValueLit -> DBValueLit; ListLit -> ListLit; ListSpread -> ListSpread;
+// ColumnarListLit -> ColumnarListLit; ColumnarGather -> ColumnarGather;
+// ColumnarColumnRead -> ColumnarColumnRead; TupleLit -> TupleLit; MapLit -> MapLit;
+// Index -> IndexRead; PoolSlot -> PoolSlot; IndexHook -> IndexHook;
+// MathLaneIndex -> MathLaneIndex; MathSwizzleRead -> MathSwizzleRead; Slice -> SliceOwned;
+// Clone -> Clone; ExplicitCopy -> ExplicitCopy; Borrow -> Borrow;
+// MaterializeView -> MaterializeView; MethodCall -> MethodCall; StaticCall -> StaticCall;
+// DecodeUnder -> DecodeUnder; BuiltinMethod -> BuiltinMethod; CoreCall -> CoreCall;
+// IfExpr -> IfExpr; ResultHandler -> ResultHandler; Todo -> Todo;
+// InvariantViolation -> InvariantViolation; Unreachable -> Unreachable;
+// DistinctRaw -> DistinctRaw; Present -> Present; Absent -> Absent; Ok -> Ok;
+// Err -> Err; Try -> TryWithContext; OrFallback -> OrFallback; OptField -> OptField;
+// Lambda -> Lambda; PatternMatches -> PatternMatches; OptionLift2 -> OptionLift2;
+// ClosureMethod -> ClosureMethod; HostBorrowCallback -> HostBorrowCallback;
+// NumericMethod -> NumericMethod; NumericBinaryMethod -> NumericBinaryMethod;
+// OverflowOpt -> OverflowOpt; HandleMethod -> HandleMethod; CoreClosureCall -> CoreClosureCall;
+// TaskGroupAll -> TaskGroupAll; TaskGroupRace -> TaskGroupRace; TaskGroupAny -> TaskGroupAny;
+// SelectStart -> SelectStart; SelectRecv -> SelectRecv; SelectAfter -> SelectAfter;
+// SelectWait -> SelectWait; FnValue -> FnValue; ModuleCall -> ModuleCall; ExternCall -> ExternCall.
+// Missing canonical source facts (MethodCall source literal/operator line, Err origin,
+// Try character column) are publication cutovers recorded in INTEGRATION-ITEMS, not erased.

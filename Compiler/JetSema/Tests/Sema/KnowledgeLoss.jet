@@ -1,0 +1,19 @@
+use jet_sema.[allows_gate, requires_gate, KnowledgeGate, KnowledgePlane]
+// Rust: crates/jet-sema/src/Sema/KnowledgeLoss.rs:103
+#Test("one_law_covers_all_knowledge_planes") {
+    cases :: [(KnowledgePlane, KnowledgeGate)]{
+        (.Range, .BoundedArithmetic), (.Exactness, .Approximation), (.Unit, .RoundedConversion),
+        (.State, .StateTransition), (.Classification, .ClassificationScrub),
+    }
+    loop (plane, gate) in cases {
+        assert(requires_gate(plane, None))
+        assert(!requires_gate(plane, Val(gate)))
+        assert(allows_gate(plane, gate))
+    }
+}
+// Rust: crates/jet-sema/src/Sema/KnowledgeLoss.rs:122
+#Test("raw_projection_is_the_explicit_escape_for_each_plane") {
+    loop plane in [KnowledgePlane]{.Range, .Exactness, .Unit, .State, .Classification} {
+        assert(!requires_gate(plane, Val(KnowledgeGate.RawProjection)))
+    }
+}

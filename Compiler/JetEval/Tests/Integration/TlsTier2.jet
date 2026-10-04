@@ -1,0 +1,83 @@
+use jet_comptime.Comptime.[evaluate_owned_with_imports_opts, run_repl_step, CtValue, DevSink, ReplAuthorizer, ReplEffectRequest]
+use jet_comptime.Diagnostics.[Diagnostic, Span]
+use jet_comptime.AST.[Expr, Stmt, Func]
+use jet_foundation.Policy.[GateSet, PolicyKey]
+use std.io.[Error as IOError]
+use std.fs.[File]
+
+// Rust: crates/jet-comptime/tests/tls_tier2.rs:11
+fn tls_call_diag(impure_depth: USize, gates: GateSet) -> Diagnostic {
+    expr :: Expr.MethodCall{
+        receiver: Box.new(Expr.Ident("tls", Span.new(0, 3))), method: "client",
+        method_span: Span.new(4, 10), owner_type_args: [], type_args: [], args: [],
+        recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false
+    }
+    funcs :: [String: Func]{}
+    extern_names :: [String: Bool]{}
+    globals :: [String: CtValue]{}
+    core_imports :: [String: String]{"tls": "core.net.tls"}
+    evaluate_owned_with_imports_opts(&expr, &funcs, &extern_names, OSPath.new("."), &globals, &core_imports, gates, impure_depth).expect_err("core.net.tls.client must not execute at comptime")
+}
+// Rust: crates/jet-comptime/tests/tls_tier2.rs:44
+#Test("core_tls_follows_the_whole_tier2_comptime_gate") {
+    pure :: tls_call_diag(0, GateSet.default())
+    assert_eq(pure.code, "E3410")
+    assert_ne(pure.code, "E0956")
+    gated :: tls_call_diag(1, GateSet.default())
+    assert_eq(gated.code, "E3411")
+    assert_ne(gated.code, "E0956")
+    allowed :: tls_call_diag(1, GateSet.allow(PolicyKey.Impure))
+    assert_eq(allowed.code, "E3412")
+    assert_ne(allowed.code, "E0956")
+    assert_eq(allowed.what, "`core.net.tls.client()` is not available at comptime")
+}
+// Rust: crates/jet-comptime/tests/tls_tier2.rs:66
+struct RecordingAuthorizer { requests: [ReplEffectRequest] = [] }
+// Rust: crates/jet-comptime/tests/tls_tier2.rs:70
+impl ReplAuthorizer for RecordingAuthorizer {
+    // Rust: crates/jet-comptime/tests/tls_tier2.rs:71
+    fn preflight(&self, request: &ReplEffectRequest, span: Span) -> Unit Diagnostic! {
+        self.requests.push(request.clone())
+        fail Diagnostic.error("E1803", "test stopped after effect classification", "the host operation must not run in this test", "inspect the recorded request", Val(span))
+    }
+    // Rust: crates/jet-comptime/tests/tls_tier2.rs:82
+    fn authorize(&self, request: &ReplEffectRequest, span: Span) -> Unit Diagnostic! { panic("preflight stops the test") }
+    // Rust: crates/jet-comptime/tests/tls_tier2.rs:86
+    fn fs_read(&self, path: String) -> [U8] IOError! { panic("TLS classification performs no filesystem I/O") }
+    // Rust: crates/jet-comptime/tests/tls_tier2.rs:90
+    fn fs_write(&self, path: String, bytes: &[U8], append: Bool) -> Unit IOError! { panic("TLS classification performs no filesystem I/O") }
+    // Rust: crates/jet-comptime/tests/tls_tier2.rs:94
+    fn fs_exists(&self, path: String) -> Bool IOError! { panic("TLS classification performs no filesystem I/O") }
+    // Rust: crates/jet-comptime/tests/tls_tier2.rs:98
+    fn fs_is_dir(&self, path: String) -> Bool IOError! { panic("TLS classification performs no filesystem I/O") }
+    // Rust: crates/jet-comptime/tests/tls_tier2.rs:102
+    fn fs_create_dir(&self, path: String) -> Unit IOError! { panic("TLS classification performs no filesystem I/O") }
+    // Rust: crates/jet-comptime/tests/tls_tier2.rs:106
+    fn fs_remove(&self, path: String) -> Unit IOError! { panic("TLS classification performs no filesystem I/O") }
+    // Rust: crates/jet-comptime/tests/tls_tier2.rs:110
+    fn verified_root(&self) -> File IOError! { panic("TLS classification does not verify a process root") }
+}
+// Rust: crates/jet-comptime/tests/tls_tier2.rs:116
+#Test("core_tls_repl_requests_use_the_net_effect") {
+    span :: Span.new(0, 10)
+    tls_call :: Expr.MethodCall{
+        receiver: Box.new(Expr.Ident("tls", Span.new(0, 3))), method: "client",
+        method_span: Span.new(4, 10), owner_type_args: [], type_args: [], args: [],
+        recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false
+    }
+    stmts :: [Stmt]{Stmt.AuthorityScope{
+        caps: [(String, Span)]{("Net", span)}, caps_span: span, binding: Val("caps"), binding_span: Val(span),
+        body: [Stmt]{Stmt.Expr(tls_call)}, span: span
+    }}
+    funcs :: [String: Func]{}
+    scope := [String: CtValue]{}
+    sink := DevSink.default()
+    core_imports :: [String: String]{"tls": "core.net.tls"}
+    authorizer := RecordingAuthorizer{}
+    error :: run_repl_step(&stmts, &funcs, OSPath.new("."), &sink, &scope, 100, true, &core_imports, &[:]{}, &[:]{}, &authorizer).expect_err("recording preflight stops execution")
+    assert_eq(error.code, "E1803")
+    assert_eq(authorizer.requests.len(), 1)
+    assert_eq(authorizer.requests[0].root, "Net")
+    assert_eq(authorizer.requests[0].operation, "client")
+    assert_eq(authorizer.requests[0].resource, "<network resource>")
+}

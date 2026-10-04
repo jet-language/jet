@@ -1,1960 +1,731 @@
-// PORT-PENDING 0409 crates-jet-sema-src-sema-checkerinfer-expr-module-group-slice-3270: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3270-5078
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
-//RS         self.normalize_contextual_expr(e);
-//RS         if self.implicit_loop_subject_depth > 0
-//RS             || self
-//RS                 .expected_type
-//RS                 .as_ref()
-//RS                 .is_some_and(|ty| {
-//RS                     matches!(ty, Type::Fn { .. })
-//RS                         || matches!(ty, Type::Named(name) if name == "UIShortcut")
-//RS                 })
-//RS         {
-//RS             normalize_bare_method_head(e);
-//RS         }
-//RS         if self.implicit_loop_subject_depth > 0 {
-//RS             // A leading `.method(args)` is parsed as a call through the
-//RS             // leading-dot field. In an implicit-subject loop it is the
-//RS             // ordinary method call on that subject; lower it to the same
-//RS             // MethodCall node used by an explicit receiver.
-//RS             let method_call = match e {
-//RS                 Expr::CallValue { callee, .. } => match callee.as_ref() {
-//RS                     Expr::Field(inner, method, method_span) if matches!(inner.as_ref(), Expr::Ident(name, _) if name.is_empty()) => {
-//RS                         Some((method.clone(), *method_span, inner.span()))
-//RS                     }
-//RS                     _ => None,
-//RS                 },
-//RS                 _ => None,
-//RS             };
-//RS             if let Some((method, method_span, receiver_span)) = method_call {
-//RS                 let span = e.span();
-//RS                 let Expr::CallValue { args, .. } = std::mem::replace(e, Expr::Absent(span)) else {
-//RS                     unreachable!("matched an implicit-subject call value");
-//RS                 };
-//RS                 *e = Expr::MethodCall {
-//RS                     receiver: Box::new(Expr::Ident(Syntax::KW_IT.to_string(), receiver_span)),
-//RS                     method,
-//RS                     method_span,
-//RS                     owner_type_args: Vec::new(),
-//RS                     type_args: Vec::new(),
-//RS                     args,
-//RS                     recv_type: None,
-//RS                     resolved_ret: None,
-//RS                     operator_rhs: None,
-//RS                     checked_widen: false,
-//RS                 };
-//RS             }
-//RS         }
-//RS         if self.implicit_loop_subject_depth > 0 && is_bare_member_chain(e) {
-//RS             replace_bare_member_subject_with(e, Syntax::KW_IT);
-//RS         }
-//RS 
-//RS         // D-SUBJECT-CALL1=A: resolve the parser's empty-receiver member chain
-//RS         // only when the surrounding call has one concrete callable parameter.
-//RS         // Rewriting to the ordinary lambda node keeps every execution tier on
-//RS         // the existing closure path.
-//RS         if let Some(Type::Fn { params, .. }) = self.expected_type.clone() {
-//RS             if is_bare_member_chain(e) && params.len() == 1 {
-//RS                 let span = e.span();
-//RS                 let chain = bare_member_chain_text(e);
-//RS                 if self.subject_shorthand_depth > 0 {
-//RS                     self.diags.push(Diagnostic::lint(
-//RS                         "L0512",
-//RS                         format!(
-//RS                             "subject shorthand `{chain}` is nested inside another subject shorthand"
-//RS                         ),
-//RS                         "implicit subjects become hard to track when shorthand scopes nest"
-//RS                             .to_string(),
-//RS                         format!("rewrite it with a named binding: `(item) -> item{chain}`"),
-//RS                         Some(span),
-//RS                     ));
-//RS                 }
-//RS                 let mut body = std::mem::replace(e, Expr::Absent(span));
-//RS                 replace_bare_member_subject(&mut body);
-//RS                 *e = Expr::Lambda(Box::new(Lambda {
-//RS                     take_names: Vec::new(),
-//RS                     params: vec![LambdaParam {
-//RS                         name: BARE_MEMBER_SUBJECT.to_string(),
-//RS                         name_span: span,
-//RS                         ty: Some(params[0].clone()),
-//RS                         ty_span: None,
-//RS                     }],
-//RS                     result_type: None,
-//RS                     error_type: None,
-//RS                     effects: None,
-//RS                     body: LambdaBody::Expr(Box::new(body)),
-//RS                     span,
-//RS                     meta: LambdaMeta::default(),
-//RS                 }));
-//RS                 self.subject_shorthand_depth += 1;
-//RS                 let result = self.infer(e);
-//RS                 self.subject_shorthand_depth -= 1;
-//RS                 return result;
-//RS             }
-//RS             if is_bare_member_chain(e) {
-//RS                 let arity = params.len().to_string();
-//RS                 let chain = bare_member_chain_text(e);
-//RS                 self.diags.push(Diagnostic::from_row(
-//RS                     "E-SUBJECT-CALL-ARITY",
-//RS                     &[("arity", arity.as_str()), ("chain", chain.as_str())],
-//RS                     Some(e.span()),
-//RS                 ));
-//RS                 return None;
-//RS             }
-//RS         }
-//RS 
-//RS         // D-SUBJECT-CALL1=A: a lower-case bare member chain has meaning only
-//RS         // as the shorthand for a unary callable. Keep ordinary value contexts
-//RS         // distinct from `.new(...)` and uppercase variant inference.
-//RS         if is_bare_member_chain(e) && !is_inferred_constructor(e) {
-//RS             // The workspace is not on Rust 2024, so a `let` chain does not
-//RS             // compile here. Nest the guard instead; the meaning is unchanged.
-//RS             if let Some(expected) = self.expected_type.clone() {
-//RS                 if !matches!(expected, Type::Fn { .. }) {
-//RS                     let expected_name = expected.name();
-//RS                     let chain = bare_member_chain_text(e);
-//RS                     self.diags.push(Diagnostic::from_row(
-//RS                         "E-SUBJECT-CALL",
-//RS                         &[
-//RS                             ("expected", expected_name.as_str()),
-//RS                             ("chain", chain.as_str()),
-//RS                         ],
-//RS                         Some(e.span()),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         // D-EMPTYLIT1: an empty `[]` always parses as `Expr::ListLit`. When the
-//RS         // expected-type context says Map, rewrite the node to an empty
-//RS         // `Expr::MapLit` here so every downstream pass (codegen, comptime,
-//RS         // formatter-after-sema) sees the AST kind it already knows how to
-//RS         // lower — the exact same shape the retired `[:]` literal produced.
-//RS         if let Expr::ListLit(elems, span) = e {
-//RS             if elems.is_empty() {
-//RS                 if let Some(Type::Map {
-//RS                     key,
-//RS                     key_span,
-//RS                     value,
-//RS                 }) = self.expected_type.clone()
-//RS                 {
-//RS                     let span = *span;
-//RS                     *e = Expr::MapLit(Vec::new(), span);
-//RS                     return Some(Type::Map {
-//RS                         key,
-//RS                         key_span,
-//RS                         value,
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         // D-DOTCTOR3=A: `Type.{ body }` elaborates against the head like an
-//RS         // expected-type position, then rewrites to the ordinary literal shape.
-//RS         if matches!(e, Expr::TypedLit { .. }) {
-//RS             return self.elaborate_typed_lit(e);
-//RS         }
-//RS         if let Expr::OrFallback { value, .. } = e {
-//RS             if value_loop_requires_route(value) {
-//RS                 return self.infer_value_loop_fallback(e);
-//RS             }
-//RS         }
-//RS         match e {
-//RS             // S68 (D-SG2): `if` in expression position. Condition is Bool; each
-//RS             // branch's trailing expression is its value, and both must agree.
-//RS             Expr::If {
-//RS                 cond,
-//RS                 then_body,
-//RS                 then_value,
-//RS                 else_body,
-//RS                 else_value,
-//RS                 span,
-//RS             } => {
-//RS                 let span = *span;
-//RS                 // The carrier a fallible context expects from this value-if.
-//RS                 let if_expected = self.expected_type.clone();
-//RS                 // D-FACT-FLOW1: one snapshot, one store per arm, one join.
-//RS                 let before = self.flow.clone();
-//RS                 // D-FLOWTYPE1=A: same Optional presence desugar as statement `if`.
-//RS                 self.rewrite_optional_flow_ne_none(cond);
-//RS                 // Value-if always has an else arm; invert atomic `== None` so the
-//RS                 // false branch (presence) becomes an S31 Present then-arm.
-//RS                 if let Some((name, name_span, cond_span)) =
-//RS                     crate::Sema::CheckerCore::atomic_absent_optional_subject(cond)
-//RS                 {
-//RS                     if self.flow_narrowable_optional_inner(&name).is_some() {
-//RS                         std::mem::swap(then_body, else_body);
-//RS                         std::mem::swap(then_value, else_value);
-//RS                         **cond = Expr::PatternTest {
-//RS                             subject: Box::new(Expr::Ident(name.clone(), name_span)),
-//RS                             pattern: crate::AST::Pattern::Present {
-//RS                                 binding: name,
-//RS                                 binding_span: name_span,
-//RS                                 inner: None,
-//RS                                 span: cond_span,
-//RS                             },
-//RS                             span: cond_span,
-//RS                         };
-//RS                     }
-//RS                 }
-//RS                 let bindings = self.check_condition_with_bindings(cond);
-//RS                 self.push_scope();
-//RS                 let mut restore_moved = Vec::new();
-//RS                 let windows = crate::Sema::CheckerCore::condition_window_names(cond, false);
-//RS                 for (name, ty) in bindings {
-//RS                     let window = windows.contains(&name);
-//RS                     if let Some(restored) =
-//RS                         self.declare_pattern_binding(&name, cond.span(), ty, window)
-//RS                     {
-//RS                         restore_moved.push(restored);
-//RS                     }
-//RS                 }
-//RS                 self.record_condition_view_bindings(cond);
-//RS                 self.check_block(then_body, false);
-//RS                 // Owner rule (bare `None`): without an optional expected
-//RS                 // type, a bare `None` arm takes its optional type from the
-//RS                 // sibling arm of the same value-if/match. A leading `None`
-//RS                 // arm waits for the else arm's type; it has no flow effects
-//RS                 // to reorder.
-//RS                 let sibling_rule = !if_expected
-//RS                     .as_ref()
-//RS                     .is_some_and(|ty| ty.unwrap_option().is_some());
-//RS                 let defer_then = sibling_rule && bare_absent_arm(then_value, false);
-//RS                 let then_ty = if defer_then {
-//RS                     None
-//RS                 } else {
-//RS                     self.infer_pattern_branch_value(cond, then_value)
-//RS                 };
-//RS                 self.pop_scope();
-//RS                 for (name, at) in restore_moved {
-//RS                     self.flow.moved.set(&name, at);
-//RS                 }
-//RS                 let then_path = self.flow.clone();
-//RS                 self.flow = before.clone();
-//RS                 self.push_scope();
-//RS                 self.check_block(else_body, false);
-//RS                 let saved_expected = self.expected_type.clone();
-//RS                 if sibling_rule && bare_absent_arm(else_value, true) {
-//RS                     self.expected_type = then_ty.clone().filter(|ty| ty.unwrap_option().is_some());
-//RS                 }
-//RS                 let else_ty = self.infer_pattern_branch_value(cond, else_value);
-//RS                 self.pop_scope();
-//RS                 let then_ty = if defer_then {
-//RS                     self.expected_type = else_ty.clone().filter(|ty| ty.unwrap_option().is_some());
-//RS                     let ty = self.infer_pattern_branch_value(cond, then_value);
-//RS                     self.expected_type = saved_expected;
-//RS                     ty
-//RS                 } else {
-//RS                     self.expected_type = saved_expected;
-//RS                     then_ty
-//RS                 };
-//RS                 let else_path = self.flow.clone();
-//RS                 let then_ty = then_ty.filter(|_| then_path.reachable);
-//RS                 let else_ty = else_ty.filter(|_| else_path.reachable);
-//RS                 // D-LIN1 / D-FACT-FLOW1: E0141 — a `#SingleUse` value consumed
-//RS                 // on one arm and not the other. `Moved::join` is a union (keeps
-//RS                 // either arm's move), so the merged store alone would call this
-//RS                 // value consumed and E0140 would never see the gap; check the
-//RS                 // two pre-merge snapshots directly for exactly one side moving
-//RS                 // it, over the bindings live at this scope before the branch.
-//RS                 let scope_depth = self.scope_depth();
-//RS                 let mut divergent_single_use: Vec<(String, Span)> = before
-//RS                     .bindings
-//RS                     .iter_at(scope_depth)
-//RS                     .filter_map(|(name, info)| {
-//RS                         let use_span = info.single_use_span?;
-//RS                         if before.moved.contains(name) {
-//RS                             return None;
-//RS                         }
-//RS                         let moved_then = then_path.moved.contains(name);
-//RS                         let moved_else = else_path.moved.contains(name);
-//RS                         if moved_then != moved_else {
-//RS                             Some((name.to_string(), use_span))
-//RS                         } else {
-//RS                             None
-//RS                         }
-//RS                     })
-//RS                     .collect();
-//RS                 divergent_single_use.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
-//RS                 for (name, use_span) in divergent_single_use {
-//RS                     self.diags
-//RS                         .push(crate::Sema::CheckerOwnership::e0141_unconsumed_branch(
-//RS                             &name, use_span,
-//RS                         ));
-//RS                 }
-//RS                 self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(
-//RS                     &before,
-//RS                     &[then_path, else_path],
-//RS                 );
-//RS                 if self.statement_expr_inference
-//RS                     && self.statement_expr_root_depth == Some(self.source_nesting)
-//RS                 {
-//RS                     return Some(crate::Sema::CheckerCoreLib::unit_ty());
-//RS                 }
-//RS                 match (then_ty, else_ty) {
-//RS                     (Some(a), Some(b)) => {
-//RS                         // `todo`, `panic`, and an all-diverging nested value-if
-//RS                         // do not contribute a live branch type. Keep the type
-//RS                         // from the branch that can reach the join.
-//RS                         let then_is_diverging = self.expr_definitely_diverges(then_value)
-//RS                             || crate::Sema::Diagnostics::block_definitely_exits(then_body);
-//RS                         let else_is_diverging = self.expr_definitely_diverges(else_value)
-//RS                             || crate::Sema::Diagnostics::block_definitely_exits(else_body);
-//RS                         if a == b || else_is_diverging || self.nominal_type_identity(&a, &b) {
-//RS                             // Update a typed hole's expected_type to match what
-//RS                             // we know; panic/diverging branches have no hole.
-//RS                             if matches!(else_value.as_ref(), Expr::Todo { .. }) {
-//RS                                 if let Expr::Todo { expected_type, .. } = else_value.as_mut() {
-//RS                                     *expected_type = Some(a.name());
-//RS                                 }
-//RS                             }
-//RS                             Some(a)
-//RS                         } else if then_is_diverging {
-//RS                             if matches!(then_value.as_ref(), Expr::Todo { .. }) {
-//RS                                 if let Expr::Todo { expected_type, .. } = then_value.as_mut() {
-//RS                                     *expected_type = Some(b.name());
-//RS                                 }
-//RS                             }
-//RS                             Some(b)
-//RS                         } else if let Some((carrier, lift_then)) = match if_expected.as_ref() {
-//RS                             // A decision table in a fallible context mixes
-//RS                             // `Ok`/`Err` arms with plain success values; the
-//RS                             // plain side lifts into the expected carrier.
-//RS                             Some(carrier @ Type::Result { ok, .. }) if b == *carrier && a == **ok => {
-//RS                                 Some((carrier.clone(), true))
-//RS                             }
-//RS                             Some(carrier @ Type::Result { ok, .. }) if a == *carrier && b == **ok => {
-//RS                                 Some((carrier.clone(), false))
-//RS                             }
-//RS                             _ => None,
-//RS                         } {
-//RS                             let plain = if lift_then {
-//RS                                 &mut **then_value
-//RS                             } else {
-//RS                                 &mut **else_value
-//RS                             };
-//RS                             let plain_span = plain.span();
-//RS                             let inner = std::mem::replace(plain, Expr::Absent(plain_span));
-//RS                             *plain = Expr::Ok(Box::new(inner), plain_span);
-//RS                             Some(carrier)
-//RS                         } else if let Some(joined) = a.numeric_join(&b) {
-//RS                             // D-NUMJOIN1=A: two numeric producers follow the one
-//RS                             // widening law, exactly as an operator's operands do.
-//RS                             self.widen_numeric_expr(then_value, &a, &joined);
-//RS                             self.widen_numeric_expr(else_value, &b, &joined);
-//RS                             Some(joined)
-//RS                         } else {
-//RS                             if self.collect_item_types.is_empty() {
-//RS                                 let fix = if matches!(
-//RS                                     (&a, &b),
-//RS                                     (
-//RS                                         Type::Named(left),
-//RS                                         Type::Named(right)
-//RS                                     ) if left == Syntax::TYPE_NEVER || right == Syntax::TYPE_NEVER
-//RS                                 ) {
-//RS                                     "make each returning branch produce the same value type; a non-returning branch needs no value".to_string()
-//RS                                 } else {
-//RS                                     format!(
-//RS                                         "make both branches produce {} (or the same type)",
-//RS                                         a.show()
-//RS                                     )
-//RS                                 };
-//RS                                 self.diags.push(Diagnostic::error(
-//RS                                     "E0124",
-//RS                                     format!(
-//RS                                         "this `if`'s branches produce different types: {} and {}",
-//RS                                         a.show(),
-//RS                                         b.show()
-//RS                                     ),
-//RS                                     "an `if` used as a value must give the same type on every path (S68)"
-//RS                                         .to_string(),
-//RS                                     fix,
-//RS                                     Some(span),
-//RS                                 ));
-//RS                             } else {
-//RS                                 self.diags.push(Diagnostic::error(
-//RS                                     "E0074",
-//RS                                     "this collecting loop produces incompatible item types"
-//RS                                         .to_string(),
-//RS                                     format!(
-//RS                                         "one collecting loop builds one List, but these paths produce {} and {}",
-//RS                                         a.show(),
-//RS                                         b.show()
-//RS                                     ),
-//RS                                     "convert every item to one type, or split the loops"
-//RS                                         .to_string(),
-//RS                                     Some(span),
-//RS                                 ));
-//RS                             }
-//RS                             // Codegen still walks the typed tree to report all
-//RS                             // source errors. Poison the invalid tail with the
-//RS                             // existing diverging recovery node so lowering
-//RS                             // never observes two live branch types.
-//RS                             let else_span = else_value.span();
-//RS                             **else_value = Expr::Todo {
-//RS                                 span: else_span,
-//RS                                 expected_type: Some(a.name()),
-//RS                             };
-//RS                             if self.collect_item_types.is_empty() {
-//RS                                 // The branch mismatch is the root error. Do
-//RS                                 // not return one branch's type to the outer
-//RS                                 // value checker, or a declared block result
-//RS                                 // would add a second, less precise E0113.
-//RS                                 return None;
-//RS                             }
-//RS                             Some(a)
-//RS                         }
-//RS                     }
-//RS                     (Some(a), None) => Some(a),
-//RS                     (None, Some(b)) => Some(b),
-//RS                     (None, None) => None,
-//RS                 }
-//RS             }
-//RS             // D-SG9: an untyped integer literal is `Int` by default, but adopts
-//RS             // a fixed-width integer type when one is expected here (binding/param/
-//RS             // return annotation, sized arithmetic). A literal that doesn't fit the
-//RS             // width is rejected (E1003) — there is no silent truncation.
-//RS             Expr::Int(n, span, width, raw) => {
-//RS                 let (n, span) = (*n, *span);
-//RS                 // Peel transparent `#Tag T` so a `[U8]`/`#Tag U8` expected type
-//RS                 // still elaborates literal width (D-SG9 / D-TAG1).
-//RS                 let expected = match self.expected_type.clone() {
-//RS                     Some(Type::Tagged { inner, .. }) => Some(*inner),
-//RS                     other => other,
-//RS                 };
-//RS                 if let Some(Type::InlineRange { base, lo, hi }) = expected {
-//RS                     let value = super::exact_integer_literal(n, raw.as_deref());
-//RS                     let interval = super::IntegerInterval::new(i128::from(lo), i128::from(hi));
-//RS                     if !super::exact_integer_fits(&value, interval.lo, interval.hi) {
-//RS                         self.diags.push(
-//RS                             crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
-//RS                                 &value, lo, hi, span,
-//RS                             ),
-//RS                         );
-//RS                     }
-//RS                     *width = None;
-//RS                     Some(Type::InlineRange { base, lo, hi })
-//RS                 } else if let Some(Type::IntN { signed, bits }) = expected {
-//RS                     let interval = super::integer_width_interval(signed, bits);
-//RS                     let value = super::exact_integer_literal(n, raw.as_deref());
-//RS                     if !super::exact_integer_fits(&value, interval.lo, interval.hi) {
-//RS                         self.diags.push(int_range_error(signed, bits, span));
-//RS                     }
-//RS                     *width = Some((signed, bits));
-//RS                     Some(Type::IntN { signed, bits })
-//RS                 } else if let Some((signed, bits)) = *width {
-//RS                     // A prior contextual check may have recorded the literal's
-//RS                     // fixed-width carrier on the AST. Preserve that carrier
-//RS                     // when a later pass re-infers the rewritten expression.
-//RS                     Some(Type::IntN { signed, bits })
-//RS                 } else {
-//RS                     *width = None;
-//RS                     Some(Type::Int)
-//RS                 }
-//RS             }
-//RS             // D-TYPE2-DEFAULT1: an untyped decimal literal is exact Decimal by default,
-//RS             // but adopts Float/F32 when that carrier is expected here. Write the
-//RS             // resolution back onto the AST so TIR lowering can read the width.
-//RS             // `value` is unread here: an untyped decimal is rebuilt from `raw`
-//RS             // below, and the machine-float path only resolves the width.
-//RS             Expr::Float(_value, span, is_f32, raw) => {
-//RS                 // D-TYPE2-DEFAULT1: an untyped decimal literal is exact. Keep
-//RS                 // an explicit Float/F32 context on the machine-float path;
-//RS                 // everything else adopts the existing Decimal Prelude carrier.
-//RS                 let expected = self.expected_type.clone();
-//RS                 if raw.is_some() && !matches!(expected, Some(Type::Float | Type::Float32)) {
-//RS                     let text = raw.take().expect("decimal literal spelling");
-//RS                     *e = super::exact_decimal_literal(text, *span);
-//RS                     return self.infer(e);
-//RS                 }
-//RS                 if matches!(expected, Some(Type::Float32)) {
-//RS                     *raw = None;
-//RS                     *is_f32 = true;
-//RS                     Some(Type::Float32)
-//RS                 } else {
-//RS                     if matches!(expected, Some(Type::Float)) {
-//RS                         *raw = None;
-//RS                     }
-//RS                     Some(Type::Float)
-//RS                 }
-//RS             }
-//RS             // D-UNITLIT1 / D-TYPE2-TIME1: ordinary suffixes resolve against an
-//RS             // in-scope `#UnitFamily` member. Canonical Time is elaborated to
-//RS             // the checked Duration constructor; other families retain their
-//RS             // existing nominal Float path.
-//RS             Expr::UnitLit {
-//RS                 int,
-//RS                 float,
-//RS                 suffix,
-//RS                 suffix_span,
-//RS                 span,
-//RS                 ..
-//RS             } => {
-//RS                 if let Some(unit) = self.registry.unit_literal("Time", suffix) {
-//RS                     let is_float = float.is_some();
-//RS                     let mut value = match (int, float) {
-//RS                         (Some(value), _) => Expr::Int(*value, *span, None, None),
-//RS                         (_, Some(value)) => Expr::Float(*value, *span, false, None),
-//RS                         _ => Expr::Int(0, *span, None, None),
-//RS                     };
-//RS                     let scale = unit
-//RS                         .scale
-//RS                         .num
-//RS                         .to_string()
-//RS                         .parse::<i64>()
-//RS                         .expect("canonical Time scales fit the Int carrier");
-//RS                     if scale != 1 {
-//RS                         let multiplier = if is_float {
-//RS                             Expr::Float(scale as f64, *span, false, None)
-//RS                         } else {
-//RS                             Expr::Int(scale, *span, None, None)
-//RS                         };
-//RS                         value =
-//RS                             Expr::Binary(BinOp::Mul, Box::new(value), Box::new(multiplier), *span);
-//RS                     }
-//RS                     let constructor = Expr::MethodCall {
-//RS                         receiver: Box::new(Expr::Ident(
-//RS                             Syntax::DURATION_TYPE.to_string(),
-//RS                             *suffix_span,
-//RS                         )),
-//RS                         method: "nanoseconds".to_string(),
-//RS                         method_span: *suffix_span,
-//RS                         owner_type_args: Vec::new(),
-//RS                         type_args: Vec::new(),
-//RS                         args: vec![CallArg {
-//RS                             convention: AccessConvention::Read,
-//RS                             expr: value,
-//RS                             span: *span,
-//RS                             flags: CallArgFlags::default(),
-//RS                             label: None,
-//RS                             spread: false,
-//RS                         }],
-//RS                         recv_type: None,
-//RS                         resolved_ret: None,
-//RS                         operator_rhs: None,
-//RS                         checked_widen: false,
-//RS                     };
-//RS                     *e = Expr::OrFallback {
-//RS                         value: Box::new(constructor),
-//RS                         fallback: OrFallback::Panic {
-//RS                             name_span: *suffix_span,
-//RS                             args: vec![CallArg {
-//RS                                 convention: AccessConvention::Read,
-//RS                                 expr: Expr::Str(
-//RS                                     vec![StrPart::Lit(
-//RS                                         "time literal is outside Duration's i64 range".to_string(),
-//RS                                     )],
-//RS                                     *span,
-//RS                                 ),
-//RS                                 span: *span,
-//RS                                 flags: CallArgFlags::default(),
-//RS                                 label: None,
-//RS                                 spread: false,
-//RS                             }],
-//RS                         },
-//RS                         is_option: false,
-//RS                         span: *span,
-//RS                     };
-//RS                     return self.infer(e);
-//RS                 }
-//RS                 let type_name = crate::AST::UnitFamilyDef::type_name(suffix);
-//RS                 let is_unit_member = self.registry.is_distinct(&type_name)
-//RS                     && self.registry.distinct_is_numeric(&type_name)
-//RS                     && self.registry.distinct_base(&type_name) == Some(&Type::Float);
-//RS                 if !is_unit_member {
-//RS                     // D-TYPE2-IMAG1=A: `4i` is the one special suffix on the
-//RS                     // existing unit-literal AST path. An in-scope unit member
-//RS                     // wins first, so a user `#UnitFamily` member named `i`
-//RS                     // shadows the imaginary fallback exactly like any unit.
-//RS                     if suffix == Syntax::UNIT_SUFFIX_IMAGINARY {
-//RS                         let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
-//RS                         let call_span = *span;
-//RS                         *e = Expr::Call(Call {
-//RS                             name: Syntax::TYPE_COMPLEX.to_string(),
-//RS                             name_span: *suffix_span,
-//RS                             type_args: Vec::new(),
-//RS                             args: vec![
-//RS                                 CallArg {
-//RS                                     convention: AccessConvention::Read,
-//RS                                     expr: Expr::Float(0.0, call_span, false, None),
-//RS                                     span: call_span,
-//RS                                     flags: CallArgFlags::default(),
-//RS                                     label: None,
-//RS                                     spread: false,
-//RS                                 },
-//RS                                 CallArg {
-//RS                                     convention: AccessConvention::Read,
-//RS                                     expr: Expr::Float(value, call_span, false, None),
-//RS                                     span: call_span,
-//RS                                     flags: CallArgFlags::default(),
-//RS                                     label: None,
-//RS                                     spread: false,
-//RS                                 },
-//RS                             ],
-//RS                             resolved_ret: None,
-//RS                             range_checked: false,
-//RS                             widen_approx: false,
-//RS                         });
-//RS                         return self.infer(e);
-//RS                     }
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0134",
-//RS                         format!("`{}` isn't a unit in scope", suffix),
-//RS                         "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here".to_string(),
-//RS                         format!("import the family that defines `{}`, or write the number without a suffix", suffix),
-//RS                         Some(*suffix_span),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
-//RS                 let call_span = *span;
-//RS                 *e = Expr::MethodCall {
-//RS                     receiver: Box::new(Expr::Ident(type_name, *suffix_span)),
-//RS                     method: Syntax::numeric_conversion_method("Float")
-//RS                         .expect("Float has a canonical conversion method")
-//RS                         .to_string(),
-//RS                     method_span: *suffix_span,
-//RS                     owner_type_args: Vec::new(),
-//RS                     type_args: Vec::new(),
-//RS                     args: vec![CallArg {
-//RS                         convention: AccessConvention::Read,
-//RS                         expr: Expr::Float(value, call_span, false, None),
-//RS                         span: call_span,
-//RS                         flags: crate::AST::CallArgFlags::default(),
-//RS                         label: None,
-//RS                         spread: false,
-//RS                     }],
-//RS                     recv_type: None,
-//RS                     resolved_ret: None,
-//RS                     operator_rhs: None,
-//RS                     checked_widen: false,
-//RS                 };
-//RS                 self.infer(e)
-//RS             }
-//RS             // D-VOID1=A: `()` is the public spelling of the existing internal
-//RS             // Unit value; no separate unit type is introduced.
-//RS             Expr::Unit(_) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-//RS             Expr::Bool(_, _) => Some(Type::Bool),
-//RS             // D-UNIFYLIT1=A: bare `"…"` is always `String`. Domain text elaborates
-//RS             // only from `SQL.{"…"}` / `HTML.{"…"}` / `Sh.{"…"}` (typed-literal
-//RS             // heads) via `elaborate_typed_lit` → `rewrite_typed_text_literal`.
-//RS             Expr::Str(parts, str_span) => {
-//RS                 let raw_html_edit = raw_multiline_html_edit(self.source, parts, *str_span);
-//RS                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): interpolation with at least one
-//RS                 // `{…}` hole builds a fresh `String` (unlike a plain literal
-//RS                 // with no holes, which is one constant piece of text — not
-//RS                 // "concatenation/interpolation that produces a new String").
-//RS                 if parts.iter().any(|p| matches!(p, StrPart::Interp(..))) {
-//RS                     self.record_memory_event(crate::Sema::MemoryEvent::new(
-//RS                         crate::Sema::MemoryEventKind::Allocation,
-//RS                         *str_span,
-//RS                         "string interpolation allocates a new `String`",
-//RS                     ));
-//RS                 }
-//RS                 let debug_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Debug,
-//RS                 )
-//RS                 .name;
-//RS                 let pretty_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Pretty,
-//RS                 )
-//RS                 .name;
-//RS                 let fixed_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Fixed,
-//RS                 )
-//RS                 .name;
-//RS                 let grouped_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Grouped,
-//RS                 )
-//RS                 .name;
-//RS                 let hex_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Hex,
-//RS                 )
-//RS                 .name;
-//RS                 let sci_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Sci,
-//RS                 )
-//RS                 .name;
-//RS                 let percent_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Percent,
-//RS                 )
-//RS                 .name;
-//RS                 let bin_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Bin,
-//RS                 )
-//RS                 .name;
-//RS                 let oct_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Oct,
-//RS                 )
-//RS                 .name;
-//RS                 let pad_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Pad,
-//RS                 )
-//RS                 .name;
-//RS                 let pad_left_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::PadLeft,
-//RS                 )
-//RS                 .name;
-//RS                 let unit_selector = crate::Syntax::interpolation_selector_for_kind(
-//RS                     crate::Syntax::InterpolationSelectorKind::Unit,
-//RS                 )
-//RS                 .name;
-//RS                 for p in parts.iter_mut() {
-//RS                     if let StrPart::Interp(inner, fmt) = p {
-//RS                         // Interpolation borrows; never moves.
-//RS                         self.borrow_ctx = true;
-//RS                         // D-MEM1 stage S5: `"{d}"` reads `d` via Display/Debug
-//RS                         // (`str` has both impls too, see `Prelude/Core.rs`) —
-//RS                         // safe for a string view, unlike most other reads.
-//RS                         let was_view_read = self.allow_string_view_read;
-//RS                         self.allow_string_view_read = true;
-//RS                         let t = self.infer(inner);
-//RS                         self.allow_string_view_read = was_view_read;
-//RS                         if let Some(t) = t {
-//RS                             if self.type_contains_observable_clock(&t) {
-//RS                                 self.record_effect(
-//RS                                     crate::Sema::Effects::Effect::Time.name(),
-//RS                                     inner.span(),
-//RS                                 );
-//RS                                 if self.in_pure && self.det_suppress == 0 {
-//RS                                     self.diags.push(crate::Sema::e3403(
-//RS                                         "Clock formatting",
-//RS                                         Some(inner.span()),
-//RS                                     ));
-//RS                                 }
-//RS                             }
-//RS                             match fmt {
-//RS                                 crate::AST::StrFormat::Display => {
-//RS                                     let display_migration_lint =
-//RS                                         super::stdlib_lints::is_display_migration_candidate(
-//RS                                             self, &t,
-//RS                                         );
-//RS                                     let generic_display_bound = self.type_param_has_bound(
-//RS                                         &t,
-//RS                                         crate::Generics::DISPLAY,
-//RS                                     ) || self.type_param_has_bound(
-//RS                                         &t,
-//RS                                         crate::Generics::PRINTABLE,
-//RS                                     );
-//RS                                     if !is_displayable(&t, self.registry, self.trait_reg)
-//RS                                         && !generic_display_bound
-//RS                                         && !self.is_unit_type(&t)
-//RS                                         || display_migration_lint
-//RS                                     {
-//RS                                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(
-//RS                                             &t,
-//RS                                         ) {
-//RS                                             self.diags.push(Diagnostic::error(
-//RS                                                 "E0915",
-//RS                                                 format!("secret-bearing `{}` has no `Display` implementation", t.name()),
-//RS                                                 "cryptographic secrets cannot enter logs or strings through interpolation".to_string(),
-//RS                                                 "remove the interpolation; log a public operation label or key identifier instead".to_string(),
-//RS                                                 Some(inner.span()),
-//RS                                             ));
-//RS                                             continue;
-//RS                                         }
-//RS                                         if crate::Sema::Diagnostics::is_one_pass_source(&t) {
-//RS                                             let fix =
-//RS                                                 crate::Sema::Diagnostics::one_pass_materializer(&t)
-//RS                                                     .map_or_else(
-//RS                                                         || {
-//RS                                                             "consume it with a `loop` and show each item instead"
-//RS                                                                 .to_string()
-//RS                                                         },
-//RS                                                         |call| {
-//RS                                                             format!(
-//RS                                                                 "materialize it first: add `{call}` before the interpolation"
-//RS                                                             )
-//RS                                                         },
-//RS                                                     );
-//RS                                             self.diags.push(Diagnostic::error(
-//RS                                                 "E0915",
-//RS                                                 format!("the one-pass source {} has no `Display` implementation", t.show()),
-//RS                                                 "reading this value consumes it, so showing it would spend the only pass".to_string(),
-//RS                                                 fix,
-//RS                                                 Some(inner.span()),
-//RS                                             ));
-//RS                                             continue;
-//RS                                         }
-//RS                                         // Migration: auto-printable structs without Display get a lint
-//RS                                         // and still compile via jet_show fallback in codegen.
-//RS                                         if let Type::Named(n) = &t {
-//RS                                             // D-CAPBUNDLE1: a nominal `distinct` type
-//RS                                             // starts inert — interpolating one without
-//RS                                             // `#Printable` names the granted bundles
-//RS                                             // instead of the generic E0915 wording.
-//RS                                             if self.registry.is_distinct(n) {
-//RS                                                 self.diags.push(e0138(
-//RS                                                     n,
-//RS                                                     "string interpolation",
-//RS                                                     "#Printable",
-//RS                                                     self.registry.distinct_granted_bundles(n),
-//RS                                                     inner.span(),
-//RS                                                 ));
-//RS                                             } else if display_migration_lint {
-//RS                                                 if let Some(edit) =
-//RS                                                     super::stdlib_lints::debug_interpolation_edit(
-//RS                                                         self,
-//RS                                                         inner,
-//RS                                                         &debug_selector,
-//RS                                                     )
-//RS                                                 {
-//RS                                                     let Some(value) = self
-//RS                                                         .source
-//RS                                                         .get(edit.span.start..edit.span.end)
-//RS                                                         .map(|value: &str| value.to_owned())
-//RS                                                     else {
-//RS                                                         continue;
-//RS                                                     };
-//RS                                                     self.diags.push(
-//RS                                                         Diagnostic::from_row(
-//RS                                                             "L0520",
-//RS                                                             &[("type", n), ("value", value.as_str())],
-//RS                                                             Some(edit.span),
-//RS                                                         )
-//RS                                                         .with_edit(edit),
-//RS                                                     );
-//RS                                                 }
-//RS                                             } else {
-//RS                                                 self.diags.push(crate::Generics::e0915(
-//RS                                                     &t.show(),
-//RS                                                     inner.span(),
-//RS                                                 ));
-//RS                                             }
-//RS                                         } else {
-//RS                                             self.diags.push(crate::Generics::e0915(
-//RS                                                 &t.show(),
-//RS                                                 inner.span(),
-//RS                                             ));
-//RS                                         }
-//RS                                     }
-//RS                                 }
-//RS                                 crate::AST::StrFormat::Debug | crate::AST::StrFormat::Pretty => {
-//RS                                     let selector = match fmt {
-//RS                                         crate::AST::StrFormat::Debug => debug_selector,
-//RS                                         crate::AST::StrFormat::Pretty => pretty_selector,
-//RS                                         _ => unreachable!("debug selector family"),
-//RS                                     };
-//RS                                     if !is_debuggable(&t, self.registry, self.trait_reg) {
-//RS                                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(
-//RS                                             &t,
-//RS                                         ) {
-//RS                                             self.diags.push(Diagnostic::error(
-//RS                                                 "E0112",
-//RS                                                 format!(
-//RS                                                     "secret-bearing `{}` cannot use `:{selector}`",
-//RS                                                     t.name()
-//RS                                                 ),
-//RS                                                 "Debug output could copy cryptographic secret material into logs or diagnostics".to_string(),
-//RS                                                 "remove the interpolation; log a public operation label or key identifier instead".to_string(),
-//RS                                                 Some(inner.span()),
-//RS                                             ));
-//RS                                             continue;
-//RS                                         }
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0112",
-//RS                                             format!(
-//RS                                                 "{} can't be shown with :{selector} yet",
-//RS                                                 t.show()
-//RS                                             ),
-//RS                                             "debug interpolation needs a debuggable value"
-//RS                                                 .to_string(),
-//RS                                             "implement `Debug` or use a debuggable part"
-//RS                                                 .to_string(),
-//RS                                             Some(inner.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                                 crate::AST::StrFormat::Fixed(_) => {
-//RS                                     if !matches!(&t, Type::Float | Type::Int) {
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0112",
-//RS                                             format!(
-//RS                                                 "{} can't use `:{fixed_selector}(n)`",
-//RS                                                 t.show()
-//RS                                             ),
-//RS                                             "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` or exact `Int` values"
-//RS                                                 .to_string(),
-//RS                                             "pass a `Float` or exact `Int`, or use bare interpolation for this value"
-//RS                                                 .to_string(),
-//RS                                             Some(inner.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                                 crate::AST::StrFormat::Grouped(_) => {
-//RS                                     if !matches!(&t, Type::Float | Type::Int) {
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0112",
-//RS                                             format!(
-//RS                                                 "{} can't use `:{grouped_selector}(n)`",
-//RS                                                 t.show()
-//RS                                             ),
-//RS                                             "grouped interpolation uses `core.text.fmt.grouped`, which formats `Float` or exact `Int` values"
-//RS                                                 .to_string(),
-//RS                                             "pass a `Float` or exact `Int`, or use bare interpolation for this value"
-//RS                                                 .to_string(),
-//RS                                             Some(inner.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                                 crate::AST::StrFormat::Hex(_) => {
-//RS                                     if t != Type::Int {
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0112",
-//RS                                             format!(
-//RS                                                 "{} can't use `:{hex_selector}(n)`",
-//RS                                                 t.show()
-//RS                                             ),
-//RS                                             "hex interpolation uses `core.text.fmt.hex`, which formats `Int` values"
-//RS                                                 .to_string(),
-//RS                                             "pass an `Int`, or use bare interpolation for this value"
-//RS                                                 .to_string(),
-//RS                                             Some(inner.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                                 crate::AST::StrFormat::Sci(_) => {
-//RS                                     if t != Type::Float {
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0112",
-//RS                                             format!(
-//RS                                                 "{} can't use `:{sci_selector}(n)`",
-//RS                                                 t.show()
-//RS                                             ),
-//RS                                             "scientific interpolation formats Float values"
-//RS                                                 .to_string(),
-//RS                                             "pass a `Float`, or use bare interpolation for this value"
-//RS                                                 .to_string(),
-//RS                                             Some(inner.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                                 crate::AST::StrFormat::Percent(_) => {
-//RS                                     if t != Type::Float {
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0112",
-//RS                                             format!(
-//RS                                                 "{} can't use `:{percent_selector}(n)`",
-//RS                                                 t.show()
-//RS                                             ),
-//RS                                             "percent interpolation formats Float values".to_string(),
-//RS                                             "pass a `Float`, or use bare interpolation for this value"
-//RS                                                 .to_string(),
-//RS                                             Some(inner.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                                 crate::AST::StrFormat::Bin => {
-//RS                                     if t != Type::Int {
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0112",
-//RS                                             format!(
-//RS                                                 "{} can't use `:{bin_selector}`",
-//RS                                                 t.show()
-//RS                                             ),
-//RS                                             "binary interpolation formats exact Int values"
-//RS                                                 .to_string(),
-//RS                                             "pass an exact `Int`, or use bare interpolation for this value"
-//RS                                                 .to_string(),
-//RS                                             Some(inner.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                                 crate::AST::StrFormat::Oct => {
-//RS                                     if t != Type::Int {
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0112",
-//RS                                             format!(
-//RS                                                 "{} can't use `:{oct_selector}`",
-//RS                                                 t.show()
-//RS                                             ),
-//RS                                             "octal interpolation formats exact Int values"
-//RS                                                 .to_string(),
-//RS                                             "pass an exact `Int`, or use bare interpolation for this value"
-//RS                                                 .to_string(),
-//RS                                             Some(inner.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                                 crate::AST::StrFormat::Pad { .. }
-//RS                                 | crate::AST::StrFormat::PadLeft { .. } => {
-//RS                                     if t != Type::String {
-//RS                                         let selector =
-//RS                                             if matches!(fmt, crate::AST::StrFormat::Pad { .. }) {
-//RS                                                 pad_selector
-//RS                                             } else {
-//RS                                                 pad_left_selector
-//RS                                             };
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0112",
-//RS                                             format!(
-//RS                                                 "{} can't use `:{selector}(n)`",
-//RS                                                 t.show()
-//RS                                             ),
-//RS                                             "padding interpolation formats String values".to_string(),
-//RS                                             "pass a `String`, or use bare interpolation for this value"
-//RS                                                 .to_string(),
-//RS                                             Some(inner.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                                 crate::AST::StrFormat::Unit(_) => {
-//RS                                     if !self.is_unit_type(&t) {
-//RS                                         self.diags.push(Diagnostic::error(
-//RS                                             "E0112",
-//RS                                             format!(
-//RS                                                 "{} can't use `:{unit_selector}(…)`",
-//RS                                                 t.show()
-//RS                                             ),
-//RS                                             "unit formatting needs a quantity or a `#UnitFamily` value"
-//RS                                                 .to_string(),
-//RS                                             "use bare interpolation, or pass a value that has a unit"
-//RS                                                 .to_string(),
-//RS                                             Some(inner.span()),
-//RS                                         ));
-//RS                                     }
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 if let Some(edit) = raw_html_edit {
-//RS                     self.diags
-//RS                         .push(Diagnostic::from_row("L0524", &[], Some(*str_span)).with_edit(edit));
-//RS                 }
-//RS                 Some(Type::String)
-//RS             }
-//RS             // D-SHIFT1 (c7shift): a pattern-literal is legal ONLY as
-//RS             // `cursor.take_pattern("…")`'s argument — that call site
-//RS             // intercepts and consumes it directly (`CheckerInfer/calls.rs`)
-//RS             // before generic argument inference ever reaches this arm. If
-//RS             // it's reached anyway (a non-`Cursor` receiver's `take_pattern`
-//RS             // falls through to the generic "unknown method" recovery path,
-//RS             // which infers every arg defensively), report it plainly rather
-//RS             // than let an unhandled AST shape reach codegen (I2).
-//RS             Expr::StrMatchLit(_, span) => {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0112",
-//RS                     "a pattern literal is only valid as a `take_pattern` argument".to_string(),
-//RS                     "this string has typed holes (`{name:Type}`), which only `take_pattern` understands"
-//RS                         .to_string(),
-//RS                     "call it as `cursor.take_pattern(\"…\")`, or drop the `:Type` for an ordinary interpolated string"
-//RS                         .to_string(),
-//RS                     Some(*span),
-//RS                 ));
-//RS                 None
-//RS             }
-//RS             // D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` is legal ONLY as a
-//RS             // `reader.take_pattern([U8].{"…"})` argument (or pattern arm),
-//RS             // intercepted in method_calls / pattern validate — not as a value.
-//RS             Expr::BinMatchLit(_, span) => {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0112",
-//RS                     "a binary pattern literal is only valid as a `take_pattern` argument".to_string(),
-//RS                     "this `[U8].{\"…\"}` literal has typed holes (`{name:U<width>}`), which only `take_pattern` understands"
-//RS                         .to_string(),
-//RS                     "call it as `reader.take_pattern([U8].{\"…\"})`".to_string(),
-//RS                     Some(*span),
-//RS                 ));
-//RS                 None
-//RS             }
-//RS             Expr::Ident(name, span) => {
-//RS                 if let Some(ty) = self.binder_ref_types.get(name) {
-//RS                     return Some(ty.clone());
-//RS                 }
-//RS                 // D-LOOPLABEL3=A: loop labels share the ordinary namespace but
-//RS                 // are control names, not runtime values.
-//RS                 if self.loop_labels.iter().any(|label| label == name) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0988",
-//RS                         format!("loop label `{name}` is not a runtime value"),
-//RS                         "a loop label names a control-flow destination, so it cannot be read, passed, or stored"
-//RS                             .to_string(),
-//RS                         format!("use `break({name})` or `next({name})` to control the loop"),
-//RS                         Some(*span),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 // D-PREPOST1 (E0144): `result` names the return value inside a
-//RS                 // `#Post` condition; at function entry (a `#Pre` condition)
-//RS                 // there is no return value yet.
-//RS                 if self.in_pre_clause && name == "result" {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0144",
-//RS                         "`result` isn't available in a `#Pre` condition".to_string(),
-//RS                         "`result` names the return value, which only exists once the function has returned — a `#Pre` condition runs at entry, before there is one".to_string(),
-//RS                         "use `result` only in a `#Post` condition".to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 // D-FAIL-BIND1=A / D-CHOOSE-TEST1=A: `err` is ambient only
-//RS                 // while a failed Result payload exists. Optional absence and
-//RS                 // pure pattern misses have no report, but teach distinct fixes.
-//RS                 if name == Syntax::AMBIENT_ERR && self.fallback_has_err == Some(false) {
-//RS                     let (code, what, why, fix) = if self.fallback_is_shape_miss {
-//RS                         (
-//RS                             "E0409",
-//RS                             "`err` is not available after a pure pattern miss",
-//RS                             "a shape test only reports whether the subject matched; it carries no failure value",
-//RS                             "remove `err`, or return an explicit value from the miss route",
-//RS                         )
-//RS                     } else {
-//RS                         (
-//RS                             "E0408",
-//RS                             "`err` is not available in an optional fallback",
-//RS                             "an optional can be absent, but it has no failure report to name",
-//RS                             "remove `err`, or use a fallible result when the fallback needs the failure",
-//RS                         )
-//RS                     };
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         code,
-//RS                         what.to_string(),
-//RS                         why.to_string(),
-//RS                         fix.to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 if self.lookup(name).is_some_and(|info| info.invalid) {
-//RS                     self.invalid_binding_reads += 1;
-//RS                     return None;
-//RS                 }
-//RS                 let moved_expr = Expr::Ident(name.clone(), *span);
-//RS                 if self.reject_moved_expr_use(&moved_expr, *span) {
-//RS                     return None;
-//RS                 }
-//RS                 // D-UNINIT-SENTINEL2: reading a `Type.{ uninit }` binding before it is written.
-//RS                 if self.flow.uninit.contains(name) {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0420",
-//RS                         format!("`{}` may be read before it is given a value", name),
-//RS                         format!(
-//RS                             "`{}` was declared with `Type{{ uninit }}`, so no value is available until you write to it — this read could see garbage",
-//RS                             name
-//RS                         ),
-//RS                         format!(
-//RS                             "write to `{}` on every path before reading it (e.g. fill it via `mut {}`)",
-//RS                             name, name
-//RS                         ),
-//RS                         Some(*span),
-//RS                     ));
-//RS                     self.flow.uninit.remove(name); // report once, then resolve its type below
-//RS                 }
-//RS                 // D-ALLOC2: E0632 — reading an arena `view` whose backing arena
-//RS                 // was already reset. (`alloc` and `reset` go
-//RS                 // through the method-call path below, so reaching here means a
-//RS                 // plain read of the view's value.)
-//RS                 self.check_view_use(name, *span);
-//RS                 // Card #1361 / I2: reading an owner while an exclusive window
-//RS                 // into it is live must be a Jet diagnostic, not rustc E0503.
-//RS                 // Skip when this Ident is only a projection base (`pair.left`,
-//RS                 // `&pair.right`, assign LValue) — those set
-//RS                 // `suppress_partial_move_root_read`; the full Field/Index place
-//RS                 // is checked separately.
-//RS                 if !self.suppress_partial_move_root_read {
-//RS                     let read_expr = Expr::Ident(name.clone(), *span);
-//RS                     self.check_place_read(&read_expr, *span);
-//RS                 }
-//RS                 // D-MEM-COPYSEM1: a read-only string-view name crossing an
-//RS                 // owning destination is materialized by `infer_checked`.
-//RS                 // An active `copies: .Explicit` policy is the only case where
-//RS                 // a bare view read remains a diagnostic.
-//RS                 if self.is_string_view(name)
-//RS                     && self.copies_explicit()
-//RS                     && !self.allow_string_view_read
-//RS                     && !(self.in_lambda_body && self.lambda_escapes)
-//RS                 {
-//RS                     self.report_string_view_unsupported_use(name, "be used directly here", *span);
-//RS                 }
-//RS                 if let Some(info) = self.lookup(name).cloned() {
-//RS                     self.record_local_reference(*span, &info);
-//RS                     return Some(info.ty.clone());
-//RS                 }
-//RS                 if let Some(t) = self.consts.get(name).cloned() {
-//RS                     self.record_const_reference(name, *span);
-//RS                     return Some(t);
-//RS                 }
-//RS                 // 3A: a constant brought in by `use m.[NAME]` reads through its
-//RS                 // NameLedger alias; codegen resolves the same alias.
-//RS                 let imported_const = self
-//RS                     .name_ledger
-//RS                     .alias(self.module_idx, name)
-//RS                     .and_then(|alias| {
-//RS                         let owner = alias.target_module?;
-//RS                         let leaf = alias
-//RS                             .target
-//RS                             .rsplit_once('.')
-//RS                             .map_or(alias.target.as_str(), |(_, leaf)| leaf);
-//RS                         let declaration = self
-//RS                             .name_ledger
-//RS                             .declaration(owner, leaf)
-//RS                             .filter(|declaration| declaration.kind == "const")?;
-//RS                         let ty = self.modules?.get(owner)?.consts.get(leaf)?.clone();
-//RS                         let path = self.name_ledger.module_path(owner)?.to_string();
-//RS                         Some((ty, path, declaration.span))
-//RS                     });
-//RS                 if let Some((ty, target_path, definition_span)) = imported_const {
-//RS                     self.record_import_alias_reference(name, *span);
-//RS                     self.record_reference_anchor(*span, &target_path, "const", definition_span);
-//RS                     return Some(ty);
-//RS                 }
-//RS                 if let Some(item) = self.core_item_imports.get(name).cloned() {
-//RS                     if let Some(module) = self.core_imports.get(name).cloned() {
-//RS                         return self.infer_core_field(name, &module, &item, *span, *span);
-//RS                     }
-//RS                 }
-//RS                 if let Some(sig) = self.funcs.get(name).cloned() {
-//RS                     // D-METHODMACRO1=A: a bare top-level function name resolved here
-//RS                     // is read as a VALUE, not called (a direct call never reaches this
-//RS                     // arm — `check_call` short-circuits on a known global function
-//RS                     // name before inferring its callee as an expression). This is
-//RS                     // exactly "this function's address was taken" for E0918.
-//RS                     self.record_current_function_reference(name, *span);
-//RS                     self.inline_addr_taken.insert(name.clone());
-//RS                     if let Some((idx, (convention, _))) = sig
-//RS                         .params
-//RS                         .iter()
-//RS                         .enumerate()
-//RS                         .find(|(_, (convention, _))| *convention != AccessConvention::Read)
-//RS                     {
-//RS                         let capability = match convention {
-//RS                             AccessConvention::Write => "the write-access marker `&`",
-//RS                             AccessConvention::Move => "the move marker `^`",
-//RS                             AccessConvention::Read => unreachable!(),
-//RS                         };
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0112",
-//RS                             format!("`{name}` cannot be used as a function value"),
-//RS                             format!(
-//RS                                 "parameter {} requires {capability}, but `fn(T)` function values take every parameter with plain read access",
-//RS                                 idx + 1
-//RS                             ),
-//RS                             "call this function directly; function values cannot erase write or ownership requirements"
-//RS                                 .to_string(),
-//RS                             Some(*span),
-//RS                         ));
-//RS                     }
-//RS                     return Some(self.checked_func_sig_to_fn_type(&sig));
-//RS                 }
-//RS                 self.unknown_name(name, *span);
-//RS                 None
-//RS             }
-//RS             Expr::Char(_, _) => Some(Type::Char),
-//RS             Expr::Spread(_, span) => {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E1311",
-//RS                     "spread only works inside a list literal or a variadic call".to_string(),
-//RS                     "write `[...xs, y]` to spread into a list, or `f(...xs)` when the callee accepts a rest parameter".to_string(),
-//RS                     "move the spread into `[ … ]` or a variadic call".to_string(),
-//RS                     Some(*span),
-//RS                 ));
-//RS                 None
-//RS             }
-//RS             // D-SPREAD1=A: should already be desugared in Bundle::desugar_member_spreads.
-//RS             // Defensive: expand and re-enter so a missed walker cannot ICE.
-//RS             Expr::MemberSpread {
-//RS                 base,
-//RS                 members,
-//RS                 span,
-//RS             } => {
-//RS                 let fields: Vec<Expr> = members
-//RS                     .iter()
-//RS                     .map(|(name, member_span)| {
-//RS                         Expr::Field(
-//RS                             Box::new(base.as_ref().clone()),
-//RS                             name.clone(),
-//RS                             Span::new(span.start, member_span.end),
-//RS                         )
-//RS                     })
-//RS                     .collect();
-//RS                 *e = Expr::ListLit(fields, *span);
-//RS                 self.infer_inner(e)
-//RS             }
-//RS             Expr::ListLit(elems, span) => {
-//RS                 let repeated_head = repeated_struct_list_edit(self.source, elems, *span);
-//RS                 // A fixed-length expected type owns the collection shape. The
-//RS                 // spelling-only list-head edit would replace `[T#N]`'s
-//RS                 // stack shape with a growable `[T]`, so keep the lint
-//RS                 // informational and do not attach an unsafe automatic edit.
-//RS                 let repeated_head_edit_allowed = !matches!(
-//RS                     self.expected_type.as_ref(),
-//RS                     Some(Type::FixedList { .. })
-//RS                 );
-//RS                 // Rewrite before typing so the list sees call results, not nested `[T#N]`.
-//RS                 // #779 demo: surface-only change; engines never learn a new construct.
-//RS                 if !elems.is_empty()
-//RS                     && !matches!(self.expected_type.as_ref(), Some(Type::FixedList { .. }))
-//RS                 {
-//RS                     self.record_memory_event(crate::Sema::MemoryEvent::new(
-//RS                         crate::Sema::MemoryEventKind::Allocation,
-//RS                         *span,
-//RS                         "list construction allocates backing storage",
-//RS                     ));
-//RS                 }
-//RS                 let inferred = self.infer_list_lit(elems, *span);
-//RS                 if inferred.is_some() {
-//RS                     if let Some((type_name, edit)) = repeated_head {
-//RS                         let mut diagnostic = Diagnostic::from_row(
-//RS                             "L0523",
-//RS                             &[("type", type_name.as_str())],
-//RS                             Some(*span),
-//RS                         );
-//RS                         if repeated_head_edit_allowed {
-//RS                             diagnostic = diagnostic.with_edit(edit);
-//RS                         }
-//RS                         self.diags.push(diagnostic);
-//RS                     }
-//RS                 }
-//RS                 inferred
-//RS             }
-//RS             Expr::TupleLit(fields, span, ty_slot) => {
-//RS                 let t = self.infer_tuple_lit(fields, *span);
-//RS                 *ty_slot = t.clone();
-//RS                 t
-//RS             }
-//RS             Expr::MapLit(entries, span) => {
-//RS                 if !entries.is_empty() {
-//RS                     self.record_memory_event(crate::Sema::MemoryEvent::new(
-//RS                         crate::Sema::MemoryEventKind::Allocation,
-//RS                         *span,
-//RS                         "map construction allocates backing storage",
-//RS                     ));
-//RS                 }
-//RS                 self.infer_map_lit(entries, *span)
-//RS             }
-//RS             Expr::Index {
-//RS                 base,
-//RS                 index,
-//RS                 span,
-//RS                 kind,
-//RS             } => {
-//RS                 let result = self.infer_index(base, index, span, kind);
-//RS                 if matches!(kind, IndexKind::Range) && self.loop_depth > 0 {
-//RS                     self.diags.push(Diagnostic::lint(
-//RS                         "L0501",
-//RS                         "slicing inside a loop copies every time".to_string(),
-//RS                         "each slice makes a fresh copy of the range — that adds up in a loop"
-//RS                             .to_string(),
-//RS                         "build indices outside the loop, or collect into one list".to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                 }
-//RS                 if matches!(kind, IndexKind::Range) {
-//RS                     let span = *span;
-//RS                     let base = std::mem::replace(base, Box::new(Expr::Absent(span)));
-//RS                     let range = std::mem::replace(index, Box::new(Expr::Absent(span)));
-//RS                     let zero = || Box::new(Expr::Int(0, span, None, None));
-//RS                     *e = Expr::Slice {
-//RS                         base,
-//RS                         start: zero(),
-//RS                         end: zero(),
-//RS                         range: Some(range),
-//RS                         span,
-//RS                     };
-//RS                 }
-//RS                 result
-//RS             }
-//RS             Expr::Slice {
-//RS                 base,
-//RS                 start,
-//RS                 end,
-//RS                 range,
-//RS                 span,
-//RS             } => {
-//RS                 if let Some(range) = range {
-//RS                     let base_ty = {
-//RS                         self.borrow_ctx = true;
-//RS                         self.infer(base)?
-//RS                     };
-//RS                     let range_ty = self.infer(range)?;
-//RS                     if range_ty != Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0505",
-//RS                             format!("slice bound must be Range, not {}", range_ty.show()),
-//RS                             "a stored slice bound carries its start, end, and end behavior in one Range value".to_string(),
-//RS                             "use `a..b`, `a..<b`, or a Range value".to_string(),
-//RS                             Some(range.span()),
-//RS                         ));
-//RS                         return None;
-//RS                     }
-//RS                     match base_ty {
-//RS                         Type::List(inner) => Some(Type::List(inner)),
-//RS                         Type::String => Some(Type::String),
-//RS                         ty if ty.is_compute_tensor_family() => {
-//RS                             Some(Type::Named("Tensor".to_string()))
-//RS                         }
-//RS                         other => {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0505",
-//RS                                 format!(
-//RS                                     "only lists and strings can be sliced, not {}",
-//RS                                     other.show()
-//RS                                 ),
-//RS                                 "a Range projects a window from indexed storage".to_string(),
-//RS                                 "use `xs[range]` on a list or `s.slice(range)` on text".to_string(),
-//RS                                 Some(*span),
-//RS                             ));
-//RS                             None
-//RS                         }
-//RS                     }
-//RS                 } else {
-//RS                     self.infer_slice(base, start, end, *span)
-//RS                 }
-//RS             }
-//RS             Expr::Range {
-//RS                 start, end, span, ..
-//RS             } => self.infer_range(start, end, *span),
-//RS             Expr::Call(call) => {
-//RS                 let span = call.name_span;
-//RS                 // D-UNINIT1: a `mut` arg is the fill site, not a read.
-//RS                 self.clear_uninit_mut_args(&call.args);
-//RS                 match self.check_call(call, true) {
-//RS                     Some(Some(t)) => Some(t),
-//RS                     Some(None) => {
-//RS                         self.diags.push(Diagnostic::error(
-//RS                             "E0116",
-//RS                             format!("`{}` doesn't hand back a value", call.name),
-//RS                             "a call is a value only when its function declares a result after the parameter list"
-//RS                                 .to_string(),
-//RS                             format!(
-//RS                                 "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) Type -> …`",
-//RS                                 call.name, call.name
-//RS                             ),
-//RS                             Some(span),
-//RS                         ));
-//RS                         None
-//RS                     }
-//RS                     None => None,
-//RS                 }
-//RS             }
-//RS             Expr::Unary(op, inner, span) => {
-//RS                 // D-SG9: fold `-<intliteral>` *before* inferring the operand, so the
-//RS                 // literal is range-checked at its negated value (`-128` fits `I8`)
-//RS                 // and the operand's own positive range check doesn't fire spuriously.
-//RS                 if let UnOp::Neg = op {
-//RS                     if let (
-//RS                         Expr::Int(n, ispan, width, raw),
-//RS                         Some(Type::InlineRange { base, lo, hi }),
-//RS                     ) = (inner.as_mut(), self.expected_type.clone())
-//RS                     {
-//RS                         let value = super::exact_integer_literal(*n, raw.as_deref()).neg();
-//RS                         let interval = super::IntegerInterval::new(i128::from(lo), i128::from(hi));
-//RS                         if !super::exact_integer_fits(&value, interval.lo, interval.hi) {
-//RS                             self.diags.push(
-//RS                                 crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
-//RS                                     &value, lo, hi, *ispan,
-//RS                                 ),
-//RS                             );
-//RS                         }
-//RS                         *width = None;
-//RS                         return Some(Type::InlineRange { base, lo, hi });
-//RS                     }
-//RS                     if let (
-//RS                         Expr::Int(n, ispan, width, raw),
-//RS                         Some(Type::IntN { signed: true, bits }),
-//RS                     ) = (inner.as_mut(), self.expected_type.clone())
-//RS                     {
-//RS                         let v = super::exact_integer_literal(*n, raw.as_deref()).neg();
-//RS                         let interval = super::integer_width_interval(true, bits);
-//RS                         if !super::exact_integer_fits(&v, interval.lo, interval.hi) {
-//RS                             self.diags.push(int_range_error(true, bits, *ispan));
-//RS                         }
-//RS                         *width = Some((true, bits));
-//RS                         return Some(Type::IntN { signed: true, bits });
-//RS                     }
-//RS                     // D-TYPE2-DEFAULT1: `-1.5` is one exact Decimal literal,
-//RS                     // so the sign folds into its spelling before the operand
-//RS                     // is inferred. A Float context keeps the machine path.
-//RS                     if let Expr::Float(_, _, _, raw) = inner.as_mut() {
-//RS                         if raw.is_some()
-//RS                             && !matches!(self.expected_type, Some(Type::Float | Type::Float32))
-//RS                         {
-//RS                             let text = raw.take().expect("decimal literal spelling");
-//RS                             let whole = *span;
-//RS                             *e = super::exact_decimal_literal(format!("-{text}"), whole);
-//RS                             return self.infer(e);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 let t = self.infer(inner)?;
-//RS                 if matches!(op, UnOp::Neg) {
-//RS                     if let Type::IntN { signed: true, bits } = &t {
-//RS                         if let Some(fact) = self
-//RS                             .active_arithmetic_policy(crate::AST::ArithmeticOperation::Neg, *span)
-//RS                         {
-//RS                             let zero =
-//RS                                 Expr::Int(0, *span, Some((true, *bits)), Some("0".to_string()));
-//RS                             let operand = inner.as_ref().clone();
-//RS                             *e = self.policy_call(
-//RS                                 fact.mode,
-//RS                                 Expr::Binary(BinOp::Sub, Box::new(zero), Box::new(operand), *span),
-//RS                                 fact,
-//RS                             );
-//RS                             return Some(t);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 match op {
-//RS                     UnOp::Neg => {
-//RS                         if let Type::InlineRange { base, .. } = &t {
-//RS                             self.require_knowledge_gate(
-//RS                                 crate::Sema::KnowledgePlane::Range,
-//RS                                 crate::Sema::KnowledgeGate::BoundedArithmetic,
-//RS                                 *span,
-//RS                             );
-//RS                             Some(base.as_ref().erased_inline_ranges())
-//RS                         } else if t.is_float()
-//RS                             || matches!(t, Type::Int | Type::IntN { signed: true, .. })
-//RS                         {
-//RS                             Some(t)
-//RS                         } else if let Type::IntN { bits, .. } = t {
-//RS                             // D-SG9: unsigned widths have no negatives.
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0109",
-//RS                                 format!("`-` can't negate {}, which is unsigned", t.show()),
-//RS                                 "unsigned numbers have no negative values".to_string(),
-//RS                                 format!("use a signed type like `I{bits}` if you need negatives"),
-//RS                                 Some(*span),
-//RS                             ));
-//RS                             None
-//RS                         } else {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0109",
-//RS                                 format!("`-` needs a number, but this is {}", t.show()),
-//RS                                 "only Int and Float values can be negated".to_string(),
-//RS                                 "use a number here".to_string(),
-//RS                                 Some(*span),
-//RS                             ));
-//RS                             None
-//RS                         }
-//RS                     }
-//RS                     // D-BITNOT1=A: `!` flips every bit it is given. On a Bool
-//RS                     // that is the one bit, so a yes becomes a no. On a whole
-//RS                     // number it is the bitwise complement, and the width comes
-//RS                     // back unchanged.
-//RS                     UnOp::Not => {
-//RS                         if let Type::InlineRange { base, .. } = &t {
-//RS                             self.require_knowledge_gate(
-//RS                                 crate::Sema::KnowledgePlane::Range,
-//RS                                 crate::Sema::KnowledgeGate::BoundedArithmetic,
-//RS                                 *span,
-//RS                             );
-//RS                             Some(base.as_ref().erased_inline_ranges())
-//RS                         } else if t == Type::Bool || t.is_integer() {
-//RS                             Some(t)
-//RS                         } else {
-//RS                             self.diags.push(Diagnostic::error(
-//RS                                 "E0109",
-//RS                                 format!(
-//RS                                     "`!` needs {} or a whole number, but this is {}",
-//RS                                     Type::Bool.show(),
-//RS                                     t.show()
-//RS                                 ),
-//RS                                 "`!` flips bits: a yes becomes a no, and a whole number \
-//RS                                  gets every bit turned over"
-//RS                                     .to_string(),
-//RS                                 "compare the value to something first, e.g. `!(x > 0)`".to_string(),
-//RS                                 Some(*span),
-//RS                             ));
-//RS                             None
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Expr::Binary(op, lhs, rhs, span) => {
-//RS                 let (op, span) = (*op, *span);
-//RS                 let mut replacement = None;
-//RS                 let ty = self.infer_binary(op, lhs, rhs, span, &mut replacement);
-//RS                 if let Some(replacement) = replacement {
-//RS                     *e = replacement;
-//RS                 } else if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Pow)
-//RS                     && ty
-//RS                         .as_ref()
-//RS                         .is_some_and(|ty| matches!(ty, Type::IntN { .. }))
-//RS                 {
-//RS                     let operation = match op {
-//RS                         BinOp::Add => Some(crate::AST::ArithmeticOperation::Add),
-//RS                         BinOp::Sub => Some(crate::AST::ArithmeticOperation::Sub),
-//RS                         BinOp::Mul => Some(crate::AST::ArithmeticOperation::Mul),
-//RS                         BinOp::Pow => Some(crate::AST::ArithmeticOperation::Pow),
-//RS                         _ => None,
-//RS                     };
-//RS                     if let Some(operation) = operation {
-//RS                         if let Some(fact) = self.active_arithmetic_policy(operation, span) {
-//RS                             let inner = Expr::Binary(
-//RS                                 op,
-//RS                                 Box::new(lhs.as_ref().clone()),
-//RS                                 Box::new(rhs.as_ref().clone()),
-//RS                                 span,
-//RS                             );
-//RS                             *e = self.policy_call(fact.mode, inner, fact);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 ty
-//RS             }
-//RS             Expr::CompareChain {
-//RS                 operands,
-//RS                 ops,
-//RS                 hooks,
-//RS                 span,
-//RS             } => {
-//RS                 let span = *span;
-//RS                 let ops = ops.clone();
-//RS                 self.infer_compare_chain(operands, &ops, hooks, span)
-//RS             }
-//RS             Expr::Deref(inner, span) => {
-//RS                 // D-CAP9: postfix `p.*` dereferences a raw pointer — a raw
-//RS                 // memory access, gated to `#Unsafe`. The result type is the
-//RS                 // pointer's element type.
-//RS                 let forbidden = !self.in_unsafe;
-//RS                 if forbidden {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0208",
-//RS                         "reading through a raw pointer requires `#Unsafe`".to_string(),
-//RS                         "`p.*` dereferences a raw pointer; that is a raw memory access, only valid inside a `#Unsafe { … }` region"
-//RS                             .to_string(),
-//RS                         "wrap this in `#Unsafe(\"why this is safe\") { … }`".to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                 }
-//RS                 let inner_t = self.infer(inner)?;
-//RS                 if forbidden {
-//RS                     return None;
-//RS                 }
-//RS                 match crate::Sema::ptr_elem(&inner_t) {
-//RS                     Some(elem) => Some(elem),
-//RS                     None => Some(inner_t),
-//RS                 }
-//RS             }
-//RS             Expr::RawOf(inner, span) => {
-//RS                 // D-CAP9: prefix `*x` takes a raw pointer to `x` (raw-pointer-of),
-//RS                 // legal only inside `#Unsafe`. Result type is `*T` (`Ptr<T>`).
-//RS                 let forbidden = !self.in_unsafe;
-//RS                 if forbidden {
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0208",
-//RS                         "taking a raw pointer requires `#Unsafe`".to_string(),
-//RS                         "`*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe { … }` region"
-//RS                             .to_string(),
-//RS                         "wrap this in `#Unsafe(\"why this is safe\") { … }` — to dereference a pointer use postfix `p.*`"
-//RS                             .to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                 }
-//RS                 let inner_t = self.infer(inner)?;
-//RS                 if forbidden {
-//RS                     return None;
-//RS                 }
-//RS                 Some(crate::Sema::ptr_type(inner_t))
-//RS             }
-//RS             Expr::Copy(inner, span) => {
-//RS                 // D-CAP2 (D-MEM1/S4): `copy x` explicitly duplicates `x` into a
-//RS                 // fresh, independent value — a temporary, so it never needs `^`
-//RS                 // and never trips E0209 regardless of what `inner` is. Suppress
-//RS                 // `infer`'s automatic owning-field-read `.clone()` wrap: this
-//RS                 // expression already IS that clone, and wrapping again would
-//RS                 // double-clone in the generated Rust.
-//RS                 self.borrow_ctx = true;
-//RS                 // D-MEM-COPYSEM1: `~d` and the default owning materialization
-//RS                 // both produce an owned `String`; the general E2307 check on
-//RS                 // a bare `Expr::Ident` must not fire for `~`'s operand.
-//RS                 let was_view_read = self.allow_string_view_read;
-//RS                 self.allow_string_view_read = true;
-//RS                 let inner_t = self.infer(inner);
-//RS                 self.allow_string_view_read = was_view_read;
-//RS                 let inner_t = inner_t?;
-//RS                 if self.type_contains_observable_clock(&inner_t) {
-//RS                     self.record_effect(crate::Sema::Effects::Effect::Time.name(), *span);
-//RS                     if self.in_pure && self.det_suppress == 0 {
-//RS                         self.diags
-//RS                             .push(crate::Sema::e3403("Clock copy", Some(*span)));
-//RS                     }
-//RS                 }
-//RS                 let copy_ty = owned_type_for_read_view(&inner_t).unwrap_or_else(|| inner_t.clone());
-//RS                 let resource = self.is_resource_type(&inner_t);
-//RS                 if resource || (!type_is_copy(&inner_t) && !self.is_cloneable_type(&copy_ty)) {
-//RS                     let cell_guard = matches!(
-//RS                         &inner_t,
-//RS                         Type::Apply { name, .. }
-//RS                             if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
-//RS                     );
-//RS                     let shown = match &inner_t {
-//RS                         Type::Apply { name, args } if cell_guard && args.len() == 1 => {
-//RS                             format!("{name}<{}>", args[0].name())
-//RS                         }
-//RS                         _ => inner_t.show(),
-//RS                     };
-//RS                     let (why, fix) = if cell_guard {
-//RS                         (
-//RS                             "a Cell guard owns one live dynamic loan; copying it would create two handles for the same loan".to_string(),
-//RS                             format!(
-//RS                                 "move it instead with the move marker `^` (`{}guard`), or create a new guard after this one is dropped",
-//RS                                 Syntax::SIGIL_MOVE
-//RS                             ),
-//RS                         )
-//RS                     } else if resource {
-//RS                         (
-//RS                             "a resource owns one cleanup duty; copying it would create two owners that could close the same handle".to_string(),
-//RS                             format!("move it instead with the move marker `^` (`{}name`), or acquire a second resource", Syntax::SIGIL_MOVE),
-//RS                         )
-//RS                     } else {
-//RS                         (
-//RS                             "copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet".to_string(),
-//RS                             format!(
-//RS                                 "move it instead with the move marker `^` (`{}name` if this is its last use), or change the type so every part can be copied",
-//RS                                 Syntax::SIGIL_MOVE
-//RS                             ),
-//RS                         )
-//RS                     };
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0211",
-//RS                         format!("`{shown}` can't be copied"),
-//RS                         why,
-//RS                         fix,
-//RS                         Some(*span),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): `copy` of a heap-owning type
-//RS                 // is itself an allocation (the whole point of `.clone()`-style
-//RS                 // duplication) — flagged regardless of whether it's cloneable.
-//RS                 if matches!(copy_ty, Type::Shared(_)) {
-//RS                     self.record_memory_event(crate::Sema::MemoryEvent::new(
-//RS                         crate::Sema::MemoryEventKind::RetainRelease,
-//RS                         *span,
-//RS                         format!("`copy` of `{}` retains a shared reference", copy_ty.show()),
-//RS                     ));
-//RS                 } else if type_owns_heap(&copy_ty, self.registry) {
-//RS                     self.record_memory_event(crate::Sema::MemoryEvent::new(
-//RS                         crate::Sema::MemoryEventKind::Allocation,
-//RS                         *span,
-//RS                         format!("`copy` of `{}` allocates owned heap data", copy_ty.show()),
-//RS                     ));
-//RS                 }
-//RS                 Some(copy_ty)
-//RS             }
-//RS             Expr::Place(inner, access, span) => {
-//RS                 // D-CAP-RECEIVER1=D: the MethodCall arm checks and removes a
-//RS                 // receiver's take mark before inference reaches it, so a take
-//RS                 // mark that arrives here stands on a bare place in a value
-//RS                 // position. D-COPY-DEFAULT1=A (#3714): that is the
-//RS                 // programmer's exact move. Record it, then leave the bare
-//RS                 // place, which every owning position already moves.
-//RS                 if *access == crate::AST::PlaceAccess::Take {
-//RS                     let mark_span = *span;
-//RS                     let ty = self.infer(inner);
-//RS                     self.note_exact_move(inner, ty.as_ref(), mark_span);
-//RS                     let place = std::mem::replace(inner.as_mut(), Expr::Absent(mark_span));
-//RS                     *e = place;
-//RS                     return ty;
-//RS                 }
-//RS                 if self.place_from_expr(inner).is_none() {
-//RS                     // Even an invalid window must finish typing its nested
-//RS                     // expression. Diagnostics compilation still lowers the
-//RS                     // function, and skipping this walk leaves range/index
-//RS                     // metadata at `Unknown`, which would become a TIR ICE.
-//RS                     self.infer(inner);
-//RS                     self.diags.push(Diagnostic::error(
-//RS                         "E0213",
-//RS                         "a window must start from a place".to_string(),
-//RS                         "only a name followed by fields, indexes, or one range has stable storage to read or edit without copying".to_string(),
-//RS                         "bind the call or temporary to a name first, then take a window into that name".to_string(),
-//RS                         Some(*span),
-//RS                     ));
-//RS                     return None;
-//RS                 }
-//RS                 if *access == crate::AST::PlaceAccess::Write {
-//RS                     self.validate_write_place(inner, *span);
-//RS                 }
-//RS                 self.borrow_ctx = true;
-//RS                 // The complete place is checked above.  While inferring its
-//RS                 // base, suppress the partial owner read (`particles` in
-//RS                 // `&particles[2]`); otherwise a known disjoint index is
-//RS                 // rejected before `place_from_expr` can compare the full
-//RS                 // projected path with a live window.
-//RS                 let suppress = self.suppress_partial_move_root_read;
-//RS                 self.suppress_partial_move_root_read = true;
-//RS                 let ty = self.infer(inner);
-//RS                 self.suppress_partial_move_root_read = suppress;
-//RS                 let ty = ty?;
-//RS                 if matches!(inner.as_ref(), Expr::Slice { .. }) {
-//RS                     let elem = match ty {
-//RS                         Type::List(elem) => *elem,
-//RS                         Type::FixedList { elem, .. } => *elem,
-//RS                         ty if ty.is_compute_tensor_family() => Type::Float,
-//RS                         other => return Some(other),
-//RS                     };
-//RS                     Some(Type::Apply {
-//RS                         name: match access {
-//RS                             crate::AST::PlaceAccess::Read => "View",
-//RS                             crate::AST::PlaceAccess::Write | crate::AST::PlaceAccess::Take => {
-//RS                                 "ViewMut"
-//RS                             }
-//RS                         }
-//RS                         .to_string(),
-//RS                         args: vec![elem],
-//RS                     })
-//RS                 } else {
-//RS                     Some(ty)
-//RS                 }
-//RS             }
-//RS             Expr::PtrFromAddr {
-//RS                 alias,
-//RS                 alias_span,
-//RS                 elem,
-//RS                 addr,
-//RS                 span,
-//RS             } => self.infer_ptr_from_addr(alias, *alias_span, elem, addr, *span),
-// END-PORT-PENDING 0409 crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3270-5078
+use jet_foundation.[AccessConvention, ArithmeticOperation, BinOp, Call, CallArg, CallArgFlags, CtBigInt, Diagnostic, Expr, IndexKind, Lambda, LambdaBody, LambdaMeta, LambdaParam, OrFallback, Pattern, PlaceAccess, Span, StrFormat, StrPart, Syntax, Type, UnOp, UnitFamilyDef, InterpolationSelectorKind]
+use jet_sema.[Checker, FlowFacts, KnowledgePlane, KnowledgeGate, MemoryEvent, MemoryEventKind, Effect, normalize_bare_method_head, is_bare_member_chain, replace_bare_member_subject_with, bare_member_chain_text, replace_bare_member_subject, BARE_MEMBER_SUBJECT, is_inferred_constructor, value_loop_requires_route, atomic_absent_optional_subject, condition_window_names, bare_absent_arm, e0141_unconsumed_branch, block_definitely_exits, unit_ty, inline_range_literal_out_of_bounds, int_range_error, raw_multiline_html_edit, is_display_migration_candidate, is_displayable, is_debuggable, is_secret_bearing_crypto_type, is_one_pass_source, one_pass_materializer, e0138, debug_interpolation_edit, e0915, e3403, repeated_struct_list_edit, ptr_elem, ptr_type, owned_type_for_read_view, type_is_copy, type_owns_heap]
 
-// PORT-PENDING 0409 crates-jet-sema-src-sema-checkerinfer-expr-module-group-slice-3270: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:1-143
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Re-export the parent `Sema` glob so the split-out submodules
-//RS // (`expr`/`fallible`/`calls`/`binary`) reach `Checker`, etc. via `use super::*`.
-//RS pub(crate) use super::*;
-//RS use crate::Syntax;
-//RS use crate::AST::Type;
-//RS 
-//RS /// One inclusive interval fact used by every integer proof in sema.
-//RS ///
-//RS /// Widths, user refinements, literal checks, and fixed-list indexes all ask
-//RS /// the same question: is one value set contained by another? Keep the
-//RS /// arithmetic and containment law here so those callers cannot grow their own
-//RS /// subtly different `(lo, hi)` checks.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(crate) struct IntegerInterval {
-//RS     pub(crate) lo: i128,
-//RS     pub(crate) hi: i128,
-//RS }
-//RS 
-//RS impl IntegerInterval {
-//RS     pub(crate) const fn new(lo: i128, hi: i128) -> Self {
-//RS         Self { lo, hi }
-//RS     }
-//RS 
-//RS     pub(crate) const fn from_bounds(bounds: (i128, i128)) -> Self {
-//RS         Self::new(bounds.0, bounds.1)
-//RS     }
-//RS 
-//RS     /// Value-set containment: a subset needs no conversion or runtime check.
-//RS     pub(crate) fn contains_interval(self, subset: Self) -> bool {
-//RS         self.lo <= subset.lo && subset.hi <= self.hi
-//RS     }
-//RS 
-//RS     pub(crate) fn contains_exact(self, value: &crate::Numeric::CtBigInt) -> bool {
-//RS         exact_integer_fits(value, self.lo, self.hi)
-//RS     }
-//RS 
-//RS     pub(crate) fn negated(self) -> Option<Self> {
-//RS         Some(Self::new(self.hi.checked_neg()?, self.lo.checked_neg()?))
-//RS     }
-//RS 
-//RS     pub(crate) fn add(self, other: Self) -> Option<Self> {
-//RS         Some(Self::new(
-//RS             self.lo.checked_add(other.lo)?,
-//RS             self.hi.checked_add(other.hi)?,
-//RS         ))
-//RS     }
-//RS 
-//RS     pub(crate) fn sub(self, other: Self) -> Option<Self> {
-//RS         Some(Self::new(
-//RS             self.lo.checked_sub(other.hi)?,
-//RS             self.hi.checked_sub(other.lo)?,
-//RS         ))
-//RS     }
-//RS 
-//RS     pub(crate) fn mul(self, other: Self) -> Option<Self> {
-//RS         let products = [
-//RS             self.lo.checked_mul(other.lo)?,
-//RS             self.lo.checked_mul(other.hi)?,
-//RS             self.hi.checked_mul(other.lo)?,
-//RS             self.hi.checked_mul(other.hi)?,
-//RS         ];
-//RS         Some(Self::new(*products.iter().min()?, *products.iter().max()?))
-//RS     }
-//RS 
-//RS     pub(crate) fn fixed_list_indexes(len: u64) -> Option<Self> {
-//RS         Some(Self::new(0, i128::from(len).checked_sub(1)?))
-//RS     }
-//RS }
-//RS 
-//RS /// Project the canonical width fact. The width formula belongs to the type's
-//RS /// knowledge vector; sema only consumes that fact through this one interval
-//RS /// interface.
-//RS pub(crate) fn integer_width_interval(signed: bool, bits: u8) -> IntegerInterval {
-//RS     IntegerInterval::from_bounds(
-//RS         Type::IntN { signed, bits }
-//RS             .integer_range()
-//RS             .expect("fixed integer widths carry an interval fact"),
-//RS     )
-//RS }
-//RS 
-//RS /// D-INTBIG1: the parser's i64 field is only a fast path. Keep all fixed-width
-//RS /// checks on the exact source value so an overflowed token cannot reappear as
-//RS /// the lexer sentinel `0`.
-//RS pub(crate) fn exact_integer_literal(value: i64, raw: Option<&str>) -> crate::Numeric::CtBigInt {
-//RS     raw.and_then(|raw| crate::Numeric::CtBigInt::from_literal(raw).ok())
-//RS         .unwrap_or_else(|| crate::Numeric::CtBigInt::from_int(value))
-//RS }
-//RS 
-//RS pub(crate) fn exact_integer_fits(value: &crate::Numeric::CtBigInt, lo: i128, hi: i128) -> bool {
-//RS     let lower = crate::Numeric::CtBigInt::from_literal(&lo.to_string())
-//RS         .expect("i128 bounds are valid integer literals");
-//RS     let upper = crate::Numeric::CtBigInt::from_literal(&hi.to_string())
-//RS         .expect("i128 bounds are valid integer literals");
-//RS     value.compare(&lower) != std::cmp::Ordering::Less
-//RS         && value.compare(&upper) != std::cmp::Ordering::Greater
-//RS }
-//RS 
-//RS /// D-TYPE2-DEFAULT1: build the one exact Decimal literal path. The parser and
-//RS /// sema use this node for untyped decimal source, while the existing direct
-//RS /// Decimal call lowers through the shared Prelude on every execution tier.
-//RS pub(crate) fn exact_decimal_literal(
-//RS     text: String,
-//RS     span: crate::Diagnostics::Span,
-//RS ) -> crate::AST::Expr {
-//RS     crate::AST::Expr::Call(crate::AST::Call {
-//RS         name: crate::Syntax::TYPE_DECIMAL.to_string(),
-//RS         name_span: span,
-//RS         type_args: Vec::new(),
-//RS         args: vec![crate::AST::CallArg {
-//RS             convention: crate::AST::AccessConvention::Read,
-//RS             expr: crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(text)], span),
-//RS             span,
-//RS             flags: crate::AST::CallArgFlags::default(),
-//RS             label: None,
-//RS             spread: false,
-//RS         }],
-//RS         resolved_ret: None,
-//RS         range_checked: false,
-//RS         widen_approx: false,
-//RS     })
-//RS }
-//RS 
-//RS /// D-REACT1=B / D-DATARACE1=C: a reactive handle type `Signal<T>`/`Derived<T>`/
-//RS /// `Computed<T>` — an Arc-backed shared value whose "copy" shares the same
-//RS /// reactive cell. Lock-ordered so task/channel
-//RS /// crossings do not lean on rustc `Send`.
-//RS pub(crate) fn is_reactive_handle_ty(ty: &Type) -> bool {
-//RS     matches!(
-//RS         ty,
-//RS         Type::Apply { name, .. }
-//RS             if name == Syntax::TYPE_SIGNAL
-//RS                 || name == Syntax::TYPE_DERIVED
-//RS                 || name == Syntax::TYPE_COMPUTED
-//RS     )
-//RS }
-//RS 
-//RS mod binary;
-//RS pub(crate) use binary::expr_wants_expected_type;
-//RS mod calls;
-//RS mod expr;
-//RS mod fallible;
-//RS mod optional_chain;
-//RS mod stdlib_lints;
-// END-PORT-PENDING 0409 crates/jet-sema/src/Sema/CheckerInfer/mod.rs:1-143
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3270
+impl Checker {
+    // The prelude executes once before direct routing; 0410 owns the remaining variants.
+    fn infer_inner(self: &Self, e: &Expr) -> Type? {
+        self.normalize_contextual_expr(&e)
+        callable_expected :: if self.expected_type == .Val(ty) -> if ty == { .Fn(_, _, _, _, _, _) -> true; .Named(name) -> name == "UIShortcut"; else -> false } else -> false
+        if self.implicit_loop_subject_depth > 0 || callable_expected -> normalize_bare_method_head(&e)
+        if self.implicit_loop_subject_depth > 0 {
+            if e == .CallValue(callee, args, span) && callee == .Field(inner, method, method_span) && inner == .Ident(name, receiver_span) && name.is_empty() {
+                e = Expr.MethodCall{
+                    receiver: Expr.Ident{name: Syntax.KW_IT, span: receiver_span}, method: method, method_span: method_span,
+                    owner_type_args: [], type_args: [], args: ^args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false,
+                }
+            }
+        }
+        if self.implicit_loop_subject_depth > 0 && is_bare_member_chain(e) -> replace_bare_member_subject_with(&e, Syntax.KW_IT)
+        if self.expected_type == .Val(Type.Fn(params, _, _, _, _, _)) {
+            if is_bare_member_chain(e) && params.len() == 1 {
+                span :: e.span()
+                chain :: bare_member_chain_text(e)
+                if self.subject_shorthand_depth > 0 -> &self.diags.push(Diagnostic.lint("L0512", "subject shorthand `{chain}` is nested inside another subject shorthand",
+                    "implicit subjects become hard to track when shorthand scopes nest", "rewrite it with a named binding: `(item) -> item{chain}`", Val(span)))
+                body := ^e
+                replace_bare_member_subject(&body)
+                e = Expr.Lambda{value: Lambda{
+                    take_names: [], params: [LambdaParam{name: BARE_MEMBER_SUBJECT, name_span: span, ty: Val(~params[0]), ty_span: None}],
+                    result_type: None, error_type: None, effects: None, body: LambdaBody.Expr{value: ^body}, span: span, meta: LambdaMeta.default(),
+                }}
+                self.subject_shorthand_depth += 1
+                result :: self.infer(&e)
+                self.subject_shorthand_depth -= 1
+                return result
+            }
+            if is_bare_member_chain(e) {
+                &self.diags.push(Diagnostic.from_row("E-SUBJECT-CALL-ARITY", [("arity", params.len().to_string()), ("chain", bare_member_chain_text(e))], Val(e.span())))
+                return None
+            }
+        }
+        if is_bare_member_chain(e) && !is_inferred_constructor(e) && self.expected_type == .Val(expected) {
+            if expected != .Fn(_, _, _, _, _, _) {
+                &self.diags.push(Diagnostic.from_row("E-SUBJECT-CALL", [("expected", expected.name()), ("chain", bare_member_chain_text(e))], Val(e.span())))
+                return None
+            }
+        }
+        if e == .ListLit(elems, span) && elems.is_empty() && self.expected_type == .Val(Type.Map(key, key_span, value)) {
+            e = Expr.MapLit{entries: [], span: span}
+            return Val(Type.Map{key: ~key, key_span: key_span, value: ~value})
+        }
+        if e == .TypedLit(_, _, _) -> return self.elaborate_typed_lit(&e)
+        if e == .OrFallback(value, _, _, _) && value_loop_requires_route(value) -> return self.infer_value_loop_fallback(&e)
+        if e == {
+            // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3434
+            .If(cond, then_body, then_value, else_body, else_value, span) -> {
+                if_expected :: ~self.expected_type
+                before :: ~self.flow
+                self.rewrite_optional_flow_ne_none(&cond)
+                if atomic_absent_optional_subject(cond) == .Val((name, name_span, cond_span)) && self.flow_narrowable_optional_inner(name) != None {
+                    swap(&then_body, &else_body)
+                    swap(&then_value, &else_value)
+                    cond = Expr.PatternTest{subject: Expr.Ident{name: name, span: name_span},
+                        pattern: Pattern.Present{binding: name, binding_span: name_span, inner: None, span: cond_span}, span: cond_span}
+                }
+                bindings :: self.check_condition_with_bindings(&cond)
+                self.push_scope()
+                restore_moved := []
+                windows :: condition_window_names(cond, false)
+                loop (name, ty) in bindings {
+                    if self.declare_pattern_binding(name, cond.span(), ty, windows.contains(name)) == .Val(restored) -> &restore_moved.push(^restored)
+                }
+                self.record_condition_view_bindings(cond)
+                self.check_block(&then_body, false)
+                sibling_rule :: !if_expected.is_some_and((ty) -> ty.unwrap_option() != None)
+                defer_then :: sibling_rule && bare_absent_arm(then_value, false)
+                then_ty := if defer_then -> None else -> self.infer_pattern_branch_value(cond, &then_value)
+                self.pop_scope()
+                loop (name, at) in restore_moved -> &self.flow.moved.set(name, at)
+                then_path :: ~self.flow
+                self.flow = ~before
+                self.push_scope()
+                self.check_block(&else_body, false)
+                saved_expected :: ~self.expected_type
+                if sibling_rule && bare_absent_arm(else_value, true) -> self.expected_type = then_ty.filter((ty) -> ty.unwrap_option() != None)
+                else_ty := self.infer_pattern_branch_value(cond, &else_value)
+                self.pop_scope()
+                if defer_then {
+                    self.expected_type = else_ty.filter((ty) -> ty.unwrap_option() != None)
+                    then_ty = self.infer_pattern_branch_value(cond, &then_value)
+                }
+                self.expected_type = ^saved_expected
+                else_path :: ~self.flow
+                if !then_path.reachable -> then_ty = None
+                if !else_path.reachable -> else_ty = None
+                depth :: self.scope_depth()
+                divergent_single_use := [(String, Span)]{}
+                loop (name, info) in before.bindings.iter_at(depth) {
+                    use_span :: info.single_use_span ?? next
+                    if before.moved.contains(name) -> next
+                    if then_path.moved.contains(name) != else_path.moved.contains(name) -> &divergent_single_use.push((name, use_span))
+                }
+                &divergent_single_use.sort_by((a, b) -> a.1.start.cmp(b.1.start).then(a.0.cmp(b.0)))
+                loop (name, use_span) in divergent_single_use -> &self.diags.push(e0141_unconsumed_branch(name, use_span))
+                self.flow = FlowFacts.merge_paths(before, [then_path, else_path])
+                if self.statement_expr_inference && self.statement_expr_root_depth == Val(self.source_nesting) -> return Val(unit_ty())
+                if (then_ty, else_ty) == {
+                    (.Val(a), .Val(b)) -> {
+                        then_is_diverging :: self.expr_definitely_diverges(then_value) || block_definitely_exits(then_body)
+                        else_is_diverging :: self.expr_definitely_diverges(else_value) || block_definitely_exits(else_body)
+                        if a == b || else_is_diverging || self.nominal_type_identity(a, b) {
+                            if else_value == .Todo(_, expected_type) -> expected_type = Val(a.name())
+                            return Val(a)
+                        }
+                        if then_is_diverging {
+                            if then_value == .Todo(_, expected_type) -> expected_type = Val(b.name())
+                            return Val(b)
+                        }
+                        if if_expected == .Val(carrier) && carrier == .Result(ok, _) {
+                            if b == carrier && a == ok {
+                                plain_span :: then_value.span()
+                                then_value = Expr.Ok{value: ^then_value, span: plain_span}
+                                return Val(carrier)
+                            }
+                            if a == carrier && b == ok {
+                                plain_span :: else_value.span()
+                                else_value = Expr.Ok{value: ^else_value, span: plain_span}
+                                return Val(carrier)
+                            }
+                        }
+                        if a.numeric_join(b) == .Val(joined) {
+                            self.widen_numeric_expr(&then_value, a, joined)
+                            self.widen_numeric_expr(&else_value, b, joined)
+                            return Val(joined)
+                        }
+                        if self.collect_item_types.is_empty() {
+                            never_pair :: if (a, b) == (.Named(left), .Named(right)) -> left == Syntax.TYPE_NEVER || right == Syntax.TYPE_NEVER else -> false
+                            fix :: if never_pair -> "make each returning branch produce the same value type; a non-returning branch needs no value"
+                                else -> "make both branches produce {a.show()} (or the same type)"
+                            &self.diags.push(Diagnostic.error("E0124", "this `if`'s branches produce different types: {a.show()} and {b.show()}",
+                                "an `if` used as a value must give the same type on every path (S68)", fix, Val(span)))
+                        } else -> &self.diags.push(Diagnostic.error("E0074", "this collecting loop produces incompatible item types",
+                            "one collecting loop builds one List, but these paths produce {a.show()} and {b.show()}", "convert every item to one type, or split the loops", Val(span)))
+                        else_span :: else_value.span()
+                        else_value = Expr.Todo{span: else_span, expected_type: Val(a.name())}
+                        if self.collect_item_types.is_empty() -> None else -> Val(a)
+                    }
+                    (.Val(a), .None) -> Val(a)
+                    (.None, .Val(b)) -> Val(b)
+                    (.None, .None) -> None
+                }
+            }
+            // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3686
+            .Int(n, span, width, raw) -> {
+                expected :: if self.expected_type == .Val(Type.Tagged(_, inner)) -> Val(inner) else -> self.expected_type
+                if expected == {
+                    .Val(Type.InlineRange(base, lo, hi)) -> {
+                        value :: exact_integer_literal(n, raw)
+                        interval :: IntegerInterval.new(I128.from(lo), I128.from(hi))
+                        if !exact_integer_fits(value, interval.lo, interval.hi) -> &self.diags.push(inline_range_literal_out_of_bounds(value, lo, hi, span))
+                        width = None
+                        Val(Type.InlineRange{base: base, lo: lo, hi: hi})
+                    }
+                    .Val(Type.IntN(signed, bits)) -> {
+                        interval :: integer_width_interval(signed, bits)
+                        value :: exact_integer_literal(n, raw)
+                        if !exact_integer_fits(value, interval.lo, interval.hi) -> &self.diags.push(int_range_error(signed, bits, span))
+                        width = Val((signed, bits))
+                        Val(Type.IntN{signed: signed, bits: bits})
+                    }
+                    else -> {
+                        if width == .Val((signed, bits)) -> Val(Type.IntN{signed: signed, bits: bits})
+                        else { width = None; Val(Type.Int) }
+                    }
+                }
+            }
+            // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3729
+            .Float(_, span, is_f32, raw) -> {
+                expected :: self.expected_type
+                if raw != None && expected != Val(Type.Float) && expected != Val(Type.Float32) {
+                    text :: raw.take().expect("decimal literal spelling")
+                    e = exact_decimal_literal(text, span)
+                    return self.infer(&e)
+                }
+                if expected == Val(Type.Float32) { raw = None; is_f32 = true; Val(Type.Float32) }
+                else { if expected == Val(Type.Float) -> raw = None; Val(Type.Float) }
+            }
+            // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3754
+            .UnitLit(int, float, suffix, suffix_span, span, _) -> {
+                if self.registry.unit_literal("Time", suffix) == .Val(unit) {
+                    is_float :: float != None
+                    value := if (int, float) == {
+                        (.Val(v), _) -> Expr.Int{value: v, span: span, width: None, raw: None}
+                        (_, .Val(v)) -> Expr.Float{value: v, span: span, is_f32: false, raw: None}
+                        else -> Expr.Int{value: 0, span: span, width: None, raw: None}
+                    }
+                    scale :: unit.scale.num.to_string().parse::<Int>().expect("canonical Time scales fit the Int carrier")
+                    if scale != 1 {
+                        multiplier :: if is_float -> Expr.Float{value: scale as Float, span: span, is_f32: false, raw: None}
+                            else -> Expr.Int{value: scale, span: span, width: None, raw: None}
+                        value = Expr.Binary{op: BinOp.Mul, left: ^value, right: ^multiplier, span: span}
+                    }
+                    constructor :: Expr.MethodCall{receiver: Expr.Ident{name: Syntax.DURATION_TYPE, span: suffix_span}, method: "nanoseconds", method_span: suffix_span,
+                        owner_type_args: [], type_args: [], args: [CallArg{convention: AccessConvention.Read, expr: ^value, span: span, flags: CallArgFlags.default(), label: None, spread: false}],
+                        recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+                    e = Expr.OrFallback{value: ^constructor, fallback: OrFallback.Panic{name_span: suffix_span, args: [CallArg{convention: AccessConvention.Read,
+                        expr: Expr.Str{parts: [StrPart.Lit{value: "time literal is outside Duration's i64 range"}], span: span}, span: span, flags: CallArgFlags.default(), label: None, spread: false}]}, is_option: false, span: span}
+                    return self.infer(&e)
+                }
+                type_name :: UnitFamilyDef.type_name(suffix)
+                is_unit_member :: self.registry.is_distinct(type_name) && self.registry.distinct_is_numeric(type_name) && self.registry.distinct_base(type_name) == Val(Type.Float)
+                value :: float ?? ((int ?? 0) as Float)
+                if !is_unit_member {
+                    if suffix == Syntax.UNIT_SUFFIX_IMAGINARY {
+                        e = Expr.Call{value: Call{name: Syntax.TYPE_COMPLEX, name_span: suffix_span, type_args: [], args: [
+                            CallArg{convention: AccessConvention.Read, expr: Expr.Float{value: 0.0, span: span, is_f32: false, raw: None}, span: span, flags: CallArgFlags.default(), label: None, spread: false},
+                            CallArg{convention: AccessConvention.Read, expr: Expr.Float{value: value, span: span, is_f32: false, raw: None}, span: span, flags: CallArgFlags.default(), label: None, spread: false},
+                        ], resolved_ret: None, range_checked: false, widen_approx: false}}
+                        return self.infer(&e)
+                    }
+                    &self.diags.push(Diagnostic.error("E0134", "`{suffix}` isn't a unit in scope",
+                        "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here",
+                        "import the family that defines `{suffix}`, or write the number without a suffix", Val(suffix_span)))
+                    return None
+                }
+                e = Expr.MethodCall{receiver: Expr.Ident{name: type_name, span: suffix_span}, method: Syntax.numeric_conversion_method("Float").expect("Float has a canonical conversion method"),
+                    method_span: suffix_span, owner_type_args: [], type_args: [], args: [CallArg{convention: AccessConvention.Read,
+                        expr: Expr.Float{value: value, span: span, is_f32: false, raw: None}, span: span, flags: CallArgFlags.default(), label: None, spread: false}],
+                    recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+                self.infer(&e)
+            }
+            .Unit(_) -> Val(Type.Named{name: Syntax.INTERNAL_UNIT_TYPE})
+            .Bool(_, _) -> Val(Type.Bool)
+            // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3910
+            .Str(parts, str_span) -> self.infer_inner_string_0409(&parts, str_span)
+            .StrMatchLit(_, span) -> {
+                &self.diags.push(Diagnostic.error("E0112", "a pattern literal is only valid as a `take_pattern` argument",
+                    "this string has typed holes (`{name:Type}`), which only `take_pattern` understands",
+                    "call it as `cursor.take_pattern(\"…\")`, or drop the `:Type` for an ordinary interpolated string", Val(span)))
+                None
+            }
+            .BinMatchLit(_, span) -> {
+                &self.diags.push(Diagnostic.error("E0112", "a binary pattern literal is only valid as a `take_pattern` argument",
+                    "this `[U8].{\"…\"}` literal has typed holes (`{name:U<width>}`), which only `take_pattern` understands",
+                    "call it as `reader.take_pattern([U8].{\"…\"})`", Val(span)))
+                None
+            }
+            // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:4330
+            .Ident(name, span) -> self.infer_inner_ident_0409(name, span)
+            .Char(_, _) -> Val(Type.Char)
+            .Spread(_, span) -> {
+                &self.diags.push(Diagnostic.error("E1311", "spread only works inside a list literal or a variadic call",
+                    "write `[...xs, y]` to spread into a list, or `f(...xs)` when the callee accepts a rest parameter",
+                    "move the spread into `[ … ]` or a variadic call", Val(span)))
+                None
+            }
+            .MemberSpread(base, members, span) -> {
+                fields :: members.map((member) -> Expr.Field{base: ~base, name: member.name, span: Span.new(span.start, member.span.end)}).collect()
+                e = Expr.ListLit{elements: fields, span: span}
+                self.infer_inner(&e)
+            }
+            .ListLit(elems, span) -> {
+                repeated_head :: repeated_struct_list_edit(self.source, elems, span)
+                fixed :: self.expected_type.is_some_and((ty) -> if ty == .FixedList(_, _) -> true else -> false)
+                if !elems.is_empty() && !fixed -> self.record_memory_event(MemoryEvent.new(MemoryEventKind.Allocation, span, "list construction allocates backing storage"))
+                inferred :: self.infer_list_lit(&elems, span)
+                if inferred != None && repeated_head == .Val((type_name, edit)) {
+                    diagnostic := Diagnostic.from_row("L0523", [("type", type_name)], Val(span))
+                    if !fixed -> diagnostic = diagnostic.with_edit(edit)
+                    &self.diags.push(^diagnostic)
+                }
+                inferred
+            }
+            .TupleLit(fields, span, ty_slot) -> { t :: self.infer_tuple_lit(&fields, span); ty_slot = ~t; t }
+            .MapLit(entries, span) -> {
+                if !entries.is_empty() -> self.record_memory_event(MemoryEvent.new(MemoryEventKind.Allocation, span, "map construction allocates backing storage"))
+                self.infer_map_lit(&entries, span)
+            }
+            .Index(base, index, span, kind) -> {
+                result :: self.infer_index(&base, &index, span, &kind)
+                if kind == IndexKind.Range && self.loop_depth > 0 -> &self.diags.push(Diagnostic.lint("L0501", "slicing inside a loop copies every time",
+                    "each slice makes a fresh copy of the range — that adds up in a loop", "build indices outside the loop, or collect into one list", Val(span)))
+                if kind == IndexKind.Range -> e = Expr.Slice{base: ^base, start: Expr.Int{value: 0, span: span, width: None, raw: None},
+                    end: Expr.Int{value: 0, span: span, width: None, raw: None}, range: Val(^index), span: span}
+                result
+            }
+            .Slice(base, start, end, range, span) -> {
+                if range == .Val(range_expr) {
+                    self.borrow_ctx = true
+                    base_ty :: self.infer(&base) ?? return None
+                    range_ty :: self.infer(&range_expr) ?? return None
+                    if range_ty != Type.Named{name: Syntax.TYPE_RANGE} {
+                        &self.diags.push(Diagnostic.error("E0505", "slice bound must be Range, not {range_ty.show()}",
+                            "a stored slice bound carries its start, end, and end behavior in one Range value", "use `a..b`, `a..<b`, or a Range value", Val(range_expr.span())))
+                        return None
+                    }
+                    if base_ty == {
+                        .List(inner) -> Val(Type.List{element: inner})
+                        .String -> Val(Type.String)
+                        ty if ty.is_compute_tensor_family() -> Val(Type.Named{name: "Tensor"})
+                        other -> {
+                            &self.diags.push(Diagnostic.error("E0505", "only lists and strings can be sliced, not {other.show()}",
+                                "a Range projects a window from indexed storage", "use `xs[range]` on a list or `s.slice(range)` on text", Val(span)))
+                            None
+                        }
+                    }
+                } else -> self.infer_slice(&base, &start, &end, span)
+            }
+            .Range(start, end, _, span) -> self.infer_range(&start, &end, span)
+            .Call(call) -> {
+                self.clear_uninit_mut_args(call.args)
+                if self.check_call(&call, true) == {
+                    .Val(.Val(t)) -> Val(t)
+                    .Val(.None) -> {
+                        &self.diags.push(Diagnostic.error("E0116", "`{call.name}` doesn't hand back a value",
+                            "a call is a value only when its function declares a result after the parameter list",
+                            "inside an arm, wrap the call in `{ … }`; otherwise put `{call.name}` on its own line, or declare it as `fn {call.name}(…) Type -> …`", Val(call.name_span)))
+                        None
+                    }
+                    .None -> None
+                }
+            }
+            // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:4700
+            .Unary(op, inner, span) -> {
+                if op == UnOp.Neg {
+                    if inner == .Int(n, ispan, width, raw) && self.expected_type == .Val(Type.InlineRange(base, lo, hi)) {
+                        value :: exact_integer_literal(n, raw).neg()
+                        interval :: IntegerInterval.new(I128.from(lo), I128.from(hi))
+                        if !exact_integer_fits(value, interval.lo, interval.hi) -> &self.diags.push(inline_range_literal_out_of_bounds(value, lo, hi, ispan))
+                        width = None
+                        return Val(Type.InlineRange{base: base, lo: lo, hi: hi})
+                    }
+                    if inner == .Int(n, ispan, width, raw) && self.expected_type == .Val(Type.IntN(true, bits)) {
+                        value :: exact_integer_literal(n, raw).neg()
+                        interval :: integer_width_interval(true, bits)
+                        if !exact_integer_fits(value, interval.lo, interval.hi) -> &self.diags.push(int_range_error(true, bits, ispan))
+                        width = Val((true, bits))
+                        return Val(Type.IntN{signed: true, bits: bits})
+                    }
+                    if inner == .Float(_, _, _, raw) && raw != None && self.expected_type != Val(Type.Float) && self.expected_type != Val(Type.Float32) {
+                        text :: raw.take().expect("decimal literal spelling")
+                        e = exact_decimal_literal("-{text}", span)
+                        return self.infer(&e)
+                    }
+                }
+                t :: self.infer(&inner) ?? return None
+                if op == UnOp.Neg && t == .IntN(true, bits) && self.active_arithmetic_policy(ArithmeticOperation.Neg, span) == .Val(fact) {
+                    zero :: Expr.Int{value: 0, span: span, width: Val((true, bits)), raw: Val("0")}
+                    e = self.policy_call(fact.mode, Expr.Binary{op: BinOp.Sub, left: ^zero, right: ^inner, span: span}, fact)
+                    return Val(t)
+                }
+                if op == {
+                    .Neg -> {
+                        if t == .InlineRange(base, _, _) {
+                            self.require_knowledge_gate(KnowledgePlane.Range, KnowledgeGate.BoundedArithmetic, span)
+                            return Val(base.erased_inline_ranges())
+                        }
+                        if t.is_float() || t == Type.Int || t == .IntN(true, _) -> return Val(t)
+                        if t == .IntN(_, bits) -> &self.diags.push(Diagnostic.error("E0109", "`-` can't negate {t.show()}, which is unsigned",
+                            "unsigned numbers have no negative values", "use a signed type like `I{bits}` if you need negatives", Val(span)))
+                        else -> &self.diags.push(Diagnostic.error("E0109", "`-` needs a number, but this is {t.show()}", "only Int and Float values can be negated", "use a number here", Val(span)))
+                        None
+                    }
+                    .Not -> {
+                        if t == .InlineRange(base, _, _) {
+                            self.require_knowledge_gate(KnowledgePlane.Range, KnowledgeGate.BoundedArithmetic, span)
+                            return Val(base.erased_inline_ranges())
+                        }
+                        if t == Type.Bool || t.is_integer() -> return Val(t)
+                        &self.diags.push(Diagnostic.error("E0109", "`!` needs {Type.Bool.show()} or a whole number, but this is {t.show()}",
+                            "`!` flips bits: a yes becomes a no, and a whole number gets every bit turned over", "compare the value to something first, e.g. `!(x > 0)`", Val(span)))
+                        None
+                    }
+                }
+            }
+            .Binary(op, lhs, rhs, span) -> {
+                replacement := None
+                ty :: self.infer_binary(op, &lhs, &rhs, span, &replacement)
+                if replacement == .Val(value) -> e = ^value
+                else if ty.is_some_and((ty) -> if ty == .IntN(_, _) -> true else -> false) {
+                    operation :: if op == { .Add -> Val(ArithmeticOperation.Add); .Sub -> Val(ArithmeticOperation.Sub); .Mul -> Val(ArithmeticOperation.Mul); .Pow -> Val(ArithmeticOperation.Pow); else -> None }
+                    if operation == .Val(operation) && self.active_arithmetic_policy(operation, span) == .Val(fact) -> e = self.policy_call(fact.mode, Expr.Binary{op: op, left: ^lhs, right: ^rhs, span: span}, fact)
+                }
+                ty
+            }
+            .CompareChain(operands, ops, hooks, span) -> self.infer_compare_chain(&operands, ops, &hooks, span)
+            .Deref(inner, span) -> {
+                forbidden :: !self.in_unsafe
+                if forbidden -> &self.diags.push(Diagnostic.error("E0208", "reading through a raw pointer requires `#Unsafe`",
+                    "`p.*` dereferences a raw pointer; that is a raw memory access, only valid inside a `#Unsafe { … }` region",
+                    "wrap this in `#Unsafe(\"why this is safe\") { … }`", Val(span)))
+                inner_t :: self.infer(&inner) ?? return None
+                if forbidden -> None else -> Val(ptr_elem(inner_t) ?? inner_t)
+            }
+            .RawOf(inner, span) -> {
+                forbidden :: !self.in_unsafe
+                if forbidden -> &self.diags.push(Diagnostic.error("E0208", "taking a raw pointer requires `#Unsafe`",
+                    "`*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe { … }` region",
+                    "wrap this in `#Unsafe(\"why this is safe\") { … }` — to dereference a pointer use postfix `p.*`", Val(span)))
+                inner_t :: self.infer(&inner) ?? return None
+                if forbidden -> None else -> Val(ptr_type(inner_t))
+            }
+            .Copy(inner, span) -> {
+                self.borrow_ctx = true
+                was_view_read :: self.allow_string_view_read
+                self.allow_string_view_read = true
+                inner_t :: self.infer(&inner)
+                self.allow_string_view_read = was_view_read
+                ty :: inner_t ?? return None
+                if self.type_contains_observable_clock(ty) {
+                    self.record_effect(Effect.Time.name(), span)
+                    if self.in_pure && self.det_suppress == 0 -> &self.diags.push(e3403("Clock copy", Val(span)))
+                }
+                copy_ty :: owned_type_for_read_view(ty) ?? ty
+                resource :: self.is_resource_type(ty)
+                if resource || (!type_is_copy(ty) && !self.is_cloneable_type(copy_ty)) {
+                    cell_guard :: if ty == .Apply(name, _) -> name == "CellReadGuard" || name == "CellEditGuard" else -> false
+                    shown :: if ty == .Apply(name, args) && cell_guard && args.len() == 1 -> "{name}<{args[0].name()}>" else -> ty.show()
+                    (why, fix) :: if cell_guard -> (
+                        "a Cell guard owns one live dynamic loan; copying it would create two handles for the same loan",
+                        "move it instead with the move marker `^` (`{Syntax.SIGIL_MOVE}guard`), or create a new guard after this one is dropped")
+                    else if resource -> (
+                        "a resource owns one cleanup duty; copying it would create two owners that could close the same handle",
+                        "move it instead with the move marker `^` (`{Syntax.SIGIL_MOVE}name`), or acquire a second resource")
+                    else -> (
+                        "copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet",
+                        "move it instead with the move marker `^` (`{Syntax.SIGIL_MOVE}name` if this is its last use), or change the type so every part can be copied")
+                    &self.diags.push(Diagnostic.error("E0211", "`{shown}` can't be copied", why, fix, Val(span)))
+                    return None
+                }
+                if copy_ty == .Shared(_) -> self.record_memory_event(MemoryEvent.new(MemoryEventKind.RetainRelease, span, "`copy` of `{copy_ty.show()}` retains a shared reference"))
+                else if type_owns_heap(copy_ty, self.registry) -> self.record_memory_event(MemoryEvent.new(MemoryEventKind.Allocation, span, "`copy` of `{copy_ty.show()}` allocates owned heap data"))
+                Val(copy_ty)
+            }
+            .Place(inner, access, span) -> {
+                if access == PlaceAccess.Take {
+                    ty :: self.infer(&inner)
+                    self.note_exact_move(inner, ty, span)
+                    e = ^inner
+                    return ty
+                }
+                if self.place_from_expr(inner) == None {
+                    _ :: self.infer(&inner)
+                    &self.diags.push(Diagnostic.error("E0213", "a window must start from a place",
+                        "only a name followed by fields, indexes, or one range has stable storage to read or edit without copying",
+                        "bind the call or temporary to a name first, then take a window into that name", Val(span)))
+                    return None
+                }
+                if access == PlaceAccess.Write -> self.validate_write_place(inner, span)
+                self.borrow_ctx = true
+                suppress :: self.suppress_partial_move_root_read
+                self.suppress_partial_move_root_read = true
+                inferred :: self.infer(&inner)
+                self.suppress_partial_move_root_read = suppress
+                ty :: inferred ?? return None
+                if inner == .Slice(_, _, _, _, _) {
+                    elem :: if ty == { .List(elem), .FixedList(elem, _) -> elem; value if value.is_compute_tensor_family() -> Type.Float; other -> return Val(other) }
+                    Val(Type.Apply{name: if access == PlaceAccess.Read -> "View" else -> "ViewMut", args: [^elem]})
+                } else -> Val(ty)
+            }
+            .PtrFromAddr(alias, alias_span, elem, addr, span) -> self.infer_ptr_from_addr(alias, alias_span, &elem, &addr, span)
+            // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:5079-5841 (packet 0410).
+            // Exact variant routing, not a speculative helper/fallback chain.
+            .Field(_, _, _) -> self.infer_inner_field(&e)
+            .OptField(_, _, _, _, _) -> self.infer_inner_opt_field(&e)
+            .MethodCall(_, _, _, _, _, _, _, _, _, _) -> self.infer_inner_method_call(&e)
+            .StructLit(_, _, _, _, _, _, _) -> self.infer_inner_struct_lit(&e)
+            .EnumLit(_, _, _, _, _, _) -> self.infer_inner_enum_lit(&e)
+            .Tainted(_, _, _) -> self.infer_inner_tainted(&e)
+            .Present(_, _) -> self.infer_inner_present(&e)
+            .Absent(span) -> self.infer_inner_absent(span)
+            .PatternTest(_, _, _) -> self.infer_inner_pattern_test(&e)
+            .ReduceMarker(name, span) -> self.infer_inner_reduce_marker(name, span)
+            .NoElse(_) -> self.infer_inner_no_else(e)
+            .Todo(_, _) -> self.infer_inner_todo(&e)
+            .Ok(_, _) -> self.infer_inner_ok(&e)
+            .Err(_, _) -> self.infer_inner_err(&e)
+            .Try(_, _, _, _) -> self.infer_inner_try(&e)
+            .OrFallback(_, _, _, _) -> self.infer_inner_or_fallback(&e)
+            .Lambda(_) -> self.infer_inner_lambda(&e)
+            .CallValue(_, _, _) -> self.infer_inner_call_value(&e)
+            .ComptimeName(_, _, _) -> self.infer_inner_comptime_name(&e)
+            .Paren(_, _) -> self.infer_inner_paren(&e)
+            .TypedLit(_, _, _) -> unreachable("TypedLit elaborated before match")
+        }
+    }
 
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:4330
+    fn infer_inner_ident_0409(self: &Self, name: String, span: Span) -> Type? {
+        if self.binder_ref_types.get(name) == .Val(ty) -> return Val(~ty)
+        if self.loop_labels.contains(name) {
+            &self.diags.push(Diagnostic.error("E0988", "loop label `{name}` is not a runtime value",
+                "a loop label names a control-flow destination, so it cannot be read, passed, or stored", "use `break({name})` or `next({name})` to control the loop", Val(span)))
+            return None
+        }
+        if self.in_pre_clause && name == "result" {
+            &self.diags.push(Diagnostic.error("E0144", "`result` isn't available in a `#Pre` condition",
+                "`result` names the return value, which only exists once the function has returned — a `#Pre` condition runs at entry, before there is one",
+                "use `result` only in a `#Post` condition", Val(span)))
+            return None
+        }
+        if name == Syntax.AMBIENT_ERR && self.fallback_has_err == Val(false) {
+            (code, what, why, fix) :: if self.fallback_is_shape_miss -> (
+                "E0409", "`err` is not available after a pure pattern miss", "a shape test only reports whether the subject matched; it carries no failure value",
+                "remove `err`, or return an explicit value from the miss route")
+            else -> ("E0408", "`err` is not available in an optional fallback", "an optional can be absent, but it has no failure report to name",
+                "remove `err`, or use a fallible result when the fallback needs the failure")
+            &self.diags.push(Diagnostic.error(code, what, why, fix, Val(span)))
+            return None
+        }
+        if self.lookup(name).is_some_and((info) -> info.invalid) { self.invalid_binding_reads += 1; return None }
+        moved_expr :: Expr.Ident{name: name, span: span}
+        if self.reject_moved_expr_use(moved_expr, span) -> return None
+        if self.flow.uninit.contains(name) {
+            &self.diags.push(Diagnostic.error("E0420", "`{name}` may be read before it is given a value",
+                "`{name}` was declared with `Type{ uninit }`, so no value is available until you write to it — this read could see garbage",
+                "write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`)", Val(span)))
+            &self.flow.uninit.remove(name)
+        }
+        self.check_view_use(name, span)
+        if !self.suppress_partial_move_root_read -> self.check_place_read(moved_expr, span)
+        if self.is_string_view(name) && self.copies_explicit() && !self.allow_string_view_read && !(self.in_lambda_body && self.lambda_escapes) -> self.report_string_view_unsupported_use(name, "be used directly here", span)
+        if self.lookup(name) == .Val(info) { self.record_local_reference(span, info); return Val(~info.ty) }
+        if self.consts.get(name) == .Val(t) { self.record_const_reference(name, span); return Val(~t) }
+        imported_const :: self.name_ledger.alias(self.module_idx, name).and_then((alias) -> {
+            owner :: alias.target_module ?? return None
+            leaf :: alias.target.rsplit_once('.').map((pair) -> pair.1) ?? alias.target
+            declaration :: self.name_ledger.declaration(owner, leaf).filter((declaration) -> declaration.kind == "const") ?? return None
+            modules :: self.modules ?? return None
+            module :: modules.get(owner) ?? return None
+            ty :: module.consts.get(leaf) ?? return None
+            path :: self.name_ledger.module_path(owner) ?? return None
+            Val((~ty, path, declaration.span))
+        })
+        if imported_const == .Val((ty, target_path, definition_span)) {
+            self.record_import_alias_reference(name, span)
+            self.record_reference_anchor(span, target_path, "const", definition_span)
+            return Val(ty)
+        }
+        if self.core_item_imports.get(name) == .Val(item) && self.core_imports.get(name) == .Val(module) -> return self.infer_core_field(name, module, item, span, span)
+        if self.funcs.get(name) == .Val(sig) {
+            self.record_current_function_reference(name, span)
+            &self.inline_addr_taken.insert(name)
+            loop (idx, param) in sig.params.enumerate() {
+                if param.convention == AccessConvention.Read -> next
+                capability :: if param.convention == AccessConvention.Write -> "the write-access marker `&`" else -> "the move marker `^`"
+                &self.diags.push(Diagnostic.error("E0112", "`{name}` cannot be used as a function value",
+                    "parameter {idx + 1} requires {capability}, but `fn(T)` function values take every parameter with plain read access",
+                    "call this function directly; function values cannot erase write or ownership requirements", Val(span)))
+                break
+            }
+            return Val(self.checked_func_sig_to_fn_type(sig))
+        }
+        self.unknown_name(name, span)
+        None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:3910
+    fn infer_inner_string_0409(self: &Self, parts: &[StrPart], str_span: Span) -> Type? {
+        raw_html_edit :: raw_multiline_html_edit(self.source, parts, str_span)
+        if parts.any((p) -> if p == .Interp(_, _) -> true else -> false) -> self.record_memory_event(MemoryEvent.new(MemoryEventKind.Allocation, str_span, "string interpolation allocates a new `String`"))
+        debug_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Debug).name
+        pretty_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Pretty).name
+        fixed_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Fixed).name
+        grouped_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Grouped).name
+        hex_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Hex).name
+        sci_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Sci).name
+        percent_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Percent).name
+        bin_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Bin).name
+        oct_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Oct).name
+        pad_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Pad).name
+        pad_left_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.PadLeft).name
+        unit_selector :: Syntax.interpolation_selector_for_kind(InterpolationSelectorKind.Unit).name
+        loop p in &parts {
+            if p != .Interp(_, _) -> next
+            if p == .Interp(inner, fmt) {
+                self.borrow_ctx = true
+                was_view_read :: self.allow_string_view_read
+                self.allow_string_view_read = true
+                inferred :: self.infer(&inner)
+                self.allow_string_view_read = was_view_read
+                t :: inferred ?? next
+                if self.type_contains_observable_clock(t) {
+                    self.record_effect(Effect.Time.name(), inner.span())
+                    if self.in_pure && self.det_suppress == 0 -> &self.diags.push(e3403("Clock formatting", Val(inner.span())))
+                }
+                if fmt == {
+                    .Display -> {
+                        migration :: is_display_migration_candidate(self, t)
+                        generic_bound :: self.type_param_has_bound(t, "Display") || self.type_param_has_bound(t, "Printable")
+                        if (!is_displayable(t, self.registry, self.trait_reg) && !generic_bound && !self.is_unit_type(t)) || migration {
+                            if is_secret_bearing_crypto_type(t) {
+                                &self.diags.push(Diagnostic.error("E0915", "secret-bearing `{t.name()}` has no `Display` implementation",
+                                    "cryptographic secrets cannot enter logs or strings through interpolation",
+                                    "remove the interpolation; log a public operation label or key identifier instead", Val(inner.span())))
+                                next
+                            }
+                            if is_one_pass_source(t) {
+                                fix :: if one_pass_materializer(t) == .Val(call) -> "materialize it first: add `{call}` before the interpolation" else -> "consume it with a `loop` and show each item instead"
+                                &self.diags.push(Diagnostic.error("E0915", "the one-pass source {t.show()} has no `Display` implementation",
+                                    "reading this value consumes it, so showing it would spend the only pass", fix, Val(inner.span())))
+                                next
+                            }
+                            if t == .Named(n) {
+                                if self.registry.is_distinct(n) -> &self.diags.push(e0138(n, "string interpolation", "#Printable", self.registry.distinct_granted_bundles(n), inner.span()))
+                                else if migration {
+                                    if debug_interpolation_edit(self, inner, debug_selector) == .Val(edit) {
+                                        value :: self.source.get(edit.span.start..<edit.span.end) ?? next // #4303
+                                        &self.diags.push(Diagnostic.from_row("L0520", [("type", n), ("value", value.to_string())], Val(edit.span)).with_edit(edit))
+                                    }
+                                } else -> &self.diags.push(e0915(t.show(), inner.span()))
+                            } else -> &self.diags.push(e0915(t.show(), inner.span()))
+                        }
+                    }
+                    .Debug, .Pretty -> {
+                        selector :: if fmt == StrFormat.Debug -> debug_selector else -> pretty_selector
+                        if !is_debuggable(t, self.registry, self.trait_reg) {
+                            if is_secret_bearing_crypto_type(t) {
+                                &self.diags.push(Diagnostic.error("E0112", "secret-bearing `{t.name()}` cannot use `:{selector}`",
+                                    "Debug output could copy cryptographic secret material into logs or diagnostics",
+                                    "remove the interpolation; log a public operation label or key identifier instead", Val(inner.span())))
+                                next
+                            }
+                            &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't be shown with :{selector} yet",
+                                "debug interpolation needs a debuggable value", "implement `Debug` or use a debuggable part", Val(inner.span())))
+                        }
+                    }
+                    .Fixed(_) -> {
+                        if t != Type.Float && t != Type.Int -> &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't use `:{fixed_selector}(n)`",
+                            "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` or exact `Int` values",
+                            "pass a `Float` or exact `Int`, or use bare interpolation for this value", Val(inner.span())))
+                    }
+                    .Grouped(_) -> {
+                        if t != Type.Float && t != Type.Int -> &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't use `:{grouped_selector}(n)`",
+                            "grouped interpolation uses `core.text.fmt.grouped`, which formats `Float` or exact `Int` values",
+                            "pass a `Float` or exact `Int`, or use bare interpolation for this value", Val(inner.span())))
+                    }
+                    .Hex(_) -> {
+                        if t != Type.Int -> &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't use `:{hex_selector}(n)`",
+                            "hex interpolation uses `core.text.fmt.hex`, which formats `Int` values", "pass an `Int`, or use bare interpolation for this value", Val(inner.span())))
+                    }
+                    .Sci(_) -> {
+                        if t != Type.Float -> &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't use `:{sci_selector}(n)`",
+                            "scientific interpolation formats Float values", "pass a `Float`, or use bare interpolation for this value", Val(inner.span())))
+                    }
+                    .Percent(_) -> {
+                        if t != Type.Float -> &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't use `:{percent_selector}(n)`",
+                            "percent interpolation formats Float values", "pass a `Float`, or use bare interpolation for this value", Val(inner.span())))
+                    }
+                    .Bin -> {
+                        if t != Type.Int -> &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't use `:{bin_selector}`",
+                            "binary interpolation formats exact Int values", "pass an exact `Int`, or use bare interpolation for this value", Val(inner.span())))
+                    }
+                    .Oct -> {
+                        if t != Type.Int -> &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't use `:{oct_selector}`",
+                            "octal interpolation formats exact Int values", "pass an exact `Int`, or use bare interpolation for this value", Val(inner.span())))
+                    }
+                    .Pad(_, _), .PadLeft(_, _) -> {
+                        if t != Type.String {
+                            selector :: if fmt == .Pad(_, _) -> pad_selector else -> pad_left_selector
+                            &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't use `:{selector}(n)`",
+                                "padding interpolation formats String values", "pass a `String`, or use bare interpolation for this value", Val(inner.span())))
+                        }
+                    }
+                    .Unit(_) -> {
+                        if !self.is_unit_type(t) -> &self.diags.push(Diagnostic.error("E0112", "{t.show()} can't use `:{unit_selector}(…)`",
+                            "unit formatting needs a quantity or a `#UnitFamily` value", "use bare interpolation, or pass a value that has a unit", Val(inner.span())))
+                    }
+                }
+            }
+        }
+        if raw_html_edit == .Val(edit) -> &self.diags.push(Diagnostic.from_row("L0524", [], Val(str_span)).with_edit(edit))
+        Val(Type.String)
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:14
+#Copy
+#Equatable
+pub struct IntegerInterval { pub lo: I128; pub hi: I128 }
+impl IntegerInterval {
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:20
+    pub fn new(lo: I128, hi: I128) -> Self { Self{lo: lo, hi: hi} }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:24
+    pub fn from_bounds(bounds: (I128, I128)) -> Self { Self.new(bounds.0, bounds.1) }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:29
+    pub fn contains_interval(self: Self, subset: Self) -> Bool { self.lo <= subset.lo && subset.hi <= self.hi }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:33
+    pub fn contains_exact(self: Self, value: CtBigInt) -> Bool { exact_integer_fits(value, self.lo, self.hi) }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:37
+    pub fn negated(self: Self) -> Self? { Val(Self.new(self.hi.checked_neg() ?? return None, self.lo.checked_neg() ?? return None)) }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:41
+    pub fn add(self: Self, other: Self) -> Self? { Val(Self.new(self.lo.checked_add(other.lo) ?? return None, self.hi.checked_add(other.hi) ?? return None)) }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:48
+    pub fn sub(self: Self, other: Self) -> Self? { Val(Self.new(self.lo.checked_sub(other.hi) ?? return None, self.hi.checked_sub(other.lo) ?? return None)) }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:55
+    pub fn mul(self: Self, other: Self) -> Self? {
+        products :: [self.lo.checked_mul(other.lo) ?? return None, self.lo.checked_mul(other.hi) ?? return None,
+            self.hi.checked_mul(other.lo) ?? return None, self.hi.checked_mul(other.hi) ?? return None]
+        Val(Self.new(products.min() ?? return None, products.max() ?? return None))
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:65
+    pub fn fixed_list_indexes(len: U64) -> Self? { Val(Self.new(0, I128.from(len).checked_sub(1) ?? return None)) }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:73
+pub fn integer_width_interval(signed: Bool, bits: U8) -> IntegerInterval {
+    IntegerInterval.from_bounds(Type.IntN{signed: signed, bits: bits}.integer_range().expect("fixed integer widths carry an interval fact"))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:84
+pub fn exact_integer_literal(value: Int, raw: String?) -> CtBigInt {
+    raw.and_then((raw) -> CtBigInt.from_literal(raw).ok()).unwrap_or_else(() -> CtBigInt.from_int(value))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:89
+pub fn exact_integer_fits(value: CtBigInt, lo: I128, hi: I128) -> Bool {
+    lower :: CtBigInt.from_literal(lo.to_string()).expect("i128 bounds are valid integer literals")
+    upper :: CtBigInt.from_literal(hi.to_string()).expect("i128 bounds are valid integer literals")
+    value.compare(lower) != Ordering.Less && value.compare(upper) != Ordering.Greater
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:101
+pub fn exact_decimal_literal(text: String, span: Span) -> Expr {
+    Expr.Call{value: Call{name: Syntax.TYPE_DECIMAL, name_span: span, type_args: [], args: [CallArg{convention: AccessConvention.Read,
+        expr: Expr.Str{parts: [StrPart.Lit{value: ^text}], span: span}, span: span, flags: CallArgFlags.default(), label: None, spread: false}],
+        resolved_ret: None, range_checked: false, widen_approx: false}}
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:127
+pub fn is_reactive_handle_ty(ty: Type) -> Bool {
+    if ty == .Apply(name, _) -> name == Syntax.TYPE_SIGNAL || name == Syntax.TYPE_DERIVED || name == Syntax.TYPE_COMPUTED else -> false
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/mod.rs:137-143
+// Canonical private composition: binary/calls/expr/fallible/optional_chain/stdlib_lints
+// live in their existing Sema owner files. Callers import expr_wants_expected_type directly.

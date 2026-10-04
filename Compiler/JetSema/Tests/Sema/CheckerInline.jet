@@ -1,0 +1,29 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR, Span]
+use jet_sema.CheckerInline.[e0918_address_taken, INLINE_ALWAYS_MAX_STMTS]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInline.rs:51/103 (behavioral controls; no inline Rust tests)
+#Test("always_inline_rejects_direct_recursion_but_soft_inline_is_a_hint") {
+    recursive :: statements05_diagnostics("#Inline(Always)\nfn recurse() {{ recurse() }}\n")
+    assert(recursive.any(fn(d: Diagnostic) { d.code == "E0917" }))
+    hint :: statements05_diagnostics("#Inline\nfn recurse() {{ recurse() }}\n")
+    assert(!hint.any(fn(d: Diagnostic) { d.code == "E0917" }))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInline.rs:48/82/103 (behavioral control)
+#Test("always_inline_statement_ceiling_is_strict") {
+    body := ""
+    loop index in 0..<INLINE_ALWAYS_MAX_STMTS { body = "{body}value_{index} :: {index}\n" }
+    at_ceiling :: statements05_diagnostics("#Inline(Always)\nfn small() {{{body}}}\n")
+    assert(!at_ceiling.any(fn(d: Diagnostic) { d.code == "E0919" }))
+    beyond :: statements05_diagnostics("#Inline(Always)\nfn large() {{{body}extra :: 0\n}}\n")
+    assert(beyond.any(fn(d: Diagnostic) { d.code == "E0919" }))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInline.rs:67 (behavioral control)
+#Test("address_taken_diagnostic_names_the_checked_promise") {
+    diagnostic :: e0918_address_taken("callback", Span{start: 3, end: 9})
+    assert(diagnostic.code == "E0918")
+    assert(diagnostic.what == "`callback` cannot be inlined: its address is taken")
+    assert(diagnostic.fix.contains("call `callback` directly"))
+}

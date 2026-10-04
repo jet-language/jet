@@ -1,528 +1,257 @@
-// PORT-PENDING 0609 crates-jet-driver-src-compile-module-group: crates/jet-driver/src/Foreign.rs:1-524
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-FFI-UNIFY1 shared binder registry.
-//RS //!
-//RS //! This is the narrow dispatch spine all foreign-language binders hang from.
-//RS //! C, Python, JS, and Octave are active namespace binders; rust/swift are registered ratified
-//RS //! mounts so later cards add binder depth without inventing a second namespace
-//RS //! model. The shipped S50 `extern rust` block stays on its existing path until
-//RS //! the `rust.*` binder migrates it under D-FFI-UNIFY1.
-//RS 
-//RS use crate::Diagnostics::Diagnostic;
-//RS use crate::Syntax;
-//RS pub use crate::AST::{
-//RS     BinderCapability, BinderCapabilityReport, BinderDescriptor, BinderRuntime, BinderStatus,
-//RS     BinderSurface, BindingStubKind, ForeignProvider, ForeignSafety, ForeignScalar, ForeignStubFile,
-//RS     FOREIGN_BINDERS as BINDERS,
-//RS };
-//RS use crate::AST::{
-//RS     ForeignAbiContract, ForeignLanguage, ForeignNamespace, ImportDecl, Item, LoadedModule,
-//RS     ProgramBundle,
-//RS };
-//RS use crate::ForeignBridge::{ForeignBoundaryContract, ForeignBoundaryIdentity};
-//RS use std::collections::{HashMap, HashSet};
-//RS use std::path::{Path, PathBuf};
-//RS use jet_foundation::Report::{StatusEnvelope, StatusValue};
-//RS 
-//RS fn all_imports(module: &LoadedModule) -> impl Iterator<Item = &ImportDecl> {
-//RS     let mut seen = HashSet::new();
-//RS     crate::AST::walk_imports(module)
-//RS         .into_iter()
-//RS         .filter_map(move |(_, import)| seen.insert(import.span).then_some(import))
-//RS }
-//RS 
-//RS pub fn binder_for(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
-//RS     crate::AST::binder_descriptor(language)
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum ForeignTarget {
-//RS     Native,
-//RS     Web,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum ForeignHost {
-//RS     DirectCAbi,
-//RS     ClangCppShim,
-//RS     BrowserJsEngine,
-//RS     NativeJsWasmComponent,
-//RS     SupervisedPythonSidecar,
-//RS     SwiftCAbiBridge,
-//RS     GoCArchive,
-//RS     EmbeddedJvm,
-//RS     EmbeddedDotNet,
-//RS     EmbeddedTcl,
-//RS     EmbeddedLua,
-//RS     FortranIsoCBinding,
-//RS     GnuCobolCAbi,
-//RS     AdaGnatCAbi,
-//RS     FreePascalCdecl,
-//RS     DartHostFfi,
-//RS     SupervisedPowerShell,
-//RS     SupervisedPerl,
-//RS     SupervisedRuby,
-//RS     SupervisedPhpPool,
-//RS     SupervisedR,
-//RS     SupervisedOctave,
-//RS     WindowsComAutomation,
-//RS     LegacyRustExtern,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ForeignRoutePlan {
-//RS     pub namespace: ForeignNamespace,
-//RS     pub descriptor: BinderDescriptor,
-//RS     pub host: ForeignHost,
-//RS     pub binding_cache: PathBuf,
-//RS     pub type_stub: Option<PathBuf>,
-//RS     pub provenance: PathBuf,
-//RS     pub abi_contract: ForeignAbiContract,
-//RS     pub boundary: ForeignBoundaryContract,
-//RS }
-//RS 
-//RS pub fn binding_cache_dir(project_root: &Path, language: ForeignLanguage) -> PathBuf {
-//RS     project_root
-//RS         .join(Syntax::SOURCE_ROOT_DIR)
-//RS         .join(language.bindings_subdir())
-//RS }
-//RS 
-//RS pub fn binding_cache_file(project_root: &Path, language: ForeignLanguage, lib: &str) -> PathBuf {
-//RS     let extension = binder_for(language)
-//RS         .map(|descriptor| descriptor.cache_extension)
-//RS         .unwrap_or(Syntax::FILE_EXT);
-//RS     binding_cache_dir(project_root, language).join(format!("{lib}.{extension}"))
-//RS }
-//RS 
-//RS pub fn type_stub_file(
-//RS     project_root: &Path,
-//RS     language: ForeignLanguage,
-//RS     lib: &str,
-//RS ) -> Option<PathBuf> {
-//RS     let descriptor = binder_for(language)?;
-//RS     match descriptor.type_stub_file {
-//RS         ForeignStubFile::None => None,
-//RS         ForeignStubFile::Suffix(extension) => {
-//RS             Some(binding_cache_dir(project_root, language).join(format!("{lib}.{extension}")))
-//RS         }
-//RS         ForeignStubFile::StemSuffix(suffix) => {
-//RS             Some(binding_cache_dir(project_root, language).join(format!("{lib}{suffix}")))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn provenance_file(project_root: &Path, language: ForeignLanguage, lib: &str) -> PathBuf {
-//RS     binding_cache_dir(project_root, language).join(format!("{lib}.provenance"))
-//RS }
-//RS 
-//RS pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost {
-//RS     match language {
-//RS         ForeignLanguage::C => ForeignHost::DirectCAbi,
-//RS         ForeignLanguage::Cpp => ForeignHost::ClangCppShim,
-//RS         ForeignLanguage::Rust => ForeignHost::LegacyRustExtern,
-//RS         ForeignLanguage::Py => ForeignHost::SupervisedPythonSidecar,
-//RS         ForeignLanguage::JS => match target {
-//RS             ForeignTarget::Native => ForeignHost::NativeJsWasmComponent,
-//RS             ForeignTarget::Web => ForeignHost::BrowserJsEngine,
-//RS         },
-//RS         ForeignLanguage::Swift => ForeignHost::SwiftCAbiBridge,
-//RS         ForeignLanguage::Go => ForeignHost::GoCArchive,
-//RS         ForeignLanguage::Java => ForeignHost::EmbeddedJvm,
-//RS         ForeignLanguage::DotNet => ForeignHost::EmbeddedDotNet,
-//RS         ForeignLanguage::Tcl => ForeignHost::EmbeddedTcl,
-//RS         ForeignLanguage::Lua => ForeignHost::EmbeddedLua,
-//RS         ForeignLanguage::Fortran => ForeignHost::FortranIsoCBinding,
-//RS         ForeignLanguage::Cobol => ForeignHost::GnuCobolCAbi,
-//RS         ForeignLanguage::Ada => ForeignHost::AdaGnatCAbi,
-//RS         ForeignLanguage::Pascal => ForeignHost::FreePascalCdecl,
-//RS         ForeignLanguage::Dart => ForeignHost::DartHostFfi,
-//RS         ForeignLanguage::PowerShell => ForeignHost::SupervisedPowerShell,
-//RS         ForeignLanguage::Perl => ForeignHost::SupervisedPerl,
-//RS         ForeignLanguage::Ruby => ForeignHost::SupervisedRuby,
-//RS         ForeignLanguage::Php => ForeignHost::SupervisedPhpPool,
-//RS         ForeignLanguage::R => ForeignHost::SupervisedR,
-//RS         ForeignLanguage::Octave => ForeignHost::SupervisedOctave,
-//RS         ForeignLanguage::Com => ForeignHost::WindowsComAutomation,
-//RS     }
-//RS }
-//RS 
-//RS pub fn route_plan(
-//RS     project_root: &Path,
-//RS     namespace: ForeignNamespace,
-//RS     target: ForeignTarget,
-//RS ) -> Option<ForeignRoutePlan> {
-//RS     let descriptor = *binder_for(namespace.language)?;
-//RS     let host = host_for(namespace.language, target);
-//RS     let boundary = ForeignBoundaryContract::new(
-//RS         descriptor,
-//RS         namespace.lib.clone(),
-//RS         ForeignBoundaryIdentity::new(
-//RS             format!("route:{}:{}", namespace.language.root(), namespace.lib),
-//RS             "none",
-//RS             descriptor.stamp(),
-//RS             format!("host:{host:?}"),
-//RS             format!("toolchain:{host:?}"),
-//RS             crate::ForeignBridge::foreign_host_target(),
-//RS         ),
-//RS     );
-//RS     Some(ForeignRoutePlan {
-//RS         host,
-//RS         binding_cache: binding_cache_file(project_root, namespace.language, &namespace.lib),
-//RS         type_stub: type_stub_file(project_root, namespace.language, &namespace.lib),
-//RS         provenance: provenance_file(project_root, namespace.language, &namespace.lib),
-//RS         descriptor,
-//RS         namespace,
-//RS         abi_contract: descriptor.contract,
-//RS         boundary,
-//RS     })
-//RS }
-//RS 
-//RS /// Capability report used by inspection and package/provider integrations.
-//RS /// Keeping it derived from the route descriptor makes cache provenance and
-//RS /// runtime dispatch agree on one ABI version.
-//RS pub fn capability_report(language: ForeignLanguage) -> Option<ForeignAbiContract> {
-//RS     binder_for(language).map(|descriptor| descriptor.contract)
-//RS }
-//RS 
-//RS /// Stable inspection output derived directly from the canonical binder table.
-//RS /// It reports structure and support claims, not host-tool presence: a missing
-//RS /// provisioned tool is a binding error, never a false capability downgrade.
-//RS pub fn capability_report_text() -> String {
-//RS     use std::fmt::Write as _;
-//RS 
-//RS     let mut output = String::from(
-//RS         "foreign capabilities\nschema=jet-ffi-capability-report-v1\nlanguage status runtime stub contract effect provider capabilities\n",
-//RS     );
-//RS     for descriptor in BINDERS {
-//RS         let report = descriptor.capability_report();
-//RS         let capabilities = report
-//RS             .capabilities
-//RS             .iter()
-//RS             .map(|capability| format!("{capability:?}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let _ = writeln!(
-//RS             output,
-//RS             "{} {:?} {:?} {:?} {} {} {:?} {}",
-//RS             report.language.root(),
-//RS             report.status,
-//RS             descriptor.runtime,
-//RS             descriptor.stub_kind,
-//RS             contract_name(report.contract),
-//RS             report.effect_root,
-//RS             report.provider,
-//RS             capabilities,
-//RS         );
-//RS     }
-//RS     output
-//RS }
-//RS 
-//RS pub fn capability_report_json() -> String {
-//RS     let rows = BINDERS
-//RS         .iter()
-//RS         .map(|descriptor| {
-//RS             let report = descriptor.capability_report();
-//RS             let capabilities = report
-//RS                 .capabilities
-//RS                 .iter()
-//RS                 .map(|capability| json_quote(&format!("{capability:?}")))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             format!(
-//RS                 "{{\"language\":{},\"status\":{},\"runtime\":{},\"stub\":{},\"contract\":{},\"effect\":{},\"provider\":{},\"capabilities\":[{}]}}",
-//RS                 json_quote(report.language.root()),
-//RS                 json_quote(&format!("{:?}", report.status)),
-//RS                 json_quote(&format!("{:?}", descriptor.runtime)),
-//RS                 json_quote(&format!("{:?}", descriptor.stub_kind)),
-//RS                 json_quote(contract_name(report.contract)),
-//RS                 json_quote(report.effect_root),
-//RS                 json_quote(&format!("{:?}", report.provider)),
-//RS                 capabilities,
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let payload = format!("{{\"languages\":[{rows}]}}");
-//RS     let ffi = StatusValue::parse(&payload).expect("foreign capability payload must be valid JSON");
-//RS     StatusEnvelope::new("inspect.ffi", true)
-//RS         .with_field("ffi", ffi)
-//RS         .json()
-//RS }
-//RS 
-//RS fn contract_name(contract: ForeignAbiContract) -> &'static str {
-//RS     if contract == ForeignAbiContract::C {
-//RS         "C"
-//RS     } else if contract == ForeignAbiContract::CXX {
-//RS         "CXX"
-//RS     } else if contract == ForeignAbiContract::NATIVE {
-//RS         "NATIVE"
-//RS     } else {
-//RS         "MESSAGE"
-//RS     }
-//RS }
-//RS 
-//RS fn json_quote(value: &str) -> String {
-//RS     let mut output = String::from("\"");
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '\\' => output.push_str("\\\\"),
-//RS             '"' => output.push_str("\\\""),
-//RS             '\n' => output.push_str("\\n"),
-//RS             '\r' => output.push_str("\\r"),
-//RS             '\t' => output.push_str("\\t"),
-//RS             character => output.push(character),
-//RS         }
-//RS     }
-//RS     output.push('"');
-//RS     output
-//RS }
-//RS 
-//RS pub fn is_active_namespace_import(
-//RS     imp: &ImportDecl,
-//RS ) -> Result<bool, crate::AST::ForeignImportError> {
-//RS     imp.foreign_imports().map(|imports| {
-//RS         imports.into_iter().any(|(ns, _)| {
-//RS             binder_for(ns.language)
-//RS                 .map(|binder| {
-//RS                     binder.surface == BinderSurface::Namespace
-//RS                         && binder.status == BinderStatus::Active
-//RS                 })
-//RS                 .unwrap_or(false)
-//RS         })
-//RS     })
-//RS }
-//RS 
-//RS /// D-FFI-UNIFY1 / D-FFI-JS1: active non-C namespace imports are backed by
-//RS /// generated binding modules under `.jet/bindings/<lang>/<lib>.jet`.
-//RS ///
-//RS /// C keeps its richer merge/link path in `CFFI::assemble`; this pass handles
-//RS /// active binders whose cache is already plain Jet source. Missing caches still
-//RS /// get an empty synthetic module so unused imports type-check and real symbol
-//RS /// use fails as a normal missing member until `jet inspect bind <lang>` materializes it.
-//RS #[derive(Debug, Clone)]
-//RS pub struct ForeignDiagnostic {
-//RS     pub file: String,
-//RS     pub source: String,
-//RS     pub diagnostic: Diagnostic,
-//RS }
-//RS 
-//RS pub fn assemble_active_namespaces(bundle: &mut ProgramBundle) -> Result<(), Vec<Diagnostic>> {
-//RS     assemble_active_namespaces_with_provenance(bundle).map_err(|diagnostics| {
-//RS         diagnostics
-//RS             .into_iter()
-//RS             .map(|entry| entry.diagnostic)
-//RS             .collect()
-//RS     })
-//RS }
-//RS 
-//RS pub fn assemble_active_namespaces_with_provenance(
-//RS     bundle: &mut ProgramBundle,
-//RS ) -> Result<(), Vec<ForeignDiagnostic>> {
-//RS     let mut surfaces: HashMap<(ForeignLanguage, String), usize> = HashMap::new();
-//RS     let user_module_count = bundle.modules.len();
-//RS 
-//RS     for idx in 0..user_module_count {
-//RS         let imports: Vec<_> = all_imports(&bundle.modules[idx]).cloned().collect();
-//RS         for imp in &imports {
-//RS             let foreign = match imp.foreign_imports() {
-//RS                 Ok(foreign) => foreign,
-//RS                 Err(error) => {
-//RS                     return Err(vec![ForeignDiagnostic {
-//RS                         file: bundle.modules[idx].display.clone(),
-//RS                         source: bundle.modules[idx].source.clone(),
-//RS                         diagnostic: error.diagnostic(),
-//RS                     }]);
-//RS                 }
-//RS             };
-//RS             for (ns, _) in foreign {
-//RS                 if ns.language == ForeignLanguage::C {
-//RS                     continue;
-//RS                 }
-//RS                 let Some(descriptor) = binder_for(ns.language) else {
-//RS                     continue;
-//RS                 };
-//RS                 if descriptor.surface != BinderSurface::Namespace
-//RS                     || descriptor.status != BinderStatus::Active
-//RS                 {
-//RS                     continue;
-//RS                 }
-//RS                 if ns.language == ForeignLanguage::Com && !cfg!(target_os = "windows") {
-//RS                     return Err(vec![ForeignDiagnostic {
-//RS                         file: bundle.modules[idx].display.clone(),
-//RS                         source: bundle.modules[idx].source.clone(),
-//RS                         diagnostic: Diagnostic::error(
-//RS                             "E3260",
-//RS                             "`com.*` needs a Windows host".to_string(),
-//RS                             "COM automation depends on Windows apartments, the registry, and IDispatch"
-//RS                                 .to_string(),
-//RS                             "build and run this module on a Windows host; use a non-COM boundary for other targets"
-//RS                                 .to_string(),
-//RS                             Some(imp.span),
-//RS                         ),
-//RS                     }]);
-//RS                 }
-//RS 
-//RS                 let key = (ns.language, ns.lib.clone());
-//RS                 let target_idx = if let Some(idx) = surfaces.get(&key).copied() {
-//RS                     idx
-//RS                 } else {
-//RS                     let idx = match materialize_namespace(bundle, ns.language, &ns.lib) {
-//RS                         Ok(idx) => idx,
-//RS                         Err(diagnostics) => {
-//RS                             let path =
-//RS                                 binding_cache_file(&bundle.project_root, ns.language, &ns.lib);
-//RS                             let source = std::fs::read_to_string(&path).unwrap_or_default();
-//RS                             return Err(diagnostics
-//RS                                 .into_iter()
-//RS                                 .map(|diagnostic| ForeignDiagnostic {
-//RS                                     file: path.display().to_string(),
-//RS                                     source: source.clone(),
-//RS                                     diagnostic,
-//RS                                 })
-//RS                                 .collect());
-//RS                         }
-//RS                     };
-//RS                     surfaces.insert(key, idx);
-//RS                     idx
-//RS                 };
-//RS                 bundle
-//RS                     .name_ledger
-//RS                     .record_import_target(idx, imp.span, target_idx);
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn materialize_namespace(
-//RS     bundle: &mut ProgramBundle,
-//RS     language: ForeignLanguage,
-//RS     lib: &str,
-//RS ) -> Result<usize, Vec<Diagnostic>> {
-//RS     let cache_path = binding_cache_file(&bundle.project_root, language, lib);
-//RS     let alias = synthetic_alias(language, lib);
-//RS     let Some(descriptor) = binder_for(language) else {
-//RS         return Err(vec![Diagnostic::error(
-//RS             "E3208",
-//RS             format!(
-//RS                 "no foreign binder descriptor is registered for `{}`",
-//RS                 language.root()
-//RS             ),
-//RS             "generated foreign stubs require a registered typed ABI descriptor".to_string(),
-//RS             "register the language binder before importing its namespace".to_string(),
-//RS             None,
-//RS         )]);
-//RS     };
-//RS     let module_idx = bundle.modules.len();
-//RS 
-//RS     if cache_path.is_file() {
-//RS         let source = match std::fs::read_to_string(&cache_path) {
-//RS             Ok(source) => source,
-//RS             Err(_) => String::new(),
-//RS         };
-//RS         if !source.is_empty() {
-//RS             if matches!(language, ForeignLanguage::Cobol | ForeignLanguage::Com)
-//RS                 && descriptor_stamp(&source).is_none()
-//RS             {
-//RS                 return Err(vec![Diagnostic::error(
-//RS                     "E3208",
-//RS                     format!(
-//RS                         "generated `{}` binding has no ABI descriptor",
-//RS                         language.root()
-//RS                     ),
-//RS                     format!(
-//RS                         "the generated stub must record the checked {} ABI contract",
-//RS                         language.root()
-//RS                     ),
-//RS                     format!(
-//RS                         "regenerate the binding with `jet inspect bind {}`",
-//RS                         language.root()
-//RS                     ),
-//RS                     None,
-//RS                 )]);
-//RS             }
-//RS             if let Some(actual) = descriptor_stamp(&source) {
-//RS                 if actual != descriptor.stamp() {
-//RS                     return Err(vec![Diagnostic::error(
-//RS                         "E3208",
-//RS                         format!(
-//RS                             "generated `{}` binding has a stale descriptor",
-//RS                             language.root()
-//RS                         ),
-//RS                         "the generated stub and binder must use the same foreign ABI descriptor"
-//RS                             .to_string(),
-//RS                         "regenerate the binding with `jet inspect bind`".to_string(),
-//RS                         None,
-//RS                     )]);
-//RS                 }
-//RS             }
-//RS             let (tokens, lex_diags) = crate::Lexer::lex_generated(&source);
-//RS             if !lex_diags.is_empty() {
-//RS                 return Err(lex_diags);
-//RS             }
-//RS             let mut program = crate::Parser::parse_with_source(&tokens, &source)?;
-//RS             if language == ForeignLanguage::Cpp {
-//RS                 mark_cpp_callback_abi(&mut program.items);
-//RS             }
-//RS             bundle.modules.push(LoadedModule {
-//RS                 path: cache_path,
-//RS                 display: format!("{}.{}", language.root(), lib),
-//RS                 source,
-//RS                 alias,
-//RS                 imports: std::mem::take(&mut program.imports),
-//RS                 items: std::mem::take(&mut program.items),
-//RS                 script_body: std::mem::take(&mut program.script_body),
-//RS                 block_spans: std::mem::take(&mut program.block_spans),
-//RS                 web_target_ceiling: program.web_target_ceiling,
-//RS                 pub_file: program.pub_file,
-//RS                 no_prelude: program.no_prelude,
-//RS                 default_target: program.default_target,
-//RS                 html_path: program.html_path.clone(),
-//RS                 policy_declarations: program.policy_declarations.clone(),
-//RS                 user_policy_declarations: program.user_policy_declarations.clone(),
-//RS                 rule_facts: std::mem::take(&mut program.rule_facts),
-//RS             });
-//RS             return Ok(module_idx);
-//RS         }
-//RS     }
-//RS 
-//RS     Err(vec![Diagnostic::error(
-//RS         "E3208",
-//RS         format!(
-//RS             "foreign binding cache for `{}.{}` is missing or empty",
-//RS             language.root(),
-//RS             lib
-//RS         ),
-//RS         "an active foreign namespace needs a generated typed binding before use".to_string(),
-//RS         "run the language binder or realize the foreign package before importing it".to_string(),
-//RS         None,
-//RS     )])
-//RS }
-//RS 
-//RS fn mark_cpp_callback_abi(items: &mut [Item]) {
-//RS     for item in items {
-//RS         let Item::Func(function) = item else { continue };
-//RS         for param in &mut function.params {
-//RS             if matches!(param.ty, crate::AST::Type::Fn { .. }) {
-//RS                 param.ty = crate::AST::Type::Tagged {
-//RS                     marker: crate::AST::TagMarker::Internal(
-//RS                         crate::AST::InternalTag::CppCallbackAbi,
-//RS                     ),
-//RS                     inner: Box::new(param.ty.clone()),
-//RS                 };
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn synthetic_alias(language: ForeignLanguage, lib: &str) -> String {
-//RS     format!("__{}_{}", language.root(), lib)
-//RS }
-//RS 
-//RS fn descriptor_stamp(source: &str) -> Option<&str> {
-//RS     source
-//RS         .lines()
-//RS         .find_map(|line| line.strip_prefix("// jet-ffi-descriptor="))
-//RS }
-// END-PORT-PENDING 0609 crates/jet-driver/src/Foreign.rs:1-524
+use jet_foundation.AST.[BinderDescriptor, BinderSurface, BinderStatus, ForeignStubFile, ForeignLanguage, ForeignNamespace, ForeignAbiContract, ForeignImportError, ImportDecl, Item, LoadedModule, ProgramBundle, Type, TagMarker, InternalTag, FOREIGN_BINDERS, binder_descriptor, walk_imports]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.Report.[StatusEnvelope, StatusValue]
+use crate.ForeignBridge.[ForeignBoundaryContract, ForeignBoundaryIdentity, foreign_host_target]
+use crate.Syntax
+use jet_lexer.lex_generated
+use jet_parser.parse_with_source
+use core.sys.target.selected_os
+use std.fs
 
+// Rust: crates/jet-driver/src/Foreign.rs:25
+fn all_imports(module: &LoadedModule) -> [&ImportDecl] {
+    // GATE #4499: canonical Span equality/hash; preserve walk order and first occurrence.
+    seen := Set<Span>{}
+    imports := [&ImportDecl]{}
+    loop (_, import) in walk_imports(module) {
+        if &seen.insert(import.span) -> &imports.push(import)
+    }
+    imports
+}
+// Rust: crates/jet-driver/src/Foreign.rs:32
+pub fn binder_for(language: ForeignLanguage) -> &BinderDescriptor? { binder_descriptor(language) }
+// Rust: crates/jet-driver/src/Foreign.rs:37
+#Derive(Debug, Clone, Copy, Eq)
+pub enum ForeignTarget { Native, Web }
+// Rust: crates/jet-driver/src/Foreign.rs:43
+#Derive(Debug, Clone, Copy, Eq)
+pub enum ForeignHost {
+    DirectCAbi, ClangCppShim, BrowserJsEngine, NativeJsWasmComponent,
+    SupervisedPythonSidecar, SwiftCAbiBridge, GoCArchive, EmbeddedJvm,
+    EmbeddedDotNet, EmbeddedTcl, EmbeddedLua, FortranIsoCBinding,
+    GnuCobolCAbi, AdaGnatCAbi, FreePascalCdecl, DartHostFfi,
+    SupervisedPowerShell, SupervisedPerl, SupervisedRuby, SupervisedPhpPool,
+    SupervisedR, SupervisedOctave, WindowsComAutomation, LegacyRustExtern
+}
+// Rust: crates/jet-driver/src/Foreign.rs:71
+#Derive(Debug, Clone, Eq)
+pub struct ForeignRoutePlan {
+    pub namespace: ForeignNamespace
+    pub descriptor: BinderDescriptor
+    pub host: ForeignHost
+    pub binding_cache: OSPath
+    pub type_stub: OSPath?
+    pub provenance: OSPath
+    pub abi_contract: ForeignAbiContract
+    pub boundary: ForeignBoundaryContract
+}
+// Rust: crates/jet-driver/src/Foreign.rs:82
+pub fn binding_cache_dir(project_root: &OSPath, language: ForeignLanguage) -> OSPath {
+    project_root.join(Syntax.SOURCE_ROOT_DIR).join(language.bindings_subdir())
+}
+// Rust: crates/jet-driver/src/Foreign.rs:88
+pub fn binding_cache_file(project_root: &OSPath, language: ForeignLanguage, lib: String) -> OSPath {
+    extension :: binder_for(language).map(fn(descriptor) { descriptor.cache_extension }).unwrap_or(Syntax.FILE_EXT)
+    binding_cache_dir(project_root, language).join("{lib}.{extension}")
+}
+// Rust: crates/jet-driver/src/Foreign.rs:95
+pub fn type_stub_file(project_root: &OSPath, language: ForeignLanguage, lib: String) -> OSPath? {
+    descriptor :: binder_for(language) ?? return None
+    if descriptor.type_stub_file == {
+        .None -> None
+        .Suffix(extension) -> Val(binding_cache_dir(project_root, language).join("{lib}.{extension}"))
+        .StemSuffix(suffix) -> Val(binding_cache_dir(project_root, language).join("{lib}{suffix}"))
+    }
+}
+// Rust: crates/jet-driver/src/Foreign.rs:112
+pub fn provenance_file(project_root: &OSPath, language: ForeignLanguage, lib: String) -> OSPath {
+    binding_cache_dir(project_root, language).join("{lib}.provenance")
+}
+// Rust: crates/jet-driver/src/Foreign.rs:116
+pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost {
+    if language == {
+        .C -> .DirectCAbi
+        .Cpp -> .ClangCppShim
+        .Rust -> .LegacyRustExtern
+        .Py -> .SupervisedPythonSidecar
+        .JS -> if target == { .Native -> .NativeJsWasmComponent; .Web -> .BrowserJsEngine }
+        .Swift -> .SwiftCAbiBridge
+        .Go -> .GoCArchive
+        .Java -> .EmbeddedJvm
+        .DotNet -> .EmbeddedDotNet
+        .Tcl -> .EmbeddedTcl
+        .Lua -> .EmbeddedLua
+        .Fortran -> .FortranIsoCBinding
+        .Cobol -> .GnuCobolCAbi
+        .Ada -> .AdaGnatCAbi
+        .Pascal -> .FreePascalCdecl
+        .Dart -> .DartHostFfi
+        .PowerShell -> .SupervisedPowerShell
+        .Perl -> .SupervisedPerl
+        .Ruby -> .SupervisedRuby
+        .Php -> .SupervisedPhpPool
+        .R -> .SupervisedR
+        .Octave -> .SupervisedOctave
+        .Com -> .WindowsComAutomation
+    }
+}
+// Rust: crates/jet-driver/src/Foreign.rs:147
+pub fn route_plan(project_root: &OSPath, namespace: ForeignNamespace, target: ForeignTarget) -> ForeignRoutePlan? {
+    descriptor :: (binder_for(namespace.language) ?? return None).clone()
+    host :: host_for(namespace.language, target)
+    boundary :: ForeignBoundaryContract.new(descriptor, namespace.lib.clone(), ForeignBoundaryIdentity.new(
+        "route:{namespace.language.root()}:{namespace.lib}", "none", descriptor.stamp(),
+        "host:{host.debug()}", "toolchain:{host.debug()}", foreign_host_target()))
+    Val(ForeignRoutePlan{host: host, binding_cache: binding_cache_file(project_root, namespace.language, namespace.lib), type_stub: type_stub_file(project_root, namespace.language, namespace.lib), provenance: provenance_file(project_root, namespace.language, namespace.lib), descriptor: descriptor, namespace: namespace, abi_contract: descriptor.contract, boundary: boundary})
+}
+// Rust: crates/jet-driver/src/Foreign.rs:181
+pub fn capability_report(language: ForeignLanguage) -> ForeignAbiContract? { binder_for(language).map(fn(descriptor) { descriptor.contract }) }
+// Rust: crates/jet-driver/src/Foreign.rs:188
+pub fn capability_report_text() -> String {
+    output := String.Builder.new()
+    &output.push_str("foreign capabilities\nschema=jet-ffi-capability-report-v1\nlanguage status runtime stub contract effect provider capabilities\n")
+    loop descriptor in FOREIGN_BINDERS {
+        report :: descriptor.capability_report()
+        capabilities :: report.capabilities.iter().map(fn(capability) { capability.debug() }).collect<[String]>().join(",")
+        &output.push_str("{report.language.root()} {report.status.debug()} {descriptor.runtime.debug()} {descriptor.stub_kind.debug()} {contract_name(report.contract)} {report.effect_root} {report.provider.debug()} {capabilities}\n")
+    }
+    output.finish()
+}
+// Rust: crates/jet-driver/src/Foreign.rs:218
+pub fn capability_report_json() -> String {
+    rows :: FOREIGN_BINDERS.iter().map(fn(descriptor) {
+        report :: descriptor.capability_report()
+        capabilities :: report.capabilities.iter().map(fn(capability) { json_quote(capability.debug()) }).collect<[String]>().join(",")
+        "{\"language\":{json_quote(report.language.root())},\"status\":{json_quote(report.status.debug())},\"runtime\":{json_quote(descriptor.runtime.debug())},\"stub\":{json_quote(descriptor.stub_kind.debug())},\"contract\":{json_quote(contract_name(report.contract))},\"effect\":{json_quote(report.effect_root)},\"provider\":{json_quote(report.provider.debug())},\"capabilities\":[{capabilities}]}"
+    }).collect<[String]>().join(",")
+    payload :: "{\"languages\":[{rows}]}"
+    ffi :: StatusValue.parse(payload).expect("foreign capability payload must be valid JSON")
+    StatusEnvelope.new("inspect.ffi", true).with_field("ffi", ffi).json()
+}
+// Rust: crates/jet-driver/src/Foreign.rs:250
+fn contract_name(contract: ForeignAbiContract) -> String {
+    if contract == ForeignAbiContract.C -> "C"
+    else if contract == ForeignAbiContract.CXX -> "CXX"
+    else if contract == ForeignAbiContract.NATIVE -> "NATIVE"
+    else -> "MESSAGE"
+}
+// Rust: crates/jet-driver/src/Foreign.rs:262
+fn json_quote(value: String) -> String {
+    output := String.Builder.new()
+    &output.push('"')
+    loop character in value.chars() {
+        if character == {
+            '\\' -> &output.push_str("\\\\")
+            '"' -> &output.push_str("\\\"")
+            '\n' -> &output.push_str("\\n")
+            '\r' -> &output.push_str("\\r")
+            '\t' -> &output.push_str("\\t")
+            character -> &output.push(character)
+        }
+    }
+    &output.push('"')
+    output.finish()
+}
+// Rust: crates/jet-driver/src/Foreign.rs:278
+pub fn is_active_namespace_import(imp: &ImportDecl) -> Bool ForeignImportError! {
+    imp.foreign_imports().map(fn(imports) {
+        imports.into_iter().any(fn(pair) { binder_for(pair.0.language).map(fn(binder) { binder.surface == BinderSurface.Namespace && binder.status == BinderStatus.Active }).unwrap_or(false) })
+    })?
+}
+// Rust: crates/jet-driver/src/Foreign.rs:301
+#Derive(Debug, Clone)
+pub struct ForeignDiagnostic {
+    pub file: String
+    pub source: String
+    pub diagnostic: Diagnostic
+}
+// Rust: crates/jet-driver/src/Foreign.rs:307
+pub fn assemble_active_namespaces(bundle: &ProgramBundle) -> Unit [Diagnostic]! {
+    assemble_active_namespaces_with_provenance(&bundle).map_err(fn(diagnostics) { diagnostics.into_iter().map(fn(entry) { entry.diagnostic }).collect() })?
+}
+// Rust: crates/jet-driver/src/Foreign.rs:316
+pub fn assemble_active_namespaces_with_provenance(bundle: &ProgramBundle) -> Unit [ForeignDiagnostic]! {
+    // GATE #4499: tuple-key equality/hash; one materialized surface per language/library.
+    surfaces := [(ForeignLanguage, String):USize]{}
+    user_module_count :: bundle.modules.len()
+    loop idx in 0..<user_module_count {
+        imports :: all_imports(bundle.modules[idx]).iter().map(fn(import) { import.clone() }).collect<[ImportDecl]>()
+        loop imp in imports {
+            foreign :: if imp.foreign_imports() == {
+                Ok(foreign) -> foreign
+                Err(error) -> return Err([ForeignDiagnostic{file: bundle.modules[idx].display.clone(), source: bundle.modules[idx].source.clone(), diagnostic: error.diagnostic()}])
+            }
+            loop (ns, _) in foreign {
+                if ns.language == ForeignLanguage.C -> continue
+                descriptor :: binder_for(ns.language) ?? continue
+                if descriptor.surface != BinderSurface.Namespace || descriptor.status != BinderStatus.Active -> continue
+                // GATE #4483: selected target facts, never compiler host cfg.
+                if ns.language == ForeignLanguage.Com && selected_os() != "windows" -> return Err([ForeignDiagnostic{
+                    file: bundle.modules[idx].display.clone(), source: bundle.modules[idx].source.clone(),
+                    diagnostic: Diagnostic.error("E3260", "`com.*` needs a Windows host", "COM automation depends on Windows apartments, the registry, and IDispatch", "build and run this module on a Windows host; use a non-COM boundary for other targets", Val(imp.span))
+                }])
+                key :: (ns.language, ns.lib.clone())
+                target_idx :: if surfaces.get(key) == {
+                    .Val(target_idx) -> target_idx
+                    .None -> {
+                        target_idx :: if materialize_namespace(&bundle, ns.language, ns.lib) == {
+                            Ok(target_idx) -> target_idx
+                            Err(diagnostics) -> {
+                                path :: binding_cache_file(bundle.project_root, ns.language, ns.lib)
+                                // GATE #4494: native filesystem read; original failure context uses empty source.
+                                source :: fs.read_to_string(path).unwrap_or_default()
+                                return Err(diagnostics.into_iter().map(fn(diagnostic) { ForeignDiagnostic{file: path.display().to_string(), source: source.clone(), diagnostic: diagnostic} }).collect())
+                            }
+                        }
+                        surfaces[key] = target_idx
+                        target_idx
+                    }
+                }
+                &bundle.name_ledger.record_import_target(idx, imp.span, target_idx)
+            }
+        }
+    }
+}
+// Rust: crates/jet-driver/src/Foreign.rs:395
+fn materialize_namespace(bundle: &ProgramBundle, language: ForeignLanguage, lib: String) -> USize [Diagnostic]! {
+    cache_path :: binding_cache_file(bundle.project_root, language, lib)
+    alias :: synthetic_alias(language, lib)
+    descriptor :: binder_for(language) ?? return Err([Diagnostic.error("E3208", "no foreign binder descriptor is registered for `{language.root()}`", "generated foreign stubs require a registered typed ABI descriptor", "register the language binder before importing its namespace", None)])
+    module_idx :: bundle.modules.len()
+    // GATE #4494: lossless native OSPath metadata and text reads.
+    if cache_path.is_file() {
+        source :: fs.read_to_string(cache_path).unwrap_or_default()
+        if !source.is_empty() {
+            if (language == ForeignLanguage.Cobol || language == ForeignLanguage.Com) && descriptor_stamp(source).is_none() -> return Err([Diagnostic.error("E3208", "generated `{language.root()}` binding has no ABI descriptor", "the generated stub must record the checked {language.root()} ABI contract", "regenerate the binding with `jet inspect bind {language.root()}`", None)])
+            if descriptor_stamp(source) == .Val(actual) {
+                if actual != descriptor.stamp() -> return Err([Diagnostic.error("E3208", "generated `{language.root()}` binding has a stale descriptor", "the generated stub and binder must use the same foreign ABI descriptor", "regenerate the binding with `jet inspect bind`", None)])
+            }
+            (tokens, lex_diags) :: lex_generated(source)
+            if !lex_diags.is_empty() -> return Err(lex_diags)
+            program := parse_with_source(tokens, source)?
+            if language == ForeignLanguage.Cpp -> mark_cpp_callback_abi(&program.items)
+            &bundle.modules.push(LoadedModule{path: cache_path, display: "{language.root()}.{lib}", source: source, alias: alias,
+                imports: ^program.imports, items: ^program.items, script_body: ^program.script_body, block_spans: ^program.block_spans,
+                web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude,
+                default_target: program.default_target, html_path: program.html_path.clone(), policy_declarations: program.policy_declarations.clone(),
+                user_policy_declarations: program.user_policy_declarations.clone(), rule_facts: ^program.rule_facts})
+            return module_idx
+        }
+    }
+    return Err([Diagnostic.error("E3208", "foreign binding cache for `{language.root()}.{lib}` is missing or empty", "an active foreign namespace needs a generated typed binding before use", "run the language binder or realize the foreign package before importing it", None)])
+}
+// Rust: crates/jet-driver/src/Foreign.rs:500
+fn mark_cpp_callback_abi(items: &[Item]) {
+    loop item in &items {
+        if item != .Func(function) -> continue
+        loop param in &function.params {
+            if param.ty == .Fn(_, _, _, _, _, _) -> param.ty = Type.Tagged{marker: TagMarker.Internal(InternalTag.CppCallbackAbi), inner: param.ty.clone()}
+        }
+    }
+}
+// Rust: crates/jet-driver/src/Foreign.rs:516
+fn synthetic_alias(language: ForeignLanguage, lib: String) -> String { "__{language.root()}_{lib}" }
+// Rust: crates/jet-driver/src/Foreign.rs:520
+fn descriptor_stamp(source: String) -> String? {
+    source.lines().find_map(fn(line) { line.strip_prefix("// jet-ffi-descriptor=").map(fn(stamp) { stamp.to_string() }) })
+}

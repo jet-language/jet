@@ -1,0 +1,50 @@
+use jet_foundation.[Expr, Type, Span, CoreModuleExports]
+use jet_foundation.Names.[NameLedger, NameReference, NameDeclaration, NameVisibility]
+use JetCodegen.Codegen.CoreSourceFunctionSignature
+use JetCodegen.Codegen.TIR.[checked_core_module_path_from_receiver, checked_core_source_signature, checked_local_function_declaration_span, checked_imported_core_source_signature]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10432
+#Test("direct_and_import_alias_core_calls_share_checked_source_target") {
+    source_path :: "Core/http/http.jet"
+    direct_span :: Span.new(0, 4)
+    alias_span :: Span.new(20, 28)
+    name_ledger := NameLedger.default()
+    loop span in [direct_span, alias_span] {
+        name_ledger.record_reference(source_path, span.start, span.end, NameReference.{module_path: source_path, kind: "import_alias", def_span: span, semantic_identity: None})
+    }
+    imports: [String: String] :: ["core": "core", "provider": "core.http.client"]
+    direct_receiver :: Expr.Field(Expr.Field(Expr.Ident("core", direct_span), "http", Span.new(4, 8)), "client", Span.new(8, 14))
+    alias_receiver :: Expr.Ident("provider", alias_span)
+    signature :: CoreSourceFunctionSignature.{module_identity: "<corelib>/Core/http::Core/http/client.jet", type_params: [], params: [], return_type: Val(.Named("HTTPRequest"))}
+    // GATE #4499: exact tuple-key equality/hash, matching the production signature index.
+    signatures: [(String, String): CoreSourceFunctionSignature] :: [("core.http.client", "request"): signature]
+    resolved_return :: Type.Named("HTTPRequest")
+    loop receiver in [direct_receiver, alias_receiver] {
+        module :: checked_core_module_path_from_receiver(receiver, imports, name_ledger, source_path).expect("checked Core import receiver")
+        found :: checked_core_source_signature(module, "request", Val(resolved_return), signatures).expect("loaded source-owned Core function")
+        assert(found.module_identity == "<corelib>/Core/http::Core/http/client.jet")
+    }
+    assert(checked_core_source_signature("core.http.client", "request", None, signatures).is_none())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10506
+#Test("private_core_function_edge_requires_checked_local_declaration") {
+    declaration_span :: Span.new(40, 50)
+    declaration :: NameDeclaration.{module: 3, name: "trim_ascii", path: "trim_ascii", kind: "function", span: declaration_span, visibility: .Private}
+    resolved_return :: Type.String
+    assert(checked_local_function_declaration_span(3, "trim_ascii", Val(resolved_return), Val(declaration)) == Val(declaration_span))
+    assert(checked_local_function_declaration_span(3, "trim_ascii", None, Val(declaration)) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10533
+#Test("checked_database_template_uses_core_source_namespace_key") {
+    source :: CoreModuleExports.core_source_module("core.data").expect("database belongs to the loaded Core data source")
+    assert(source.alias == "core_core_data")
+    assert(source.module == "core.data")
+    owner :: "<corelib>/Core/data::Core/data/data.jet"
+    signature :: CoreSourceFunctionSignature.{module_identity: owner, type_params: ["T"], params: [], return_type: None}
+    signatures: [(String, String): CoreSourceFunctionSignature] :: [(source.module, "database"): signature]
+    checked :: checked_imported_core_source_signature(source.alias, "database", owner, signatures).expect("checked Core source signature resolves through its module namespace")
+    assert(checked.type_params == ["T"])
+    assert(checked_imported_core_source_signature(source.alias, "database", "wrong source identity", signatures).is_none())
+}

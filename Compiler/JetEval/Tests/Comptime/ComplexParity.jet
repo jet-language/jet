@@ -1,0 +1,38 @@
+use jet_comptime.Comptime.CryptoLite.[hkdf_sha256, x25519, xchacha20poly1305_seal, xchacha20poly1305_open, aes256gcm_seal, aes256gcm_open, ed25519_sign]
+
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:263
+fn bytes(hex: &String) -> [U8] {
+    hex.as_bytes().chunks_exact(2).map(fn(pair) {
+        digit := fn(byte: U8) { if byte <= 57 { byte - 48 } else { byte - 97 + 10 } }
+        digit(pair[0]) * 16 + digit(pair[1])
+    }).collect()
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:280
+#Test("rfc_5869_hkdf_sha256_case_1") {
+    actual := hkdf_sha256(&[U8;22]{0x0b}, &bytes("000102030405060708090a0b0c"), &bytes("f0f1f2f3f4f5f6f7f8f9"), 42)
+    assert(actual == bytes("3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"))
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:291
+#Test("rfc_7748_x25519_shared_secret") {
+    secret := bytes("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")
+    public := bytes("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f")
+    assert(x25519(&secret, &public).unwrap().to_vec() == bytes("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"))
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:301
+#Test("expert_aead_roundtrips") {
+    key := [U8;32]{0x11}.to_vec()
+    xnonce := [U8;24]{0x24}.to_vec()
+    anonce := [U8;12]{0x12}.to_vec()
+    message := "expert crypto".as_bytes().to_vec()
+    aad := "tenant".as_bytes().to_vec()
+    xsealed := xchacha20poly1305_seal(&key, &xnonce, &message, &aad)?
+    assert(xchacha20poly1305_open(&key, &xnonce, &xsealed, &aad)? == message)
+    asealed := aes256gcm_seal(&key, &anonce, &message, &aad)?
+    assert(aes256gcm_open(&key, &anonce, &asealed, &aad)? == message)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:320
+#Test("rfc_8032_sign_empty") {
+    seed: [U8;32] = bytes("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60").try_into().unwrap()
+    expected := bytes("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
+    assert(ed25519_sign(&seed, &[]).to_vec() == expected)
+}

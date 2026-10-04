@@ -1,0 +1,162 @@
+use jet_comptime.Comptime.ZstdEntropy.*
+use std.collections.HashSet
+use std.process.[Command, Stdio]
+use std.io.Write
+
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:701
+fn compress(plain: &[U8]) -> [U8] { compress_with(plain, &[]) }
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:705
+fn compress_with(plain: &[U8], args: &[String]) -> [U8] {
+    // GATE #4494: actual subprocess pipes, write and child wait; zstd is the real corpus provider.
+    child := Command.new("zstd").args(["-q", "--no-check", "-c"]).args(args).stdin(Stdio.piped()).stdout(Stdio.piped()).spawn().expect("zstd in Jet test environment")
+    {
+        stdin := child.stdin.take().unwrap()
+        stdin.write_all(plain).unwrap()
+    }
+    output :: child.wait_with_output().unwrap()
+    assert(output.status.success())
+    ^output.stdout
+}
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:719
+fn corpus(len: USize) -> ([U8], [U8]) {
+    alphabet: U8 = if len < 1000 { 8 } else if len < 100000 { 16 } else { 64 }
+    value: U32 = 1
+    plain := [U8].with_capacity(len)
+    seen := HashSet<U32>.new()
+    loop plain.len() < len {
+        value ^= value << 13
+        value ^= value >> 17
+        value ^= value << 5
+        candidate: U8 = if value & 3 == 0 { 0 } else { 1 + (value as U8 % (alphabet - 1)) }
+        if plain.len() >= 3 {
+            at :: plain.len()
+            key :: U32.from_le_bytes([plain[at - 3], plain[at - 2], plain[at - 1], candidate])
+            if !seen.insert(key) { continue }
+        }
+        plain.push(candidate)
+    }
+    frame :: compress(&plain)
+    (^plain, ^frame)
+}
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:753
+fn repeat_corpus(len: USize) -> [U8] {
+    value: U32 = 1
+    plain :: (0..<len).map(fn(_) {
+        value = value.wrapping_mul(1103515245).wrapping_add(12345) & 0x7fffffff
+        U8{65} + (value % 3) as U8
+    }).collect<[U8]>()
+    compress(&plain)
+}
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:764
+fn sequence_repeat_plain() -> [U8] {
+    value: U32 = 1
+    base :: (0..<BLOCK_MAX).map(fn(_) {
+        value = value.wrapping_mul(1103515245).wrapping_add(12345) & 0x7fffffff
+        (value % 3) as U8
+    }).collect<[U8]>()
+    plain := [U8].with_capacity(BLOCK_MAX * 3)
+    loop shift in [U8{0}, U8{4}, U8{8}] { plain.extend(base.iter().map(fn(byte) { byte + shift })) }
+    ^plain
+}
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:779
+fn blocks(frame: &[U8]) -> [&[U8]] {
+    assert(frame[0..<4] == [U8{40}, U8{181}, U8{47}, U8{253}])
+    descriptor :: frame[4]
+    single :: descriptor & 0x20 != 0
+    dict :: [USize{0}, USize{1}, USize{2}, USize{4}][USize.from(descriptor & 3)]
+    fcs: USize = if (descriptor >> 6, single) == {
+        (0, false) -> 0
+        (0, true) -> 1
+        (1, _) -> 2
+        (2, _) -> 4
+        _ -> 8
+    }
+    offset := 5 + USize.from(!single) + dict + fcs
+    out := [&[U8]]{}
+    loop {
+        header :: U32.from_le_bytes([frame[offset], frame[offset + 1], frame[offset + 2], 0])
+        offset += 3
+        size :: (header >> 3) as USize
+        out.push(&frame[offset..<offset + size])
+        offset += size
+        if header & 1 != 0 { return ^out }
+    }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:807
+#Test("ordinary_one_and_four_stream_huffman_weights_decode") {
+    loop (len, streams) in [(USize{100}, 1), (USize{10000}, 4)] {
+        (plain, frame) :: corpus(len)
+        block :: blocks(&frame)[0]
+        assert(block[0] & 3 == 2, "ordinary corpus must use Huffman literals")
+        assert((if (block[0] >> 2) & 3 == 0 { 1 } else { 4 }) == streams)
+        state := HuffmanState.default()
+        (decoded, used) :: literals(block, &state).expect("decode")
+        assert(block[used..<block.len()] == [U8{0}], "corpus must have no sequences")
+        assert(decoded == plain)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:820
+#Test("ordinary_multiblock_corpus_reuses_huffman_table") {
+    frame :: repeat_corpus(300000)
+    state := HuffmanState.default()
+    kinds := [U8]{}
+    loop block in blocks(&frame) {
+        if block[0] & 3 >= 2 {
+            kinds.push(block[0] & 3)
+            (decoded, used) :: literals(block, &state).expect("decode")
+            assert(!decoded.is_empty() && used < block.len())
+        }
+    }
+    assert(kinds.contains(&2) && kinds.contains(&3), "expected compressed + treeless: {kinds:?}")
+}
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:838
+#Test("ordinary_multiblock_corpus_reuses_sequence_table") {
+    plain :: sequence_repeat_plain()
+    frame :: compress_with(&plain, &["-19"])
+    huffman := HuffmanState.default()
+    modes := [U8]{}
+    loop block in blocks(&frame) {
+        (_, used) :: literals(block, &huffman).expect("literals")
+        section :: &block[used..<block.len()]
+        (count, header) :: sequence_count(section).expect("sequence header")
+        if count != 0 { modes.push(section[header]) }
+    }
+    assert(modes.iter().any(fn(mode) { [mode >> 6, (mode >> 4) & 3, (mode >> 2) & 3].contains(&3) }), "stock corpus must repeat an LL/ML/OF table: {modes:02x?}")
+}
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:860
+#Test("sequence_modes_and_headers_enforce_spec_bounds") {
+    assert(sequence_count(&[127]) == Val((127, 1)))
+    assert(sequence_count(&[128, 5]) == Val((5, 2)))
+    assert(sequence_count(&[255, 1, 2]) == Val((0x8101, 3)))
+    state := SequenceState.default()
+    out := [U8{65}]
+    assert(sequences(&[1, 0x54, 1, 0, 0, 1], &"B".bytes(), &state, &out, 0, 8, 128, 128).is_some())
+    assert(out == "ABBBB".bytes())
+    assert(sequences(&[1, 0xfc, 1], &"C".bytes(), &state, &out, 0, 8, 128, 128).is_some())
+    assert(out == "ABBBBCCCC".bytes())
+    zero_count := [U8]{}
+    zero_state := SequenceState.default()
+    assert(sequences(&[128, 0], &"literal".bytes(), &zero_state, &zero_count, 0, 8, 128, 128).is_some())
+    assert(zero_count == "literal".bytes())
+    loop (window, block_max) in [(USize{0}, USize{128}), (USize{8}, USize{3})] {
+        state := SequenceState.default()
+        out := [U8{65}]
+        assert(sequences(&[1, 0x54, 1, 0, 0, 1], &"B".bytes(), &state, &out, 0, window, block_max, 128).is_none())
+    }
+    malformed_sections: [[U8]] = [[0, 0], [1, 0xfc, 1], [1, 1, 1], [1, 0x40, 36, 1], [1, 0x10, 32, 1], [1, 0x04, 53, 1], [1, 0x54, 0, 0, 0, 1], [1, 0x54, 1, 0, 0, 3]]
+    loop malformed in malformed_sections {
+        state := SequenceState.default()
+        out := [U8{65}]
+        assert(sequences(&malformed, &"B".bytes(), &state, &out, 0, 8, 128, 128).is_none(), "accepted malformed sequence section: {malformed:?}")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ZstdEntropy.rs:937
+#Test("entropy_headers_reject_truncation_and_oversized_counts") {
+    state := HuffmanState.default()
+    assert(literals(&[], &state).is_none())
+    assert(literals(&[0xff], &state).is_none())
+    assert(literals(&[0x12, 0xc0, 0x00, 0x80, 0x20, 0x02], &state).is_none())
+    assert(Huffman.parse(&[0]).is_none())
+    assert(FseTable.parse(&[0xff], 6, 255).is_none())
+}

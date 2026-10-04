@@ -1,0 +1,13 @@
+use JetCodegen.Codegen.Context.Cx
+use JetCodegen.Codegen.Statement.[variant_binding_types_for_enum, group_leaves]
+use JetFoundation.AST.Type
+
+// Rust: crates/jet-codegen/src/Codegen/Statement.rs:46-99
+#Test("statement_data_event_bindings_and_unknown_groups") {
+    cx := Cx.default()
+    assert(variant_binding_types_for_enum(&cx, "DataEvent", "Bytes") == Some([Type.List(Type.Int)]))
+    assert(variant_binding_types_for_enum(&cx, "DataEvent", "ArrayEnd") == Some([]))
+    assert(variant_binding_types_for_enum(&cx, "DataEvent", "Unknown") == None)
+    assert(group_leaves(&cx, None, "Group").is_empty())
+    assert(group_leaves(&cx, Some("Unknown"), "Group").is_empty())
+}

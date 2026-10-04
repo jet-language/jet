@@ -1,0 +1,24 @@
+use jet_foundation.[CtValue, NamedCtValue]
+use jet_comptime.Comptime.SyncLite.[apply, datatree_to_text, datatree_equal_unordered, sync_show_value]
+use jet_comptime.Diagnostics.[Span]
+
+// Behavioral controls for crates/jet-comptime/src/Comptime/SyncLite.rs:205-216 (no inline Rust tests).
+#Test("sync_datatree_scalar_projection") {
+    value :: CtValue.Str{value: "hello"}
+    assert_eq(datatree_to_text(&value), Val("hello"))
+    assert(datatree_equal_unordered(&value, &value))
+    assert(!datatree_equal_unordered(&value, &CtValue.Bool{value: true}))
+}
+// Behavioral control for crates/jet-comptime/src/Comptime/SyncLite.rs:492,599-710.
+#Test("sync_counter_marshalling") {
+    span :: Span.new(0, 0)
+    counter :: apply("counter_new", &[CtValue]{CtValue.Str{value: "replica"}, CtValue.Int{value: -7}}, span)!
+    value :: apply("counter_value", &[CtValue]{counter}, span)!
+    assert_eq(value, CtValue.Int{value: -7})
+}
+// Behavioral controls for crates/jet-comptime/src/Comptime/SyncLite.rs:935-1035.
+#Test("sync_missing_argument_is_diagnostic") {
+    assert(apply("text_new", &[CtValue]{}, Span.new(0, 0)).is_err())
+    assert(apply("unknown", &[CtValue]{}, Span.new(0, 0)).is_err())
+    assert_eq(sync_show_value(&CtValue.Str{value: "not a carrier"}), None)
+}

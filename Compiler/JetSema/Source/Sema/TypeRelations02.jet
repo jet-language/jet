@@ -1,1833 +1,840 @@
-// PORT-PENDING 0415 crates-jet-sema-src-sema-checkeritems-slice-1768: crates/jet-sema/src/Sema/CheckerItems.rs:1768-3596
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(crate) fn validate_public_failure_carrier(&mut self, function: &crate::AST::Func) {
-//RS         if !function.is_pub {
-//RS             return;
-//RS         }
-//RS         let Some(return_type) = function.return_type.as_ref() else {
-//RS             return;
-//RS         };
-//RS         let Some((_, error_type)) = return_type.unwrap_result() else {
-//RS             return;
-//RS         };
-//RS 
-//RS         fn collect_named(ty: &Type, out: &mut Vec<String>) {
-//RS             match ty {
-//RS                 Type::Named(name) => out.push(name.clone()),
-//RS                 Type::Apply { name, args } => {
-//RS                     out.push(name.clone());
-//RS                     for arg in args {
-//RS                         collect_named(arg, out);
-//RS                     }
-//RS                 }
-//RS                 Type::List(inner)
-//RS                 | Type::Shared(inner)
-//RS                 | Type::Option(inner)
-//RS                 | Type::FixedList { elem: inner, .. }
-//RS                 | Type::Tagged { inner, .. }
-//RS                 | Type::InlineRange { base: inner, .. }
-//RS                 | Type::Quantity { base: inner, .. } => collect_named(inner, out),
-//RS                 Type::Map { key, value, .. }
-//RS                 | Type::Result {
-//RS                     ok: key,
-//RS                     err: value,
-//RS                 } => {
-//RS                     collect_named(key, out);
-//RS                     collect_named(value, out);
-//RS                 }
-//RS                 Type::Tuple(fields) => {
-//RS                     for (_, field) in fields {
-//RS                         collect_named(field, out);
-//RS                     }
-//RS                 }
-//RS                 Type::Fn { params, ret, .. } => {
-//RS                     for param in params {
-//RS                         collect_named(param, out);
-//RS                     }
-//RS                     if let Some(ret) = ret {
-//RS                         collect_named(ret, out);
-//RS                     }
-//RS                 }
-//RS                 Type::Int
-//RS                 | Type::Float
-//RS                 | Type::Float32
-//RS                 | Type::Bool
-//RS                 | Type::String
-//RS                 | Type::Char
-//RS                 | Type::TraitObject(_)
-//RS                 | Type::IntN { .. }
-//RS                 | Type::Measure(_) => {}
-//RS                 Type::Union(members) => {
-//RS                     for member in members {
-//RS                         collect_named(member, out);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         let mut pending = Vec::new();
-//RS         collect_named(error_type, &mut pending);
-//RS         let mut checked_carriers = HashSet::new();
-//RS         let mut reported_members = HashSet::new();
-//RS         while let Some(carrier) = pending.pop() {
-//RS             let (import_ns, leaf) = Self::split_type_name(&carrier);
-//RS             let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
-//RS                 continue;
-//RS             };
-//RS             if !checked_carriers.insert((owner, leaf.to_string())) {
-//RS                 continue;
-//RS             }
-//RS             let Some(declaration) = self.name_ledger.declaration(owner, leaf) else {
-//RS                 continue;
-//RS             };
-//RS             let declaration_span = declaration.span;
-//RS             let declaration_visibility = declaration.visibility;
-//RS             let declaration_kind = declaration.kind.clone();
-//RS             if declaration_visibility != jet_foundation::Names::NameVisibility::Public {
-//RS                 let member = leaf.to_string();
-//RS                 if reported_members.insert(member.clone()) {
-//RS                     let diagnostic = Diagnostic::from_row(
-//RS                         "E2421",
-//RS                         &[
-//RS                             ("function", function.name.as_str()),
-//RS                             ("member", member.as_str()),
-//RS                         ],
-//RS                         Some(declaration_span),
-//RS                     );
-//RS                     let edit = self.public_failure_visibility_edit(
-//RS                         owner,
-//RS                         declaration_span,
-//RS                         &declaration_kind,
-//RS                         declaration_visibility,
-//RS                     );
-//RS                     self.diags.push(diagnostic.with_edit_grade(
-//RS                         edit,
-//RS                         crate::Diagnostics::FixApplicability::Suggested,
-//RS                         crate::Diagnostics::FixSafety::ApiChanging,
-//RS                     ));
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             let fields = if owner == self.module_idx {
-//RS                 self.registry.struct_fields(leaf)
-//RS             } else {
-//RS                 self.modules
-//RS                     .and_then(|modules| modules.get(owner))
-//RS                     .and_then(|module| module.registry.struct_fields(leaf))
-//RS             }
-//RS             .map(|fields| fields.to_vec());
-//RS             let Some(fields) = fields else {
-//RS                 continue;
-//RS             };
-//RS             for (field, _, field_type) in fields {
-//RS                 pending.extend({
-//RS                     let mut nested = Vec::new();
-//RS                     collect_named(&field_type, &mut nested);
-//RS                     nested
-//RS                 });
-//RS                 let member_key = format!("{leaf}.{field}");
-//RS                 let Some(field_declaration) = self.name_ledger.declaration(owner, &member_key)
-//RS                 else {
-//RS                     continue;
-//RS                 };
-//RS                 if field_declaration.visibility == jet_foundation::Names::NameVisibility::Public
-//RS                     || !reported_members.insert(member_key.clone())
-//RS                 {
-//RS                     continue;
-//RS                 }
-//RS                 let field_span = field_declaration.span;
-//RS                 let field_visibility = field_declaration.visibility;
-//RS                 let diagnostic = Diagnostic::from_row(
-//RS                     "E2421",
-//RS                     &[
-//RS                         ("function", function.name.as_str()),
-//RS                         ("member", member_key.as_str()),
-//RS                     ],
-//RS                     Some(field_span),
-//RS                 );
-//RS                 let edit = self.public_failure_visibility_edit(
-//RS                     owner,
-//RS                     field_span,
-//RS                     "field",
-//RS                     field_visibility,
-//RS                 );
-//RS                 self.diags.push(diagnostic.with_edit_grade(
-//RS                     edit,
-//RS                     crate::Diagnostics::FixApplicability::Suggested,
-//RS                     crate::Diagnostics::FixSafety::ApiChanging,
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     fn core_source_owner_module(&self, module: &str, type_name: &str) -> Option<usize> {
-//RS         let source = jet_foundation::CoreModuleExports::core_source_modules()
-//RS             .iter()
-//RS             .find(|source| source.module == module)?;
-//RS         self.modules?.iter().enumerate().find_map(|(idx, state)| {
-//RS             (state.module_alias == source.alias && state.registry.contains(type_name)).then_some(idx)
-//RS         })
-//RS     }
-//RS 
-//RS     /// The modules whose public names this file reaches through its imports:
-//RS     /// each import target, then (D-MOD-CYCLE1=A) the other member files of
-//RS     /// every imported dependency package, since a dependency is one namespace
-//RS     /// that the loader binds through a single member file. Members of this
-//RS     /// file's own package are already imported directly.
-//RS     pub(crate) fn import_scope_modules(&self) -> Vec<usize> {
-//RS         let mut scope: Vec<usize> = self.imports.values().copied().collect();
-//RS         let own_root = self.name_ledger.module_namespace(self.module_idx);
-//RS         let mut dependency_roots: Vec<&str> = Vec::new();
-//RS         for idx in scope.clone() {
-//RS             let Some(root) = self.name_ledger.module_namespace(idx) else {
-//RS                 continue;
-//RS             };
-//RS             if Some(root) == own_root || dependency_roots.contains(&root) {
-//RS                 continue;
-//RS             }
-//RS             dependency_roots.push(root);
-//RS             for sibling in self.name_ledger.namespace_siblings(idx) {
-//RS                 if !scope.contains(&sibling) {
-//RS                     scope.push(sibling);
-//RS                 }
-//RS             }
-//RS         }
-//RS         scope
-//RS     }
-//RS 
-//RS     /// Whether `owner` declares a record named like a built-in boundary type
-//RS     /// (`Path`, `URL`, `DateTime`) that is not that built-in's own carrier.
-//RS     /// `core.net.url`'s `URL` is the built-in; `core.files.path`'s `Path` is a
-//RS     /// different type that only shares the leaf.
-//RS     pub(crate) fn record_distinct_from_builtin(&self, owner: usize, leaf: &str) -> bool {
-//RS         let Some(kind) = crate::Syntax::typed_head_kind(leaf) else {
-//RS             return false;
-//RS         };
-//RS         let carrier_alias = kind
-//RS             .carrier_record_module()
-//RS             .and_then(jet_foundation::CoreModuleExports::core_source_module)
-//RS             .map(|source| source.alias);
-//RS         self.modules
-//RS             .and_then(|modules| modules.get(owner))
-//RS             .is_some_and(|state| {
-//RS                 state.registry.contains(leaf) && Some(state.module_alias.as_str()) != carrier_alias
-//RS             })
-//RS     }
-//RS 
-//RS     /// A Core record whose leaf is also a built-in type name but which is not
-//RS     /// that built-in (the `core.files.path` record `Path`) is identified by its
-//RS     /// canonical path. Its bare leaf names the built-in, so the two never unify
-//RS     /// by spelling.
-//RS     pub(crate) fn core_nominal_shadowing_builtin(&self, module: &str, leaf: &str) -> Option<String> {
-//RS         let owner = self.core_source_owner_module(module, leaf)?;
-//RS         self.record_distinct_from_builtin(owner, leaf)
-//RS             .then(|| self.canonical_nominal_name(owner, leaf))
-//RS     }
-//RS 
-//RS     /// A function signature read across a module boundary names the owner's
-//RS     /// records that only share a built-in type's leaf (`Path`) by canonical
-//RS     /// path, so the caller never reads that leaf as the built-in.
-//RS     pub(crate) fn qualify_builtin_shadowing_sig(&self, owner: usize, sig: &mut crate::AST::FuncSig) {
-//RS         if owner == self.module_idx {
-//RS             return;
-//RS         }
-//RS         let qualify = |ty: &Type| {
-//RS             ty.map_named_types(&|name| {
-//RS                 self.record_distinct_from_builtin(owner, name)
-//RS                     .then(|| self.canonical_nominal_name(owner, name))
-//RS             })
-//RS         };
-//RS         for (_, ty) in &mut sig.params {
-//RS             *ty = qualify(ty);
-//RS         }
-//RS         if let Some(ret) = &mut sig.return_type {
-//RS             *ret = qualify(ret);
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn struct_owner_module(
-//RS         &self,
-//RS         type_name: &str,
-//RS         import_ns: Option<&str>,
-//RS     ) -> Option<usize> {
-//RS         if let Some(module) = import_ns.and_then(|namespace| self.core_imports.get(namespace)) {
-//RS             if jet_foundation::CoreModuleExports::core_leaf_kind(module, type_name).is_some() {
-//RS                 // Source-owned Core records use the ordinary registry for fields
-//RS                 // and visibility; fall back to the generated view only when no
-//RS                 // source owner is loaded.
-//RS                 return self.core_source_owner_module(module, type_name);
-//RS             }
-//RS         }
-//RS         if import_ns.is_none() {
-//RS             if let Some(module) = self.core_imports.get(type_name) {
-//RS                 let leaf = self
-//RS                     .core_item_imports
-//RS                     .get(type_name)
-//RS                     .map_or(type_name, String::as_str);
-//RS                 if jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some() {
-//RS                     if let Some(owner) = self.core_source_owner_module(module, leaf) {
-//RS                         return Some(owner);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Some(namespace) = import_ns {
-//RS             if namespace.contains("::") {
-//RS                 let identity = format!("{namespace}::{type_name}");
-//RS                 let mod_idx = self.name_ledger.nominal_module(&identity)?;
-//RS                 let mods = self.modules?;
-//RS                 return mods
-//RS                     .get(mod_idx)
-//RS                     .filter(|module| module.registry.contains(type_name))
-//RS                     .map(|_| mod_idx);
-//RS             }
-//RS             let mod_idx = *self.imports.get(namespace)?;
-//RS             let mods = self.modules?;
-//RS             if mods[mod_idx].registry.contains(type_name) {
-//RS                 return Some(mod_idx);
-//RS             }
-//RS             // D-MOD-CYCLE1=A: an imported package is one namespace.
-//RS             return self
-//RS                 .name_ledger
-//RS                 .namespace_siblings(mod_idx)
-//RS                 .into_iter()
-//RS                 .find(|&sibling| mods[sibling].registry.contains(type_name));
-//RS         }
-//RS         if type_name.contains("::") {
-//RS             let (namespace, leaf) = type_name.rsplit_once("::")?;
-//RS             return self.struct_owner_module(leaf, Some(namespace));
-//RS         }
-//RS         if self.registry.contains(type_name) {
-//RS             return Some(self.module_idx);
-//RS         }
-//RS         let mods = self.modules?;
-//RS         if let Some(alias) = self.name_ledger.alias(self.module_idx, type_name) {
-//RS             if let Some(owner) = alias.target_module {
-//RS                 let leaf = alias
-//RS                     .target
-//RS                     .rsplit_once("::")
-//RS                     .or_else(|| alias.target.rsplit_once('.'))
-//RS                     .map_or(alias.target.as_str(), |(_, leaf)| leaf);
-//RS                 if mods
-//RS                     .get(owner)
-//RS                     .is_some_and(|module| module.registry.contains(leaf))
-//RS                     && self.type_is_pub_in(owner, leaf)
-//RS                 {
-//RS                     return Some(owner);
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         // A bare built-in type name (`Path`, `URL`, `DateTime`) that this
-//RS         // module neither declares nor imports by name is the built-in. A
-//RS         // built-in with a Core carrier record (`URL` in `core.net.url`) is that
-//RS         // record, so its documented fields and methods resolve through the
-//RS         // ordinary registry. A loaded module's same-named record that is not
-//RS         // the carrier keeps its canonical identity.
-//RS         if let Some(kind) = crate::Syntax::typed_head_kind(type_name) {
-//RS             return kind
-//RS                 .carrier_record_module()
-//RS                 .and_then(|module| self.core_source_owner_module(module, type_name));
-//RS         }
-//RS         // The fallback is the only branch that scans every module. Cache its
-//RS         // exact source spelling for this body checker, including misses and
-//RS         // ambiguities, so repeated expression nodes do not repeat the scan.
-//RS         if let Some(owner) = self.nominal_owner_cache.borrow().get(type_name) {
-//RS             return *owner;
-//RS         }
-//RS         let mut found = None;
-//RS         for (idx, st) in mods.iter().enumerate() {
-//RS             if st.registry.contains(type_name) && self.type_is_pub_in(idx, type_name) {
-//RS                 if found.is_some_and(|previous| previous != idx) {
-//RS                     found = None;
-//RS                     break;
-//RS                 }
-//RS                 found = Some(idx);
-//RS             }
-//RS         }
-//RS         self.nominal_owner_cache
-//RS             .borrow_mut()
-//RS             .insert(type_name.to_owned(), found);
-//RS         found
-//RS     }
-//RS 
-//RS     pub(crate) fn split_type_name(type_name: &str) -> (Option<&str>, &str) {
-//RS         type_name
-//RS             .rsplit_once("::")
-//RS             .or_else(|| type_name.rsplit_once('.'))
-//RS             .map_or((None, type_name), |(namespace, leaf)| {
-//RS                 (Some(namespace), leaf)
-//RS             })
-//RS     }
-//RS 
-//RS     pub(crate) fn struct_type_name_parts<'b>(
-//RS         &self,
-//RS         type_name: &'b str,
-//RS     ) -> (Option<&'b str>, &'b str) {
-//RS         // D-PROTO1/D-PROTO2: generated protocol handles are local nominal
-//RS         // types whose dots are part of the type name, not an import namespace.
-//RS         // Preserve that identity for field and method lookup; imported names
-//RS         // still use the ordinary namespace/leaf split below.
-//RS         if self.registry.contains(type_name) {
-//RS             return (None, type_name);
-//RS         }
-//RS         Self::split_type_name(type_name)
-//RS     }
-//RS 
-//RS     pub(crate) fn canonical_nominal_name(&self, owner: usize, leaf: &str) -> String {
-//RS         let identity = self
-//RS             .name_ledger
-//RS             .nominal_identity(owner, leaf)
-//RS             .expect("name ledger must contain every loaded module");
-//RS         if let Some(carrier) = crate::Sema::CheckerCoreLib::core_http_carrier_leaf(&identity) {
-//RS             return carrier.to_string();
-//RS         }
-//RS         identity
-//RS     }
-//RS 
-//RS     pub(crate) fn struct_fields_for_type_name(
-//RS         &self,
-//RS         type_name: &str,
-//RS     ) -> Option<&[(String, Span, Type)]> {
-//RS         let (import_ns, leaf) = self.struct_type_name_parts(type_name);
-//RS         let owner = self.struct_owner_module(leaf, import_ns)?;
-//RS         self.struct_fields_of(owner, leaf)
-//RS     }
-//RS 
-//RS     pub(crate) fn type_implements_trait_for_name(&self, type_name: &str, trait_name: &str) -> bool {
-//RS         let (import_ns, leaf) = self.struct_type_name_parts(type_name);
-//RS         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
-//RS             return self.trait_reg.implements_trait(type_name, trait_name);
-//RS         };
-//RS         if owner == self.module_idx {
-//RS             self.trait_reg.implements_trait(leaf, trait_name)
-//RS         } else {
-//RS             self.modules
-//RS                 .and_then(|modules| modules.get(owner))
-//RS                 .is_some_and(|module| module.trait_reg.implements_trait(leaf, trait_name))
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn capability_type_context(
-//RS         &self,
-//RS         ty: &Type,
-//RS     ) -> (
-//RS         Type,
-//RS         &crate::Sema::TypeRegistry,
-//RS         &crate::Traits::TraitRegistry,
-//RS     ) {
-//RS         let (name, args) = match ty {
-//RS             Type::Named(name) => (name.as_str(), None),
-//RS             Type::Apply { name, args } => (name.as_str(), Some(args.as_slice())),
-//RS             _ => return (ty.clone(), self.registry, self.trait_reg),
-//RS         };
-//RS         let (import_ns, leaf) = self.struct_type_name_parts(name);
-//RS         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
-//RS             return (ty.clone(), self.registry, self.trait_reg);
-//RS         };
-//RS         let normalized = match args {
-//RS             None => Type::Named(leaf.to_string()),
-//RS             Some(args) => Type::Apply {
-//RS                 name: leaf.to_string(),
-//RS                 args: args.to_vec(),
-//RS             },
-//RS         };
-//RS         if owner == self.module_idx {
-//RS             (normalized, self.registry, self.trait_reg)
-//RS         } else if let Some(module) = self.modules.and_then(|modules| modules.get(owner)) {
-//RS             (normalized, &module.registry, &module.trait_reg)
-//RS         } else {
-//RS             (ty.clone(), self.registry, self.trait_reg)
-//RS         }
-//RS     }
-//RS 
-//RS     /// Resolve equality capability through the same owner registry as ordinary
-//RS     /// imported struct lookup. Bundle-level auto-derives synthesize `equal`
-//RS     /// bodies whose field types may nest a qualified imported nominal
-//RS     /// (`[[units.Meter]]`), so peel structural containers before selecting the
-//RS     /// nominal's canonical bundle owner — mirroring `is_cloneable_type`.
-//RS     pub(crate) fn is_equatable_type(&self, ty: &Type) -> bool {
-//RS         match ty {
-//RS             Type::List(inner) | Type::Option(inner) => self.is_equatable_type(inner),
-//RS             Type::Map { key, value, .. } => {
-//RS                 self.is_equatable_type(key) && self.is_equatable_type(value)
-//RS             }
-//RS             Type::Result { ok, err } => self.is_equatable_type(ok) && self.is_equatable_type(err),
-//RS             Type::Tuple(fields) => fields
-//RS                 .iter()
-//RS                 .all(|(_, field)| self.is_equatable_type(field)),
-//RS             Type::FixedList { elem, .. }
-//RS             | Type::Tagged { inner: elem, .. }
-//RS             | Type::InlineRange { base: elem, .. } => self.is_equatable_type(elem),
-//RS             Type::Union(members) => members.iter().all(|member| self.is_equatable_type(member)),
-//RS             Type::Apply { args, .. } if !args.iter().all(|arg| self.is_equatable_type(arg)) => {
-//RS                 false
-//RS             }
-//RS             _ => {
-//RS                 let (normalized, registry, trait_reg) = self.capability_type_context(ty);
-//RS                 crate::Sema::Diagnostics::is_equatable(&normalized, registry, trait_reg)
-//RS             }
-//RS         }
-//RS     }
-//RS     /// Whether a value of `ty` can be duplicated, with every nominal resolved
-//RS     /// through the module that declares it. A field or payload may name a
-//RS     /// type from an import or a package sibling (D-MOD-CYCLE1=A), which the
-//RS     /// reading module's registry does not hold, and generated codec
-//RS     /// temporaries wrap imported fields in `Result`/`Option`. A type whose
-//RS     /// nominals all live in this module takes the registry walk directly.
-//RS     pub(crate) fn is_cloneable_type(&self, ty: &Type) -> bool {
-//RS         if crate::Sema::Diagnostics::is_cloneable(ty, self.registry) {
-//RS             return true;
-//RS         }
-//RS         let mut entered = HashSet::new();
-//RS         self.cloneable_in_context(ty, self.module_idx, &mut entered)
-//RS     }
-//RS 
-//RS     /// The declaring module and leaf of the nominal `name` as `context_mod`
-//RS     /// spells it: a canonical identity names its module, the context's own
-//RS     /// declarations stay there, and any other spelling resolves the way this
-//RS     /// module's nominal lookup does.
-//RS     fn nominal_owner_in_context<'n>(
-//RS         &self,
-//RS         name: &'n str,
-//RS         context_mod: usize,
-//RS     ) -> Option<(usize, &'n str)> {
-//RS         let registry_of = |module: usize| {
-//RS             if module == self.module_idx {
-//RS                 Some(self.registry)
-//RS             } else {
-//RS                 self.modules
-//RS                     .and_then(|modules| modules.get(module))
-//RS                     .map(|state| &state.registry)
-//RS             }
-//RS         };
-//RS         let (owner, leaf) = if let Some((_, leaf)) = name.rsplit_once("::") {
-//RS             (self.name_ledger.nominal_module(name)?, leaf)
-//RS         } else if registry_of(context_mod).is_some_and(|registry| registry.contains(name)) {
-//RS             (context_mod, name)
-//RS         } else {
-//RS             let (namespace, leaf) = Self::split_type_name(name);
-//RS             (self.struct_owner_module(leaf, namespace)?, leaf)
-//RS         };
-//RS         registry_of(owner)
-//RS             .is_some_and(|registry| registry.contains(leaf))
-//RS             .then_some((owner, leaf))
-//RS     }
-//RS 
-//RS     /// `is_cloneable_type`'s walk. Each nominal is entered once per query: a
-//RS     /// revisit is either a cycle (vacuously cloneable, as in the registry
-//RS     /// walk) or a type already found cloneable, since the first field that
-//RS     /// is not ends the query.
-//RS     fn cloneable_in_context(
-//RS         &self,
-//RS         ty: &Type,
-//RS         context_mod: usize,
-//RS         entered: &mut HashSet<(usize, String)>,
-//RS     ) -> bool {
-//RS         match ty {
-//RS             Type::List(inner) | Type::Option(inner) => {
-//RS                 self.cloneable_in_context(inner, context_mod, entered)
-//RS             }
-//RS             Type::Map { key, value, .. } => {
-//RS                 self.cloneable_in_context(key, context_mod, entered)
-//RS                     && self.cloneable_in_context(value, context_mod, entered)
-//RS             }
-//RS             Type::Result { ok, err } => {
-//RS                 self.cloneable_in_context(ok, context_mod, entered)
-//RS                     && self.cloneable_in_context(err, context_mod, entered)
-//RS             }
-//RS             Type::Tuple(fields) => fields
-//RS                 .iter()
-//RS                 .all(|(_, field)| self.cloneable_in_context(field, context_mod, entered)),
-//RS             Type::FixedList { elem, .. }
-//RS             | Type::Tagged { inner: elem, .. }
-//RS             | Type::InlineRange { base: elem, .. }
-//RS             | Type::Quantity { base: elem, .. } => {
-//RS                 self.cloneable_in_context(elem, context_mod, entered)
-//RS             }
-//RS             Type::Union(members) => members
-//RS                 .iter()
-//RS                 .all(|member| self.cloneable_in_context(member, context_mod, entered)),
-//RS             Type::Named(name) | Type::Apply { name, .. } => {
-//RS                 let Some((owner, leaf)) = self.nominal_owner_in_context(name, context_mod) else {
-//RS                     // Built-in carriers, Core types and type variables.
-//RS                     return crate::Sema::Diagnostics::is_cloneable(ty, self.registry);
-//RS                 };
-//RS                 if let Type::Apply { args, .. } = ty {
-//RS                     if !args
-//RS                         .iter()
-//RS                         .all(|arg| self.cloneable_in_context(arg, context_mod, entered))
-//RS                     {
-//RS                         return false;
-//RS                     }
-//RS                 }
-//RS                 if !entered.insert((owner, leaf.to_string())) {
-//RS                     return true;
-//RS                 }
-//RS                 let registry = if owner == self.module_idx {
-//RS                     self.registry
-//RS                 } else if let Some(state) = self.modules.and_then(|modules| modules.get(owner)) {
-//RS                     &state.registry
-//RS                 } else {
-//RS                     return false;
-//RS                 };
-//RS                 match registry.types.get(leaf) {
-//RS                     Some(TypeDef::Struct { fields, .. }) => fields
-//RS                         .iter()
-//RS                         .all(|(_, _, field)| self.cloneable_in_context(field, owner, entered)),
-//RS                     Some(TypeDef::Enum { variants, .. }) => {
-//RS                         variants.values().all(|(_, payload)| match payload {
-//RS                             VariantPayload::Unit => true,
-//RS                             VariantPayload::Single(payload, _) => {
-//RS                                 self.cloneable_in_context(payload, owner, entered)
-//RS                             }
-//RS                             VariantPayload::Named(fields) => fields
-//RS                                 .iter()
-//RS                                 .all(|field| self.cloneable_in_context(&field.ty, owner, entered)),
-//RS                         })
-//RS                     }
-//RS                     // D-DIST1: distinct types wrap a scalar.
-//RS                     Some(TypeDef::Distinct { .. }) => true,
-//RS                     Some(TypeDef::Alias { target, .. }) => {
-//RS                         self.cloneable_in_context(target, owner, entered)
-//RS                     }
-//RS                     None => false,
-//RS                 }
-//RS             }
-//RS             _ => crate::Sema::Diagnostics::is_cloneable(ty, self.registry),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn types_comparable_type(&self, ty: &Type) -> bool {
-//RS         let (normalized, registry, trait_reg) = self.capability_type_context(ty);
-//RS         trait_reg.type_implements_trait(&normalized, crate::Generics::COMPARABLE)
-//RS             || crate::Sema::Diagnostics::types_comparable(&normalized, registry)
-//RS     }
-//RS 
-//RS     pub(crate) fn incomparable_field_type(&self, ty: &Type) -> Option<String> {
-//RS         let (normalized, registry, _) = self.capability_type_context(ty);
-//RS         crate::Sema::Diagnostics::incomparable_field(&normalized, registry)
-//RS     }
-//RS 
-//RS     pub(crate) fn struct_fields_of(
-//RS         &self,
-//RS         owner_mod: usize,
-//RS         type_name: &str,
-//RS     ) -> Option<&[(String, Span, Type)]> {
-//RS         if owner_mod == self.module_idx {
-//RS             self.registry.struct_fields(type_name)
-//RS         } else {
-//RS             self.modules?
-//RS                 .get(owner_mod)?
-//RS                 .registry
-//RS                 .struct_fields(type_name)
-//RS         }
-//RS     }
-//RS 
-//RS     /// Whether any value of `ty` can hold an observable `Clock`. This is a
-//RS     /// reachability query, so each nominal is walked at most once: a nominal
-//RS     /// seen again is either on the current path (a cycle adds nothing) or
-//RS     /// already answered no (a yes ends the whole query). Keeping it visited
-//RS     /// keeps the walk linear on large mutually recursive type graphs, where
-//RS     /// every `==`, interpolation, and copy asks this question.
-//RS     ///
-//RS     /// A query that answers no has walked everything its nominals reach, so
-//RS     /// each nominal of this module it entered answers no as well; the open
-//RS     /// registry memo keeps them, and later queries stop there instead of
-//RS     /// walking the same type graph again (D-COMPILE-SPEED1, #3661).
-//RS     pub(crate) fn type_contains_observable_clock(&self, ty: &Type) -> bool {
-//RS         fn contains(
-//RS             checker: &Checker<'_>,
-//RS             ty: &Type,
-//RS             context_mod: usize,
-//RS             seen: &mut HashSet<(usize, String)>,
-//RS         ) -> bool {
-//RS             match ty {
-//RS                 Type::Tagged { marker, inner }
-//RS                     if matches!(
-//RS                         marker,
-//RS                         crate::AST::TagMarker::Internal(
-//RS                             crate::AST::InternalTag::DeterministicClock
-//RS                         )
-//RS                     ) && crate::Sema::Diagnostics::is_clock_type(inner) =>
-//RS                 {
-//RS                     false
-//RS                 }
-//RS                 Type::Named(name) if name == crate::Syntax::CLOCK_TYPE => true,
-//RS                 Type::Named(name) | Type::Apply { name, .. } => {
-//RS                     if let Type::Apply { args, .. } = ty {
-//RS                         if args
-//RS                             .iter()
-//RS                             .any(|arg| contains(checker, arg, context_mod, seen))
-//RS                         {
-//RS                             return true;
-//RS                         }
-//RS                     }
-//RS                     let context_registry = if context_mod == checker.module_idx {
-//RS                         Some(checker.registry)
-//RS                     } else {
-//RS                         checker
-//RS                             .modules
-//RS                             .and_then(|modules| modules.get(context_mod))
-//RS                             .map(|state| &state.registry)
-//RS                     };
-//RS                     let owner_mod =
-//RS                         if context_registry.is_some_and(|registry| registry.contains(name)) {
-//RS                             context_mod
-//RS                         } else if let Some(owner) = checker.struct_owner_module(name, None) {
-//RS                             owner
-//RS                         } else {
-//RS                             return false;
-//RS                         };
-//RS                     if !seen.insert((owner_mod, name.clone())) {
-//RS                         return false;
-//RS                     }
-//RS                     if owner_mod == checker.module_idx
-//RS                         && checker
-//RS                             .registry
-//RS                             .nominal_memo_holds(NominalQuery::ObservableClock, name)
-//RS                     {
-//RS                         return false;
-//RS                     }
-//RS                     let registry = if owner_mod == checker.module_idx {
-//RS                         checker.registry
-//RS                     } else if let Some(registry) = checker
-//RS                         .modules
-//RS                         .and_then(|modules| modules.get(owner_mod))
-//RS                         .map(|state| &state.registry)
-//RS                     {
-//RS                         registry
-//RS                     } else {
-//RS                         return false;
-//RS                     };
-//RS                     match registry.types.get(name) {
-//RS                         Some(TypeDef::Struct { fields, .. }) => fields
-//RS                             .iter()
-//RS                             .any(|(_, _, field_ty)| contains(checker, field_ty, owner_mod, seen)),
-//RS                         Some(TypeDef::Enum { variants, .. }) => {
-//RS                             variants.values().any(|(_, payload)| match payload {
-//RS                                 VariantPayload::Unit => false,
-//RS                                 VariantPayload::Single(payload_ty, _) => {
-//RS                                     contains(checker, payload_ty, owner_mod, seen)
-//RS                                 }
-//RS                                 VariantPayload::Named(fields) => fields
-//RS                                     .iter()
-//RS                                     .any(|field| contains(checker, &field.ty, owner_mod, seen)),
-//RS                             })
-//RS                         }
-//RS                         Some(TypeDef::Distinct { base, .. }) => {
-//RS                             contains(checker, base, owner_mod, seen)
-//RS                         }
-//RS                         Some(TypeDef::Alias { target, .. }) => {
-//RS                             contains(checker, target, owner_mod, seen)
-//RS                         }
-//RS                         None => false,
-//RS                     }
-//RS                 }
-//RS                 Type::Option(inner)
-//RS                 | Type::List(inner)
-//RS                 | Type::Shared(inner)
-//RS                 | Type::Tagged { inner, .. } => contains(checker, inner, context_mod, seen),
-//RS                 Type::Result { ok, err } => {
-//RS                     contains(checker, ok, context_mod, seen)
-//RS                         || contains(checker, err, context_mod, seen)
-//RS                 }
-//RS                 Type::Map { key, value, .. } => {
-//RS                     contains(checker, key, context_mod, seen)
-//RS                         || contains(checker, value, context_mod, seen)
-//RS                 }
-//RS                 Type::Tuple(fields) => fields
-//RS                     .iter()
-//RS                     .any(|(_, field_ty)| contains(checker, field_ty, context_mod, seen)),
-//RS                 Type::FixedList { elem, .. } => contains(checker, elem, context_mod, seen),
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS 
-//RS         let mut seen = HashSet::new();
-//RS         let found = contains(self, ty, self.module_idx, &mut seen);
-//RS         if !found {
-//RS             self.registry.record_neutral_nominals(
-//RS                 NominalQuery::ObservableClock,
-//RS                 seen.into_iter()
-//RS                     .filter(|(module, _)| *module == self.module_idx)
-//RS                     .map(|(_, name)| name),
-//RS             );
-//RS         }
-//RS         found
-//RS     }
-//RS 
-//RS     /// D-FIELDPOL1: `type_name`'s computed fields (name → span + declared
-//RS     /// type) in `owner_mod`, or `None` when it has none / isn't a struct.
-//RS     pub(crate) fn computed_field_types_of(
-//RS         &self,
-//RS         owner_mod: usize,
-//RS         type_name: &str,
-//RS     ) -> Option<&HashMap<String, (Span, Type)>> {
-//RS         if owner_mod == self.module_idx {
-//RS             self.registry.computed_field_types(type_name)
-//RS         } else {
-//RS             self.modules?
-//RS                 .get(owner_mod)?
-//RS                 .registry
-//RS                 .computed_field_types(type_name)
-//RS         }
-//RS     }
-//RS 
-//RS     /// Check if `enum_name` is a known enum in the current or any imported module.
-//RS     pub(crate) fn is_known_enum(&self, enum_name: &str) -> bool {
-//RS         if self.registry.enum_variants(enum_name).is_some() {
-//RS             return true;
-//RS         }
-//RS         if self
-//RS             .canonical_enum_registry(enum_name, |registry, leaf| {
-//RS                 registry.enum_variants(leaf).map(|_| ())
-//RS             })
-//RS             .is_some()
-//RS         {
-//RS             return true;
-//RS         }
-//RS         if let Some(mods) = self.modules {
-//RS             for idx in self.import_scope_modules() {
-//RS                 if self.type_is_pub_in(idx, enum_name)
-//RS                     && mods[idx].registry.enum_variants(enum_name).is_some()
-//RS                 {
-//RS                     return true;
-//RS                 }
-//RS             }
-//RS         }
-//RS         // Core-declared enums stay on the canonical declaration path; this
-//RS         // keeps qualified and expected-type dot literals on the normal resolver.
-//RS         if jet_foundation::CoreModuleExports::core_enum_variants(enum_name).is_some() {
-//RS             return true;
-//RS         }
-//RS         // D-TERM1 (ratified 2026-06-22): `Key` is a core enum, not in user registry.
-//RS         if enum_name == crate::Syntax::TYPE_KEY {
-//RS             return true;
-//RS         }
-//RS         // D-PROCESS1=A: `ProcessStreamMode` and `ProcessSignal` are core dot-literal enums.
-//RS         if matches!(enum_name, "ProcessStreamMode" | "ProcessSignal") {
-//RS             return true;
-//RS         }
-//RS         // D-TEXTWIDTH1=B: `TextWidth`'s two field enums.
-//RS         if matches!(enum_name, "TextWidthAmbiguous" | "TextWidthControls") {
-//RS             return true;
-//RS         }
-//RS         // stdlib-api-laws D4: `WatchEvent`'s two field enums.
-//RS         if matches!(enum_name, "WatchDomain" | "WatchKind") {
-//RS             return true;
-//RS         }
-//RS         if enum_name == Syntax::DURATION_UNIT_TYPE {
-//RS             return true;
-//RS         }
-//RS         // D-FOUND-COREAPI1 / #2853: closed event-time late disposition.
-//RS         if enum_name == "LateEventDisposition" {
-//RS             return true;
-//RS         }
-//RS         if matches!(
-//RS             enum_name,
-//RS             "Overflow"
-//RS                 | "FailurePolicy"
-//RS                 | "DispatchState"
-//RS                 | "HookPolicy"
-//RS                 | "HookDecision"
-//RS                 | "HookOutcome"
-//RS         ) {
-//RS             return true;
-//RS         }
-//RS         if matches!(enum_name, "NetShutdown" | "NetReadyInterest") {
-//RS             return true;
-//RS         }
-//RS         if matches!(enum_name, "NetError" | "NetDnsError") {
-//RS             return true;
-//RS         }
-//RS         if is_io_error_type_name(enum_name) || enum_name == Syntax::TYPE_IO_OPERATION {
-//RS             return true;
-//RS         }
-//RS         if matches!(enum_name, "SMTPSecurity" | "RecipientPolicy" | "EmailError") {
-//RS             return true;
-//RS         }
-//RS         if enum_name == "AuthError" {
-//RS             return true;
-//RS         }
-//RS         if matches!(
-//RS             enum_name,
-//RS             "DeliveryState" | "ServiceError" | "TaskOutcome" | "TaskStatus"
-//RS         ) {
-//RS             return true;
-//RS         }
-//RS         false
-//RS     }
-//RS 
-//RS     /// Resolve enum variants for `enum_name`, returning a cloned copy.
-//RS     /// Checks current registry and imported file-module registries.
-//RS     pub(crate) fn resolve_enum_variants_cloned(
-//RS         &self,
-//RS         enum_name: &str,
-//RS     ) -> Option<HashMap<String, (Span, VariantPayload)>> {
-//RS         // Core encoding carriers are declared in Core.jet for export shape,
-//RS         // while their payload-bearing variants are owned by the checker table.
-//RS         // Resolve that canonical table before the metadata's unit-only view.
-//RS         if let Some(v) = core_encoding_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_http_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_email_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_service_error_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_workflow_outcome_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = self.registry.enum_variants(enum_name) {
-//RS             return Some(self.owner_variants_for_reader(self.module_idx, enum_name, v.clone()));
-//RS         }
-//RS         // A canonical nominal (`<owner>::Leaf`) names its declaring module
-//RS         // directly; imported Core enums reach patterns in this spelling.
-//RS         if let Some(variants) = self.canonical_enum_registry(enum_name, |registry, leaf| {
-//RS             registry.enum_variants(leaf).cloned()
-//RS         }) {
-//RS             let (namespace, leaf) = Self::split_type_name(enum_name);
-//RS             return Some(match self.struct_owner_module(leaf, namespace) {
-//RS                 Some(owner) => self.owner_variants_for_reader(owner, leaf, variants),
-//RS                 None => variants,
-//RS             });
-//RS         }
-//RS         if let Some(mods) = self.modules {
-//RS             for idx in self.import_scope_modules() {
-//RS                 if self.type_is_pub_in(idx, enum_name) {
-//RS                     if let Some(v) = mods[idx].registry.enum_variants(enum_name) {
-//RS                         return Some(self.owner_variants_for_reader(idx, enum_name, v.clone()));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Some(v) = core_late_event_disposition_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_declared_enum_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         // D-TERM1 (ratified 2026-06-22): `Key` is a core enum (not in user registry).
-//RS         // Synthesise its variant table here so `Key.Char(c)` / `Key.Enter` literals work.
-//RS         if enum_name == crate::Syntax::TYPE_KEY {
-//RS             return Some(core_key_variants());
-//RS         }
-//RS         if let Some(v) = core_task_failure_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         // D-PROCESS1=A: `ProcessStreamMode` is a core enum — synthesise its variant
-//RS         // table so `.Stream`/`.Inherit`/`.Capture` dot-literals resolve (D-ENUMDOT2).
-//RS         if enum_name == "ProcessStreamMode" {
-//RS             return Some(core_process_stream_mode_variants());
-//RS         }
-//RS         // D-PROCESS1=A: `ProcessSignal` is a closed Core enum — resolve its
-//RS         // exact `Term`/`Hup`/`Int` variant table for literals and patterns.
-//RS         if enum_name == "ProcessSignal" {
-//RS             return Some(core_process_signal_variants());
-//RS         }
-//RS         if enum_name == crate::Syntax::TYPE_PROCESS_RESOURCE_LIMIT {
-//RS             return Some(core_process_resource_limit_variants());
-//RS         }
-//RS         if enum_name == Syntax::TYPE_TERMINAL_MODE {
-//RS             return Some(core_terminal_mode_variants());
-//RS         }
-//RS         if enum_name == "EnvError" {
-//RS             return Some(core_env_error_variants());
-//RS         }
-//RS         if let Some(v) = core_delivery_state_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         // D-TEXTWIDTH1=B: `TextWidthAmbiguous`/`TextWidthControls` — synthesise
-//RS         // their variant table so `.Narrow`/`.Wide`/`.Zero`/`.Reject` dot-literals
-//RS         // resolve (D-ENUMDOT2), same mechanism as `ProcessStreamMode`.
-//RS         if let Some(v) = core_text_width_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         // stdlib-api-laws D4: `WatchDomain`/`WatchKind` — same mechanism, so
-//RS         // `.File`/`.Created` dot-literals resolve and both switches are
-//RS         // exhaustive without a wildcard.
-//RS         if let Some(v) = core_watch_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_duration_unit_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_event_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_reduce_op_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_net_control_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_net_error_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS 
-//RS         if let Some(v) = core_io_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_encoding_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_lang_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_fact_kind_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_tls_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         if let Some(v) = core_auth_variants(enum_name) {
-//RS             return Some(v);
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS     /// D-TAG1: fold a field chain rooted at an enum type name into
-//RS     /// `(enum_name, dotted_path)` — `Damage.Fire.Burn` → `("Damage",
-//RS     /// "Fire.Burn")`. Returns `None` for a bare `Ident` (no hop — the
-//RS     /// single-segment `Enum.Variant` routes stay untouched), for chains not
-//RS     /// rooted at a known enum, or when a local shadows the type name.
-//RS     ///
-//RS     /// D-MOD2: a chain rooted at a file-module alias names the imported enum
-//RS     /// by its qualified spelling — `types.Kind.Beta` → `("types.Kind",
-//RS     /// "Beta")`. The path is empty for the bare `types.Kind` receiver.
-//RS     pub(crate) fn fold_enum_variant_path(&self, e: &Expr) -> Option<(String, String)> {
-//RS         fn walk<'e>(e: &'e Expr) -> Option<(&'e str, Vec<&'e str>)> {
-//RS             match e {
-//RS                 Expr::Ident(name, _) => Some((name, Vec::new())),
-//RS                 Expr::Field(inner, member, _) => {
-//RS                     let (root, mut segs) = walk(inner)?;
-//RS                     segs.push(member);
-//RS                     Some((root, segs))
-//RS                 }
-//RS                 _ => None,
-//RS             }
-//RS         }
-//RS         let (root, segs) = walk(e)?;
-//RS         if segs.is_empty() || self.lookup(root).is_some() {
-//RS             return None;
-//RS         }
-//RS         if self.imports.contains_key(root) && !self.is_known_enum(root) {
-//RS             let qualified = format!("{root}.{}", segs[0]);
-//RS             if !self.is_known_enum(&qualified) {
-//RS                 return None;
-//RS             }
-//RS             let identity = self.import_qualified_nominal(&qualified)?;
-//RS             return Some((identity, segs[1..].join(".")));
-//RS         }
-//RS         if !self.is_known_enum(root) {
-//RS             return None;
-//RS         }
-//RS         // D-MOD2: a member-imported enum (`use types.[Kind]`) keeps its
-//RS         // owner's canonical identity; every other spelling keeps its own.
-//RS         if self.member_imported_type(root) {
-//RS             return Some((self.imported_nominal_head(root), segs.join(".")));
-//RS         }
-//RS         Some((root.to_string(), segs.join(".")))
-//RS     }
-//RS 
-//RS     /// D-MOD2: `name` is bound here by a member import of another module's
-//RS     /// type (`use types.[Kind]`), so its identity is the owner's canonical one.
-//RS     pub(crate) fn member_imported_type(&self, name: &str) -> bool {
-//RS         !name.contains("::")
-//RS             && !self.registry.contains(name)
-//RS             && self
-//RS                 .name_ledger
-//RS                 .alias(self.module_idx, name)
-//RS                 .is_some_and(|alias| alias.target_module.is_some_and(|owner| owner != self.module_idx))
-//RS     }
-//RS 
-//RS     /// D-MOD2: the canonical nominal identity (`<owner>::Leaf`) of a name
-//RS     /// qualified by a file-module alias (`types.Kind`). `None` when the
-//RS     /// namespace is not an import alias of this module, so bare and local
-//RS     /// spellings keep their existing identity.
-//RS     pub(crate) fn import_qualified_nominal(&self, name: &str) -> Option<String> {
-//RS         let (namespace, _) = Self::split_type_name(name);
-//RS         if name.contains("::") || !namespace.is_some_and(|namespace| self.imports.contains_key(namespace)) {
-//RS             return None;
-//RS         }
-//RS         Some(self.imported_nominal_head(name))
-//RS     }
-//RS 
-//RS     /// D-TAG1: the enum's variant groups (group path → span + ordered leaf paths),
-//RS     /// resolved like `resolve_enum_variants_cloned` (local registry, then imports).
-//RS     /// `None` when the type isn't an enum; an empty map for a flat enum.
-//RS     pub(crate) fn resolve_enum_groups_cloned(
-//RS         &self,
-//RS         enum_name: &str,
-//RS     ) -> Option<HashMap<String, (Span, Vec<String>)>> {
-//RS         if let Some(g) = self.registry.enum_groups(enum_name) {
-//RS             return Some(g.clone());
-//RS         }
-//RS         if let Some(groups) = self.canonical_enum_registry(enum_name, |registry, leaf| {
-//RS             registry.enum_groups(leaf).cloned()
-//RS         }) {
-//RS             return Some(groups);
-//RS         }
-//RS         if let Some(mods) = self.modules {
-//RS             for idx in self.import_scope_modules() {
-//RS                 if self.type_is_pub_in(idx, enum_name) {
-//RS                     if let Some(g) = mods[idx].registry.enum_groups(enum_name) {
-//RS                         return Some(g.clone());
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS     /// Resolve a canonical nominal enum identity (`<owner>::Leaf`) or an
-//RS     /// import-alias-qualified spelling (`types.Kind`) to its declaring
-//RS     /// module's registry entry. Bare names use the import scan.
-//RS     fn canonical_enum_registry<T>(
-//RS         &self,
-//RS         enum_name: &str,
-//RS         read: impl Fn(&super::TypeRegistry, &str) -> Option<T>,
-//RS     ) -> Option<T> {
-//RS         let (namespace, leaf) = Self::split_type_name(enum_name);
-//RS         let qualified = enum_name.contains("::")
-//RS             || namespace.is_some_and(|namespace| self.imports.contains_key(namespace));
-//RS         if !qualified {
-//RS             return None;
-//RS         }
-//RS         let owner = self.struct_owner_module(leaf, namespace)?;
-//RS         if owner == self.module_idx {
-//RS             return read(self.registry, leaf);
-//RS         }
-//RS         let module = self.modules?.get(owner)?;
-//RS         read(&module.registry, leaf).filter(|_| self.type_is_pub_in(owner, leaf))
-//RS     }
-//RS 
-//RS     pub(crate) fn field_is_pub_in(&self, owner_mod: usize, type_name: &str, field: &str) -> bool {
-//RS         if owner_mod == self.module_idx {
-//RS             return true;
-//RS         }
-//RS         let name = format!("{type_name}.{field}");
-//RS         self.name_ledger.visible(self.module_idx, owner_mod, &name)
-//RS     }
-//RS 
-//RS     pub(crate) fn type_is_pub_in(&self, owner_mod: usize, type_name: &str) -> bool {
-//RS         if owner_mod == self.module_idx {
-//RS             return true;
-//RS         }
-//RS         self.name_ledger
-//RS             .visible(self.module_idx, owner_mod, type_name)
-//RS     }
-//RS 
-//RS     /// Check a struct field value through the shared assignability rules.
-//RS     /// Plain mismatches do not emit a diagnostic in `check_type_assignable`,
-//RS     /// so record construction supplies the field-specific E0108 fallback.
-//RS     pub(super) fn check_struct_field_assignable(
-//RS         &mut self,
-//RS         field: &str,
-//RS         expected: &Type,
-//RS         actual: &Type,
-//RS         value: &mut Expr,
-//RS         span: Span,
-//RS     ) {
-//RS         let expected = self.resolve_type(expected.clone());
-//RS         let mut actual = self.resolve_type(actual.clone());
-//RS         if expected != actual && self.implicitly_convert_unit(value, &expected, &actual) {
-//RS             actual = expected.clone();
-//RS         }
-//RS         // D-OPT-LIFT1=A: a plain payload fills a `T?` field.
-//RS         if let Some(lifted) = self.lift_optional_slot(&expected, &actual, value) {
-//RS             actual = lifted;
-//RS         }
-//RS         let reported = self.check_type_assignable(&expected, &actual, span);
-//RS         if !reported {
-//RS             let fix = if expected == Type::Int
-//RS                 && matches!(value, Expr::Binary(BinOp::Div, _, _, _))
-//RS                 && matches!(&actual, Type::Named(name) if name == Syntax::TYPE_FRACTION)
-//RS             {
-//RS                 "use `/%` to divide and round down (`/%=` in place), or make the field a Float"
-//RS                     .to_string()
-//RS             } else {
-//RS                 type_fix_hint(&expected, &actual)
-//RS             };
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0108",
-//RS                 format!(
-//RS                     "field `{field}` holds {}, but this value is {}",
-//RS                     expected.show(),
-//RS                     actual.show()
-//RS                 ),
-//RS                 "a field keeps one type for its whole life".to_string(),
-//RS                 fix,
-//RS                 Some(span),
-//RS             ));
-//RS         }
-//RS     }
-//RS 
-//RS     /// Check an enum payload value (`Pair.Ints{a: …}`, `Pair.One(…)`) against
-//RS     /// its declared slot. Plain mismatches do not emit a diagnostic in
-//RS     /// `check_type_assignable`, so construction supplies the payload-specific
-//RS     /// E0108 fallback. A slot typed by one of the enum's own type parameters
-//RS     /// takes its type from the value, so there is nothing to compare here.
-//RS     fn check_enum_payload_assignable(
-//RS         &mut self,
-//RS         type_name: &str,
-//RS         variant: &str,
-//RS         field: Option<&str>,
-//RS         declared: &Type,
-//RS         actual: &Type,
-//RS         value: &mut Expr,
-//RS     ) {
-//RS         let params = self.struct_subst(type_name, &[]);
-//RS         if !params.is_empty() {
-//RS             let mentions_param = std::cell::Cell::new(false);
-//RS             declared.map_named_types(&|name| {
-//RS                 if params.contains_key(name) {
-//RS                     mentions_param.set(true);
-//RS                 }
-//RS                 None
-//RS             });
-//RS             if mentions_param.get() {
-//RS                 return;
-//RS             }
-//RS         }
-//RS         let span = value.span();
-//RS         let expected = self.resolve_type(declared.clone());
-//RS         let mut actual = self.resolve_type(actual.clone());
-//RS         if expected != actual && self.implicitly_convert_unit(value, &expected, &actual) {
-//RS             actual = expected.clone();
-//RS         }
-//RS         if let Some(lifted) = self.lift_optional_slot(&expected, &actual, value) {
-//RS             actual = lifted;
-//RS         }
-//RS         if self.check_type_assignable(&expected, &actual, span) {
-//RS             return;
-//RS         }
-//RS         let display_type_name = self.display_type_name(type_name, None);
-//RS         let slot = match field {
-//RS             Some(field) => format!("field `{field}` of `{display_type_name}.{variant}`"),
-//RS             None => format!("the payload of `{display_type_name}.{variant}`"),
-//RS         };
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0108",
-//RS             format!(
-//RS                 "{slot} holds {}, but this value is {}",
-//RS                 expected.show(),
-//RS                 actual.show()
-//RS             ),
-//RS             "a variant payload keeps the type its enum declaration gives it".to_string(),
-//RS             type_fix_hint(&expected, &actual),
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     pub(crate) fn check_struct_lit(
-//RS         &mut self,
-//RS         type_name: &str,
-//RS         type_args: &[Type],
-//RS         import_ns: Option<&str>,
-//RS         fields: &mut Vec<(String, Span, Expr)>,
-//RS         span: Span,
-//RS     ) -> Type {
-//RS         // A canonical nominal arrives here from an expected type as
-//RS         // `package::path::Type`. Field registries and visibility tables are
-//RS         // keyed by the owner-local leaf, while the returned type below keeps
-//RS         // the canonical identity. Split only for this local lookup; never
-//RS         // reintroduce the short name as semantic identity.
-//RS         let (qualified_namespace, leaf_name) =
-//RS             if import_ns.is_none() && self.registry.contains(type_name) {
-//RS                 (None, type_name)
-//RS             } else {
-//RS                 Self::split_type_name(type_name)
-//RS             };
-//RS         let import_ns = import_ns.or(qualified_namespace);
-//RS         let type_name = leaf_name;
-//RS         let deprecation_name = import_ns.map_or_else(
-//RS             || type_name.to_string(),
-//RS             |namespace| format!("{namespace}.{type_name}"),
-//RS         );
-//RS         self.warn_deprecated_type_name(&deprecation_name, span);
-//RS         let display_type_name = self.display_type_name(type_name, None);
-//RS         // D-HTTP-CORE2=A: shared HTTP messages enforce typed headers and a
-//RS         // single-use byte Body. The old public-field literals cannot preserve
-//RS         // those invariants and ended at this core API break.
-//RS         if matches!(type_name, "HTTPRequest" | "HTTPResponse") {
-//RS             let (what, fix) = if type_name == "HTTPResponse" {
-//RS                 (
-//RS                     "`HTTPResponse.{ ... }` was replaced by the shared HTTP response constructor",
-//RS                     "use `server.response(status, text)`, then add headers with `.header(...)`",
-//RS                 )
-//RS             } else {
-//RS                 (
-//RS                     "`HTTPRequest.{ ... }` was replaced by the shared HTTP request constructor",
-//RS                     "use `client.request(method, url)`, then configure it with request methods",
-//RS                 )
-//RS             };
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E2002",
-//RS                 what.to_string(),
-//RS                 "HTTP messages now contain validated typed fields and a byte-native, single-use Body; public-field literals cannot preserve those invariants".to_string(),
-//RS                 fix.to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS             return Type::Named(type_name.to_string());
-//RS         }
-//RS         // E2-M10: compiler-known constructable struct types (HTTPRequest, HTTPResponse).
-//RS         // These have no user-module owner but are valid in struct literals. Generic
-//RS         // history records use the same path with their concrete command argument.
-//RS         if let Some(core_fields) = core_constructable_fields(type_name)
-//RS             .or_else(|| core_generic_constructable_fields(type_name, type_args))
-//RS         {
-//RS             let str_map_ty = Type::Map {
-//RS                 key: Box::new(Type::String),
-//RS                 key_span: None,
-//RS                 value: Box::new(Type::String),
-//RS             };
-//RS             let provided_names: std::collections::HashSet<String> =
-//RS                 fields.iter().map(|(n, ..)| n.clone()).collect();
-//RS             for (fname, _, fexpr) in fields.iter_mut() {
-//RS                 let expected_ty: Option<Type> = core_fields
-//RS                     .iter()
-//RS                     .find(|(n, _)| n == fname)
-//RS                     .map(|(_, t)| t.clone());
-//RS                 let saved = self.expected_type.clone();
-//RS                 if let Some(et) = expected_ty.as_ref() {
-//RS                     self.expected_type = Some(et.clone());
-//RS                 }
-//RS                 let got = self.infer(fexpr);
-//RS                 self.clone_borrowed_struct_field_value(Some(fname), fexpr, got.as_ref());
-//RS                 self.expected_type = saved;
-//RS                 if type_name == Syntax::TYPE_ERR {
-//RS                     if let (Some(expected), Some(got)) = (expected_ty.as_ref(), got.as_ref()) {
-//RS                         self.check_type_assignable(expected, got, fexpr.span());
-//RS                     }
-//RS                 }
-//RS                 let _ = (&str_map_ty, &expected_ty);
-//RS             }
-//RS             // Report missing fields.
-//RS             let missing: Vec<_> = core_fields
-//RS                 .iter()
-//RS                 .filter(|(n, _)| !provided_names.contains(n))
-//RS                 .map(|(n, _)| n.clone())
-//RS                 .collect();
-//RS             if !missing.is_empty() {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0303",
-//RS                     format!(
-//RS                         "struct literal for `{}` is missing fields: {}",
-//RS                         display_type_name,
-//RS                         missing.join(", ")
-//RS                     ),
-//RS                     "every field must appear exactly once".to_string(),
-//RS                     format!("add: {}", missing.join(", ")),
-//RS                     Some(span),
-//RS                 ));
-//RS             }
-//RS             return if type_args.is_empty() {
-//RS                 Type::Named(type_name.to_string())
-//RS             } else {
-//RS                 Type::Apply {
-//RS                     name: type_name.to_string(),
-//RS                     args: type_args.to_vec(),
-//RS                 }
-//RS             };
-//RS         }
-//RS         // `Never` has no constructible value. Keep the dedicated value-position
-//RS         // diagnostic instead of falling through to the generic unknown-struct
-//RS         // report for `Never { ... }`.
-//RS         if type_name == Syntax::TYPE_NEVER {
-//RS             self.diags
-//RS                 .push(Diagnostic::from_row("E2422", &[], Some(span)));
-//RS             for (_, _, e) in fields.iter_mut() {
-//RS                 self.infer(e);
-//RS             }
-//RS             return Type::Named(type_name.to_string());
-//RS         }
-//RS         let Some(owner_mod) = self.struct_owner_module(type_name, import_ns) else {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0119",
-//RS                 format!("there's no type called `{}`", display_type_name),
-//RS                 "struct literals need a struct type name".to_string(),
-//RS                 "define the struct first, or check the spelling".to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS             for (_, _, e) in fields.iter_mut() {
-//RS                 self.infer(e);
-//RS             }
-//RS             return Type::Named(type_name.to_string());
-//RS         };
-//RS         let display_type_name = self.display_type_name(type_name, Some(owner_mod));
-//RS         if owner_mod != self.module_idx && !self.type_is_pub_in(owner_mod, type_name) {
-//RS             self.diags.push(private_item(&display_type_name, span));
-//RS         } else if owner_mod != self.module_idx
-//RS             && Syntax::classify_identifier(type_name) == Syntax::IdentifierClass::SoftPublic
-//RS         {
-//RS             self.diags.push(soft_public_use(&display_type_name, span));
-//RS         }
-//RS         let Some(def_fields) = self
-//RS             .struct_fields_of(owner_mod, type_name)
-//RS             .map(|fields| fields.to_vec())
-//RS         else {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0119",
-//RS                 format!("there's no type called `{}`", display_type_name),
-//RS                 "struct literals need a struct type name".to_string(),
-//RS                 "define the struct first, or check the spelling".to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS             for (_, _, e) in fields.iter_mut() {
-//RS                 self.infer(e);
-//RS             }
-//RS             return Type::Named(type_name.to_string());
-//RS         };
-//RS         let subst = self.struct_subst_for_owner(owner_mod, type_name, type_args);
-//RS         let field_names: Vec<String> = def_fields.iter().map(|(n, ..)| n.clone()).collect();
-//RS         // D-PATCH1: `T.Patch` literals are partial — omitted fields mean "unchanged"
-//RS         // (encoded as `null` / `None`); provided values use the inner field type.
-//RS         let is_patch_lit = type_name
-//RS             .strip_suffix(".Patch")
-//RS             .is_some_and(|base| super::patch_type_name(base) == type_name)
-//RS             && def_fields
-//RS                 .iter()
-//RS                 .all(|(_, _, ty)| matches!(ty, Type::Option(_)));
-//RS         let mut provided = HashMap::new();
-//RS         for (name, name_span, expr) in fields.iter_mut() {
-//RS             if provided.insert(name.clone(), ()).is_some() {
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0303",
-//RS                     format!("field `{}` appears more than once", name),
-//RS                     "each field may be written only once in a struct literal".to_string(),
-//RS                     "remove the duplicate field".to_string(),
-//RS                     Some(*name_span),
-//RS                 ));
-//RS             }
-//RS             if owner_mod != self.module_idx && !self.field_is_pub_in(owner_mod, type_name, name) {
-//RS                 self.diags.push(private_item(name, *name_span));
-//RS             } else if owner_mod != self.module_idx
-//RS                 && Syntax::classify_identifier(name) == Syntax::IdentifierClass::SoftPublic
-//RS             {
-//RS                 self.diags.push(soft_public_use(name, *name_span));
-//RS             }
-//RS             let field_def = def_fields.iter().find(|(n, ..)| n == name);
-//RS             let saved_expected = self.expected_type.clone();
-//RS             let saved_esc = self.lambda_escapes;
-//RS             if let Some((_, _, fty)) = field_def {
-//RS                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
-//RS                 let expected = if is_patch_lit && !self.compiler_generated {
-//RS                     inst.unwrap_option().cloned()
-//RS                 } else {
-//RS                     atomic_field_inner(&inst).cloned().or_else(|| Some(inst.clone()))
-//RS                 };
-//RS                 self.expected_type = expected;
-//RS             }
-//RS             let string_view_field = self.expected_type.as_ref().is_some_and(|ty| {
-//RS                 matches!(
-//RS                     ty,
-//RS                     Type::Apply { name, args }
-//RS                         if name == "View"
-//RS                             && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
-//RS                 )
-//RS             });
-//RS             if matches!(expr, Expr::Lambda(_)) {
-//RS                 self.lambda_escapes = true;
-//RS             }
-//RS             let saved_string_view_read = self.allow_string_view_read;
-//RS             if string_view_field {
-//RS                 self.allow_string_view_read = true;
-//RS             }
-//RS             let et = self.infer(expr);
-//RS             self.allow_string_view_read = saved_string_view_read;
-//RS             self.expected_type = saved_expected;
-//RS             self.lambda_escapes = saved_esc;
-//RS             // A struct-lit field VALUE is an owning position. A bare borrowed-in-env
-//RS             // non-`Copy` ident (a `read`/`mut` param → `&T`/`&mut T`) can't be moved
-//RS             // into the field — codegen would emit `(*user_n)` → rustc E0507.
-//RS             self.clone_borrowed_struct_field_value(Some(name), expr, et.as_ref());
-//RS             // D-ALLOC2: E0631 — storing an arena `view` in a struct field would
-//RS             // let the struct (which can outlive the region) keep a dangling
-//RS             // borrow into the arena.
-//RS             if let Expr::Ident(vname, vspan) = expr {
-//RS                 if self.is_arena_view(vname) || self.is_fixed_backing_view(vname) {
-//RS                     self.report_view_escape(vname, "be stored in a struct field", *vspan);
-//RS                 }
-//RS                 // D-DYNARRAY1: E2305 — storing a `View<T>` in a struct field
-//RS                 // would let the struct outlive the list it borrows from.
-//RS                 if self.is_list_view(vname) {
-//RS                     if !self.named_view_has_stable_owner(vname) {
-//RS                         self.report_view_escape(vname, "be stored in a struct field", *vspan);
-//RS                     }
-//RS                 }
-//RS                 if string_view_field && self.is_string_view(vname) {
-//RS                     if !self.named_view_has_stable_owner(vname) {
-//RS                         self.report_string_view_unsupported_use(
-//RS                             vname,
-//RS                             "be stored in a struct field",
-//RS                             *vspan,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if let Some((_, _, fty)) = field_def {
-//RS                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
-//RS                 if let Some(et) = et {
-//RS                     // `View<str>` fields accept only live string-view bindings
-//RS                     // (or trim/after/before calls). A plain owned `String` is
-//RS                     // not a view — allowing it here false-greened into an ICE
-//RS                     // when codegen emitted `String` into an `&str` slot (#1163).
-//RS                     let string_view_compatible = string_view_field
-//RS                         && et == Type::String
-//RS                         && (matches!(
-//RS                             expr,
-//RS                             Expr::Ident(name, _) if self.is_string_view(name)
-//RS                         ) || self.string_view_call_source(expr).is_some());
-//RS                     if string_view_field && et == Type::String && !string_view_compatible {
-//RS                         // #1164: an owned String cannot fill a declared View<str> field.
-//RS                         self.report_owned_string_as_view_str(expr.span());
-//RS                     } else if is_patch_lit && !self.compiler_generated {
-//RS                         if let Some(inner) = inst.unwrap_option() {
-//RS                             let expected = atomic_field_inner(inner).unwrap_or(inner);
-//RS                             self.check_struct_field_assignable(
-//RS                                 name,
-//RS                                 expected,
-//RS                                 &et,
-//RS                                 expr,
-//RS                                 expr.span(),
-//RS                             );
-//RS                         }
-//RS                     } else if !string_view_compatible {
-//RS                         let expected = atomic_field_inner(&inst).unwrap_or(&inst);
-//RS                         self.check_struct_field_assignable(name, expected, &et, expr, expr.span());
-//RS                     }
-//RS                 }
-//RS             } else if self
-//RS                 .computed_field_types_of(owner_mod, type_name)
-//RS                 .is_some_and(|c| c.contains_key(name))
-//RS             {
-//RS                 // D-FIELDPOL1: a computed field is never settable — it's
-//RS                 // recomputed on every read, so a struct literal can't give it
-//RS                 // a value.
-//RS                 self.diags.push(Diagnostic::error(
-//RS                     "E0339",
-//RS                     format!(
-//RS                         "`{}` is a computed field on `{}` — it can't be set",
-//RS                         name, display_type_name
-//RS                     ),
-//RS                     format!(
-//RS                         "`{}` is declared `{} -> …` — its value always comes from that formula, never from a struct literal",
-//RS                         name, name
-//RS                     ),
-//RS                     format!("remove `{}` from this `.{{ … }}`", name),
-//RS                     Some(*name_span),
-//RS                 ));
-//RS             } else {
-//RS                 let suggestion = suggest_field(name, &field_names);
-//RS                 let fix = suggestion.as_ref().map_or_else(
-//RS                     || "remove this field".to_string(),
-//RS                     |suggest| format!("did you mean `{suggest}`?"),
-//RS                 );
-//RS                 let mut diagnostic = Diagnostic::error(
-//RS                     "E0303",
-//RS                     format!(
-//RS                         "struct literal for `{}` has no field `{}`",
-//RS                         display_type_name, name
-//RS                     ),
-//RS                     "struct literals may only set fields that exist on the type".to_string(),
-//RS                     fix,
-//RS                     Some(*name_span),
-//RS                 );
-//RS                 if let Some(suggest) = suggestion {
-//RS                     diagnostic = diagnostic.with_edit(TextEdit {
-//RS                         span: *name_span,
-//RS                         new_text: suggest,
-//RS                     });
-//RS                 }
-//RS                 self.diags.push(diagnostic);
-//RS             }
-//RS         }
-//RS         let missing: Vec<_> = def_fields
-//RS             .iter()
-//RS             .filter(|(n, _, _)| !provided.contains_key(n))
-//RS             .map(|(n, ..)| n.clone())
-//RS             .collect();
-//RS         // D-DEFAULT-SHAPE1=B: omitted fields with `{}` defaults are filled in.
-//RS         let defaults = if owner_mod == self.module_idx {
-//RS             self.registry.field_defaults(type_name).map(|d| d.clone())
-//RS         } else {
-//RS             self.modules
-//RS                 .and_then(|mods| mods.get(owner_mod))
-//RS                 .and_then(|m| m.registry.field_defaults(type_name))
-//RS                 .map(|d| d.clone())
-//RS         };
-//RS         let mut still_missing = Vec::new();
-//RS         for name in missing {
-//RS             let Some(expr) = defaults.as_ref().and_then(|d| d.get(&name)).cloned() else {
-//RS                 still_missing.push(name);
-//RS                 continue;
-//RS             };
-//RS             let name_span = def_fields
-//RS                 .iter()
-//RS                 .find(|(n, ..)| n == &name)
-//RS                 .map(|(_, sp, ..)| *sp)
-//RS                 .unwrap_or(span);
-//RS             let mut filled = expr;
-//RS             let field_def = def_fields.iter().find(|(n, ..)| n == &name);
-//RS             let saved_expected = self.expected_type.clone();
-//RS             if let Some((_, _, fty)) = field_def {
-//RS                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
-//RS                 self.expected_type = Some(inst);
-//RS             }
-//RS             let et = self.infer(&mut filled);
-//RS             self.expected_type = saved_expected;
-//RS             if let (Some((_, _, fty)), Some(et)) = (field_def, et) {
-//RS                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
-//RS                 let filled_span = filled.span();
-//RS                 self.check_struct_field_assignable(&name, &inst, &et, &mut filled, filled_span);
-//RS             }
-//RS             fields.push((name, name_span, filled));
-//RS         }
-//RS         if !still_missing.is_empty() && !is_patch_lit {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0303",
-//RS                 format!(
-//RS                     "struct literal for `{}` is missing fields: {}",
-//RS                     display_type_name,
-//RS                     still_missing.join(", ")
-//RS                 ),
-//RS                 "every field without a `{…}` default must appear exactly once".to_string(),
-//RS                 format!("add: {}", still_missing.join(", ")),
-//RS                 Some(span),
-//RS             ));
-//RS         }
-//RS         // A literal of an imported struct carries the owner's canonical
-//RS         // identity, the same one the owner's signatures and methods use, so
-//RS         // `crypto.X25519PublicKey{…}` and `crypto.X25519PublicKey.from_text(…)`
-//RS         // name one type.
-//RS         let nominal_name = if owner_mod == self.module_idx {
-//RS             type_name.to_string()
-//RS         } else {
-//RS             self.canonical_nominal_name(owner_mod, type_name)
-//RS         };
-//RS         let nominal = Type::Named(nominal_name.clone());
-//RS         if !type_args.is_empty() {
-//RS             Type::Apply {
-//RS                 name: nominal_name,
-//RS                 args: type_args.to_vec(),
-//RS             }
-//RS         } else if self
-//RS             .modules
-//RS             .and_then(|modules| modules.get(owner_mod))
-//RS             .map_or_else(
-//RS                 || self.trait_reg.struct_params.get(type_name),
-//RS                 |module| module.trait_reg.struct_params.get(type_name),
-//RS             )
-//RS             .is_some_and(|p| !p.is_empty())
-//RS         {
-//RS             let params = if owner_mod == self.module_idx {
-//RS                 self.trait_reg.struct_params.get(type_name)
-//RS             } else {
-//RS                 self.modules
-//RS                     .and_then(|modules| modules.get(owner_mod))
-//RS                     .and_then(|module| module.trait_reg.struct_params.get(type_name))
-//RS             }
-//RS             .expect("generic struct parameters exist");
-//RS             Type::Apply {
-//RS                 name: nominal_name,
-//RS                 args: params.iter().map(|p| Type::Named(p.name.clone())).collect(),
-//RS             }
-//RS         } else {
-//RS             nominal
-//RS         }
-//RS     }
-//RS 
-//RS     /// Return the leaf expression in an owning constructor payload. Optional
-//RS     /// (`Val`/`Present`) and fallible (`Ok`/`Err`) constructors store their
-//RS     /// payload in the destination, so the payload follows the same field
-//RS     /// ownership law as a bare field value. Parentheses and taint labels are
-//RS     /// transparent; an explicit `Copy` is a complete ownership decision.
-//RS     fn owning_field_value_mut(expr: &mut Expr) -> &mut Expr {
-//RS         match expr {
-//RS             Expr::Paren(inner, _)
-//RS             | Expr::Present(inner, _)
-//RS             | Expr::Ok(inner, _)
-//RS             | Expr::Err(inner, _)
-//RS             | Expr::Tainted(inner, _, _) => Self::owning_field_value_mut(inner),
-//RS             _ => expr,
-//RS         }
-//RS     }
-//RS 
-//RS     fn owning_field_value_type<'ty>(
-//RS         expr: &Expr,
-//RS         ty: Option<&'ty Type>,
-//RS     ) -> Option<&'ty Type> {
-//RS         match expr {
-//RS             Expr::Paren(inner, _) | Expr::Tainted(inner, _, _) => {
-//RS                 Self::owning_field_value_type(inner, ty)
-//RS             }
-//RS             Expr::Present(inner, _) => {
-//RS                 Self::owning_field_value_type(inner, ty.and_then(Type::unwrap_option))
-//RS             }
-//RS             Expr::Ok(inner, _) => Self::owning_field_value_type(
-//RS                 inner,
-//RS                 ty.and_then(|ty| ty.unwrap_result().map(|(ok, _)| ok)),
-//RS             ),
-//RS             Expr::Err(inner, _) => Self::owning_field_value_type(
-//RS                 inner,
-//RS                 ty.and_then(|ty| ty.unwrap_result().map(|(_, err)| err)),
-//RS             ),
-//RS             _ => ty,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Rewrite a struct-literal (or enum-payload, via the same call from
-//RS     /// `check_enum_lit`) field VALUE that is a bare non-`Copy` ident into an
-//RS     /// `Expr::Copy` node (D-CAP2 — the same node `~x` uses), when leaving it a
-//RS     /// move would either (a) not type-check (a borrowed param) or (b) silently
-//RS     /// move an OWNED LOCAL that is still read later — both would otherwise
-//RS     /// reach rustc as a raw, unreported E0507/E0382 (I2). Read-only values use
-//RS     /// that node implicitly at an owning destination; `copies: .Explicit`
-//RS     /// restores the diagnostic for borrowed subplaces.
-//RS     ///
-//RS     ///   - a `read`/`mut` param is `&T`/`&mut T`, so using it directly as the
-//RS     ///     (owning) field value would emit `(*user_n)` → rustc E0507. Materialize
-//RS     ///     it before codegen when the target type is cloneable.
-//RS     ///   - an OWNED local (no param convention) moves for real in the
-//RS     ///     generated Rust; if a later statement in the same/enclosing block
-//RS     ///     still reads it, that would be rustc E0382 ("use after move") with
-//RS     ///     no jet-level diagnostic ever raised — clone it instead, matching
-//RS     ///     the same "auto-clone at an owning slot" rule `check_take_arg_ownership`
-//RS     ///     already applies to a plain function-call argument. An owned local
-//RS     ///     that is NOT read again keeps moving (no wasted clone; unchanged
-//RS     ///     from prior behavior).
-//RS     /// `take` params, `Copy` types, and non-ident values are left untouched (no clone).
-//RS     fn clone_borrowed_struct_field_value(
-//RS         &mut self,
-//RS         field_name: Option<&str>,
-//RS         expr: &mut Expr,
-//RS         ty: Option<&Type>,
-//RS     ) {
-//RS         // `Val(x)`, `Ok(x)`, and `Err(x)` are owning constructors. Apply the
-//RS         // existing field rule to `x`, not to the carrier wrapper, so an
-//RS         // optional self-typed field cannot move a local without recording it.
-//RS         let payload_ty = Self::owning_field_value_type(expr, ty);
-//RS         let payload = Self::owning_field_value_mut(expr);
-//RS         if self.reject_borrowed_param_subplace(payload, payload_ty, "fill an owned field") {
-//RS             return;
-//RS         }
-//RS         // A repeated field/parameter name is still an owning slot. Read-only
-//RS         // values materialize here under D-MEM-COPYSEM1; the explicit policy
-//RS         // restores the old refusal and its `~value` fix.
-//RS         if let Some(field_name) = field_name {
-//RS             let borrowed = matches!(payload, Expr::Ident(name, _) if name == field_name)
-//RS                 && if let Expr::Ident(name, _) = &*payload {
-//RS                     self.lookup(name).is_some_and(|info| {
-//RS                         !type_is_copy(&info.ty)
-//RS                             && !matches!(
-//RS                                 &info.ty,
-//RS                                 Type::Named(n) if self.type_param_scope.iter().any(|p| &p.name == n)
-//RS                             )
-//RS                             && matches!(
-//RS                                 info.param_conv,
-//RS                                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS                             )
-//RS                     })
-//RS                 } else {
-//RS                     false
-//RS                 };
-//RS             if borrowed
-//RS                 && !self.copies_explicit()
-//RS                 && payload_ty.is_some_and(|ty| self.is_cloneable_type(ty))
-//RS             {
-//RS                 let ty = payload_ty.expect("cloneable borrowed same-name field has a type");
-//RS                 self.insert_implicit_copy(payload, ty, ty);
-//RS                 return;
-//RS             }
-//RS             if borrowed {
-//RS                 let (name, span) = match &*payload {
-//RS                     Expr::Ident(name, span) => (name, *span),
-//RS                     _ => return,
-//RS                 };
-//RS                 let diagnostic = Diagnostic::error(
-//RS                     "E0120",
-//RS                     format!("`{name}` was not moved here, so it cannot fill an owned field"),
-//RS                     "this function has read access only and does not own the value".to_string(),
-//RS                     format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
-//RS                     Some(span),
-//RS                 );
-//RS                 self.diags
-//RS                     .push(self.with_ownership_copy_edit(diagnostic, span, payload_ty));
-//RS                 return;
-//RS             }
-//RS         }
-//RS         let should_clone = match payload {
-//RS             Expr::Ident(name, _) => {
-//RS                 let name = name.clone();
-//RS                 self.lookup(&name).is_some_and(|info| {
-//RS                     let is_type_var = matches!(
-//RS                         &info.ty,
-//RS                         Type::Named(n) if self.type_param_scope.iter().any(|p| &p.name == n)
-//RS                     );
-//RS                     if type_is_copy(&info.ty) || is_type_var {
-//RS                         return false;
-//RS                     }
-//RS                     match info.param_conv {
-//RS                         Some(AccessConvention::Read) | Some(AccessConvention::Write) => true,
-//RS                         _ => self.is_name_live_after(&name),
-//RS                     }
-//RS                 })
-//RS             }
-//RS             _ => false,
-//RS         };
-//RS         if should_clone && self.copies_explicit() {
-//RS             // `copies: .Explicit` makes every implicit copy the audit reports
-//RS             // a diagnostic with the Safe `~` edit, including a local that is
-//RS             // still read after it fills this field (#3738).
-//RS             if let Expr::Ident(name, span) = &*payload {
-//RS                 let (name, span) = (name.clone(), *span);
-//RS                 let borrowed = self.lookup(&name).is_some_and(|info| {
-//RS                     matches!(
-//RS                         info.param_conv,
-//RS                         Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS                     )
-//RS                 });
-//RS                 let (what, why) = if borrowed {
-//RS                     (
-//RS                         format!("`{name}` was not moved here, so it cannot fill an owned field"),
-//RS                         "this function has read access only and does not own the value",
-//RS                     )
-//RS                 } else {
-//RS                     (
-//RS                         format!("`{name}` is still used later, so filling this field would copy it"),
-//RS                         "`copies: .Explicit` is active, so a copy into an owned field must be written",
-//RS                     )
-//RS                 };
-//RS                 let diagnostic = Diagnostic::error(
-//RS                     "E0120",
-//RS                     what,
-//RS                     why.to_string(),
-//RS                     format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
-//RS                     Some(span),
-//RS                 );
-//RS                 self.diags
-//RS                     .push(self.with_ownership_copy_edit(diagnostic, span, payload_ty));
-//RS             }
-//RS             return;
-//RS         }
-//RS         if should_clone {
-//RS             // D-CAP2 (D-MEM1/S4): same node `copy x` desugars to — one
-//RS             // mechanism for "duplicate this value", whether the compiler
-//RS             // inserts it or the user spells it.
-//RS             let span = payload.span();
-//RS             let old = std::mem::replace(payload, Expr::Absent(span));
-//RS             *payload = Expr::Copy(Box::new(old), span);
-//RS         }
-//RS         // A non-Copy payload that was not materialized is an actual transfer.
-//RS         // Record it now so a later read reaches the existing moved-value
-//RS         // diagnostic instead of an emitter/rustc use-after-move.
-//RS         self.note_move_if_direct_ident(payload, "the variant payload");
-//RS     }
-//RS 
-// END-PORT-PENDING 0415 crates/jet-sema/src/Sema/CheckerItems.rs:1768-3596
+use jet_foundation.[Type, Expr, Func, FuncSig, Span, Diagnostic, TextEdit, AccessConvention, BinOp, TagMarker, InternalTag, VariantPayload, NameVisibility, FixApplicability, FixSafety]
+use jet_foundation.CoreModuleExports
+use jet_sema.[Checker, TypeRegistry, TypeDef, NominalQuery, TraitRegistry, atomic_field_inner, patch_type_name, type_is_copy]
+use jet_sema.Diagnostics as SemaDiagnostics
+use jet_sema.Generics
+use jet_syntax as Syntax
+use core.mem
+use jet_sema.[core_http_carrier_leaf, is_io_error_type_name, core_encoding_variants, core_http_variants, core_email_variants, core_service_error_variants, core_workflow_outcome_variants, core_late_event_disposition_variants, core_declared_enum_variants, core_key_variants, core_task_failure_variants, core_process_stream_mode_variants, core_process_signal_variants, core_process_resource_limit_variants, core_terminal_mode_variants, core_env_error_variants, core_delivery_state_variants, core_text_width_variants, core_watch_variants, core_duration_unit_variants, core_event_variants, core_reduce_op_variants, core_net_control_variants, core_net_error_variants, core_io_variants, core_lang_variants, core_fact_kind_variants, core_tls_variants, core_auth_variants, type_fix_hint, core_constructable_fields, core_generic_constructable_fields, private_item, soft_public_use, suggest_field]
 
+// All methods extend the same canonical Checker/TypeRelations owner.
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:1768
+fn validate_public_failure_carrier(self: &Checker, function: Func) {
+    if !function.is_pub -> return
+    return_type :: function.return_type ?? return
+    (_, error_type) :: return_type.unwrap_result() ?? return
+    // Rust: crates/jet-sema/src/Sema/CheckerItems.rs:1779
+    fn collect_named(ty: Type, out: &[String]) {
+        if ty == {
+            .Named(name) -> &out.push(name)
+            .Apply(name, args) -> {
+                &out.push(name)
+                loop arg in args -> collect_named(arg, &out)
+            }
+            .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> collect_named(inner, &out)
+            .Map(key, _, value) | .Result(key, value) -> {
+                collect_named(key, &out)
+                collect_named(value, &out)
+            }
+            .Tuple(fields) -> { loop field in fields -> collect_named(field.ty, &out) }
+            .Fn(params, ret, _, _) -> {
+                loop param in params -> collect_named(param, &out)
+                if ret == .Val(value) -> collect_named(value, &out)
+            }
+            .Union(members) -> { loop member in members -> collect_named(member, &out) }
+            .Int | .Float | .Float32 | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Measure(_) -> {}
+        }
+    }
+    pending := [String]{}
+    collect_named(error_type, &pending)
+    checked_carriers := [(USize, String):Bool]{} // GATE #4499: exact owner/leaf tuple keys.
+    reported_members := [String:Bool]{}
+    loop {
+        carrier :: &pending.pop() ?? break
+        (import_ns, leaf) :: split_type_name(carrier)
+        owner :: self.struct_owner_module(leaf, import_ns) ?? next
+        key :: (owner, leaf)
+        if checked_carriers.contains_key(key) -> next
+        checked_carriers[key] = true
+        declaration :: self.name_ledger.declaration(owner, leaf) ?? next
+        if declaration.visibility != NameVisibility.Public {
+            if !reported_members.contains_key(leaf) {
+                reported_members[leaf] = true
+                diagnostic :: Diagnostic.from_row("E2421", [("function", function.name), ("member", leaf)], Val(declaration.span))
+                edit :: self.public_failure_visibility_edit(owner, declaration.span, declaration.kind, declaration.visibility)
+                self.diags.push(diagnostic.with_edit_grade(edit, FixApplicability.Suggested, FixSafety.ApiChanging))
+            }
+            next
+        }
+        fields :: self.struct_fields_of(owner, leaf) ?? next
+        loop field in fields {
+            collect_named(field.2, &pending)
+            member_key :: "{leaf}.{field.0}"
+            field_declaration :: self.name_ledger.declaration(owner, member_key) ?? next
+            if field_declaration.visibility == NameVisibility.Public || reported_members.contains_key(member_key) -> next
+            reported_members[member_key] = true
+            diagnostic :: Diagnostic.from_row("E2421", [("function", function.name), ("member", member_key)], Val(field_declaration.span))
+            edit :: self.public_failure_visibility_edit(owner, field_declaration.span, "field", field_declaration.visibility)
+            self.diags.push(diagnostic.with_edit_grade(edit, FixApplicability.Suggested, FixSafety.ApiChanging))
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:1927
+fn core_source_owner_module(self: &Checker, module: String, type_name: String) -> USize? {
+    alias := None
+    loop source in CoreModuleExports.core_source_modules() {
+        if source.module == module { alias = Val(source.alias); break }
+    }
+    wanted :: alias ?? return None
+    modules :: self.modules ?? return None
+    loop (idx, state) in modules.enumerate() {
+        if state.module_alias == wanted && state.registry.contains(type_name) -> return Val(idx)
+    }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:1941
+fn import_scope_modules(self: &Checker) -> [USize] {
+    scope := self.imports.values().to_list()
+    initial :: scope.len()
+    own_root :: self.name_ledger.module_namespace(self.module_idx)
+    dependency_roots := [String:Bool]{}
+    seen := [USize:Bool]{}
+    loop idx in scope -> seen[idx] = true
+    loop i in 0..initial {
+        idx :: scope[i]
+        root :: self.name_ledger.module_namespace(idx) ?? next
+        if Val(root) == own_root || dependency_roots.contains_key(root) -> next
+        dependency_roots[root] = true
+        loop sibling in self.name_ledger.namespace_siblings(idx) {
+            if !seen.contains_key(sibling) { seen[sibling] = true; &scope.push(sibling) }
+        }
+    }
+    scope
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:1966
+fn record_distinct_from_builtin(self: &Checker, owner: USize, leaf: String) -> Bool {
+    kind :: Syntax.typed_head_kind(leaf) ?? return false
+    carrier_alias := None
+    if kind.carrier_record_module() == .Val(module) {
+        if CoreModuleExports.core_source_module(module) == .Val(source) -> carrier_alias = Val(source.alias)
+    }
+    modules :: self.modules ?? return false
+    state :: modules.get(owner) ?? return false
+    state.registry.contains(leaf) && Val(state.module_alias) != carrier_alias
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:1985
+fn core_nominal_shadowing_builtin(self: &Checker, module: String, leaf: String) -> String? {
+    owner :: self.core_source_owner_module(module, leaf) ?? return None
+    if self.record_distinct_from_builtin(owner, leaf) -> Val(self.canonical_nominal_name(owner, leaf)) else -> None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:1994
+fn qualify_builtin_shadowing_sig(self: &Checker, owner: USize, sig: &FuncSig) {
+    if owner == self.module_idx -> return
+    qualify :: (ty: Type) -> ty.map_named_types((name) -> if self.record_distinct_from_builtin(owner, name) -> Val(self.canonical_nominal_name(owner, name)) else -> None)
+    loop param in &sig.params -> param.1 = qualify(param.1)
+    if sig.return_type == .Val(ret) -> sig.return_type = Val(qualify(ret))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2012
+fn struct_owner_module(self: &Checker, type_name: String, import_ns: String?) -> USize? {
+    if import_ns == .Val(namespace) {
+        if self.core_imports.get(namespace) == .Val(module) {
+            if CoreModuleExports.core_leaf_kind(module, type_name) != None -> return self.core_source_owner_module(module, type_name)
+        }
+    }
+    if import_ns == None {
+        if self.core_imports.get(type_name) == .Val(module) {
+            leaf :: self.core_item_imports.get(type_name) ?? type_name
+            if CoreModuleExports.core_leaf_kind(module, leaf) != None {
+                if self.core_source_owner_module(module, leaf) == .Val(owner) -> return Val(owner)
+            }
+        }
+    }
+    if import_ns == .Val(namespace) {
+        if namespace.contains("::") {
+            identity :: "{namespace}::{type_name}"
+            mod_idx :: self.name_ledger.nominal_module(identity) ?? return None
+            modules :: self.modules ?? return None
+            state :: modules.get(mod_idx) ?? return None
+            return if state.registry.contains(type_name) -> Val(mod_idx) else -> None
+        }
+        mod_idx :: self.imports.get(namespace) ?? return None
+        modules :: self.modules ?? return None
+        if modules[mod_idx].registry.contains(type_name) -> return Val(mod_idx)
+        loop sibling in self.name_ledger.namespace_siblings(mod_idx) {
+            if modules[sibling].registry.contains(type_name) -> return Val(sibling)
+        }
+        return None
+    }
+    if type_name.contains("::") {
+        (namespace, leaf) :: type_name.rsplit_once("::") ?? return None
+        return self.struct_owner_module(leaf, Val(namespace))
+    }
+    if self.registry.contains(type_name) -> return Val(self.module_idx)
+    modules :: self.modules ?? return None
+    if self.name_ledger.alias(self.module_idx, type_name) == .Val(alias) {
+        if alias.target_module == .Val(owner) {
+            (_, leaf) :: split_type_name(alias.target)
+            if modules.get(owner) == .Val(state) && state.registry.contains(leaf) && self.type_is_pub_in(owner, leaf) -> return Val(owner)
+        }
+    }
+    if Syntax.typed_head_kind(type_name) == .Val(kind) {
+        module :: kind.carrier_record_module() ?? return None
+        return self.core_source_owner_module(module, type_name)
+    }
+    if self.nominal_owner_cache.get(type_name) == .Val(owner) -> return owner
+    found := None
+    loop (idx, state) in modules.enumerate() {
+        if state.registry.contains(type_name) && self.type_is_pub_in(idx, type_name) {
+            if found == .Val(previous) && previous != idx { found = None; break }
+            found = Val(idx)
+        }
+    }
+    self.nominal_owner_cache[type_name] = found
+    found
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2118
+fn split_type_name(type_name: String) -> (String?, String) {
+    parts := type_name.rsplit_once("::")
+    if parts == None -> parts = type_name.rsplit_once(".")
+    if parts == .Val((namespace, leaf)) -> (Val(namespace), leaf) else -> (None, type_name)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2127
+fn struct_type_name_parts(self: &Checker, type_name: String) -> (String?, String) {
+    if self.registry.contains(type_name) -> (None, type_name) else -> split_type_name(type_name)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2141
+fn canonical_nominal_name(self: &Checker, owner: USize, leaf: String) -> String {
+    identity :: self.name_ledger.nominal_identity(owner, leaf).expect("name ledger must contain every loaded module")
+    if core_http_carrier_leaf(identity) == .Val(carrier) -> carrier else -> identity
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2152
+fn struct_fields_for_type_name(self: &Checker, type_name: String) -> [(String, Span, Type)]? {
+    (import_ns, leaf) :: self.struct_type_name_parts(type_name)
+    owner :: self.struct_owner_module(leaf, import_ns) ?? return None
+    self.struct_fields_of(owner, leaf)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2161
+fn type_implements_trait_for_name(self: &Checker, type_name: String, trait_name: String) -> Bool {
+    (import_ns, leaf) :: self.struct_type_name_parts(type_name)
+    owner :: self.struct_owner_module(leaf, import_ns) ?? return self.trait_reg.implements_trait(type_name, trait_name)
+    if owner == self.module_idx -> return self.trait_reg.implements_trait(leaf, trait_name)
+    modules :: self.modules ?? return false
+    state :: modules.get(owner) ?? return false
+    state.trait_reg.implements_trait(leaf, trait_name)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2175
+fn capability_type_context(self: &Checker, ty: Type) -> (Type, &TypeRegistry, &TraitRegistry) {
+    name := ""
+    args := None
+    if ty == {
+        .Named(n) -> name = n
+        .Apply(n, a) -> { name = n; args = Val(a) }
+        else -> return (ty, &self.registry, &self.trait_reg)
+    }
+    (import_ns, leaf) :: self.struct_type_name_parts(name)
+    owner :: self.struct_owner_module(leaf, import_ns) ?? return (ty, &self.registry, &self.trait_reg)
+    normalized :: if args == .Val(values) -> Type.Apply{name: leaf, args: values} else -> Type.Named{name: leaf}
+    if owner == self.module_idx -> return (normalized, &self.registry, &self.trait_reg)
+    if self.modules == .Val(modules) {
+        if modules.get(owner) == .Val(state) -> return (normalized, &state.registry, &state.trait_reg)
+    }
+    (ty, &self.registry, &self.trait_reg)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2213
+fn is_equatable_type(self: &Checker, ty: Type) -> Bool {
+    if ty == {
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> return self.is_equatable_type(inner)
+        .Map(key, _, value) | .Result(key, value) -> return self.is_equatable_type(key) && self.is_equatable_type(value)
+        .Tuple(fields) -> {
+            loop field in fields { if !self.is_equatable_type(field.ty) -> return false }
+            return true
+        }
+        .Union(members) -> {
+            loop member in members { if !self.is_equatable_type(member) -> return false }
+            return true
+        }
+        .Apply(_, args) -> { loop arg in args { if !self.is_equatable_type(arg) -> return false } }
+        else -> {}
+    }
+    (normalized, registry, trait_reg) :: self.capability_type_context(ty)
+    SemaDiagnostics.is_equatable(normalized, registry, trait_reg)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2242
+fn is_cloneable_type(self: &Checker, ty: Type) -> Bool {
+    if SemaDiagnostics.is_cloneable(ty, self.registry) -> return true
+    entered := [(USize, String):Bool]{} // GATE #4499
+    self.cloneable_in_context(ty, self.module_idx, &entered)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2254
+fn nominal_owner_in_context(self: &Checker, name: String, context_mod: USize) -> (USize, String)? {
+    registry_of :: (module: USize) -> {
+        if module == self.module_idx -> return Val(&self.registry)
+        modules :: self.modules ?? return None
+        state :: modules.get(module) ?? return None
+        Val(&state.registry)
+    }
+    owner := 0
+    leaf := name
+    if name.rsplit_once("::") == .Val((_, local)) {
+        owner = self.name_ledger.nominal_module(name) ?? return None
+        leaf = local
+    } else if registry_of(context_mod) == .Val(registry) && registry.contains(name) {
+        owner = context_mod
+    } else {
+        (namespace, local) :: split_type_name(name)
+        owner = self.struct_owner_module(local, namespace) ?? return None
+        leaf = local
+    }
+    registry :: registry_of(owner) ?? return None
+    if registry.contains(leaf) -> Val((owner, leaf)) else -> None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2285
+fn cloneable_in_context(self: &Checker, ty: Type, context_mod: USize, entered: &[(USize, String):Bool]) -> Bool {
+    return if ty == {
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> self.cloneable_in_context(inner, context_mod, &entered)
+        .Map(key, _, value) | .Result(key, value) -> self.cloneable_in_context(key, context_mod, &entered) && self.cloneable_in_context(value, context_mod, &entered)
+        .Tuple(fields) -> {
+            loop field in fields { if !self.cloneable_in_context(field.ty, context_mod, &entered) -> return false }
+            true
+        }
+        .Union(members) -> {
+            loop member in members { if !self.cloneable_in_context(member, context_mod, &entered) -> return false }
+            true
+        }
+        .Named(name) | .Apply(name, _) -> {
+            (owner, leaf) :: self.nominal_owner_in_context(name, context_mod) ?? return SemaDiagnostics.is_cloneable(ty, self.registry)
+            if ty == .Apply(_, args) {
+                loop arg in args { if !self.cloneable_in_context(arg, context_mod, &entered) -> return false }
+            }
+            key :: (owner, leaf)
+            if entered.contains_key(key) -> return true
+            entered[key] = true
+            registry := &self.registry
+            if owner != self.module_idx {
+                modules :: self.modules ?? return false
+                state :: modules.get(owner) ?? return false
+                registry = &state.registry
+            }
+            if registry.types.get(leaf) == {
+                .Val(.Struct(fields, _)) -> {
+                    loop field in fields { if !self.cloneable_in_context(field.2, owner, &entered) -> return false }
+                    true
+                }
+                .Val(.Enum(variants, _, _)) -> {
+                    loop value in variants.values() {
+                        if value.1 == {
+                            .Unit -> {}
+                            .Single(payload, _) -> { if !self.cloneable_in_context(payload, owner, &entered) -> return false }
+                            .Named(fields) -> { loop field in fields { if !self.cloneable_in_context(field.ty, owner, &entered) -> return false } }
+                        }
+                    }
+                    true
+                }
+                .Val(.Distinct(_, _, _)) -> true
+                .Val(.Alias(target, _)) -> self.cloneable_in_context(target, owner, &entered)
+                None -> false
+            }
+        }
+        else -> SemaDiagnostics.is_cloneable(ty, self.registry)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2365
+fn types_comparable_type(self: &Checker, ty: Type) -> Bool {
+    (normalized, registry, trait_reg) :: self.capability_type_context(ty)
+    trait_reg.type_implements_trait(normalized, Generics.COMPARABLE) || SemaDiagnostics.types_comparable(normalized, registry)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2371
+fn incomparable_field_type(self: &Checker, ty: Type) -> String? {
+    (normalized, registry, _) :: self.capability_type_context(ty)
+    SemaDiagnostics.incomparable_field(normalized, registry)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2376
+fn struct_fields_of(self: &Checker, owner_mod: USize, type_name: String) -> [(String, Span, Type)]? {
+    if owner_mod == self.module_idx -> return self.registry.struct_fields(type_name)
+    modules :: self.modules ?? return None
+    state :: modules.get(owner_mod) ?? return None
+    state.registry.struct_fields(type_name)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2402
+fn type_contains_observable_clock(self: &Checker, ty: Type) -> Bool {
+    // Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2403
+    fn contains(checker: &Checker, ty: Type, context_mod: USize, seen: &[(USize, String):Bool]) -> Bool {
+        if ty == .Tagged(.Internal(.DeterministicClock), inner) && SemaDiagnostics.is_clock_type(inner) -> return false
+        return if ty == {
+            .Named(name) | .Apply(name, _) -> {
+                if ty == .Named(Syntax.CLOCK_TYPE) -> return true
+                if ty == .Apply(_, args) {
+                    loop arg in args { if contains(&checker, arg, context_mod, &seen) -> return true }
+                }
+                context_registry := None
+                if context_mod == checker.module_idx {
+                    context_registry = Val(&checker.registry)
+                } else if checker.modules == .Val(modules) {
+                    if modules.get(context_mod) == .Val(state) -> context_registry = Val(&state.registry)
+                }
+                owner_mod := context_mod
+                if !(context_registry == .Val(registry) && registry.contains(name)) -> owner_mod = checker.struct_owner_module(name, None) ?? return false
+                key :: (owner_mod, name)
+                if seen.contains_key(key) -> return false
+                seen[key] = true
+                if owner_mod == checker.module_idx && checker.registry.nominal_memo_holds(NominalQuery.ObservableClock, name) -> return false
+                registry := &checker.registry
+                if owner_mod != checker.module_idx {
+                    modules :: checker.modules ?? return false
+                    state :: modules.get(owner_mod) ?? return false
+                    registry = &state.registry
+                }
+                if registry.types.get(name) == {
+                    .Val(.Struct(fields, _)) -> {
+                        loop field in fields { if contains(&checker, field.2, owner_mod, &seen) -> return true }
+                        false
+                    }
+                    .Val(.Enum(variants, _, _)) -> {
+                        loop value in variants.values() {
+                            if value.1 == {
+                                .Unit -> {}
+                                .Single(payload, _) -> { if contains(&checker, payload, owner_mod, &seen) -> return true }
+                                .Named(fields) -> { loop field in fields { if contains(&checker, field.ty, owner_mod, &seen) -> return true } }
+                            }
+                        }
+                        false
+                    }
+                    .Val(.Distinct(base, _, _)) -> contains(&checker, base, owner_mod, &seen)
+                    .Val(.Alias(target, _)) -> contains(&checker, target, owner_mod, &seen)
+                    None -> false
+                }
+            }
+            .Option(inner) | .List(inner) | .Shared(inner) | .Tagged(_, inner) | .FixedList(inner, _) -> contains(&checker, inner, context_mod, &seen)
+            .Result(key, value) | .Map(key, _, value) -> contains(&checker, key, context_mod, &seen) || contains(&checker, value, context_mod, &seen)
+            .Tuple(fields) -> {
+                loop field in fields { if contains(&checker, field.ty, context_mod, &seen) -> return true }
+                false
+            }
+            else -> false
+        }
+    }
+    seen := [(USize, String):Bool]{} // GATE #4499
+    found :: contains(&self, ty, self.module_idx, &seen)
+    if !found {
+        neutral := [String]{}
+        loop (key, _) in seen { if key.0 == self.module_idx -> &neutral.push(key.1) }
+        self.registry.record_neutral_nominals(NominalQuery.ObservableClock, neutral)
+    }
+    found
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2526
+fn computed_field_types_of(self: &Checker, owner_mod: USize, type_name: String) -> [String:(Span, Type)]? {
+    if owner_mod == self.module_idx -> return self.registry.computed_field_types(type_name)
+    modules :: self.modules ?? return None
+    state :: modules.get(owner_mod) ?? return None
+    state.registry.computed_field_types(type_name)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2542
+fn is_known_enum(self: &Checker, enum_name: String) -> Bool {
+    if self.registry.enum_variants(enum_name) != None -> return true
+    if self.canonical_enum_registry(enum_name, (registry, leaf) -> if registry.enum_variants(leaf) != None -> Val(()) else -> None) != None -> return true
+    if self.modules == .Val(modules) {
+        loop idx in self.import_scope_modules() {
+            if self.type_is_pub_in(idx, enum_name) && modules[idx].registry.enum_variants(enum_name) != None -> return true
+        }
+    }
+    if CoreModuleExports.core_enum_variants(enum_name) != None -> return true
+    if enum_name == Syntax.TYPE_KEY || enum_name == Syntax.DURATION_UNIT_TYPE || enum_name == Syntax.TYPE_IO_OPERATION || is_io_error_type_name(enum_name) -> return true
+    return if enum_name == {
+        "ProcessStreamMode" | "ProcessSignal" | "TextWidthAmbiguous" | "TextWidthControls" | "WatchDomain" | "WatchKind" | "LateEventDisposition" | "Overflow" | "FailurePolicy" | "DispatchState" | "HookPolicy" | "HookDecision" | "HookOutcome" | "NetShutdown" | "NetReadyInterest" | "NetError" | "NetDnsError" | "SMTPSecurity" | "RecipientPolicy" | "EmailError" | "AuthError" | "DeliveryState" | "ServiceError" | "TaskOutcome" | "TaskStatus" -> true
+        else -> false
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2628
+fn resolve_enum_variants_cloned(self: &Checker, enum_name: String) -> [String:(Span, VariantPayload)]? {
+    if core_encoding_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_http_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_email_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_service_error_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_workflow_outcome_variants(enum_name) == .Val(v) -> return Val(v)
+    if self.registry.enum_variants(enum_name) == .Val(v) -> return Val(self.owner_variants_for_reader(self.module_idx, enum_name, v))
+    if self.canonical_enum_registry(enum_name, (registry, leaf) -> registry.enum_variants(leaf)) == .Val(variants) {
+        (namespace, leaf) :: split_type_name(enum_name)
+        if self.struct_owner_module(leaf, namespace) == .Val(owner) -> return Val(self.owner_variants_for_reader(owner, leaf, variants))
+        return Val(variants)
+    }
+    if self.modules == .Val(modules) {
+        loop idx in self.import_scope_modules() {
+            if self.type_is_pub_in(idx, enum_name) {
+                if modules[idx].registry.enum_variants(enum_name) == .Val(v) -> return Val(self.owner_variants_for_reader(idx, enum_name, v))
+            }
+        }
+    }
+    if core_late_event_disposition_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_declared_enum_variants(enum_name) == .Val(v) -> return Val(v)
+    if enum_name == Syntax.TYPE_KEY -> return Val(core_key_variants())
+    if core_task_failure_variants(enum_name) == .Val(v) -> return Val(v)
+    if enum_name == "ProcessStreamMode" -> return Val(core_process_stream_mode_variants())
+    if enum_name == "ProcessSignal" -> return Val(core_process_signal_variants())
+    if enum_name == Syntax.TYPE_PROCESS_RESOURCE_LIMIT -> return Val(core_process_resource_limit_variants())
+    if enum_name == Syntax.TYPE_TERMINAL_MODE -> return Val(core_terminal_mode_variants())
+    if enum_name == "EnvError" -> return Val(core_env_error_variants())
+    if core_delivery_state_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_text_width_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_watch_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_duration_unit_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_event_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_reduce_op_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_net_control_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_net_error_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_io_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_encoding_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_lang_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_fact_kind_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_tls_variants(enum_name) == .Val(v) -> return Val(v)
+    if core_auth_variants(enum_name) == .Val(v) -> return Val(v)
+    None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2767
+fn fold_enum_variant_path(self: &Checker, e: Expr) -> (String, String)? {
+    // Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2768
+    fn walk(e: Expr) -> (String, [String])? {
+        return if e == {
+            .Ident(name, _) -> Val((name, []))
+            .Field(inner, member, _) -> {
+                (root, segs) := walk(inner) ?? return None
+                &segs.push(member)
+                Val((root, segs))
+            }
+            else -> None
+        }
+    }
+    (root, segs) :: walk(e) ?? return None
+    if segs.len() == 0 || self.lookup(root) != None -> return None
+    if self.imports.contains_key(root) && !self.is_known_enum(root) {
+        qualified :: "{root}.{segs[0]}"
+        if !self.is_known_enum(qualified) -> return None
+        identity :: self.import_qualified_nominal(qualified) ?? return None
+        return Val((identity, segs[1..].join(".")))
+    }
+    if !self.is_known_enum(root) -> return None
+    if self.member_imported_type(root) -> return Val((self.imported_nominal_head(root), segs.join(".")))
+    Val((root, segs.join(".")))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2804
+fn member_imported_type(self: &Checker, name: String) -> Bool {
+    if name.contains("::") || self.registry.contains(name) -> return false
+    alias :: self.name_ledger.alias(self.module_idx, name) ?? return false
+    owner :: alias.target_module ?? return false
+    owner != self.module_idx
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2817
+fn import_qualified_nominal(self: &Checker, name: String) -> String? {
+    (namespace, _) :: split_type_name(name)
+    if name.contains("::") -> return None
+    ns :: namespace ?? return None
+    if !self.imports.contains_key(ns) -> return None
+    Val(self.imported_nominal_head(name))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2828
+fn resolve_enum_groups_cloned(self: &Checker, enum_name: String) -> [String:(Span, [String])]? {
+    if self.registry.enum_groups(enum_name) == .Val(groups) -> return Val(groups)
+    if self.canonical_enum_registry(enum_name, (registry, leaf) -> registry.enum_groups(leaf)) == .Val(groups) -> return Val(groups)
+    if self.modules == .Val(modules) {
+        loop idx in self.import_scope_modules() {
+            if self.type_is_pub_in(idx, enum_name) {
+                if modules[idx].registry.enum_groups(enum_name) == .Val(groups) -> return Val(groups)
+            }
+        }
+    }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2855
+fn canonical_enum_registry<T>(self: &Checker, enum_name: String, read: (&TypeRegistry, String) -> T?) -> T? {
+    (namespace, leaf) :: split_type_name(enum_name)
+    qualified := enum_name.contains("::")
+    if namespace == .Val(ns) && self.imports.contains_key(ns) -> qualified = true
+    if !qualified -> return None
+    owner :: self.struct_owner_module(leaf, namespace) ?? return None
+    if owner == self.module_idx -> return read(&self.registry, leaf)
+    modules :: self.modules ?? return None
+    state :: modules.get(owner) ?? return None
+    result :: read(&state.registry, leaf)
+    if self.type_is_pub_in(owner, leaf) -> result else -> None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2874
+fn field_is_pub_in(self: &Checker, owner_mod: USize, type_name: String, field: String) -> Bool {
+    if owner_mod == self.module_idx -> return true
+    self.name_ledger.visible(self.module_idx, owner_mod, "{type_name}.{field}")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2882
+fn type_is_pub_in(self: &Checker, owner_mod: USize, type_name: String) -> Bool {
+    if owner_mod == self.module_idx -> true else -> self.name_ledger.visible(self.module_idx, owner_mod, type_name)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2893
+fn check_struct_field_assignable(self: &Checker, field: String, expected: Type, actual: Type, value: &Expr, span: Span) {
+    expected :: self.resolve_type(expected)
+    actual := self.resolve_type(actual)
+    if expected != actual && self.implicitly_convert_unit(&value, expected, actual) -> actual = expected
+    if self.lift_optional_slot(expected, actual, &value) == .Val(lifted) -> actual = lifted
+    if !self.check_type_assignable(expected, actual, span) {
+        integer_division :: expected == Type.Int && actual == Type.Named{name: Syntax.TYPE_FRACTION} && if value == {.Binary(.Div, _, _, _) -> true else -> false}
+        fix :: if integer_division -> "use `/%` to divide and round down (`/%=` in place), or make the field a Float" else -> type_fix_hint(expected, actual)
+        self.diags.push(Diagnostic.error("E0108", "field `{field}` holds " + expected.show() + ", but this value is " + actual.show(), "a field keeps one type for its whole life", fix, Val(span)))
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2940
+fn check_enum_payload_assignable(self: &Checker, type_name: String, variant: String, field: String?, declared: Type, actual: Type, value: &Expr) {
+    params :: self.struct_subst(type_name, [])
+    if params.len() > 0 {
+        mentions_param := false
+        _ :: declared.map_named_types((name) -> { if params.contains_key(name) -> mentions_param = true; None })
+        if mentions_param -> return
+    }
+    span :: value.span()
+    expected :: self.resolve_type(declared)
+    actual := self.resolve_type(actual)
+    if expected != actual && self.implicitly_convert_unit(&value, expected, actual) -> actual = expected
+    if self.lift_optional_slot(expected, actual, &value) == .Val(lifted) -> actual = lifted
+    if self.check_type_assignable(expected, actual, span) -> return
+    display_type_name :: self.display_type_name(type_name, None)
+    slot :: if field == .Val(name) -> "field `{name}` of `{display_type_name}.{variant}`" else -> "the payload of `{display_type_name}.{variant}`"
+    self.diags.push(Diagnostic.error("E0108", slot + " holds " + expected.show() + ", but this value is " + actual.show(), "a variant payload keeps the type its enum declaration gives it", type_fix_hint(expected, actual), Val(span)))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2992
+fn check_struct_lit(self: &Checker, type_name: String, type_args: [Type], import_ns: String?, fields: &[(String, Span, Expr)], span: Span) -> Type {
+    (qualified_namespace, leaf_name) :: if import_ns == None && self.registry.contains(type_name) -> (None, type_name) else -> split_type_name(type_name)
+    import_ns :: if import_ns != None -> import_ns else -> qualified_namespace
+    type_name :: leaf_name
+    deprecation_name :: if import_ns == .Val(ns) -> "{ns}.{type_name}" else -> type_name
+    self.warn_deprecated_type_name(deprecation_name, span)
+    display_type_name := self.display_type_name(type_name, None)
+    if type_name == "HTTPRequest" || type_name == "HTTPResponse" {
+        what :: if type_name == "HTTPResponse" -> "`HTTPResponse.{ ... }` was replaced by the shared HTTP response constructor" else -> "`HTTPRequest.{ ... }` was replaced by the shared HTTP request constructor"
+        fix :: if type_name == "HTTPResponse" -> "use `server.response(status, text)`, then add headers with `.header(...)`" else -> "use `client.request(method, url)`, then configure it with request methods"
+        self.diags.push(Diagnostic.error("E2002", what, "HTTP messages now contain validated typed fields and a byte-native, single-use Body; public-field literals cannot preserve those invariants", fix, Val(span)))
+        return Type.Named{name: type_name}
+    }
+    core_fields := core_constructable_fields(type_name)
+    if core_fields == None -> core_fields = core_generic_constructable_fields(type_name, type_args)
+    if core_fields == .Val(definitions) {
+        provided_names := [String:Bool]{}
+        field_types := [String:Type]{}
+        loop field in definitions -> field_types[field.0] = field.1
+        loop field in fields -> provided_names[field.0] = true
+        loop field in &fields {
+            expected_ty :: field_types.get(field.0)
+            saved :: self.expected_type
+            if expected_ty != None -> self.expected_type = expected_ty
+            got :: self.infer(&field.2)
+            self.clone_borrowed_struct_field_value(Val(field.0), &field.2, got)
+            self.expected_type = saved
+            if type_name == Syntax.TYPE_ERR && expected_ty == .Val(expected) && got == .Val(actual) -> _ :: self.check_type_assignable(expected, actual, field.2.span())
+        }
+        missing := [String]{}
+        loop definition in definitions { if !provided_names.contains_key(definition.0) -> &missing.push(definition.0) }
+        if missing.len() > 0 -> self.diags.push(Diagnostic.error("E0303", "struct literal for `{display_type_name}` is missing fields: " + missing.join(", "), "every field must appear exactly once", "add: " + missing.join(", "), Val(span)))
+        return if type_args.len() == 0 -> Type.Named{name: type_name} else -> Type.Apply{name: type_name, args: type_args}
+    }
+    if type_name == Syntax.TYPE_NEVER {
+        self.diags.push(Diagnostic.from_row("E2422", [], Val(span)))
+        loop field in &fields -> _ :: self.infer(&field.2)
+        return Type.Named{name: type_name}
+    }
+    owner_mod :: self.struct_owner_module(type_name, import_ns) ?? {
+        self.diags.push(Diagnostic.error("E0119", "there's no type called `{display_type_name}`", "struct literals need a struct type name", "define the struct first, or check the spelling", Val(span)))
+        loop field in &fields -> _ :: self.infer(&field.2)
+        return Type.Named{name: type_name}
+    }
+    display_type_name = self.display_type_name(type_name, Val(owner_mod))
+    if owner_mod != self.module_idx && !self.type_is_pub_in(owner_mod, type_name) {
+        self.diags.push(private_item(display_type_name, span))
+    } else if owner_mod != self.module_idx && Syntax.classify_identifier(type_name) == Syntax.IdentifierClass.SoftPublic {
+        self.diags.push(soft_public_use(display_type_name, span))
+    }
+    def_fields :: self.struct_fields_of(owner_mod, type_name) ?? {
+        self.diags.push(Diagnostic.error("E0119", "there's no type called `{display_type_name}`", "struct literals need a struct type name", "define the struct first, or check the spelling", Val(span)))
+        loop field in &fields -> _ :: self.infer(&field.2)
+        return Type.Named{name: type_name}
+    }
+    subst :: self.struct_subst_for_owner(owner_mod, type_name, type_args)
+    field_names := [String]{}
+    field_index := [String:USize]{}
+    loop (i, definition) in def_fields.enumerate() { &field_names.push(definition.0); field_index[definition.0] = i }
+    is_patch_lit := false
+    if type_name.strip_suffix(".Patch") == .Val(base) && patch_type_name(base) == type_name {
+        is_patch_lit = true
+        loop definition in def_fields { if definition.2.unwrap_option() == None -> is_patch_lit = false }
+    }
+    provided := [String:Bool]{}
+    loop field in &fields {
+        name :: field.0
+        name_span :: field.1
+        expr := &field.2
+        if provided.contains_key(name) -> self.diags.push(Diagnostic.error("E0303", "field `{name}` appears more than once", "each field may be written only once in a struct literal", "remove the duplicate field", Val(name_span)))
+        provided[name] = true
+        if owner_mod != self.module_idx && !self.field_is_pub_in(owner_mod, type_name, name) {
+            self.diags.push(private_item(name, name_span))
+        } else if owner_mod != self.module_idx && Syntax.classify_identifier(name) == Syntax.IdentifierClass.SoftPublic {
+            self.diags.push(soft_public_use(name, name_span))
+        }
+        field_def :: if field_index.get(name) == .Val(i) -> Val(def_fields[i]) else -> None
+        saved_expected :: self.expected_type
+        saved_esc :: self.lambda_escapes
+        if field_def == .Val(definition) {
+            inst :: self.instantiate_type_for_owner(owner_mod, definition.2, subst)
+            self.expected_type = if is_patch_lit && !self.compiler_generated -> inst.unwrap_option() else -> Val(atomic_field_inner(inst) ?? inst)
+        }
+        string_view_field :: if self.expected_type == {
+            .Val(.Apply("View", args)) -> args.len() == 1 && args[0] == Type.Named{name: "str"}
+            else -> false
+        }
+        if expr == .Lambda(_) -> self.lambda_escapes = true
+        saved_string_view_read :: self.allow_string_view_read
+        if string_view_field -> self.allow_string_view_read = true
+        et :: self.infer(&expr)
+        self.allow_string_view_read = saved_string_view_read
+        self.expected_type = saved_expected
+        self.lambda_escapes = saved_esc
+        self.clone_borrowed_struct_field_value(Val(name), &expr, et)
+        if expr == .Ident(vname, vspan) {
+            if self.is_arena_view(vname) || self.is_fixed_backing_view(vname) -> self.report_view_escape(vname, "be stored in a struct field", vspan)
+            if self.is_list_view(vname) && !self.named_view_has_stable_owner(vname) -> self.report_view_escape(vname, "be stored in a struct field", vspan)
+            if string_view_field && self.is_string_view(vname) && !self.named_view_has_stable_owner(vname) -> self.report_string_view_unsupported_use(vname, "be stored in a struct field", vspan)
+        }
+        if field_def == .Val(definition) {
+            inst :: self.instantiate_type_for_owner(owner_mod, definition.2, subst)
+            if et == .Val(actual) {
+                live_view :: if expr == {.Ident(vname, _) -> self.is_string_view(vname) else -> false}
+                string_view_compatible :: string_view_field && actual == Type.String && (live_view || self.string_view_call_source(expr) != None)
+                if string_view_field && actual == Type.String && !string_view_compatible {
+                    self.report_owned_string_as_view_str(expr.span())
+                } else if is_patch_lit && !self.compiler_generated {
+                    if inst.unwrap_option() == .Val(inner) -> self.check_struct_field_assignable(name, atomic_field_inner(inner) ?? inner, actual, &expr, expr.span())
+                } else if !string_view_compatible {
+                    self.check_struct_field_assignable(name, atomic_field_inner(inst) ?? inst, actual, &expr, expr.span())
+                }
+            }
+        } else {
+            computed :: self.computed_field_types_of(owner_mod, type_name)
+            if computed == .Val(types) && types.contains_key(name) {
+                self.diags.push(Diagnostic.error("E0339", "`{name}` is a computed field on `{display_type_name}` — it can't be set", "`{name}` is declared `{name} -> …` — its value always comes from that formula, never from a struct literal", "remove `{name}` from this `.{{ … }}`", Val(name_span)))
+            } else {
+                suggestion :: suggest_field(name, field_names)
+                fix :: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "remove this field"
+                diagnostic := Diagnostic.error("E0303", "struct literal for `{display_type_name}` has no field `{name}`", "struct literals may only set fields that exist on the type", fix, Val(name_span))
+                if suggestion == .Val(candidate) -> diagnostic = diagnostic.with_edit(TextEdit{span: name_span, new_text: candidate})
+                self.diags.push(diagnostic)
+            }
+        }
+    }
+    defaults := None
+    if owner_mod == self.module_idx {
+        defaults = self.registry.field_defaults(type_name)
+    } else if self.modules == .Val(modules) {
+        if modules.get(owner_mod) == .Val(state) -> defaults = state.registry.field_defaults(type_name)
+    }
+    still_missing := [String]{}
+    loop definition in def_fields {
+        name :: definition.0
+        if provided.contains_key(name) -> next
+        default_expr := None
+        if defaults == .Val(values) -> default_expr = values.get(name)
+        filled := default_expr ?? { &still_missing.push(name); next }
+        saved_expected :: self.expected_type
+        inst :: self.instantiate_type_for_owner(owner_mod, definition.2, subst)
+        self.expected_type = Val(inst)
+        et :: self.infer(&filled)
+        self.expected_type = saved_expected
+        if et == .Val(actual) -> self.check_struct_field_assignable(name, inst, actual, &filled, filled.span())
+        &fields.push((name, definition.1, filled))
+    }
+    if still_missing.len() > 0 && !is_patch_lit -> self.diags.push(Diagnostic.error("E0303", "struct literal for `{display_type_name}` is missing fields: " + still_missing.join(", "), "every field without a `{…}` default must appear exactly once", "add: " + still_missing.join(", "), Val(span)))
+    nominal_name :: if owner_mod == self.module_idx -> type_name else -> self.canonical_nominal_name(owner_mod, type_name)
+    nominal :: Type.Named{name: nominal_name}
+    if type_args.len() > 0 -> return Type.Apply{name: nominal_name, args: type_args}
+    check_params := self.trait_reg.struct_params.get(type_name)
+    if self.modules == .Val(modules) {
+        if modules.get(owner_mod) == .Val(state) -> check_params = state.trait_reg.struct_params.get(type_name)
+    }
+    if check_params == .Val(values) && values.len() > 0 {
+        params := None
+        if owner_mod == self.module_idx {
+            params = self.trait_reg.struct_params.get(type_name)
+        } else if self.modules == .Val(modules) {
+            if modules.get(owner_mod) == .Val(state) -> params = state.trait_reg.struct_params.get(type_name)
+        }
+        values :: params.expect("generic struct parameters exist")
+        args := [Type]{}
+        loop param in values -> &args.push(Type.Named{name: param.name})
+        return Type.Apply{name: nominal_name, args: args}
+    }
+    nominal
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:3415
+fn owning_field_value_mut(expr: &Expr) -> &Expr {
+    return if expr == {
+        .Paren(inner, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Tainted(inner, _, _) -> owning_field_value_mut(&inner)
+        else -> &expr
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:3426
+fn owning_field_value_type(expr: Expr, ty: Type?) -> Type? {
+    return if expr == {
+        .Paren(inner, _) | .Tainted(inner, _, _) -> owning_field_value_type(inner, ty)
+        .Present(inner, _) -> owning_field_value_type(inner, if ty == .Val(value) -> value.unwrap_option() else -> None)
+        .Ok(inner, _) -> {
+            payload := None
+            if ty == .Val(value) { if value.unwrap_result() == .Val((ok, _)) -> payload = Val(ok) }
+            owning_field_value_type(inner, payload)
+        }
+        .Err(inner, _) -> {
+            payload := None
+            if ty == .Val(value) { if value.unwrap_result() == .Val((_, error)) -> payload = Val(error) }
+            owning_field_value_type(inner, payload)
+        }
+        else -> ty
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:3470
+fn clone_borrowed_struct_field_value(self: &Checker, field_name: String?, expr: &Expr, ty: Type?) {
+    payload_ty :: owning_field_value_type(expr, ty)
+    payload := owning_field_value_mut(&expr)
+    if self.reject_borrowed_param_subplace(payload, payload_ty, "fill an owned field") -> return
+    if field_name == .Val(field) {
+        borrowed := false
+        if payload == .Ident(name, _) && name == field {
+            if self.lookup(name) == .Val(info) {
+                type_var := false
+                if info.ty == .Named(n) { loop param in self.type_param_scope { if param.name == n -> type_var = true } }
+                borrowed = !type_is_copy(info.ty) && !type_var && (info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write))
+            }
+        }
+        cloneable := false
+        if payload_ty == .Val(value) -> cloneable = self.is_cloneable_type(value)
+        if borrowed && !self.copies_explicit() && cloneable {
+            value :: payload_ty.expect("cloneable borrowed same-name field has a type")
+            self.insert_implicit_copy(payload, value, value)
+            return
+        }
+        if borrowed {
+            if payload == .Ident(name, span) {
+                diagnostic :: Diagnostic.error("E0120", "`{name}` was not moved here, so it cannot fill an owned field", "this function has read access only and does not own the value", "copy it explicitly with `{Syntax.SIGIL_COPY}{name}`", Val(span))
+                self.diags.push(self.with_ownership_copy_edit(diagnostic, span, payload_ty))
+            }
+            return
+        }
+    }
+    should_clone := false
+    if payload == .Ident(name, _) {
+        if self.lookup(name) == .Val(info) {
+            type_var := false
+            if info.ty == .Named(n) { loop param in self.type_param_scope { if param.name == n -> type_var = true } }
+            if !type_is_copy(info.ty) && !type_var {
+                should_clone = if info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write) -> true else -> self.is_name_live_after(name)
+            }
+        }
+    }
+    if should_clone && self.copies_explicit() {
+        if payload == .Ident(name, span) {
+            borrowed := false
+            if self.lookup(name) == .Val(info) -> borrowed = info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write)
+            what :: if borrowed -> "`{name}` was not moved here, so it cannot fill an owned field" else -> "`{name}` is still used later, so filling this field would copy it"
+            why :: if borrowed -> "this function has read access only and does not own the value" else -> "`copies: .Explicit` is active, so a copy into an owned field must be written"
+            diagnostic :: Diagnostic.error("E0120", what, why, "copy it explicitly with `{Syntax.SIGIL_COPY}{name}`", Val(span))
+            self.diags.push(self.with_ownership_copy_edit(diagnostic, span, payload_ty))
+        }
+        return
+    }
+    if should_clone {
+        span :: payload.span()
+        old :: mem.replace(payload, Expr.Absent(span))
+        payload = Expr.Copy(old, span)
+    }
+    self.note_move_if_direct_ident(payload, "the variant payload")
+}

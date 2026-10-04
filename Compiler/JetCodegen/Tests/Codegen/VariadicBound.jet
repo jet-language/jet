@@ -1,0 +1,16 @@
+use jet_codegen.Codegen.VariadicBound.[variadic_bound_fn_name, variadic_slot_name, unroll_variadic_body, stmt_references_ident, expr_references_ident]
+use jet_foundation.AST.[Expr, Stmt]
+use jet_foundation.Span.[Span]
+
+// Rust: crates/jet-codegen/src/Codegen/VariadicBound.rs:22-373 (behavioral controls; no inline Rust tests)
+#Test("variadic_bound_identity_and_reference_controls") {
+    assert(variadic_bound_fn_name("user_log_all", 2) == "user_log_all__va2")
+    assert(variadic_slot_name("parts", 0) == "parts__va0")
+    assert(unroll_variadic_body([], "parts", 0)? == [])
+    span :: Span{start: 0, end: 0}
+    assert(expr_references_ident(Expr.Ident("parts", span), "parts"))
+    assert(!expr_references_ident(Expr.Ident("other", span), "parts"))
+    assert(stmt_references_ident(Stmt.Expr(Expr.Ident("parts", span)), "parts"))
+    result :: unroll_variadic_body([Stmt.Expr(Expr.Ident("parts", span))], "parts", 2)
+    assert(result.is_err())
+}

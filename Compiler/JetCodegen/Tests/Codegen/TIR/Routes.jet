@@ -1,0 +1,121 @@
+use jet_foundation.[Type, Effect]
+use jet_foundation.MIR.[MirPreludeAbi, MirPreludeFamily, MirSymbol]
+use jet_codegen.TIR.[TClosureOp, TNumericOp, TFailureCarrier, TZipMode, TPreludeRoute, TRoutePlan]
+use jet_codegen.TIR.Routes.[loop_route_bundle, zip_closure_route, as_prelude, event_route, task_route, watch_route, http_client_request_route]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:48-86
+#Test("loop_route_bundle_preserves_internal_protocol") {
+    bundle :: loop_route_bundle()
+    rows :: [TPreludeRoute]{bundle.range_init, bundle.range_has_next, bundle.range_value, bundle.range_advance,
+        bundle.iter_init, bundle.iter_has_next, bundle.iter_value, bundle.iter_advance}
+    members :: [String]{"loop_range_init", "loop_range_has_next", "loop_range_value", "loop_range_advance",
+        "loop_iter_init", "loop_iter_has_next", "loop_iter_value", "loop_iter_advance"}
+    symbols :: [String]{"jet_loop_range_init", "jet_loop_range_has_next", "jet_loop_range_value", "jet_loop_range_advance",
+        "jet_loop_iter_init", "jet_loop_iter_has_next", "jet_loop_iter_value", "jet_loop_iter_advance"}
+    loop (index, row) in rows.enumerate() {
+        init :: index == 0 || index == 4
+        assert_eq(row.family, MirPreludeFamily.StaticPrelude)
+        assert_eq(row.module, "core.prelude")
+        assert_eq(row.member, members[index])
+        assert_eq(row.symbol, MirSymbol.Prelude(symbols[index]))
+        assert_eq(row.signature.arity, if init -> 5 else -> 1)
+        assert_eq(row.signature.max_arity, row.signature.arity)
+        assert_eq(row.signature.borrow_mask, if init -> [Bool]{false, false, false, false, false} else -> [Bool]{true})
+        assert(row.fallibility is .Infallible)
+        assert_eq(row.abi, MirPreludeAbi.Value)
+        assert_eq(row.effect, None)
+        assert_eq(row.authority, None)
+        assert_eq(row.db_metadata, None)
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:88-110
+#Test("zip_routes_keep_short_strict_and_pad_arities") {
+    loop (mode, member, symbol, arity) in [(TZipMode, String, String, USize)]{
+        (TZipMode.Short, "zip", "jet_iter_zip", 3), (TZipMode.Strict, "zip_strict", "jet_iter_zip_strict", 10), (TZipMode.Pad, "zip_pad", "jet_iter_zip_pad", 5)} {
+        row :: zip_closure_route(mode)
+        assert_eq(row.module, "core.iter")
+        assert_eq(row.member, member)
+        assert_eq(row.symbol, MirSymbol.Prelude(symbol))
+        assert_eq(row.signature.arity, arity)
+        assert_eq(row.signature.max_arity, arity)
+        assert_eq(row.signature.borrow_mask, [Bool].repeat(false, arity))
+        assert(row.fallibility is .Infallible)
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:176-415
+#Test("collection_routes_choose_checked_receiver_and_borrow_shape") {
+    plain :: TFailureCarrier.Infallible
+    list :: TClosureOp.FilterMap.prelude_route(Type.List(Type.Int), Type.List(Type.Int), plain) ?? panic(err.message)
+    iter :: TClosureOp.FilterMap.prelude_route(Type.Apply{name: "Iter", args: [Type]{Type.Int}}, Type.List(Type.Int), plain) ?? panic(err.message)
+    assert_eq(list.symbol, MirSymbol.Prelude("jet_list_filter_map_iter"))
+    assert_eq(iter.symbol, MirSymbol.Prelude("jet_iter_filter_map"))
+    carrier :: TFailureCarrier.Result{success: Type.List(Type.Int), error: Type.Named("Err")}
+    view :: TClosureOp.TryMap.prelude_route(Type.Apply{name: "ViewMut", args: [Type]{Type.Int}}, Type.List(Type.Int), carrier) ?? panic(err.message)
+    assert_eq(view.module, "core.view")
+    assert_eq(view.signature.borrow_mask, [Bool]{true, false})
+    if view.fallibility == .Result{success, error} {
+        assert_eq(success, Type.List(Type.Int))
+        assert_eq(error, Type.Named("Err"))
+    } else -> panic("checked carrier must be retained")
+    if TClosureOp.Map.route_plan(Type.Int, Type.Int, plain) == Err(error) {
+        assert_eq(error.message, "checked closure operation `Map` has an unsupported receiver type")
+    } else -> panic("unsupported receiver must be refused")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:793-815
+#Test("closure_routes_preserve_mutation_effect_and_aggregate_abi") {
+    mutating :: TClosureOp.UpdateFirst.prelude_route(Type.List(Type.Int), Type.Int, TFailureCarrier.Infallible) ?? panic(err.message)
+    assert_eq(mutating.signature.borrow_mask, [Bool]{true, false, false})
+    assert_eq(mutating.effect, Val(Effect.Mem))
+    aggregate :: TClosureOp.Partition{tuple_struct: "Parts"}.prelude_route(Type.List(Type.Int), Type.Named("Parts"), TFailureCarrier.Infallible) ?? panic(err.message)
+    assert_eq(aggregate.abi, MirPreludeAbi.Aggregate)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:841-904
+#Test("numeric_predicates_and_structural_plan_rejection") {
+    row :: TNumericOp.Predicate("is_finite").prelude_route(Type.Bool, TFailureCarrier.Infallible) ?? panic(err.message)
+    assert_eq(row.module, "core.math")
+    assert_eq(row.symbol, MirSymbol.Prelude("jet_std_math_is_finite"))
+    if TNumericOp.Predicate("unknown").route_plan(Type.Bool, TFailureCarrier.Infallible) == Err(error) {
+        assert_eq(error.message, "unknown numeric predicate `unknown`")
+    } else -> panic("unknown numeric predicate must fail")
+    if as_prelude(TRoutePlan.Primitive, "numeric method") == Err(error) {
+        assert_eq(error.message, "checked operation `numeric method` requires structural MIR lowering")
+    } else -> panic("structural MIR operation must not invent a Prelude row")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1048-1183
+#Test("async_event_routes_select_executable_failure_carrier") {
+    receiver :: Type.Apply{name: "AsyncEvent", args: [Type]{Type.Int}}
+    plain :: as_prelude(event_route(receiver, "emit_async", TFailureCarrier.Infallible) ?? panic(err.message), "event") ?? panic(err.message)
+    fallible :: as_prelude(event_route(receiver, "emit_async", TFailureCarrier.Result{success: Type.Int, error: Type.Named("Err")}) ?? panic(err.message), "event") ?? panic(err.message)
+    assert_eq(plain.symbol, MirSymbol.Prelude("jet_std::JetAsyncEvent::emit_async"))
+    assert_eq(fallible.symbol, MirSymbol.Prelude("jet_std::JetAsyncEvent::emit_async_result"))
+    assert_eq(fallible.signature.borrow_mask, [Bool]{true, false})
+    if event_route(Type.Named("Event"), "unknown", TFailureCarrier.Infallible) == Err(error) {
+        assert_eq(error.message, "unknown checked event method `Event.unknown`")
+    } else -> panic("unknown event method must fail")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1185-1220
+#Test("task_routes_unwrap_private_result_body_carrier") {
+    body :: Type.Result{ok: Type.Int, err: Type.Named("Err")}
+    joined :: as_prelude(task_route(Type.Apply{name: "Task", args: [Type]{body}}, TFailureCarrier.Infallible) ?? panic(err.message), "task") ?? panic(err.message)
+    assert_eq(joined.symbol, MirSymbol.Prelude("jet_std::jet_task_join_result"))
+    plain :: as_prelude(task_route(Type.Apply{name: "Task", args: [Type]{Type.Int}}, TFailureCarrier.Infallible) ?? panic(err.message), "task") ?? panic(err.message)
+    assert_eq(plain.symbol, MirSymbol.Prelude("jet_std::JetTask::join"))
+    if task_route(Type.Apply{name: "Task", args: []}, TFailureCarrier.Infallible) == Err(error) {
+        assert_eq(error.message, "checked task join is missing its value type")
+    } else -> panic("missing task value must fail")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:918-1022,1222-1346
+#Test("watch_and_http_routes_preserve_effect_and_borrow_masks") {
+    watch :: as_prelude(watch_route(Type.Named("WatchSet"), "add", TFailureCarrier.Infallible) ?? panic(err.message), "watch") ?? panic(err.message)
+    assert_eq(watch.symbol, MirSymbol.Prelude("jet_jit_watchset_add"))
+    assert_eq(watch.effect, Val(Effect.IO))
+    assert_eq(watch.signature.borrow_mask, [Bool]{true, true})
+    http :: as_prelude(http_client_request_route("HTTPRequest", "header", TFailureCarrier.Infallible) ?? panic(err.message), "http") ?? panic(err.message)
+    assert_eq(http.symbol, MirSymbol.Prelude("jet_http_client_request_header"))
+    assert_eq(http.signature.arity, 3)
+    assert_eq(http.signature.borrow_mask, [Bool]{false, true, true})
+    assert_eq(http.effect, Val(Effect.Net))
+    if http_client_request_route("HTTPClient", "header", TFailureCarrier.Infallible) == Err(error) {
+        assert_eq(error.message, "unhandled HTTP client method `HTTPClient.header`")
+    } else -> panic("receiver-specific HTTP method must be refused")
+}

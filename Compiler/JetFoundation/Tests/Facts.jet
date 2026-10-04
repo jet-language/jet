@@ -1,5 +1,7 @@
 // Original jet-foundation/Facts.rs tests758-818, plus registry/alias boundaries.
 use jet_foundation.[FactKind, ReachabilityRow, StateGraph, StateGraphTransition, StateNode, fact_kind_name, fact_registry_contains, fact_registry_declare, fact_registry_declare_member, fact_registry_declare_state, fact_registry_declare_with_rules, fact_registry_get, fact_registry_iter, fact_registry_iter_kind, fact_registry_member, fact_registry_new, fact_registry_set_state_graph, fact_registry_state_graph, fact_registry_state_members, project_reachability, reachability_copy_node, reachability_nodes_with, reachability_path, sema_effect_covers]
+use jet_foundation.[BuildFactSnapshot, MIRRuntimeLayer, MIROSTarget, PKG_BUILD_STAMP_TOOLCHAIN]
+use core.files.runtime.kernel_path_components as build_snapshot_test_path
 
 #Test("subsumption_uses_segment_boundaries") {
     assert(sema_effect_covers("FS", "FS"))
@@ -55,4 +57,31 @@ use jet_foundation.[FactKind, ReachabilityRow, StateGraph, StateGraphTransition,
     assert((reachability_path(result, "taint", "alias", "Credential") ?? panic("alias missing")) == [String]{"alias", "a", "leaf"})
     assert(reachability_nodes_with(result, "taint", "Token") == [String]{"isolated"})
     assert(reachability_path(result, "missing", "root", "Credential") == None)
+}
+
+#Test("bundle_build_snapshot_keeps_original_host_default_identities") {
+    snapshot :: BuildFactSnapshot.for_host(MIROSTarget.Linux, "x86_64-unknown-linux-gnu")
+    assert_eq(snapshot.package_name, "script")
+    assert_eq(snapshot.package_version, "0.0.0")
+    assert_eq(snapshot.profile, "dev")
+    assert_eq(snapshot.os, MIROSTarget.Linux)
+    assert_eq(snapshot.target_triple, "x86_64-unknown-linux-gnu")
+    assert_eq(snapshot.target_dossier.machine, None)
+    assert_eq(snapshot.target_dossier.layer, MIRRuntimeLayer.Std)
+    assert_eq(snapshot.target_dossier.provider_identity, "hosted-default")
+    assert_eq(snapshot.target_dossier.closure_identity, "prelude-hosted-v1")
+    assert_eq(snapshot.target_dossier.compiler_identity, PKG_BUILD_STAMP_TOOLCHAIN)
+}
+
+#Test("script_snapshot_decodes_only_original_native_filename_stem") {
+    platform :: build_snapshot_test_path.PathPlatform.Unix
+    ordinary :: BuildFactSnapshot.script_for_host(build_snapshot_test_path.from_text("folder/my entry.jet", platform), MIROSTarget.MacOS, "aarch64-apple-darwin", "release")
+    assert_eq(ordinary.package_name, "my entry")
+    assert_eq(ordinary.profile, "release")
+    assert_eq(ordinary.target_triple, "aarch64-apple-darwin")
+    // Invalid ancestor bytes do not affect the valid final filename.
+    path :: build_snapshot_test_path.OSPath{encoded: [U8]{U8{255}, U8{47}, U8{97}, U8{46}, U8{106}, U8{101}, U8{116}}, platform: platform}
+    assert_eq(BuildFactSnapshot.script_for_host(path, MIROSTarget.Linux, "x86_64-unknown-linux-gnu", "dev").package_name, "a")
+    invalid_stem :: build_snapshot_test_path.OSPath{encoded: [U8]{U8{255}, U8{46}, U8{106}, U8{101}, U8{116}}, platform: platform}
+    assert_eq(BuildFactSnapshot.script_for_host(invalid_stem, MIROSTarget.Linux, "x86_64-unknown-linux-gnu", "dev").package_name, "script")
 }

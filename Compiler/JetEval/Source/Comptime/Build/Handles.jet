@@ -1,142 +1,159 @@
-// PORT-PENDING 0601 crates-jet-comptime-src-comptime-syncjetstd-module-group: crates/jet-comptime/src/Comptime/Build/handles.rs:1-138
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct TargetId(pub usize);
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct ActionId(pub usize);
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct ToolchainId(pub usize);
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct SigningIdentityId(pub usize);
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct ProbeId(pub usize);
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct PluginId(pub usize);
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct GeneratedModuleId(pub usize);
-//RS 
-//RS macro_rules! target_handle {
-//RS     ($name:ident) => {
-//RS         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS         pub struct $name {
-//RS             pub(super) id: TargetId,
-//RS             pub(super) context: u64,
-//RS         }
-//RS 
-//RS         impl $name {
-//RS             pub fn id(self) -> TargetId {
-//RS                 self.id
-//RS             }
-//RS         }
-//RS 
-//RS         impl From<$name> for TargetRef {
-//RS             fn from(value: $name) -> TargetRef {
-//RS                 TargetRef {
-//RS                     id: value.id,
-//RS                     context: value.context,
-//RS                 }
-//RS             }
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS target_handle!(ExecutableTarget);
-//RS target_handle!(LibraryTarget);
-//RS target_handle!(TestTarget);
-//RS target_handle!(AssetBundleTarget);
-//RS target_handle!(DocTarget);
-//RS target_handle!(InstallTarget);
-//RS target_handle!(PackageTarget);
-//RS target_handle!(PublishTarget);
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct TargetRef {
-//RS     pub(super) id: TargetId,
-//RS     pub(super) context: u64,
-//RS }
-//RS 
-//RS impl TargetRef {
-//RS     pub fn id(self) -> TargetId {
-//RS         self.id
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct ActionHandle {
-//RS     pub(super) id: ActionId,
-//RS     pub(super) context: u64,
-//RS }
-//RS 
-//RS impl ActionHandle {
-//RS     pub fn id(self) -> ActionId {
-//RS         self.id
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct ToolchainHandle {
-//RS     pub(super) id: ToolchainId,
-//RS     pub(super) context: u64,
-//RS }
-//RS 
-//RS impl ToolchainHandle {
-//RS     pub fn id(self) -> ToolchainId {
-//RS         self.id
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct SigningIdentityHandle {
-//RS     pub(super) id: SigningIdentityId,
-//RS     pub(super) context: u64,
-//RS }
-//RS 
-//RS impl SigningIdentityHandle {
-//RS     pub fn id(self) -> SigningIdentityId {
-//RS         self.id
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct ProbeHandle {
-//RS     pub(super) id: ProbeId,
-//RS     pub(super) context: u64,
-//RS }
-//RS 
-//RS impl ProbeHandle {
-//RS     pub fn id(self) -> ProbeId {
-//RS         self.id
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct PluginHandle {
-//RS     pub(super) id: PluginId,
-//RS     pub(super) context: u64,
-//RS }
-//RS 
-//RS impl PluginHandle {
-//RS     pub fn id(self) -> PluginId {
-//RS         self.id
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct GeneratedModuleHandle {
-//RS     pub(super) id: GeneratedModuleId,
-//RS     pub(super) context: u64,
-//RS }
-//RS 
-//RS impl GeneratedModuleHandle {
-//RS     pub fn id(self) -> GeneratedModuleId {
-//RS         self.id
-//RS     }
-//RS }
-// END-PORT-PENDING 0601 crates/jet-comptime/src/Comptime/Build/handles.rs:1-138
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:1
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct TargetId(pub USize)
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:4
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct ActionId(pub USize)
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:7
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct ToolchainId(pub USize)
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:10
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct SigningIdentityId(pub USize)
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:13
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct ProbeId(pub USize)
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:16
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct PluginId(pub USize)
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:19
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct GeneratedModuleId(pub USize)
 
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:47
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct ExecutableTarget { id: TargetId, context: U64 }
+impl ExecutableTarget {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:31
+    pub fn id(self: Self) -> TargetId { self.id }
+}
+impl From<ExecutableTarget> for TargetRef {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:37
+    fn from(value: ExecutableTarget) -> TargetRef { TargetRef { id: value.id, context: value.context } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:48
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct LibraryTarget { id: TargetId, context: U64 }
+impl LibraryTarget {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:31
+    pub fn id(self: Self) -> TargetId { self.id }
+}
+impl From<LibraryTarget> for TargetRef {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:37
+    fn from(value: LibraryTarget) -> TargetRef { TargetRef { id: value.id, context: value.context } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:49
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct TestTarget { id: TargetId, context: U64 }
+impl TestTarget {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:31
+    pub fn id(self: Self) -> TargetId { self.id }
+}
+impl From<TestTarget> for TargetRef {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:37
+    fn from(value: TestTarget) -> TargetRef { TargetRef { id: value.id, context: value.context } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:50
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct AssetBundleTarget { id: TargetId, context: U64 }
+impl AssetBundleTarget {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:31
+    pub fn id(self: Self) -> TargetId { self.id }
+}
+impl From<AssetBundleTarget> for TargetRef {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:37
+    fn from(value: AssetBundleTarget) -> TargetRef { TargetRef { id: value.id, context: value.context } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:51
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct DocTarget { id: TargetId, context: U64 }
+impl DocTarget {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:31
+    pub fn id(self: Self) -> TargetId { self.id }
+}
+impl From<DocTarget> for TargetRef {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:37
+    fn from(value: DocTarget) -> TargetRef { TargetRef { id: value.id, context: value.context } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:52
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct InstallTarget { id: TargetId, context: U64 }
+impl InstallTarget {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:31
+    pub fn id(self: Self) -> TargetId { self.id }
+}
+impl From<InstallTarget> for TargetRef {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:37
+    fn from(value: InstallTarget) -> TargetRef { TargetRef { id: value.id, context: value.context } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:53
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct PackageTarget { id: TargetId, context: U64 }
+impl PackageTarget {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:31
+    pub fn id(self: Self) -> TargetId { self.id }
+}
+impl From<PackageTarget> for TargetRef {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:37
+    fn from(value: PackageTarget) -> TargetRef { TargetRef { id: value.id, context: value.context } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:54
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct PublishTarget { id: TargetId, context: U64 }
+impl PublishTarget {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:31
+    pub fn id(self: Self) -> TargetId { self.id }
+}
+impl From<PublishTarget> for TargetRef {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:37
+    fn from(value: PublishTarget) -> TargetRef { TargetRef { id: value.id, context: value.context } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:56
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct TargetRef { id: TargetId, context: U64 }
+impl TargetRef {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:63
+    pub fn id(self: Self) -> TargetId { self.id }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:68
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct ActionHandle { id: ActionId, context: U64 }
+impl ActionHandle {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:75
+    pub fn id(self: Self) -> ActionId { self.id }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:80
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct ToolchainHandle { id: ToolchainId, context: U64 }
+impl ToolchainHandle {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:87
+    pub fn id(self: Self) -> ToolchainId { self.id }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:92
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct SigningIdentityHandle { id: SigningIdentityId, context: U64 }
+impl SigningIdentityHandle {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:99
+    pub fn id(self: Self) -> SigningIdentityId { self.id }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:104
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct ProbeHandle { id: ProbeId, context: U64 }
+impl ProbeHandle {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:111
+    pub fn id(self: Self) -> ProbeId { self.id }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:116
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct PluginHandle { id: PluginId, context: U64 }
+impl PluginHandle {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:123
+    pub fn id(self: Self) -> PluginId { self.id }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:128
+#Derive(Debug, Clone, Copy, Eq, Ord, Hash)
+pub struct GeneratedModuleHandle { id: GeneratedModuleId, context: U64 }
+impl GeneratedModuleHandle {
+    // Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:135
+    pub fn id(self: Self) -> GeneratedModuleId { self.id }
+}

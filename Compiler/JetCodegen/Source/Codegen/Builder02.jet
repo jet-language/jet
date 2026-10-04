@@ -1,1805 +1,799 @@
-// PORT-PENDING 0500 crates-jet-codegen-src-codegen-tir-mir-slice-5433: crates/jet-codegen/src/Codegen/TIR/mir.rs:5433-7233
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(super) fn span(&self) -> Span {
-//RS         self.current_span
-//RS     }
-//RS 
-//RS     pub(super) fn loop_body_blocks(
-//RS         &self,
-//RS         header: MirBlockId,
-//RS         body: MirBlockId,
-//RS         exit: Option<MirBlockId>,
-//RS         advance: Option<MirBlockId>,
-//RS     ) -> Vec<MirBlockId> {
-//RS         let mut pending = vec![body];
-//RS         let mut seen = HashSet::new();
-//RS         let mut region = Vec::new();
-//RS         while let Some(block_id) = pending.pop() {
-//RS             if block_id == header
-//RS                 || exit == Some(block_id)
-//RS                 || advance == Some(block_id)
-//RS                 || !seen.insert(block_id)
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let Some(block) = self.block_by_id(block_id) else {
-//RS                 continue;
-//RS             };
-//RS             region.push(block_id);
-//RS             pending.extend(block.terminator.targets());
-//RS         }
-//RS         region.sort_unstable();
-//RS         region
-//RS     }
-//RS 
-//RS     /// Return the checked place compared by a counted-loop condition.
-//RS     ///
-//RS     /// Canonicalized range loops use `local < end`/`local <= end`; retaining
-//RS     /// the place here lets the source row carry the same stable cursor scope
-//RS     /// that MIR's scalar loop analysis recovers after lowering.
-//RS     pub(super) fn loop_cursor_place(&self, condition: &TExpr) -> Option<MirPlaceId> {
-//RS         let TExprKind::Binary { lhs, .. } = &condition.kind else {
-//RS             return None;
-//RS         };
-//RS         let TExprKind::Local(local) = &lhs.kind else {
-//RS             return None;
-//RS         };
-//RS         self.local_places.get(&local.name).copied()
-//RS     }
-//RS 
-//RS     pub(super) fn checked_loop_cursor(
-//RS         &self,
-//RS         body_blocks: &[MirBlockId],
-//RS         advance: Option<MirBlockId>,
-//RS         cursor_place: Option<MirPlaceId>,
-//RS         hinted: Option<MirValueId>,
-//RS     ) -> Option<MirValueId> {
-//RS         if hinted.is_some() {
-//RS             return hinted;
-//RS         }
-//RS         let mut reads = Vec::new();
-//RS         for block_id in body_blocks {
-//RS             if advance == Some(*block_id) {
-//RS                 continue;
-//RS             }
-//RS             let Some(block) = self.block_by_id(*block_id) else {
-//RS                 continue;
-//RS             };
-//RS             for instruction in &block.instructions {
-//RS                 if let (Some(result), MirOperation::ReadPlace(place)) =
-//RS                     (instruction.result, &instruction.operation)
-//RS                 {
-//RS                     if cursor_place == Some(*place) {
-//RS                         reads.push(result);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         reads
-//RS             .iter()
-//RS             .copied()
-//RS             .find(|value| self.checked_cursor_value_is_indexed(body_blocks, advance, *value))
-//RS             .or_else(|| reads.into_iter().next())
-//RS     }
-//RS 
-//RS     fn checked_cursor_value_is_indexed(
-//RS         &self,
-//RS         body_blocks: &[MirBlockId],
-//RS         advance: Option<MirBlockId>,
-//RS         cursor: MirValueId,
-//RS     ) -> bool {
-//RS         body_blocks
-//RS             .iter()
-//RS             .filter(|block_id| advance != Some(**block_id))
-//RS             .any(|block_id| {
-//RS                 let Some(block) = self.block_by_id(*block_id) else {
-//RS                     return false;
-//RS                 };
-//RS                 block
-//RS                     .instructions
-//RS                     .iter()
-//RS                     .any(|instruction| match &instruction.operation {
-//RS                         MirOperation::Index { index, .. } => *index == cursor,
-//RS                         _ => checked_operation_place_refs(&instruction.operation)
-//RS                             .into_iter()
-//RS                             .any(|place_id| {
-//RS                                 self.places
-//RS                                     .iter()
-//RS                                     .find(|place| place.id == place_id)
-//RS                                     .is_some_and(|place| {
-//RS                                         place.projections.iter().any(|projection| {
-//RS                                         matches!(
-//RS                                             projection,
-//RS                                             MirProjection::Index { index, .. } if *index == cursor
-//RS                                         )
-//RS                                     })
-//RS                                     })
-//RS                             }),
-//RS                     })
-//RS             })
-//RS     }
-//RS 
-//RS     fn checked_cursor_matches(
-//RS         &self,
-//RS         value: MirValueId,
-//RS         cursor: MirValueId,
-//RS         cursor_place: Option<MirPlaceId>,
-//RS         seen: &mut HashSet<MirValueId>,
-//RS     ) -> bool {
-//RS         if value == cursor || !seen.insert(value) {
-//RS             return value == cursor;
-//RS         }
-//RS         let Some(instruction) = self
-//RS             .blocks
-//RS             .iter()
-//RS             .flat_map(|block| block.instructions.iter())
-//RS             .find(|instruction| instruction.result == Some(value))
-//RS         else {
-//RS             return false;
-//RS         };
-//RS         match &instruction.operation {
-//RS             MirOperation::ReadPlace(place) => cursor_place == Some(*place),
-//RS             MirOperation::Copy { value, .. }
-//RS             | MirOperation::Move { value }
-//RS             | MirOperation::AttachTag { value, .. }
-//RS             | MirOperation::Convert { value, .. } => {
-//RS                 self.checked_cursor_matches(*value, cursor, cursor_place, seen)
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn checked_value_access_root(
-//RS         &self,
-//RS         value: MirValueId,
-//RS         seen: &mut HashSet<MirValueId>,
-//RS     ) -> MirVectorAccessRoot {
-//RS         if !seen.insert(value) {
-//RS             return MirVectorAccessRoot::Value(value);
-//RS         }
-//RS         let Some(instruction) = self
-//RS             .blocks
-//RS             .iter()
-//RS             .flat_map(|block| block.instructions.iter())
-//RS             .find(|instruction| instruction.result == Some(value))
-//RS         else {
-//RS             return MirVectorAccessRoot::Value(value);
-//RS         };
-//RS         match &instruction.operation {
-//RS             MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
-//RS                 MirVectorAccessRoot::Place(*place)
-//RS             }
-//RS             MirOperation::Copy { value, .. }
-//RS             | MirOperation::Move { value }
-//RS             | MirOperation::AttachTag { value, .. }
-//RS             | MirOperation::Field { base: value, .. }
-//RS             | MirOperation::Index { base: value, .. } => {
-//RS                 self.checked_value_access_root(*value, seen)
-//RS             }
-//RS             MirOperation::Semantic(MirSemanticOp::ColumnarRead { base, .. }) => {
-//RS                 self.checked_value_access_root(*base, seen)
-//RS             }
-//RS             _ => MirVectorAccessRoot::Value(value),
-//RS         }
-//RS     }
-//RS 
-//RS     fn checked_value_type(&self, value: MirValueId) -> Option<MirType> {
-//RS         self.values
-//RS             .iter()
-//RS             .find(|(candidate, ..)| *candidate == value)
-//RS             .map(|(_, ty, ..)| ty.clone())
-//RS     }
-//RS 
-//RS     fn checked_place_base_type(&self, place: &MirPlace) -> Option<MirType> {
-//RS         match &place.base {
-//RS             MirPlaceBase::Local(local) => self
-//RS                 .locals
-//RS                 .iter()
-//RS                 .find(|candidate| candidate.id == *local)
-//RS                 .map(|local| local.ty.clone()),
-//RS             MirPlaceBase::Parameter(value)
-//RS             | MirPlaceBase::Capture(value)
-//RS             | MirPlaceBase::Temporary(value) => self.checked_value_type(*value),
-//RS             MirPlaceBase::Static(_) => None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn checked_vector_place_layout(
-//RS         &self,
-//RS         place: &MirPlace,
-//RS         field: Option<MirFieldId>,
-//RS     ) -> (MirVectorLayout, Option<usize>) {
-//RS         let Some(field) = field else {
-//RS             return (MirVectorLayout::Flat, None);
-//RS         };
-//RS         let Some(base_type) = self.checked_place_base_type(place) else {
-//RS             return (MirVectorLayout::AosStrided, None);
-//RS         };
-//RS         let element = match base_type.kind() {
-//RS             MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => inner.as_ref(),
-//RS             MirTypeKind::Tagged { inner, .. } => match inner.kind() {
-//RS                 MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
-//RS                     inner.as_ref()
-//RS                 }
-//RS                 _ => return (MirVectorLayout::AosStrided, None),
-//RS             },
-//RS             _ => return (MirVectorLayout::AosStrided, None),
-//RS         };
-//RS         let Some(identity) = element.identity.or_else(|| match element.kind() {
-//RS             MirTypeKind::Apply { name, .. } => Some(name.id),
-//RS             _ => None,
-//RS         }) else {
-//RS             return (MirVectorLayout::AosStrided, None);
-//RS         };
-//RS         let Some(definition) = self
-//RS             .type_defs
-//RS             .iter()
-//RS             .find(|definition| definition.id == identity)
-//RS         else {
-//RS             return (MirVectorLayout::AosStrided, None);
-//RS         };
-//RS         let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
-//RS             return (MirVectorLayout::AosStrided, None);
-//RS         };
-//RS         if definition.layout != Some(jet_foundation::MIR::MirStructLayout::Columnar) {
-//RS             return (MirVectorLayout::AosStrided, None);
-//RS         }
-//RS         (
-//RS             MirVectorLayout::ColumnarDirect,
-//RS             fields.iter().position(|candidate| candidate.id == field),
-//RS         )
-//RS     }
-//RS 
-//RS     fn checked_indexed_field_access(
-//RS         &self,
-//RS         base: MirValueId,
-//RS         field: MirFieldId,
-//RS         cursor: Option<MirValueId>,
-//RS         cursor_place: Option<MirPlaceId>,
-//RS     ) -> Option<(MirVectorAccessRoot, MirVectorLayout, Option<usize>)> {
-//RS         let instruction = self
-//RS             .blocks
-//RS             .iter()
-//RS             .flat_map(|block| block.instructions.iter())
-//RS             .find(|instruction| instruction.result == Some(base))?;
-//RS         let MirOperation::Index {
-//RS             base: collection,
-//RS             index,
-//RS             kind: MirIndexKind::List | MirIndexKind::FixedListProof,
-//RS             ..
-//RS         } = &instruction.operation
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         let cursor = cursor?;
-//RS         if !self.checked_cursor_matches(*index, cursor, cursor_place, &mut HashSet::new()) {
-//RS             return None;
-//RS         }
-//RS         let collection_type = self.checked_value_type(*collection)?;
-//RS         let element = match collection_type.kind() {
-//RS             MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => inner.as_ref(),
-//RS             MirTypeKind::Tagged { inner, .. } => match inner.kind() {
-//RS                 MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
-//RS                     inner.as_ref()
-//RS                 }
-//RS                 _ => return None,
-//RS             },
-//RS             _ => return None,
-//RS         };
-//RS         let identity = element.identity.or_else(|| match element.kind() {
-//RS             MirTypeKind::Apply { name, .. } => Some(name.id),
-//RS             _ => None,
-//RS         })?;
-//RS         let definition = self
-//RS             .type_defs
-//RS             .iter()
-//RS             .find(|definition| definition.id == identity)?;
-//RS         let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
-//RS             return None;
-//RS         };
-//RS         let layout = if definition.layout == Some(jet_foundation::MIR::MirStructLayout::Columnar) {
-//RS             MirVectorLayout::ColumnarDirect
-//RS         } else {
-//RS             MirVectorLayout::AosStrided
-//RS         };
-//RS         Some((
-//RS             self.checked_value_access_root(*collection, &mut HashSet::new()),
-//RS             layout,
-//RS             (layout == MirVectorLayout::ColumnarDirect)
-//RS                 .then(|| fields.iter().position(|candidate| candidate.id == field))
-//RS                 .flatten(),
-//RS         ))
-//RS     }
-//RS 
-//RS     fn checked_vector_accesses(
-//RS         &self,
-//RS         blocks: &[MirBlockId],
-//RS         cursor: Option<MirValueId>,
-//RS         cursor_place: Option<MirPlaceId>,
-//RS     ) -> Vec<MirVectorAccess> {
-//RS         let mut accesses = Vec::new();
-//RS         for block_id in blocks {
-//RS             let Some(block) = self.block_by_id(*block_id) else {
-//RS                 continue;
-//RS             };
-//RS             for instruction in &block.instructions {
-//RS                 for place_id in checked_operation_place_refs(&instruction.operation) {
-//RS                     let Some(place) = self.places.iter().find(|place| place.id == place_id) else {
-//RS                         continue;
-//RS                     };
-//RS                     let field =
-//RS                         place
-//RS                             .projections
-//RS                             .iter()
-//RS                             .rev()
-//RS                             .find_map(|projection| match projection {
-//RS                                 MirProjection::Field { field, .. } => Some(*field),
-//RS                                 _ => None,
-//RS                             });
-//RS                     let (layout, column_index) = self.checked_vector_place_layout(place, field);
-//RS                     accesses.push(MirVectorAccess {
-//RS                         root: MirVectorAccessRoot::Place(place_id),
-//RS                         field,
-//RS                         layout,
-//RS                         column_index,
-//RS                     });
-//RS                 }
-//RS                 match &instruction.operation {
-//RS                     MirOperation::Index { base, index, .. }
-//RS                         if cursor.is_some_and(|cursor| {
-//RS                             self.checked_cursor_matches(
-//RS                                 *index,
-//RS                                 cursor,
-//RS                                 cursor_place,
-//RS                                 &mut HashSet::new(),
-//RS                             )
-//RS                         }) =>
-//RS                     {
-//RS                         accesses.push(MirVectorAccess {
-//RS                             root: self.checked_value_access_root(*base, &mut HashSet::new()),
-//RS                             field: None,
-//RS                             layout: MirVectorLayout::Flat,
-//RS                             column_index: None,
-//RS                         });
-//RS                     }
-//RS                     MirOperation::Semantic(MirSemanticOp::ColumnarRead {
-//RS                         base,
-//RS                         column,
-//RS                         column_index,
-//RS                         ..
-//RS                     }) => accesses.push(MirVectorAccess {
-//RS                         root: MirVectorAccessRoot::Value(*base),
-//RS                         field: Some(*column),
-//RS                         layout: MirVectorLayout::ColumnarDirect,
-//RS                         column_index: Some(*column_index),
-//RS                     }),
-//RS                     MirOperation::Field { base, field } => {
-//RS                         if let Some((root, layout, column_index)) =
-//RS                             self.checked_indexed_field_access(*base, *field, cursor, cursor_place)
-//RS                         {
-//RS                             accesses.push(MirVectorAccess {
-//RS                                 root,
-//RS                                 field: Some(*field),
-//RS                                 layout,
-//RS                                 column_index,
-//RS                             });
-//RS                         }
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS         }
-//RS         accesses.sort_unstable();
-//RS         accesses.dedup();
-//RS         accesses
-//RS     }
-//RS 
-//RS     fn checked_lane_width(ty: &MirType, rule: MirVectorRule) -> Option<u16> {
-//RS         match ty.kind() {
-//RS             MirTypeKind::Int => (rule == MirVectorRule::EarlyExitSearch).then_some(2),
-//RS             MirTypeKind::Float => Some(2),
-//RS             MirTypeKind::Float32 => Some(4),
-//RS             MirTypeKind::IntN { bits, .. } => Some(if *bits <= 32 { 4 } else { 2 }),
-//RS             MirTypeKind::InlineRange { base, .. }
-//RS             | MirTypeKind::Tagged { inner: base, .. }
-//RS             | MirTypeKind::Quantity { base, .. } => Self::checked_lane_width(base, rule),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn record_checked_vector_fact(
-//RS         &mut self,
-//RS         header: MirBlockId,
-//RS         cursor: Option<MirValueId>,
-//RS         body_blocks: Vec<MirBlockId>,
-//RS         advance_block: Option<MirBlockId>,
-//RS         cursor_place: Option<MirPlaceId>,
-//RS         facts: &crate::AST::AutoVectorizationFacts,
-//RS         span: Span,
-//RS     ) -> Result<(), LowerError> {
-//RS         let element_type = self.mir_type(&facts.element_type)?;
-//RS         let accesses = self.checked_vector_accesses(&body_blocks, cursor, cursor_place);
-//RS         let layouts = accesses
-//RS             .iter()
-//RS             .filter(|access| access.field.is_some() || access.layout != MirVectorLayout::Flat)
-//RS             .map(|access| access.layout)
-//RS             .collect::<BTreeSet<_>>();
-//RS         let layout = if layouts.len() == 1 {
-//RS             *layouts.iter().next().expect("one checked vector layout")
-//RS         } else {
-//RS             MirVectorLayout::Flat
-//RS         };
-//RS         let lane_width = Self::checked_lane_width(&element_type, MirVectorRule::Elementwise);
-//RS         let packed = lane_width.is_some()
-//RS             && !accesses.is_empty()
-//RS             && facts.no_aliasing
-//RS             && facts.no_early_exit
-//RS             && facts.effect_free_body
-//RS             && facts.no_cross_iteration_deps;
-//RS         self.checked_vector_facts.push(MirVectorFact {
-//RS             loop_header: header,
-//RS             cursor,
-//RS             body_blocks,
-//RS             advance_block,
-//RS             rule: MirVectorRule::Elementwise,
-//RS             accesses,
-//RS             layout,
-//RS             element_type: Some(element_type),
-//RS             packed,
-//RS             lane_width,
-//RS             no_aliasing: facts.no_aliasing,
-//RS             no_early_exit: facts.no_early_exit,
-//RS             effect_free_body: facts.effect_free_body,
-//RS             no_cross_iteration_dependencies: facts.no_cross_iteration_deps,
-//RS             fixed_reduction: None,
-//RS             span,
-//RS             // This row is source evidence, not a final optimization decision.
-//RS             decision: MirOptimizationDecision::Rejected(
-//RS                 MirOptimizationRejection::UnsupportedOperation,
-//RS             ),
-//RS         });
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub(super) fn set_span(&mut self, span: Span) {
-//RS         self.current_span = span;
-//RS     }
-//RS     pub(super) fn set_line_marker(&mut self, line: u32) {
-//RS         self.current_line = Some(line);
-//RS     }
-//RS     /// Source text and line index of the function being lowered.
-//RS     pub(super) fn function_source(&self) -> Option<&'a IndexedSource<'a>> {
-//RS         self.source_texts.get(&self.function.source_file)
-//RS     }
-//RS     pub(super) fn source_line(&self) -> u32 {
-//RS         if let Some(line) = self.current_line {
-//RS             return line;
-//RS         }
-//RS         // LineMarker is debug-only; SourceSpan is always present for jet run.
-//RS         if let Some(source) = self.function_source() {
-//RS             return source.lines.line_col(source.text, self.current_span.start).0 as u32;
-//RS         }
-//RS         self.function.line as u32
-//RS     }
-//RS     /// 1-based character column of the statement being lowered, or 0 when
-//RS     /// its source text is not retained.
-//RS     pub(super) fn source_column(&self) -> u32 {
-//RS         self.function_source().map_or(0, |source| {
-//RS             source.lines.line_col(source.text, self.current_span.start).1 as u32
-//RS         })
-//RS     }
-//RS     pub(super) fn with_switch_subject<R>(
-//RS         &mut self,
-//RS         subject: MirValueId,
-//RS         lower: impl FnOnce(&mut Self) -> Result<R, LowerError>,
-//RS     ) -> Result<R, LowerError> {
-//RS         let previous = self.switch_subject.replace(subject);
-//RS         let result = lower(self);
-//RS         self.switch_subject = previous;
-//RS         result
-//RS     }
-//RS 
-//RS     pub(super) fn switch_subject(&self) -> Result<MirValueId, LowerError> {
-//RS         self.switch_subject
-//RS             .ok_or_else(|| self.error(self.span(), "switch subject is not available"))
-//RS     }
-//RS     pub(super) fn panic_context_at(
-//RS         &self,
-//RS         line: u32,
-//RS         source_line_override: Option<&str>,
-//RS     ) -> MirPanicContext {
-//RS         let source_line = source_line_override
-//RS             .map(str::to_owned)
-//RS             .or_else(|| {
-//RS                 self.function_source().map(|source| {
-//RS                     source
-//RS                         .lines
-//RS                         .line_text(source.text, line as usize)
-//RS                         .to_owned()
-//RS                 })
-//RS             })
-//RS             .unwrap_or_default();
-//RS         MirPanicContext {
-//RS             function: self.function.name.clone(),
-//RS             source_line,
-//RS             caret: 0,
-//RS             locals: Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn source_file_id_for(&mut self, file: &str) -> MirSourceFileId {
-//RS         if let Some(id) = self.source_files.get(file).copied() {
-//RS             return id;
-//RS         }
-//RS         let id = MirSourceFileId(stable_id("mir-source-file", file));
-//RS         self.source_files.insert(file.to_string(), id);
-//RS         id
-//RS     }
-//RS     fn lower_db_query_metadata(&mut self, metadata: super::TDbQueryMetadata) -> MirDbQueryMetadata {
-//RS         let source_path = metadata.source_file;
-//RS         MirDbQueryMetadata {
-//RS             source_file: self.source_file_id_for(&source_path),
-//RS             source_path,
-//RS             source_span: metadata.source_span,
-//RS             statement_identity: metadata.statement_identity,
-//RS             table_facts: metadata
-//RS                 .table_facts
-//RS                 .into_iter()
-//RS                 .map(|fact| MirDbTableFact {
-//RS                     table_id: fact.table_id,
-//RS                     read: fact.read,
-//RS                     write: fact.write,
-//RS                 })
-//RS                 .collect(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn site_id_for(&self, span: Span, purpose: &str) -> MirSiteId {
-//RS         MirSiteId(stable_id(
-//RS             "mir-site",
-//RS             &format!(
-//RS                 "{}:{purpose}:{}:{}",
-//RS                 function_identity(self.function),
-//RS                 span.start,
-//RS                 span.end
-//RS             ),
-//RS         ))
-//RS     }
-//RS 
-//RS     pub(super) fn type_id_for(&self, key: &str) -> Result<MirTypeId, LowerError> {
-//RS         // A bare name declared by the function's own module shadows a
-//RS         // compiler-owned row of the same leaf (a user `Effect` over the Core
-//RS         // export row keyed `Effect`), as `mir_type` resolves the value type.
-//RS         let scoped = (!self.function.module.is_empty() && !key.contains("::"))
-//RS             .then(|| format!("{}::{key}", self.function.module))
-//RS             .filter(|scoped| {
-//RS                 self.type_defs
-//RS                     .iter()
-//RS                     .any(|ty| ty.key == *scoped && ty.name == key)
-//RS             });
-//RS         let canonical_key = canonical_nominal_name(
-//RS             self.type_defs,
-//RS             scoped.as_deref().unwrap_or(key),
-//RS             self.span(),
-//RS         )?;
-//RS         let exact = self
-//RS             .type_defs
-//RS             .iter()
-//RS             .filter(|ty| ty.key == canonical_key)
-//RS             .collect::<Vec<_>>();
-//RS         match exact.as_slice() {
-//RS             [ty] => Ok(ty.id),
-//RS             [] => match self
-//RS                 .trait_defs
-//RS                 .iter()
-//RS                 .filter(|trait_def| trait_def.key == key || trait_def.name == key)
-//RS                 .count()
-//RS             {
-//RS                 0 => Ok(MirTypeId(stable_id("mir-type", &canonical_key))),
-//RS                 1 => Ok(MirTypeId(stable_id("mir-type", &format!("Trait({key})")))),
-//RS                 _ => Err(self.error(
-//RS                     self.span(),
-//RS                     format!("ambiguous checked MIR trait key `{key}`"),
-//RS                 )),
-//RS             },
-//RS             _ => Err(self.error(
-//RS                 self.span(),
-//RS                 format!("ambiguous checked MIR type key `{key}`"),
-//RS             )),
-//RS         }
-//RS     }
-//RS     /// Return the flattened MIR leaves rooted at a checked enum group path.
-//RS     ///
-//RS     /// Groups are a source/TIR pattern convenience.  Canonical MIR stores only
-//RS     /// their dotted leaf variants, so consumers must test each descendant leaf.
-//RS     pub(super) fn enum_group_leaves(&self, owner: MirTypeId, group: &str) -> Option<Vec<String>> {
-//RS         let row = self.type_defs.iter().find(|row| row.id == owner)?;
-//RS         let MirTypeDefKind::Enum { variants, .. } = &row.kind else {
-//RS             return None;
-//RS         };
-//RS         let prefix = format!("{group}.");
-//RS         let leaves = variants
-//RS             .iter()
-//RS             .filter(|variant| variant.name.starts_with(&prefix))
-//RS             .map(|variant| variant.name.clone())
-//RS             .collect::<Vec<_>>();
-//RS         (!leaves.is_empty()).then_some(leaves)
-//RS     }
-//RS 
-//RS     fn normalize_contextual_type(&self, ty: &Type) -> Type {
-//RS         ty.map_named_types(&|name| {
-//RS             if self
-//RS                 .function
-//RS                 .generic_params
-//RS                 .iter()
-//RS                 .any(|parameter| parameter.name == name)
-//RS             {
-//RS                 return None;
-//RS             }
-//RS             let scoped = format!("{}::{name}", self.function.module);
-//RS             // A bare built-in type name (`Path`) outside its declaring module is
-//RS             // the built-in; a loaded module's same-named record is reached only
-//RS             // through its scoped or canonical spelling.
-//RS             let bare = if name == crate::Syntax::TYPE_TASKGROUP
-//RS                 || crate::Syntax::typed_head_kind(name).is_some()
-//RS             {
-//RS                 None
-//RS             } else {
-//RS                 self.nominal_identities.get(name)
-//RS             };
-//RS             self.nominal_identities
-//RS                 .get(&scoped)
-//RS                 .or(bare)
-//RS                 .cloned()
-//RS                 .or_else(|| {
-//RS                     let qualified = (!self.function.module.is_empty()).then_some(scoped)?;
-//RS                     self.type_defs
-//RS                         .iter()
-//RS                         .any(|definition| definition.key == qualified && definition.name == name)
-//RS                         .then_some(qualified)
-//RS                 })
-//RS         })
-//RS     }
-//RS 
-//RS     pub(super) fn mir_type(&mut self, ty: &Type) -> Result<MirType, LowerError> {
-//RS         let span = self.span();
-//RS         let normalized = self.normalize_contextual_type(ty);
-//RS         let contextual_owner = match &normalized {
-//RS             Type::Named(name) => {
-//RS                 let owner_name = match &self.function.kind {
-//RS                     super::TFuncKind::Method { owner_type, .. }
-//RS                     | super::TFuncKind::TraitMethod { owner_type, .. } => Some(owner_type.name()),
-//RS                     super::TFuncKind::TopLevel => None,
-//RS                 };
-//RS                 owner_name.and_then(|owner_name| {
-//RS                     let same_leaf = owner_name
-//RS                         .rsplit("::")
-//RS                         .next()
-//RS                         .unwrap_or(owner_name.as_str())
-//RS                         == name;
-//RS                     let ambiguous = self
-//RS                         .type_defs
-//RS                         .iter()
-//RS                         .filter(|definition| {
-//RS                             definition.name == *name
-//RS                                 || definition
-//RS                                     .key
-//RS                                     .rsplit("::")
-//RS                                     .next()
-//RS                                     .unwrap_or(&definition.key)
-//RS                                     == name.as_str()
-//RS                         })
-//RS                         .count()
-//RS                         > 1;
-//RS                     (same_leaf && ambiguous).then_some(Type::Named(owner_name))
-//RS                 })
-//RS             }
-//RS             _ => None,
-//RS         };
-//RS         let resolved_ty = contextual_owner.as_ref().unwrap_or(&normalized);
-//RS         let instance = canonical_type_instance(self.type_defs, resolved_ty, span)?;
-//RS         merge_type_instance(&mut self.type_instances, instance.clone(), span)?;
-//RS         Ok(instance)
-//RS     }
-//RS 
-//RS     pub(super) fn value_source_type(&self, value: MirValueId) -> Result<Type, LowerError> {
-//RS         self.values
-//RS             .iter()
-//RS             .find(|(id, _, _, _)| *id == value)
-//RS             .map(|(_, ty, _, _)| mir_type_as_ast(ty))
-//RS             .ok_or_else(|| {
-//RS                 self.error(
-//RS                     self.span(),
-//RS                     format!("missing checked MIR value type {value:?}"),
-//RS                 )
-//RS             })
-//RS     }
-//RS 
-//RS     pub(super) fn call_value_access(
-//RS         &self,
-//RS         value: MirValueId,
-//RS         borrowed: bool,
-//RS     ) -> Result<MirAccess, LowerError> {
-//RS         if borrowed {
-//RS             return Ok(MirAccess::Read);
-//RS         }
-//RS         let ownership = self
-//RS             .values
-//RS             .iter()
-//RS             .rev()
-//RS             .find(|(id, _, _, _)| *id == value)
-//RS             .map(|(_, _, _, ownership)| ownership)
-//RS             .ok_or_else(|| {
-//RS                 self.error(
-//RS                     self.span(),
-//RS                     format!("missing checked MIR value ownership {value:?}"),
-//RS                 )
-//RS             })?;
-//RS         Ok(
-//RS             if matches!(ownership.mode, jet_foundation::MIR::MirOwnershipMode::Copy) {
-//RS                 MirAccess::Read
-//RS             } else {
-//RS                 MirAccess::Move
-//RS             },
-//RS         )
-//RS     }
-//RS 
-//RS     pub(super) fn field_id_for(
-//RS         &self,
-//RS         owner: jet_foundation::MIR::MirTypeId,
-//RS         key: &str,
-//RS     ) -> Result<MirFieldId, LowerError> {
-//RS         let Some(ty) = self.type_defs.iter().find(|ty| ty.id == owner) else {
-//RS             return Err(self.error(
-//RS                 self.span(),
-//RS                 format!("missing checked MIR owner type {owner:?}"),
-//RS             ));
-//RS         };
-//RS         let lookup_key = math_field_name(ty, key).unwrap_or(key);
-//RS         let field = match &ty.kind {
-//RS             MirTypeDefKind::Struct { fields, .. } => {
-//RS                 fields.iter().find(|field| field.name == lookup_key)
-//RS             }
-//RS             MirTypeDefKind::Enum { variants, .. } => {
-//RS                 variants.iter().find_map(|variant| match &variant.payload {
-//RS                     jet_foundation::MIR::MirVariantPayload::Named(fields) => {
-//RS                         fields.iter().find(|field| field.name == lookup_key)
-//RS                     }
-//RS                     _ => None,
-//RS                 })
-//RS             }
-//RS             MirTypeDefKind::Distinct { .. }
-//RS             | MirTypeDefKind::Alias { .. }
-//RS             | MirTypeDefKind::UnitFamily { .. } => None,
-//RS         };
-//RS         field.map(|field| field.id).ok_or_else(|| {
-//RS             self.error(
-//RS                 self.span(),
-//RS                 format!("missing checked MIR field `{key}` on {owner:?}"),
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     /// Whether `ty` names a checked MIR record row. The compiler-owned
-//RS     /// Duration quantity has none; its `ns` read is a scalar projection.
-//RS     pub(super) fn has_field_owner(&self, ty: &Type) -> bool {
-//RS         self.field_owner_id_for_type(ty)
-//RS             .is_ok_and(|owner| self.type_defs.iter().any(|definition| definition.id == owner))
-//RS     }
-//RS 
-//RS     pub(super) fn field_owner_id_for_type(&self, ty: &Type) -> Result<MirTypeId, LowerError> {
-//RS         let normalized = self.normalize_contextual_type(ty);
-//RS         let ty = field_owner_type(&normalized);
-//RS         let key = match ty {
-//RS             Type::Apply { name, .. } => name.clone(),
-//RS             // A structural union owns the generated carrier row whose identity
-//RS             // is keyed by its canonical members, as in `mir_type`.
-//RS             Type::Union(_) => {
-//RS                 type_identity_key(&canonicalize_type(self.type_defs, ty, self.span())?)
-//RS             }
-//RS             _ => type_identity_key(ty),
-//RS         };
-//RS         let id = self.type_id_for(&key)?;
-//RS         Ok(id)
-//RS     }
-//RS 
-//RS     pub(super) fn field_name_for_type(
-//RS         &self,
-//RS         ty: &Type,
-//RS         index: usize,
-//RS     ) -> Result<String, LowerError> {
-//RS         let ty = field_owner_type(ty);
-//RS         if let Type::Tuple(fields) = ty {
-//RS             return fields
-//RS                 .get(index)
-//RS                 .map(|(name, _)| name.clone())
-//RS                 .ok_or_else(|| {
-//RS                     self.error(
-//RS                         self.span(),
-//RS                         format!("missing checked tuple field at position {index}"),
-//RS                     )
-//RS                 });
-//RS         }
-//RS         let owner = self.field_owner_id_for_type(ty)?;
-//RS         let definition = self
-//RS             .type_defs
-//RS             .iter()
-//RS             .find(|definition| definition.id == owner)
-//RS             .ok_or_else(|| {
-//RS                 self.error(
-//RS                     self.span(),
-//RS                     format!("missing checked MIR owner type {owner:?}"),
-//RS                 )
-//RS             })?;
-//RS         let fields = match &definition.kind {
-//RS             MirTypeDefKind::Struct { fields, .. } => fields,
-//RS             MirTypeDefKind::Enum { .. }
-//RS             | MirTypeDefKind::Distinct { .. }
-//RS             | MirTypeDefKind::Alias { .. }
-//RS             | MirTypeDefKind::UnitFamily { .. } => {
-//RS                 return Err(self.error(
-//RS                     self.span(),
-//RS                     format!("checked MIR type {owner:?} has no ordered fields"),
-//RS                 ));
-//RS             }
-//RS         };
-//RS         fields
-//RS             .get(index)
-//RS             .map(|field| field.name.clone())
-//RS             .ok_or_else(|| {
-//RS                 self.error(
-//RS                     self.span(),
-//RS                     format!("missing checked MIR field at position {index} on {owner:?}"),
-//RS                 )
-//RS             })
-//RS     }
-//RS 
-//RS     pub(super) fn field_id_for_type(&self, ty: &Type, key: &str) -> Result<MirFieldId, LowerError> {
-//RS         let normalized = self.normalize_contextual_type(ty);
-//RS         let ty = field_owner_type(&normalized);
-//RS         if let Type::Tuple(fields) = ty {
-//RS             if let Some(field_name) = tuple_field_name(fields, key) {
-//RS                 let identity =
-//RS                     canonical_type_instance(self.type_defs, ty, self.span())?.identity_key();
-//RS                 return Ok(MirFieldId(stable_id(
-//RS                     "mir-field",
-//RS                     &format!("{identity}::{field_name}"),
-//RS                 )));
-//RS             }
-//RS         }
-//RS         let owner = self.field_owner_id_for_type(ty)?;
-//RS         self.field_id_for(owner, key)
-//RS     }
-//RS 
-//RS     fn field_id_for_mir_type(&self, ty: &MirType, key: &str) -> Result<MirFieldId, LowerError> {
-//RS         let ty = field_owner_mir_type(ty);
-//RS         if let Some(fields) = ty.tuple_fields() {
-//RS             if let Some(field_name) = tuple_field_name(fields, key) {
-//RS                 return Ok(MirFieldId(stable_id(
-//RS                     "mir-field",
-//RS                     &format!("{}::{field_name}", ty.identity_key()),
-//RS                 )));
-//RS             }
-//RS         }
-//RS         // Applied values carry an instance identity (`Pair<Int>`, `Sender<String>`, ...),
-//RS         // but field rows belong to the nominal declaration. Resolve the owner through
-//RS         // the checked nominal reference instead of treating the applied instance as a
-//RS         // declaration row.
-//RS         let owner = match ty.kind() {
-//RS             MirTypeKind::Apply { name, .. } => self.type_id_for(&name.name)?,
-//RS             _ => ty.nominal_id().ok_or_else(|| {
-//RS                 self.error(self.span(), format!("missing MIR field owner for `{key}`"))
-//RS             })?,
-//RS         };
-//RS         self.field_id_for(owner, key)
-//RS     }
-//RS 
-//RS     pub(super) fn enum_named_payload_field(
-//RS         &self,
-//RS         owner: &str,
-//RS         variant: &str,
-//RS         label: &str,
-//RS     ) -> Result<(MirFieldId, usize), LowerError> {
-//RS         let owner_id = self.type_id_for(owner)?;
-//RS         let row = self
-//RS             .type_defs
-//RS             .iter()
-//RS             .find(|row| row.id == owner_id)
-//RS             .ok_or_else(|| self.error(self.span(), format!("missing MIR enum owner `{owner}`")))?;
-//RS         let MirTypeDefKind::Enum { variants, .. } = &row.kind else {
-//RS             return Err(self.error(
-//RS                 self.span(),
-//RS                 format!("MIR enum payload owner `{owner}` is not an enum"),
-//RS             ));
-//RS         };
-//RS         let variant_row = variants
-//RS             .iter()
-//RS             .find(|candidate| candidate.name == variant)
-//RS             .ok_or_else(|| {
-//RS                 self.error(
-//RS                     self.span(),
-//RS                     format!("missing MIR enum variant `{owner}.{variant}`"),
-//RS                 )
-//RS             })?;
-//RS         let MirVariantPayload::Named(fields) = &variant_row.payload else {
-//RS             return Err(self.error(
-//RS                 self.span(),
-//RS                 format!("MIR enum variant `{owner}.{variant}` has no named payload"),
-//RS             ));
-//RS         };
-//RS         fields
-//RS             .iter()
-//RS             .enumerate()
-//RS             .find(|(_, field)| field.name == label)
-//RS             .map(|(order, field)| (field.id, order))
-//RS             .ok_or_else(|| {
-//RS                 self.error(
-//RS                     self.span(),
-//RS                     format!("missing MIR enum payload field `{owner}.{variant}.{label}`"),
-//RS                 )
-//RS             })
-//RS     }
-//RS 
-//RS     pub(super) fn shared_guard_field_path(
-//RS         &self,
-//RS         guard_ty: &Type,
-//RS         path: &[String],
-//RS     ) -> Result<Vec<MirFieldId>, LowerError> {
-//RS         let mut current = field_owner_type(guard_ty).clone();
-//RS         let mut fields = Vec::with_capacity(path.len());
-//RS         for label in path {
-//RS             let field = self.field_id_for_type(&current, label)?;
-//RS             let field_ty = self.field_type_for_type(&current, label)?;
-//RS             fields.push(field);
-//RS             current = field_ty;
-//RS         }
-//RS         Ok(fields)
-//RS     }
-//RS 
-//RS     pub(super) fn intern_prelude_call(
-//RS         &mut self,
-//RS         mut row: MirPreludeCall,
-//RS     ) -> Result<MirPreludeCallId, LowerError> {
-//RS         let symbol = row.symbol.name();
-//RS         if symbol.is_empty() {
-//RS             return Err(self.error(self.span(), "checked Prelude row has an empty symbol"));
-//RS         }
-//RS         let identity = format!(
-//RS             "{:?}:{}:{}:{}:{}:{}:{:?}:{:?}:{:?}:{:?}",
-//RS             row.family,
-//RS             row.module,
-//RS             row.member,
-//RS             symbol,
-//RS             row.signature.arity,
-//RS             row.signature.max_arity,
-//RS             row.signature.borrow_mask,
-//RS             row.effect,
-//RS             row.fallibility,
-//RS             row.abi
-//RS         );
-//RS 
-//RS         row.id = MirPreludeCallId(stable_id("mir-prelude-call", &identity));
-//RS         if let Some(existing) =
-//RS             self.prelude_call_positions.get(&row.id).map(|position| &self.prelude_calls[*position])
-//RS         {
-//RS             if existing.family != row.family
-//RS                 || existing.module != row.module
-//RS                 || existing.member != row.member
-//RS                 || existing.symbol != row.symbol
-//RS                 || existing.signature != row.signature
-//RS                 || existing.effect != row.effect
-//RS                 || existing.fallibility != row.fallibility
-//RS                 || existing.abi != row.abi
-//RS             {
-//RS                 return Err(self.error(
-//RS                     self.span(),
-//RS                     format!("conflicting checked Prelude row {:?}", row.id),
-//RS                 ));
-//RS             }
-//RS             return Ok(row.id);
-//RS         }
-//RS         self.prelude_call_positions.insert(row.id, self.prelude_calls.len());
-//RS         self.prelude_calls.push(row);
-//RS         Ok(self.prelude_calls.last().expect("row just inserted").id)
-//RS     }
-//RS     pub(super) fn intern_core_route(
-//RS         &mut self,
-//RS         record: &'static jet_foundation::Syntax::CoreCallRecord,
-//RS         carrier: &TFailureCarrier,
-//RS     ) -> Result<MirPreludeCallId, LowerError> {
-//RS         let symbol = match record.symbol {
-//RS             jet_foundation::Syntax::CoreCallSymbol::Prelude(name) => {
-//RS                 jet_foundation::MIR::MirSymbol::Prelude(name.to_string())
-//RS             }
-//RS             jet_foundation::Syntax::CoreCallSymbol::Rust(name) => {
-//RS                 jet_foundation::MIR::MirSymbol::Runtime(name.to_string())
-//RS             }
-//RS         };
-//RS         let fallibility = call_fallibility(self, carrier)?;
-//RS         self.intern_prelude_call(MirPreludeCall {
-//RS             id: MirPreludeCallId(0),
-//RS             family: MirPreludeFamily::StaticPrelude,
-//RS             module: if record.module.is_empty() {
-//RS                 format!("receiver({})", record.receiver_types.join("|"))
-//RS             } else {
-//RS                 record.module.to_string()
-//RS             },
-//RS             member: record.member.to_string(),
-//RS             symbol,
-//RS             signature: MirCallSignature {
-//RS                 arity: record.signature.arity,
-//RS                 max_arity: record.signature.max_arity,
-//RS                 borrow_mask: record.signature.borrow_mask.to_vec(),
-//RS             },
-//RS             effect: record.effect,
-//RS             fallibility,
-//RS             abi: MirPreludeAbi::Value,
-//RS             authority: None,
-//RS             db_metadata: None,
-//RS         })
-//RS     }
-//RS     pub(super) fn lower_call_fallibility(
-//RS         &mut self,
-//RS         carrier: &TFailureCarrier,
-//RS     ) -> Result<MirCallFallibility, LowerError> {
-//RS         call_fallibility(self, carrier)
-//RS     }
-//RS 
-//RS     pub(super) fn local_id_for(&self, local: &TLocal) -> Result<MirLocalId, LowerError> {
-//RS         self.locals
-//RS             .iter()
-//RS             .find(|candidate| self.local_places.get(&local.name) == Some(&candidate.place))
-//RS             .map(|candidate| candidate.id)
-//RS             .ok_or_else(|| {
-//RS                 self.error(
-//RS                     self.span(),
-//RS                     format!("missing checked MIR local row `{}`", local.name),
-//RS                 )
-//RS             })
-//RS     }
-//RS 
-//RS     pub(super) fn intern_prelude_route(
-//RS         &mut self,
-//RS         route: TPreludeRoute,
-//RS     ) -> Result<MirPreludeCallId, LowerError> {
-//RS         let db_metadata = route
-//RS             .db_metadata
-//RS             .map(|metadata| self.lower_db_query_metadata(metadata));
-//RS         let fallibility = call_fallibility(self, &route.fallibility)?;
-//RS         self.intern_prelude_call(MirPreludeCall {
-//RS             id: MirPreludeCallId(0),
-//RS             family: route.family,
-//RS             module: route.module,
-//RS             member: route.member,
-//RS             symbol: route.symbol,
-//RS             signature: route.signature,
-//RS             effect: route.effect,
-//RS             fallibility,
-//RS             abi: route.abi,
-//RS             authority: None,
-//RS             db_metadata,
-//RS         })
-//RS     }
-//RS 
-//RS     pub(super) fn function_id(&self) -> Result<MirFunctionId, LowerError> {
-//RS         self.function_registry.id_for(self.function)
-//RS     }
-//RS 
-//RS     pub(super) fn current_block(&self) -> MirBlockId {
-//RS         self.current
-//RS     }
-//RS 
-//RS     pub(super) fn switch_to(&mut self, block: MirBlockId) {
-//RS         self.current = block;
-//RS     }
-//RS 
-//RS     pub(super) fn block_mut(&mut self, id: MirBlockId) -> Result<&mut MirBasicBlock, LowerError> {
-//RS         match self.block_positions.get(&id).copied() {
-//RS             Some(index) => Ok(&mut self.blocks[index]),
-//RS             None => Err(self.error(self.span(), format!("missing MIR block {id:?}"))),
-//RS         }
-//RS     }
-//RS 
-//RS     /// The block with `id` (first row wins, as a linear `find` would).
-//RS     pub(super) fn block_by_id(&self, id: MirBlockId) -> Option<&MirBasicBlock> {
-//RS         self.block_positions
-//RS             .get(&id)
-//RS             .map(|position| &self.blocks[*position])
-//RS     }
-//RS 
-//RS     fn current_block_mut(&mut self) -> Option<&mut MirBasicBlock> {
-//RS         let position = *self.block_positions.get(&self.current)?;
-//RS         Some(&mut self.blocks[position])
-//RS     }
-//RS 
-//RS     /// The instruction that defines `value`.
-//RS     fn value_instruction(&self, value: MirValueId) -> Option<&MirInstruction> {
-//RS         self.blocks[*self.value_blocks.get(&value)?]
-//RS             .instructions
-//RS             .iter()
-//RS             .find(|instruction| instruction.result == Some(value))
-//RS     }
-//RS 
-//RS     pub(super) fn new_block(&mut self, span: Span, role: &str) -> Result<MirBlockId, LowerError> {
-//RS         let identity = self.reserve_identity("block", span, role, "")?;
-//RS         let id = MirBlockId(stable_id("mir-block", &identity));
-//RS         self.block_positions.entry(id).or_insert(self.blocks.len());
-//RS         self.blocks.push(MirBasicBlock {
-//RS             id,
-//RS             span,
-//RS             instructions: Vec::new(),
-//RS             terminator: MirTerminator::Unreachable {
-//RS                 reason: "lowering in progress".to_string(),
-//RS             },
-//RS         });
-//RS         Ok(id)
-//RS     }
-//RS 
-//RS     pub(super) fn is_terminated(&self) -> bool {
-//RS         !matches!(
-//RS             self.block_by_id(self.current).map(|block| &block.terminator),
-//RS             Some(MirTerminator::Unreachable { reason }) if reason == "lowering in progress"
-//RS         )
-//RS     }
-//RS 
-//RS     pub(super) fn terminate(&mut self, terminator: MirTerminator) {
-//RS         if let Some(block) = self.current_block_mut() {
-//RS             block.terminator = terminator;
-//RS         }
-//RS     }
-//RS 
-//RS     /// End the current path with `terminator`, running the cleanups of every
-//RS     /// frame from `from_depth` up first. Each frame's cleanups are lowered
-//RS     /// once, as a drop chain its exits share (`seal_exit_chains`), so cleanup
-//RS     /// code grows with the frame's locals, not with exits times locals. Exits
-//RS     /// that cannot share a chain clean up inline on their own path.
-//RS     pub(super) fn terminate_with_cleanup(
-//RS         &mut self,
-//RS         terminator: MirTerminator,
-//RS         from_depth: usize,
-//RS     ) -> Result<(), LowerError> {
-//RS         self.emit_transaction_exit_restores(&terminator, from_depth)?;
-//RS         if let MirTerminator::Return { value: Some(value) } = &terminator {
-//RS             self.retype_absent_return(*value)?;
-//RS         }
-//RS         let from_depth = from_depth.min(self.defer_stack.len());
-//RS         if let Some(target) = self.shared_exit_target(&terminator, from_depth)? {
-//RS             if let (ExitTarget::Return(Some(slot)), MirTerminator::Return { value: Some(value) }) =
-//RS                 (target, &terminator)
-//RS             {
-//RS                 self.emit(
-//RS                     "exit.value.write",
-//RS                     None,
-//RS                     MirOperation::WritePlace { place: slot, value: *value },
-//RS                 )?;
-//RS             }
-//RS             let depth = self.defer_stack.len() - 1;
-//RS             let entry = self.exit_chain_entry(depth, target, from_depth)?;
-//RS             self.terminate(MirTerminator::Jump { target: entry });
-//RS             return Ok(());
-//RS         }
-//RS         // Preserve deferred actions so a sibling path gets its own
-//RS         // reverse-order cleanup sequence.
-//RS         self.emit_deferred_cleanups_from(from_depth, false)?;
-//RS         self.terminate(terminator);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Roll back every `#Transact` scope an exit leaves before that exit's
-//RS     /// cleanups release the saved snapshots: a `return`, `?` propagation,
-//RS     /// `break` or `continue` out of the body restores each snapshot, innermost
-//RS     /// transaction and newest snapshot first. The body's fallthrough commits.
-//RS     fn emit_transaction_exit_restores(
-//RS         &mut self,
-//RS         terminator: &MirTerminator,
-//RS         from_depth: usize,
-//RS     ) -> Result<(), LowerError> {
-//RS         if !matches!(
-//RS             terminator,
-//RS             MirTerminator::Return { .. } | MirTerminator::Break { .. } | MirTerminator::Continue { .. }
-//RS         ) {
-//RS             return Ok(());
-//RS         }
-//RS         // Taken while the restores lower, so a restore call never re-enters.
-//RS         let transactions = std::mem::take(&mut self.transaction_restores);
-//RS         let left = transactions
-//RS             .iter()
-//RS             .enumerate()
-//RS             .rev()
-//RS             .filter(|(_, (scope, _))| {
-//RS                 self.defer_stack
-//RS                     .iter()
-//RS                     .rposition(|frame| frame.owner == Some(*scope))
-//RS                     .is_some_and(|depth| depth >= from_depth)
-//RS             })
-//RS             .map(|(index, _)| index)
-//RS             .collect::<Vec<_>>();
-//RS         let mut result = Ok(());
-//RS         'restore: for transaction in left {
-//RS             for (index, restore) in transactions[transaction].1.iter().enumerate().rev() {
-//RS                 if let Err(error) = self.emit_transaction_restore(index, restore) {
-//RS                     result = Err(error);
-//RS                     break 'restore;
-//RS                 }
-//RS             }
-//RS         }
-//RS         self.transaction_restores = transactions;
-//RS         result
-//RS     }
-//RS 
-//RS     fn emit_transaction_restore(
-//RS         &mut self,
-//RS         index: usize,
-//RS         restore: &TransactionRestore,
-//RS     ) -> Result<(), LowerError> {
-//RS         if let Some(call) = &restore.custom {
-//RS             lower_expr(self, call)?;
-//RS             return Ok(());
-//RS         }
-//RS         let value = self.emit(
-//RS             &format!("transaction.snapshot.{index}.restore.read"),
-//RS             Some(restore.ty.clone()),
-//RS             MirOperation::ReadPlace(restore.saved),
-//RS         )?;
-//RS         self.emit(
-//RS             &format!("transaction.snapshot.{index}.restore.write"),
-//RS             None,
-//RS             MirOperation::WritePlace {
-//RS                 place: restore.place,
-//RS                 value,
-//RS             },
-//RS         )?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// The drop chain an exit toward `terminator` enters, or `None` when it
-//RS     /// cleans up inline: nothing is registered to clean up, the terminator
-//RS     /// carries a value no slot can hold (a break value feeds its loop's phi
-//RS     /// by predecessor), or a frame it leaves keeps its exits inline.
-//RS     fn shared_exit_target(
-//RS         &mut self,
-//RS         terminator: &MirTerminator,
-//RS         from_depth: usize,
-//RS     ) -> Result<Option<ExitTarget>, LowerError> {
-//RS         let frames = &self.defer_stack[from_depth..];
-//RS         if frames.iter().all(|frame| frame.actions.is_empty())
-//RS             || frames.iter().any(|frame| frame.inline_exits)
-//RS         {
-//RS             return Ok(None);
-//RS         }
-//RS         Ok(match terminator {
-//RS             MirTerminator::Return { value: None } => Some(ExitTarget::Return(None)),
-//RS             MirTerminator::Return { value: Some(value) } => {
-//RS                 self.exit_value_slot(*value)?.map(|slot| ExitTarget::Return(Some(slot)))
-//RS             }
-//RS             MirTerminator::Break { target, value: None } => Some(ExitTarget::Break(*target)),
-//RS             MirTerminator::Continue { target } => Some(ExitTarget::Continue(*target)),
-//RS             _ => None,
-//RS         })
-//RS     }
-//RS 
-//RS     /// The local a returned `value` waits in while its drop chain runs, one
-//RS     /// per returned type; `None` for a borrow, which stays on its own path.
-//RS     fn exit_value_slot(&mut self, value: MirValueId) -> Result<Option<MirPlaceId>, LowerError> {
-//RS         // The returned value was produced just before the exit, so the scan
-//RS         // from the newest row is short.
-//RS         let Some((ty, ownership)) = self
-//RS             .values
-//RS             .iter()
-//RS             .rev()
-//RS             .find(|row| row.0 == value)
-//RS             .map(|row| (row.1.clone(), row.3))
-//RS         else {
-//RS             return Ok(None);
-//RS         };
-//RS         if matches!(
-//RS             ownership.mode,
-//RS             MirOwnershipMode::ReadBorrow | MirOwnershipMode::WriteBorrow
-//RS         ) {
-//RS             return Ok(None);
-//RS         }
-//RS         if let Some((_, slot)) = self.exit_value_slots.iter().find(|(slot_ty, _)| *slot_ty == ty) {
-//RS             return Ok(Some(*slot));
-//RS         }
-//RS         let name = format!("exit_value_{}", self.exit_value_slots.len());
-//RS         let span = self.span();
-//RS         let local_identity = self.reserve_identity("local", span, &name, "")?;
-//RS         let local_id = MirLocalId(stable_id("mir-local", &local_identity));
-//RS         let place = self.place_id("local", &name)?;
-//RS         self.places.push(MirPlace {
-//RS             id: place,
-//RS             span,
-//RS             ty: ty.clone(),
-//RS             base: MirPlaceBase::Local(local_id),
-//RS             projections: Vec::new(),
-//RS             access: MirAccess::Move,
-//RS             persist_key: None,
-//RS         });
-//RS         self.locals.push(MirLocal {
-//RS             id: local_id,
-//RS             name,
-//RS             span,
-//RS             ty: ty.clone(),
-//RS             place,
-//RS             mutable: true,
-//RS             ownership: MirOwnership {
-//RS                 moved: false,
-//RS                 last_use: false,
-//RS                 ..ownership
-//RS             },
-//RS             comptime: false,
-//RS             uninit: false,
-//RS             arena_view: false,
-//RS             string_view: false,
-//RS             gc_root: false,
-//RS         });
-//RS         self.exit_value_slots.push((ty, place));
-//RS         Ok(Some(place))
-//RS     }
-//RS 
-//RS     /// The block an exit from frame `depth` toward `target` jumps to: one
-//RS     /// per target and per count of the frame's explicit actions so far.
-//RS     fn exit_chain_entry(
-//RS         &mut self,
-//RS         depth: usize,
-//RS         target: ExitTarget,
-//RS         cut: usize,
-//RS     ) -> Result<MirBlockId, LowerError> {
-//RS         let frame = &self.defer_stack[depth];
-//RS         let explicit = frame.explicit;
-//RS         if let Some(exit) = frame
-//RS             .pending_exits
-//RS             .iter()
-//RS             .find(|exit| exit.target == target && exit.explicit == explicit)
-//RS         {
-//RS             return Ok(exit.block);
-//RS         }
-//RS         let block = self.new_block(self.span(), "cleanup.chain")?;
-//RS         self.defer_stack[depth].pending_exits.push(PendingExit {
-//RS             target,
-//RS             explicit,
-//RS             cut,
-//RS             block,
-//RS         });
-//RS         Ok(block)
-//RS     }
-//RS 
-//RS     /// The block that ends every drop chain toward `target` with the exit.
-//RS     fn exit_tail(&mut self, target: ExitTarget) -> Result<MirBlockId, LowerError> {
-//RS         if let Some(block) = self.exit_tails.get(&target) {
-//RS             return Ok(*block);
-//RS         }
-//RS         let block = self.new_block(self.span(), "cleanup.chain.exit")?;
-//RS         self.switch_to(block);
-//RS         let terminator = match target {
-//RS             ExitTarget::Return(None) => MirTerminator::Return { value: None },
-//RS             ExitTarget::Return(Some(slot)) => {
-//RS                 let ty = self
-//RS                     .exit_value_slots
-//RS                     .iter()
-//RS                     .find(|(_, place)| *place == slot)
-//RS                     .map(|(ty, _)| ty.clone())
-//RS                     .ok_or_else(|| self.error(self.span(), "exit value slot has no type"))?;
-//RS                 let value = self.emit_mir_type(
-//RS                     "exit.value.read",
-//RS                     Some(ty),
-//RS                     MirOperation::MovePlace { place: slot },
-//RS                 )?;
-//RS                 MirTerminator::Return { value: Some(value) }
-//RS             }
-//RS             ExitTarget::Break(target) => MirTerminator::Break {
-//RS                 target,
-//RS                 value: None,
-//RS             },
-//RS             ExitTarget::Continue(target) => MirTerminator::Continue { target },
-//RS         };
-//RS         self.terminate(terminator);
-//RS         self.exit_tails.insert(target, block);
-//RS         Ok(block)
-//RS     }
-//RS 
-//RS     /// Lower the drop chains that exits from frame `depth` jump to, using
-//RS     /// the frame's actions as they stand now. Per target, the chain entered
-//RS     /// after `e` explicit actions runs those actions newest first, then
-//RS     /// releases every owned local the frame registered, newest first, then
-//RS     /// continues into the enclosing frame's chain or, at the target's frame,
-//RS     /// ends with the exit. Each release is guarded by the local's live flag,
-//RS     /// which reads false on an exit taken before the local was bound, so one
-//RS     /// release sequence serves every exit of the frame; explicit actions run
-//RS     /// unconditionally, hence the per-count entries. Runs when the frame
-//RS     /// closes, before its actions are consumed, and at the end of the body.
-//RS     fn seal_exit_chains(&mut self, depth: usize) -> Result<(), LowerError> {
-//RS         let saved = self.current;
-//RS         loop {
-//RS             let mut pending = std::mem::take(&mut self.defer_stack[depth].pending_exits);
-//RS             if pending.is_empty() {
-//RS                 break;
-//RS             }
-//RS             pending.sort_by_key(|exit| exit.explicit);
-//RS             let actions = self.defer_stack[depth].actions.clone();
-//RS             let (automatic, explicit): (Vec<_>, Vec<_>) = actions
-//RS                 .into_iter()
-//RS                 .partition(|action| matches!(action, DeferredCleanup::DropPlace { .. }));
-//RS             let mut sealed: Vec<ExitTarget> = Vec::new();
-//RS             for exit in &pending {
-//RS                 if sealed.contains(&exit.target) {
-//RS                     continue;
-//RS                 }
-//RS                 sealed.push(exit.target);
-//RS                 let entries: Vec<&PendingExit> =
-//RS                     pending.iter().filter(|other| other.target == exit.target).collect();
-//RS                 let next = if depth <= exit.cut {
-//RS                     self.exit_tail(exit.target)?
-//RS                 } else {
-//RS                     self.exit_chain_entry(depth - 1, exit.target, exit.cut)?
-//RS                 };
-//RS                 let entry = |count: usize, ctx: &mut Self| match entries
-//RS                     .iter()
-//RS                     .find(|candidate| candidate.explicit == count)
-//RS                 {
-//RS                     Some(candidate) => Ok(candidate.block),
-//RS                     None => ctx.new_block(ctx.span(), "cleanup.chain"),
-//RS                 };
-//RS                 let mut block = entry(0, self)?;
-//RS                 self.switch_to(block);
-//RS                 for action in automatic.iter().rev() {
-//RS                     self.emit_cleanup_action(*action, false)?;
-//RS                 }
-//RS                 self.terminate(MirTerminator::Jump { target: next });
-//RS                 let deepest = entries.last().map_or(0, |last| last.explicit);
-//RS                 for count in 1..=deepest {
-//RS                     let following = block;
-//RS                     block = entry(count, self)?;
-//RS                     self.switch_to(block);
-//RS                     let action = explicit.get(count - 1).copied().ok_or_else(|| {
-//RS                         self.error(self.span(), "drop chain entry outlives its explicit cleanup")
-//RS                     })?;
-//RS                     self.emit_cleanup_action(action, false)?;
-//RS                     self.terminate(MirTerminator::Jump { target: following });
-//RS                 }
-//RS             }
-//RS         }
-//RS         self.switch_to(saved);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Seal every active frame's drop chains, innermost first, so each
-//RS     /// enclosing frame sees the entries its inner chains continue into.
-//RS     fn seal_all_exit_chains(&mut self) -> Result<(), LowerError> {
-//RS         for depth in (0..self.defer_stack.len()).rev() {
-//RS             self.seal_exit_chains(depth)?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Consume every active deferred action before an explicit process stop.
-//RS     ///
-//RS     /// Native stop unwinds after the call, while the resident JIT branches to
-//RS     /// its stop block as soon as the host records the exit.  Cleanup therefore
-//RS     /// has to be in the MIR before the stop call, not on a successor edge.
-//RS     /// Exits taken before the stop keep the actions in their sealed chains.
-//RS     pub(super) fn emit_explicit_stop_cleanups(&mut self) -> Result<(), LowerError> {
-//RS         self.seal_all_exit_chains()?;
-//RS         self.emit_deferred_cleanups_from(0, true)
-//RS     }
-//RS 
-//RS     /// D-SHAPE-RESOURCE1=A: run the cleanups that must happen before the one
-//RS     /// CFG path that stops the program (`panic`, a failed `assert`/`require`):
-//RS     /// deferred actions and the automatic `Close` of still-live resources.
-//RS     /// Plain releases are skipped because the process is ending anyway, and
-//RS     /// the actions stay registered for sibling paths that continue.
-//RS     pub(super) fn emit_stop_path_cleanups(&mut self) -> Result<(), LowerError> {
-//RS         self.emit_cleanup_actions(0, false, true)
-//RS     }
-//RS 
-//RS     /// Whether a stop at this point owes any cleanup: a deferred action, or
-//RS     /// the automatic `Close` of a still-registered resource local.
-//RS     pub(super) fn has_stop_path_cleanups(&self) -> bool {
-//RS         self.defer_stack
-//RS             .iter()
-//RS             .flat_map(|frame| frame.actions.iter())
-//RS             .any(|action| match *action {
-//RS                 DeferredCleanup::DropPlace { place, .. } => self.place_has_scope_end_close(place),
-//RS                 _ => true,
-//RS             })
-//RS     }
-//RS 
-//RS     /// Locals that `emit_stop_path_cleanups` moves out. A stop report must not
-//RS     /// read them afterwards.
-//RS     pub(super) fn stop_path_moved_locals(&self) -> HashSet<MirLocalId> {
-//RS         self.defer_stack
-//RS             .iter()
-//RS             .flat_map(|frame| frame.actions.iter())
-//RS             .filter_map(|action| match *action {
-//RS                 DeferredCleanup::Close(index) => Some(self.deferred_closes[index].place),
-//RS                 DeferredCleanup::Guard(place) | DeferredCleanup::FileOwner { place, .. } => {
-//RS                     Some(place)
-//RS                 }
-//RS                 DeferredCleanup::DropPlace { place, .. } => {
-//RS                     self.place_has_scope_end_close(place).then_some(place)
-//RS                 }
-//RS             })
-//RS             .filter_map(|place| {
-//RS                 match self.places.iter().find(|row| row.id == place)?.base {
-//RS                     MirPlaceBase::Local(local) => Some(local),
-//RS                     _ => None,
-//RS                 }
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn place_has_scope_end_close(&self, place: MirPlaceId) -> bool {
-//RS         self.places
-//RS             .iter()
-//RS             .find(|row| row.id == place)
-//RS             .is_some_and(|row| self.scope_end_close(&row.ty).is_some())
-//RS     }
-//RS 
-//RS     fn emit_deferred_cleanups(&mut self, from_depth: usize) -> Result<(), LowerError> {
-//RS         self.emit_deferred_cleanups_from(from_depth, true)
-//RS     }
-//RS 
-//RS     fn emit_deferred_cleanups_from(
-//RS         &mut self,
-//RS         from_depth: usize,
-//RS         consume: bool,
-//RS     ) -> Result<(), LowerError> {
-//RS         self.emit_cleanup_actions(from_depth, consume, false)
-//RS     }
-//RS 
-//RS     fn emit_cleanup_actions(
-//RS         &mut self,
-//RS         from_depth: usize,
-//RS         consume: bool,
-//RS         stop_path: bool,
-//RS     ) -> Result<(), LowerError> {
-//RS         let from_depth = from_depth.min(self.defer_stack.len());
-//RS         for depth in (from_depth..self.defer_stack.len()).rev() {
-//RS             let actions = if consume {
-//RS                 self.defer_stack[depth].explicit = 0;
-//RS                 std::mem::take(&mut self.defer_stack[depth].actions)
-//RS             } else {
-//RS                 self.defer_stack[depth].actions.clone()
-//RS             };
-//RS             // D-SHAPE-RESOURCE1=A: explicit deferred actions run first in
-//RS             // reverse registration order; the automatic safety net then
-//RS             // closes or releases every still-live local in reverse
-//RS             // declaration order.
-//RS             let (automatic, explicit): (Vec<_>, Vec<_>) = actions
-//RS                 .into_iter()
-//RS                 .partition(|action| matches!(action, DeferredCleanup::DropPlace { .. }));
-//RS             for action in explicit.into_iter().rev().chain(automatic.into_iter().rev()) {
-//RS                 self.emit_cleanup_action(action, stop_path)?;
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Lower one cleanup action into the current block. On a stop path a
-//RS     /// plain release is skipped: the process is ending anyway.
-//RS     fn emit_cleanup_action(
-//RS         &mut self,
-//RS         action: DeferredCleanup,
-//RS         stop_path: bool,
-//RS     ) -> Result<(), LowerError> {
-//RS         match action {
-//RS             DeferredCleanup::Close(index) => self.emit_deferred_close(index)?,
-//RS             DeferredCleanup::Guard(place) => {
-//RS                 let ty = self
-//RS                     .places
-//RS                     .iter()
-//RS                     .find(|candidate| candidate.id == place)
-//RS                     .map(|candidate| candidate.ty.clone())
-//RS                     .ok_or_else(|| {
-//RS                         self.error(
-//RS                             self.span(),
-//RS                             "scope guard cleanup targets an unavailable place",
-//RS                         )
-//RS                     })?;
-//RS                 let value = self.emit_mir_type(
-//RS                     "scope.guard.cleanup.move",
-//RS                     Some(ty),
-//RS                     MirOperation::MovePlace { place },
-//RS                 )?;
-//RS                 self.emit(
-//RS                     "scope.guard.cleanup.drop",
-//RS                     None,
-//RS                     MirOperation::Drop {
-//RS                         value,
-//RS                         kind: MirDropKind::Value,
-//RS                     },
-//RS                 )?;
-//RS             }
-//RS             DeferredCleanup::FileOwner { place, live } => {
-//RS                 self.emit_file_owner_cleanup(place, live)?;
-//RS             }
-//RS             DeferredCleanup::DropPlace { place, live, kind } => {
-//RS                 if !stop_path || self.place_has_scope_end_close(place) {
-//RS                     self.emit_owned_place_cleanup(place, live, kind)?;
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub(super) fn emit_scope_cleanups(&mut self, scope: MirScopeId) -> Result<(), LowerError> {
-//RS         let Some(depth) = self
-//RS             .defer_stack
-//RS             .iter()
-//RS             .rposition(|frame| frame.owner == Some(scope))
-//RS         else {
-//RS             return Err(self.error(
-//RS                 self.span(),
-//RS                 format!("scope cleanup has no active frame for {scope:?}"),
-//RS             ));
-//RS         };
-//RS         self.emit_deferred_cleanups_from(depth, false)
-//RS     }
-//RS 
-//RS     /// The name a user local is bound under. A binding whose source spelling
-//RS     /// collides with a reserved identifier may be bound under its mangled
-//RS     /// Rust spelling; every lookup resolves through this one rule.
-//RS     pub(super) fn resolved_local_name(&self, local: &TLocal) -> String {
-//RS         let mangled = crate::Codegen::mangle(&local.name);
-//RS         if !local.generated && mangled != local.name && self.local_places.contains_key(&mangled) {
-//RS             mangled
-//RS         } else {
-//RS             local.name.clone()
-//RS         }
-//RS     }
-//RS 
-//RS     /// Register `close` to run at every exit of the innermost lexical frame.
-//RS     /// The resource place is resolved now, so a later binding that shadows the
-//RS     /// resource name cannot redirect the close.
-//RS     pub(super) fn register_defer_close(
-//RS         &mut self,
-//RS         close: TExpr,
-//RS         resource: &TLocal,
-//RS     ) -> Result<(), LowerError> {
-//RS         if self.defer_stack.is_empty() {
-//RS             return Err(self.error(self.span(), "defer registered without lexical scope"));
-//RS         }
-//RS         let resource = self.resolved_local_name(resource);
-//RS         let ty = self.local_types.get(&resource).cloned().ok_or_else(|| {
-//RS             self.error(
-//RS                 self.span(),
-//RS                 format!("unbound deferred resource `{resource}`"),
-//RS             )
-//RS         })?;
-//RS         let place = self.place_for_local(&TLocal::user(resource.clone()), MirAccess::Move)?;
-//RS         let index = self.deferred_closes.len();
-//RS         self.deferred_closes.push(std::rc::Rc::new(DeferredClose {
-//RS             close,
-//RS             resource,
-//RS             place,
-//RS             ty,
-//RS             span: self.span(),
-//RS         }));
-//RS         self.defer_stack
-//RS             .last_mut()
-//RS             .expect("checked non-empty defer stack")
-//RS             .push_action(DeferredCleanup::Close(index));
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Lower one deferred close at the current exit edge. The resource name is
-//RS     /// rebound to the place captured at registration while the close lowers,
-//RS     /// and the close gets its own lexical frame so any temporaries it owns are
-//RS     /// cleaned up here rather than joining the frame being exited.
-//RS     fn emit_deferred_close(&mut self, index: usize) -> Result<(), LowerError> {
-//RS         let deferred = std::rc::Rc::clone(&self.deferred_closes[index]);
-//RS         let exit_span = self.span();
-//RS         let previous_place = self
-//RS             .local_places
-//RS             .insert(deferred.resource.clone(), deferred.place);
-//RS         let previous_ty = self
-//RS             .local_types
-//RS             .insert(deferred.resource.clone(), deferred.ty.clone());
-//RS         self.set_span(deferred.span);
-//RS         self.push_lexical_frame();
-//RS         let lowered = self
-//RS             .lower_child(&deferred.close)
-//RS             .and_then(|_| self.pop_lexical_frame());
-//RS         self.set_span(exit_span);
-//RS         match previous_place {
-//RS             Some(place) => self.local_places.insert(deferred.resource.clone(), place),
-//RS             None => self.local_places.remove(&deferred.resource),
-//RS         };
-//RS         match previous_ty {
-//RS             Some(ty) => self.local_types.insert(deferred.resource.clone(), ty),
-//RS             None => self.local_types.remove(&deferred.resource),
-//RS         };
-//RS         lowered
-//RS     }
-//RS 
-//RS     pub(super) fn register_scope_guard(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
-//RS         let Some(row) = self
-//RS             .places
-//RS             .iter_mut()
-//RS             .find(|candidate| candidate.id == place)
-//RS         else {
-//RS             return Err(self.error(
-//RS                 self.span(),
-//RS                 "scope guard cleanup targets an unavailable place",
-//RS             ));
-//RS         };
-//RS         if !matches!(
-//RS             row.ty.nominal_name(),
-//RS             Some("ScopeGuard") | Some("EventScope")
-//RS         ) {
-//RS             return Err(self.error(self.span(), "scope guard cleanup targets a non-guard place"));
-//RS         }
-//RS         let event_scope = row.ty.nominal_name() == Some("EventScope");
-//RS         retain_place_access(row, MirAccess::Move);
-//RS         let Some(frame) = self.defer_stack.last_mut() else {
-//RS             if event_scope {
-//RS                 return Ok(());
-//RS             }
-//RS             return Err(self.error(self.span(), "scope guard registered without lexical scope"));
-//RS         };
-//RS         frame.push_action(DeferredCleanup::Guard(place));
-//RS         Ok(())
-//RS     }
-//RS     pub(super) fn is_core_file_owner(&self, identity: MirTypeId) -> bool {
-//RS         let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.files") else {
-//RS             return false;
-//RS         };
-//RS         self.type_defs.iter().any(|definition| {
-//RS             definition.id == identity
-//RS                 && matches!(definition.name.as_str(), "FileReader" | "FileWriter" | "TempDir" | "TempFile" | "FileLock")
-//RS                 && self.modules.iter().any(|module| {
-//RS                     module.path == source.path
-//RS                         && definition.module == jet_foundation::MIR::MirModuleId(stable_id("mir-module", &module.key))
-//RS                         && definition.key == format!("{}::{}", module.key, definition.name)
-//RS                 })
-//RS         })
-//RS     }
-//RS 
-//RS     fn owned_file_paths(
-//RS         &mut self,
-//RS         ty: &MirType,
-//RS         path: &mut Vec<(String, Type)>,
-//RS         visiting: &mut Vec<MirTypeId>,
-//RS         output: &mut Vec<Vec<(String, Type)>>,
-//RS     ) -> Result<(), LowerError> {
-//RS         if ty.identity.is_some_and(|identity| self.is_core_file_owner(identity)) {
-//RS             output.push(path.clone());
-//RS             return Ok(());
-//RS         }
-//RS         if let Some(fields) = ty.tuple_fields() {
-//RS             for (name, field_ty) in fields {
-//RS                 path.push((name.clone(), mir_type_as_ast(field_ty)));
-//RS                 self.owned_file_paths(field_ty, path, visiting, output)?;
-//RS                 path.pop();
-//RS             }
-//RS             return Ok(());
-//RS         }
-//RS         let Some(identity) = ty.identity else { return Ok(()) };
-//RS         if visiting.contains(&identity) {
-//RS             return Ok(());
-//RS         }
-//RS         let definitions = self.type_defs;
-//RS         let Some(definition) = definitions.iter().find(|row| row.id == identity) else {
-//RS             return Ok(());
-//RS         };
-//RS         if !matches!(definition.ownership, MirOwnershipMode::Owned | MirOwnershipMode::Move) {
-//RS             return Ok(());
-//RS         }
-//RS         let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
-//RS             return Ok(());
-//RS         };
-//RS         visiting.push(identity);
-//RS         let owner = mir_type_as_ast(ty);
-//RS         for field in fields.iter().filter(|field| !field.computed) {
-//RS             let field_ty = self.field_type_for_type(&owner, &field.name)?;
-//RS             let checked = self.mir_type(&field_ty)?;
-//RS             path.push((field.name.clone(), field_ty));
-//RS             self.owned_file_paths(&checked, path, visiting, output)?;
-//RS             path.pop();
-//RS         }
-//RS         visiting.pop();
-//RS         Ok(())
-//RS     }
-//RS 
-// END-PORT-PENDING 0500 crates/jet-codegen/src/Codegen/TIR/mir.rs:5433-7233
+// Private continuation of canonical TIR MIR LowerCtx.
+use jet_foundation.MIR.*
+use jet_foundation.AST.[Type, AutoVectorizationFacts]
+use jet_foundation.Diagnostics.[Span]
+use jet_foundation.Names.[stable_id, type_identity_key]
+use jet_foundation.Syntax as Syntax
+use jet_foundation.CoreModuleExports.[core_source_module]
+use jet_codegen.Codegen.TIR.*
+use jet_codegen.Codegen.TIR.mir.*
+use jet_codegen.Codegen.[mangle]
+use std.rc.[Rc] // GATE #4494: retained compiler descriptor.
 
+impl LowerCtx {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5433
+    pub fn span(self) -> Span Never! { self.current_span }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5437
+    pub fn loop_body_blocks(self, header: MirBlockId, body: MirBlockId, exit: MirBlockId?, advance: MirBlockId?) -> [MirBlockId] Never! {
+        pending := [body]
+        seen := [MirBlockId: Bool]{}
+        region := [MirBlockId]{}
+        loop {
+            block_id :: pending.pop() ?? break
+            if block_id == header || exit == Val(block_id) || advance == Val(block_id) || seen.contains_key(block_id) -> continue
+            seen[block_id] = true
+            block :: self.block_by_id(block_id) ?? continue
+            region.push(block_id)
+            pending.extend(block.terminator.targets())
+        }
+        region.sort()
+        ^region
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5470
+    pub fn loop_cursor_place(self, condition: TExpr) -> MirPlaceId? Never! {
+        lhs :: if condition.kind == { .Binary(lhs: lhs, ..) -> lhs, else -> return None }
+        local :: if lhs.kind == { .Local(local) -> local, else -> return None }
+        self.local_places.get(local.name)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5480
+    pub fn checked_loop_cursor(self, body_blocks: [MirBlockId], advance: MirBlockId?, cursor_place: MirPlaceId?, hinted: MirValueId?) -> MirValueId? Never! {
+        if hinted != None -> return hinted
+        reads := [MirValueId]{}
+        loop block_id in body_blocks {
+            if advance == Val(block_id) -> continue
+            block :: self.block_by_id(block_id) ?? continue
+            loop instruction in block.instructions {
+                if (instruction.result, instruction.operation) == {
+                    (.Val(result), .ReadPlace(place)) -> { if cursor_place == Val(place) -> reads.push(result) }
+                    else -> {}
+                }
+            }
+        }
+        reads.find(value -> self.checked_cursor_value_is_indexed(body_blocks, advance, value)).or_else(fn() { reads.first() })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5515
+    fn checked_cursor_value_is_indexed(self, body_blocks: [MirBlockId], advance: MirBlockId?, cursor: MirValueId) -> Bool Never! {
+        loop block_id in body_blocks {
+            if advance == Val(block_id) -> continue
+            block :: self.block_by_id(block_id) ?? continue
+            loop instruction in block.instructions {
+                if instruction.operation == {
+                    .Index(index: index, ..) -> { if index == cursor -> return true }
+                    else -> {
+                        loop place_id in checked_operation_place_refs(instruction.operation) {
+                            place :: self.places.find(place -> place.id == place_id) ?? continue
+                            if place.projections.any(projection -> if projection == { .Index(index: index, ..) -> index == cursor, else -> false }) -> return true
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5552
+    fn checked_cursor_matches(self, value: MirValueId, cursor: MirValueId, cursor_place: MirPlaceId?, seen: &[MirValueId: Bool]) -> Bool Never! {
+        if value == cursor || seen.contains_key(value) -> return value == cursor
+        seen[value] = true
+        instruction :: self.blocks.lazy().flat_map(block -> block.instructions.lazy()).find(instruction -> instruction.result == Val(value)) ?? return false
+        if instruction.operation == {
+            .ReadPlace(place) -> cursor_place == Val(place)
+            .Copy(value: value, ..) | .Move(value: value) | .AttachTag(value: value, ..) | .Convert(value: value, ..) -> self.checked_cursor_matches(value, cursor, cursor_place, &seen)
+            else -> false
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5582
+    fn checked_value_access_root(self, value: MirValueId, seen: &[MirValueId: Bool]) -> MirVectorAccessRoot Never! {
+        if seen.contains_key(value) -> return .Value(value)
+        seen[value] = true
+        instruction :: self.blocks.lazy().flat_map(block -> block.instructions.lazy()).find(instruction -> instruction.result == Val(value)) ?? return .Value(value)
+        if instruction.operation == {
+            .ReadPlace(place) | .MovePlace(place: place) -> .Place(place)
+            .Copy(value: value, ..) | .Move(value: value) | .AttachTag(value: value, ..) | .Field(base: value, ..) | .Index(base: value, ..) -> self.checked_value_access_root(value, &seen)
+            .Semantic(.ColumnarRead(base: base, ..)) -> self.checked_value_access_root(base, &seen)
+            else -> .Value(value)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5616
+    fn checked_value_type(self, value: MirValueId) -> MirType? Never! { self.values.find(row -> row.0 == value).map(row -> ~row.1) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5623
+    fn checked_place_base_type(self, place: MirPlace) -> MirType? Never! {
+        if place.base == {
+            .Local(local) -> self.locals.find(candidate -> candidate.id == local).map(local -> ~local.ty)
+            .Parameter(value) | .Capture(value) | .Temporary(value) -> self.checked_value_type(value)
+            .Static(_) -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5637
+    fn checked_vector_place_layout(self, place: MirPlace, field: MirFieldId?) -> (MirVectorLayout, Int?) Never! {
+        id :: field ?? return (.Flat, None)
+        base_type :: self.checked_place_base_type(place) ?? return (.AosStrided, None)
+        element :: if base_type.kind() == {
+            .List(inner) | .FixedList(elem: inner, ..) -> inner
+            .Tagged(inner: inner, ..) -> if inner.kind() == { .List(elem) | .FixedList(elem: elem, ..) -> elem, else -> return (.AosStrided, None) }
+            else -> return (.AosStrided, None)
+        }
+        identity :: element.identity.or_else(fn() { if element.kind() == { .Apply(name: name, ..) -> Val(name.id), else -> None } }) ?? return (.AosStrided, None)
+        definition :: self.type_defs.find(definition -> definition.id == identity) ?? return (.AosStrided, None)
+        fields :: if definition.kind == { .Struct(fields: fields, ..) -> fields, else -> return (.AosStrided, None) }
+        if definition.layout != Val(MirStructLayout.Columnar) -> return (.AosStrided, None)
+        (.ColumnarDirect, fields.position(candidate -> candidate.id == id))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5683
+    fn checked_indexed_field_access(self, base: MirValueId, field: MirFieldId, cursor: MirValueId?, cursor_place: MirPlaceId?) -> (MirVectorAccessRoot, MirVectorLayout, Int?)? Never! {
+        instruction :: self.blocks.lazy().flat_map(block -> block.instructions.lazy()).find(instruction -> instruction.result == Val(base)) ?? return None
+        (collection, index) :: if instruction.operation == {
+            .Index(base: collection, index: index, kind: .List | .FixedListProof, ..) -> (collection, index)
+            else -> return None
+        }
+        cursor_value :: cursor ?? return None
+        seen := [MirValueId: Bool]{}
+        if !self.checked_cursor_matches(index, cursor_value, cursor_place, &seen) -> return None
+        collection_type :: self.checked_value_type(collection) ?? return None
+        element :: if collection_type.kind() == {
+            .List(inner) | .FixedList(elem: inner, ..) -> inner
+            .Tagged(inner: inner, ..) -> if inner.kind() == { .List(elem) | .FixedList(elem: elem, ..) -> elem, else -> return None }
+            else -> return None
+        }
+        identity :: element.identity.or_else(fn() { if element.kind() == { .Apply(name: name, ..) -> Val(name.id), else -> None } }) ?? return None
+        definition :: self.type_defs.find(definition -> definition.id == identity) ?? return None
+        fields :: if definition.kind == { .Struct(fields: fields, ..) -> fields, else -> return None }
+        layout :: if definition.layout == Val(MirStructLayout.Columnar) -> MirVectorLayout.ColumnarDirect else -> MirVectorLayout.AosStrided
+        root_seen := [MirValueId: Bool]{}
+        Val((self.checked_value_access_root(collection, &root_seen), layout, if layout == .ColumnarDirect -> fields.position(candidate -> candidate.id == field) else -> None))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5744
+    fn checked_vector_accesses(self, blocks: [MirBlockId], cursor: MirValueId?, cursor_place: MirPlaceId?) -> [MirVectorAccess] Never! {
+        accesses := [MirVectorAccess]{}
+        loop block_id in blocks {
+            block :: self.block_by_id(block_id) ?? continue
+            loop instruction in block.instructions {
+                loop place_id in checked_operation_place_refs(instruction.operation) {
+                    place :: self.places.find(place -> place.id == place_id) ?? continue
+                    field :: place.projections.lazy().rev().find_map(projection -> if projection == { .Field(field: field, ..) -> Val(field), else -> None })
+                    (layout, column_index) :: self.checked_vector_place_layout(place, field)
+                    accesses.push(MirVectorAccess{root: .Place(place_id), field: field, layout: layout, column_index: column_index})
+                }
+                if instruction.operation == {
+                    .Index(base: base, index: index, ..) -> {
+                        if cursor == .Val(cursor_value) {
+                            seen := [MirValueId: Bool]{}
+                            if self.checked_cursor_matches(index, cursor_value, cursor_place, &seen) {
+                                roots := [MirValueId: Bool]{}
+                                accesses.push(MirVectorAccess{root: self.checked_value_access_root(base, &roots), field: None, layout: .Flat, column_index: None})
+                            }
+                        }
+                    }
+                    .Semantic(.ColumnarRead(base: base, column: column, column_index: column_index, ..)) -> accesses.push(MirVectorAccess{root: .Value(base), field: Val(column), layout: .ColumnarDirect, column_index: Val(column_index)})
+                    .Field(base: base, field: field) -> {
+                        if self.checked_indexed_field_access(base, field, cursor, cursor_place) == .Val((root, layout, column_index)) -> accesses.push(MirVectorAccess{root: root, field: Val(field), layout: layout, column_index: column_index})
+                    }
+                    else -> {}
+                }
+            }
+        }
+        // GATE #4499: composite access ordering/equality is canonical MIR ordering.
+        accesses.sort()
+        accesses.dedup()
+        ^accesses
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5827
+    fn checked_lane_width(ty: MirType, rule: MirVectorRule) -> U16? Never! {
+        if ty.kind() == {
+            .Int -> if rule == .EarlyExitSearch -> Val(U16{2}) else -> None
+            .Float -> Val(U16{2})
+            .Float32 -> Val(U16{4})
+            .IntN(bits: bits, ..) -> Val(if bits <= 32 -> U16{4} else -> U16{2})
+            .InlineRange(base: base, ..) | .Tagged(inner: base, ..) | .Quantity(base: base, ..) -> LowerCtx.checked_lane_width(base, rule)
+            else -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5840
+    pub fn record_checked_vector_fact(&self, header: MirBlockId, cursor: MirValueId?, body_blocks: ^[MirBlockId], advance_block: MirBlockId?, cursor_place: MirPlaceId?, facts: AutoVectorizationFacts, span: Span) -> Unit LowerError! {
+        element_type :: self.mir_type(facts.element_type)?
+        accesses :: self.checked_vector_accesses(body_blocks, cursor, cursor_place)
+        layouts := [MirVectorLayout: Bool]{}
+        loop access in accesses {
+            if access.field != None || access.layout != .Flat -> layouts[access.layout] = true
+        }
+        layout :: if layouts.len() == 1 -> layouts.keys().first() ?? panic("one checked vector layout") else -> MirVectorLayout.Flat
+        lane_width :: LowerCtx.checked_lane_width(element_type, .Elementwise)
+        packed :: lane_width != None && !accesses.is_empty() && facts.no_aliasing && facts.no_early_exit && facts.effect_free_body && facts.no_cross_iteration_deps
+        self.checked_vector_facts.push(MirVectorFact{loop_header: header, cursor: cursor, body_blocks: ^body_blocks, advance_block: advance_block, rule: .Elementwise, accesses: ^accesses, layout: layout, element_type: Val(^element_type), packed: packed, lane_width: lane_width, no_aliasing: facts.no_aliasing, no_early_exit: facts.no_early_exit, effect_free_body: facts.effect_free_body, no_cross_iteration_dependencies: facts.no_cross_iteration_deps, fixed_reduction: None, span: span, decision: MirOptimizationDecision.Rejected(MirOptimizationRejection.UnsupportedOperation)})
+    }
+}
+
+impl LowerCtx {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5894
+    pub fn set_span(&self, span: Span) -> Unit Never! { self.current_span = span }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5897
+    pub fn set_line_marker(&self, line: U32) -> Unit Never! { self.current_line = Val(line) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5901
+    pub fn function_source(self) -> IndexedSource? Never! { self.source_texts.get(self.function.source_file) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5904
+    pub fn source_line(self) -> U32 Never! {
+        if self.current_line == .Val(line) -> return line
+        if self.function_source() == .Val(source) -> return U32{source.lines.line_col(source.text, self.current_span.start).0}
+        U32{self.function.line}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5916
+    pub fn source_column(self) -> U32 Never! { self.function_source().map(source -> U32{source.lines.line_col(source.text, self.current_span.start).1}) ?? U32{0} }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5921
+    pub fn with_switch_subject<R>(&self, subject: MirValueId, lower: fn(&LowerCtx) -> R LowerError!) -> R LowerError! {
+        previous :: self.switch_subject.replace(subject)
+        result :: lower(&self)
+        self.switch_subject = previous
+        result?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5932
+    pub fn switch_subject(self) -> MirValueId LowerError! { self.switch_subject ?? return Err(self.error(self.span(), "switch subject is not available")) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5936
+    pub fn panic_context_at(self, line: U32, source_line_override: String?) -> MirPanicContext Never! {
+        source_line :: source_line_override.map(text -> ~text).or_else(fn() { self.function_source().map(source -> ~source.lines.line_text(source.text, Int{line})) }) ?? ""
+        MirPanicContext{function: ~self.function.name, source_line: ^source_line, caret: 0, locals: []}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5960
+    pub fn source_file_id_for(&self, file: String) -> MirSourceFileId Never! {
+        if self.source_files.get(file) == .Val(id) -> return id
+        id :: MirSourceFileId(stable_id("mir-source-file", file))
+        self.source_files[file] = id
+        id
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5968
+    fn lower_db_query_metadata(&self, metadata: ^TDbQueryMetadata) -> MirDbQueryMetadata Never! {
+        source_path :: ^metadata.source_file
+        MirDbQueryMetadata{source_file: self.source_file_id_for(source_path), source_path: ^source_path, source_span: metadata.source_span, statement_identity: ^metadata.statement_identity, table_facts: metadata.table_facts.map(fact -> MirDbTableFact{table_id: fact.table_id, read: fact.read, write: fact.write})}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5987
+    pub fn site_id_for(self, span: Span, purpose: String) -> MirSiteId Never! {
+        MirSiteId(stable_id("mir-site", "{function_identity(self.function)}:{purpose}:{span.start}:{span.end}"))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5999
+    pub fn type_id_for(self, key: String) -> MirTypeId LowerError! {
+        scoped := String?{None}
+        if !self.function.module.is_empty() && !key.contains("::") {
+            candidate :: "{self.function.module}::{key}"
+            if self.type_defs.any(ty -> ty.key == candidate && ty.name == key) -> scoped = Val(^candidate)
+        }
+        canonical_key :: canonical_nominal_name(self.type_defs, scoped ?? key, self.span())?
+        exact := MirTypeId?{None}
+        loop ty in self.type_defs {
+            if ty.key != canonical_key -> continue
+            if exact != None -> return Err(self.error(self.span(), "ambiguous checked MIR type key `{key}`"))
+            exact = Val(ty.id)
+        }
+        if exact == .Val(id) -> return id
+        trait_count :: self.trait_defs.lazy().filter(row -> row.key == key || row.name == key).count()
+        if trait_count == {
+            0 -> MirTypeId(stable_id("mir-type", canonical_key))
+            1 -> MirTypeId(stable_id("mir-type", "Trait({key})"))
+            else -> return Err(self.error(self.span(), "ambiguous checked MIR trait key `{key}`"))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6045
+    pub fn enum_group_leaves(self, owner: MirTypeId, group: String) -> [String]? Never! {
+        row :: self.type_defs.find(row -> row.id == owner) ?? return None
+        variants :: if row.kind == { .Enum(variants: variants, ..) -> variants, else -> return None }
+        prefix :: "{group}."
+        leaves :: variants.lazy().filter(variant -> variant.name.starts_with(prefix)).map(variant -> ~variant.name).to_list()
+        if leaves.is_empty() -> None else -> Val(^leaves)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6059
+    fn normalize_contextual_type(self, ty: Type) -> Type Never! {
+        ty.map_named_types(fn(name: String) {
+            if self.function.generic_params.any(parameter -> parameter.name == name) -> return None
+            scoped :: "{self.function.module}::{name}"
+            bare :: if name == Syntax.TYPE_TASKGROUP || Syntax.typed_head_kind(name) != None -> None else -> self.nominal_identities.get(name)
+            self.nominal_identities.get(scoped).or(bare).map(identity -> ~identity).or_else(fn() {
+                if self.function.module.is_empty() -> return None
+                if self.type_defs.any(definition -> definition.key == scoped && definition.name == name) -> Val(~scoped) else -> None
+            })
+        })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6094
+    pub fn mir_type(&self, ty: Type) -> MirType LowerError! {
+        span :: self.span()
+        normalized :: self.normalize_contextual_type(ty)
+        contextual_owner :: if normalized == {
+            .Named(name) -> {
+                owner_name :: if self.function.kind == {
+                    .Method(owner_type: owner, ..) | .TraitMethod(owner_type: owner, ..) -> Val(owner.name())
+                    .TopLevel -> None
+                }
+                owner_name.and_then(owner -> {
+                    same_leaf :: (owner.rsplit("::").next() ?? owner) == name
+                    ambiguous :: self.type_defs.lazy().filter(definition -> definition.name == name || (definition.key.rsplit("::").next() ?? definition.key) == name).count() > 1
+                    if same_leaf && ambiguous -> Val(Type.Named(^owner)) else -> None
+                })
+            }
+            else -> None
+        }
+        instance :: canonical_type_instance(self.type_defs, contextual_owner ?? normalized, span)?
+        merge_type_instance(&self.type_instances, ~instance, span)?
+        ^instance
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6135
+    pub fn value_source_type(self, value: MirValueId) -> Type LowerError! {
+        row :: self.values.find(row -> row.0 == value) ?? return Err(self.error(self.span(), "missing checked MIR value type {value}"))
+        mir_type_as_ast(row.1)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6148
+    pub fn call_value_access(self, value: MirValueId, borrowed: Bool) -> MirAccess LowerError! {
+        if borrowed -> return .Read
+        row :: self.values.lazy().rev().find(row -> row.0 == value) ?? return Err(self.error(self.span(), "missing checked MIR value ownership {value}"))
+        if row.3.mode == .Copy -> .Read else -> .Move
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6177
+    pub fn field_id_for(self, owner: MirTypeId, key: String) -> MirFieldId LowerError! {
+        ty :: self.type_defs.find(ty -> ty.id == owner) ?? return Err(self.error(self.span(), "missing checked MIR owner type {owner}"))
+        lookup_key :: math_field_name(ty, key) ?? key
+        field :: if ty.kind == {
+            .Struct(fields: fields, ..) -> fields.find(field -> field.name == lookup_key)
+            .Enum(variants: variants, ..) -> variants.lazy().find_map(variant -> if variant.payload == { .Named(fields) -> fields.find(field -> field.name == lookup_key), else -> None })
+            .Distinct(..) | .Alias(..) | .UnitFamily(..) -> None
+        }
+        (field ?? return Err(self.error(self.span(), "missing checked MIR field `{key}` on {owner}"))).id
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6215
+    pub fn has_field_owner(self, ty: Type) -> Bool Never! { self.field_owner_id_for_type(ty).is_ok_and(owner -> self.type_defs.any(definition -> definition.id == owner)) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6220
+    pub fn field_owner_id_for_type(self, ty: Type) -> MirTypeId LowerError! {
+        normalized :: self.normalize_contextual_type(ty)
+        owner :: field_owner_type(normalized)
+        key :: if owner == {
+            .Apply(name: name, ..) -> ~name
+            .Union(_) -> type_identity_key(canonicalize_type(self.type_defs, owner, self.span())?)
+            else -> type_identity_key(owner)
+        }
+        self.type_id_for(key)?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6236
+    pub fn field_name_for_type(self, ty: Type, index: Int) -> String LowerError! {
+        owner_ty :: field_owner_type(ty)
+        if owner_ty == {
+            .Tuple(fields) -> return ~(fields.get(index) ?? return Err(self.error(self.span(), "missing checked tuple field at position {index}"))).0
+            else -> {}
+        }
+        owner :: self.field_owner_id_for_type(owner_ty)?
+        definition :: self.type_defs.find(definition -> definition.id == owner) ?? return Err(self.error(self.span(), "missing checked MIR owner type {owner}"))
+        fields :: if definition.kind == { .Struct(fields: fields, ..) -> fields, else -> return Err(self.error(self.span(), "checked MIR type {owner} has no ordered fields")) }
+        ~(fields.get(index) ?? return Err(self.error(self.span(), "missing checked MIR field at position {index} on {owner}"))).name
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6287
+    pub fn field_id_for_type(self, ty: Type, key: String) -> MirFieldId LowerError! {
+        normalized :: self.normalize_contextual_type(ty)
+        owner_ty :: field_owner_type(normalized)
+        if owner_ty == {
+            .Tuple(fields) -> {
+                if tuple_field_name(fields, key) == .Val(field_name) {
+                    identity :: canonical_type_instance(self.type_defs, owner_ty, self.span())?.identity_key()
+                    return MirFieldId(stable_id("mir-field", "{identity}::{field_name}"))
+                }
+            }
+            else -> {}
+        }
+        self.field_id_for(self.field_owner_id_for_type(owner_ty)?, key)?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6304
+    fn field_id_for_mir_type(self, ty: MirType, key: String) -> MirFieldId LowerError! {
+        owner_ty :: field_owner_mir_type(ty)
+        if owner_ty.tuple_fields() == .Val(fields) {
+            if tuple_field_name(fields, key) == .Val(field_name) -> return MirFieldId(stable_id("mir-field", "{owner_ty.identity_key()}::{field_name}"))
+        }
+        owner :: if owner_ty.kind() == {
+            .Apply(name: name, ..) -> self.type_id_for(name.name)?
+            else -> owner_ty.nominal_id() ?? return Err(self.error(self.span(), "missing MIR field owner for `{key}`"))
+        }
+        self.field_id_for(owner, key)?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6327
+    pub fn enum_named_payload_field(self, owner: String, variant: String, label: String) -> (MirFieldId, Int) LowerError! {
+        owner_id :: self.type_id_for(owner)?
+        row :: self.type_defs.find(row -> row.id == owner_id) ?? return Err(self.error(self.span(), "missing MIR enum owner `{owner}`"))
+        variants :: if row.kind == { .Enum(variants: variants, ..) -> variants, else -> return Err(self.error(self.span(), "MIR enum payload owner `{owner}` is not an enum")) }
+        variant_row :: variants.find(candidate -> candidate.name == variant) ?? return Err(self.error(self.span(), "missing MIR enum variant `{owner}.{variant}`"))
+        fields :: if variant_row.payload == { .Named(fields) -> fields, else -> return Err(self.error(self.span(), "MIR enum variant `{owner}.{variant}` has no named payload")) }
+        (order, field) :: fields.enumerate().find((_, field) -> field.name == label) ?? return Err(self.error(self.span(), "missing MIR enum payload field `{owner}.{variant}.{label}`"))
+        (field.id, order)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6373
+    pub fn shared_guard_field_path(self, guard_ty: Type, path: [String]) -> [MirFieldId] LowerError! {
+        current := ~field_owner_type(guard_ty)
+        fields := [MirFieldId]{}
+        fields.reserve(path.len())
+        loop label in path {
+            field :: self.field_id_for_type(current, label)?
+            field_ty :: self.field_type_for_type(current, label)?
+            fields.push(field)
+            current = ^field_ty
+        }
+        ^fields
+    }
+}
+
+impl LowerCtx {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6389
+    pub fn intern_prelude_call(&self, row: ^MirPreludeCall) -> MirPreludeCallId LowerError! {
+        symbol :: row.symbol.name()
+        if symbol.is_empty() -> return Err(self.error(self.span(), "checked Prelude row has an empty symbol"))
+        identity :: "{row.family.debug()}:{row.module}:{row.member}:{symbol}:{row.signature.arity}:{row.signature.max_arity}:{row.signature.borrow_mask.debug()}:{row.effect.debug()}:{row.fallibility.debug()}:{row.abi.debug()}"
+        row.id = MirPreludeCallId(stable_id("mir-prelude-call", identity))
+        if self.prelude_call_positions.get(row.id) == .Val(position) {
+            existing :: self.prelude_calls[position]
+            if existing.family != row.family || existing.module != row.module || existing.member != row.member || existing.symbol != row.symbol || existing.signature != row.signature || existing.effect != row.effect || existing.fallibility != row.fallibility || existing.abi != row.abi -> return Err(self.error(self.span(), "conflicting checked Prelude row {row.id.debug()}"))
+            return row.id
+        }
+        self.prelude_call_positions[row.id] = self.prelude_calls.len()
+        id :: row.id
+        self.prelude_calls.push(^row)
+        id
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6435
+    pub fn intern_core_route(&self, record: Syntax.CoreCallRecord, carrier: TFailureCarrier) -> MirPreludeCallId LowerError! {
+        symbol :: if record.symbol == { .Prelude(name) -> MirSymbol.Prelude(~name), .Rust(name) -> MirSymbol.Runtime(~name) }
+        fallibility :: call_fallibility(&self, carrier)?
+        self.intern_prelude_call(MirPreludeCall{id: MirPreludeCallId(0), family: .StaticPrelude, module: if record.module.is_empty() -> "receiver({record.receiver_types.join("|")})" else -> ~record.module, member: ~record.member, symbol: ^symbol, signature: MirCallSignature{arity: record.signature.arity, max_arity: record.signature.max_arity, borrow_mask: ~record.signature.borrow_mask}, effect: record.effect, fallibility: ^fallibility, abi: .Value, authority: None, db_metadata: None})?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6471
+    pub fn lower_call_fallibility(&self, carrier: TFailureCarrier) -> MirCallFallibility LowerError! { call_fallibility(&self, carrier)? }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6478
+    pub fn local_id_for(self, local: TLocal) -> MirLocalId LowerError! {
+        row :: self.locals.find(candidate -> self.local_places.get(local.name) == Val(candidate.place)) ?? return Err(self.error(self.span(), "missing checked MIR local row `{local.name}`"))
+        row.id
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6491
+    pub fn intern_prelude_route(&self, route: ^TPreludeRoute) -> MirPreludeCallId LowerError! {
+        db_metadata :: route.db_metadata.map(metadata -> self.lower_db_query_metadata(^metadata))
+        fallibility :: call_fallibility(&self, route.fallibility)?
+        self.intern_prelude_call(MirPreludeCall{id: MirPreludeCallId(0), family: route.family, module: ^route.module, member: ^route.member, symbol: ^route.symbol, signature: ^route.signature, effect: route.effect, fallibility: ^fallibility, abi: route.abi, authority: None, db_metadata: ^db_metadata})?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6514
+    pub fn function_id(self) -> MirFunctionId LowerError! { self.function_registry.id_for(self.function)? }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6518
+    pub fn current_block(self) -> MirBlockId Never! { self.current }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6522
+    pub fn switch_to(&self, block: MirBlockId) -> Unit Never! { self.current = block }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6526
+    pub fn block_mut(&self, id: MirBlockId) -> &MirBasicBlock LowerError! {
+        index :: self.block_positions.get(id) ?? return Err(self.error(self.span(), "missing MIR block {id.debug()}"))
+        &self.blocks[index]
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6534
+    pub fn block_by_id(self, id: MirBlockId) -> &MirBasicBlock? Never! { self.block_positions.get(id).map(position -> &self.blocks[position]) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6540
+    fn current_block_mut(&self) -> &MirBasicBlock? Never! {
+        position :: self.block_positions.get(self.current) ?? return None
+        Val(&self.blocks[position])
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6546
+    fn value_instruction(self, value: MirValueId) -> &MirInstruction? Never! {
+        block :: self.value_blocks.get(value) ?? return None
+        self.blocks[block].instructions.find(instruction -> instruction.result == Val(value))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6553
+    pub fn new_block(&self, span: Span, role: String) -> MirBlockId LowerError! {
+        identity :: self.reserve_identity("block", span, role, "")?
+        id :: MirBlockId(stable_id("mir-block", identity))
+        // First duplicate row wins, matching linear find.
+        if !self.block_positions.contains_key(id) -> self.block_positions[id] = self.blocks.len()
+        self.blocks.push(MirBasicBlock{id: id, span: span, instructions: [], terminator: MirTerminator.Unreachable(reason: "lowering in progress")})
+        id
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6568
+    pub fn is_terminated(self) -> Bool Never! {
+        !self.block_by_id(self.current).is_some_and(block -> if block.terminator == { .Unreachable(reason: reason) -> reason == "lowering in progress", else -> false })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6575
+    pub fn terminate(&self, terminator: ^MirTerminator) -> Unit Never! {
+        if self.current_block_mut() == .Val(block) -> block.terminator = ^terminator
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6586
+    pub fn terminate_with_cleanup(&self, terminator: ^MirTerminator, from_depth: Int) -> Unit LowerError! {
+        self.emit_transaction_exit_restores(terminator, from_depth)?
+        if terminator == { .Return(value: .Val(value)) -> self.retype_absent_return(value)?, else -> {} }
+        cut :: from_depth.min(self.defer_stack.len())
+        if self.shared_exit_target(terminator, cut)? == .Val(target) {
+            if (target, terminator) == {
+                (.Return(.Val(slot)), .Return(value: .Val(value))) -> { _ :: self.emit("exit.value.write", None, MirOperation.WritePlace(place: slot, value: value))? }
+                else -> {}
+            }
+            entry :: self.exit_chain_entry(self.defer_stack.len() - 1, target, cut)?
+            self.terminate(MirTerminator.Jump(target: entry))
+            return
+        }
+        // Keep actions registered so sibling paths get their own reversed sequence.
+        self.emit_deferred_cleanups_from(cut, false)?
+        self.terminate(^terminator)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6622
+    fn emit_transaction_exit_restores(&self, terminator: MirTerminator, from_depth: Int) -> Unit LowerError! {
+        if terminator == { .Return(..) | .Break(..) | .Continue(..) -> {}, else -> return }
+        transactions :: self.transaction_restores.take()
+        left := [Int]{}
+        loop (index, (scope, _)) in transactions.lazy().enumerate().rev() {
+            if self.defer_stack.lazy().rposition(frame -> frame.owner == Val(scope)).is_some_and(depth -> depth >= from_depth) -> left.push(index)
+        }
+        result := Unit LowerError!{Ok(())}
+        failed := false
+        loop transaction in left {
+            loop (index, restore) in transactions[transaction].1.lazy().enumerate().rev() {
+                if self.emit_transaction_restore(index, restore) == {
+                    .Err(error) -> { result = Err(^error); failed = true; break }
+                    .Ok(_) -> {}
+                }
+            }
+            if failed -> break
+        }
+        // Restore metadata even on the first lowering failure.
+        self.transaction_restores = ^transactions
+        result?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6660
+    fn emit_transaction_restore(&self, index: Int, restore: TransactionRestore) -> Unit LowerError! {
+        if restore.custom == .Val(call) {
+            _ :: lower_expr(&self, call)?
+            return
+        }
+        value :: self.emit("transaction.snapshot.{index}.restore.read", Val(~restore.ty), MirOperation.ReadPlace(restore.saved))?
+        _ :: self.emit("transaction.snapshot.{index}.restore.write", None, MirOperation.WritePlace(place: restore.place, value: value))?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6689
+    fn shared_exit_target(&self, terminator: MirTerminator, from_depth: Int) -> ExitTarget? LowerError! {
+        frames :: self.defer_stack.slice(from_depth, self.defer_stack.len())
+        if frames.all(frame -> frame.actions.is_empty()) || frames.any(frame -> frame.inline_exits) -> return None
+        if terminator == {
+            .Return(value: .None) -> Val(ExitTarget.Return(None))
+            .Return(value: .Val(value)) -> self.exit_value_slot(value)?.map(slot -> ExitTarget.Return(Val(slot)))
+            .Break(target: target, value: .None) -> Val(ExitTarget.Break(target))
+            .Continue(target: target) -> Val(ExitTarget.Continue(target))
+            else -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6713
+    fn exit_value_slot(&self, value: MirValueId) -> MirPlaceId? LowerError! {
+        row :: self.values.lazy().rev().find(row -> row.0 == value) ?? return None
+        ty :: ~row.1
+        ownership :: row.3
+        if ownership.mode == .ReadBorrow || ownership.mode == .WriteBorrow -> return None
+        if self.exit_value_slots.find((slot_ty, _) -> slot_ty == ty) == .Val((_, slot)) -> return Val(slot)
+        name :: "exit_value_{self.exit_value_slots.len()}"
+        span :: self.span()
+        local_identity :: self.reserve_identity("local", span, name, "")?
+        local_id :: MirLocalId(stable_id("mir-local", local_identity))
+        place :: self.place_id("local", name)?
+        self.places.push(MirPlace{id: place, span: span, ty: ~ty, base: .Local(local_id), projections: [], access: .Move, persist_key: None})
+        reset_ownership := ownership
+        reset_ownership.moved = false
+        reset_ownership.last_use = false
+        self.locals.push(MirLocal{id: local_id, name: ^name, span: span, ty: ~ty, place: place, mutable: true, ownership: reset_ownership, comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false})
+        self.exit_value_slots.push((^ty, place))
+        Val(place)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6772
+    fn exit_chain_entry(&self, depth: Int, target: ExitTarget, cut: Int) -> MirBlockId LowerError! {
+        frame :: self.defer_stack[depth]
+        explicit :: frame.explicit
+        if frame.pending_exits.find(exit -> exit.target == target && exit.explicit == explicit) == .Val(exit) -> return exit.block
+        block :: self.new_block(self.span(), "cleanup.chain")?
+        self.defer_stack[depth].pending_exits.push(PendingExit{target: target, explicit: explicit, cut: cut, block: block})
+        block
+    }
+}
+
+impl LowerCtx {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6798
+    fn exit_tail(&self, target: ExitTarget) -> MirBlockId LowerError! {
+        if self.exit_tails.get(target) == .Val(block) -> return block
+        block :: self.new_block(self.span(), "cleanup.chain.exit")?
+        self.switch_to(block)
+        terminator :: if target == {
+            .Return(.None) -> MirTerminator.Return(value: None)
+            .Return(.Val(slot)) -> {
+                row :: self.exit_value_slots.find((_, place) -> place == slot) ?? return Err(self.error(self.span(), "exit value slot has no type"))
+                value :: self.emit_mir_type("exit.value.read", Val(~row.0), MirOperation.MovePlace(place: slot))?
+                MirTerminator.Return(value: Val(value))
+            }
+            .Break(target) -> MirTerminator.Break(target: target, value: None)
+            .Continue(target) -> MirTerminator.Continue(target: target)
+        }
+        self.terminate(^terminator)
+        self.exit_tails[target] = block
+        block
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6841
+    fn seal_exit_chains(&self, depth: Int) -> Unit LowerError! {
+        saved :: self.current
+        loop {
+            pending := self.defer_stack[depth].pending_exits.take()
+            if pending.is_empty() -> break
+            pending.sort_by(exit -> exit.explicit)
+            actions :: ~self.defer_stack[depth].actions
+            (automatic, explicit) :: actions.partition(action -> if action == { .DropPlace(..) -> true, else -> false })
+            sealed := [ExitTarget: Bool]{}
+            loop exit in pending {
+                if sealed.contains_key(exit.target) -> continue
+                sealed[exit.target] = true
+                entries :: pending.lazy().filter(other -> other.target == exit.target).to_list()
+                next :: if depth <= exit.cut -> self.exit_tail(exit.target)? else -> self.exit_chain_entry(depth - 1, exit.target, exit.cut)?
+                // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6866
+                entry :: fn(count: Int, ctx: &LowerCtx) -> MirBlockId LowerError! {
+                    if entries.find(candidate -> candidate.explicit == count) == .Val(candidate) -> candidate.block
+                    else -> ctx.new_block(ctx.span(), "cleanup.chain")?
+                }
+                block := entry(0, &self)?
+                self.switch_to(block)
+                loop action in automatic.lazy().rev() -> self.emit_cleanup_action(action, false)?
+                self.terminate(MirTerminator.Jump(target: next))
+                deepest :: entries.last().map(last -> last.explicit) ?? 0
+                loop count in 1..(deepest + 1) {
+                    following :: block
+                    block = entry(count, &self)?
+                    self.switch_to(block)
+                    action :: explicit.get(count - 1) ?? return Err(self.error(self.span(), "drop chain entry outlives its explicit cleanup"))
+                    self.emit_cleanup_action(action, false)?
+                    self.terminate(MirTerminator.Jump(target: following))
+                }
+            }
+        }
+        self.switch_to(saved)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6898
+    fn seal_all_exit_chains(&self) -> Unit LowerError! {
+        loop depth in (0..self.defer_stack.len()).rev() -> self.seal_exit_chains(depth)?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6911
+    pub fn emit_explicit_stop_cleanups(&self) -> Unit LowerError! {
+        self.seal_all_exit_chains()?
+        self.emit_deferred_cleanups_from(0, true)?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6921
+    pub fn emit_stop_path_cleanups(&self) -> Unit LowerError! { self.emit_cleanup_actions(0, false, true)? }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6927
+    pub fn has_stop_path_cleanups(self) -> Bool Never! {
+        self.defer_stack.lazy().flat_map(frame -> frame.actions.lazy()).any(action -> if action == { .DropPlace(place: place, ..) -> self.place_has_scope_end_close(place), else -> true })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6939
+    pub fn stop_path_moved_locals(self) -> [MirLocalId: Bool] Never! {
+        moved := [MirLocalId: Bool]{}
+        loop frame in self.defer_stack {
+            loop action in frame.actions {
+                place :: if action == {
+                    .Close(index) -> self.deferred_closes[index].place
+                    .Guard(place) | .FileOwner(place: place, ..) -> place
+                    .DropPlace(place: place, ..) -> if self.place_has_scope_end_close(place) -> place else -> continue
+                }
+                row :: self.places.find(row -> row.id == place) ?? continue
+                if row.base == { .Local(local) -> moved[local] = true, else -> {} }
+            }
+        }
+        ^moved
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6961
+    fn place_has_scope_end_close(self, place: MirPlaceId) -> Bool Never! { self.places.find(row -> row.id == place).is_some_and(row -> self.scope_end_close(row.ty) != None) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6968
+    fn emit_deferred_cleanups(&self, from_depth: Int) -> Unit LowerError! { self.emit_deferred_cleanups_from(from_depth, true)? }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6972
+    fn emit_deferred_cleanups_from(&self, from_depth: Int, consume: Bool) -> Unit LowerError! { self.emit_cleanup_actions(from_depth, consume, false)? }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:6980
+    fn emit_cleanup_actions(&self, from_depth: Int, consume: Bool, stop_path: Bool) -> Unit LowerError! {
+        cut :: from_depth.min(self.defer_stack.len())
+        loop depth in (cut..self.defer_stack.len()).rev() {
+            actions :: if consume {
+                self.defer_stack[depth].explicit = 0
+                self.defer_stack[depth].actions.take()
+            } else -> ~self.defer_stack[depth].actions
+            // Explicit actions first, automatic safety net second, both newest first.
+            (automatic, explicit) :: actions.partition(action -> if action == { .DropPlace(..) -> true, else -> false })
+            loop action in explicit.lazy().rev() -> self.emit_cleanup_action(action, stop_path)?
+            loop action in automatic.lazy().rev() -> self.emit_cleanup_action(action, stop_path)?
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:7010
+    fn emit_cleanup_action(&self, action: DeferredCleanup, stop_path: Bool) -> Unit LowerError! {
+        if action == {
+            .Close(index) -> self.emit_deferred_close(index)?
+            .Guard(place) -> {
+                row :: self.places.find(candidate -> candidate.id == place) ?? return Err(self.error(self.span(), "scope guard cleanup targets an unavailable place"))
+                value :: self.emit_mir_type("scope.guard.cleanup.move", Val(~row.ty), MirOperation.MovePlace(place: place))?
+                _ :: self.emit("scope.guard.cleanup.drop", None, MirOperation.Drop(value: value, kind: .Value))?
+            }
+            .FileOwner(place: place, live: live) -> self.emit_file_owner_cleanup(place, live)?
+            .DropPlace(place: place, live: live, kind: kind) -> {
+                if !stop_path || self.place_has_scope_end_close(place) -> self.emit_owned_place_cleanup(place, live, kind)?
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:7055
+    pub fn emit_scope_cleanups(&self, scope: MirScopeId) -> Unit LowerError! {
+        depth :: self.defer_stack.lazy().rposition(frame -> frame.owner == Val(scope)) ?? return Err(self.error(self.span(), "scope cleanup has no active frame for {scope.debug()}"))
+        self.emit_deferred_cleanups_from(depth, false)?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:7072
+    pub fn resolved_local_name(self, local: TLocal) -> String Never! {
+        mangled :: mangle(local.name)
+        if !local.generated && mangled != local.name && self.local_places.contains_key(mangled) -> ^mangled else -> ~local.name
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:7084
+    pub fn register_defer_close(&self, close: ^TExpr, resource: TLocal) -> Unit LowerError! {
+        if self.defer_stack.is_empty() -> return Err(self.error(self.span(), "defer registered without lexical scope"))
+        name :: self.resolved_local_name(resource)
+        ty :: self.local_types.get(name).map(ty -> ~ty) ?? return Err(self.error(self.span(), "unbound deferred resource `{name}`"))
+        place :: self.place_for_local(TLocal.user(~name), .Move)?
+        index :: self.deferred_closes.len()
+        // GATE #4494: shared descriptor retains the registered close while nested lowering mutates the table.
+        self.deferred_closes.push(Rc.new(DeferredClose{close: ^close, resource: ^name, place: place, ty: ^ty, span: self.span()}))
+        self.defer_stack[self.defer_stack.len() - 1].push_action(DeferredCleanup.Close(index))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:7119
+    fn emit_deferred_close(&self, index: Int) -> Unit LowerError! {
+        deferred :: Rc.clone(self.deferred_closes[index]) // GATE #4494
+        exit_span :: self.span()
+        previous_place :: self.local_places.insert(~deferred.resource, deferred.place)
+        previous_ty :: self.local_types.insert(~deferred.resource, ~deferred.ty)
+        self.set_span(deferred.span)
+        self.push_lexical_frame()
+        lowered :: self.lower_child(deferred.close).and_then(_ -> self.pop_lexical_frame())
+        self.set_span(exit_span)
+        if previous_place == {
+            .Val(place) -> { _ :: self.local_places.insert(~deferred.resource, place) }
+            .None -> { _ :: self.local_places.remove(deferred.resource) }
+        }
+        if previous_ty == {
+            .Val(ty) -> { _ :: self.local_types.insert(~deferred.resource, ^ty) }
+            .None -> { _ :: self.local_types.remove(deferred.resource) }
+        }
+        lowered?
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:7145
+    pub fn register_scope_guard(&self, place: MirPlaceId) -> Unit LowerError! {
+        row :: self.places.find_mut(candidate -> candidate.id == place) ?? return Err(self.error(self.span(), "scope guard cleanup targets an unavailable place"))
+        name :: row.ty.nominal_name()
+        if name != Val("ScopeGuard") && name != Val("EventScope") -> return Err(self.error(self.span(), "scope guard cleanup targets a non-guard place"))
+        event_scope :: name == Val("EventScope")
+        retain_place_access(&row, .Move)
+        frame :: self.defer_stack.last_mut() ?? {
+            if event_scope -> return
+            return Err(self.error(self.span(), "scope guard registered without lexical scope"))
+        }
+        frame.push_action(DeferredCleanup.Guard(place))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:7173
+    pub fn is_core_file_owner(self, identity: MirTypeId) -> Bool Never! {
+        source :: core_source_module("core.files") ?? return false
+        self.type_defs.any(definition -> {
+            if definition.id != identity -> return false
+            if definition.name != "FileReader" && definition.name != "FileWriter" && definition.name != "TempDir" && definition.name != "TempFile" && definition.name != "FileLock" -> return false
+            self.modules.any(module -> module.path == source.path && definition.module == MirModuleId(stable_id("mir-module", module.key)) && definition.key == "{module.key}::{definition.name}")
+        })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:7188
+    fn owned_file_paths(&self, ty: MirType, path: &[(String, Type)], visiting: &[MirTypeId], output: &[[(String, Type)]]) -> Unit LowerError! {
+        if ty.identity.is_some_and(identity -> self.is_core_file_owner(identity)) {
+            output.push(~path)
+            return
+        }
+        if ty.tuple_fields() == .Val(fields) {
+            loop (name, field_ty) in fields {
+                path.push((~name, mir_type_as_ast(field_ty)))
+                self.owned_file_paths(field_ty, &path, &visiting, &output)?
+                _ :: path.pop()
+            }
+            return
+        }
+        identity :: ty.identity ?? return
+        if visiting.contains(identity) -> return
+        definition :: self.type_defs.find(row -> row.id == identity) ?? return
+        if definition.ownership != .Owned && definition.ownership != .Move -> return
+        fields :: if definition.kind == { .Struct(fields: fields, ..) -> fields, else -> return }
+        visiting.push(identity)
+        owner :: mir_type_as_ast(ty)
+        loop field in fields {
+            if field.computed -> continue
+            field_ty :: self.field_type_for_type(owner, field.name)?
+            checked :: self.mir_type(field_ty)?
+            path.push((~field.name, ^field_ty))
+            self.owned_file_paths(checked, &path, &visiting, &output)?
+            _ :: path.pop()
+        }
+        _ :: visiting.pop()
+    }
+}

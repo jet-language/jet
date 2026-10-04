@@ -1,2166 +1,614 @@
-// PORT-PENDING 0491 crates-jet-codegen-src-codegen-tir-lower-method-calls-slice-11055: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11055-13216
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
-//RS             let marked_name = if Syntax::is_comptime_name(name) {
-//RS                 name.clone()
-//RS             } else {
-//RS                 format!("{}{}", Syntax::COMPTIME_MARK, name)
-//RS             };
-//RS             let is_authority = |candidate: &str| {
-//RS                 matches!(
-//RS                     cx.const_values.get(candidate),
-//RS                     Some(crate::Comptime::CtValue::Struct { type_name, .. })
-//RS                         if type_name == Syntax::TYPE_AUTHORITY
-//RS                 )
-//RS             };
-//RS             if is_authority(name) {
-//RS                 Some(name.clone())
-//RS             } else if is_authority(&marked_name) {
-//RS                 Some(marked_name)
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         }
-//RS         _ => None,
-//RS     };
-//RS     if (recv_type.as_deref() == Some(Syntax::TYPE_AUTHORITY) || comptime_authority_name.is_some())
-//RS         && matches!(method, "with" | "without")
-//RS         && args.len() == 1
-//RS     {
-//RS         return in_own_frame(|| {
-//RS             let recv = if let Some(name) = comptime_authority_name.as_ref() {
-//RS                 let comptime_receiver = Expr::ComptimeName {
-//RS                     name: name.clone(),
-//RS                     span: receiver.span(),
-//RS                     value: None,
-//RS                 };
-//RS                 lower_expr(&comptime_receiver, cx, env)
-//RS             } else {
-//RS                 lower_expr(receiver, cx, env)
-//RS             };
-//RS             let mut targs = args
-//RS                 .iter()
-//RS                 .map(|arg| lower_one_call_arg(arg, None, env, cx))
-//RS                 .collect::<Vec<_>>();
-//RS             let receiver = TCallArg {
-//RS                 value: recv,
-//RS                 template_items: None,
-//RS                 borrow: true,
-//RS                 mut_borrow: false,
-//RS                 clone: false,
-//RS                 arc_clone: false,
-//RS                 fn_coerce: None,
-//RS                 widen_to_vec: false,
-//RS                 widen_to_union: None,
-//RS                 box_as_trait: None,
-//RS             };
-//RS             for arg in &mut targs {
-//RS                 arg.borrow = true;
-//RS                 arg.mut_borrow = false;
-//RS             }
-//RS             let mut call_args = Vec::with_capacity(targs.len() + 1);
-//RS             call_args.push(receiver);
-//RS             call_args.extend(targs);
-//RS             TExpr {
-//RS                 ty: resolved_ret
-//RS                     .cloned()
-//RS                     .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
-//RS                 kind: TExprKind::StaticCall {
-//RS                     owner: rooted_owner("JetAuthority"),
-//RS                     owner_type: None,
-//RS                     method: TMethodRef::bare(method),
-//RS                     type_args: type_args.to_vec(),
-//RS                     args: call_args,
-//RS                 },
-//RS             }
-//RS         });
-//RS     }
-//RS     // Core geometry constructors are static even when sema also recovers the
-//RS     // receiver's nominal type.  Keep local declarations authoritative, but do
-//RS     // not let imported Core geometry rows fall through to a nonexistent
-//RS     // inherent `new` MIR target.
-//RS     if let Some(type_name) = static_call_type_name_lower(receiver, env) {
-//RS         if crate::Sema::is_geometry_type(&type_name)
-//RS             && !cx.local_type_names.contains(&type_name)
-//RS             && crate::Sema::geometry_static_return_with_owner(
-//RS                 &type_name,
-//RS                 method,
-//RS                 args.len(),
-//RS                 owner_type_args,
-//RS             )
-//RS             .is_some()
-//RS         {
-//RS             let ret = crate::Sema::geometry_static_return_with_owner(
-//RS                 &type_name,
-//RS                 method,
-//RS                 args.len(),
-//RS                 owner_type_args,
-//RS             )
-//RS             .expect("geometry constructor return was checked above");
-//RS             return in_own_frame(|| TExpr {
-//RS                 ty: ret,
-//RS                 kind: TExprKind::MathBuiltin {
-//RS                     type_name,
-//RS                     func: method.to_string(),
-//RS                     args: args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect(),
-//RS                 },
-//RS             });
-//RS         }
-//RS     }
-//RS     let checked_text_static = |type_name: &str| {
-//RS         cx.string_distinct_has_registered_method(type_name, "check")
-//RS             && (method == "check"
-//RS                 || (cx.string_distinct_has_registered_method(type_name, "encode_hole")
-//RS                     && matches!(method, "from" | "encode_hole")))
-//RS     };
-//RS     // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate
-//RS     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
-//RS     // ident and `method` is a registered static method. Mirror the AST path
-//RS     // (Expression.rs ~L1644): `__jet_<Type>::__jet_<method>(args)`.
-//RS     if recv_type.is_none()
-//RS         || matches!(
-//RS             recv_type.as_deref(),
-//RS             Some("ExpiringSecret" | crate::Syntax::EXPIRING_VALUE_TYPE)
-//RS         )
-//RS         || recv_type.as_deref().is_some_and(checked_text_static)
-//RS         || matches!(receiver, Expr::Ident(type_name, _) if checked_text_static(type_name))
-//RS         || static_call_type_name_lower(receiver, env)
-//RS             .is_some_and(|type_name| checked_text_static(&type_name))
-//RS     {
-//RS         let explicit_checked_text_type = match receiver {
-//RS             Expr::Ident(type_name, _) if checked_text_static(type_name) => Some(type_name.clone()),
-//RS             _ => None,
-//RS         };
-//RS         if let Some(type_name) = explicit_checked_text_type
-//RS             .or_else(|| static_call_type_name_lower(receiver, env))
-//RS             .or_else(|| recv_type.clone())
-//RS         {
-//RS             let type_name = cx.distinct_type_identity(&type_name).unwrap_or(type_name);
-//RS             if type_name == "DataLimits" && method == "safe" && args.is_empty() {
-//RS                 return TExpr {
-//RS                     ty: resolved_ret
-//RS                         .cloned()
-//RS                         .unwrap_or_else(|| Type::Named("DataLimits".to_string())),
-//RS                     kind: TExprKind::StaticCall {
-//RS                         owner: rooted_owner("jet_std::DataLimits"),
-//RS                         owner_type: None,
-//RS                         method: TMethodRef::bare("safe"),
-//RS                         type_args: Vec::new(),
-//RS                         args: Vec::new(),
-//RS                     },
-//RS                 };
-//RS             }
-//RS             if type_name == "Limits" && method == "safe" && args.is_empty() {
-//RS                 return TExpr {
-//RS                     ty: resolved_ret
-//RS                         .cloned()
-//RS                         .unwrap_or_else(|| Type::Named("Limits".to_string())),
-//RS                     kind: TExprKind::StaticCall {
-//RS                         owner: TStaticOwner::Prelude {
-//RS                             rooted: false,
-//RS                             path: "core.email".to_string(),
-//RS                             generics: Vec::new(),
-//RS                         },
-//RS                         owner_type: None,
-//RS                         method: TMethodRef::bare("limits_safe"),
-//RS                         type_args: Vec::new(),
-//RS                         args: Vec::new(),
-//RS                     },
-//RS                 };
-//RS             }
-//RS             return in_own_frame(|| {
-//RS                 if type_name == Syntax::TYPE_ATOMIC
-//RS                     && owner_type_args.len() == 1
-//RS                     && args.len() == 1
-//RS                     && matches!(method, "new" | "try_new")
-//RS                 {
-//RS                     let inner = owner_type_args[0].clone();
-//RS                     return TExpr {
-//RS                         ty: resolved_ret.cloned().unwrap_or_else(|| Type::Apply {
-//RS                             name: Syntax::TYPE_ATOMIC.to_string(),
-//RS                             args: vec![inner.clone()],
-//RS                         }),
-//RS                         kind: TExprKind::StaticCall {
-//RS                             owner: rooted_generic_owner("JetAtomic", vec![TPreludeArg::Jet(inner)]),
-//RS                             owner_type: None,
-//RS                             method: TMethodRef::bare(method),
-//RS                             type_args: Vec::new(),
-//RS                             args: vec![lower_one_call_arg(&args[0], None, env, cx)],
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 // D-SHAPE-PROJECT1=A: `T.merge(flags, settings)` on a `#CLI`
-//RS                 // struct is the precedence combinator; the row carries `T` so
-//RS                 // every engine builds the same builder spec from T's rows.
-//RS                 if method == "merge"
-//RS                     && args.len() == 2
-//RS                     && cx.type_names.contains(&type_name)
-//RS                     && matches!(resolved_ret, Some(Type::Result { ok, .. }) if **ok == Type::Named(type_name.clone()))
-//RS                 {
-//RS                     let Some(ty) = resolved_ret.cloned() else {
-//RS                         return invariant_method_expr(
-//RS                             method_span,
-//RS                             "T.merge has no resolved return type",
-//RS                         );
-//RS                     };
-//RS                     let lowered_args = args
-//RS                         .iter()
-//RS                         .map(|arg| lower_expr(&arg.expr, cx, env))
-//RS                         .collect::<Vec<_>>();
-//RS                     let record = match checked_core_record("core.args", "merge", 2, method_span) {
-//RS                         Ok(record) => record,
-//RS                         Err(expr) => return expr,
-//RS                     };
-//RS                     return TExpr {
-//RS                         ty: ty.clone(),
-//RS                         kind: TExprKind::CoreCall {
-//RS                             record,
-//RS                             args: lowered_args,
-//RS                             source_span: method_span,
-//RS                             type_args: Vec::new(),
-//RS                             widen_to_vec: vec![false, false],
-//RS                             data_plan: None,
-//RS                             fallibility: TFailureCarrier::from_checked_type(&ty),
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 // D-FOUND-PLATFORM1=A: contextual `.cmd("key")` is the
-//RS                 // checked UiShortcut constructor. It lowers through the same
-//RS                 // shared Prelude type method on every resident/AOT tier.
-//RS                 if type_name == "UIShortcut" && method == "cmd" && args.len() == 1 {
-//RS                     return TExpr {
-//RS                         ty: resolved_ret
-//RS                             .cloned()
-//RS                             .unwrap_or_else(|| Type::Named(type_name.clone())),
-//RS                         kind: TExprKind::StaticCall {
-//RS                             owner: rooted_owner("JetUiShortcut"),
-//RS                             owner_type: None,
-//RS                             method: TMethodRef::bare("cmd"),
-//RS                             type_args: Vec::new(),
-//RS                             args: vec![lower_one_call_arg(&args[0], None, env, cx)],
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 // D-TEXTHEAD-TYPE1=A: the source-facing constructors are ordinary
-//RS                 // inherent facades over the ordinary CheckedText implementation.
-//RS                 // Their Rust names stay bare; only actual Jet methods use the
-//RS                 // `__jet_` mangle.
-//RS                 if checked_text_static(&type_name) {
-//RS                     let lowered_args: Vec<_> = args
-//RS                         .iter()
-//RS                         .map(|argument| lower_one_call_arg(argument, None, env, cx))
-//RS                         .collect();
-//RS                     let resolved_type_args = if method == "encode_hole" {
-//RS                         let sig = cx
-//RS                             .method_sigs
-//RS                             .get(&(type_name.clone(), method.to_string()))
-//RS                             .cloned()
-//RS                             .unwrap_or_default();
-//RS                         let inferred = resolved_method_type_args(
-//RS                             cx,
-//RS                             &type_name,
-//RS                             method,
-//RS                             &sig,
-//RS                             &[],
-//RS                             &lowered_args,
-//RS                             type_args,
-//RS                             resolved_ret,
-//RS                         );
-//RS                         if inferred.is_empty() && type_args.is_empty() && lowered_args.len() == 1 {
-//RS                             vec![lowered_args[0].value.ty.clone()]
-//RS                         } else {
-//RS                             inferred
-//RS                         }
-//RS                     } else {
-//RS                         type_args.to_vec()
-//RS                     };
-//RS                     let owner = Type::Named(type_name.clone());
-//RS                     if !resolved_type_args.is_empty() {
-//RS                         cx.jit_method_calls.borrow_mut().insert(
-//RS                             crate::Codegen::TIR::generic_method_instance_key(
-//RS                                 &owner,
-//RS                                 method,
-//RS                                 &resolved_type_args,
-//RS                             ),
-//RS                             (
-//RS                                 owner.clone(),
-//RS                                 method.to_string(),
-//RS                                 resolved_type_args.clone(),
-//RS                             ),
-//RS                         );
-//RS                     }
-//RS                     let method_name = if resolved_type_args.is_empty() {
-//RS                         method.to_string()
-//RS                     } else {
-//RS                         generic_method_instance_leaf(&owner, method, &resolved_type_args)
-//RS                     };
-//RS                     return TExpr {
-//RS                         ty: resolved_ret
-//RS                             .cloned()
-//RS                             .or_else(|| {
-//RS                                 cx.method_rets
-//RS                                     .get(&(type_name.clone(), method.to_string()))
-//RS                                     .cloned()
-//RS                                     .flatten()
-//RS                             })
-//RS                             .unwrap_or_else(|| {
-//RS                                 if method == "from" {
-//RS                                     Type::Result {
-//RS                                         ok: Box::new(Type::Named(type_name.clone())),
-//RS                                         err: Box::new(Type::String),
-//RS                                     }
-//RS                                 } else {
-//RS                                     Type::String
-//RS                                 }
-//RS                             }),
-//RS                         kind: TExprKind::StaticCall {
-//RS                             owner: TStaticOwner::User(type_name.clone()),
-//RS                             owner_type: Some(Type::Named(type_name)),
-//RS                             method: TMethodRef::bare(method_name),
-//RS                             type_args: resolved_type_args,
-//RS                             args: lowered_args,
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 // D-AUTHORITY-NAME1=A: the source-facing constructor is an
-//RS                 // inherent facade over the one rooted Prelude carrier. There
-//RS                 // is no user `Authority::from_rights` MIR function.
-//RS                 if type_name == Syntax::TYPE_AUTHORITY && method == "from_rights" && args.len() == 1
-//RS                 {
-//RS                     return TExpr {
-//RS                         ty: resolved_ret
-//RS                             .cloned()
-//RS                             .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
-//RS                         kind: TExprKind::StaticCall {
-//RS                             owner: rooted_owner("JetAuthority"),
-//RS                             owner_type: None,
-//RS                             method: TMethodRef::bare("from_rights"),
-//RS                             type_args: Vec::new(),
-//RS                             args: args
-//RS                                 .iter()
-//RS                                 .map(|arg| lower_one_call_arg(arg, None, env, cx))
-//RS                                 .collect(),
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 // D-AUTHORITY-NAME1=A: keep construction as a Prelude static call
-//RS                 // so every engine receives the same named rights carrier.
-//RS                 if type_name == Syntax::TYPE_AUTHORITY && method == "workspace" && args.is_empty() {
-//RS                     return TExpr {
-//RS                         ty: resolved_ret
-//RS                             .cloned()
-//RS                             .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
-//RS                         kind: TExprKind::StaticCall {
-//RS                             owner: rooted_owner("JetAuthority"),
-//RS                             owner_type: None,
-//RS                             method: TMethodRef::bare("workspace"),
-//RS                             type_args: Vec::new(),
-//RS                             args: Vec::new(),
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 if type_name == "Date" && method == "today" && args.is_empty() {
-//RS                     return in_own_frame(|| {
-//RS                         let Some(ty) = resolved_ret.cloned() else {
-//RS                             return invariant_method_expr(
-//RS                                 method_span,
-//RS                                 "Date.today without a resolved return type",
-//RS                             );
-//RS                         };
-//RS                         let record = match checked_core_record("core.time", "today", 0, method_span)
-//RS                         {
-//RS                             Ok(record) => record,
-//RS                             Err(expr) => return expr,
-//RS                         };
-//RS                         TExpr {
-//RS                             ty: ty.clone(),
-//RS                             kind: TExprKind::CoreCall {
-//RS                                 record,
-//RS                                 args: Vec::new(),
-//RS                                 source_span: method_span,
-//RS                                 type_args: Vec::new(),
-//RS                                 widen_to_vec: Vec::new(),
-//RS                                 data_plan: None,
-//RS                                 fallibility: TFailureCarrier::from_checked_type(&ty),
-//RS                             },
-//RS                         }
-//RS                     });
-//RS                 }
-//RS                 if type_name == "Path"
-//RS                     && method == "home"
-//RS                     && args.is_empty()
-//RS                     && !cx.type_names.contains("Path")
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         return TExpr {
-//RS                             ty: Type::Named("Path".to_string()),
-//RS                             kind: TExprKind::HandleMethod {
-//RS                                 recv: Box::new(TExpr {
-//RS                                     ty: unit_type(),
-//RS                                     kind: TExprKind::Unit,
-//RS                                 }),
-//RS                                 op: THandleOp::PathHome,
-//RS                                 args: Vec::new(),
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-VALIDATE-DECODE1=B: generated codecs frame a child Result at the
-//RS                 // one field/index boundary before applying `?`. Keep this as a TIR
-//RS                 // node so AOT, JIT, and interpreter use one implementation.
-//RS                 if type_name == "FieldError" && method == "under" && args.len() == 2 {
-//RS                     return in_own_frame(|| {
-//RS                         let segment = lower_one_call_arg(&args[0], None, env, cx).value;
-//RS                         let inner = lower_expr(&args[1].expr, cx, env);
-//RS                         return TExpr {
-//RS                             ty: resolved_ret.cloned().unwrap_or_else(|| inner.ty.clone()),
-//RS                             kind: TExprKind::DecodeUnder {
-//RS                                 segment: Box::new(segment),
-//RS                                 inner: Box::new(inner),
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if matches!(
-//RS                     type_name.as_str(),
-//RS                     "HTTPMethod"
-//RS                         | "HTTPStatus"
-//RS                         | "HTTPVersion"
-//RS                         | "HTTPHeaderName"
-//RS                         | "HTTPHeaderValue"
-//RS                         | "Headers"
-//RS                         | "Body"
-//RS                 ) {
-//RS                     return in_own_frame(|| {
-//RS                         let method_rust = match (type_name.as_str(), method, args.len()) {
-//RS                             ("Body", "bytes", 1) => "from_bytes",
-//RS                             ("Body", "text", 1) => "from_text",
-//RS                             ("Body", "text", 2) => "from_text_with_mime",
-//RS                             ("Body", "json", 1) => "from_json",
-//RS                             ("Body", "form", 1) => "from_form",
-//RS                             ("Body", "multipart", 1) => "from_multipart",
-//RS                             ("Body", "reader", 1) => "from_reader",
-//RS                             ("Body", "reader", 2) => "from_reader_with_length",
-//RS                             _ => method,
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: resolved_ret
-//RS                                 .cloned()
-//RS                                 .unwrap_or_else(|| Type::Named(type_name.clone())),
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: rooted_owner(
-//RS                                     net_handle_rust_type(type_name.as_str())
-//RS                                         .map(str::to_owned)
-//RS                                         .unwrap_or_else(|| format!("Jet{type_name}")),
-//RS                                 ),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare(method_rust),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: args
-//RS                                     .iter()
-//RS                                     .map(|argument| lower_one_call_arg(argument, None, env, cx))
-//RS                                     .collect(),
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-STRPARSE1: text interpretation stays `Type.parse(text)`. Carry the
-//RS                 // text as the builtin receiver so the existing builtin TIR seam owns emit.
-//RS                 if let ("Int" | "Float", "parse", Some(arg)) =
-//RS                     (type_name.as_str(), method, args.first())
-//RS                 {
-//RS                     if args.len() == 1 {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-//RS                                     ok: Box::new(if type_name == "Int" {
-//RS                                         Type::Int
-//RS                                     } else {
-//RS                                         Type::Float
-//RS                                     }),
-//RS                                     err: Box::new(Type::Named("ParseError".to_string())),
-//RS                                 }),
-//RS                                 kind: TExprKind::BuiltinMethod {
-//RS                                     recv: Box::new(lower_expr(&arg.expr, cx, env)),
-//RS                                     op: if type_name == "Int" {
-//RS                                         TBuiltinOp::ParseInt
-//RS                                     } else {
-//RS                                         TBuiltinOp::ParseFloat
-//RS                                     },
-//RS                                     args: vec![],
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 if type_name == "Int" && method == "from_radix" && args.len() == 2 {
-//RS                     return in_own_frame(|| {
-//RS                         let line = cx.src_line_col(method_span.start).0 as u32;
-//RS                         return TExpr {
-//RS                             ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-//RS                                 ok: Box::new(Type::Int),
-//RS                                 err: Box::new(Type::Named("ParseError".to_string())),
-//RS                             }),
-//RS                             kind: TExprKind::BuiltinMethod {
-//RS                                 recv: Box::new(lower_expr(&args[0].expr, cx, env)),
-//RS                                 op: TBuiltinOp::IntFromRadix { line },
-//RS                                 args: vec![lower_expr(&args[1].expr, cx, env)],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS 
-//RS                 // D-BYTESDECODE1: UTF-8 decoding is a String static method, but
-//RS                 // its value argument is the builtin receiver so every engine uses
-//RS                 // the same Prelude-backed TIR operation.
-//RS                 if let ("String", method @ ("from_bytes" | "from_bytes_lossy"), Some(arg)) =
-//RS                     (type_name.as_str(), method, args.first())
-//RS                 {
-//RS                     if args.len() == 1 {
-//RS                         let (op, ty) = if method == "from_bytes" {
-//RS                             (
-//RS                                 TBuiltinOp::StringFromBytes,
-//RS                                 resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-//RS                                     ok: Box::new(Type::String),
-//RS                                     err: Box::new(Type::Named(
-//RS                                         crate::Syntax::TYPE_UTF8_ERROR.to_string(),
-//RS                                     )),
-//RS                                 }),
-//RS                             )
-//RS                         } else {
-//RS                             (
-//RS                                 TBuiltinOp::StringFromBytesLossy,
-//RS                                 resolved_ret.cloned().unwrap_or(Type::String),
-//RS                             )
-//RS                         };
-//RS                         return in_own_frame(|| TExpr {
-//RS                             ty,
-//RS                             kind: TExprKind::BuiltinMethod {
-//RS                                 recv: Box::new(lower_expr(&arg.expr, cx, env)),
-//RS                                 op,
-//RS                                 args: vec![],
-//RS                             },
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 // D-SHAPE-CONVERT1=A: numeric conversions are static on the destination
-//RS                 // type. Reuse NumericMethod by treating the sole value argument as its
-//RS                 // input; only the source-level call direction changed.
-//RS                 if let (Some(target), Some(source_name), Some(arg)) = (
-//RS                     crate::AST::numeric_type_from_name(&type_name),
-//RS                     Syntax::numeric_conversion_source(method),
-//RS                     args.first(),
-//RS                 ) {
-//RS                     if args.len() == 1 {
-//RS                         return in_own_frame(|| {
-//RS                             let input = lower_expr(&arg.expr, cx, env);
-//RS                             // Exact carriers are opaque Prelude values, not Rust
-//RS                             // primitives. Cross to Float through their shared
-//RS                             // `to_float` operation instead of emitting `as f64`.
-//RS                             if target == Type::Float
-//RS                                 && matches!(source_name, "Fraction" | "Decimal")
-//RS                             {
-//RS                                 return TExpr {
-//RS                                     ty: resolved_ret.cloned().unwrap_or(Type::Float),
-//RS                                     kind: TExprKind::PreciseBuiltin {
-//RS                                         type_name: source_name.to_string(),
-//RS                                         func: "to_float".to_string(),
-//RS                                         args: vec![input],
-//RS                                     },
-//RS                                 };
-//RS                             }
-//RS                             let op = resolve_numeric_conversion_op(&type_name, source_name)
-//RS                                 .expect("sema admitted a numeric destination conversion");
-//RS                             let ty =
-//RS                                 crate::Collections::builtin_method_return(&target, method, 1, true)
-//RS                                     .flatten()
-//RS                                     .unwrap_or(target);
-//RS                             return TExpr {
-//RS                                 ty,
-//RS                                 kind: TExprKind::NumericMethod {
-//RS                                     recv: Box::new(input),
-//RS                                     op,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 if let (Some((base, _)), Some(source), Some(arg)) = (
-//RS                     cx.distinct_types.get(&type_name),
-//RS                     Syntax::numeric_conversion_source(method),
-//RS                     args.first(),
-//RS                 ) {
-//RS                     if args.len() == 1 {
-//RS                         return in_own_frame(|| {
-//RS                             let op = resolve_numeric_conversion_op(&base.name(), source)
-//RS                                 .expect("sema admitted a numeric distinct conversion");
-//RS                             let range = cx.distinct_ranges.get(&type_name).copied();
-//RS                             return TExpr {
-//RS                                 ty: resolved_ret
-//RS                                     .cloned()
-//RS                                     .unwrap_or_else(|| Type::Named(type_name.clone())),
-//RS                                 kind: TExprKind::DistinctConvert {
-//RS                                     name: type_name,
-//RS                                     arg: Box::new(lower_expr(&arg.expr, cx, env)),
-//RS                                     op,
-//RS                                     range,
-//RS                                     fallible: matches!(resolved_ret, Some(Type::Result { .. })),
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 if let (Some((base, _)), Some(arg)) =
-//RS                     (cx.distinct_types.get(&type_name), args.first())
-//RS                 {
-//RS                     if args.len() == 1
-//RS                         && !base.is_numeric()
-//RS                         && Syntax::conversion_method_for_source(&base.name()) == method
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(type_name.clone()),
-//RS                                 kind: TExprKind::Call {
-//RS                                     name: type_name,
-//RS                                     type_args: Vec::new(),
-//RS                                     args: vec![lower_one_call_arg(arg, None, env, cx)],
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 if let (Some(destination), Some(arg)) =
-//RS                     (cx.unit_facts.get(&type_name), args.first())
-//RS                 {
-//RS                     let exact_method = method.strip_suffix("_rounded").unwrap_or(method);
-//RS                     let lowered = lower_expr(&arg.expr, cx, env);
-//RS                     let rounding = args.get(1).and_then(|mode| match &mode.expr {
-//RS                         Expr::EnumLit {
-//RS                             type_name,
-//RS                             variant,
-//RS                             args,
-//RS                             ..
-//RS                         } if type_name.is_empty() && args.is_empty() => {
-//RS                             Syntax::unit_rounding_mode(variant)
-//RS                         }
-//RS                         _ => None,
-//RS                     });
-//RS                     let source = match &lowered.ty {
-//RS                         Type::Named(name) => cx.unit_facts.get(name),
-//RS                         _ => None,
-//RS                     }
-//RS                     .or_else(|| {
-//RS                         let destination_scope = type_name.rsplit_once('.').map(|(scope, _)| scope);
-//RS                         cx.unit_facts.iter().find_map(|(name, fact)| {
-//RS                             let leaf = name.rsplit('.').next().unwrap_or(name);
-//RS                             let source_scope = name.rsplit_once('.').map(|(scope, _)| scope);
-//RS                             (source_scope == destination_scope
-//RS                                 && fact.family == destination.family
-//RS                                 && fact.kind == destination.kind
-//RS                                 && Syntax::conversion_method_for_source(leaf) == exact_method)
-//RS                                 .then_some(fact)
-//RS                         })
-//RS                     });
-//RS                     if args.len() == 1 || (args.len() == 3 && rounding.is_some()) {
-//RS                         if let Some(source) = source {
-//RS                             return in_own_frame(|| {
-//RS                                 let Ok(scale) = source.scale.div(&destination.scale) else {
-//RS                                     return invariant_method_expr(
-//RS                                         method_span,
-//RS                                         "unit conversion without a valid checked scale",
-//RS                                     );
-//RS                                 };
-//RS                                 let Ok(offset) = source
-//RS                                     .offset
-//RS                                     .sub(&destination.offset)
-//RS                                     .and_then(|value| value.div(&destination.scale))
-//RS                                 else {
-//RS                                     return invariant_method_expr(
-//RS                                         method_span,
-//RS                                         "unit conversion without a valid checked offset",
-//RS                                     );
-//RS                                 };
-//RS                                 let measured_scale_uncertainty =
-//RS                                     |fact: &crate::Codegen::UnitFact| {
-//RS                                         let crate::AST::UnitScaleProvenance::Measured {
-//RS                                             standard_uncertainty,
-//RS                                             ..
-//RS                                         } = &fact.scale_provenance
-//RS                                         else {
-//RS                                             return None;
-//RS                                         };
-//RS                                         let standard_uncertainty =
-//RS                                             standard_uncertainty.parse::<f64>().ok()?;
-//RS                                         let scale = unit_ratio_as_f64(&fact.scale)?.abs();
-//RS                                         (scale.is_finite() && scale > 0.0)
-//RS                                             .then_some(standard_uncertainty.abs() / scale)
-//RS                                     };
-//RS                                 let source_relative = measured_scale_uncertainty(source);
-//RS                                 let destination_relative = measured_scale_uncertainty(destination);
-//RS                                 let relative_uncertainty = if source_relative.is_some()
-//RS                                     || destination_relative.is_some()
-//RS                                 {
-//RS                                     Some(
-//RS                                         source_relative
-//RS                                             .unwrap_or(0.0)
-//RS                                             .hypot(destination_relative.unwrap_or(0.0)),
-//RS                                     )
-//RS                                 } else {
-//RS                                     None
-//RS                                 };
-//RS                                 let Some(result_ty) = resolved_ret.cloned() else {
-//RS                                     return invariant_method_expr(
-//RS                                         method_span,
-//RS                                         "unit conversion without a resolved return type",
-//RS                                     );
-//RS                                 };
-//RS                                 let fallible = matches!(&result_ty, Type::Result { .. });
-//RS                                 let rounding = rounding.map(|mode| {
-//RS                                     (mode, Box::new(lower_expr(&args[2].expr, cx, env)))
-//RS                                 });
-//RS                                 return TExpr {
-//RS                                     ty: result_ty,
-//RS                                     kind: TExprKind::UnitConvert {
-//RS                                         destination: type_name,
-//RS                                         arg: Box::new(lowered),
-//RS                                         scale,
-//RS                                         offset,
-//RS                                         rounding,
-//RS                                         fallible,
-//RS                                         relative_uncertainty,
-//RS                                         file: cx.file.clone(),
-//RS                                         line: cx.src_line_col(method_span.start).0 as u32,
-//RS                                     },
-//RS                                 };
-//RS                             });
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-PATHFS1: `Path.from(str)` → `jet_path_from(&(str_arg))`.
-//RS                 // The string arg becomes the "receiver" slot of the PathFrom HandleMethod;
-//RS                 // `Path` itself (a type-name ident) has no value. A bare `Path` names the
-//RS                 // built-in unless this module declares its own; a loaded module's `Path`
-//RS                 // record (`core.files.path`) is a different nominal and never answers here.
-//RS                 if type_name == crate::Syntax::TYPE_PATH
-//RS                     && method == "from"
-//RS                     && args.len() == 1
-//RS                     && !cx.local_type_names.contains(crate::Syntax::TYPE_PATH)
-//RS                     && resolved_ret
-//RS                         .is_none_or(|ty| *ty == Type::Named(crate::Syntax::TYPE_PATH.to_string()))
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let str_arg = lower_expr(&args[0].expr, cx, env);
-//RS                         return TExpr {
-//RS                             ty: Type::Named("Path".to_string()),
-//RS                             kind: TExprKind::HandleMethod {
-//RS                                 recv: Box::new(str_arg),
-//RS                                 op: THandleOp::PathFrom,
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-SHIFT1 (c7shift): `Reader.over(bytes)` keeps the borrowing
-//RS                 // clone helper unless sema proved a generic owned last use.
-//RS                 // Same "arg becomes the recv slot" shape as `Path.from` above.
-//RS                 if type_name == "Reader"
-//RS                     && method == "over"
-//RS                     && args.len() == 1
-//RS                     && !cx.type_names.contains("Reader")
-//RS                 {
-//RS                     let owned = args[0].flags.owned_last_use;
-//RS                     return in_own_frame(|| {
-//RS                         let bytes_arg = lower_expr(&args[0].expr, cx, env);
-//RS                         return TExpr {
-//RS                             ty: Type::Named("Reader".to_string()),
-//RS                             kind: TExprKind::HandleMethod {
-//RS                                 recv: Box::new(bytes_arg),
-//RS                                 op: THandleOp::ReaderOver { owned },
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-SHIFT1: `Cursor.over(s)` → `jet_cursor_over(&(s_arg))`.
-//RS                 if type_name == "Cursor"
-//RS                     && method == "over"
-//RS                     && args.len() == 1
-//RS                     && !cx.type_names.contains("Cursor")
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let s_arg = lower_expr(&args[0].expr, cx, env);
-//RS                         return TExpr {
-//RS                             ty: Type::Named("Cursor".to_string()),
-//RS                             kind: TExprKind::HandleMethod {
-//RS                                 recv: Box::new(s_arg),
-//RS                                 op: THandleOp::CursorOver,
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-FIDELITY-API1=A: `Perf.fidelity()` / `Perf.override_fidelity(v)?`
-//RS                 // lower to the same core call shape as `use core.perf as perf`.
-//RS                 if type_name == "Perf" && !cx.type_names.contains("Perf") {
-//RS                     return in_own_frame(|| {
-//RS                         let targs: Vec<TExpr> =
-//RS                             args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-//RS                         let widen_to_vec = core_widen_to_vec("core.perf", method, &targs);
-//RS                         let Some(ty) = resolved_ret.cloned() else {
-//RS                             return invariant_method_expr(
-//RS                                 method_span,
-//RS                                 format!("Perf.{method} without a resolved return type",),
-//RS                             );
-//RS                         };
-//RS                         let record = match checked_core_record(
-//RS                             "core.perf",
-//RS                             method,
-//RS                             targs.len(),
-//RS                             method_span,
-//RS                         ) {
-//RS                             Ok(record) => record,
-//RS                             Err(expr) => return expr,
-//RS                         };
-//RS                         TExpr {
-//RS                             ty: ty.clone(),
-//RS                             kind: TExprKind::CoreCall {
-//RS                                 record,
-//RS                                 args: targs,
-//RS                                 source_span: method_span,
-//RS                                 type_args: Vec::new(),
-//RS                                 widen_to_vec,
-//RS                                 data_plan: None,
-//RS                                 fallibility: TFailureCarrier::from_checked_type(&ty),
-//RS                             },
-//RS                         }
-//RS                     });
-//RS                 }
-//RS                 // D-COLLBREADTH1=A: `Set.from([...])` → collect list into HashSet.
-//RS                 // Lower the list arg as the recv of a SetFrom BuiltinMethod.
-//RS                 if type_name == "Set" && method == "from" && args.len() == 1 {
-//RS                     return in_own_frame(|| {
-//RS                         let list_arg = lower_expr(&args[0].expr, cx, env);
-//RS                         let elem_ty = match &list_arg.ty {
-//RS                             Type::List(inner) => *inner.clone(),
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: "Set".to_string(),
-//RS                                 args: vec![elem_ty],
-//RS                             },
-//RS                             kind: TExprKind::BuiltinMethod {
-//RS                                 recv: Box::new(list_arg),
-//RS                                 op: TBuiltinOp::SetFrom,
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // #1478: `Set.new()` → empty HashSet with elem type from sema.
-//RS                 if type_name == "Set" && method == "new" && args.is_empty() {
-//RS                     return in_own_frame(|| {
-//RS                         let elem_ty = match resolved_ret {
-//RS                             Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-//RS                                 targs[0].clone()
-//RS                             }
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: "Set".to_string(),
-//RS                                 args: vec![elem_ty.clone()],
-//RS                             },
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: host_generic_owner(
-//RS                                     "std::collections::HashSet",
-//RS                                     vec![TPreludeArg::Jet(elem_ty)],
-//RS                                 ),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-ALLOCFAIL1=A: `List.try_new()` and `.try_with_capacity(n)` use
-//RS                 // the ordinary BuiltinMethod carrier; the inert Unit receiver keeps
-//RS                 // static lowering inside the existing TIR seam.
-//RS                 if type_name == Syntax::TYPE_LIST
-//RS                     && !cx.type_names.contains(Syntax::TYPE_LIST)
-//RS                     && matches!(method, "try_new" | "try_with_capacity")
-//RS                     && ((method == "try_new" && args.is_empty())
-//RS                         || (method == "try_with_capacity" && args.len() == 1))
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let elem_ty = match resolved_ret {
-//RS                             Some(Type::Result { ok, .. }) => match ok.as_ref() {
-//RS                                 Type::List(inner) => (**inner).clone(),
-//RS                                 _ => Type::Int,
-//RS                             },
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-//RS                             ok: Box::new(Type::List(Box::new(elem_ty.clone()))),
-//RS                             err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
-//RS                         });
-//RS                         let value_args = if method == "try_with_capacity" {
-//RS                             vec![lower_expr(&args[0].expr, cx, env)]
-//RS                         } else {
-//RS                             Vec::new()
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty,
-//RS                             kind: TExprKind::BuiltinMethod {
-//RS                                 recv: Box::new(TExpr {
-//RS                                     ty: unit_type(),
-//RS                                     kind: TExprKind::Unit,
-//RS                                 }),
-//RS                                 op: if method == "try_new" {
-//RS                                     TBuiltinOp::ListTryNew
-//RS                                 } else {
-//RS                                     TBuiltinOp::ListTryWithCapacity
-//RS                                 },
-//RS                                 args: value_args,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // #1477: `Map.new()` → empty JetMap; `Map.from_keys`/`Map.fromkeys`.
-//RS                 if type_name == Syntax::TYPE_MAP && method == "new" && args.is_empty() {
-//RS                     return in_own_frame(|| {
-//RS                         let (key, value) = match resolved_ret {
-//RS                             Some(Type::Map { key, value, .. }) => {
-//RS                                 ((**key).clone(), (**value).clone())
-//RS                             }
-//RS                             _ => (Type::Int, Type::Int),
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Map {
-//RS                                 key: Box::new(key),
-//RS                                 key_span: None,
-//RS                                 value: Box::new(value),
-//RS                             },
-//RS                             kind: TExprKind::MapLit(Vec::new()),
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == Syntax::TYPE_MAP
-//RS                     && matches!(method, "from_keys" | "fromkeys")
-//RS                     && args.len() == 2
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let keys = lower_expr(&args[0].expr, cx, env);
-//RS                         let default = lower_expr(&args[1].expr, cx, env);
-//RS                         let (key, value) = match resolved_ret {
-//RS                             Some(Type::Map { key, value, .. }) => {
-//RS                                 ((**key).clone(), (**value).clone())
-//RS                             }
-//RS                             _ => (
-//RS                                 match &keys.ty {
-//RS                                     Type::List(inner) => *inner.clone(),
-//RS                                     _ => Type::Int,
-//RS                                 },
-//RS                                 default.ty.clone(),
-//RS                             ),
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Map {
-//RS                                 key: Box::new(key),
-//RS                                 key_span: None,
-//RS                                 value: Box::new(value),
-//RS                             },
-//RS                             kind: TExprKind::BuiltinMethod {
-//RS                                 recv: Box::new(keys),
-//RS                                 op: TBuiltinOp::MapFromKeys,
-//RS                                 args: vec![default],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == crate::Syntax::TYPE_RANK && method == "from" && args.len() == 1 {
-//RS                     return in_own_frame(|| {
-//RS                         let list_arg = lower_expr(&args[0].expr, cx, env);
-//RS                         let elem_ty = match &list_arg.ty {
-//RS                             Type::List(inner) => *inner.clone(),
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: crate::Syntax::TYPE_RANK.to_string(),
-//RS                                 args: vec![elem_ty],
-//RS                             },
-//RS                             kind: TExprKind::BuiltinMethod {
-//RS                                 recv: Box::new(list_arg),
-//RS                                 op: TBuiltinOp::SortedSetFrom,
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == crate::Syntax::TYPE_RANK && method == "new" && args.is_empty() {
-//RS                     return in_own_frame(|| {
-//RS                         let elem_ty = match resolved_ret {
-//RS                             Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-//RS                                 targs[0].clone()
-//RS                             }
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: crate::Syntax::TYPE_RANK.to_string(),
-//RS                                 args: vec![elem_ty.clone()],
-//RS                             },
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: host_generic_owner(
-//RS                                     "std::collections::BTreeSet",
-//RS                                     vec![TPreludeArg::Jet(elem_ty)],
-//RS                                 ),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE
-//RS                     && method == "from"
-//RS                     && args.len() == 1
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let list_arg = lower_expr(&args[0].expr, cx, env);
-//RS                         let elem_ty = match &list_arg.ty {
-//RS                             Type::List(inner) => *inner.clone(),
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
-//RS                                 args: vec![elem_ty],
-//RS                             },
-//RS                             kind: TExprKind::BuiltinMethod {
-//RS                                 recv: Box::new(list_arg),
-//RS                                 op: TBuiltinOp::PriorityQueueFrom,
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE
-//RS                     && method == "new"
-//RS                     && args.is_empty()
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let elem_ty = match resolved_ret {
-//RS                             Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-//RS                                 targs[0].clone()
-//RS                             }
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
-//RS                                 args: vec![elem_ty.clone()],
-//RS                             },
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: host_generic_owner(
-//RS                                     "std::collections::BinaryHeap",
-//RS                                     vec![TPreludeArg::Jet(elem_ty)],
-//RS                                 ),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == crate::Syntax::TYPE_LRU && method == "new" && args.len() == 1 {
-//RS                     return in_own_frame(|| {
-//RS                         let cap_arg = lower_expr(&args[0].expr, cx, env);
-//RS                         let (key_ty, value_ty) = match resolved_ret {
-//RS                             Some(Type::Apply { args: targs, .. }) if targs.len() >= 2 => {
-//RS                                 (targs[0].clone(), targs[1].clone())
-//RS                             }
-//RS                             _ => (Type::String, Type::Int),
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: crate::Syntax::TYPE_LRU.to_string(),
-//RS                                 args: vec![key_ty, value_ty],
-//RS                             },
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: rooted_owner("JetCache"),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![TCallArg {
-//RS                                     value: cap_arg,
-//RS                                     template_items: None,
-//RS                                     borrow: false,
-//RS                                     mut_borrow: false,
-//RS                                     clone: false,
-//RS                                     arc_clone: false,
-//RS                                     fn_coerce: None,
-//RS                                     widen_to_vec: false,
-//RS                                     widen_to_union: None,
-//RS                                     box_as_trait: None,
-//RS                                 }],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == crate::Syntax::TYPE_BITS && method == "new" && args.is_empty() {
-//RS                     return in_own_frame(|| {
-//RS                         return TExpr {
-//RS                             ty: Type::Named(crate::Syntax::TYPE_BITS.to_string()),
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: rooted_owner("JetBitSet"),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == crate::Syntax::TYPE_BYTES && method == "new" && args.is_empty() {
-//RS                     return in_own_frame(|| {
-//RS                         return TExpr {
-//RS                             ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: rooted_owner("JetByteBuffer"),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == crate::Syntax::TYPE_BYTES
-//RS                     && method == "with_capacity"
-//RS                     && args.len() == 1
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         let n = lower_expr(&args[0].expr, cx, env);
-//RS                         return TExpr {
-//RS                             ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
-//RS                             kind: TExprKind::BuiltinMethod {
-//RS                                 recv: Box::new(n),
-//RS                                 op: TBuiltinOp::ByteBufferWithCapacity,
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == crate::Syntax::TYPE_BYTES && method == "from" && args.len() == 1 {
-//RS                     return in_own_frame(|| {
-//RS                         let bytes_arg = lower_expr(&args[0].expr, cx, env);
-//RS                         return TExpr {
-//RS                             ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
-//RS                             kind: TExprKind::BuiltinMethod {
-//RS                                 recv: Box::new(bytes_arg),
-//RS                                 op: TBuiltinOp::ByteBufferFrom,
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-COLLBREADTH1=A: `Queue.init([...])` → collect list into VecDeque.
-//RS                 if type_name == crate::Syntax::TYPE_QUEUE && method == "init" && args.len() == 1 {
-//RS                     return in_own_frame(|| {
-//RS                         let list_arg = lower_expr(&args[0].expr, cx, env);
-//RS                         let elem_ty = match &list_arg.ty {
-//RS                             Type::List(inner) => *inner.clone(),
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: crate::Syntax::TYPE_QUEUE.to_string(),
-//RS                                 args: vec![elem_ty],
-//RS                             },
-//RS                             kind: TExprKind::BuiltinMethod {
-//RS                                 recv: Box::new(list_arg),
-//RS                                 op: TBuiltinOp::DequeFrom,
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-COLLBREADTH1=A: `Queue.new()` → empty VecDeque with elem type from sema.
-//RS                 // The element type comes from `resolved_ret` (sema filled it from the annotation).
-//RS                 if type_name == crate::Syntax::TYPE_QUEUE && method == "new" && args.is_empty() {
-//RS                     return in_own_frame(|| {
-//RS                         let elem_ty = match resolved_ret {
-//RS                             Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-//RS                                 targs[0].clone()
-//RS                             }
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         let deque_ty = Type::Apply {
-//RS                             name: crate::Syntax::TYPE_QUEUE.to_string(),
-//RS                             args: vec![elem_ty.clone()],
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: deque_ty,
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: host_generic_owner(
-//RS                                     "std::collections::VecDeque",
-//RS                                     vec![TPreludeArg::Jet(elem_ty)],
-//RS                                 ),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-TAG1: `Tally.new()` → empty HashMap with elem type from sema.
-//RS                 if type_name == crate::Syntax::TYPE_TALLY && method == "new" && args.is_empty() {
-//RS                     return in_own_frame(|| {
-//RS                         let elem_ty = match resolved_ret {
-//RS                             Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-//RS                                 targs[0].clone()
-//RS                             }
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         let bag_ty = Type::Apply {
-//RS                             name: crate::Syntax::TYPE_TALLY.to_string(),
-//RS                             args: vec![elem_ty.clone()],
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: bag_ty,
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: host_generic_owner(
-//RS                                     "std::collections::HashMap",
-//RS                                     vec![TPreludeArg::Jet(elem_ty), TPreludeArg::HostUsize],
-//RS                                 ),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>.new()` → an empty `JetPool<T>`.
-//RS                 // The element type comes from `resolved_ret` (sema filled it from the
-//RS                 // call-site turbofish or the binding's annotation).
-//RS                 if type_name == "Pool" && method == "new" && args.is_empty() {
-//RS                     return in_own_frame(|| {
-//RS                         let elem_ty = match resolved_ret {
-//RS                             Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => {
-//RS                                 targs[0].clone()
-//RS                             }
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         let pool_ty = Type::Apply {
-//RS                             name: "Pool".to_string(),
-//RS                             args: vec![elem_ty.clone()],
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: pool_ty,
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: rooted_generic_owner(
-//RS                                     "jet_std::JetPool",
-//RS                                     vec![TPreludeArg::Jet(elem_ty)],
-//RS                                 ),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-MEM1 S6 (D-SHARED-API1=A): `Shared.new(x)` → a `JetShared<T>`
-//RS                 // wrapping `x`; `T` is `x`'s own lowered type (no turbofish, no
-//RS                 // annotation needed — the argument alone fixes it).
-//RS                 if type_name == "Shared" && method == "new" && args.len() == 1 {
-//RS                     return in_own_frame(|| {
-//RS                         let arg_t = lower_expr(&args[0].expr, cx, env);
-//RS                         let elem_ty = arg_t.ty.clone();
-//RS                         return TExpr {
-//RS                             ty: Type::Shared(Box::new(elem_ty.clone())),
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: rooted_generic_owner(
-//RS                                     "jet_std::JetShared",
-//RS                                     vec![TPreludeArg::Jet(elem_ty)],
-//RS                                 ),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![TCallArg {
-//RS                                     value: arg_t,
-//RS                                     template_items: None,
-//RS                                     borrow: false,
-//RS                                     mut_borrow: false,
-//RS                                     clone: false,
-//RS                                     arc_clone: false,
-//RS                                     fn_coerce: None,
-//RS                                     widen_to_vec: false,
-//RS                                     widen_to_union: None,
-//RS                                     box_as_trait: None,
-//RS                                 }],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == Syntax::TYPE_CONDITION && method == "new" && args.is_empty() {
-//RS                     return in_own_frame(|| {
-//RS                         return TExpr {
-//RS                             ty: Type::Named(Syntax::TYPE_CONDITION.to_string()),
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: rooted_owner("jet_std::JetCondition"),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: Vec::new(),
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == "Cell" && method == "new" && args.len() == 1 {
-//RS                     return in_own_frame(|| {
-//RS                         let mut value = lower_expr(&args[0].expr, cx, env);
-//RS                         let cell_ty = resolved_ret.cloned().unwrap_or_else(|| Type::Apply {
-//RS                             name: "Cell".to_string(),
-//RS                             args: vec![value.ty.clone()],
-//RS                         });
-//RS                         let elem_ty = match &cell_ty {
-//RS                             Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
-//RS                             _ => value.ty.clone(),
-//RS                         };
-//RS                         if matches!(value.kind, TExprKind::Absent) {
-//RS                             value.ty = elem_ty.clone();
-//RS                         }
-//RS                         return TExpr {
-//RS                             ty: cell_ty,
-//RS                             kind: TExprKind::StaticCall {
-//RS                                 owner: rooted_generic_owner(
-//RS                                     "jet_std::JetCell",
-//RS                                     vec![TPreludeArg::Jet(elem_ty)],
-//RS                                 ),
-//RS                                 owner_type: None,
-//RS                                 method: TMethodRef::bare("new"),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![TCallArg {
-//RS                                     value,
-//RS                                     template_items: None,
-//RS                                     borrow: false,
-//RS                                     mut_borrow: false,
-//RS                                     clone: false,
-//RS                                     arc_clone: false,
-//RS                                     fn_coerce: None,
-//RS                                     widen_to_vec: false,
-//RS                                     widen_to_union: None,
-//RS                                     box_as_trait: None,
-//RS                                 }],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == "ExpiringSecret" && method == "new" && args.len() == 3 {
-//RS                     return in_own_frame(|| {
-//RS                         let value = lower_expr(&args[0].expr, cx, env);
-//RS                         let duration = lower_expr(&args[1].expr, cx, env);
-//RS                         let clock = lower_expr(&args[2].expr, cx, env);
-//RS                         let elem_ty = match resolved_ret {
-//RS                             Some(Type::Apply { name, args })
-//RS                                 if name == "ExpiringSecret" && !args.is_empty() =>
-//RS                             {
-//RS                                 args[0].clone()
-//RS                             }
-//RS                             _ => value.ty.clone(),
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: "ExpiringSecret".to_string(),
-//RS                                 args: vec![elem_ty.clone()],
-//RS                             },
-//RS                             kind: TExprKind::HostCall(Box::new(THostCall::ExpiringSecretNew {
-//RS                                 value: Box::new(value),
-//RS                                 duration: Box::new(duration),
-//RS                                 clock: Box::new(clock),
-//RS                                 elem: elem_ty,
-//RS                             })),
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if type_name == Syntax::EXPIRING_VALUE_TYPE && method == "new" && args.len() == 3 {
-//RS                     return in_own_frame(|| {
-//RS                         let value = lower_expr(&args[0].expr, cx, env);
-//RS                         let duration = lower_expr(&args[1].expr, cx, env);
-//RS                         let clock = lower_expr(&args[2].expr, cx, env);
-//RS                         let elem_ty = match resolved_ret {
-//RS                             Some(Type::Apply { name, args })
-//RS                                 if name == Syntax::EXPIRING_VALUE_TYPE && !args.is_empty() =>
-//RS                             {
-//RS                                 args[0].clone()
-//RS                             }
-//RS                             _ => value.ty.clone(),
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: Type::Apply {
-//RS                                 name: Syntax::EXPIRING_VALUE_TYPE.to_string(),
-//RS                                 args: vec![elem_ty],
-//RS                             },
-//RS                             kind: TExprKind::HostCall(Box::new(THostCall::ExpiringValueNew {
-//RS                                 value: Box::new(value),
-//RS                                 duration: Box::new(duration),
-//RS                                 clock: Box::new(clock),
-//RS                             })),
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-HOLE1: `Option.lift2(f, a, b)` → apply `f` to both payloads only when
-//RS                 // both are present. `a`/`b` lower plainly as values; `R` comes from sema's
-//RS                 // `resolved_ret` (the arg-dependent return type, same mechanism the
-//RS                 // polymorphic core specials use — see the AST `MethodCall.resolved_ret` doc).
-//RS                 if type_name == "Option" && method == "lift2" && !cx.type_names.contains("Option") {
-//RS                     return in_own_frame(|| {
-//RS                         let a_ty = match tir_recv_jet_ty(&args[1].expr, env) {
-//RS                             Some(Type::Option(inner)) => (*inner).clone(),
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         let b_ty = match tir_recv_jet_ty(&args[2].expr, env) {
-//RS                             Some(Type::Option(inner)) => (*inner).clone(),
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         // c142: a bare `f` callable is invoked only by the shared Prelude's
-//RS                         // present branch, not stored — but rustc
-//RS                         // still needs its param types written out whenever the body resolves a
-//RS                         // trait method on a param (e.g. interpolation's `.jet_display()`), the same reason
-//RS                         // `lower_one_call_arg` annotates a lambda flowing into a fn-typed
-//RS                         // parameter. Reuse that mechanism with `a`/`b`'s payload types as the
-//RS                         // expected params.
-//RS                         let ret_ty = match resolved_ret {
-//RS                             Some(Type::Option(inner)) => (**inner).clone(),
-//RS                             _ => Type::Int,
-//RS                         };
-//RS                         let f_t = in_own_frame(|| match &args[0].expr {
-//RS                             Expr::Lambda(lam) => super::take_scheduled_expr(&args[0].expr, cx)
-//RS                                 .unwrap_or_else(|| {
-//RS                                     let tl = lower_lambda_expecting(
-//RS                                         lam,
-//RS                                         cx,
-//RS                                         env,
-//RS                                         Some(&[a_ty.clone(), b_ty.clone()]),
-//RS                                     );
-//RS                                     TExpr {
-//RS                                         ty: Type::Fn {
-//RS                                             params: vec![a_ty.clone(), b_ty.clone()],
-//RS                                             ret: Some(Box::new(ret_ty.clone())),
-//RS                                             effect_bound: None,
-//RS                                             return_view_provenance: None,
-//RS                                             param_contract: None,
-//RS                                             call_metadata: None,
-//RS                                         },
-//RS                                         kind: TExprKind::Lambda(Box::new(tl)),
-//RS                                     }
-//RS                                 }),
-//RS                             _ => lower_expr(&args[0].expr, cx, env),
-//RS                         });
-//RS                         let a_t = lower_expr(&args[1].expr, cx, env);
-//RS                         let b_t = lower_expr(&args[2].expr, cx, env);
-//RS                         return TExpr {
-//RS                             ty: Type::Option(Box::new(ret_ty)),
-//RS                             kind: TExprKind::OptionLift2 {
-//RS                                 f: Box::new(f_t),
-//RS                                 a: Box::new(a_t),
-//RS                                 b: Box::new(b_t),
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-SPACE-GEOMETRY1=A: stock coordinate constructors lower
-//RS                 // through the same typed MathBuiltin family as linalg values.
-//RS                 if crate::Sema::is_geometry_type(&type_name) {
-//RS                     if let Some(ret) = crate::Sema::geometry_static_return_with_owner(
-//RS                         &type_name,
-//RS                         method,
-//RS                         args.len(),
-//RS                         owner_type_args,
-//RS                     ) {
-//RS                         return in_own_frame(|| TExpr {
-//RS                             ty: ret,
-//RS                             kind: TExprKind::MathBuiltin {
-//RS                                 type_name: type_name.clone(),
-//RS                                 func: method.to_string(),
-//RS                                 args: args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect(),
-//RS                             },
-//RS                         });
-//RS                     }
-//RS                 }
-//RS 
-//RS                 // D-SIMD2 / D-LINALG1: a static method on a built-in math type → the prelude
-//RS                 // free function `{root}jet_math_<T>_<method>(args)`.
-//RS                 if crate::Sema::is_math_type(&type_name) && !cx.type_names.contains(&type_name) {
-//RS                     if let Some(ret) =
-//RS                         crate::Sema::math_static_return(&type_name, method, args.len())
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             let bridge = crate::Sema::math_static_arg_ty(&type_name, method);
-//RS                             let targs: Vec<TExpr> = args
-//RS                                 .iter()
-//RS                                 .map(|a| {
-//RS                                     let mut t = lower_expr(&a.expr, cx, env);
-//RS                                     // D-FIXARR1 bridge: a `[..]` literal arg to `from_array` lowered
-//RS                                     // as a growable list; re-tag it to the `[T#N]` fixed array so emit
-//RS                                     // produces `[e1, …]` (a Rust stack array), not `vec![…]`.
-//RS                                     if let Some(fl @ Type::FixedList { .. }) = &bridge {
-//RS                                         if matches!(t.ty, Type::List(_))
-//RS                                             && matches!(t.kind, TExprKind::ListLit(_))
-//RS                                         {
-//RS                                             t.ty = fl.clone();
-//RS                                         }
-//RS                                     }
-//RS                                     t
-//RS                                 })
-//RS                                 .collect();
-//RS                             return TExpr {
-//RS                                 ty: ret,
-//RS                                 kind: TExprKind::MathBuiltin {
-//RS                                     type_name: type_name.clone(),
-//RS                                     func: method.to_string(),
-//RS                                     args: targs,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 // A module-qualified receiver (`mymod.Thing.new()`) registers its
-//RS                 // methods under the bare leaf, so the leaf is the right key there.
-//RS                 // But D-PROTO1/D-PROTO2 declare `Payment.Client` — the dot is part
-//RS                 // of the type's own name, and `register_method` keyed its surface by
-//RS                 // that full spelling. Stripping unconditionally missed both
-//RS                 // `method_sigs` and `method_rets`, so `instantiate_method_ret` fell
-//RS                 // through to `unit_type()` and every dotted-handle static call was
-//RS                 // stamped `Unit`. Engines that need an ABI then read the wrong
-//RS                 // carrier: the resident tier stored `Payment.Client.client()` in an
-//RS                 // i8 slot and refused the next `^handle` argument, which wants the
-//RS                 // i64 handle. Ask the one method table which spelling it knows.
-//RS                 // An imported source type (`crypto.Secret.from_text`) has no leaf
-//RS                 // row at all: `register_imported_methods` keys it by the declaring
-//RS                 // module's canonical nominal, exactly as instance calls look it up,
-//RS                 // and that identity also names the checked function target.
-//RS                 let dotted_key = (type_name.clone(), method.to_string());
-//RS                 let lookup_type_name = if cx.method_sigs.contains_key(&dotted_key)
-//RS                     || cx.method_rets.contains_key(&dotted_key)
-//RS                 {
-//RS                     type_name.clone()
-//RS                 } else {
-//RS                     let leaf = type_name
-//RS                         .rsplit_once('.')
-//RS                         .map_or(type_name.as_str(), |(_, leaf)| leaf);
-//RS                     let leaf_key = (leaf.to_string(), method.to_string());
-//RS                     match cx.imported_type_metadata_name(&type_name) {
-//RS                         Some(identity)
-//RS                             if !cx.method_sigs.contains_key(&leaf_key)
-//RS                                 && !cx.method_rets.contains_key(&leaf_key)
-//RS                                 && cx
-//RS                                     .method_sigs
-//RS                                     .contains_key(&(identity.clone(), method.to_string())) =>
-//RS                         {
-//RS                             identity
-//RS                         }
-//RS                         _ => leaf.to_string(),
-//RS                     }
-//RS                 };
-//RS                 let lookup_type_name = lookup_type_name.as_str();
-//RS                 let type_name = if lookup_type_name.contains("::") {
-//RS                     lookup_type_name.to_string()
-//RS                 } else {
-//RS                     type_name
-//RS                 };
-//RS                 let operator_method = operator_rhs.and_then(|rhs| {
-//RS                     let trait_name = operator_trait_for_method(method)?;
-//RS                     let key = crate::Traits::operator_method_identity(
-//RS                         lookup_type_name,
-//RS                         trait_name,
-//RS                         method,
-//RS                         rhs,
-//RS                     );
-//RS                     cx.operator_methods.get(&key).cloned()
-//RS                 });
-//RS                 let sig = if operator_rhs.is_some() {
-//RS                     operator_method
-//RS                         .as_ref()
-//RS                         .map(|facts| facts.sig.clone())
-//RS                         .unwrap_or_default()
-//RS                 } else {
-//RS                     let sig = cx
-//RS                         .method_sigs
-//RS                         .get(&(lookup_type_name.to_string(), method.to_string()))
-//RS                         .cloned()
-//RS                         .unwrap_or_default();
-//RS                     instantiated_sig.map(|sig| sig.to_vec()).unwrap_or_else(|| {
-//RS                         instantiate_method_sig(
-//RS                             cx,
-//RS                             &type_name,
-//RS                             method,
-//RS                             &sig,
-//RS                             owner_type_args,
-//RS                             type_args,
-//RS                         )
-//RS                     })
-//RS                 };
-//RS                 let mut targs = lower_method_args(args, &sig, env, cx);
-//RS                 retag_empty_collection_args(&mut targs, &sig);
-//RS                 let resolved_type_args = if operator_rhs.is_some() {
-//RS                     type_args.to_vec()
-//RS                 } else {
-//RS                     resolved_method_type_args(
-//RS                         cx,
-//RS                         lookup_type_name,
-//RS                         method,
-//RS                         &sig,
-//RS                         owner_type_args,
-//RS                         &targs,
-//RS                         type_args,
-//RS                         resolved_ret,
-//RS                     )
-//RS                 };
-//RS                 let source_ret_ty = if operator_rhs.is_some() {
-//RS                     resolved_ret
-//RS                         .cloned()
-//RS                         .or_else(|| operator_method.as_ref().and_then(|facts| facts.ret.clone()))
-//RS                 } else {
-//RS                     instantiate_method_ret(
-//RS                         cx,
-//RS                         lookup_type_name,
-//RS                         method,
-//RS                         owner_type_args,
-//RS                         &resolved_type_args,
-//RS                         resolved_ret,
-//RS                     )
-//RS                 }
-//RS                 .map(|ty| resolve_self_ty(&ty, &type_name))
-//RS                 .unwrap_or_else(unit_type);
-//RS                 let ret_ty = if env.fallback_subject && resolved_ret.is_some() {
-//RS                     jet_foundation::AST::FailureContract::from_return_type(Some(&source_ret_ty))
-//RS                         .effective_type()
-//RS                 } else {
-//RS                     source_ret_ty
-//RS                 };
-//RS                 let owner_type = if owner_type_args.is_empty() {
-//RS                     Type::Named(type_name.clone())
-//RS                 } else {
-//RS                     Type::Apply {
-//RS                         name: type_name.clone(),
-//RS                         args: owner_type_args.to_vec(),
-//RS                     }
-//RS                 };
-//RS                 if matches!(&owner_type, Type::Apply { .. }) || !resolved_type_args.is_empty() {
-//RS                     cx.jit_method_calls.borrow_mut().insert(
-//RS                         crate::Codegen::TIR::generic_method_instance_key(
-//RS                             &owner_type,
-//RS                             method,
-//RS                             &resolved_type_args,
-//RS                         ),
-//RS                         (
-//RS                             owner_type.clone(),
-//RS                             method.to_string(),
-//RS                             resolved_type_args.clone(),
-//RS                         ),
-//RS                     );
-//RS                 }
-//RS                 let trait_name = operator_method
-//RS                     .as_ref()
-//RS                     .map(|facts| facts.trait_name.clone())
-//RS                     .or_else(|| {
-//RS                         cx.trait_method_traits
-//RS                             .get(&(lookup_type_name.to_string(), method.to_string()))
-//RS                             .cloned()
-//RS                     });
-//RS                 let generic_method = (matches!(&owner_type, Type::Apply { .. })
-//RS                     || !resolved_type_args.is_empty())
-//RS                     && operator_rhs.is_none()
-//RS                     && trait_name.is_none();
-//RS                 let method_ref = if let Some(rhs) = operator_rhs {
-//RS                     let trait_name = trait_name
-//RS                         .as_deref()
-//RS                         .or_else(|| operator_trait_for_method(method))
-//RS                         .expect("checked operator method has a canonical trait");
-//RS                     TMethodRef::operator(lookup_type_name, trait_name, method, rhs)
-//RS                 } else {
-//RS                     trait_name.as_deref().map_or_else(
-//RS                         || {
-//RS                             let method_name = if generic_method {
-//RS                                 generic_method_instance_leaf(
-//RS                                     &owner_type,
-//RS                                     method,
-//RS                                     &resolved_type_args,
-//RS                                 )
-//RS                             } else {
-//RS                                 method.to_string()
-//RS                             };
-//RS                             TMethodRef::inherent(method_name)
-//RS                         },
-//RS                         |trait_name| TMethodRef::trait_method(trait_name, method),
-//RS                     )
-//RS                 };
-//RS                 return TExpr {
-//RS                     ty: ret_ty,
-//RS                     kind: TExprKind::StaticCall {
-//RS                         owner: TStaticOwner::User(if generic_method {
-//RS                             owner_type.name()
-//RS                         } else {
-//RS                             type_name.clone()
-//RS                         }),
-//RS                         owner_type: Some(owner_type),
-//RS                         method: method_ref,
-//RS                         type_args: resolved_type_args,
-//RS                         args: targs,
-//RS                     },
-//RS                 };
-//RS             });
-//RS         }
-//RS     }
-//RS     // c109 Phase 30: DYNAMIC dispatch on a TRAIT-OBJECT receiver (`s.name()`/`s.area()`,
-//RS     // `s: Box<dyn __jet_Shape>`). The gate proved `recv_type == Some(<trait>)` with the
-//RS     // trait in `cx.trait_names`. The AST `emit_method_call` (Expression.rs ~L1657) emits
-//RS     // `({recv}).{method}({args})` — the BARE (unmangled) method name (vtable dispatch),
-//RS     // node (`({recv}).{method_rust}({args})`) with the bare method name. Trait declarations
-//RS     // retain their full parameter/return facts in `Cx`, so dynamic calls use the same
-//RS     // convention-aware argument lowering as static calls.
-//RS     if let Some(ty) = recv_type {
-//RS         if cx.trait_names.contains(ty) || crate::Generics::is_builtin_trait(ty) {
-//RS             return in_own_frame(|| {
-//RS                 let mut recv = lower_expr(receiver, cx, env);
-//RS                 let concrete_owner = match &recv.ty {
-//RS                     Type::Named(name) => Some(name.clone()),
-//RS                     Type::Apply { name, .. } => Some(name.clone()),
-//RS                     _ => None,
-//RS                 };
-//RS                 let derived_operator_rhs = if operator_rhs.is_none() {
-//RS                     let trait_name = operator_trait_for_method(method);
-//RS                     let rhs = match recv.ty.without_user_tags() {
-//RS                         Type::Named(_) | Type::Apply { .. } => Some(recv.ty.clone()),
-//RS                         _ => None,
-//RS                     };
-//RS                     trait_name.and(rhs)
-//RS                 } else {
-//RS                     None
-//RS                 };
-//RS                 let effective_operator_rhs = operator_rhs.or(derived_operator_rhs.as_ref());
-//RS                 let operator_method = effective_operator_rhs.and_then(|rhs| {
-//RS                     let owner = concrete_owner.as_deref()?;
-//RS                     let trait_name = operator_trait_for_method(method)?;
-//RS                     let owner_leaf = owner.rsplit("::").next().unwrap_or(owner);
-//RS                     let lookup_owner = cx
-//RS                         .local_type_identities
-//RS                         .get(owner)
-//RS                         .map(String::as_str)
-//RS                         .unwrap_or(owner);
-//RS                     let rhs_name = rhs.name();
-//RS                     let rhs_leaf = rhs_name.rsplit("::").next().unwrap_or(rhs_name.as_str());
-//RS                     let rhs_source = Type::Named(rhs_leaf.to_string());
-//RS                     [owner, lookup_owner, owner_leaf]
-//RS                         .into_iter()
-//RS                         .find_map(|candidate| {
-//RS                             [&rhs, &rhs_source].into_iter().find_map(|candidate_rhs| {
-//RS                                 let key = crate::Traits::operator_method_identity(
-//RS                                     candidate,
-//RS                                     trait_name,
-//RS                                     method,
-//RS                                     candidate_rhs,
-//RS                                 );
-//RS                                 cx.operator_methods.get(&key).cloned()
-//RS                             })
-//RS                         })
-//RS                 });
-//RS                 let key = (ty.clone(), method.to_string());
-//RS                 let sig = if effective_operator_rhs.is_some() {
-//RS                     operator_method
-//RS                         .as_ref()
-//RS                         .map(|facts| facts.sig.clone())
-//RS                         .unwrap_or_else(|| {
-//RS                             vec![(
-//RS                                 crate::AST::AccessConvention::Read,
-//RS                                 (*effective_operator_rhs
-//RS                                     .as_ref()
-//RS                                     .expect("effective operator RHS"))
-//RS                                 .clone(),
-//RS                             )]
-//RS                         })
-//RS                 } else {
-//RS                     cx.method_sigs.get(&key).cloned().unwrap_or_default()
-//RS                 };
-//RS                 let sig = if effective_operator_rhs.is_some() {
-//RS                     sig
-//RS                 } else {
-//RS                     instantiated_sig.map(|sig| sig.to_vec()).unwrap_or_else(|| {
-//RS                         instantiate_method_sig(cx, ty, method, &sig, &[], type_args)
-//RS                     })
-//RS                 };
-//RS                 let ret_ty = if effective_operator_rhs.is_some() {
-//RS                     resolved_ret.cloned().or_else(|| {
-//RS                         operator_method
-//RS                             .as_ref()
-//RS                             .and_then(|facts| facts.ret.clone())
-//RS                             .or_else(|| match operator_trait_for_method(method) {
-//RS                                 Some(Syntax::TRAIT_EQUATABLE) => Some(Type::Bool),
-//RS                                 Some(Syntax::TRAIT_COMPARABLE) => {
-//RS                                     Some(Type::Named(Syntax::TYPE_ORDERING.to_string()))
-//RS                                 }
-//RS                                 _ => None,
-//RS                             })
-//RS                     })
-//RS                 } else {
-//RS                     resolved_ret
-//RS                         .cloned()
-//RS                         .or_else(|| cx.method_rets.get(&key).cloned().flatten())
-//RS                 }
-//RS                 .unwrap_or_else(unit_type);
-//RS                 let builtin_operator = crate::Generics::is_builtin_trait(ty)
-//RS                     && matches!(method, "add" | "sub" | "mul" | "div" | "equal" | "compare");
-//RS                 let distinct_numeric_operator = concrete_owner.as_ref().is_some_and(|owner| {
-//RS                     cx.distinct_types
-//RS                         .get(owner)
-//RS                         .is_some_and(|(_, numeric)| *numeric)
-//RS                         && !cx.distinct_ranges.contains_key(owner)
-//RS                         && !cx
-//RS                             .method_sigs
-//RS                             .contains_key(&(owner.clone(), method.to_string()))
-//RS                 }) && operator_method.is_none()
-//RS                     && matches!(method, "add" | "sub" | "mul" | "div");
-//RS                 if builtin_operator
-//RS                     && args.len() == 1
-//RS                     && (recv.ty.is_numeric()
-//RS                         || matches!(recv.ty, Type::Bool | Type::Char | Type::String)
-//RS                         || distinct_numeric_operator)
-//RS                 {
-//RS                     // Specialized scalars and numeric bundles use the same base
-//RS                     // operation; synthetic traits have no user MIR function body.
-//RS                     let rhs = lower_expr(&args[0].expr, cx, env);
-//RS                     return lower_builtin_binary_method(method, recv, rhs, ret_ty, method_span, cx);
-//RS                 }
-//RS                 let mut targs = lower_method_args(args, &sig, env, cx);
-//RS                 retag_empty_collection_args(&mut targs, &sig);
-//RS                 if builtin_operator {
-//RS                     if let Some(rhs) = targs.first_mut() {
-//RS                         rhs.borrow = true;
-//RS                     }
-//RS                 }
-//RS                 // D-NUMOPS1/D-FAIL-ARITH1: an arithmetic operator that reached its
-//RS                 // bound generically (`fn f<T: Add>(l: T, r: T) => T { return l + r }`)
-//RS                 // traps in the same Prelude kernel as the direct operator, so it must
-//RS                 // report the same Jet location. Record the operator's source line
-//RS                 // here; emit then spells the trait's `_at` entry point, whose
-//RS                 // fixed-width impls thread `(file, line)` into `jet_add`/`jet_div`.
-//RS                 // Without it the call lands on the impl's location-free plain method,
-//RS                 // whose only spellable placeholder is `<built-in Add>:0`.
-//RS                 // `equal`/`compare` never trap, so they carry no line.
-//RS                 let operator_line = (builtin_operator
-//RS                     && matches!(method, "add" | "sub" | "mul" | "div"))
-//RS                 .then(|| cx.src_line_col(method_span.start).0 as u32);
-//RS                 // A specialized generic/variadic parameter can retain the trait as
-//RS                 // `recv_type` while its lowered TIR type is the exact concrete
-//RS                 // implementation. Keep that concrete ABI and dispatch directly;
-//RS                 // only genuine trait-object values use the boxed dynamic ABI.
-//RS                 let direct_bound_dispatch = match &recv.ty {
-//RS                     Type::Named(concrete) => {
-//RS                         !cx.trait_names.contains(concrete)
-//RS                             && !crate::Generics::is_builtin_trait(concrete)
-//RS                     }
-//RS                     Type::TraitObject(_) => false,
-//RS                     _ => true,
-//RS                 };
-//RS                 let method_ref = if let Some(rhs) = effective_operator_rhs {
-//RS                     let owner = concrete_owner
-//RS                         .as_deref()
-//RS                         .expect("checked operator call has a concrete receiver");
-//RS                     let trait_name = operator_method
-//RS                         .as_ref()
-//RS                         .map(|facts| facts.trait_name.as_str())
-//RS                         .or_else(|| operator_trait_for_method(method))
-//RS                         .expect("checked operator method has a canonical trait");
-//RS                     TMethodRef::operator(owner, trait_name, method, rhs)
-//RS                 } else {
-//RS                     TMethodRef::trait_method(ty, method)
-//RS                 };
-//RS                 if direct_bound_dispatch {
-//RS                     return in_own_frame(|| {
-//RS                         return TExpr {
-//RS                             ty: ret_ty,
-//RS                             kind: TExprKind::MethodCall {
-//RS                                 recv: Box::new(recv),
-//RS                                 method: method_ref,
-//RS                                 type_args: type_args.to_vec(),
-//RS                                 args: targs,
-//RS                                 source_first_string_literal: first_string_literal_arg(args),
-//RS                                 operator_line,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 recv.ty = Type::TraitObject(vec![ty.clone()]);
-//RS                 return TExpr {
-//RS                     ty: ret_ty,
-//RS                     kind: TExprKind::MethodCall {
-//RS                         recv: Box::new(recv),
-//RS                         method: method_ref,
-//RS                         type_args: type_args.to_vec(),
-//RS                         args: targs,
-//RS                         source_first_string_literal: first_string_literal_arg(args),
-//RS                         operator_line,
-//RS                     },
-//RS                 };
-//RS             });
-//RS         }
-//RS     }
-//RS     return in_own_frame(|| {
-//RS         // D-BUILDENTRY1 / D-METAREFLECT1: BuildContext, ProgramInfo, and TypeInfo
-//RS         // methods are compiler-host operations. Lower them as HostCall so MIR
-//RS         // eval can reach `eval_program_build_method` / `Builtins::apply_method`
-//RS         // without synthesizing missing user methods or field IDs.
-//RS         let ty_name = recv_type
-//RS             .clone()
-//RS             .or_else(|| match tir_recv_jet_ty(receiver, env) {
-//RS                 Some(Type::Named(name) | Type::Apply { name, .. }) => Some(name),
-//RS                 _ => None,
-//RS             });
-//RS         if let Some(ty_name) = ty_name.as_deref() {
-//RS             if method != "generate" && is_comptime_host_method(ty_name, method) {
-//RS                 let recv = lower_expr(receiver, cx, env);
-//RS                 let targs = args
-//RS                     .iter()
-//RS                     .map(|arg| lower_expr(&arg.expr, cx, env))
-//RS                     .collect();
-//RS                 let ty = resolved_ret
-//RS                     .cloned()
-//RS                     .or_else(|| {
-//RS                         crate::Collections::builtin_method_return(
-//RS                             &Type::Named(ty_name.to_string()),
-//RS                             method,
-//RS                             args.len(),
-//RS                             false,
-//RS                         )
-//RS                         .flatten()
-//RS                     })
-//RS                     .unwrap_or_else(unit_type);
-//RS                 return TExpr {
-//RS                     ty,
-//RS                     kind: TExprKind::HostCall(Box::new(THostCall::Method {
-//RS                         recv: Box::new(recv),
-//RS                         method: method.to_string(),
-//RS                         args: targs,
-//RS                     })),
-//RS                 };
-//RS             }
-//RS         }
-//RS         let Some(ty_name) = ty_name else {
-//RS             return invariant_method_expr(method_span, format!("method `{method}` receiver type"));
-//RS         };
-//RS         // `lookup_ty_name` is the canonical nominal target identity. Method
-//RS         // signatures use the declaration table's owner spelling, which is a
-//RS         // local leaf for own methods and canonical for imported methods.
-//RS         let lookup_ty_name = cx
-//RS             .imported_type_metadata_name(&ty_name)
-//RS             .unwrap_or_else(|| ty_name.clone());
-//RS         let metadata_ty_name = cx.method_metadata_name(&ty_name, method);
-//RS         // Imported operator metadata records the RHS under its declaring
-//RS         // nominal identity, even when sema's source-facing operand is a bare
-//RS         // selective-import leaf. Use that identity for signature and MIR lookup.
-//RS         let canonical_operator_rhs = operator_rhs.map(|rhs| match rhs {
-//RS             Type::Named(name) => cx
-//RS                 .imported_type_metadata_name(name)
-//RS                 .map(Type::Named)
-//RS                 .unwrap_or_else(|| rhs.clone()),
-//RS             _ => rhs.clone(),
-//RS         });
-//RS         let operator_method = canonical_operator_rhs.as_ref().and_then(|rhs| {
-//RS             let trait_name = operator_trait_for_method(method)?;
-//RS             let key =
-//RS                 crate::Traits::operator_method_identity(&lookup_ty_name, trait_name, method, rhs);
-//RS             cx.operator_methods.get(&key).cloned()
-//RS         });
-//RS         // A checked operator carries its complete identity from sema. Never
-//RS         // collapse that call onto the ordinary owner/method table.
-//RS         let sig = if operator_rhs.is_some() {
-//RS             operator_method
-//RS                 .as_ref()
-//RS                 .map(|facts| facts.sig.clone())
-//RS                 .unwrap_or_default()
-//RS         } else {
-//RS             cx.method_sigs
-//RS                 .get(&(metadata_ty_name.to_string(), method.to_string()))
-//RS                 .cloned()
-//RS                 .unwrap_or_default()
-//RS         };
-//RS         let mut recv = if matches!(
-//RS             cx.method_self_convs
-//RS                 .get(&(metadata_ty_name.to_string(), method.to_string())),
-//RS             Some(AccessConvention::Move)
-//RS         ) && matches!(receiver, Expr::Ident(name, _) if env.is_resource(name))
-//RS         {
-//RS             lower_owned_expr(receiver, cx, env)
-//RS         } else {
-//RS             lower_expr(receiver, cx, env)
-//RS         };
-//RS         let target_owner = canonical_method_target_owner(cx, &ty_name);
-//RS         canonicalize_method_receiver_type(&mut recv.ty, &target_owner);
-//RS 
-//RS         let owner_type_args = match &recv.ty {
-//RS             Type::Apply { name, args } if name == &ty_name || name == &lookup_ty_name => {
-//RS                 args.as_slice()
-//RS             }
-//RS             _ => &[][..],
-//RS         };
-//RS         let sig = if operator_rhs.is_some() {
-//RS             sig
-//RS         } else {
-//RS             instantiated_sig.map(|sig| sig.to_vec()).unwrap_or_else(|| {
-//RS                 instantiate_method_sig(
-//RS                     cx,
-//RS                     &metadata_ty_name,
-//RS                     method,
-//RS                     &sig,
-//RS                     owner_type_args,
-//RS                     type_args,
-//RS                 )
-//RS             })
-//RS         };
-//RS         if matches!(&recv.ty, Type::Named(name) if cx.trait_names.contains(name)) {
-//RS             return in_own_frame(|| {
-//RS                 let trait_name = recv.ty.name();
-//RS                 let mut recv = recv;
-//RS                 recv.ty = Type::TraitObject(vec![trait_name.clone()]);
-//RS                 let mut targs = lower_method_args(args, &sig, env, cx);
-//RS                 retag_empty_collection_args(&mut targs, &sig);
-//RS                 let ret_ty = resolved_ret
-//RS                     .cloned()
-//RS                     .or_else(|| {
-//RS                         cx.method_rets
-//RS                             .get(&(trait_name.clone(), method.to_string()))
-//RS                             .cloned()
-//RS                             .flatten()
-//RS                     })
-//RS                     .unwrap_or_else(unit_type);
-//RS                 return TExpr {
-//RS                     ty: ret_ty,
-//RS                     kind: TExprKind::MethodCall {
-//RS                         recv: Box::new(recv),
-//RS                         method: TMethodRef::trait_method(&trait_name, method),
-//RS                         type_args: type_args.to_vec(),
-//RS                         args: targs,
-//RS                         source_first_string_literal: first_string_literal_arg(args),
-//RS                         operator_line: None,
-//RS                     },
-//RS                 };
-//RS             });
-//RS         }
-//RS 
-//RS         let distinct_numeric_operator = cx
-//RS             .distinct_types
-//RS             .get(&lookup_ty_name)
-//RS             .is_some_and(|(_, numeric)| *numeric)
-//RS             && !cx.distinct_ranges.contains_key(&lookup_ty_name)
-//RS             && !cx
-//RS                 .method_sigs
-//RS                 .contains_key(&(metadata_ty_name.clone(), method.to_string()))
-//RS             && operator_method.is_none()
-//RS             && matches!(method, "add" | "sub" | "mul" | "div")
-//RS             && args.len() == 1;
-//RS         if distinct_numeric_operator {
-//RS             let rhs = lower_expr(&args[0].expr, cx, env);
-//RS             let ret_ty = resolved_ret
-//RS                 .cloned()
-//RS                 .or_else(|| operator_method.as_ref().and_then(|facts| facts.ret.clone()))
-//RS                 .unwrap_or_else(unit_type);
-//RS             return lower_builtin_binary_method(method, recv, rhs, ret_ty, method_span, cx);
-//RS         }
-//RS         let mut targs = lower_method_args(args, &sig, env, cx);
-//RS         retag_empty_collection_args(&mut targs, &sig);
-//RS         let resolved_type_args = if operator_rhs.is_some() {
-//RS             type_args.to_vec()
-//RS         } else {
-//RS             resolved_method_type_args(
-//RS                 cx,
-//RS                 &metadata_ty_name,
-//RS                 method,
-//RS                 &sig,
-//RS                 owner_type_args,
-//RS                 &targs,
-//RS                 type_args,
-//RS                 resolved_ret,
-//RS             )
-//RS         };
-//RS         let generic_method =
-//RS             matches!(&recv.ty, Type::Apply { .. }) || !resolved_type_args.is_empty();
-//RS         if generic_method {
-//RS             cx.jit_method_calls.borrow_mut().insert(
-//RS                 crate::Codegen::TIR::generic_method_instance_key(
-//RS                     &recv.ty,
-//RS                     method,
-//RS                     &resolved_type_args,
-//RS                 ),
-//RS                 (
-//RS                     recv.ty.clone(),
-//RS                     method.to_string(),
-//RS                     resolved_type_args.clone(),
-//RS                 ),
-//RS             );
-//RS         }
-//RS         let method_ref = if let Some(rhs) = canonical_operator_rhs.as_ref() {
-//RS             let trait_name = operator_method
-//RS                 .as_ref()
-//RS                 .map(|facts| facts.trait_name.as_str())
-//RS                 .or_else(|| operator_trait_for_method(method))
-//RS                 .expect("checked operator method has a canonical trait");
-//RS             TMethodRef::operator(&lookup_ty_name, trait_name, method, rhs)
-//RS         } else if cx
-//RS             .trait_methods
-//RS             .contains(&(metadata_ty_name.to_string(), method.to_string()))
-//RS         {
-//RS             TMethodRef::bare(method)
-//RS         } else if generic_method {
-//RS             let method_name = crate::Codegen::TIR::generic_method_instance_key(
-//RS                 &recv.ty,
-//RS                 method,
-//RS                 &resolved_type_args,
-//RS             );
-//RS             TMethodRef::inherent(method_name)
-//RS         } else {
-//RS             TMethodRef::inherent(method)
-//RS         };
-//RS         // The result type, read from the resolved method return (total fact). It is
-//RS         // rarely load-bearing in emit (a binding carries sema's `b.ty`; arithmetic on a
-//RS         // method result doesn't trap — matching the AST `expr_jet_ty`/`operand_is_integer`),
-//RS         // but the TIR keeps it total per the design principle.
-//RS         let ret_ty = if operator_rhs.is_some() {
-//RS             resolved_ret
-//RS                 .cloned()
-//RS                 .or_else(|| operator_method.as_ref().and_then(|facts| facts.ret.clone()))
-//RS         } else {
-//RS             instantiate_method_ret(
-//RS                 cx,
-//RS                 &metadata_ty_name,
-//RS                 method,
-//RS                 owner_type_args,
-//RS                 &resolved_type_args,
-//RS                 resolved_ret,
-//RS             )
-//RS         }
-//RS         .unwrap_or_else(unit_type);
-//RS         TExpr {
-//RS             ty: ret_ty,
-//RS             kind: TExprKind::MethodCall {
-//RS                 recv: Box::new(recv),
-//RS                 method: method_ref,
-//RS                 type_args: resolved_type_args,
-//RS                 args: targs,
-//RS                 source_first_string_literal: first_string_literal_arg(args),
-//RS                 operator_line: None,
-//RS             },
-//RS         }
-//RS     });
-//RS }
-//RS 
-// END-PORT-PENDING 0491 crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11055-13216
+use jet_foundation.AST.[Expr, Type, CallArg, AccessConvention, FailureContract, UnitScaleProvenance, numeric_type_from_name]
+use jet_codegen.Codegen.[Cx]
+use jet_foundation.Diagnostics.[Span]
+use jet_codegen.Codegen.TIR.[TExpr, TExprKind, TCallArg, TMethodRef, TStaticOwner, TPreludeArg, TFailureCarrier, THostCall, TBuiltinOp, THandleOp, LowerEnv, generic_method_instance_key, generic_method_instance_leaf, resolve_numeric_conversion_op, lower_lambda_expecting]
+use jet_codegen.Codegen.TIR.Lower.Expressions.[lower_expr, lower_owned_expr, in_own_frame, unit_type, take_scheduled_expr]
+use jet_codegen.Codegen.TIR.Lower.MethodCalls.[lower_one_call_arg, lower_method_args, retag_empty_collection_args, rooted_owner, rooted_generic_owner, host_generic_owner, static_call_type_name_lower, invariant_method_expr, checked_core_record, resolved_method_type_args, instantiate_method_sig, instantiate_method_ret, resolve_self_ty, operator_trait_for_method, tir_recv_jet_ty, core_widen_to_vec, unit_ratio_as_f64, net_handle_rust_type, first_string_literal_arg, lower_builtin_binary_method, is_comptime_host_method, canonical_method_target_owner, canonicalize_method_receiver_type]
+use jet_codegen.[Syntax, Sema, Collections, Generics, Traits]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11055
+// Terminal fragment of lower_method_call_impl; publish privately in Codegen.TIR.Lower.MethodCalls.
+fn lower_method_call_impl_11055(receiver: &Expr, method: &String, method_span: Span,
+    owner_type_args: &[Type], type_args: &[Type], args: &[CallArg], recv_type: &String?,
+    operator_rhs: &Type?, resolved_ret: &Type?, checked_widen: Bool, cx: &Cx,
+    env: &LowerEnv, lowered_receiver: TExpr?, instantiated_sig: &[(AccessConvention, Type)]?) -> TExpr {
+    comptime_authority_name :: if receiver == {
+        .Ident(name, _) | .ComptimeName{name: name, ..} -> {
+            marked_name :: if Syntax.is_comptime_name(name) -> name.clone() else -> "{Syntax.COMPTIME_MARK}{name}"
+            is_authority :: fn(candidate: &String) -> Bool {
+                if cx.const_values.get(candidate) == Val(.Struct{type_name: type_name, ..}) -> type_name == Syntax.TYPE_AUTHORITY else -> false
+            }
+            if is_authority(name) -> Val(name.clone()) else if is_authority(marked_name) -> Val(marked_name) else -> None
+        }
+        else -> None
+    }
+    if (recv_type == Val(Syntax.TYPE_AUTHORITY) || comptime_authority_name.is_some()) && (method == "with" || method == "without") && args.len() == 1 {
+        return in_own_frame(fn() {
+            recv :: if comptime_authority_name == Val(name) -> lower_expr(Expr.ComptimeName{name: name.clone(), span: receiver.span(), value: None}, cx, &env) else -> lower_expr(receiver, cx, &env)
+            targs := loop arg in args -> lower_one_call_arg(arg, None, &env, cx)
+            receiver_arg :: TCallArg{value: recv, template_items: None, borrow: true, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None}
+            loop arg in &targs { arg.borrow = true; arg.mut_borrow = false }
+            call_args := [TCallArg].with_capacity(targs.len() + 1)
+            call_args.push(receiver_arg)
+            call_args.extend(^targs)
+            TExpr{ty: resolved_ret ?? Type.Named(Syntax.TYPE_AUTHORITY), kind: TExprKind.StaticCall{owner: rooted_owner("JetAuthority"), owner_type: None, method: TMethodRef.bare(method), type_args: type_args.clone(), args: call_args}}
+        })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11134
+    // Imported Core geometry constructors must not become nonexistent inherent new targets.
+    if static_call_type_name_lower(receiver, env) == Val(type_name) {
+        if Sema.is_geometry_type(type_name) && !cx.local_type_names.contains(type_name) && Sema.geometry_static_return_with_owner(type_name, method, args.len(), owner_type_args).is_some() {
+            ret :: Sema.geometry_static_return_with_owner(type_name, method, args.len(), owner_type_args) ?? panic("geometry constructor return was checked above")
+            return in_own_frame(fn() { TExpr{ty: ret, kind: TExprKind.MathBuiltin{type_name: type_name, func: method.clone(), args: loop a in args -> lower_expr(a.expr, cx, &env)}} })
+        }
+    }
+    checked_text_static :: fn(type_name: &String) -> Bool {
+        cx.string_distinct_has_registered_method(type_name, "check") && (method == "check" || (cx.string_distinct_has_registered_method(type_name, "encode_hole") && (method == "from" || method == "encode_hole")))
+    }
+    explicit_checked_text_type :: if receiver == {
+        .Ident(type_name, _) where checked_text_static(type_name) -> Val(type_name.clone())
+        else -> None
+    }
+    if recv_type.is_none() || recv_type == Val("ExpiringSecret") || recv_type == Val(Syntax.EXPIRING_VALUE_TYPE) || recv_type.is_some_and(checked_text_static) || explicit_checked_text_type.is_some() || static_call_type_name_lower(receiver, env).is_some_and(checked_text_static) {
+        candidate :: explicit_checked_text_type.or_else(fn() { static_call_type_name_lower(receiver, env) }).or_else(fn() { recv_type.clone() })
+        if candidate == Val(candidate_name) {
+            type_name :: cx.distinct_type_identity(candidate_name) ?? candidate_name
+            // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11191
+            if type_name == "DataLimits" && method == "safe" && args.is_empty() {
+                return TExpr{ty: resolved_ret ?? Type.Named("DataLimits"), kind: TExprKind.StaticCall{owner: rooted_owner("jet_std::DataLimits"), owner_type: None, method: TMethodRef.bare("safe"), type_args: [], args: []}}
+            }
+            if type_name == "Limits" && method == "safe" && args.is_empty() {
+                return TExpr{ty: resolved_ret ?? Type.Named("Limits"), kind: TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: false, path: "core.email", generics: []}, owner_type: None, method: TMethodRef.bare("limits_safe"), type_args: [], args: []}}
+            }
+            return in_own_frame(fn() {
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11224
+                if type_name == Syntax.TYPE_ATOMIC && owner_type_args.len() == 1 && args.len() == 1 && (method == "new" || method == "try_new") {
+                    inner :: owner_type_args[0].clone()
+                    return TExpr{ty: resolved_ret ?? Type.Apply{name: Syntax.TYPE_ATOMIC, args: [inner.clone()]}, kind: TExprKind.StaticCall{owner: rooted_generic_owner("JetAtomic", [TPreludeArg.Jet(inner)]), owner_type: None, method: TMethodRef.bare(method), type_args: [], args: [lower_one_call_arg(args[0], None, &env, cx)]}}
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11247
+                if method == "merge" && args.len() == 2 && cx.type_names.contains(type_name) && resolved_ret.is_some_and(fn(ty) { if ty == .Result{ok: ok, ..} -> ok == Type.Named(type_name) else -> false }) {
+                    if resolved_ret == Val(ty) {
+                        lowered_args :: loop arg in args -> lower_expr(arg.expr, cx, &env)
+                        record :: if checked_core_record("core.args", "merge", 2, method_span) == { Ok(record) -> record Err(expr) -> return expr }
+                        return TExpr{ty: ty.clone(), kind: TExprKind.CoreCall{record: record, args: lowered_args, source_span: method_span, type_args: [], widen_to_vec: [false, false], data_plan: None, fallibility: TFailureCarrier.from_checked_type(ty)}}
+                    } else -> return invariant_method_expr(method_span, "T.merge has no resolved return type")
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11282
+                if type_name == "UIShortcut" && method == "cmd" && args.len() == 1 {
+                    return TExpr{ty: resolved_ret ?? Type.Named(type_name), kind: TExprKind.StaticCall{owner: rooted_owner("JetUiShortcut"), owner_type: None, method: TMethodRef.bare("cmd"), type_args: [], args: [lower_one_call_arg(args[0], None, &env, cx)]}}
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11300
+                if checked_text_static(type_name) {
+                    lowered_args :: loop argument in args -> lower_one_call_arg(argument, None, &env, cx)
+                    resolved_type_args :: if method == "encode_hole" -> {
+                        sig :: cx.method_sigs.get((type_name, method)) ?? [] // GATE #4499 composite metadata keys.
+                        inferred :: resolved_method_type_args(cx, type_name, method, sig, [], lowered_args, type_args, resolved_ret)
+                        if inferred.is_empty() && type_args.is_empty() && lowered_args.len() == 1 -> [lowered_args[0].value.ty.clone()] else -> inferred
+                    } else -> type_args.clone()
+                    owner :: Type.Named(type_name.clone())
+                    if !resolved_type_args.is_empty() {
+                        &cx.jit_method_calls.insert(generic_method_instance_key(owner, method, resolved_type_args), (owner.clone(), method.clone(), resolved_type_args.clone()))
+                    }
+                    method_name :: if resolved_type_args.is_empty() -> method.clone() else -> generic_method_instance_leaf(owner, method, resolved_type_args)
+                    ty :: resolved_ret.or_else(fn() { (cx.method_rets.get((type_name, method)) ?? None) }).unwrap_or_else(fn() {
+                        if method == "from" -> Type.Result{ok: Type.Named(type_name), err: Type.String} else -> Type.String
+                    })
+                    return TExpr{ty: ty, kind: TExprKind.StaticCall{owner: TStaticOwner.User(type_name.clone()), owner_type: Val(Type.Named(type_name)), method: TMethodRef.bare(method_name), type_args: resolved_type_args, args: lowered_args}}
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11380
+                if type_name == Syntax.TYPE_AUTHORITY && method == "from_rights" && args.len() == 1 {
+                    return TExpr{ty: resolved_ret ?? Type.Named(Syntax.TYPE_AUTHORITY), kind: TExprKind.StaticCall{owner: rooted_owner("JetAuthority"), owner_type: None, method: TMethodRef.bare("from_rights"), type_args: [], args: loop arg in args -> lower_one_call_arg(arg, None, &env, cx)}}
+                }
+                if type_name == Syntax.TYPE_AUTHORITY && method == "workspace" && args.is_empty() {
+                    return TExpr{ty: resolved_ret ?? Type.Named(Syntax.TYPE_AUTHORITY), kind: TExprKind.StaticCall{owner: rooted_owner("JetAuthority"), owner_type: None, method: TMethodRef.bare("workspace"), type_args: [], args: []}}
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11414
+                if type_name == "Date" && method == "today" && args.is_empty() {
+                    return in_own_frame(fn() {
+                        if resolved_ret == Val(ty) {
+                            record :: if checked_core_record("core.time", "today", 0, method_span) == { Ok(record) -> record Err(expr) -> return expr }
+                            TExpr{ty: ty.clone(), kind: TExprKind.CoreCall{record: record, args: [], source_span: method_span, type_args: [], widen_to_vec: [], data_plan: None, fallibility: TFailureCarrier.from_checked_type(ty)}}
+                        } else -> invariant_method_expr(method_span, "Date.today without a resolved return type")
+                    })
+                }
+                if type_name == "Path" && method == "home" && args.is_empty() && !cx.type_names.contains("Path") {
+                    return in_own_frame(fn() { TExpr{ty: Type.Named("Path"), kind: TExprKind.HandleMethod{recv: TExpr{ty: unit_type(), kind: TExprKind.Unit}, op: THandleOp.PathHome, args: []}} })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11463
+                if type_name == "FieldError" && method == "under" && args.len() == 2 {
+                    return in_own_frame(fn() {
+                        segment :: lower_one_call_arg(args[0], None, &env, cx).value
+                        inner :: lower_expr(args[1].expr, cx, &env)
+                        TExpr{ty: resolved_ret ?? inner.ty.clone(), kind: TExprKind.DecodeUnder{segment: segment, inner: inner}}
+                    })
+                }
+                if ["HTTPMethod", "HTTPStatus", "HTTPVersion", "HTTPHeaderName", "HTTPHeaderValue", "Headers", "Body"].contains(type_name) {
+                    return in_own_frame(fn() {
+                        method_rust :: if (type_name, method, args.len()) == {
+                            ("Body", "bytes", 1) -> "from_bytes"
+                            ("Body", "text", 1) -> "from_text"
+                            ("Body", "text", 2) -> "from_text_with_mime"
+                            ("Body", "json", 1) -> "from_json"
+                            ("Body", "form", 1) -> "from_form"
+                            ("Body", "multipart", 1) -> "from_multipart"
+                            ("Body", "reader", 1) -> "from_reader"
+                            ("Body", "reader", 2) -> "from_reader_with_length"
+                            else -> method
+                        }
+                        TExpr{ty: resolved_ret ?? Type.Named(type_name), kind: TExprKind.StaticCall{owner: rooted_owner(net_handle_rust_type(type_name) ?? "Jet{type_name}"), owner_type: None, method: TMethodRef.bare(method_rust), type_args: [], args: loop argument in args -> lower_one_call_arg(argument, None, &env, cx)}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11521
+                if (type_name == "Int" || type_name == "Float") && method == "parse" && args.len() == 1 {
+                    return in_own_frame(fn() { TExpr{ty: resolved_ret ?? Type.Result{ok: if type_name == "Int" -> Type.Int else -> Type.Float, err: Type.Named("ParseError")}, kind: TExprKind.BuiltinMethod{recv: lower_expr(args[0].expr, cx, &env), op: if type_name == "Int" -> TBuiltinOp.ParseInt else -> TBuiltinOp.ParseFloat, args: []}} })
+                }
+                if type_name == "Int" && method == "from_radix" && args.len() == 2 {
+                    return in_own_frame(fn() {
+                        line :: cx.src_line_col(method_span.start).0 as U32
+                        TExpr{ty: resolved_ret ?? Type.Result{ok: Type.Int, err: Type.Named("ParseError")}, kind: TExprKind.BuiltinMethod{recv: lower_expr(args[0].expr, cx, &env), op: TBuiltinOp.IntFromRadix{line: line}, args: [lower_expr(args[1].expr, cx, &env)]}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11568
+                if type_name == "String" && (method == "from_bytes" || method == "from_bytes_lossy") && args.len() == 1 {
+                    (op, ty) :: if method == "from_bytes" -> (TBuiltinOp.StringFromBytes, resolved_ret ?? Type.Result{ok: Type.String, err: Type.Named(Syntax.TYPE_UTF8_ERROR)}) else -> (TBuiltinOp.StringFromBytesLossy, resolved_ret ?? Type.String)
+                    return in_own_frame(fn() { TExpr{ty: ty, kind: TExprKind.BuiltinMethod{recv: lower_expr(args[0].expr, cx, &env), op: op, args: []}} })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11601
+                if (numeric_type_from_name(type_name), Syntax.numeric_conversion_source(method), args.first()) == (Val(target), Val(source_name), Val(arg)) {
+                    if args.len() == 1 {
+                        return in_own_frame(fn() {
+                            input :: lower_expr(arg.expr, cx, &env)
+                            if target == Type.Float && (source_name == "Fraction" || source_name == "Decimal") {
+                                return TExpr{ty: resolved_ret ?? Type.Float, kind: TExprKind.PreciseBuiltin{type_name: source_name.clone(), func: "to_float", args: [input]}}
+                            }
+                            op :: resolve_numeric_conversion_op(type_name, source_name) ?? panic("sema admitted a numeric destination conversion")
+                            ty :: (Collections.builtin_method_return(target, method, 1, true) ?? None) ?? target
+                            TExpr{ty: ty, kind: TExprKind.NumericMethod{recv: input, op: op}}
+                        })
+                    }
+                }
+                if (cx.distinct_types.get(type_name), Syntax.numeric_conversion_source(method), args.first()) == (Val((base, _)), Val(source), Val(arg)) {
+                    if args.len() == 1 {
+                        return in_own_frame(fn() {
+                            op :: resolve_numeric_conversion_op(base.name(), source) ?? panic("sema admitted a numeric distinct conversion")
+                            range :: cx.distinct_ranges.get(type_name)
+                            TExpr{ty: resolved_ret ?? Type.Named(type_name), kind: TExprKind.DistinctConvert{name: type_name, arg: lower_expr(arg.expr, cx, &env), op: op, range: range, fallible: resolved_ret.is_some_and(fn(ty) { ty == .Result{..} })}}
+                        })
+                    }
+                }
+                if (cx.distinct_types.get(type_name), args.first()) == (Val((base, _)), Val(arg)) {
+                    if args.len() == 1 && !base.is_numeric() && Syntax.conversion_method_for_source(base.name()) == method {
+                        return in_own_frame(fn() { TExpr{ty: Type.Named(type_name), kind: TExprKind.Call{name: type_name, type_args: [], args: [lower_one_call_arg(arg, None, &env, cx)]}} })
+                    }
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11684
+                if (cx.unit_facts.get(type_name), args.first()) == (Val(destination), Val(arg)) {
+                    exact_method :: method.strip_suffix("_rounded") ?? method
+                    lowered :: lower_expr(arg.expr, cx, &env)
+                    rounding :: args.get(1).and_then(fn(mode) {
+                        if mode.expr == {
+                            .EnumLit{type_name: name, variant: variant, args: mode_args, ..} where name.is_empty() && mode_args.is_empty() -> Syntax.unit_rounding_mode(variant)
+                            else -> None
+                        }
+                    })
+                    source := if lowered.ty == { .Named(name) -> cx.unit_facts.get(name) else -> None }
+                    if source.is_none() {
+                        destination_scope :: type_name.rsplit_once('.').map(fn(pair) { pair.0 })
+                        source = cx.unit_facts.iter().find_map(fn(entry) {
+                            (name, fact) :: entry
+                            leaf :: name.rsplit('.').next() ?? name
+                            source_scope :: name.rsplit_once('.').map(fn(pair) { pair.0 })
+                            if source_scope == destination_scope && fact.family == destination.family && fact.kind == destination.kind && Syntax.conversion_method_for_source(leaf) == exact_method -> Val(fact) else -> None
+                        })
+                    }
+                    if args.len() == 1 || (args.len() == 3 && rounding.is_some()) {
+                        if source == Val(source_fact) {
+                            return in_own_frame(fn() {
+                                scale :: if source_fact.scale.div(destination.scale) == { Ok(value) -> value Err(_) -> return invariant_method_expr(method_span, "unit conversion without a valid checked scale") }
+                                offset :: if source_fact.offset.sub(destination.offset).and_then(fn(value) { value.div(destination.scale) }) == { Ok(value) -> value Err(_) -> return invariant_method_expr(method_span, "unit conversion without a valid checked offset") }
+                                measured_scale_uncertainty :: fn(fact: &jet_codegen.Codegen.UnitFact) -> Float? {
+                                    if fact.scale_provenance == .Measured{standard_uncertainty: uncertainty, ..} {
+                                        if Float.parse(uncertainty) == Ok(standard_uncertainty) {
+                                            if unit_ratio_as_f64(fact.scale) == Val(raw_scale) {
+                                                scale :: raw_scale.abs()
+                                                if scale.is_finite() && scale > 0.0 -> return Val(standard_uncertainty.abs() / scale)
+                                            }
+                                        }
+                                    }
+                                    None
+                                }
+                                source_relative :: measured_scale_uncertainty(source_fact)
+                                destination_relative :: measured_scale_uncertainty(destination)
+                                relative_uncertainty :: if source_relative.is_some() || destination_relative.is_some() -> Val((source_relative ?? 0.0).hypot(destination_relative ?? 0.0)) else -> None
+                                if resolved_ret == Val(result_ty) {
+                                    fallible :: result_ty == .Result{..}
+                                    lowered_rounding :: rounding.map(fn(mode) { (mode, lower_expr(args[2].expr, cx, &env)) })
+                                    return TExpr{ty: result_ty, kind: TExprKind.UnitConvert{destination: type_name, arg: lowered, scale: scale, offset: offset, rounding: lowered_rounding, fallible: fallible, relative_uncertainty: relative_uncertainty, file: cx.file.clone(), line: cx.src_line_col(method_span.start).0 as U32}}
+                                } else -> return invariant_method_expr(method_span, "unit conversion without a resolved return type")
+                            })
+                        }
+                    }
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11796
+                if type_name == Syntax.TYPE_PATH && method == "from" && args.len() == 1 && !cx.local_type_names.contains(Syntax.TYPE_PATH) && resolved_ret.is_none_or(fn(ty) { ty == Type.Named(Syntax.TYPE_PATH) }) {
+                    return in_own_frame(fn() { TExpr{ty: Type.Named("Path"), kind: TExprKind.HandleMethod{recv: lower_expr(args[0].expr, cx, &env), op: THandleOp.PathFrom, args: []}} })
+                }
+                if type_name == "Reader" && method == "over" && args.len() == 1 && !cx.type_names.contains("Reader") {
+                    owned :: args[0].flags.owned_last_use
+                    return in_own_frame(fn() { TExpr{ty: Type.Named("Reader"), kind: TExprKind.HandleMethod{recv: lower_expr(args[0].expr, cx, &env), op: THandleOp.ReaderOver{owned: owned}, args: []}} })
+                }
+                if type_name == "Cursor" && method == "over" && args.len() == 1 && !cx.type_names.contains("Cursor") {
+                    return in_own_frame(fn() { TExpr{ty: Type.Named("Cursor"), kind: TExprKind.HandleMethod{recv: lower_expr(args[0].expr, cx, &env), op: THandleOp.CursorOver, args: []}} })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11856
+                if type_name == "Perf" && !cx.type_names.contains("Perf") {
+                    return in_own_frame(fn() {
+                        targs :: loop a in args -> lower_expr(a.expr, cx, &env)
+                        widen_to_vec :: core_widen_to_vec("core.perf", method, targs)
+                        if resolved_ret == Val(ty) {
+                            record :: if checked_core_record("core.perf", method, targs.len(), method_span) == { Ok(record) -> record Err(expr) -> return expr }
+                            TExpr{ty: ty.clone(), kind: TExprKind.CoreCall{record: record, args: targs, source_span: method_span, type_args: [], widen_to_vec: widen_to_vec, data_plan: None, fallibility: TFailureCarrier.from_checked_type(ty)}}
+                        } else -> invariant_method_expr(method_span, "Perf.{method} without a resolved return type")
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11892
+                if type_name == "Set" && method == "from" && args.len() == 1 {
+                    return in_own_frame(fn() {
+                        list_arg :: lower_expr(args[0].expr, cx, &env)
+                        elem_ty :: if list_arg.ty == { .List(inner) -> inner.clone() else -> Type.Int }
+                        TExpr{ty: Type.Apply{name: "Set", args: [elem_ty]}, kind: TExprKind.BuiltinMethod{recv: list_arg, op: TBuiltinOp.SetFrom, args: []}}
+                    })
+                }
+                if type_name == "Set" && method == "new" && args.is_empty() {
+                    return in_own_frame(fn() {
+                        elem_ty :: if resolved_ret == { Val(.Apply{args: targs, ..}) where !targs.is_empty() -> targs[0].clone() else -> Type.Int }
+                        TExpr{ty: Type.Apply{name: "Set", args: [elem_ty.clone()]}, kind: TExprKind.StaticCall{owner: host_generic_owner("std::collections::HashSet", [TPreludeArg.Jet(elem_ty)]), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: []}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11944
+                if type_name == Syntax.TYPE_LIST && !cx.type_names.contains(Syntax.TYPE_LIST) && (method == "try_new" || method == "try_with_capacity") && ((method == "try_new" && args.is_empty()) || (method == "try_with_capacity" && args.len() == 1)) {
+                    return in_own_frame(fn() {
+                        elem_ty :: if resolved_ret == { Val(.Result{ok: .List(inner), ..}) -> inner.clone() else -> Type.Int }
+                        ty :: resolved_ret ?? Type.Result{ok: Type.List(elem_ty), err: Type.Named(Syntax.TYPE_ALLOC_ERROR)}
+                        value_args :: if method == "try_with_capacity" -> [lower_expr(args[0].expr, cx, &env)] else -> []
+                        TExpr{ty: ty, kind: TExprKind.BuiltinMethod{recv: TExpr{ty: unit_type(), kind: TExprKind.Unit}, op: if method == "try_new" -> TBuiltinOp.ListTryNew else -> TBuiltinOp.ListTryWithCapacity, args: value_args}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:11983
+                if type_name == Syntax.TYPE_MAP && method == "new" && args.is_empty() {
+                    return in_own_frame(fn() {
+                        (key, value) :: if resolved_ret == { Val(.Map{key: key, value: value, ..}) -> (key.clone(), value.clone()) else -> (Type.Int, Type.Int) }
+                        TExpr{ty: Type.Map{key: key, key_span: None, value: value}, kind: TExprKind.MapLit([])}
+                    })
+                }
+                if type_name == Syntax.TYPE_MAP && (method == "from_keys" || method == "fromkeys") && args.len() == 2 {
+                    return in_own_frame(fn() {
+                        keys :: lower_expr(args[0].expr, cx, &env)
+                        default :: lower_expr(args[1].expr, cx, &env)
+                        (key, value) :: if resolved_ret == {
+                            Val(.Map{key: key, value: value, ..}) -> (key.clone(), value.clone())
+                            else -> (if keys.ty == { .List(inner) -> inner.clone() else -> Type.Int }, default.ty.clone())
+                        }
+                        TExpr{ty: Type.Map{key: key, key_span: None, value: value}, kind: TExprKind.BuiltinMethod{recv: keys, op: TBuiltinOp.MapFromKeys, args: [default]}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12035
+                if type_name == Syntax.TYPE_RANK && method == "from" && args.len() == 1 {
+                    return in_own_frame(fn() {
+                        list_arg :: lower_expr(args[0].expr, cx, &env)
+                        elem_ty :: if list_arg.ty == { .List(inner) -> inner.clone() else -> Type.Int }
+                        TExpr{ty: Type.Apply{name: Syntax.TYPE_RANK, args: [elem_ty]}, kind: TExprKind.BuiltinMethod{recv: list_arg, op: TBuiltinOp.SortedSetFrom, args: []}}
+                    })
+                }
+                if type_name == Syntax.TYPE_RANK && method == "new" && args.is_empty() {
+                    return in_own_frame(fn() {
+                        elem_ty :: if resolved_ret == { Val(.Apply{args: targs, ..}) where !targs.is_empty() -> targs[0].clone() else -> Type.Int }
+                        TExpr{ty: Type.Apply{name: Syntax.TYPE_RANK, args: [elem_ty.clone()]}, kind: TExprKind.StaticCall{owner: host_generic_owner("std::collections::BTreeSet", [TPreludeArg.Jet(elem_ty)]), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: []}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12081
+                if type_name == Syntax.TYPE_PRIORITY_QUEUE && method == "from" && args.len() == 1 {
+                    return in_own_frame(fn() {
+                        list_arg :: lower_expr(args[0].expr, cx, &env)
+                        elem_ty :: if list_arg.ty == { .List(inner) -> inner.clone() else -> Type.Int }
+                        TExpr{ty: Type.Apply{name: Syntax.TYPE_PRIORITY_QUEUE, args: [elem_ty]}, kind: TExprKind.BuiltinMethod{recv: list_arg, op: TBuiltinOp.PriorityQueueFrom, args: []}}
+                    })
+                }
+                if type_name == Syntax.TYPE_PRIORITY_QUEUE && method == "new" && args.is_empty() {
+                    return in_own_frame(fn() {
+                        elem_ty :: if resolved_ret == { Val(.Apply{args: targs, ..}) where !targs.is_empty() -> targs[0].clone() else -> Type.Int }
+                        TExpr{ty: Type.Apply{name: Syntax.TYPE_PRIORITY_QUEUE, args: [elem_ty.clone()]}, kind: TExprKind.StaticCall{owner: host_generic_owner("std::collections::BinaryHeap", [TPreludeArg.Jet(elem_ty)]), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: []}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12133
+                if type_name == Syntax.TYPE_LRU && method == "new" && args.len() == 1 {
+                    return in_own_frame(fn() {
+                        cap_arg :: lower_expr(args[0].expr, cx, &env)
+                        (key_ty, value_ty) :: if resolved_ret == { Val(.Apply{args: targs, ..}) where targs.len() >= 2 -> (targs[0].clone(), targs[1].clone()) else -> (Type.String, Type.Int) }
+                        TExpr{ty: Type.Apply{name: Syntax.TYPE_LRU, args: [key_ty, value_ty]}, kind: TExprKind.StaticCall{owner: rooted_owner("JetCache"), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: [TCallArg{value: cap_arg, template_items: None, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None}]}}
+                    })
+                }
+                if type_name == Syntax.TYPE_BITS && method == "new" && args.is_empty() {
+                    return in_own_frame(fn() { TExpr{ty: Type.Named(Syntax.TYPE_BITS), kind: TExprKind.StaticCall{owner: rooted_owner("JetBitSet"), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: []}} })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12182
+                if type_name == Syntax.TYPE_BYTES && method == "new" && args.is_empty() {
+                    return in_own_frame(fn() { TExpr{ty: Type.Named(Syntax.TYPE_BYTES), kind: TExprKind.StaticCall{owner: rooted_owner("JetByteBuffer"), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: []}} })
+                }
+                if type_name == Syntax.TYPE_BYTES && method == "with_capacity" && args.len() == 1 {
+                    return in_own_frame(fn() { TExpr{ty: Type.Named(Syntax.TYPE_BYTES), kind: TExprKind.BuiltinMethod{recv: lower_expr(args[0].expr, cx, &env), op: TBuiltinOp.ByteBufferWithCapacity, args: []}} })
+                }
+                if type_name == Syntax.TYPE_BYTES && method == "from" && args.len() == 1 {
+                    return in_own_frame(fn() { TExpr{ty: Type.Named(Syntax.TYPE_BYTES), kind: TExprKind.BuiltinMethod{recv: lower_expr(args[0].expr, cx, &env), op: TBuiltinOp.ByteBufferFrom, args: []}} })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12226
+                if type_name == Syntax.TYPE_QUEUE && method == "init" && args.len() == 1 {
+                    return in_own_frame(fn() {
+                        list_arg :: lower_expr(args[0].expr, cx, &env)
+                        elem_ty :: if list_arg.ty == { .List(inner) -> inner.clone() else -> Type.Int }
+                        TExpr{ty: Type.Apply{name: Syntax.TYPE_QUEUE, args: [elem_ty]}, kind: TExprKind.BuiltinMethod{recv: list_arg, op: TBuiltinOp.DequeFrom, args: []}}
+                    })
+                }
+                if type_name == Syntax.TYPE_QUEUE && method == "new" && args.is_empty() {
+                    return in_own_frame(fn() {
+                        elem_ty :: if resolved_ret == { Val(.Apply{args: targs, ..}) where !targs.is_empty() -> targs[0].clone() else -> Type.Int }
+                        TExpr{ty: Type.Apply{name: Syntax.TYPE_QUEUE, args: [elem_ty.clone()]}, kind: TExprKind.StaticCall{owner: host_generic_owner("std::collections::VecDeque", [TPreludeArg.Jet(elem_ty)]), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: []}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12276
+                if type_name == Syntax.TYPE_TALLY && method == "new" && args.is_empty() {
+                    return in_own_frame(fn() {
+                        elem_ty :: if resolved_ret == { Val(.Apply{args: targs, ..}) where !targs.is_empty() -> targs[0].clone() else -> Type.Int }
+                        TExpr{ty: Type.Apply{name: Syntax.TYPE_TALLY, args: [elem_ty.clone()]}, kind: TExprKind.StaticCall{owner: host_generic_owner("std::collections::HashMap", [TPreludeArg.Jet(elem_ty), TPreludeArg.HostUsize]), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: []}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12306
+                if type_name == "Pool" && method == "new" && args.is_empty() {
+                    return in_own_frame(fn() {
+                        elem_ty :: if resolved_ret == { Val(.Apply{args: targs, ..}) where !targs.is_empty() -> targs[0].clone() else -> Type.Int }
+                        TExpr{ty: Type.Apply{name: "Pool", args: [elem_ty.clone()]}, kind: TExprKind.StaticCall{owner: rooted_generic_owner("jet_std::JetPool", [TPreludeArg.Jet(elem_ty)]), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: []}}
+                    })
+                }
+                if type_name == "Shared" && method == "new" && args.len() == 1 {
+                    return in_own_frame(fn() {
+                        arg_t :: lower_expr(args[0].expr, cx, &env)
+                        elem_ty :: arg_t.ty.clone()
+                        TExpr{ty: Type.Shared(elem_ty.clone()), kind: TExprKind.StaticCall{owner: rooted_generic_owner("jet_std::JetShared", [TPreludeArg.Jet(elem_ty)]), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: [TCallArg{value: arg_t, template_items: None, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None}]}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12366
+                if type_name == Syntax.TYPE_CONDITION && method == "new" && args.is_empty() {
+                    return in_own_frame(fn() { TExpr{ty: Type.Named(Syntax.TYPE_CONDITION), kind: TExprKind.StaticCall{owner: rooted_owner("jet_std::JetCondition"), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: []}} })
+                }
+                if type_name == "Cell" && method == "new" && args.len() == 1 {
+                    return in_own_frame(fn() {
+                        value := lower_expr(args[0].expr, cx, &env)
+                        cell_ty :: resolved_ret ?? Type.Apply{name: "Cell", args: [value.ty.clone()]}
+                        elem_ty :: if cell_ty == { .Apply{args: cell_args, ..} where !cell_args.is_empty() -> cell_args[0].clone() else -> value.ty.clone() }
+                        if value.kind == .Absent { value.ty = elem_ty.clone() }
+                        TExpr{ty: cell_ty, kind: TExprKind.StaticCall{owner: rooted_generic_owner("jet_std::JetCell", [TPreludeArg.Jet(elem_ty)]), owner_type: None, method: TMethodRef.bare("new"), type_args: [], args: [TCallArg{value: value, template_items: None, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None}]}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12420
+                if type_name == "ExpiringSecret" && method == "new" && args.len() == 3 {
+                    return in_own_frame(fn() {
+                        value :: lower_expr(args[0].expr, cx, &env)
+                        duration :: lower_expr(args[1].expr, cx, &env)
+                        clock :: lower_expr(args[2].expr, cx, &env)
+                        elem_ty :: if resolved_ret == { Val(.Apply{name: "ExpiringSecret", args: targs}) where !targs.is_empty() -> targs[0].clone() else -> value.ty.clone() }
+                        TExpr{ty: Type.Apply{name: "ExpiringSecret", args: [elem_ty.clone()]}, kind: TExprKind.HostCall(THostCall.ExpiringSecretNew{value: value, duration: duration, clock: clock, elem: elem_ty})}
+                    })
+                }
+                if type_name == Syntax.EXPIRING_VALUE_TYPE && method == "new" && args.len() == 3 {
+                    return in_own_frame(fn() {
+                        value :: lower_expr(args[0].expr, cx, &env)
+                        duration :: lower_expr(args[1].expr, cx, &env)
+                        clock :: lower_expr(args[2].expr, cx, &env)
+                        elem_ty :: if resolved_ret == { Val(.Apply{name: name, args: targs}) where name == Syntax.EXPIRING_VALUE_TYPE && !targs.is_empty() -> targs[0].clone() else -> value.ty.clone() }
+                        TExpr{ty: Type.Apply{name: Syntax.EXPIRING_VALUE_TYPE, args: [elem_ty]}, kind: TExprKind.HostCall(THostCall.ExpiringValueNew{value: value, duration: duration, clock: clock})}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12477
+                if type_name == "Option" && method == "lift2" && !cx.type_names.contains("Option") {
+                    return in_own_frame(fn() {
+                        a_ty :: if tir_recv_jet_ty(args[1].expr, env) == { Val(.Option(inner)) -> inner.clone() else -> Type.Int }
+                        b_ty :: if tir_recv_jet_ty(args[2].expr, env) == { Val(.Option(inner)) -> inner.clone() else -> Type.Int }
+                        ret_ty :: if resolved_ret == { Val(.Option(inner)) -> inner.clone() else -> Type.Int }
+                        f_t :: in_own_frame(fn() {
+                            if args[0].expr == {
+                                .Lambda(lam) -> take_scheduled_expr(args[0].expr, cx).unwrap_or_else(fn() {
+                                    tl :: lower_lambda_expecting(lam, cx, &env, Val([a_ty.clone(), b_ty.clone()]))
+                                    TExpr{ty: Type.Fn{params: [a_ty.clone(), b_ty.clone()], ret: Val(ret_ty.clone()), effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None}, kind: TExprKind.Lambda(tl)}
+                                })
+                                else -> lower_expr(args[0].expr, cx, &env)
+                            }
+                        })
+                        a_t :: lower_expr(args[1].expr, cx, &env)
+                        b_t :: lower_expr(args[2].expr, cx, &env)
+                        TExpr{ty: Type.Option(ret_ty), kind: TExprKind.OptionLift2{f: f_t, a: a_t, b: b_t}}
+                    })
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12536
+                if Sema.is_geometry_type(type_name) {
+                    if Sema.geometry_static_return_with_owner(type_name, method, args.len(), owner_type_args) == Val(ret) {
+                        return in_own_frame(fn() { TExpr{ty: ret, kind: TExprKind.MathBuiltin{type_name: type_name.clone(), func: method.clone(), args: loop a in args -> lower_expr(a.expr, cx, &env)}} })
+                    }
+                }
+                if Sema.is_math_type(type_name) && !cx.type_names.contains(type_name) {
+                    if Sema.math_static_return(type_name, method, args.len()) == Val(ret) {
+                        return in_own_frame(fn() {
+                            bridge :: Sema.math_static_arg_ty(type_name, method)
+                            targs :: loop a in args {
+                                t := lower_expr(a.expr, cx, &env)
+                                if bridge == Val(fl) {
+                                    if fl == .FixedList{..} && t.ty == .List(_) && t.kind == .ListLit(_) { t.ty = fl.clone() }
+                                }
+                                t
+                            }
+                            TExpr{ty: ret, kind: TExprKind.MathBuiltin{type_name: type_name.clone(), func: method.clone(), args: targs}}
+                        })
+                    }
+                }
+                // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12604
+                // Preserve dotted nominal identities before trying a module-qualified leaf.
+                dotted_key :: (type_name.clone(), method.clone())
+                lookup_type_name :: if cx.method_sigs.contains_key(dotted_key) || cx.method_rets.contains_key(dotted_key) -> type_name.clone() else -> {
+                    leaf :: type_name.rsplit_once('.').map(fn(pair) { pair.1 }) ?? type_name
+                    leaf_key :: (leaf, method)
+                    if cx.imported_type_metadata_name(type_name) == {
+                        Val(identity) where !cx.method_sigs.contains_key(leaf_key) && !cx.method_rets.contains_key(leaf_key) && cx.method_sigs.contains_key((identity, method)) -> identity
+                        else -> leaf.clone()
+                    }
+                }
+                type_name :: if lookup_type_name.contains("::") -> lookup_type_name.clone() else -> type_name
+                operator_method :: operator_rhs.and_then(fn(rhs) {
+                    operator_trait_for_method(method).and_then(fn(trait_name) { cx.operator_methods.get(Traits.operator_method_identity(lookup_type_name, trait_name, method, rhs)) })
+                })
+                sig :: if operator_rhs.is_some() -> operator_method.map(fn(facts) { facts.sig.clone() }) ?? [] else -> {
+                    raw_sig :: cx.method_sigs.get((lookup_type_name, method)) ?? []
+                    instantiated_sig.unwrap_or_else(fn() { instantiate_method_sig(cx, type_name, method, raw_sig, owner_type_args, type_args) })
+                }
+                targs := lower_method_args(args, sig, &env, cx)
+                retag_empty_collection_args(&targs, sig)
+                resolved_type_args :: if operator_rhs.is_some() -> type_args.clone() else -> resolved_method_type_args(cx, lookup_type_name, method, sig, owner_type_args, targs, type_args, resolved_ret)
+                source_ret_ty :: (if operator_rhs.is_some() -> resolved_ret.or_else(fn() { operator_method.and_then(fn(facts) { facts.ret.clone() }) }) else -> instantiate_method_ret(cx, lookup_type_name, method, owner_type_args, resolved_type_args, resolved_ret)).map(fn(ty) { resolve_self_ty(ty, type_name) }).unwrap_or_else(unit_type)
+                ret_ty :: if env.fallback_subject && resolved_ret.is_some() -> FailureContract.from_return_type(Val(source_ret_ty)).effective_type() else -> source_ret_ty
+                owner_type :: if owner_type_args.is_empty() -> Type.Named(type_name.clone()) else -> Type.Apply{name: type_name.clone(), args: owner_type_args.clone()}
+                if owner_type == .Apply{..} || !resolved_type_args.is_empty() {
+                    &cx.jit_method_calls.insert(generic_method_instance_key(owner_type, method, resolved_type_args), (owner_type.clone(), method.clone(), resolved_type_args.clone()))
+                }
+                trait_name :: operator_method.map(fn(facts) { facts.trait_name.clone() }).or_else(fn() { cx.trait_method_traits.get((lookup_type_name, method)) })
+                generic_method :: (owner_type == .Apply{..} || !resolved_type_args.is_empty()) && operator_rhs.is_none() && trait_name.is_none()
+                method_ref :: if operator_rhs == Val(rhs) -> {
+                    trait_name :: trait_name.or_else(fn() { operator_trait_for_method(method) }) ?? panic("checked operator method has a canonical trait")
+                    TMethodRef.operator(lookup_type_name, trait_name, method, rhs)
+                } else if trait_name == Val(trait_name) -> TMethodRef.trait_method(trait_name, method) else -> {
+                    method_name :: if generic_method -> generic_method_instance_leaf(owner_type, method, resolved_type_args) else -> method.clone()
+                    TMethodRef.inherent(method_name)
+                }
+                TExpr{ty: ret_ty, kind: TExprKind.StaticCall{owner: TStaticOwner.User(if generic_method -> owner_type.name() else -> type_name.clone()), owner_type: Val(owner_type), method: method_ref, type_args: resolved_type_args, args: targs}}
+            })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12785
+    if recv_type == Val(ty) {
+        if cx.trait_names.contains(ty) || Generics.is_builtin_trait(ty) {
+            return in_own_frame(fn() {
+                recv := lower_expr(receiver, cx, &env)
+                concrete_owner :: if recv.ty == { .Named(name) | .Apply{name: name, ..} -> Val(name.clone()) else -> None }
+                derived_operator_rhs :: if operator_rhs.is_none() -> {
+                    trait_name :: operator_trait_for_method(method)
+                    rhs :: if recv.ty.without_user_tags() == { .Named(_) | .Apply{..} -> Val(recv.ty.clone()) else -> None }
+                    trait_name.and(rhs)
+                } else -> None
+                effective_operator_rhs :: operator_rhs.or(derived_operator_rhs)
+                operator_method :: effective_operator_rhs.and_then(fn(rhs) {
+                    if (concrete_owner, operator_trait_for_method(method)) == (Val(owner), Val(trait_name)) {
+                        owner_leaf :: owner.rsplit("::").next() ?? owner
+                        lookup_owner :: cx.local_type_identities.get(owner) ?? owner
+                        rhs_name :: rhs.name()
+                        rhs_leaf :: rhs_name.rsplit("::").next() ?? rhs_name
+                        rhs_source :: Type.Named(rhs_leaf)
+                        return [owner, lookup_owner, owner_leaf].iter().find_map(fn(candidate) {
+                            [rhs, rhs_source].iter().find_map(fn(candidate_rhs) { cx.operator_methods.get(Traits.operator_method_identity(candidate, trait_name, method, candidate_rhs)) })
+                        })
+                    }
+                    None
+                })
+                key :: (ty.clone(), method.clone())
+                raw_sig :: if effective_operator_rhs.is_some() -> operator_method.map(fn(facts) { facts.sig.clone() }).unwrap_or_else(fn() { [(AccessConvention.Read, effective_operator_rhs ?? panic("effective operator RHS"))] }) else -> cx.method_sigs.get(key) ?? []
+                sig :: if effective_operator_rhs.is_some() -> raw_sig else -> instantiated_sig.unwrap_or_else(fn() { instantiate_method_sig(cx, ty, method, raw_sig, [], type_args) })
+                ret_ty :: (if effective_operator_rhs.is_some() -> resolved_ret.or_else(fn() {
+                    operator_method.and_then(fn(facts) { facts.ret.clone() }).or_else(fn() {
+                        if operator_trait_for_method(method) == { Val(Syntax.TRAIT_EQUATABLE) -> Val(Type.Bool) Val(Syntax.TRAIT_COMPARABLE) -> Val(Type.Named(Syntax.TYPE_ORDERING)) else -> None }
+                    })
+                }) else -> resolved_ret.or_else(fn() { cx.method_rets.get(key) ?? None })).unwrap_or_else(unit_type)
+                builtin_operator :: Generics.is_builtin_trait(ty) && ["add", "sub", "mul", "div", "equal", "compare"].contains(method)
+                distinct_numeric_operator :: concrete_owner.is_some_and(fn(owner) {
+                    cx.distinct_types.get(owner).is_some_and(fn(fact) { fact.1 }) && !cx.distinct_ranges.contains_key(owner) && !cx.method_sigs.contains_key((owner, method))
+                }) && operator_method.is_none() && ["add", "sub", "mul", "div"].contains(method)
+                if builtin_operator && args.len() == 1 && (recv.ty.is_numeric() || recv.ty == .Bool | .Char | .String || distinct_numeric_operator) {
+                    rhs :: lower_expr(args[0].expr, cx, &env)
+                    return lower_builtin_binary_method(method, recv, rhs, ret_ty, method_span, cx)
+                }
+                targs := lower_method_args(args, sig, &env, cx)
+                retag_empty_collection_args(&targs, sig)
+                if builtin_operator && !targs.is_empty() { targs[0].borrow = true }
+                operator_line :: if builtin_operator && ["add", "sub", "mul", "div"].contains(method) -> Val(cx.src_line_col(method_span.start).0 as U32) else -> None
+                direct_bound_dispatch :: if recv.ty == {
+                    .Named(concrete) -> !cx.trait_names.contains(concrete) && !Generics.is_builtin_trait(concrete)
+                    .TraitObject(_) -> false
+                    else -> true
+                }
+                method_ref :: if effective_operator_rhs == Val(rhs) -> {
+                    owner :: concrete_owner ?? panic("checked operator call has a concrete receiver")
+                    trait_name :: operator_method.map(fn(facts) { facts.trait_name }).or_else(fn() { operator_trait_for_method(method) }) ?? panic("checked operator method has a canonical trait")
+                    TMethodRef.operator(owner, trait_name, method, rhs)
+                } else -> TMethodRef.trait_method(ty, method)
+                if direct_bound_dispatch {
+                    return in_own_frame(fn() { TExpr{ty: ret_ty, kind: TExprKind.MethodCall{recv: recv, method: method_ref, type_args: type_args.clone(), args: targs, source_first_string_literal: first_string_literal_arg(args), operator_line: operator_line}} })
+                }
+                recv.ty = Type.TraitObject([ty.clone()])
+                TExpr{ty: ret_ty, kind: TExprKind.MethodCall{recv: recv, method: method_ref, type_args: type_args.clone(), args: targs, source_first_string_literal: first_string_literal_arg(args), operator_line: operator_line}}
+            })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:12970
+    return in_own_frame(fn() {
+        ty_name :: recv_type.or_else(fn() { if tir_recv_jet_ty(receiver, env) == { Val(.Named(name)) | Val(.Apply{name: name, ..}) -> Val(name) else -> None } })
+        if ty_name == Val(ty_name) {
+            if method != "generate" && is_comptime_host_method(ty_name, method) {
+                recv :: lower_expr(receiver, cx, &env)
+                targs :: loop arg in args -> lower_expr(arg.expr, cx, &env)
+                ty :: resolved_ret.or_else(fn() { Collections.builtin_method_return(Type.Named(ty_name), method, args.len(), false) ?? None }).unwrap_or_else(unit_type)
+                return TExpr{ty: ty, kind: TExprKind.HostCall(THostCall.Method{recv: recv, method: method.clone(), args: targs})}
+            }
+        }
+        if ty_name == Val(ty_name) {
+            lookup_ty_name :: cx.imported_type_metadata_name(ty_name) ?? ty_name.clone()
+            metadata_ty_name :: cx.method_metadata_name(ty_name, method)
+            canonical_operator_rhs :: operator_rhs.map(fn(rhs) { if rhs == { .Named(name) -> cx.imported_type_metadata_name(name).map(fn(identity) { Type.Named(identity) }) ?? rhs.clone() else -> rhs.clone() } })
+            operator_method :: canonical_operator_rhs.and_then(fn(rhs) { operator_trait_for_method(method).and_then(fn(trait_name) { cx.operator_methods.get(Traits.operator_method_identity(lookup_ty_name, trait_name, method, rhs)) }) })
+            raw_sig :: if operator_rhs.is_some() -> operator_method.map(fn(facts) { facts.sig.clone() }) ?? [] else -> cx.method_sigs.get((metadata_ty_name, method)) ?? []
+            move_receiver :: cx.method_self_convs.get((metadata_ty_name, method)) == Val(AccessConvention.Move) && (if receiver == { .Ident(name, _) -> env.is_resource(name) else -> false })
+            recv := if move_receiver -> lower_owned_expr(receiver, cx, &env) else -> lower_expr(receiver, cx, &env)
+            target_owner :: canonical_method_target_owner(cx, ty_name)
+            canonicalize_method_receiver_type(&recv.ty, target_owner)
+            owner_type_args :: if recv.ty == { .Apply{name: name, args: recv_args} where name == ty_name || name == lookup_ty_name -> recv_args else -> [] }
+            sig :: if operator_rhs.is_some() -> raw_sig else -> instantiated_sig.unwrap_or_else(fn() { instantiate_method_sig(cx, metadata_ty_name, method, raw_sig, owner_type_args, type_args) })
+            // Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:13082
+            if recv.ty == .Named(name) {
+                if cx.trait_names.contains(name) {
+                    return in_own_frame(fn() {
+                        trait_name :: recv.ty.name()
+                        recv.ty = Type.TraitObject([trait_name.clone()])
+                        targs := lower_method_args(args, sig, &env, cx)
+                        retag_empty_collection_args(&targs, sig)
+                        ret_ty :: resolved_ret.or_else(fn() { cx.method_rets.get((trait_name, method)) ?? None }).unwrap_or_else(unit_type)
+                        TExpr{ty: ret_ty, kind: TExprKind.MethodCall{recv: recv, method: TMethodRef.trait_method(trait_name, method), type_args: type_args.clone(), args: targs, source_first_string_literal: first_string_literal_arg(args), operator_line: None}}
+                    })
+                }
+            }
+            distinct_numeric_operator :: cx.distinct_types.get(lookup_ty_name).is_some_and(fn(fact) { fact.1 }) && !cx.distinct_ranges.contains_key(lookup_ty_name) && !cx.method_sigs.contains_key((metadata_ty_name, method)) && operator_method.is_none() && ["add", "sub", "mul", "div"].contains(method) && args.len() == 1
+            if distinct_numeric_operator {
+                rhs :: lower_expr(args[0].expr, cx, &env)
+                ret_ty :: resolved_ret.or_else(fn() { operator_method.and_then(fn(facts) { facts.ret.clone() }) }).unwrap_or_else(unit_type)
+                return lower_builtin_binary_method(method, recv, rhs, ret_ty, method_span, cx)
+            }
+            targs := lower_method_args(args, sig, &env, cx)
+            retag_empty_collection_args(&targs, sig)
+            resolved_type_args :: if operator_rhs.is_some() -> type_args.clone() else -> resolved_method_type_args(cx, metadata_ty_name, method, sig, owner_type_args, targs, type_args, resolved_ret)
+            generic_method :: recv.ty == .Apply{..} || !resolved_type_args.is_empty()
+            if generic_method {
+                &cx.jit_method_calls.insert(generic_method_instance_key(recv.ty, method, resolved_type_args), (recv.ty.clone(), method.clone(), resolved_type_args.clone()))
+            }
+            method_ref :: if canonical_operator_rhs == Val(rhs) -> {
+                trait_name :: operator_method.map(fn(facts) { facts.trait_name }).or_else(fn() { operator_trait_for_method(method) }) ?? panic("checked operator method has a canonical trait")
+                TMethodRef.operator(lookup_ty_name, trait_name, method, rhs)
+            } else if cx.trait_methods.contains((metadata_ty_name, method)) -> TMethodRef.bare(method) else if generic_method -> TMethodRef.inherent(generic_method_instance_key(recv.ty, method, resolved_type_args)) else -> TMethodRef.inherent(method)
+            ret_ty :: (if operator_rhs.is_some() -> resolved_ret.or_else(fn() { operator_method.and_then(fn(facts) { facts.ret.clone() }) }) else -> instantiate_method_ret(cx, metadata_ty_name, method, owner_type_args, resolved_type_args, resolved_ret)).unwrap_or_else(unit_type)
+            TExpr{ty: ret_ty, kind: TExprKind.MethodCall{recv: recv, method: method_ref, type_args: resolved_type_args, args: targs, source_first_string_literal: first_string_literal_arg(args), operator_line: None}}
+        } else -> invariant_method_expr(method_span, "method `{method}` receiver type")
+    })
+}

@@ -1,0 +1,28 @@
+use jet_comptime.Comptime.DataPipeline.[schema_value, add_query_values, collect_join_rows]
+use jet_foundation.[CtValue, CtFloat, NamedCtValue, Type, Span, Diagnostic]
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5496
+#Test("schema_rejects_non_list_inputs_and_keeps_empty_untyped_schema_empty") {
+    row :: &fn(name: String) -> ([String], [(String, Type)])? { None }
+    assert(schema_value(&CtValue.Unit, None, row, Span.default()).is_err())
+    empty :: CtValue.List{values: [CtValue]{}}
+    assert(schema_value(&empty, None, row, Span.default())! == empty)
+}
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5528
+#Test("query_sum_preserves_asymmetric_int_float_conversion_and_overflow") {
+    left := CtValue.Int{value: Int.MAX}
+    assert(add_query_values(&left, CtValue.Int{value: 1}, Span.default()).is_err())
+    assert(left == CtValue.Int{value: Int.MAX})
+    left = CtValue.Int{value: 1}
+    assert(add_query_values(&left, CtValue.Float{value: CtFloat.f64(2.0)}, Span.default()).is_err())
+    left = CtValue.Float{value: CtFloat.f64(2.0)}
+    add_query_values(&left, CtValue.Int{value: 3}, Span.default())!
+    assert(left == CtValue.Float{value: CtFloat.f64(5.0)})
+}
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:5698
+#Test("left_join_retains_unmatched_rows_with_the_resolved_right_type") {
+    call := fn(callback: &CtValue, args: [CtValue], span: Span) -> CtValue Diagnostic! { args[0] }
+    rows :: collect_join_rows(&[CtValue]{CtValue.Str{value: "left"}}, &[CtValue]{}, &CtValue.Unit, &CtValue.Unit, true, Val(Type.String), &call, Span.default())!
+    assert(rows == [CtValue]{CtValue.Struct{type_name: "DataJoin", fields: [NamedCtValue]{NamedCtValue{name: "left", value: CtValue.Str{value: "left"}}, NamedCtValue{name: "right", value: CtValue.absent(Type.String)}}}})
+    assert(collect_join_rows(&[CtValue]{CtValue.Str{value: "left"}}, &[CtValue]{}, &CtValue.Unit, &CtValue.Unit, true, None, &call, Span.default()).is_err())
+}

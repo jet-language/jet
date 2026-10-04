@@ -1,1796 +1,817 @@
-// PORT-PENDING 0556 crates-jet-comptime-src-comptime-applite-slice-1: crates/jet-comptime/src/Comptime/AppLite.rs:1-1792
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-LIVEQUERY1=A / I9: `app` ambient includes Prelude `LiveQuery.rs`.
-//RS 
-//RS use std::cell::Cell;
-//RS 
-//RS use super::Diagnostics::unsupported;
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::{ClosureData, CtKey, CtOpaque, CtValue, Lambda, LambdaBody, LambdaMeta, Type};
-//RS 
-//RS thread_local! {
-//RS     static WEB_RUNTIME_POLICY: Cell<(bool, bool)> = const { Cell::new((false, false)) };
-//RS }
-//RS #[allow(unused_imports)]
-//RS pub use jet_foundation::Outcome::*;
-//RS mod jet_app_middleware {
-//RS     include!("../../../jet-foundation/src/AppMiddleware.rs");
-//RS }
-//RS 
-//RS mod web_kernel {
-//RS     include!("../../../jet-codegen/src/Prelude/SharedProtocol.rs");
-//RS 
-//RS     pub(super) fn jet_web_runtime_devtools_enabled() -> bool {
-//RS         super::WEB_RUNTIME_POLICY.with(|policy| policy.get().0)
-//RS     }
-//RS 
-//RS     pub(super) fn jet_web_runtime_history_enabled() -> bool {
-//RS         super::WEB_RUNTIME_POLICY.with(|policy| policy.get().1)
-//RS     }
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS     use jet_foundation::Devtools::jet_devtools_publish_event;
-//RS     use jet_foundation::LiveLifecycle::JetLiveLifecycle;
-//RS 
-//RS     pub(super) mod native_scheduler {
-//RS         trait JetShow {
-//RS             fn jet_show(&self) -> String;
-//RS         }
-//RS 
-//RS         trait JetDisplay {
-//RS             fn jet_display(&self) -> String;
-//RS         }
-//RS 
-//RS         trait JetDebug {
-//RS             fn jet_debug(&self) -> String;
-//RS         }
-//RS         pub const JET_DEVTOOLS_LOCAL_RAIL_ENABLED: bool = true;
-//RS         use jet_foundation::Devtools::{
-//RS             jet_devtools_install_event_sink, jet_devtools_install_live_value_sink,
-//RS             jet_devtools_publish_event, JET_DEVTOOLS_MAX_LIVE_VALUES, JetDevtoolsEnvelope,
-//RS             JetDevtoolsEvent, JetDevtoolsEventSink, JetDevtoolsEventSinkGuard,
-//RS             JetDevtoolsSourceIdentityFact, JetLiveValueDecision, JetLiveValueSinkGuard,
-//RS         };
-//RS         use jet_foundation::Outcome::{
-//RS             jet_render_runtime_stop, jet_stream_take_failure_report, JetRuntimeDiagnostic,
-//RS             JetTaskFailure,
-//RS         };
-//RS 
-//RS         pub(crate) fn jet_runtime_stop_with_context(
-//RS             code: &'static str,
-//RS             file: &str,
-//RS             line: u32,
-//RS             _fn_name: &str,
-//RS             _src_line: &str,
-//RS             message: &str,
-//RS         ) -> ! {
-//RS             super::jet_runtime_stop(code, file, line as i64, message)
-//RS         }
-//RS 
-//RS         pub(crate) mod jet_std {
-//RS             use super::JetShow;
-//RS             pub(crate) use jet_foundation::Outcome::{jet_outcome_of, JetTaskFailure};
-//RS             pub(crate) use crate::Comptime::UrlLite::url_percent_decode_str
-//RS                 as jet_url_percent_decode_str;
-//RS             pub(crate) use crate::Comptime::UrlLite::url_percent_encode
-//RS                 as jet_url_percent_encode;
-//RS             include!("../../../jet-codegen/src/Prelude/TaskGroup.rs");
-//RS             include!("../../../jet-codegen/src/Prelude/LocalCell.rs");
-//RS             include!(concat!(env!("OUT_DIR"), "/web_kernel_std.rs"));
-//RS 
-//RS             #[cfg(test)]
-//RS             mod shared_snapshot_tests {
-//RS                 use super::JetShared;
-//RS                 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
-//RS 
-//RS                 #[test]
-//RS                 fn projection_moves_once_and_releases_snapshot_owner() {
-//RS                     struct Projection(Arc<AtomicUsize>);
-//RS                     impl Clone for Projection {
-//RS                         fn clone(&self) -> Self {
-//RS                             panic!("consuming a snapshot must move its projection")
-//RS                         }
-//RS                     }
-//RS                     impl Drop for Projection {
-//RS                         fn drop(&mut self) {
-//RS                             self.0.fetch_add(1, Ordering::SeqCst);
-//RS                         }
-//RS                     }
-//RS 
-//RS                     let shared = JetShared::new(String::from("payload"));
-//RS                     let drops = Arc::new(AtomicUsize::new(0));
-//RS                     let snapshot = shared.capture_with(|_| Projection(drops.clone()));
-//RS                     assert_eq!(shared.strong_count(), 2);
-//RS                     let revision = snapshot.revision();
-//RS                     let (projection, captured_revision) = snapshot.into_value_and_revision();
-//RS                     assert_eq!(captured_revision, revision);
-//RS                     assert_eq!(shared.strong_count(), 1);
-//RS                     assert_eq!(drops.load(Ordering::SeqCst), 0);
-//RS                     drop(projection);
-//RS                     assert_eq!(drops.load(Ordering::SeqCst), 1);
-//RS                 }
-//RS 
-//RS                 #[test]
-//RS                 fn snapshot_keeps_payload_live_until_its_owner_is_released() {
-//RS                     let shared = JetShared::new(String::from("payload"));
-//RS                     let owner = shared.physical_owner();
-//RS                     let snapshot = shared.capture();
-//RS                     assert_eq!(owner.strong_count(), 2);
-//RS                     drop(shared);
-//RS                     assert_eq!(owner.strong_count(), 1);
-//RS                     assert_eq!(snapshot.value(), "payload");
-//RS                     drop(snapshot);
-//RS                     assert_eq!(owner.strong_count(), 0);
-//RS                     assert!(owner.upgrade().is_none());
-//RS                 }
-//RS             }
-//RS 
-//RS             pub use jet_foundation::DataTree::DataTree;
-//RS 
-//RS             #[derive(Clone, Debug, PartialEq)]
-//RS             pub struct FieldError {
-//RS                 pub path: String,
-//RS                 pub reason: String,
-//RS             }
-//RS 
-//RS             impl FieldError {
-//RS                 pub fn one(reason: impl Into<String>) -> Vec<Self> {
-//RS                     vec![Self {
-//RS                         path: String::new(),
-//RS                         reason: reason.into(),
-//RS                     }]
-//RS                 }
-//RS             }
-//RS 
-//RS             // Host rows for the HTTP substrate below. These are the same
-//RS             // plain shapes the resident JIT's `net_http_rt::jet_std` supplies;
-//RS             // the Prelude sources own every operation on them.
-//RS             #[derive(Clone, Copy, Debug, PartialEq)]
-//RS             pub enum IOOperation {
-//RS                 Read,
-//RS                 Write,
-//RS                 Flush,
-//RS                 Connect,
-//RS                 Accept,
-//RS                 Close,
-//RS                 Resolve,
-//RS                 Codec,
-//RS             }
-//RS 
-//RS             #[derive(Clone, Debug, PartialEq)]
-//RS             pub struct IOContext {
-//RS                 pub operation: IOOperation,
-//RS                 pub resource: Option<String>,
-//RS                 pub os_code: Option<i64>,
-//RS                 pub cause: Option<String>,
-//RS             }
-//RS 
-//RS             impl IOContext {
-//RS                 pub fn new(
-//RS                     operation: IOOperation,
-//RS                     resource: Option<String>,
-//RS                     os_code: Option<i64>,
-//RS                     cause: Option<String>,
-//RS                 ) -> Self {
-//RS                     Self {
-//RS                         operation,
-//RS                         resource,
-//RS                         os_code,
-//RS                         cause,
-//RS                     }
-//RS                 }
-//RS             }
-//RS 
-//RS             #[derive(Clone, Debug, PartialEq)]
-//RS             pub enum IOError {
-//RS                 InvalidInput(IOContext),
-//RS                 NotFound(IOContext),
-//RS                 PermissionDenied(IOContext),
-//RS                 TimedOut(IOContext),
-//RS                 Cancelled(IOContext),
-//RS                 Closed(IOContext),
-//RS                 Protocol(IOContext),
-//RS                 Other(IOContext),
-//RS             }
-//RS 
-//RS             #[derive(Clone, Copy, Debug, PartialEq)]
-//RS             pub struct Duration {
-//RS                 pub ns: i64,
-//RS             }
-//RS 
-//RS             impl Duration {
-//RS                 #[inline]
-//RS                 pub fn as_millis(self) -> i64 {
-//RS                     self.ns / 1_000_000
-//RS                 }
-//RS             }
-//RS 
-//RS             #[derive(Clone, Debug, PartialEq)]
-//RS             pub struct LogField {
-//RS                 pub key: String,
-//RS                 pub value: String,
-//RS                 pub kind: String,
-//RS                 pub redacted: bool,
-//RS             }
-//RS 
-//RS             pub(crate) use crate::Comptime::UrlLite::JetMIME;
-//RS 
-//RS             /// Strict JSON validity through the one Foundation parser; the
-//RS             /// server-fn kernel only asks whether a body parses.
-//RS             pub fn parse_json_typed_datatree(
-//RS                 text: &str,
-//RS             ) -> Result<DataTree, jet_foundation::EncodingJson::Error> {
-//RS                 jet_foundation::EncodingJson::parse_json_typed(text, true)
-//RS             }
-//RS         }
-//RS 
-//RS         include!(concat!(env!("OUT_DIR"), "/web_kernel_native_scheduler.rs"));
-//RS     }
-//RS 
-//RS     use self::native_scheduler::jet_std;
-//RS     pub use self::native_scheduler::jet_std::{
-//RS         DataTree, JetDerived, JetReactiveEffect, JetSignal, jet_reactive_effect,
-//RS         jet_reactive_effect_rooted,
-//RS     };
-//RS 
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/Core/WebPending.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs");
-//RS 
-//RS     #[allow(non_camel_case_types)]
-//RS     pub trait __jet_Encode {
-//RS         fn jet_encode(&self) -> jet_std::DataTree;
-//RS     }
-//RS 
-//RS     #[allow(non_camel_case_types)]
-//RS     pub trait __jet_Decode: Sized {
-//RS         fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
-//RS     }
-//RS 
-//RS     impl __jet_Encode for String {
-//RS         fn jet_encode(&self) -> jet_std::DataTree {
-//RS             jet_std::DataTree::Text(self.clone())
-//RS         }
-//RS     }
-//RS 
-//RS     impl __jet_Decode for String {
-//RS         fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-//RS             match tree {
-//RS                 jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => {
-//RS                     Ok(value.clone())
-//RS                 }
-//RS                 _ => Err(jet_std::FieldError::one("expected Text")),
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn jet_enc_json_to_string<T: __jet_Encode>(value: &T) -> String {
-//RS         jet_foundation::EncodingJson::render_json(&value.jet_encode(), false, 0)
-//RS     }
-//RS 
-//RS     pub fn jet_enc_json_decode<T: __jet_Decode>(
-//RS         value: &String,
-//RS     ) -> Result<T, Vec<jet_std::FieldError>> {
-//RS         let tree = jet_foundation::EncodingJson::parse_json(value, true)
-//RS             .map_err(|error| jet_std::FieldError::one(error.message))?;
-//RS         T::jet_decode(&tree)
-//RS     }
-//RS 
-//RS 
-//RS     #[derive(Clone, Debug)]
-//RS     pub struct JetErr(pub String);
-//RS 
-//RS     impl std::fmt::Display for JetErr {
-//RS         fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS             formatter.write_str(&self.0)
-//RS         }
-//RS     }
-//RS 
-//RS     // I9: `App.serve` reaches `jet_app_http_serve` in HTTPServer.rs. AOT emits
-//RS     // that file and the resident JIT includes it (`net_http_rt`); the
-//RS     // interpreter hosts the same sources in `http_kernel` below so routing,
-//RS     // the server-fn CSRF/middleware policy, static files, and live reload
-//RS     // have one owner. App.rs names exactly these entries.
-//RS     pub(super) use super::http_kernel::{
-//RS         jet_app_http_assets, jet_app_http_mount, jet_app_http_mux_new,
-//RS         jet_app_http_page_response, jet_app_http_reload, jet_app_http_request_url,
-//RS         jet_app_http_serve, jet_web_server_fn_register_http, jet_web_server_fn_typed,
-//RS         JetHTTPMux, JetWebServerFnError, JetWebServerFnHandler, JetWebServerFunction,
-//RS     };
-//RS 
-//RS     pub fn jet_runtime_stop(code: &str, _path: &str, _line: i64, message: &str) -> ! {
-//RS         panic!("{code}: {message}")
-//RS     }
-//RS 
-//RS     use super::jet_app_middleware;
-//RS     include!("../../../jet-codegen/src/Prelude/App.rs");
-//RS     pub(super) struct AppLiveQuery(JetLiveQuery);
-//RS 
-//RS     pub(super) fn app_live_query_parts(
-//RS         query: &AppLiveQuery,
-//RS     ) -> (u64, String, String, u64, bool, String) {
-//RS         let query = &query.0;
-//RS         (
-//RS             query.id,
-//RS             query.footprint.display(),
-//RS             query.value.clone(),
-//RS             query.lifecycle.generation,
-//RS             query.lifecycle.active,
-//RS             query.lifecycle.error.clone(),
-//RS         )
-//RS     }
-//RS 
-//RS     pub(super) fn app_live_query_from_parts(
-//RS         id: u64,
-//RS         footprint: String,
-//RS         value: String,
-//RS         generation: u64,
-//RS         active: bool,
-//RS         error: String,
-//RS     ) -> Option<AppLiveQuery> {
-//RS         let footprint = if footprint.is_empty() {
-//RS             JetLiveFootprint { paths: Vec::new() }
-//RS         } else {
-//RS             JetLiveFootprint::parse(&footprint)?
-//RS         };
-//RS         Some(AppLiveQuery(JetLiveQuery {
-//RS             key: String::new(),
-//RS             id,
-//RS             footprint,
-//RS             value,
-//RS             lifecycle: JetLiveLifecycle {
-//RS                 generation,
-//RS                 active,
-//RS                 dirty: false,
-//RS                 error,
-//RS                 fresh_at_ms: 0,
-//RS                 invalidation_cause: String::new(),
-//RS                 refreshing: false,
-//RS                 cancelled: false,
-//RS             },
-//RS             rerun: None,
-//RS             sink: None,
-//RS         }))
-//RS     }
-//RS 
-//RS     pub(super) fn app_live(footprint: String, initial: String) -> AppLiveQuery {
-//RS         AppLiveQuery(jet_app_live(footprint, initial))
-//RS     }
-//RS 
-//RS     pub(super) fn app_live_query<F>(
-//RS         footprint: String,
-//RS         initial: String,
-//RS         rerun: F,
-//RS     ) -> AppLiveQuery
-//RS     where
-//RS         F: Fn() -> Result<String, String> + Send + Sync + 'static,
-//RS     {
-//RS         AppLiveQuery(jet_app_live_query(footprint, initial, rerun))
-//RS     }
-//RS 
-//RS     pub(super) fn app_subscribe(source: String) -> AppLiveQuery {
-//RS         AppLiveQuery(jet_app_subscribe(source))
-//RS     }
-//RS 
-//RS     pub(super) fn app_invalidate(footprint: String) -> i64 {
-//RS         jet_app_invalidate(footprint)
-//RS     }
-//RS 
-//RS     pub(super) fn app_transact_invalidate(write_set: String) -> i64 {
-//RS         jet_app_transact_invalidate(write_set)
-//RS     }
-//RS 
-//RS     pub(super) fn app_signal_push(query: &AppLiveQuery, payload: String) -> AppLiveQuery {
-//RS         AppLiveQuery(jet_app_signal_push(&query.0, payload))
-//RS     }
-//RS 
-//RS     pub(super) fn app_live_get(query: &AppLiveQuery) -> String {
-//RS         jet_app_live_get(&query.0)
-//RS     }
-//RS 
-//RS     pub(super) fn app_live_show(query: &AppLiveQuery) -> String {
-//RS         jet_app_live_show(&query.0)
-//RS     }
-//RS 
-//RS     pub(super) fn app_live_stats() -> String {
-//RS         jet_app_live_stats()
-//RS     }
-//RS 
-//RS     pub(super) fn app_live_publish_transport(topic: String, event: String) {
-//RS         jet_live_publish_transport(topic, event);
-//RS     }
-//RS     pub(super) fn app_web_query_new(
-//RS         key: String,
-//RS         live: &AppLiveQuery,
-//RS     ) -> JetWebQuery {
-//RS         jet_web_query_new(key, &live.0)
-//RS     }
-//RS }
-//RS 
-//RS /// Interpreter host for the canonical HTTP substrate: the same
-//RS /// HTTPMessage/NetHTTP/HTTPServer/WebServerFn/Ws sources AOT concatenates and
-//RS /// the resident JIT includes in `net_http_rt`. `web_kernel` (App.rs) imports
-//RS /// the App mux entries from here, exactly as the JIT's `web_rt` does. Every
-//RS /// item defined in this module is a marshalling row; behavior lives in the
-//RS /// included files. Dead-code reports here are about other hosts' usage, and
-//RS /// `private_interfaces` is the flat AOT namespace's `pub(crate)` grammar
-//RS /// landing in a nested module.
-//RS #[allow(
-//RS     dead_code,
-//RS     unused_imports,
-//RS     unused_variables,
-//RS     unused_mut,
-//RS     non_camel_case_types,
-//RS     private_interfaces
-//RS )]
-//RS mod http_kernel {
-//RS     use crate::{JetDebug, JetDisplay, JetShow};
-//RS     use super::jet_app_middleware;
-//RS     use super::web_kernel::native_scheduler::*;
-//RS     use super::web_kernel::native_scheduler::jet_std;
-//RS     use super::web_kernel::{
-//RS         __jet_Decode, __jet_Encode, jet_app_ws_register, jet_app_ws_unregister,
-//RS         jet_enc_json_decode, jet_enc_json_to_string, jet_runtime_stop,
-//RS     };
-//RS     use super::CtValue;
-//RS     use crate::AST::Type;
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS     use jet_foundation::Devtools::*;
-//RS     /// The one request-identity scope the Sync/DB kernel reads; the AOT
-//RS     /// Prelude is one flat namespace, so the interpreter shares it too.
-//RS     use crate::Comptime::SyncLite::JetDbRequestScope;
-//RS 
-//RS     fn jet_panic(file: &str, line: u32, message: &str) -> ! {
-//RS         jet_runtime_stop("E3001", file, i64::from(line), message)
-//RS     }
-//RS 
-//RS     /// Structured log emission is the Log.rs kernel's job; the resident hosts
-//RS     /// leave it silent and the App mux never installs the access-log middleware.
-//RS     fn jet_log_emit(_level: &str, _message: &str, _fields: &[jet_std::LogField]) {}
-//RS 
-//RS     struct JetFileReader {
-//RS         inner: std::io::BufReader<std::fs::File>,
-//RS         path: String,
-//RS     }
-//RS     struct JetFileWriter {
-//RS         inner: std::io::BufWriter<std::fs::File>,
-//RS         path: String,
-//RS     }
-//RS 
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
-//RS     use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
-//RS     include!("../../../jet-codegen/src/Prelude/Core/DevtoolsRequestPanel.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/Core/HttpRequestTarget.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/Core/NetPure.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/Core/NetError.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
-//RS 
-//RS     fn http_error_to_ct(error: JetHTTPError) -> CtValue {
-//RS         let parts = jet_http_error_surface_parts(error);
-//RS         let args = match parts.payload {
-//RS             JetHTTPErrorSurfacePayload::Unit => Vec::new(),
-//RS             JetHTTPErrorSurfacePayload::Int { field, value } => {
-//RS                 vec![(Some(field.to_string()), CtValue::Int(value))]
-//RS             }
-//RS             JetHTTPErrorSurfacePayload::Text { field, value } => {
-//RS                 vec![(Some(field.to_string()), CtValue::Str(value))]
-//RS             }
-//RS             JetHTTPErrorSurfacePayload::Operation {
-//RS                 field, variant, ..
-//RS             } => vec![(
-//RS                 Some(field.to_string()),
-//RS                 CtValue::Enum {
-//RS                     type_name: "HTTPOperation".to_string(),
-//RS                     variant: variant.to_string(),
-//RS                     args: Vec::new(),
-//RS                 },
-//RS             )],
-//RS         };
-//RS         CtValue::Enum {
-//RS             type_name: "HTTPError".to_string(),
-//RS             variant: parts.variant.to_string(),
-//RS             args,
-//RS         }
-//RS     }
-//RS     fn http_response_to_ct(response: JetHTTPResponse) -> Result<CtValue, JetHTTPError> {
-//RS         let JetHTTPResponse {
-//RS             status,
-//RS             version,
-//RS             headers,
-//RS             body,
-//RS             trailers,
-//RS             protocol,
-//RS             remote_address,
-//RS             redirect_history,
-//RS             timings_ms,
-//RS             reused_connection,
-//RS             raw_content_encoding,
-//RS             ..
-//RS         } = response;
-//RS         let body = body.bytes(usize::MAX)?;
-//RS         let headers_to_ct = |headers: JetHTTPHeaders| CtValue::Struct {
-//RS             type_name: "Headers".to_string(),
-//RS             fields: headers
-//RS                 .entries
-//RS                 .into_iter()
-//RS                 .map(|(name, value)| (name, CtValue::Str(value)))
-//RS                 .collect(),
-//RS         };
-//RS         let raw_content_encoding = raw_content_encoding
-//RS             .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
-//RS             .unwrap_or_else(|| CtValue::absent(Type::String));
-//RS         Ok(CtValue::Struct {
-//RS             type_name: "HTTPResponse".to_string(),
-//RS             fields: vec![
-//RS                 ("status".to_string(), CtValue::Int(status)),
-//RS                 ("version".to_string(), CtValue::Str(version)),
-//RS                 ("headers".to_string(), headers_to_ct(headers)),
-//RS                 (
-//RS                     "body".to_string(),
-//RS                     CtValue::Struct {
-//RS                         type_name: "Body".to_string(),
-//RS                         fields: vec![("bytes".to_string(), CtValue::Bytes(body))],
-//RS                     },
-//RS                 ),
-//RS                 ("trailers".to_string(), headers_to_ct(trailers)),
-//RS                 ("protocol".to_string(), CtValue::Str(protocol)),
-//RS                 ("remote_address".to_string(), CtValue::Str(remote_address)),
-//RS                 (
-//RS                     "redirect_history".to_string(),
-//RS                     CtValue::List(
-//RS                         redirect_history
-//RS                             .into_iter()
-//RS                             .map(CtValue::Str)
-//RS                             .collect(),
-//RS                     ),
-//RS                 ),
-//RS                 (
-//RS                     "timings_ms".to_string(),
-//RS                     CtValue::List(timings_ms.into_iter().map(CtValue::Int).collect()),
-//RS                 ),
-//RS                 (
-//RS                     "reused_connection".to_string(),
-//RS                     CtValue::Bool(reused_connection),
-//RS                 ),
-//RS                 ("raw_content_encoding".to_string(), raw_content_encoding),
-//RS             ],
-//RS         })
-//RS     }
-//RS 
-//RS     pub(super) fn http_static_file(path: String, mime: String) -> CtValue {
-//RS         match jet_http_srv_static_file(&path, &mime).and_then(http_response_to_ct) {
-//RS             Ok(response) => CtValue::Present(Box::new(response)),
-//RS             Err(error) => CtValue::failed(Box::new(http_error_to_ct(error))),
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     pub(super) fn http_text_from_bytes(
-//RS         bytes: Vec<u8>,
-//RS         limit: Option<i64>,
-//RS     ) -> Result<String, CtValue> {
-//RS         let body = JetHTTPBody::from_bytes(bytes);
-//RS         jet_http_body_json_text_defaulted(&body, limit).map_err(http_error_to_ct)
-//RS     }
-//RS     pub(super) fn http_project_json_decode_error(result: CtValue) -> CtValue {
-//RS         let result = match result {
-//RS             CtValue::Present(value) => Ok(*value),
-//RS             CtValue::Failed(_) => Err(Vec::<jet_std::FieldError>::new()),
-//RS             value => return value,
-//RS         };
-//RS         match jet_http_project_json_decode_error(result) {
-//RS             Ok(value) => CtValue::Present(Box::new(value)),
-//RS             Err(error) => CtValue::Failed(crate::AST::CtReport::Told(Box::new(
-//RS                 http_error_to_ct(error),
-//RS             ))),
-//RS         }
-//RS     }
-//RS     pub(super) fn http_error_response(error: CtValue) -> Result<CtValue, String> {
-//RS         let CtValue::Enum {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS         } = error
-//RS         else {
-//RS             return Err("MIR HTTP handler error is not an enum carrier".to_string());
-//RS         };
-//RS         if type_name != "HTTPError" {
-//RS             return Err("MIR HTTP handler error is not HTTPError".to_string());
-//RS         }
-//RS         let mut payload = 0;
-//RS         let mut text = None;
-//RS         for (_, value) in args {
-//RS             match value {
-//RS                 CtValue::Int(value) => payload = value,
-//RS                 CtValue::Str(value) => text = Some(value),
-//RS                 CtValue::Enum {
-//RS                     type_name,
-//RS                     variant,
-//RS                     args,
-//RS                 } if type_name == "HTTPOperation" && args.is_empty() => {
-//RS                     payload = match variant.as_str() {
-//RS                         "ClientConnect" => 0,
-//RS                         "ServerBind" => 1,
-//RS                         "ServeListener" => 2,
-//RS                         _ => {
-//RS                             return Err(
-//RS                                 "MIR HTTP operation error has an unknown variant".to_string()
-//RS                             )
-//RS                         }
-//RS                     };
-//RS                 }
-//RS                 _ => return Err("MIR HTTP handler error has an invalid payload".to_string()),
-//RS             }
-//RS         }
-//RS         let error = jet_http_error_from_surface_name(&variant, payload, text)
-//RS             .ok_or_else(|| "MIR HTTP handler error has an unknown variant".to_string())?;
-//RS         http_response_to_ct(jet_http_srv_error_response(error))
-//RS             .map_err(|_| "canonical HTTP error response could not be materialized".to_string())
-//RS     }
-//RS 
-//RS }
-//RS 
-//RS /// Marshal MIR's byte carrier through the canonical HTTPMessage body-text
-//RS /// helper; the interpreter does not own HTTP limits or error classification.
-//RS pub fn http_text_from_bytes(bytes: Vec<u8>, limit: Option<i64>) -> Result<String, CtValue> {
-//RS     http_kernel::http_text_from_bytes(bytes, limit)
-//RS }
-//RS pub fn http_static_file(path: String, mime: String) -> CtValue {
-//RS     http_kernel::http_static_file(path, mime)
-//RS }
-//RS pub fn http_project_json_decode_error(result: CtValue) -> CtValue {
-//RS     http_kernel::http_project_json_decode_error(result)
-//RS }
-//RS pub fn http_error_response(error: CtValue) -> Result<CtValue, String> {
-//RS     http_kernel::http_error_response(error)
-//RS }
-//RS 
-//RS 
-//RS pub(crate) fn jet_live_publish_transport(topic: String, event: String) {
-//RS     web_kernel::app_live_publish_transport(topic, event);
-//RS }
-//RS fn live_to_ct(q: &web_kernel::AppLiveQuery) -> CtValue {
-//RS     let (id, footprint, value, generation, active, error) =
-//RS         web_kernel::app_live_query_parts(q);
-//RS     CtValue::Struct {
-//RS         type_name: "LiveQuery".to_string(),
-//RS         fields: vec![
-//RS             (
-//RS                 "id".to_string(),
-//RS                 CtValue::Int(id.min(i64::MAX as u64) as i64),
-//RS             ),
-//RS             ("footprint".to_string(), CtValue::Str(footprint)),
-//RS             ("value".to_string(), CtValue::Str(value)),
-//RS             (
-//RS                 "generation".to_string(),
-//RS                 CtValue::Int(generation.min(i64::MAX as u64) as i64),
-//RS             ),
-//RS             ("active".to_string(), CtValue::Bool(active)),
-//RS             ("error".to_string(), CtValue::Str(error)),
-//RS         ],
-//RS     }
-//RS }
-//RS fn ct_to_live(v: &CtValue, span: Span) -> Result<web_kernel::AppLiveQuery, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = v else {
-//RS         return Err(unsupported("LiveQuery", span));
-//RS     };
-//RS     if type_name != "LiveQuery" && type_name != "JetLiveQuery" {
-//RS         return Err(unsupported("LiveQuery", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find(|(n, _)| n == name)
-//RS             .map(|(_, v)| v)
-//RS             .ok_or_else(|| unsupported("LiveQuery field", span))
-//RS     };
-//RS     let footprint = match field("footprint")? {
-//RS         CtValue::Str(s) => s.clone(),
-//RS         _ => return Err(unsupported("footprint", span)),
-//RS     };
-//RS     let active = match field("active")? {
-//RS         CtValue::Bool(b) => *b,
-//RS         _ => return Err(unsupported("active", span)),
-//RS     };
-//RS     let error = match field("error")? {
-//RS         CtValue::Str(s) => s.clone(),
-//RS         _ => return Err(unsupported("error", span)),
-//RS     };
-//RS     if !active && error.is_empty() {
-//RS         return Err(unsupported("LiveQuery error", span));
-//RS     }
-//RS     let id = match field("id")? {
-//RS         CtValue::Int(n) if *n >= 0 => *n as u64,
-//RS         _ => return Err(unsupported("id", span)),
-//RS     };
-//RS     let value = match field("value")? {
-//RS         CtValue::Str(s) => s.clone(),
-//RS         _ => return Err(unsupported("value", span)),
-//RS     };
-//RS     let generation = match field("generation")? {
-//RS         CtValue::Int(n) if *n >= 0 => *n as u64,
-//RS         _ => return Err(unsupported("generation", span)),
-//RS     };
-//RS     web_kernel::app_live_query_from_parts(id, footprint, value, generation, active, error)
-//RS         .ok_or_else(|| unsupported("footprint", span))
-//RS }
-//RS 
-//RS /// JIT/interpreter adapter for a typed live query. The callback remains in
-//RS /// the shared Prelude registry; the CtValue is only the ordinary structural
-//RS /// handle crossing the engine boundary.
-//RS pub fn live_query_with<F>(footprint: String, initial: String, rerun: F) -> CtValue
-//RS where
-//RS     F: Fn() -> Result<String, String> + Send + Sync + 'static,
-//RS {
-//RS     live_to_ct(&web_kernel::app_live_query(footprint, initial, rerun))
-//RS 
-//RS }
-//RS pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let one = |i: usize| {
-//RS         args.get(i)
-//RS             .ok_or_else(|| unsupported(&format!("app.{method} arg {i}"), span))
-//RS     };
-//RS     match method {
-//RS         "live" => {
-//RS             let footprint = match one(0)? {
-//RS                 CtValue::Str(s) => s.clone(),
-//RS                 _ => return Err(unsupported("footprint", span)),
-//RS             };
-//RS             let initial = match one(1)? {
-//RS                 CtValue::Str(s) => s.clone(),
-//RS                 _ => return Err(unsupported("initial", span)),
-//RS             };
-//RS             Ok(live_to_ct(&web_kernel::app_live(footprint, initial)))
-//RS         }
-//RS         "subscribe" => {
-//RS             let source = match one(0)? {
-//RS                 CtValue::Str(s) => s.clone(),
-//RS                 _ => return Err(unsupported("source", span)),
-//RS             };
-//RS             Ok(live_to_ct(&web_kernel::app_subscribe(source)))
-//RS         }
-//RS         "invalidate" => {
-//RS             let footprint = match one(0)? {
-//RS                 CtValue::Str(s) => s.clone(),
-//RS                 _ => return Err(unsupported("footprint", span)),
-//RS             };
-//RS             Ok(CtValue::Int(web_kernel::app_invalidate(footprint)))
-//RS         }
-//RS         "transact_invalidate" => {
-//RS             let write_set = match one(0)? {
-//RS                 CtValue::Str(s) => s.clone(),
-//RS                 _ => return Err(unsupported("write_set", span)),
-//RS             };
-//RS             Ok(CtValue::Int(web_kernel::app_transact_invalidate(write_set)))
-//RS         }
-//RS         "signal_push" => {
-//RS             let payload = match one(1)? {
-//RS                 CtValue::Str(s) => s.clone(),
-//RS                 _ => return Err(unsupported("payload", span)),
-//RS             };
-//RS             Ok(live_to_ct(&web_kernel::app_signal_push(
-//RS                 &ct_to_live(one(0)?, span)?,
-//RS                 payload,
-//RS             )))
-//RS         }
-//RS         "live_get" => Ok(CtValue::Str(web_kernel::app_live_get(
-//RS             &ct_to_live(one(0)?, span)?,
-//RS         ))),
-//RS         "live_show" => Ok(CtValue::Str(web_kernel::app_live_show(
-//RS             &ct_to_live(one(0)?, span)?,
-//RS         ))),
-//RS         "live_stats" => Ok(CtValue::Str(web_kernel::app_live_stats())),
-//RS         _ => Err(unsupported(&format!("`app.{method}()`"), span)),
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct WebRouterHandle(web_kernel::JetWebRouter);
-//RS 
-//RS #[derive(Clone)]
-//RS struct WebQueryHandle(web_kernel::JetWebQuery);
-//RS 
-//RS #[derive(Clone)]
-//RS struct WebFormHandle(web_kernel::JetWebForm);
-//RS 
-//RS #[derive(Clone)]
-//RS struct WebTableHandle(web_kernel::JetWebTable<CtValue>);
-//RS #[derive(Clone)]
-//RS struct WebTableColumnHandle(web_kernel::JetWebTableColumn<CtValue>);
-//RS 
-//RS #[derive(Clone)]
-//RS struct WebVirtualPlanViewportHandle(web_kernel::JetWebVirtualPlanViewport);
-//RS 
-//RS #[derive(Clone)]
-//RS struct WebStoreHandle(web_kernel::JetWebStore<CtValue>);
-//RS 
-//RS struct WebStorePatchHandle(std::sync::Mutex<Option<web_kernel::JetWebStorePatch<CtValue>>>);
-//RS 
-//RS struct WebStoreSubscriptionHandle(web_kernel::JetWebStoreSubscription);
-//RS 
-//RS type WebFormValidationHandle =
-//RS     std::sync::Mutex<Option<web_kernel::JetWebFormTypedValidation>>;
-//RS type WebFormSubmissionHandle =
-//RS     std::sync::Mutex<Option<web_kernel::JetWebFormTypedSubmission>>;
-//RS 
-//RS fn web_record_field<'a>(
-//RS     value: &'a CtValue,
-//RS     name: &str,
-//RS     span: Span,
-//RS ) -> Result<&'a CtValue, Diagnostic> {
-//RS     let CtValue::Struct { fields, .. } = value else {
-//RS         return Err(unsupported("checked Web record", span));
-//RS     };
-//RS     fields.iter().find(|(field, _)| field == name).map(|(_, value)| value)
-//RS         .ok_or_else(|| unsupported(&format!("Web record field `{name}`"), span))
-//RS }
-//RS 
-//RS fn web_enum_variant<'a>(
-//RS     value: &'a CtValue,
-//RS     expected: &str,
-//RS     span: Span,
-//RS ) -> Result<&'a str, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Enum { type_name, variant, .. } if type_name == expected => Ok(variant),
-//RS         _ => Err(unsupported(expected, span)),
-//RS     }
-//RS }
-//RS 
-//RS fn web_enum_value(type_name: &str, value: impl std::fmt::Debug) -> CtValue {
-//RS     CtValue::Enum {
-//RS         type_name: type_name.to_string(),
-//RS         variant: format!("{value:?}"),
-//RS         args: Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn web_form_field_spec(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<Result<web_kernel::JetWebFormFieldSpec, String>, Diagnostic> {
-//RS     let field = |name| web_record_field(value, name, span);
-//RS     let value_type = match web_enum_variant(field("value_type")?, "WebFormValueType", span)? {
-//RS         "String" => web_kernel::JetWebFormValueType::String,
-//RS         "Int" => web_kernel::JetWebFormValueType::Int,
-//RS         "Bool" => web_kernel::JetWebFormValueType::Bool,
-//RS         "Float" => web_kernel::JetWebFormValueType::Float,
-//RS         _ => return Err(unsupported("WebFormValueType", span)),
-//RS     };
-//RS     let control = match web_enum_variant(field("control")?, "WebFormControl", span)? {
-//RS         "Text" => web_kernel::JetWebFormControl::Text,
-//RS         "Email" => web_kernel::JetWebFormControl::Email,
-//RS         "Password" => web_kernel::JetWebFormControl::Password,
-//RS         "Number" => web_kernel::JetWebFormControl::Number,
-//RS         "Checkbox" => web_kernel::JetWebFormControl::Checkbox,
-//RS         "Hidden" => web_kernel::JetWebFormControl::Hidden,
-//RS         "URL" => web_kernel::JetWebFormControl::URL,
-//RS         "Date" => web_kernel::JetWebFormControl::Date,
-//RS         _ => return Err(unsupported("WebFormControl", span)),
-//RS     };
-//RS     let optional = |value: &CtValue| match value {
-//RS         CtValue::Present(value) => web_string(value, "form optional text", span).map(Some),
-//RS         value if value.is_clean_stop() => Ok(None),
-//RS         _ => Err(unsupported("form optional text", span)),
-//RS     };
-//RS     let default = optional(field("default")?)?;
-//RS     let group = optional(field("group")?)?;
-//RS     let label = web_string(field("label")?, "form label", span)?;
-//RS     let wire_name = web_string(field("wire_name")?, "form wire name", span)?;
-//RS     Ok(web_kernel::JetWebFormFieldSpec::new(
-//RS         web_string(field("name")?, "form field name", span)?,
-//RS         value_type,
-//RS         web_bool(field("required")?, "form required field", span)?,
-//RS     ).and_then(|spec| {
-//RS         let mut spec = spec.with_control(control).with_label(label)?.with_wire_name(wire_name)?;
-//RS         if let Some(default) = default {
-//RS             spec = spec.default_value(default)?;
-//RS         }
-//RS         if let Some(group) = group {
-//RS             spec = spec.in_group(group)?;
-//RS         }
-//RS         Ok(spec)
-//RS     }))
-//RS }
-//RS 
-//RS fn web_form_decoded(value: web_kernel::JetWebFormDecodedInput) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "WebFormDecodedInput".to_string(),
-//RS         fields: vec![
-//RS             ("type_name".to_string(), CtValue::Str(value.type_name)),
-//RS             ("values".to_string(), web_string_map_value(value.values)),
-//RS             ("wire_values".to_string(), web_string_map_value(value.wire_values)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn web_error_map_value(value: std::collections::BTreeMap<String, Vec<String>>) -> CtValue {
-//RS     CtValue::Map(value.into_iter().map(|(key, messages)| (
-//RS         CtKey::Str(key),
-//RS         CtValue::List(messages.into_iter().map(CtValue::Str).collect()),
-//RS     )).collect())
-//RS }
-//RS 
-//RS fn web_form_action_error(value: web_kernel::JetWebFormActionError) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "WebFormActionError".to_string(),
-//RS         fields: vec![
-//RS             ("field_errors".to_string(), web_error_map_value(value.field_errors)),
-//RS             ("form_errors".to_string(), CtValue::List(
-//RS                 value.form_errors.into_iter().map(CtValue::Str).collect(),
-//RS             )),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn web_form_action_error_read(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<web_kernel::JetWebFormActionError, Diagnostic> {
-//RS     let CtValue::Map(fields) = web_record_field(value, "field_errors", span)? else {
-//RS         return Err(unsupported("form action field errors", span));
-//RS     };
-//RS     let fields = fields.iter().map(|(key, value)| {
-//RS         let CtKey::Str(key) = key else {
-//RS             return Err(unsupported("form action field name", span));
-//RS         };
-//RS         Ok((key.clone(), web_strings(value, "form action field errors", span)?))
-//RS     }).collect::<Result<_, Diagnostic>>()?;
-//RS     Ok(web_kernel::JetWebFormActionError {
-//RS         field_errors: fields,
-//RS         form_errors: web_strings(
-//RS             web_record_field(value, "form_errors", span)?, "form action errors", span,
-//RS         )?,
-//RS     })
-//RS }
-//RS 
-//RS fn web_form_field_state(value: web_kernel::JetWebFormFieldState) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "WebFormFieldState".to_string(),
-//RS         fields: vec![
-//RS             ("name".to_string(), CtValue::Str(value.name)),
-//RS             ("value_type".to_string(), web_enum_value("WebFormValueType", value.value_type)),
-//RS             ("required".to_string(), CtValue::Bool(value.required)),
-//RS             ("value".to_string(), CtValue::Str(value.value)),
-//RS             ("touched".to_string(), CtValue::Bool(value.touched)),
-//RS             ("validating".to_string(), CtValue::Bool(value.validating)),
-//RS             ("errors".to_string(), CtValue::List(
-//RS                 value.errors.into_iter().map(CtValue::Str).collect(),
-//RS             )),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn web_form_state(value: web_kernel::JetWebFormState) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "WebFormState".to_string(),
-//RS         fields: vec![
-//RS             ("status".to_string(), web_enum_value("WebFormStatus", value.status)),
-//RS             ("fields".to_string(), CtValue::Map(value.fields.into_iter().map(|(key, value)| (
-//RS                 CtKey::Str(key), web_form_field_state(value),
-//RS             )).collect())),
-//RS             ("action".to_string(), CtValue::Str(value.action)),
-//RS             ("method".to_string(), CtValue::Str(value.method)),
-//RS             ("result".to_string(), CtValue::Str(value.result)),
-//RS             ("error".to_string(), CtValue::Str(value.error)),
-//RS             ("submission_count".to_string(), CtValue::Int(value.submission_count as i64)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn web_opaque<T: std::any::Any>(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<&T, Diagnostic> {
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported(std::any::type_name::<T>(), span));
-//RS     };
-//RS     data.opaque
-//RS         .as_ref()
-//RS         .and_then(|value| value.downcast_ref::<T>())
-//RS         .ok_or_else(|| unsupported(std::any::type_name::<T>(), span))
-//RS }
-//RS 
-//RS fn opaque_web<T: std::any::Any + Send + Sync>(value: T) -> CtValue {
-//RS     CtValue::Closure(std::sync::Arc::new(ClosureData {
-//RS         lambda: Lambda {
-//RS             take_names: Vec::new(),
-//RS             params: Vec::new(),
-//RS             result_type: None,
-//RS             error_type: None,
-//RS             effects: None,
-//RS             body: LambdaBody::Block(Vec::new()),
-//RS             span: Span::new(0, 0),
-//RS             meta: LambdaMeta::default(),
-//RS         },
-//RS         captured: std::collections::HashMap::new(),
-//RS         return_type: None,
-//RS         opaque: Some(CtOpaque::new(value)),
-//RS     }))
-//RS }
-//RS #[derive(Clone)]
-//RS pub struct AppHandle(web_kernel::JetApp);
-//RS 
-//RS impl std::fmt::Debug for AppHandle {
-//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         formatter.debug_struct("AppHandle").finish_non_exhaustive()
-//RS     }
-//RS }
-//RS 
-//RS pub enum AppRuntimeResult {
-//RS     App(AppHandle),
-//RS     Value(CtValue),
-//RS }
-//RS 
-//RS pub fn app_new_runtime() -> AppHandle {
-//RS     AppHandle(web_kernel::jet_app())
-//RS }
-//RS 
-//RS fn app_string(value: &CtValue, name: &str, span: Span) -> Result<String, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Str(value) => Ok(value.clone()),
-//RS         _ => Err(unsupported(name, span)),
-//RS     }
-//RS }
-//RS 
-//RS fn app_binding(value: &CtValue, span: Span) -> Result<Vec<web_kernel::JetAppRouteBinding>, Diagnostic> {
-//RS     let value = app_string(value, "app route binding", span)?;
-//RS     Ok(web_kernel::jet_app_route_binding(&value))
-//RS }
-//RS 
-//RS fn app_callback(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     if matches!(value, CtValue::Closure(_)) {
-//RS         Ok(value.clone())
-//RS     } else {
-//RS         Err(unsupported("app callback", span))
-//RS     }
-//RS }
-//RS 
-//RS fn tree_text(tree: &web_kernel::DataTree) -> Option<String> {
-//RS     match tree {
-//RS         web_kernel::DataTree::Text(value) | web_kernel::DataTree::TypedText(value) => {
-//RS             Some(value.clone())
-//RS         }
-//RS         web_kernel::DataTree::Int(value) => Some(value.to_string()),
-//RS         web_kernel::DataTree::Float(value) => Some(value.to_string()),
-//RS         web_kernel::DataTree::Bool(value) => Some(value.to_string()),
-//RS         web_kernel::DataTree::Number(value) => Some(value.clone()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn tree_to_untyped(tree: &web_kernel::DataTree, span: Span) -> Result<CtValue, String> {
-//RS     match tree {
-//RS         web_kernel::DataTree::Null => Ok(CtValue::Unit),
-//RS         web_kernel::DataTree::Bool(value) => Ok(CtValue::Bool(*value)),
-//RS         web_kernel::DataTree::Int(value) => Ok(CtValue::Int(*value)),
-//RS         web_kernel::DataTree::Float(value) => Ok(CtValue::Float(crate::AST::CtFloat::f64(*value))),
-//RS         web_kernel::DataTree::Number(value) => value
-//RS             .parse::<i64>()
-//RS             .map(CtValue::Int)
-//RS             .or_else(|_| value.parse::<f64>().map(|value| CtValue::Float(crate::AST::CtFloat::f64(value))))
-//RS             .map_err(|_| format!("invalid JSON number `{value}`")),
-//RS         web_kernel::DataTree::TypedText(value) => {
-//RS             let tree = parse_app_json_tree(value)?;
-//RS             tree_to_untyped(&tree, span)
-//RS         }
-//RS         web_kernel::DataTree::Text(value) => Ok(CtValue::Str(value.clone())),
-//RS         web_kernel::DataTree::Bytes(value) => Ok(CtValue::Bytes(value.clone())),
-//RS         web_kernel::DataTree::Array(values) => values
-//RS             .iter()
-//RS             .map(|value| tree_to_untyped(value, span))
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .map(CtValue::List),
-//RS         web_kernel::DataTree::Object(values) => values
-//RS             .iter()
-//RS             .map(|(name, value)| Ok((name.clone(), tree_to_untyped(value, span)?)))
-//RS             .collect::<Result<Vec<_>, String>>()
-//RS             .map(|fields| CtValue::Struct {
-//RS                 type_name: "RouteObject".to_string(),
-//RS                 fields,
-//RS             }),
-//RS     }
-//RS }
-//RS 
-//RS fn binding_type(value: &str) -> (String, bool) {
-//RS     match value.strip_suffix('?') {
-//RS         Some(value) => (value.to_string(), true),
-//RS         None => (value.to_string(), false),
-//RS     }
-//RS }
-//RS 
-//RS fn binding_ast_type(value: &str) -> Type {
-//RS     let (value, optional) = binding_type(value);
-//RS     let ty = match value.as_str() {
-//RS         "Int" => Type::Int,
-//RS         "Float" => Type::Float,
-//RS         "Bool" => Type::Bool,
-//RS         "String" | "Text" => Type::String,
-//RS         "Char" => Type::Char,
-//RS         value => Type::Named(value.to_string()),
-//RS     };
-//RS     if optional {
-//RS         Type::Option(Box::new(ty))
-//RS     } else {
-//RS         ty
-//RS     }
-//RS }
-//RS 
-//RS fn decode_binding_tree(
-//RS     tree: &web_kernel::DataTree,
-//RS     ty: &str,
-//RS     span: Span,
-//RS ) -> Result<CtValue, String> {
-//RS     let (base, optional) = binding_type(ty);
-//RS     if optional {
-//RS         if matches!(tree, web_kernel::DataTree::Null) {
-//RS             return Ok(CtValue::absent(binding_ast_type(ty)));
-//RS         }
-//RS         return decode_binding_tree(tree, &base, span)
-//RS             .map(|value| CtValue::Present(Box::new(value)));
-//RS     }
-//RS     match base.as_str() {
-//RS         "Int" => tree_text(tree)
-//RS             .and_then(|value| value.parse::<i64>().ok())
-//RS             .map(CtValue::Int)
-//RS             .ok_or_else(|| format!("route input is not a valid Int: {tree:?}")),
-//RS         "Float" => tree_text(tree)
-//RS             .and_then(|value| value.parse::<f64>().ok())
-//RS             .map(|value| CtValue::Float(crate::AST::CtFloat::f64(value)))
-//RS             .ok_or_else(|| format!("route input is not a valid Float: {tree:?}")),
-//RS         "Bool" => tree_text(tree)
-//RS             .and_then(|value| match value.as_str() {
-//RS                 "true" => Some(true),
-//RS                 "false" => Some(false),
-//RS                 _ => None,
-//RS             })
-//RS             .map(CtValue::Bool)
-//RS             .ok_or_else(|| format!("route input is not a valid Bool: {tree:?}")),
-//RS         "String" | "Text" => tree_text(tree)
-//RS             .map(CtValue::Str)
-//RS             .ok_or_else(|| format!("route input is not valid Text: {tree:?}")),
-//RS         "Char" => tree_text(tree)
-//RS             .and_then(|value| value.chars().next().filter(|_| value.chars().count() == 1))
-//RS             .map(CtValue::Char)
-//RS             .ok_or_else(|| format!("route input is not a valid Char: {tree:?}")),
-//RS         _ => tree_to_untyped(tree, span).map(|value| match value {
-//RS             CtValue::Struct { fields, .. } => CtValue::Struct {
-//RS                 type_name: base.clone(),
-//RS                 fields,
-//RS             },
-//RS             value => value,
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS fn parse_app_json_tree(value: &str) -> Result<web_kernel::DataTree, String> {
-//RS     jet_foundation::EncodingJson::parse_json(value, true)
-//RS         .map(|tree| tree)
-//RS         .map_err(|error| error.message)
-//RS }
-//RS 
-//RS fn mir_tree_to_ct(
-//RS     tree: &web_kernel::DataTree,
-//RS     ty: &jet_foundation::MIR::MirType,
-//RS     span: Span,
-//RS ) -> Result<CtValue, String> {
-//RS     use jet_foundation::MIR::MirTypeKind;
-//RS     match ty.kind() {
-//RS         MirTypeKind::Option(inner) => {
-//RS             if matches!(tree, web_kernel::DataTree::Null) {
-//RS                 Ok(CtValue::absent(crate::Comptime::MirBridge::mir_to_ast_type(inner)))
-//RS             } else {
-//RS                 mir_tree_to_ct(tree, inner, span).map(|value| CtValue::Present(Box::new(value)))
-//RS             }
-//RS         }
-//RS         MirTypeKind::Shared(inner)
-//RS         | MirTypeKind::Tagged { inner, .. }
-//RS         | MirTypeKind::Quantity { base: inner, .. }
-//RS         | MirTypeKind::InlineRange { base: inner, .. } => mir_tree_to_ct(tree, inner, span),
-//RS         MirTypeKind::Int | MirTypeKind::IntN { .. } => decode_binding_tree(tree, "Int", span),
-//RS         MirTypeKind::Float | MirTypeKind::Float32 => decode_binding_tree(tree, "Float", span),
-//RS         MirTypeKind::Bool => decode_binding_tree(tree, "Bool", span),
-//RS         MirTypeKind::String => decode_binding_tree(tree, "String", span),
-//RS         MirTypeKind::Char => decode_binding_tree(tree, "Char", span),
-//RS         MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
-//RS             let web_kernel::DataTree::Array(values) = tree else {
-//RS                 return Err(format!("route input is not a list: {tree:?}"));
-//RS             };
-//RS             values
-//RS                 .iter()
-//RS                 .map(|value| mir_tree_to_ct(value, inner, span))
-//RS                 .collect::<Result<Vec<_>, _>>()
-//RS                 .map(CtValue::List)
-//RS         }
-//RS         MirTypeKind::Map { value: value_ty, .. } => {
-//RS             let web_kernel::DataTree::Object(values) = tree else {
-//RS                 return Err(format!("route input is not an object: {tree:?}"));
-//RS             };
-//RS             values
-//RS                 .iter()
-//RS                 .map(|(key, value)| {
-//RS                     Ok((
-//RS                         CtKey::Str(key.clone()),
-//RS                         mir_tree_to_ct(value, value_ty, span)?,
-//RS                     ))
-//RS                 })
-//RS                 .collect::<Result<std::collections::BTreeMap<_, _>, String>>()
-//RS                 .map(CtValue::Map)
-//RS         }
-//RS         MirTypeKind::Tuple(fields) => {
-//RS             let web_kernel::DataTree::Object(values) = tree else {
-//RS                 return Err(format!("route input is not a tuple object: {tree:?}"));
-//RS             };
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|(name, field_ty)| {
-//RS                     let value = values
-//RS                         .iter()
-//RS                         .find(|(key, _)| key == name)
-//RS                         .map(|(_, value)| value)
-//RS                         .ok_or_else(|| format!("route input is missing `{name}`"))?;
-//RS                     Ok((name.clone(), mir_tree_to_ct(value, field_ty, span)?))
-//RS                 })
-//RS                 .collect::<Result<Vec<_>, String>>()
-//RS                 .map(|fields| CtValue::Struct {
-//RS                     type_name: "RouteTuple".to_string(),
-//RS                     fields,
-//RS                 })
-//RS         }
-//RS         MirTypeKind::Apply { name, .. } => {
-//RS             let value = tree_to_untyped(tree, span)?;
-//RS             Ok(match value {
-//RS                 CtValue::Struct { fields, .. } => CtValue::Struct {
-//RS                     type_name: name.name.clone(),
-//RS                     fields,
-//RS                 },
-//RS                 value => value,
-//RS             })
-//RS         }
-//RS         _ => tree_to_untyped(tree, span),
-//RS     }
-//RS }
-//RS 
-//RS fn decode_route_inputs(
-//RS     trees: &[web_kernel::DataTree],
-//RS     bindings: &[web_kernel::JetAppRouteBinding],
-//RS     types: &[jet_foundation::MIR::MirType],
-//RS     span: Span,
-//RS ) -> Result<Vec<CtValue>, String> {
-//RS     if trees.len() != bindings.len() || trees.len() != types.len() {
-//RS         return Err(format!(
-//RS             "app callback received {} inputs for {} checked bindings",
-//RS             trees.len(),
-//RS             bindings.len()
-//RS         ));
-//RS     }
-//RS     trees
-//RS         .iter()
-//RS         .zip(bindings)
-//RS         .zip(types)
-//RS         .map(|((tree, binding), ty)| match binding {
-//RS             web_kernel::JetAppRouteBinding::Search {
-//RS                 scalar: None,
-//RS                 fields,
-//RS                 ..
-//RS             } => {
-//RS                 let web_kernel::DataTree::Object(values) = tree else {
-//RS                     return Err("route search input is not an object".to_string());
-//RS                 };
-//RS                 fields
-//RS                     .iter()
-//RS                     .map(|field| {
-//RS                         let value = values.iter().find(|(name, _)| name == &field.name);
-//RS                         match value {
-//RS                             Some((_, value)) => decode_binding_tree(value, &field.ty, span)
-//RS                                 .map(|value| (field.name.clone(), value)),
-//RS                             None if !field.required => Ok((
-//RS                                 field.name.clone(),
-//RS                                 CtValue::absent(binding_ast_type(&field.ty)),
-//RS                             )),
-//RS                             None => Err(format!("route search input is missing `{}`", field.name)),
-//RS                         }
-//RS                     })
-//RS                     .collect::<Result<Vec<_>, _>>()
-//RS                     .map(|fields| CtValue::Struct {
-//RS                         type_name: ty.nominal_name().unwrap_or("RouteSearch").to_string(),
-//RS                         fields,
-//RS                     })
-//RS             }
-//RS             web_kernel::JetAppRouteBinding::Data => {
-//RS                 let tree = match tree {
-//RS                     web_kernel::DataTree::TypedText(value) => parse_app_json_tree(value)?,
-//RS                     tree => tree.clone(),
-//RS                 };
-//RS                 mir_tree_to_ct(&tree, ty, span)
-//RS             }
-//RS             _ => mir_tree_to_ct(tree, ty, span),
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn callback_error(value: CtValue) -> String {
-//RS     match value {
-//RS         CtValue::Failed(report) => format!("{report:?}"),
-//RS         value => format!("{value:?}"),
-//RS     }
-//RS }
-//RS 
-//RS fn callback_page(value: CtValue) -> Result<web_kernel::JetWebPage, String> {
-//RS     let value = match value {
-//RS         CtValue::Present(value) => *value,
-//RS         value => value,
-//RS     };
-//RS     let CtValue::Struct { fields, .. } = value else {
-//RS         return Err("app page callback did not return WebPage".to_string());
-//RS     };
-//RS     let title = fields
-//RS         .iter()
-//RS         .find(|(name, _)| name == "title")
-//RS         .and_then(|(_, value)| match value {
-//RS             CtValue::Str(value) => Some(value.clone()),
-//RS             _ => None,
-//RS         })
-//RS         .ok_or_else(|| "app page callback returned WebPage without title".to_string())?;
-//RS     let body = fields
-//RS         .iter()
-//RS         .find(|(name, _)| name == "body")
-//RS         .and_then(|(_, value)| match value {
-//RS             CtValue::Str(value) => Some(value.clone()),
-//RS             _ => None,
-//RS         })
-//RS         .ok_or_else(|| "app page callback returned WebPage without body".to_string())?;
-//RS     Ok(web_kernel::JetWebPage { title, body })
-//RS }
-//RS 
-//RS fn app_page_callback(
-//RS     callback: CtValue,
-//RS     types: Vec<jet_foundation::MIR::MirType>,
-//RS     binding: Vec<web_kernel::JetAppRouteBinding>,
-//RS     span: Span,
-//RS ) -> web_kernel::JetAppTreeRouteCallback<Result<web_kernel::JetWebPage, String>> {
-//RS     let arity = types.len();
-//RS     web_kernel::JetAppTreeRouteCallback::new(
-//RS         arity,
-//RS         std::sync::Arc::new(move |trees| {
-//RS             let values = decode_route_inputs(trees, &binding, &types, span)?;
-//RS             let value = super::Methods::invoke_standalone_closure(&callback, values, span)
-//RS                 .map_err(|error| format!("{error:?}"))?;
-//RS             match value {
-//RS                 CtValue::Failed(report) => Err(format!("{report:?}")),
-//RS                 value => Ok(callback_page(value)),
-//RS             }
-//RS         }),
-//RS     )
-//RS }
-//RS 
-//RS fn app_boundary_callback(
-//RS     callback: CtValue,
-//RS     span: Span,
-//RS ) -> web_kernel::JetAppTreeRouteCallback<Result<web_kernel::JetWebPage, String>> {
-//RS     web_kernel::JetAppTreeRouteCallback::new(
-//RS         0,
-//RS         std::sync::Arc::new(move |_| {
-//RS             let value = super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)
-//RS                 .map_err(|error| format!("{error:?}"))?;
-//RS             match value {
-//RS                 CtValue::Failed(report) => Err(format!("{report:?}")),
-//RS                 value => Ok(callback_page(value)),
-//RS             }
-//RS         }),
-//RS     )
-//RS }
-//RS 
-//RS fn app_loader_callback(
-//RS     callback: CtValue,
-//RS     types: Vec<jet_foundation::MIR::MirType>,
-//RS     binding: Vec<web_kernel::JetAppRouteBinding>,
-//RS     span: Span,
-//RS ) -> web_kernel::JetAppTreeRouteCallback<Result<String, String>> {
-//RS     let arity = types.len();
-//RS     web_kernel::JetAppTreeRouteCallback::new(
-//RS         arity,
-//RS         std::sync::Arc::new(move |trees| {
-//RS             let values = decode_route_inputs(trees, &binding, &types, span)?;
-//RS             let value = super::Methods::invoke_standalone_closure(&callback, values, span)
-//RS                 .map_err(|error| format!("{error:?}"))?;
-//RS             match value {
-//RS                 CtValue::Failed(report) => Err(format!("{report:?}")),
-//RS                 CtValue::Present(value) => Ok(Ok(ct_to_json_string(value.as_ref()))),
-//RS                 value => Ok(Ok(ct_to_json_string(&value))),
-//RS             }
-//RS         }),
-//RS     )
-//RS }
-//RS 
-//RS fn ct_to_json_string(value: &CtValue) -> String {
-//RS     fn tree(value: &CtValue) -> web_kernel::DataTree {
-//RS         match value {
-//RS             CtValue::Int(value) => web_kernel::DataTree::Int(*value),
-//RS             CtValue::Float(value) => web_kernel::DataTree::Float(value.as_f64()),
-//RS             CtValue::Bool(value) => web_kernel::DataTree::Bool(*value),
-//RS             CtValue::Char(value) => web_kernel::DataTree::Text(value.to_string()),
-//RS             CtValue::Str(value) => web_kernel::DataTree::Text(value.clone()),
-//RS             CtValue::Bytes(value) => web_kernel::DataTree::Bytes(value.clone()),
-//RS             CtValue::List(values) => {
-//RS                 web_kernel::DataTree::Array(values.iter().map(tree).collect())
-//RS             }
-//RS             CtValue::Map(values) => web_kernel::DataTree::Object(
-//RS                 values
-//RS                     .iter()
-//RS                     .filter_map(|(key, value)| match key {
-//RS                         CtKey::Str(key) => Some((key.clone(), tree(value))),
-//RS                         _ => None,
-//RS                     })
-//RS                     .collect(),
-//RS             ),
-//RS             CtValue::Struct { fields, .. } => web_kernel::DataTree::Object(
-//RS                 fields.iter().map(|(key, value)| (key.clone(), tree(value))).collect(),
-//RS             ),
-//RS             CtValue::Enum { variant, .. } if variant == "Null" => {
-//RS                 web_kernel::DataTree::Null
-//RS             }
-//RS             CtValue::Enum { args, .. } => web_kernel::DataTree::Object(
-//RS                 args.iter()
-//RS                     .filter_map(|(key, value)| {
-//RS                         key.as_ref().map(|key| (key.clone(), tree(value)))
-//RS                     })
-//RS                     .collect(),
-//RS             ),
-//RS             CtValue::Present(value) => tree(value),
-//RS             CtValue::Failed(_) | CtValue::Unit => web_kernel::DataTree::Null,
-//RS             CtValue::BigInt(value) => web_kernel::DataTree::Number(value.to_string_rep()),
-//RS             CtValue::Closure(_) => web_kernel::DataTree::Null,
-//RS         }
-//RS     }
-//RS     fn render(tree: &web_kernel::DataTree) -> String {
-//RS         match tree {
-//RS             web_kernel::DataTree::Null => "null".to_string(),
-//RS             web_kernel::DataTree::Bool(value) => value.to_string(),
-//RS             web_kernel::DataTree::Int(value) => value.to_string(),
-//RS             web_kernel::DataTree::Float(value) => format!("{value:?}"),
-//RS             web_kernel::DataTree::Number(value) => value.clone(),
-//RS             web_kernel::DataTree::TypedText(value) | web_kernel::DataTree::Text(value) => {
-//RS                 format!("{value:?}")
-//RS             }
-//RS             web_kernel::DataTree::Bytes(values) => format!(
-//RS                 "[{}]",
-//RS                 values.iter().map(u8::to_string).collect::<Vec<_>>().join(",")
-//RS             ),
-//RS             web_kernel::DataTree::Array(values) => {
-//RS                 format!("[{}]", values.iter().map(render).collect::<Vec<_>>().join(","))
-//RS             }
-//RS             web_kernel::DataTree::Object(values) => format!(
-//RS                 "{{{}}}",
-//RS                 values
-//RS                     .iter()
-//RS                     .map(|(key, value)| format!("{:?}:{}", key, render(value)))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(",")
-//RS             ),
-//RS         }
-//RS     }
-//RS     render(&tree(value))
-//RS }
-//RS 
-//RS fn app_output_type(value: Option<&jet_foundation::MIR::MirType>) -> String {
-//RS     let Some(value) = value else {
-//RS         return "Unit".to_string();
-//RS     };
-//RS     match value.kind() {
-//RS         jet_foundation::MIR::MirTypeKind::Result { ok, .. } => ok.canonical_key(),
-//RS         _ => value.canonical_key(),
-//RS     }
-//RS }
-//RS 
-//RS pub fn app_method_runtime(
-//RS     handle: &AppHandle,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     callback_types: &[jet_foundation::MIR::MirType],
-//RS     callback_return_type: Option<&jet_foundation::MIR::MirType>,
-//RS     span: Span,
-//RS ) -> Result<AppRuntimeResult, Diagnostic> {
-//RS     let one = |index: usize| {
-//RS         args.get(index)
-//RS             .ok_or_else(|| unsupported(&format!("app.{method} argument {index}"), span))
-//RS     };
-//RS     let wrap_app = |value: web_kernel::JetApp| AppRuntimeResult::App(AppHandle(value));
-//RS     match method {
-//RS         "route" | "page" | "layout" => {
-//RS             let path = app_string(one(0)?, "app route path", span)?;
-//RS             let callback = app_callback(one(1)?, span)?;
-//RS             let binding_text = app_string(one(2)?, "app route binding", span)?;
-//RS             let binding = web_kernel::jet_app_route_binding(&binding_text);
-//RS             let callback = app_page_callback(callback, callback_types.to_vec(), binding, span);
-//RS             let app = match method {
-//RS                 "route" => web_kernel::jet_app_route(&handle.0, path, callback, binding_text),
-//RS                 "page" => web_kernel::jet_app_page(&handle.0, path, callback, binding_text),
-//RS                 _ => web_kernel::jet_app_layout(&handle.0, path, callback, binding_text),
-//RS             };
-//RS             Ok(wrap_app(app))
-//RS         }
-//RS         "loader" => {
-//RS             let callback = app_callback(one(0)?, span)?;
-//RS             let binding_text = app_string(
-//RS                 args.last()
-//RS                     .ok_or_else(|| unsupported("app loader binding", span))?,
-//RS                 "app loader binding",
-//RS                 span,
-//RS             )?;
-//RS             let binding = web_kernel::jet_app_route_binding(&binding_text);
-//RS             let callback =
-//RS                 app_loader_callback(callback, callback_types.to_vec(), binding.clone(), span);
-//RS             let preload = if args.len() == 4 {
-//RS                 match one(2)? {
-//RS                     CtValue::Bool(value) => *value,
-//RS                     _ => return Err(unsupported("app loader preload", span)),
-//RS                 }
-//RS             } else {
-//RS                 false
-//RS             };
-//RS             let data_type = app_output_type(callback_return_type);
-//RS             let app = handle.0.loader_encoded(callback, binding, data_type, preload);
-//RS             Ok(wrap_app(app))
-//RS         }
-//RS         "pending" | "not_found" | "error" => {
-//RS             let callback = app_boundary_callback(app_callback(one(0)?, span)?, span);
-//RS             let app = match method {
-//RS                 "pending" => web_kernel::jet_app_pending(&handle.0, callback),
-//RS                 "not_found" => web_kernel::jet_app_not_found(&handle.0, callback),
-//RS                 _ => web_kernel::jet_app_error(&handle.0, callback),
-//RS             };
-//RS             Ok(wrap_app(app))
-//RS         }
-//RS         "action" | "form" | "data" => {
-//RS             let name = app_string(one(0)?, "app server function name", span)?;
-//RS             let callback = app_callback(one(1)?, span)?;
-//RS             let binding = if method == "form" {
-//RS                 app_string(
-//RS                     args.get(2)
-//RS                         .ok_or_else(|| unsupported("app form binding", span))?,
-//RS                     "app form binding",
-//RS                     span,
-//RS                 )?
-//RS             } else {
-//RS                 String::new()
-//RS             };
-//RS             let invoke = move |args| {
-//RS                 let value = super::Methods::invoke_standalone_closure(&callback, args, span)
-//RS                     .map_err(|error| format!("{error:?}"))?;
-//RS                 match value {
-//RS                     CtValue::Failed(report) => Err(format!("{report:?}")),
-//RS                     value => Ok(ct_to_json_string(&value)),
-//RS                 }
-//RS             };
-//RS             let app = if callback_types.is_empty() {
-//RS                 let action: std::sync::Arc<dyn Fn() -> Result<String, String> + Send + Sync> =
-//RS                     std::sync::Arc::new(move || invoke(Vec::new()));
-//RS                 match method {
-//RS                     "action" => web_kernel::jet_app_action(&handle.0, name, action),
-//RS                     "form" => web_kernel::jet_app_form(&handle.0, name, action, binding),
-//RS                     _ => web_kernel::jet_app_data(&handle.0, name, action),
-//RS                 }
-//RS             } else {
-//RS                 let action: std::sync::Arc<
-//RS                     dyn Fn(&String) -> Result<String, String> + Send + Sync,
-//RS                 > = if method == "form" {
-//RS                     let bindings = web_kernel::jet_app_route_binding(&binding);
-//RS                     let types = callback_types.to_vec();
-//RS                     std::sync::Arc::new(move |body| {
-//RS                         let tree = parse_app_json_tree(body)?;
-//RS                         let values =
-//RS                             decode_route_inputs(std::slice::from_ref(&tree), &bindings, &types, span)?;
-//RS                         invoke(values)
-//RS                     })
-//RS                 } else {
-//RS                     std::sync::Arc::new(move |body| {
-//RS                         invoke(vec![CtValue::Str(body.clone())])
-//RS                     })
-//RS                 };
-//RS                 match method {
-//RS                     "action" => web_kernel::jet_app_action(&handle.0, name, action),
-//RS                     "form" => web_kernel::jet_app_form(&handle.0, name, action, binding),
-//RS                     _ => web_kernel::jet_app_data(&handle.0, name, action),
-//RS                 }
-//RS             };
-//RS             Ok(wrap_app(app))
-//RS         }
-//RS         "mount" => {
-//RS             let prefix = app_string(one(0)?, "app mount prefix", span)?;
-//RS             let callback = app_callback(one(1)?, span)?;
-//RS             let app = handle.0.mount(prefix, move |path| {
-//RS                 let _ = super::Methods::invoke_standalone_closure(
-//RS                     &callback,
-//RS                     vec![CtValue::Str(path.clone())],
-//RS                     span,
-//RS                 );
-//RS             });
-//RS             Ok(wrap_app(app))
-//RS         }
-//RS         "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y"
-//RS         | "adapter" => {
-//RS             let value = app_string(one(0)?, "app setting", span)?;
-//RS             let app = match method {
-//RS                 "routes" => web_kernel::jet_app_routes(&handle.0, value),
-//RS                 "security" => web_kernel::jet_app_security(&handle.0, value),
-//RS                 "assets" => web_kernel::jet_app_assets(&handle.0, value),
-//RS                 "split" => web_kernel::jet_app_split(&handle.0, value),
-//RS                 "code_split" => web_kernel::jet_app_code_split(&handle.0, value),
-//RS                 "cache" => web_kernel::jet_app_cache(&handle.0, value),
-//RS                 "a11y" => web_kernel::jet_app_a11y(&handle.0, value),
-//RS                 _ => web_kernel::jet_app_adapter(&handle.0, value),
-//RS             };
-//RS             Ok(wrap_app(app))
-//RS         }
-//RS         "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev"
-//RS         | "hydration_release" => {
-//RS             let app = match method {
-//RS                 "csr" => web_kernel::jet_app_csr(&handle.0),
-//RS                 "ssr" => web_kernel::jet_app_ssr(&handle.0),
-//RS                 "ssg" => web_kernel::jet_app_ssg(&handle.0),
-//RS                 "stream" => web_kernel::jet_app_stream(&handle.0),
-//RS                 "streaming" => web_kernel::jet_app_streaming(&handle.0),
-//RS                 "island" => web_kernel::jet_app_island(&handle.0),
-//RS                 "hydration_dev" => web_kernel::jet_app_hydration_dev(&handle.0),
-//RS                 _ => web_kernel::jet_app_hydration_release(&handle.0),
-//RS             };
-//RS             Ok(wrap_app(app))
-//RS         }
-//RS         "facts_json" => Ok(AppRuntimeResult::Value(CtValue::Str(
-//RS             web_kernel::jet_app_facts_json(&handle.0),
-//RS         ))),
-//RS         "serve" | "serve_on" => {
-//RS             if let Some(value) = args.first() {
-//RS                 let port = match value {
-//RS                     CtValue::Int(value) if *value >= 0 && *value <= i64::from(u16::MAX) => {
-//RS                         *value as i64
-//RS                     }
-//RS                     _ => return Err(unsupported("app serve port", span)),
-//RS                 };
-//RS                 web_kernel::jet_app_serve_on(&handle.0, port);
-//RS             } else {
-//RS                 web_kernel::jet_app_serve(&handle.0);
-//RS             }
-//RS             Ok(AppRuntimeResult::Value(CtValue::Unit))
-//RS         }
-//RS         _ => Err(unsupported(&format!("`App.{method}()`"), span)),
-//RS     }
-//RS }
-//RS 
-//RS fn web_router(value: &CtValue, span: Span) -> Result<&web_kernel::JetWebRouter, Diagnostic> {
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported("WebRouter", span));
-//RS     };
-//RS     data.opaque
-//RS         .as_ref()
-//RS         .and_then(|value| value.downcast_ref::<WebRouterHandle>())
-//RS         .map(|value| &value.0)
-//RS         .ok_or_else(|| unsupported("WebRouter", span))
-//RS }
-//RS 
-//RS fn web_query(value: &CtValue, span: Span) -> Result<&web_kernel::JetWebQuery, Diagnostic> {
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported("WebQuery", span));
-//RS     };
-//RS     data.opaque
-//RS         .as_ref()
-//RS         .and_then(|value| value.downcast_ref::<WebQueryHandle>())
-//RS         .map(|value| &value.0)
-//RS         .ok_or_else(|| unsupported("WebQuery", span))
-//RS }
-//RS 
-//RS fn web_form(value: &CtValue, span: Span) -> Result<&web_kernel::JetWebForm, Diagnostic> {
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported("WebForm", span));
-//RS     };
-//RS     data.opaque
-//RS         .as_ref()
-//RS         .and_then(|value| value.downcast_ref::<WebFormHandle>())
-//RS         .map(|value| &value.0)
-//RS         .ok_or_else(|| unsupported("WebForm", span))
-//RS }
-//RS 
-//RS fn web_table(value: &CtValue, span: Span) -> Result<&web_kernel::JetWebTable<CtValue>, Diagnostic> {
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported("WebTable", span));
-//RS     };
-//RS     data.opaque
-//RS         .as_ref()
-//RS         .and_then(|value| value.downcast_ref::<WebTableHandle>())
-//RS         .map(|value| &value.0)
-//RS         .ok_or_else(|| unsupported("WebTable", span))
-//RS }
-//RS 
-//RS fn web_table_column(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<&web_kernel::JetWebTableColumn<CtValue>, Diagnostic> {
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported("WebTableColumn", span));
-//RS     };
-//RS     data.opaque
-//RS         .as_ref()
-//RS         .and_then(|value| value.downcast_ref::<WebTableColumnHandle>())
-//RS         .map(|value| &value.0)
-//RS         .ok_or_else(|| unsupported("WebTableColumn", span))
-//RS }
-//RS 
-//RS fn web_virtual_plan_viewport(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<&web_kernel::JetWebVirtualPlanViewport, Diagnostic> {
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported("WebVirtualPlanViewport", span));
-//RS     };
-//RS     data.opaque
-//RS         .as_ref()
-//RS         .and_then(|value| value.downcast_ref::<WebVirtualPlanViewportHandle>())
-//RS         .map(|value| &value.0)
-//RS         .ok_or_else(|| unsupported("WebVirtualPlanViewport", span))
-//RS }
-//RS 
-//RS fn web_store(value: &CtValue, span: Span) -> Result<&web_kernel::JetWebStore<CtValue>, Diagnostic> {
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported("WebStore", span));
-//RS     };
-//RS     data.opaque
-//RS         .as_ref()
-//RS         .and_then(|value| value.downcast_ref::<WebStoreHandle>())
-//RS         .map(|value| &value.0)
-//RS         .ok_or_else(|| unsupported("WebStore", span))
-//RS }
-//RS 
-//RS fn web_string(value: &CtValue, what: &str, span: Span) -> Result<String, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Str(value) => Ok(value.clone()),
-//RS         _ => Err(unsupported(what, span)),
-//RS     }
-//RS }
-//RS 
-//RS fn web_bool(value: &CtValue, what: &str, span: Span) -> Result<bool, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Bool(value) => Ok(*value),
-//RS         _ => Err(unsupported(what, span)),
-//RS     }
-//RS }
-//RS 
-//RS fn web_int(value: &CtValue, what: &str, span: Span) -> Result<i64, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Int(value) => Ok(*value),
-//RS         CtValue::BigInt(value) => value
-//RS             .try_i64()
-//RS             .ok_or_else(|| unsupported(what, span)),
-//RS         _ => Err(unsupported(what, span)),
-//RS     }
-//RS }
-//RS 
-//RS fn web_strings(value: &CtValue, what: &str, span: Span) -> Result<Vec<String>, Diagnostic> {
-//RS     let CtValue::List(values) = value else {
-//RS         return Err(unsupported(what, span));
-//RS     };
-//RS     values
-//RS         .iter()
-//RS         .map(|value| web_string(value, what, span))
-//RS         .collect()
-//RS }
-//RS 
-// END-PORT-PENDING 0556 crates/jet-comptime/src/Comptime/AppLite.rs:1-1792
+use std.cell.Cell
+use std.thread_local.ThreadLocal
+use jet_comptime.Comptime.Diagnostics.unsupported
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.AST.[ClosureData, CtKey, CtOpaque, CtValue, CtReport, Lambda, LambdaBody, LambdaMeta, Type]
+use jet_foundation.Outcome.*
+use jet_foundation.AppMiddleware as jet_app_middleware
+use jet_foundation.Devtools.*
+use jet_foundation.LiveLifecycle.JetLiveLifecycle
+use jet_foundation.DataTree.DataTree
+use jet_foundation.EncodingJson
+use jet_comptime.Comptime.UrlLite.[url_percent_decode_str, url_percent_encode, JetMIME]
+use jet_comptime.Comptime.SyncLite.JetDbRequestScope
+// Canonical shared kernels; the interpreter only marshals their values.
+// GATE #4494: native scheduler and generated std primitives retain their real providers.
+use jet_codegen.Prelude.[SharedProtocol, TaskGroup, LocalCell, WebKernelStd, WebKernelNativeScheduler]
+use jet_codegen.Prelude.CoreLib.Top.[LiveQuery, HTTPRoute, WebRouter, WebQuery, WebForms, WebTable, WebVirtual, WebStore, App]
+use jet_codegen.Prelude.Core.WebPending
 
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:9
+const WEB_RUNTIME_POLICY: ThreadLocal<Cell<(Bool, Bool)>> = ThreadLocal.new(fn() { Cell.new((false, false)) })
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:21
+fn jet_web_runtime_devtools_enabled() -> Bool { WEB_RUNTIME_POLICY.with(fn(policy) { policy.get().0 }) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:25
+fn jet_web_runtime_history_enabled() -> Bool { WEB_RUNTIME_POLICY.with(fn(policy) { policy.get().1 }) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:34
+trait JetShow { fn jet_show(self: &Self) -> String }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:38
+trait JetDisplay { fn jet_display(self: &Self) -> String }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:42
+trait JetDebug { fn jet_debug(self: &Self) -> String }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:45
+const JET_DEVTOOLS_LOCAL_RAIL_ENABLED: Bool = true
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:57
+fn jet_runtime_stop_with_context(code: String, file: String, line: U32, _fn_name: String, _src_line: String, message: String) -> Never {
+    jet_runtime_stop(code, file, line as I64, message)
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:129
+struct FieldError { path: String, reason: String }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:134
+impl FieldError {
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:135
+    fn one(reason: String) -> [FieldError] { [FieldError{path: String.new(), reason: reason}] }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:147
+enum IOOperation { Read, Write, Flush, Connect, Accept, Close, Resolve, Codec }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:159
+struct IOContext { operation: IOOperation, resource: String?, os_code: I64?, cause: String? }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:166
+impl IOContext {
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:167
+    fn new(operation: IOOperation, resource: String?, os_code: I64?, cause: String?) -> IOContext {
+        IOContext{operation: operation, resource: resource, os_code: os_code, cause: cause}
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:183
+#Error
+enum IOError { InvalidInput(IOContext), NotFound(IOContext), PermissionDenied(IOContext), TimedOut(IOContext), Cancelled(IOContext), Closed(IOContext), Protocol(IOContext), Other(IOContext) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:195
+struct Duration { ns: I64 }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:199
+impl Duration {
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:201
+    fn as_millis(self: Duration) -> I64 { self.ns / 1_000_000 }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:207
+struct LogField { key: String, value: String, kind: String, redacted: Bool }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:218
+fn parse_json_typed_datatree(text: String) -> DataTree EncodingJson.Error! { EncodingJson.parse_json_typed(text, true) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:245
+trait __jet_Encode { fn jet_encode(self: &Self) -> DataTree }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:250
+trait __jet_Decode { fn jet_decode(tree: &DataTree) -> Self [FieldError]! }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:254
+impl __jet_Encode for String {
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:255
+    fn jet_encode(self: &String) -> DataTree { DataTree.Text(self.clone()) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:260
+impl __jet_Decode for String {
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:261
+    fn jet_decode(tree: &DataTree) -> String [FieldError]! {
+        if tree == { .Text(value) | .TypedText(value) -> Ok(value.clone()); else -> Err(FieldError.one("expected Text")) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:271
+fn jet_enc_json_to_string<T: __jet_Encode>(value: &T) -> String { EncodingJson.render_json(value.jet_encode(), false, 0) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:275
+fn jet_enc_json_decode<T: __jet_Decode>(value: &String) -> T [FieldError]! {
+    tree := EncodingJson.parse_json(value, true).map_err(fn(error) { FieldError.one(error.message) })?
+    T.jet_decode(tree)
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:285
+struct JetErr { message: String }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:287
+impl std.fmt.Display for JetErr {
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:288
+    fn fmt(self: &JetErr, formatter: &std.fmt.Formatter) -> Void std.fmt.Error! { formatter.write_str(self.message) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:305
+fn jet_runtime_stop(code: String, _path: String, _line: I64, message: String) -> Never { panic("{code}: {message}") }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:311
+struct AppLiveQuery { query: JetLiveQuery }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:313
+fn app_live_query_parts(query: &AppLiveQuery) -> (U64, String, String, U64, Bool, String) {
+    query := query.query
+    (query.id, query.footprint.display(), query.value.clone(), query.lifecycle.generation, query.lifecycle.active, query.lifecycle.error.clone())
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:327
+fn app_live_query_from_parts(id: U64, footprint: String, value: String, generation: U64, active: Bool, error: String) -> AppLiveQuery? {
+    footprint := if footprint.is_empty() -> JetLiveFootprint{paths: []} else -> JetLiveFootprint.parse(footprint)?
+    Val(AppLiveQuery{query: JetLiveQuery{key: String.new(), id: id, footprint: footprint, value: value,
+        lifecycle: JetLiveLifecycle{generation: generation, active: active, dirty: false, error: error, fresh_at_ms: 0,
+            invalidation_cause: String.new(), refreshing: false, cancelled: false}, rerun: None, sink: None}})
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:360
+fn app_live(footprint: String, initial: String) -> AppLiveQuery { AppLiveQuery{query: jet_app_live(footprint, initial)} }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:364
+fn app_live_query(footprint: String, initial: String, rerun: fn() -> String Err!) -> AppLiveQuery { AppLiveQuery{query: jet_app_live_query(footprint, initial, rerun)} }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:375
+fn app_subscribe(source: String) -> AppLiveQuery { AppLiveQuery{query: jet_app_subscribe(source)} }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:379
+fn app_invalidate(footprint: String) -> I64 { jet_app_invalidate(footprint) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:383
+fn app_transact_invalidate(write_set: String) -> I64 { jet_app_transact_invalidate(write_set) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:387
+fn app_signal_push(query: &AppLiveQuery, payload: String) -> AppLiveQuery { AppLiveQuery{query: jet_app_signal_push(query.query, payload)} }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:391
+fn app_live_get(query: &AppLiveQuery) -> String { jet_app_live_get(query.query) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:395
+fn app_live_show(query: &AppLiveQuery) -> String { jet_app_live_show(query.query) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:399
+fn app_live_stats() -> String { jet_app_live_stats() }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:403
+fn app_live_publish_transport(topic: String, event: String) { LiveQuery.jet_live_publish_transport(topic, event) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:406
+fn app_web_query_new(key: String, live: &AppLiveQuery) -> JetWebQuery { jet_web_query_new(key, live.query) }
+use jet_codegen.Prelude.CoreLib.Top.[SHA256Raw, CryptoEntropy, DNSResolverPolicy, HTTPMessage, NetHTTP, HTTPServer, WebServerFn, WsClient, Ws]
+use jet_codegen.Prelude.Core.[DevtoolsRequestPanel, HttpRequestTarget, NetPure, NetError]
+use jet_crypto_entropy.[jet_crypto_entropy_fill, JetCryptoEntropyError]
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:448
+fn jet_panic(file: String, line: U32, message: String) -> Never { jet_runtime_stop("E3001", file, line as I64, message) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:454
+// Faithful silent resident-host hook: this mux does not install access-log middleware.
+fn jet_log_emit(_level: String, _message: String, _fields: &[LogField]) {}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:456
+// GATE #4494: buffered native file providers.
+struct JetFileReader { inner: std.io.BufReader<std.fs.File>, path: String }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:460
+struct JetFileWriter { inner: std.io.BufWriter<std.fs.File>, path: String }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:481
+fn http_error_to_ct(error: JetHTTPError) -> CtValue {
+    parts := jet_http_error_surface_parts(error)
+    args := if parts.payload == {
+        .Unit -> []
+        .Int{field, value} -> [(Val(field.to_string()), CtValue.Int(value))]
+        .Text{field, value} -> [(Val(field.to_string()), CtValue.Str(value))]
+        .Operation{field, variant, ..} -> [(Val(field.to_string()), CtValue.Enum{type_name: "HTTPOperation", variant: variant.to_string(), args: []})]
+    }
+    CtValue.Enum{type_name: "HTTPError", variant: parts.variant.to_string(), args: ^args}
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:508
+fn http_response_to_ct(response: JetHTTPResponse) -> CtValue JetHTTPError! {
+    JetHTTPResponse{status, version, headers, body, trailers, protocol, remote_address, redirect_history, timings_ms, reused_connection, raw_content_encoding, ..} := ^response
+    body := body.bytes(USize.MAX)?
+    headers_to_ct := fn(headers: JetHTTPHeaders) {
+        CtValue.Struct{type_name: "Headers", fields: headers.entries.into_iter().map(fn(entry) { (name, value) := entry; (name, CtValue.Str(value)) }).collect()}
+    }
+    raw_content_encoding := raw_content_encoding.map(fn(value) { CtValue.Present(CtValue.Str(value)) }).unwrap_or_else(fn() { CtValue.absent(Type.String) })
+    Ok(CtValue.Struct{type_name: "HTTPResponse", fields: [
+        ("status", CtValue.Int(status)), ("version", CtValue.Str(version)), ("headers", headers_to_ct(^headers)),
+        ("body", CtValue.Struct{type_name: "Body", fields: [("bytes", CtValue.Bytes(^body))]}),
+        ("trailers", headers_to_ct(^trailers)), ("protocol", CtValue.Str(^protocol)), ("remote_address", CtValue.Str(^remote_address)),
+        ("redirect_history", CtValue.List(redirect_history.into_iter().map(fn(value) { CtValue.Str(value) }).collect())),
+        ("timings_ms", CtValue.List(timings_ms.into_iter().map(fn(value) { CtValue.Int(value) }).collect())),
+        ("reused_connection", CtValue.Bool(reused_connection)), ("raw_content_encoding", ^raw_content_encoding)]})
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:573
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:651
+pub fn http_static_file(path: String, mime: String) -> CtValue {
+    if jet_http_srv_static_file(path, mime).and_then(fn(response) { http_response_to_ct(response) }) == {
+        Ok(response) -> CtValue.Present(^response)
+        Err(error) -> CtValue.failed(http_error_to_ct(error))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:581
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:648
+pub fn http_text_from_bytes(bytes: [U8], limit: I64?) -> String CtValue! {
+    body := JetHTTPBody.from_bytes(^bytes)
+    jet_http_body_json_text_defaulted(body, limit).map_err(fn(error) { http_error_to_ct(error) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:588
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:654
+pub fn http_project_json_decode_error(result: CtValue) -> CtValue {
+    result := if result == { .Present(value) -> Ok(^value); .Failed(_) -> Err([] as [FieldError]); value -> return ^value }
+    if jet_http_project_json_decode_error(result) == {
+        Ok(value) -> CtValue.Present(^value)
+        Err(error) -> CtValue.Failed(CtReport.Told(http_error_to_ct(error)))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:601
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:657
+pub fn http_error_response(error: CtValue) -> CtValue Err! {
+    if error != .Enum{type_name, variant, args} -> return Err("MIR HTTP handler error is not an enum carrier")
+    if type_name != "HTTPError" -> return Err("MIR HTTP handler error is not HTTPError")
+    payload := 0
+    text: String? := None
+    for (_, value) in args {
+        if value == {
+            .Int(value) -> { payload = value }
+            .Str(value) -> { text = Val(^value) }
+            .Enum{type_name, variant, args} if type_name == "HTTPOperation" && args.is_empty() -> {
+                payload = if variant == { "ClientConnect" -> 0; "ServerBind" -> 1; "ServeListener" -> 2; else -> return Err("MIR HTTP operation error has an unknown variant") }
+            }
+            else -> return Err("MIR HTTP handler error has an invalid payload")
+        }
+    }
+    error := jet_http_error_from_surface_name(variant, payload, ^text) ?? return Err("MIR HTTP handler error has an unknown variant")
+    http_response_to_ct(jet_http_srv_error_response(error)).map_err(fn(_) { "canonical HTTP error response could not be materialized" })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:662
+pub fn jet_live_publish_transport(topic: String, event: String) { app_live_publish_transport(topic, event) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:665
+fn live_to_ct(q: &AppLiveQuery) -> CtValue {
+    (id, footprint, value, generation, active, error) := app_live_query_parts(q)
+    CtValue.Struct{type_name: "LiveQuery", fields: [
+        ("id", CtValue.Int(id.min(I64.MAX as U64) as I64)), ("footprint", CtValue.Str(footprint)), ("value", CtValue.Str(value)),
+        ("generation", CtValue.Int(generation.min(I64.MAX as U64) as I64)), ("active", CtValue.Bool(active)), ("error", CtValue.Str(error))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:686
+fn ct_to_live(v: &CtValue, span: Span) -> AppLiveQuery Diagnostic! {
+    if v != .Struct{type_name, fields} -> return Err(unsupported("LiveQuery", span))
+    if type_name != "LiveQuery" && type_name != "JetLiveQuery" -> return Err(unsupported("LiveQuery", span))
+    field := fn(name: String) -> &CtValue Diagnostic! {
+        fields.iter().find(fn(entry) { (n, _) := entry; n == name }).map(fn(entry) { (_, v) := entry; v }).ok_or_else(fn() { unsupported("LiveQuery field", span) })
+    }
+    footprint := if field("footprint")? == { .Str(s) -> s.clone(); else -> return Err(unsupported("footprint", span)) }
+    active := if field("active")? == { .Bool(b) -> b; else -> return Err(unsupported("active", span)) }
+    error := if field("error")? == { .Str(s) -> s.clone(); else -> return Err(unsupported("error", span)) }
+    if !active && error.is_empty() -> return Err(unsupported("LiveQuery error", span))
+    id := if field("id")? == { .Int(n) if n >= 0 -> n as U64; else -> return Err(unsupported("id", span)) }
+    value := if field("value")? == { .Str(s) -> s.clone(); else -> return Err(unsupported("value", span)) }
+    generation := if field("generation")? == { .Int(n) if n >= 0 -> n as U64; else -> return Err(unsupported("generation", span)) }
+    app_live_query_from_parts(id, footprint, value, generation, active, error).ok_or_else(fn() { unsupported("footprint", span) })
+}
+
+use std.sync.[Arc, Mutex]
+use jet_comptime.Comptime.AppLite02.web_string_map_value
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:734
+pub fn live_query_with(footprint: String, initial: String, rerun: fn() -> String Err!) -> CtValue {
+    live_to_ct(app_live_query(footprint, initial, rerun))
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:741
+pub fn apply(method: String, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    one := fn(i: USize) -> &CtValue Diagnostic! { args.get(i).ok_or_else(fn() { unsupported("app.{method} arg {i}", span) }) }
+    if method == {
+        "live" -> {
+            footprint := if one(0)? == { .Str(s) -> s.clone(); else -> return Err(unsupported("footprint", span)) }
+            initial := if one(1)? == { .Str(s) -> s.clone(); else -> return Err(unsupported("initial", span)) }
+            Ok(live_to_ct(app_live(footprint, initial)))
+        }
+        "subscribe" -> {
+            source := if one(0)? == { .Str(s) -> s.clone(); else -> return Err(unsupported("source", span)) }
+            Ok(live_to_ct(app_subscribe(source)))
+        }
+        "invalidate" -> {
+            footprint := if one(0)? == { .Str(s) -> s.clone(); else -> return Err(unsupported("footprint", span)) }
+            Ok(CtValue.Int(app_invalidate(footprint)))
+        }
+        "transact_invalidate" -> {
+            write_set := if one(0)? == { .Str(s) -> s.clone(); else -> return Err(unsupported("write_set", span)) }
+            Ok(CtValue.Int(app_transact_invalidate(write_set)))
+        }
+        "signal_push" -> {
+            payload := if one(1)? == { .Str(s) -> s.clone(); else -> return Err(unsupported("payload", span)) }
+            Ok(live_to_ct(app_signal_push(ct_to_live(one(0)?, span)?, payload)))
+        }
+        "live_get" -> Ok(CtValue.Str(app_live_get(ct_to_live(one(0)?, span)?)))
+        "live_show" -> Ok(CtValue.Str(app_live_show(ct_to_live(one(0)?, span)?)))
+        "live_stats" -> Ok(CtValue.Str(app_live_stats()))
+        else -> Err(unsupported("`app.{method}()`", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:801
+struct WebRouterHandle { value: JetWebRouter }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:804
+struct WebQueryHandle { value: JetWebQuery }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:807
+struct WebFormHandle { value: JetWebForm }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:810
+struct WebTableHandle { value: JetWebTable<CtValue> }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:812
+struct WebTableColumnHandle { value: JetWebTableColumn<CtValue> }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:815
+struct WebVirtualPlanViewportHandle { value: JetWebVirtualPlanViewport }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:818
+struct WebStoreHandle { value: JetWebStore<CtValue> }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:820
+// GATE #4494: atomic single-consumption of native patch/submission handles.
+struct WebStorePatchHandle { value: Mutex<JetWebStorePatch<CtValue>?> }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:822
+struct WebStoreSubscriptionHandle { value: JetWebStoreSubscription }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:824
+type WebFormValidationHandle = Mutex<JetWebFormTypedValidation?>
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:826
+type WebFormSubmissionHandle = Mutex<JetWebFormTypedSubmission?>
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:829
+fn web_record_field(value: &CtValue, name: String, span: Span) -> &CtValue Diagnostic! {
+    if value != .Struct{fields, ..} -> return Err(unsupported("checked Web record", span))
+    fields.iter().find(fn(entry) { (field, _) := entry; field == name }).map(fn(entry) { (_, value) := entry; value })
+        .ok_or_else(fn() { unsupported("Web record field `{name}`", span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:841
+fn web_enum_variant(value: &CtValue, expected: String, span: Span) -> String Diagnostic! {
+    if value == { .Enum{type_name, variant, ..} if type_name == expected -> Ok(variant); else -> Err(unsupported(expected, span)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:852
+fn web_enum_value<T: std.fmt.Debug>(type_name: String, value: T) -> CtValue {
+    CtValue.Enum{type_name: type_name.to_string(), variant: "{value:?}", args: []}
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:860
+fn web_form_field_spec(value: &CtValue, span: Span) -> (JetWebFormFieldSpec Err!) Diagnostic! {
+    field := fn(name) { web_record_field(value, name, span) }
+    value_type := if web_enum_variant(field("value_type")?, "WebFormValueType", span)? == {
+        "String" -> JetWebFormValueType.String; "Int" -> JetWebFormValueType.Int; "Bool" -> JetWebFormValueType.Bool; "Float" -> JetWebFormValueType.Float
+        else -> return Err(unsupported("WebFormValueType", span))
+    }
+    control := if web_enum_variant(field("control")?, "WebFormControl", span)? == {
+        "Text" -> JetWebFormControl.Text; "Email" -> JetWebFormControl.Email; "Password" -> JetWebFormControl.Password
+        "Number" -> JetWebFormControl.Number; "Checkbox" -> JetWebFormControl.Checkbox; "Hidden" -> JetWebFormControl.Hidden
+        "URL" -> JetWebFormControl.URL; "Date" -> JetWebFormControl.Date
+        else -> return Err(unsupported("WebFormControl", span))
+    }
+    optional := fn(value: &CtValue) -> String? Diagnostic! {
+        if value == {
+            .Present(value) -> web_string(value, "form optional text", span).map(fn(s) { Val(s) })
+            value if value.is_clean_stop() -> Ok(None)
+            else -> Err(unsupported("form optional text", span))
+        }
+    }
+    default := optional(field("default")?)?
+    group := optional(field("group")?)?
+    label := web_string(field("label")?, "form label", span)?
+    wire_name := web_string(field("wire_name")?, "form wire name", span)?
+    Ok(JetWebFormFieldSpec.new(web_string(field("name")?, "form field name", span)?, value_type,
+        web_bool(field("required")?, "form required field", span)?).and_then(fn(spec) {
+            spec := spec.with_control(control).with_label(label)?.with_wire_name(wire_name)?
+            if default == Val(default) { spec = spec.default_value(default)? }
+            if group == Val(group) { spec = spec.in_group(group)? }
+            Ok(spec)
+        }))
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:908
+fn web_form_decoded(value: JetWebFormDecodedInput) -> CtValue {
+    CtValue.Struct{type_name: "WebFormDecodedInput", fields: [
+        ("type_name", CtValue.Str(value.type_name)), ("values", web_string_map_value(value.values)), ("wire_values", web_string_map_value(value.wire_values))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:919
+fn web_error_map_value(value: [String: [String]]) -> CtValue {
+    keys := value.keys().collect<[String]>()
+    keys.sort()
+    CtValue.Map(keys.into_iter().map(fn(key) {
+        messages := value.remove(key).expect("sorted map key exists")
+        (CtKey.Str(key), CtValue.List(messages.into_iter().map(fn(message) { CtValue.Str(message) }).collect()))
+    }).collect())
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:926
+fn web_form_action_error(value: JetWebFormActionError) -> CtValue {
+    CtValue.Struct{type_name: "WebFormActionError", fields: [
+        ("field_errors", web_error_map_value(value.field_errors)), ("form_errors", CtValue.List(value.form_errors.into_iter().map(fn(s) { CtValue.Str(s) }).collect()))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:938
+fn web_form_action_error_read(value: &CtValue, span: Span) -> JetWebFormActionError Diagnostic! {
+    if web_record_field(value, "field_errors", span)? != .Map(fields) -> return Err(unsupported("form action field errors", span))
+    out := [String: [String]]{}
+    for (key, value) in fields {
+        if key != .Str(key) -> return Err(unsupported("form action field name", span))
+        out.insert(key.clone(), web_strings(value, "form action field errors", span)?)
+    }
+    Ok(JetWebFormActionError{field_errors: ^out, form_errors: web_strings(web_record_field(value, "form_errors", span)?, "form action errors", span)?})
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:959
+fn web_form_field_state(value: JetWebFormFieldState) -> CtValue {
+    CtValue.Struct{type_name: "WebFormFieldState", fields: [
+        ("name", CtValue.Str(value.name)), ("value_type", web_enum_value("WebFormValueType", value.value_type)),
+        ("required", CtValue.Bool(value.required)), ("value", CtValue.Str(value.value)), ("touched", CtValue.Bool(value.touched)),
+        ("validating", CtValue.Bool(value.validating)), ("errors", CtValue.List(value.errors.into_iter().map(fn(s) { CtValue.Str(s) }).collect()))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:976
+fn web_form_state(value: JetWebFormState) -> CtValue {
+    keys := value.fields.keys().collect<[String]>()
+    keys.sort()
+    fields := keys.into_iter().map(fn(key) { (CtKey.Str(key.clone()), web_form_field_state(value.fields.remove(key).expect("sorted map key exists"))) }).collect()
+    CtValue.Struct{type_name: "WebFormState", fields: [
+        ("status", web_enum_value("WebFormStatus", value.status)), ("fields", CtValue.Map(fields)),
+        ("action", CtValue.Str(value.action)), ("method", CtValue.Str(value.method)), ("result", CtValue.Str(value.result)),
+        ("error", CtValue.Str(value.error)), ("submission_count", CtValue.Int(value.submission_count as I64))]}
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:993
+fn web_opaque<T: std.any.Any>(value: &CtValue, span: Span) -> &T Diagnostic! {
+    if value != .Closure(data) -> return Err(unsupported(std.any.type_name<T>(), span))
+    data.opaque.and_then(fn(value) { value.downcast_ref<T>() }).ok_or_else(fn() { unsupported(std.any.type_name<T>(), span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1006
+fn opaque_web<T: std.any.Any + Send + Sync>(value: T) -> CtValue {
+    // GATE #4494: retained opaque allocation, not a replacement value.
+    CtValue.Closure(Arc.new(ClosureData{lambda: Lambda{take_names: [], params: [], result_type: None, error_type: None,
+        effects: None, body: LambdaBody.Block([]), span: Span.new(0, 0), meta: LambdaMeta.default()},
+        captured: HashMap.new(), return_type: None, opaque: Val(CtOpaque.new(^value))}))
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1024
+pub struct AppHandle { value: JetApp }
+use std.collections.HashMap
+use jet_foundation.AST.CtFloat
+use jet_foundation.MIR.[MirType, MirTypeKind]
+use jet_comptime.Comptime.MirBridge.mir_to_ast_type
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1026
+impl std.fmt.Debug for AppHandle {
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1027
+    fn fmt(self: &AppHandle, formatter: &std.fmt.Formatter) -> Void std.fmt.Error! { formatter.debug_struct("AppHandle").finish_non_exhaustive() }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1032
+pub enum AppRuntimeResult { App(AppHandle), Value(CtValue) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1037
+pub fn app_new_runtime() -> AppHandle { AppHandle{value: jet_app()} }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1041
+fn app_string(value: &CtValue, name: String, span: Span) -> String Diagnostic! {
+    if value == { .Str(value) -> Ok(value.clone()); else -> Err(unsupported(name, span)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1048
+fn app_binding(value: &CtValue, span: Span) -> [JetAppRouteBinding] Diagnostic! {
+    value := app_string(value, "app route binding", span)?
+    Ok(jet_app_route_binding(value))
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1053
+fn app_callback(value: &CtValue, span: Span) -> CtValue Diagnostic! {
+    if value is .Closure(_) -> Ok(value.clone()) else -> Err(unsupported("app callback", span))
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1064
+fn tree_text(tree: &DataTree) -> String? {
+    if tree == {
+        .Text(value) | .TypedText(value) | .Number(value) -> Val(value.clone())
+        .Int(value) | .Float(value) | .Bool(value) -> Val(value.to_string())
+        else -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1077
+fn tree_to_untyped(tree: &DataTree, span: Span) -> CtValue Err! {
+    if tree == {
+        .Null -> Ok(CtValue.Unit)
+        .Bool(value) -> Ok(CtValue.Bool(value))
+        .Int(value) -> Ok(CtValue.Int(value))
+        .Float(value) -> Ok(CtValue.Float(CtFloat.f64(value)))
+        .Number(value) -> value.parse<I64>().map(fn(n) { CtValue.Int(n) })
+            .or_else(fn(_) { value.parse<F64>().map(fn(n) { CtValue.Float(CtFloat.f64(n)) }) }).map_err(fn(_) { "invalid JSON number `{value}`" })
+        .TypedText(value) -> { parsed := parse_app_json_tree(value)?; tree_to_untyped(parsed, span) }
+        .Text(value) -> Ok(CtValue.Str(value.clone()))
+        .Bytes(value) -> Ok(CtValue.Bytes(value.clone()))
+        .Array(values) -> {
+            out := [CtValue].with_capacity(values.len())
+            for value in values { out.push(tree_to_untyped(value, span)?) }
+            Ok(CtValue.List(^out))
+        }
+        .Object(values) -> {
+            fields := [(String, CtValue)].with_capacity(values.len())
+            for (name, value) in values { fields.push((name.clone(), tree_to_untyped(value, span)?)) }
+            Ok(CtValue.Struct{type_name: "RouteObject", fields: ^fields})
+        }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1110
+fn binding_type(value: String) -> (String, Bool) {
+    if value.strip_suffix('?') == { Val(value) -> (value.to_string(), true); None -> (value.to_string(), false) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1117
+fn binding_ast_type(value: String) -> Type {
+    (value, optional) := binding_type(value)
+    ty := if value == { "Int" -> Type.Int; "Float" -> Type.Float; "Bool" -> Type.Bool; "String" | "Text" -> Type.String; "Char" -> Type.Char; value -> Type.Named(value.to_string()) }
+    if optional -> Type.Option(^ty) else -> ^ty
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1134
+fn decode_binding_tree(tree: &DataTree, ty: String, span: Span) -> CtValue Err! {
+    (base, optional) := binding_type(ty)
+    if optional {
+        if tree is .Null -> return Ok(CtValue.absent(binding_ast_type(ty)))
+        return decode_binding_tree(tree, base, span).map(fn(value) { CtValue.Present(value) })
+    }
+    if base == {
+        "Int" -> tree_text(tree).and_then(fn(value) { value.parse<I64>().ok() }).map(fn(n) { CtValue.Int(n) }).ok_or_else(fn() { "route input is not a valid Int: {tree:?}" })
+        "Float" -> tree_text(tree).and_then(fn(value) { value.parse<F64>().ok() }).map(fn(n) { CtValue.Float(CtFloat.f64(n)) }).ok_or_else(fn() { "route input is not a valid Float: {tree:?}" })
+        "Bool" -> tree_text(tree).and_then(fn(value) { if value == { "true" -> Val(true); "false" -> Val(false); else -> None } }).map(fn(b) { CtValue.Bool(b) }).ok_or_else(fn() { "route input is not a valid Bool: {tree:?}" })
+        "String" | "Text" -> tree_text(tree).map(fn(s) { CtValue.Str(s) }).ok_or_else(fn() { "route input is not valid Text: {tree:?}" })
+        "Char" -> tree_text(tree).and_then(fn(value) { value.chars().next().filter(fn(_) { value.chars().count() == 1 }) }).map(fn(c) { CtValue.Char(c) }).ok_or_else(fn() { "route input is not a valid Char: {tree:?}" })
+        else -> tree_to_untyped(tree, span).map(fn(value) { if value == { .Struct{fields, ..} -> CtValue.Struct{type_name: base.clone(), fields: ^fields}; value -> ^value } })
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1181
+fn parse_app_json_tree(value: String) -> DataTree Err! { EncodingJson.parse_json(value, true).map_err(fn(error) { error.message }) }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1187
+fn mir_tree_to_ct(tree: &DataTree, ty: &MirType, span: Span) -> CtValue Err! {
+    if ty.kind() == {
+        .Option(inner) -> {
+            if tree is .Null -> Ok(CtValue.absent(mir_to_ast_type(inner)))
+            else -> mir_tree_to_ct(tree, inner, span).map(fn(value) { CtValue.Present(value) })
+        }
+        .Shared(inner) | .Tagged{inner, ..} | .Quantity{base: inner, ..} | .InlineRange{base: inner, ..} -> mir_tree_to_ct(tree, inner, span)
+        .Int | .IntN{..} -> decode_binding_tree(tree, "Int", span)
+        .Float | .Float32 -> decode_binding_tree(tree, "Float", span)
+        .Bool -> decode_binding_tree(tree, "Bool", span)
+        .String -> decode_binding_tree(tree, "String", span)
+        .Char -> decode_binding_tree(tree, "Char", span)
+        .List(inner) | .FixedList{elem: inner, ..} -> {
+            if tree != .Array(values) -> return Err("route input is not a list: {tree:?}")
+            out := [CtValue].with_capacity(values.len())
+            for value in values { out.push(mir_tree_to_ct(value, inner, span)?) }
+            Ok(CtValue.List(^out))
+        }
+        .Map{value: value_ty, ..} -> {
+            if tree != .Object(values) -> return Err("route input is not an object: {tree:?}")
+            out := [CtKey: CtValue]{} // GATE #4499: exact CtKey equality.
+            for (key, value) in values { out.insert(CtKey.Str(key.clone()), mir_tree_to_ct(value, value_ty, span)?) }
+            Ok(CtValue.Map(^out))
+        }
+        .Tuple(fields) -> {
+            if tree != .Object(values) -> return Err("route input is not a tuple object: {tree:?}")
+            out := [(String, CtValue)].with_capacity(fields.len())
+            for (name, field_ty) in fields {
+                value := values.iter().find(fn(entry) { (key, _) := entry; key == name }).map(fn(entry) { (_, value) := entry; value }) ?? return Err("route input is missing `{name}`")
+                out.push((name.clone(), mir_tree_to_ct(value, field_ty, span)?))
+            }
+            Ok(CtValue.Struct{type_name: "RouteTuple", fields: ^out})
+        }
+        .Apply{name, ..} -> {
+            value := tree_to_untyped(tree, span)?
+            Ok(if value == { .Struct{fields, ..} -> CtValue.Struct{type_name: name.name.clone(), fields: ^fields}; value -> ^value })
+        }
+        else -> tree_to_untyped(tree, span)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1269
+fn decode_route_inputs(trees: &[DataTree], bindings: &[JetAppRouteBinding], types: &[MirType], span: Span) -> [CtValue] Err! {
+    if trees.len() != bindings.len() || trees.len() != types.len() -> return Err("app callback received {trees.len()} inputs for {bindings.len()} checked bindings")
+    out := [CtValue].with_capacity(trees.len())
+    for ((tree, binding), ty) in trees.iter().zip(bindings).zip(types) {
+        value := if binding == {
+            .Search{scalar: None, fields, ..} -> {
+                if tree != .Object(values) -> return Err("route search input is not an object")
+                out_fields := [(String, CtValue)].with_capacity(fields.len())
+                for field in fields {
+                    value := values.iter().find(fn(entry) { (name, _) := entry; name == field.name })
+                    decoded := if value == {
+                        Val((_, value)) -> decode_binding_tree(value, field.ty, span)?
+                        None if !field.required -> CtValue.absent(binding_ast_type(field.ty))
+                        None -> return Err("route search input is missing `{field.name}`")
+                    }
+                    out_fields.push((field.name.clone(), ^decoded))
+                }
+                CtValue.Struct{type_name: ty.nominal_name().unwrap_or("RouteSearch").to_string(), fields: ^out_fields}
+            }
+            .Data -> {
+                tree := if tree == { .TypedText(value) -> parse_app_json_tree(value)?; tree -> tree.clone() }
+                mir_tree_to_ct(tree, ty, span)?
+            }
+            else -> mir_tree_to_ct(tree, ty, span)?
+        }
+        out.push(^value)
+    }
+    Ok(^out)
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1327
+fn callback_error(value: CtValue) -> String { if value == { .Failed(report) -> "{report:?}"; value -> "{value:?}" } }
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1334
+fn callback_page(value: CtValue) -> JetWebPage Err! {
+    value := if value == { .Present(value) -> ^value; value -> ^value }
+    if value != .Struct{fields, ..} -> return Err("app page callback did not return WebPage")
+    title := fields.iter().find(fn(entry) { (name, _) := entry; name == "title" }).and_then(fn(entry) {
+        (_, value) := entry; if value == { .Str(value) -> Val(value.clone()); else -> None }
+    }) ?? return Err("app page callback returned WebPage without title")
+    body := fields.iter().find(fn(entry) { (name, _) := entry; name == "body" }).and_then(fn(entry) {
+        (_, value) := entry; if value == { .Str(value) -> Val(value.clone()); else -> None }
+    }) ?? return Err("app page callback returned WebPage without body")
+    Ok(JetWebPage{title: title, body: body})
+}
+
+use jet_comptime.Comptime.Methods.invoke_standalone_closure
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1361
+fn app_page_callback(callback: CtValue, types: [MirType], binding: [JetAppRouteBinding], span: Span) -> JetAppTreeRouteCallback<JetWebPage Err!> {
+    arity := types.len()
+    JetAppTreeRouteCallback.new(arity, Arc.new(fn(trees) {
+        values := decode_route_inputs(trees, binding, types, span)?
+        value := invoke_standalone_closure(callback, ^values, span).map_err(fn(error) { "{error:?}" })?
+        if value == { .Failed(report) -> Err("{report:?}"); value -> Ok(callback_page(^value)) }
+    }))
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1382
+fn app_boundary_callback(callback: CtValue, span: Span) -> JetAppTreeRouteCallback<JetWebPage Err!> {
+    JetAppTreeRouteCallback.new(0, Arc.new(fn(_) {
+        value := invoke_standalone_closure(callback, [], span).map_err(fn(error) { "{error:?}" })?
+        if value == { .Failed(report) -> Err("{report:?}"); value -> Ok(callback_page(^value)) }
+    }))
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1399
+fn app_loader_callback(callback: CtValue, types: [MirType], binding: [JetAppRouteBinding], span: Span) -> JetAppTreeRouteCallback<String Err!> {
+    arity := types.len()
+    JetAppTreeRouteCallback.new(arity, Arc.new(fn(trees) {
+        values := decode_route_inputs(trees, binding, types, span)?
+        value := invoke_standalone_closure(callback, ^values, span).map_err(fn(error) { "{error:?}" })?
+        if value == { .Failed(report) -> Err("{report:?}"); .Present(value) -> Ok(Ok(ct_to_json_string(value))); value -> Ok(Ok(ct_to_json_string(value))) }
+    }))
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1421
+fn ct_to_json_string(value: &CtValue) -> String {
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1422
+    fn tree(value: &CtValue) -> DataTree {
+        if value == {
+            .Int(value) -> DataTree.Int(value)
+            .Float(value) -> DataTree.Float(value.as_f64())
+            .Bool(value) -> DataTree.Bool(value)
+            .Char(value) -> DataTree.Text(value.to_string())
+            .Str(value) -> DataTree.Text(value.clone())
+            .Bytes(value) -> DataTree.Bytes(value.clone())
+            .List(values) -> DataTree.Array(values.iter().map(fn(value) { tree(value) }).collect())
+            .Map(values) -> {
+                keys := values.keys().collect<[CtKey]>()
+                keys.sort()
+                DataTree.Object(keys.iter().filter_map(fn(key) { if key == { .Str(s) -> Val((s.clone(), tree(values.get(key).expect("sorted key exists")))); else -> None } }).collect())
+            }
+            .Struct{fields, ..} -> DataTree.Object(fields.iter().map(fn(entry) { (key, value) := entry; (key.clone(), tree(value)) }).collect())
+            .Enum{variant, ..} if variant == "Null" -> DataTree.Null
+            .Enum{args, ..} -> DataTree.Object(args.iter().filter_map(fn(entry) { (key, value) := entry; key.map(fn(key) { (key.clone(), tree(value)) }) }).collect())
+            .Present(value) -> tree(value)
+            .Failed(_) | .Unit | .Closure(_) -> DataTree.Null
+            .BigInt(value) -> DataTree.Number(value.to_string_rep())
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1461
+    fn render(tree: &DataTree) -> String {
+        if tree == {
+            .Null -> "null"
+            .Bool(value) | .Int(value) -> value.to_string()
+            .Float(value) -> "{value:?}"
+            .Number(value) -> value.clone()
+            .TypedText(value) | .Text(value) -> "{value:?}"
+            .Bytes(values) -> "[{values.iter().map(fn(value) { value.to_string() }).collect<[String]>().join(",")}]"
+            .Array(values) -> "[{values.iter().map(fn(value) { render(value) }).collect<[String]>().join(",")}]"
+            .Object(values) -> {
+                parts := values.iter().map(fn(entry) { (key, value) := entry; "{key:?}:{render(value)}" }).collect<[String]>().join(",")
+                "{{{parts}}}"
+            }
+        }
+    }
+    render(tree(value))
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1491
+fn app_output_type(value: &MirType?) -> String {
+    value := value ?? return "Unit"
+    if value.kind() == { .Result{ok, ..} -> ok.canonical_key(); else -> value.canonical_key() }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1501
+pub fn app_method_runtime(handle: &AppHandle, method: String, args: &[CtValue], callback_types: &[MirType], callback_return_type: &MirType?, span: Span) -> AppRuntimeResult Diagnostic! {
+    one := fn(index: USize) -> &CtValue Diagnostic! { args.get(index).ok_or_else(fn() { unsupported("app.{method} argument {index}", span) }) }
+    wrap_app := fn(value: JetApp) { AppRuntimeResult.App(AppHandle{value: value}) }
+    if method == {
+        "route" | "page" | "layout" -> {
+            path := app_string(one(0)?, "app route path", span)?
+            callback := app_callback(one(1)?, span)?
+            binding_text := app_string(one(2)?, "app route binding", span)?
+            binding := jet_app_route_binding(binding_text)
+            callback := app_page_callback(^callback, callback_types.to_vec(), ^binding, span)
+            app := if method == {
+                "route" -> jet_app_route(handle.value, path, callback, binding_text)
+                "page" -> jet_app_page(handle.value, path, callback, binding_text)
+                else -> jet_app_layout(handle.value, path, callback, binding_text)
+            }
+            Ok(wrap_app(^app))
+        }
+        "loader" -> {
+            callback := app_callback(one(0)?, span)?
+            binding_text := app_string(args.last() ?? return Err(unsupported("app loader binding", span)), "app loader binding", span)?
+            binding := jet_app_route_binding(binding_text)
+            callback := app_loader_callback(^callback, callback_types.to_vec(), binding.clone(), span)
+            preload := if args.len() == 4 {
+                if one(2)? == { .Bool(value) -> value; else -> return Err(unsupported("app loader preload", span)) }
+            } else { false }
+            data_type := app_output_type(callback_return_type)
+            Ok(wrap_app(handle.value.loader_encoded(callback, binding, data_type, preload)))
+        }
+        "pending" | "not_found" | "error" -> {
+            callback := app_boundary_callback(app_callback(one(0)?, span)?, span)
+            app := if method == { "pending" -> jet_app_pending(handle.value, callback); "not_found" -> jet_app_not_found(handle.value, callback); else -> jet_app_error(handle.value, callback) }
+            Ok(wrap_app(^app))
+        }
+        "action" | "form" | "data" -> {
+            name := app_string(one(0)?, "app server function name", span)?
+            callback := app_callback(one(1)?, span)?
+            binding := if method == "form" -> app_string(args.get(2) ?? return Err(unsupported("app form binding", span)), "app form binding", span)? else -> String.new()
+            invoke := fn(args) -> String Err! {
+                value := invoke_standalone_closure(callback, args, span).map_err(fn(error) { "{error:?}" })?
+                if value == { .Failed(report) -> Err("{report:?}"); value -> Ok(ct_to_json_string(value)) }
+            }
+            app := if callback_types.is_empty() {
+                action := Arc.new(fn() { invoke([]) })
+                if method == { "action" -> jet_app_action(handle.value, name, action); "form" -> jet_app_form(handle.value, name, action, binding); else -> jet_app_data(handle.value, name, action) }
+            } else {
+                action := if method == "form" {
+                    bindings := jet_app_route_binding(binding)
+                    types := callback_types.to_vec()
+                    Arc.new(fn(body) {
+                        tree := parse_app_json_tree(body)?
+                        values := decode_route_inputs(std.slice.from_ref(tree), bindings, types, span)?
+                        invoke(^values)
+                    })
+                } else {
+                    Arc.new(fn(body) { invoke([CtValue.Str(body.clone())]) })
+                }
+                if method == { "action" -> jet_app_action(handle.value, name, action); "form" -> jet_app_form(handle.value, name, action, binding); else -> jet_app_data(handle.value, name, action) }
+            }
+            Ok(wrap_app(^app))
+        }
+        "mount" -> {
+            prefix := app_string(one(0)?, "app mount prefix", span)?
+            callback := app_callback(one(1)?, span)?
+            app := handle.value.mount(prefix, fn(path) { _ :: invoke_standalone_closure(callback, [CtValue.Str(path.clone())], span) })
+            Ok(wrap_app(^app))
+        }
+        "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter" -> {
+            value := app_string(one(0)?, "app setting", span)?
+            app := if method == {
+                "routes" -> jet_app_routes(handle.value, value)
+                "security" -> jet_app_security(handle.value, value)
+                "assets" -> jet_app_assets(handle.value, value)
+                "split" -> jet_app_split(handle.value, value)
+                "code_split" -> jet_app_code_split(handle.value, value)
+                "cache" -> jet_app_cache(handle.value, value)
+                "a11y" -> jet_app_a11y(handle.value, value)
+                else -> jet_app_adapter(handle.value, value)
+            }
+            Ok(wrap_app(^app))
+        }
+        "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev" | "hydration_release" -> {
+            app := if method == {
+                "csr" -> jet_app_csr(handle.value)
+                "ssr" -> jet_app_ssr(handle.value)
+                "ssg" -> jet_app_ssg(handle.value)
+                "stream" -> jet_app_stream(handle.value)
+                "streaming" -> jet_app_streaming(handle.value)
+                "island" -> jet_app_island(handle.value)
+                "hydration_dev" -> jet_app_hydration_dev(handle.value)
+                else -> jet_app_hydration_release(handle.value)
+            }
+            Ok(wrap_app(^app))
+        }
+        "facts_json" -> Ok(AppRuntimeResult.Value(CtValue.Str(jet_app_facts_json(handle.value))))
+        "serve" | "serve_on" -> {
+            if args.first() == Val(value) {
+                port := if value == { .Int(value) if value >= 0 && value <= U16.MAX as I64 -> value; else -> return Err(unsupported("app serve port", span)) }
+                jet_app_serve_on(handle.value, port)
+            } else { jet_app_serve(handle.value) }
+            Ok(AppRuntimeResult.Value(CtValue.Unit))
+        }
+        else -> Err(unsupported("`App.{method}()`", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1676
+fn web_router(value: &CtValue, span: Span) -> &JetWebRouter Diagnostic! {
+    if value != .Closure(data) -> return Err(unsupported("WebRouter", span))
+    data.opaque.and_then(fn(value) { value.downcast_ref<WebRouterHandle>() }).map(fn(value) { &value.value }).ok_or_else(fn() { unsupported("WebRouter", span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1687
+fn web_query(value: &CtValue, span: Span) -> &JetWebQuery Diagnostic! {
+    if value != .Closure(data) -> return Err(unsupported("WebQuery", span))
+    data.opaque.and_then(fn(value) { value.downcast_ref<WebQueryHandle>() }).map(fn(value) { &value.value }).ok_or_else(fn() { unsupported("WebQuery", span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1698
+fn web_form(value: &CtValue, span: Span) -> &JetWebForm Diagnostic! {
+    if value != .Closure(data) -> return Err(unsupported("WebForm", span))
+    data.opaque.and_then(fn(value) { value.downcast_ref<WebFormHandle>() }).map(fn(value) { &value.value }).ok_or_else(fn() { unsupported("WebForm", span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1709
+fn web_table(value: &CtValue, span: Span) -> &JetWebTable<CtValue> Diagnostic! {
+    if value != .Closure(data) -> return Err(unsupported("WebTable", span))
+    data.opaque.and_then(fn(value) { value.downcast_ref<WebTableHandle>() }).map(fn(value) { &value.value }).ok_or_else(fn() { unsupported("WebTable", span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1720
+fn web_table_column(value: &CtValue, span: Span) -> &JetWebTableColumn<CtValue> Diagnostic! {
+    if value != .Closure(data) -> return Err(unsupported("WebTableColumn", span))
+    data.opaque.and_then(fn(value) { value.downcast_ref<WebTableColumnHandle>() }).map(fn(value) { &value.value }).ok_or_else(fn() { unsupported("WebTableColumn", span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1734
+fn web_virtual_plan_viewport(value: &CtValue, span: Span) -> &JetWebVirtualPlanViewport Diagnostic! {
+    if value != .Closure(data) -> return Err(unsupported("WebVirtualPlanViewport", span))
+    data.opaque.and_then(fn(value) { value.downcast_ref<WebVirtualPlanViewportHandle>() }).map(fn(value) { &value.value }).ok_or_else(fn() { unsupported("WebVirtualPlanViewport", span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1748
+fn web_store(value: &CtValue, span: Span) -> &JetWebStore<CtValue> Diagnostic! {
+    if value != .Closure(data) -> return Err(unsupported("WebStore", span))
+    data.opaque.and_then(fn(value) { value.downcast_ref<WebStoreHandle>() }).map(fn(value) { &value.value }).ok_or_else(fn() { unsupported("WebStore", span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1759
+fn web_string(value: &CtValue, what: String, span: Span) -> String Diagnostic! {
+    if value == { .Str(value) -> Ok(value.clone()); else -> Err(unsupported(what, span)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1766
+fn web_bool(value: &CtValue, what: String, span: Span) -> Bool Diagnostic! {
+    if value == { .Bool(value) -> Ok(value); else -> Err(unsupported(what, span)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1773
+fn web_int(value: &CtValue, what: String, span: Span) -> I64 Diagnostic! {
+    if value == { .Int(value) -> Ok(value); .BigInt(value) -> value.try_i64().ok_or_else(fn() { unsupported(what, span) }); else -> Err(unsupported(what, span)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1783
+fn web_strings(value: &CtValue, what: String, span: Span) -> [String] Diagnostic! {
+    if value != .List(values) -> return Err(unsupported(what, span))
+    out := [String].with_capacity(values.len())
+    for value in values { out.push(web_string(value, what, span)?) }
+    Ok(^out)
+}

@@ -1,0 +1,700 @@
+// Test-private continuation of Compiler/Bootstrap/Tests.rs; shares fixture and stage helpers with packet 0550.
+use jet_foundation.[TEXT_NUL, MIRProgram, MIRCopyFact, rust_code_mask, sha256_hex, rust_debug_string]
+use jet_bootstrap.[BootstrapSourceUnit, bootstrap_unit_catalog, bootstrap_unit_definitions, bootstrap_defined_unit_item, bootstrap_unit_symbol_at, bootstrap_unit_symbols, bootstrap_strongly_connected_units]
+use jet_store.runtime.[split_runtime_crate, export_crate_source]
+use core.collections.Set
+use std.[fs, env, process, time]
+use std.process.Command
+use jet_tests.RustReference
+
+// Rust: Compiler/Bootstrap/Tests.rs:1619
+#Test("bootstrap_private_self_compile_harness") {
+    repo :: OSPath(BOOTSTRAP_CANONICAL_SOURCE_ROOT)
+    zero :: build_stage_zero(repo, true)
+    session :: zero.session
+    compiler_project :: zero.compiler_project
+    source_lease :: zero.source_lease
+    stage_zero_project :: zero.project
+    stage_zero_binary :: zero.binary
+    stage_zero_id :: zero.id
+    task_roots_output :: session.join("task-roots.out")
+    task_roots_receipt :: session.join("task-roots.receipt")
+    run_generated_artifact(stage_zero_binary, "task-roots", compiler_project, BOOTSTRAP_ENTRY_RELATIVE, task_roots_output, task_roots_receipt)
+    assert_task_roots_receipt(task_roots_output, task_roots_receipt)
+    small_project :: session.join("small-program")
+    small_entry :: write_small_program(small_project)
+    assert_optional_codec_roundtrip(stage_zero_binary, small_project, session, "stage-zero")
+    stage_zero_small_source :: session.join("stage-zero-small.rs")
+    stage_zero_small_receipt :: session.join("stage-zero-small.receipt")
+    run_generated_artifact(stage_zero_binary, "factory", small_project, SMALL_ENTRY_RELATIVE, stage_zero_small_source, stage_zero_small_receipt)
+    assert_factory_receipt(stage_zero_small_receipt)
+    stage_zero_small_rust :: fs.read_to_string(stage_zero_small_source) catch error { panic("stage-zero factory did not produce `{stage_zero_small_source}`: {error}") }
+    stage_zero_small_project :: session.join("stage-zero-small-backend")
+    (stage_zero_small_binary, _) :: build_backend_artifact(repo, stage_zero_small_project, "jet_bootstrap_small_stage_zero", stage_zero_small_rust)
+    image_reuse_output :: session.join("user-image-reuse.rs")
+    image_reuse_receipt :: session.join("user-image-reuse.receipt")
+    run_generated_artifact(stage_zero_small_binary, "factory", small_project, SMALL_ENTRY_RELATIVE, image_reuse_output, image_reuse_receipt)
+    assert_factory_receipt(image_reuse_receipt)
+    assert_small_program_runs(stage_zero_small_binary, "stage zero")
+    source_lease.revalidate() catch error { panic("compiler source authority changed before stage-zero self-source: {error}") }
+    stage_one_raw :: session.join("stage-one.rs")
+    stage_one_receipt :: session.join("stage-one.receipt")
+    run_generated_artifact(stage_zero_binary, "runner", compiler_project, BOOTSTRAP_ENTRY_RELATIVE, stage_one_raw, stage_one_receipt)
+    source_lease.revalidate() catch error { panic("compiler source authority changed after stage-zero self-source: {error}") }
+    assert_runner_receipt(stage_one_receipt)
+    stage_one_source :: append_generated_artifact_main(fs.read_to_string(stage_one_raw) catch error { panic("stage-zero Runner did not produce stage one source: {error}") }, true)
+    stage_one_image :: generated_compiler_image(stage_one_raw)
+    stage_one_project :: session.join("stage-one")
+    (stage_one_binary, stage_one_id) :: build_backend_artifact_with_native_library(repo, stage_one_project, "jet_bootstrap_stage_one", stage_one_source, Val(stage_one_image), None, None)
+    assert_ne(stage_zero_id, stage_one_id, "distinct generated compiler artifacts must not reuse one identity")
+    assert_optional_codec_roundtrip(stage_one_binary, small_project, session, "stage-one")
+    stage_one_small_source :: session.join("stage-one-small.rs")
+    stage_one_small_receipt :: session.join("stage-one-small.receipt")
+    run_generated_artifact(stage_one_binary, "factory", small_project, SMALL_ENTRY_RELATIVE, stage_one_small_source, stage_one_small_receipt)
+    assert_factory_receipt(stage_one_small_receipt)
+    stage_one_small_rust :: fs.read_to_string(stage_one_small_source) catch error { panic("stage-one factory did not produce `{stage_one_small_source}`: {error}") }
+    stage_one_small_project :: session.join("stage-one-small-backend")
+    (stage_one_small_binary, _) :: build_backend_artifact(repo, stage_one_small_project, "jet_bootstrap_small_stage_one", stage_one_small_rust)
+    assert_small_program_runs(stage_one_small_binary, "stage one")
+    source_lease.revalidate() catch error { panic("compiler source authority changed before stage-one self-source: {error}") }
+    stage_two_raw :: session.join("stage-two.raw.rs")
+    stage_two_receipt :: session.join("stage-two.receipt")
+    run_generated_artifact(stage_one_binary, "runner", compiler_project, BOOTSTRAP_ENTRY_RELATIVE, stage_two_raw, stage_two_receipt)
+    source_lease.revalidate() catch error { panic("compiler source authority changed after stage-one self-source: {error}") }
+    assert_runner_receipt(stage_two_receipt)
+    stage_two_source :: session.join("stage-two.rs")
+    stage_two_source_text :: append_generated_artifact_main(fs.read_to_string(stage_two_raw) catch error { panic("stage-one Runner did not produce stage-two source: {error}") }, true)
+    fs.write(stage_two_source, stage_two_source_text) catch error { panic("cannot retain stage-two source `{stage_two_source}`: {error}") }
+    stage_two_image :: generated_compiler_image(stage_two_raw)
+    fs.write(stage_two_source.with_extension("image"), stage_two_image) catch error { panic("cannot retain stage-two compiler image beside `{stage_two_source}`: {error}") }
+    stage_two_project :: session.join("stage-two")
+    (stage_two_binary, stage_two_id) :: build_backend_artifact_with_native_library(repo, stage_two_project, "jet_bootstrap_stage_two", stage_two_source_text, Val(stage_two_image), None, None)
+    assert_ne(stage_one_id, stage_two_id, "distinct generated compiler artifacts must not reuse one identity")
+    assert_optional_codec_roundtrip(stage_two_binary, small_project, session, "stage-two")
+    assert_mir_optimizer_compiler_source(stage_two_binary, compiler_project, session)
+    assert_mir_optimizer_fixtures(stage_two_binary, repo, session)
+    invalid_project :: session.join("invalid-imported-source")
+    (invalid_entry, invalid_entry_source, imported_source_path, imported_source) :: write_invalid_import_project(invalid_project)
+    invalid_output :: session.join("invalid-compile.rs")
+    invalid_receipt :: session.join("invalid-compile.receipt")
+    run_generated_artifact(stage_two_binary, "runner", invalid_project, SMALL_ENTRY_RELATIVE, invalid_output, invalid_receipt)
+    invalid_receipt_text :: fs.read_to_string(invalid_receipt) catch error { panic("cannot read generated invalid-compile receipt `{invalid_receipt}`: {error}") }
+    assert(invalid_receipt_text.lines().any(fn(line) { line == "complete=false" }))
+    assert_receipt_count_at_least(invalid_receipt_text, "report_count", 1)
+    assert(!invalid_output.exists(), "an incomplete generated Jet compile must not produce backend Rust source")
+    assert(imported_source.bytes().len() > imported_source.chars().count(), "invalid source fixture must exercise UTF-8 byte coordinates")
+    end :: imported_source.bytes().len()
+    generated_report :: report_at_imported_eof(receipt_reports(invalid_receipt), imported_source_path, end)
+    source_closure :: [(invalid_entry, invalid_entry_source), (imported_source_path, imported_source)]
+    reference_reports :: rust_reference_reports(invalid_entry, invalid_entry_source, source_closure)
+    reference_report :: report_at_imported_eof(reference_reports, imported_source_path, end)
+    assert_eq(generated_report, reference_report, "generated Jet report for a non-entry Unicode EOF error must match the Rust reference")
+    casing_project :: session.join("identifier-casing")
+    (casing_entry, casing_entry_source, casing_closure) :: write_identifier_casing_project(casing_project)
+    casing_output :: session.join("identifier-casing.rs")
+    casing_receipt :: session.join("identifier-casing.receipt")
+    run_generated_artifact(stage_two_binary, "runner", casing_project, SMALL_ENTRY_RELATIVE, casing_output, casing_receipt)
+    generated_casing_reports :: receipt_reports(casing_receipt).filter(fn(report) { report.contains("\"code\":\"E0357\"") }).collect()
+    reference_casing_reports :: rust_reference_reports(casing_entry, casing_entry_source, casing_closure).filter(fn(report) { report.contains("\"code\":\"E0357\"") }).collect()
+    assert_eq(reference_casing_reports.len(), 8, "casing parity fixture must exercise every checked category: {reference_casing_reports}")
+    assert_eq(generated_casing_reports, reference_casing_reports, "generated Jet E0357 reports must match the Rust reference (D-SHAPE-CASE1)")
+    valid_report_project :: session.join("valid-report")
+    (valid_entry, valid_entry_source) :: write_valid_report_project(valid_report_project)
+    valid_report_output :: session.join("valid-report.rs")
+    valid_report_receipt :: session.join("valid-report.receipt")
+    run_generated_artifact(stage_two_binary, "runner", valid_report_project, SMALL_ENTRY_RELATIVE, valid_report_output, valid_report_receipt)
+    assert_runner_receipt(valid_report_receipt)
+    assert(valid_report_output.is_file(), "a complete generated Jet compile must produce backend Rust source")
+    valid_source_closure :: [(valid_entry, valid_entry_source)]
+    generated_valid_reports :: receipt_reports(valid_report_receipt)
+    reference_valid_reports :: rust_reference_success_reports(valid_entry, valid_entry_source, valid_source_closure)
+    assert(reference_valid_reports.any(fn(report) { report.contains("\"code\":\"L0104\"") }), "valid parity fixture must exercise a successful compile with a lint report: {reference_valid_reports}")
+    assert(reference_valid_reports.any(fn(report) { report.contains("\"code\":\"L0619\"") }), "valid parity fixture must exercise a report with absent source metadata: {reference_valid_reports}")
+    assert_eq(generated_valid_reports, reference_valid_reports, "generated Jet reports for a complete compile must match the Rust reference")
+    closure_project :: session.join("nested-closure-callback")
+    write_nested_closure_callback_project(closure_project)
+    closure_output :: session.join("nested-closure-callback.rs")
+    closure_receipt :: session.join("nested-closure-callback.receipt")
+    run_generated_artifact(stage_two_binary, "factory", closure_project, SMALL_ENTRY_RELATIVE, closure_output, closure_receipt)
+    assert_factory_receipt(closure_receipt)
+    assert(closure_output.is_file(), "captured lambdas and C callback adapters must survive Pipeline MIR assembly and reach emission")
+    projection_output :: session.join("offset-projection.span")
+    projection_receipt :: session.join("offset-projection.receipt")
+    run_generated_artifact(stage_two_binary, "offset-projection", small_project, SMALL_ENTRY_RELATIVE, projection_output, projection_receipt)
+    assert_eq(fs.read_to_string(projection_output) catch error { panic("cannot read nonzero-offset projection `{projection_output}`: {error}") }, "0..4", "aggregate offset 1200 must rebase to UTF-8 physical byte span 0..4 in a four-byte file")
+    projection_receipt_text :: fs.read_to_string(projection_receipt) catch error { panic("cannot read nonzero-offset projection receipt `{projection_output}`: {error}") }
+    assert(projection_receipt_text.lines().any(fn(line) { line == "span=0..4" }))
+    stage_two_small_source :: session.join("stage-two-small.rs")
+    stage_two_small_receipt :: session.join("stage-two-small.receipt")
+    run_generated_artifact(stage_two_binary, "factory", small_project, SMALL_ENTRY_RELATIVE, stage_two_small_source, stage_two_small_receipt)
+    assert_factory_receipt(stage_two_small_receipt)
+    stage_two_small_rust :: fs.read_to_string(stage_two_small_source) catch error { panic("stage-two factory did not produce `{stage_two_small_source}`: {error}") }
+    stage_two_small_project :: session.join("stage-two-small-backend")
+    (stage_two_small_binary, _) :: build_backend_artifact(repo, stage_two_small_project, "jet_bootstrap_small_stage_two", stage_two_small_rust)
+    assert_small_program_runs(stage_two_small_binary, "stage two")
+    carrier_fixture_project :: session.join("source-contract-carrier")
+    write_source_fixture_project(carrier_fixture_project, SOURCE_FIXTURE_MANIFEST, CARRIER_FIXTURE_SOURCE)
+    compile_and_run_source_fixture(stage_two_binary, repo, session, "carrier_binding", carrier_fixture_project, CARRIER_FIXTURE_EXPECTED)
+    // GATE #4494: compile-time immutable source fixture inclusion, not a Rust bridge.
+    loop (label, source, expected) in [
+        ("operator_user_defined", USER_OPERATOR_FIXTURE_SOURCE, USER_OPERATOR_FIXTURE_EXPECTED),
+        ("operator_spaceship", SPACESHIP_FIXTURE_SOURCE, SPACESHIP_FIXTURE_EXPECTED),
+        ("exact_division_runtime", EXACT_DIVISION_FIXTURE_ONE, EXACT_DIVISION_FIXTURE_ONE_EXPECTED),
+        ("exact_division_comptime", EXACT_DIVISION_FIXTURE_TWO, EXACT_DIVISION_FIXTURE_TWO_EXPECTED),
+        ("operator_mixed_types", MIXED_OPERATOR_FIXTURE_SOURCE, MIXED_OPERATOR_FIXTURE_EXPECTED),
+        ("enum_derived_order", DERIVED_ORDER_FIXTURE_SOURCE, DERIVED_ORDER_FIXTURE_EXPECTED),
+        ("display_read_receiver", std.include_str("../../../../Examples/features/traits/display_read_receiver.jet"), std.include_str("../../../../Examples/features/expected/traits/display_read_receiver.out")),
+        ("never_plain_return", NEVER_PLAIN_RETURN_FIXTURE_SOURCE, NEVER_PLAIN_RETURN_FIXTURE_EXPECTED),
+        ("registry_rows", REGISTRY_ROWS_FIXTURE_SOURCE, REGISTRY_ROWS_FIXTURE_EXPECTED),
+    ] {
+        project :: session.join(label)
+        write_source_fixture_project(project, SOURCE_FIXTURE_MANIFEST, source)
+        compile_and_run_source_fixture(stage_two_binary, repo, session, label, project, expected)
+    }
+    loop receiver in ["^self", "&self"] {
+        loop inline in [false, true] {
+            method :: "fn display({receiver}) -> String {{ \"label\" }}"
+            source :: if inline -> "struct Label {{\n    text: String\n    impl Display {{ {method} }}\n}}\nfn run() {{}}\n" else -> "struct Label {{ text: String }}\nimpl Label.Display {{ {method} }}\nfn run() {{}}\n"
+            receiver_label :: if receiver == "^self" -> "take" else -> "edit"
+            label :: "display-receiver-{receiver_label}-{inline}"
+            project :: session.join(label)
+            entry :: write_source_fixture_project(project, SOURCE_FIXTURE_MANIFEST, source)
+            output :: session.join("{label}.rs")
+            receipt :: session.join("{label}.receipt")
+            run_generated_artifact(stage_two_binary, "runner", project, SMALL_ENTRY_RELATIVE, output, receipt)
+            assert(!output.exists(), "invalid Display receiver reached Rust emission")
+            generated :: receipt_reports(receipt).filter(fn(report) { report.contains("\"code\":\"E0907\"") }).collect()
+            reference :: rust_reference_reports(entry, source, [(entry, source)]).filter(fn(report) { report.contains("\"code\":\"E0907\"") }).collect()
+            assert_eq(reference.len(), 1, "Display receiver must fail in sema")
+            assert_eq(generated, reference, "Display receiver reports must agree")
+        }
+    }
+    partial_move_project :: session.join("core-files-partial-move-siblings")
+    write_source_fixture_project(partial_move_project, SOURCE_FIXTURE_MANIFEST, CORE_FILES_PARTIAL_MOVE_SIBLINGS_SOURCE)
+    compile_and_run_source_fixture(stage_two_binary, repo, session, "core_files_partial_move_siblings", partial_move_project, "true\n".repeat(25))
+    uninit_partial_exit_project :: session.join("uninit-fixed-partial-exit")
+    write_source_fixture_project(uninit_partial_exit_project, SOURCE_FIXTURE_MANIFEST, UNINIT_FIXED_PARTIAL_EXIT_SOURCE)
+    compile_and_run_source_fixture(stage_two_binary, repo, session, "uninit_fixed_partial_exit", uninit_partial_exit_project, "7\n")
+    handle_lifetime_project :: session.join("native-handle-lifetimes")
+    handle_lifetime_manifest :: "name: \"bootstrap_handle_lifetimes\"\nversion: \"0.1.0\"\nedition: \"2028\"\ndeps: {{ close: c@{rust_debug_string(handle_lifetime_project.display())} }}\noutputs: {{ app: .Executable{{ entry: run }} }}\n"
+    write_source_fixture_project(handle_lifetime_project, handle_lifetime_manifest, HANDLE_LIFETIME_FIXTURE_SOURCE)
+    build_local_c_provider(handle_lifetime_project, "close", HANDLE_LIFETIME_C_PROVIDER)
+    compile_and_run_source_fixture_with_native_library(stage_two_binary, repo, session, "native_handle_lifetimes", handle_lifetime_project, HANDLE_LIFETIME_FIXTURE_EXPECTED, Val((handle_lifetime_project, "close")))
+    struct_word_project :: session.join("struct_call_word")
+    write_source_fixture_project(struct_word_project, SOURCE_FIXTURE_MANIFEST, std.include_str("../../../../Examples/features/basics/struct_call_word.jet"))
+    compile_and_run_source_fixture(stage_two_binary, repo, session, "struct_call_word", struct_word_project, std.include_str("../../../../Examples/features/expected/basics/struct_call_word.out"))
+    provenance :: session.join("bootstrap.provenance")
+    provenance_text :: "schema=jet-private-bootstrap/v1\ncompiler_project={compiler_project}\nstage_zero_id={stage_zero_id}\nstage_zero_source={stage_zero_project.join(\"src/main.rs\")}\nstage_one_id={stage_one_id}\nstage_one_source={stage_one_project.join(\"src/main.rs\")}\nstage_two_id={stage_two_id}\nstage_two_source={stage_two_source}\nstage_two_backend={stage_two_project.join(\"src/main.rs\")}\nstage_two_small_backend={stage_two_small_project.join(\"src/main.rs\")}\nsmall_entry={small_entry}\nbackend=Tools/agent/jet-env cargo build --manifest-path <cache-project>/Cargo.toml --bin <cache-binary>\n"
+    fs.write(provenance, provenance_text) catch error { panic("cannot write bootstrap provenance `{provenance}`: {error}") }
+    assert(provenance.is_file(), "bootstrap provenance was not retained")
+}
+
+// Rust: Compiler/Bootstrap/Tests.rs:2175
+fn home_path() -> OSPath {
+    // GATE #4494: native environment OS-string lookup, preserving non-UTF8 HOME.
+    OSPath(env.var_os("HOME") ?? panic("HOME is required for the private bootstrap cache"))
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2182
+fn bootstrap_session_root() -> OSPath {
+    // GATE #4494: native wall-clock and process identity.
+    timestamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH) catch error { panic("system clock is before the Unix epoch: {error}") }
+    home_path().join(".cache/jet-test-scratch").join("bootstrap-self-{process.id()}-{timestamp.as_nanos()}")
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2193
+fn assemble_compiler_sources(repo: OSPath, task_roots: Bool) {
+    // GATE #4494: real child process with native cwd/environment removal.
+    output :: Command.new(repo.join("Tools/agent/jet-env")).current_dir(repo).env_remove("CARGO_TARGET_DIR").args(["node", "Compiler/Bootstrap/assemble.mjs"]).output() catch error { panic("cannot run bootstrap assembler: {error}") }
+    assert_command_success("bootstrap assembler", output)
+    if !task_roots -> return
+    compiler_entry :: home_path().join(BOOTSTRAP_PROJECT_RELATIVE).join(BOOTSTRAP_ENTRY_RELATIVE)
+    compiler_source := fs.read_to_string(compiler_entry) catch error { panic("cannot read assembled compiler fixture `{compiler_entry}`: {error}") }
+    &compiler_source.push_str("\n\n")
+    &compiler_source.push_str(TASK_ROOTS_FIXTURE_SOURCE)
+    fs.write(compiler_entry, compiler_source) catch error { panic("cannot add task-root fixture to the private compiler unit `{compiler_entry}`: {error}") }
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2225
+fn write_small_program(project: OSPath) -> OSPath {
+    fs.create_dir_all(project) catch error { panic("cannot create small Jet project `{project}`: {error}") }
+    manifest :: project.join("package.jet")
+    entry :: project.join(SMALL_ENTRY_RELATIVE)
+    fs.write(manifest, SMALL_PROGRAM_MANIFEST) catch error { panic("cannot write small Jet manifest `{manifest}`: {error}") }
+    fs.write(entry, SMALL_PROGRAM_SOURCE) catch error { panic("cannot write small Jet source `{entry}`: {error}") }
+    entry
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2240
+fn write_source_fixture_project(project: OSPath, manifest: String, source: String) -> OSPath {
+    fs.create_dir_all(project) catch error { panic("cannot create source fixture project `{project}`: {error}") }
+    manifest_path :: project.join("package.jet")
+    entry :: project.join(SMALL_ENTRY_RELATIVE)
+    fs.write(manifest_path, manifest) catch error { panic("cannot write source fixture manifest `{manifest_path}`: {error}") }
+    fs.write(entry, source) catch error { panic("cannot write source fixture `{entry}`: {error}") }
+    entry
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2254
+fn assert_mir_optimizer_fixtures(binary: OSPath, repo: OSPath, session: OSPath) {
+    loop (name, fixture_path, expected_stdout) in [
+        ("inline", "tests/fixtures/mir_optimizer_inline.jet", "inline:11\nfailure:negative\n"),
+        ("loops", "tests/fixtures/mir_optimizer_loops.jet", "true true true true false\n"),
+        ("source_regressions", "tests/fixtures/mir_optimizer_source_regressions.jet", "unit:body\ntrue true true true true true true\n"),
+    ] {
+        fixture_source :: fs.read_to_string(repo.join(fixture_path)) catch error { panic("cannot read MIR optimizer fixture `{fixture_path}`: {error}") }
+        project :: session.join("optimizer-{name}")
+        write_source_fixture_project(project, SOURCE_FIXTURE_MANIFEST, fixture_source)
+        generated_source_path :: session.join("optimizer-{name}.rs")
+        receipt :: session.join("optimizer-{name}.receipt")
+        run_generated_artifact(binary, "factory", project, SMALL_ENTRY_RELATIVE, generated_source_path, receipt)
+        assert_factory_receipt(receipt)
+        generated_source :: fs.read_to_string(generated_source_path) catch error { panic("cannot read generated MIR optimizer backend for `{name}`: {error}") }
+        backend_project :: session.join("optimizer-{name}-backend")
+        (backend_binary, _) :: build_backend_artifact(repo, backend_project, "jet_bootstrap_optimizer_{name}", generated_source)
+        output :: Command.new(backend_binary).output() catch error { panic("cannot execute MIR optimizer fixture `{name}`: {error}") }
+        assert_command_success("MIR optimizer fixture `{name}`", output)
+        assert_eq(String.from_utf8_lossy(output.stdout), expected_stdout, "generated compiler changed MIR optimizer fixture `{name}` behavior")
+    }
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2311
+fn build_local_c_provider(root: OSPath, library: String, source: String) {
+    source_path :: root.join("{library}.c")
+    object_path :: root.join("{library}.o")
+    archive_path :: root.join("lib{library}.a")
+    fs.write(source_path, source) catch error { panic("cannot write C provider `{source_path}`: {error}") }
+    compiler := String?{None}
+    loop candidate in ["cc", "gcc", "clang"] {
+        output :: Command.new(candidate).arg("--version").output().ok()
+        if output == .Val(value) { if value.status.success() { compiler = Val(candidate); break } }
+    }
+    selected :: compiler ?? panic("C provider fixture requires cc, gcc, or clang")
+    compile :: Command.new(selected).arg("-c").arg(source_path).arg("-o").arg(object_path).output() catch error { panic("cannot compile C provider `{source_path}`: {error}") }
+    assert_command_success("native C provider compile", compile)
+    archive :: Command.new("ar").arg("rcs").arg(archive_path).arg(object_path).output() catch error { panic("cannot archive C provider `{archive_path}`: {error}") }
+    assert_command_success("native C provider archive", archive)
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2344
+fn compile_and_run_source_fixture(compiler: OSPath, repo: OSPath, session: OSPath, label: String, project: OSPath, expected_stdout: String) {
+    raw_source :: session.join("{label}.raw.rs")
+    receipt :: session.join("{label}.receipt")
+    run_generated_artifact(compiler, "runner", project, SMALL_ENTRY_RELATIVE, raw_source, receipt)
+    assert_runner_receipt(receipt)
+    source :: fs.read_to_string(raw_source) catch error { panic("generated compiler did not emit `{raw_source}`: {error}") }
+    backend_project :: session.join("{label}-backend")
+    (binary, _) :: build_backend_artifact(repo, backend_project, label, source)
+    output :: Command.new(binary).output() catch error { panic("cannot execute generated `{label}` fixture: {error}") }
+    assert_command_success("generated `{label}` fixture", output)
+    assert_eq(String.from_utf8_lossy(output.stdout), expected_stdout, "generated `{label}` fixture output differs from its executable source contract")
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2379
+fn compile_and_run_source_fixture_with_native_library(compiler: OSPath, repo: OSPath, session: OSPath, label: String, project: OSPath, expected_stdout: String, native_library: (OSPath, String)?) {
+    raw_source :: session.join("{label}.raw.rs")
+    receipt :: session.join("{label}.receipt")
+    run_generated_artifact(compiler, "runner", project, SMALL_ENTRY_RELATIVE, raw_source, receipt)
+    assert_runner_receipt(receipt)
+    source :: fs.read_to_string(raw_source) catch error { panic("generated compiler did not emit `{raw_source}`: {error}") }
+    backend_project :: session.join("{label}-backend")
+    (binary, _) :: build_backend_artifact_with_native_library(repo, backend_project, label, source, None, native_library, None)
+    output :: Command.new(binary).output() catch error { panic("cannot execute generated `{label}` fixture: {error}") }
+    assert_command_success("generated `{label}` fixture", output)
+    assert_eq(String.from_utf8_lossy(output.stdout), expected_stdout, "generated `{label}` fixture output differs from its executable source contract")
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2423
+fn assert_evaluator_materialization_helpers_in_mir(mir: MIRProgram) {
+    loop helper_name in ["jet_eval_materialize_string_window", "jet_eval_materialize_list_window", "jet_eval_materialize_bytes_window"] {
+        by_name := mir.functions.iter().filter(fn(function) { function.name == helper_name })
+        helper :: &by_name.next() ?? panic("full-manifest MIR lacks evaluator helper `{helper_name}`")
+        assert(&by_name.next() == None, "full-manifest MIR has ambiguous evaluator helper `{helper_name}`")
+        function_id :: helper.id
+        by_identity := mir.functions.iter().filter(fn(function) { function.id == function_id })
+        checked_helper :: &by_identity.next() ?? panic("checked evaluator helper `{helper_name}` lost its function ID")
+        assert(&by_identity.next() == None, "checked evaluator helper `{helper_name}` has a duplicate MIR function ID")
+        assert(checked_helper.blocks.any(fn(block) { block.instructions.any(fn(instruction) { if instruction.operation == { .Copy(_, fact) -> fact == MIRCopyFact.ViewMaterialize else -> false } }) }), "checked evaluator helper `{helper_name}` ({function_id}) must contain a materializing Copy")
+    }
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2462
+fn write_invalid_import_project(project: OSPath) -> (OSPath, String, OSPath, String) {
+    fs.create_dir_all(project) catch error { panic("cannot create invalid Jet project `{project}`: {error}") }
+    manifest :: project.join("package.jet")
+    entry :: project.join(SMALL_ENTRY_RELATIVE)
+    entry_source :: "use \"broken\" as broken\npub fn main() {{\n    print(\"entry\")\n}}\n"
+    imported_source :: "pub fn broken() {{ print(\"🧪\")"
+    imported :: project.join("broken.jet")
+    fs.write(manifest, SMALL_PROGRAM_MANIFEST) catch error { panic("cannot write invalid Jet manifest `{manifest}`: {error}") }
+    fs.write(entry, entry_source) catch error { panic("cannot write invalid Jet entry `{entry}`: {error}") }
+    fs.write(imported, imported_source) catch error { panic("cannot write invalid imported Jet source `{imported}`: {error}") }
+    (entry, entry_source, imported, imported_source)
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2485
+fn write_identifier_casing_project(project: OSPath) -> (OSPath, String, [(OSPath, String)]) {
+    fs.create_dir_all(project) catch error { panic("cannot create identifier-casing Jet project `{project}`: {error}") }
+    manifest :: project.join("package.jet")
+    entry :: project.join(SMALL_ENTRY_RELATIVE)
+    helper :: project.join("helper.jet")
+    entry_source :: "use \"helper\" as BadAlias\n\nstruct bad_type {{\n    BadField: Int\n}}\n\nMAX_RETRIES :: prep {{ 3 }}\nBAD_CONSTANT :: prep {{ MAX_RETRIES }}\n\nfn BadFunction(BadParam: Int) -> Int {{\n    BadLocal :: BadParam\n    callback :: (BadLambda: Int) -> BadLambda\n    return callback(BadLocal)\n}}\n\npub fn main() {{\n    print(BadFunction(BAD_CONSTANT))\n}}\n"
+    helper_source :: "pub fn helper() -> Int {{\n    return 1\n}}\n"
+    fs.write(manifest, SMALL_PROGRAM_MANIFEST) catch error { panic("cannot write identifier-casing manifest `{manifest}`: {error}") }
+    fs.write(entry, entry_source) catch error { panic("cannot write identifier-casing entry `{entry}`: {error}") }
+    fs.write(helper, helper_source) catch error { panic("cannot write identifier-casing helper `{helper}`: {error}") }
+    (entry, entry_source, [(entry, entry_source), (helper, helper_source)])
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2526
+fn write_valid_report_project(project: OSPath) -> (OSPath, String) {
+    fs.create_dir_all(project) catch error { panic("cannot create valid-report Jet project `{project}`: {error}") }
+    manifest :: project.join("package.jet")
+    entry :: project.join(SMALL_ENTRY_RELATIVE)
+    entry_source :: "fn unused() Int -> 1\n\npub fn main() {{}}\n"
+    manifest_source :: "name: \"bootstrap_small\"\nversion: \"0.1.0\"\nedition: \"2028\"\noutputs: {{ app: .Executable{{ entry: main }} }}\nboundaries: {{\n    deny: [{{ from: \"bootstrap_small.run\", to: \"bootstrap_small.db\" }}]\n}}\n"
+    fs.write(manifest, manifest_source) catch error { panic("cannot write valid-report Jet manifest `{manifest}`: {error}") }
+    fs.write(entry, entry_source) catch error { panic("cannot write valid-report Jet entry `{entry}`: {error}") }
+    (entry, entry_source)
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2550
+fn write_nested_closure_callback_project(project: OSPath) {
+    fs.create_dir_all(project) catch error { panic("cannot create nested-lambda project `{project}`: {error}") }
+    manifest :: project.join("package.jet")
+    entry :: project.join(SMALL_ENTRY_RELATIVE)
+    source :: "use c.cb as c\n\n#Import module c.cb {{\n    fn call(cb: fn(I32) I32 -[]>, x: I32) I32 = \"call\"\n}}\n\npub fn main() {{\n    prefix :: \"nested\"\n    captured :: () -> prefix\n    print(captured())\n    print(c.call((x) -> x, 40))\n}}\n"
+    fs.write(manifest, SMALL_PROGRAM_MANIFEST) catch error { panic("cannot write nested-lambda manifest `{manifest}`: {error}") }
+    fs.write(entry, source) catch error { panic("cannot write nested-lambda source `{entry}`: {error}") }
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2577
+fn rust_reference_reports(entry: OSPath, entry_source: String, source_closure: [(OSPath, String)]) -> [String] {
+    entry_path :: entry.to_str() ?? panic("invalid Jet test entry path `{entry}`")
+    // GATE #4494: retained Rust test-peer subprocess; never a production bridge.
+    response :: RustReference.compile_bundle_path_opts_with_source_closure_and_runtime(entry_path, .Check, false, .default(), false, false, false, false, None, None, "dev", [String:String]{}, false, None, source_closure, None)
+    diagnostics :: if response == { .Err(diagnostics) -> diagnostics .Ok(_) -> panic("Rust reference accepted the intentionally invalid imported source") }
+    report_path :: RustReference.ReportPath.from_process(entry_path)
+    reports := [String]{}
+    loop diagnostic in diagnostics -> &reports.push(diagnostic.to_report(report_path, entry_source).json())
+    reports
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2614
+fn rust_reference_success_reports(entry: OSPath, entry_source: String, source_closure: [(OSPath, String)]) -> [String] {
+    entry_path :: entry.to_str() ?? panic("invalid Jet test entry path `{entry}`")
+    response :: RustReference.compile_bundle_path_opts_with_source_closure_and_runtime(entry_path, .Check, false, .default(), false, false, false, false, None, None, "dev", [String:String]{}, false, None, source_closure, None)
+    (output, _) :: if response == { .Ok(value) -> value .Err(diagnostics) -> panic("Rust reference rejected valid report fixture: {diagnostics}") }
+    report_path :: RustReference.ReportPath.from_process(entry_path)
+    reports := [String]{}
+    loop diagnostic in output.lints -> &reports.push(diagnostic.to_report(report_path, entry_source).json())
+    reports
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2649
+fn report_at_imported_eof(reports: [String], path: OSPath, end: Int) -> String {
+    file :: "\"file\":\"{path}\""
+    span :: "\"span\":{{\"start\":{end},\"end\":{end}}}"
+    loop report in reports { if report.contains("\"code\":\"E0003\"") && report.contains(file) && report.contains(span) -> return report }
+    panic("no imported-source EOF E0003 report for `{path}` at byte {end}: {reports}")
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2664
+TASK_ROOTS_BEGIN :: "// bootstrap:task-roots-begin"
+// Rust: Compiler/Bootstrap/Tests.rs:2665
+TASK_ROOTS_END :: "// bootstrap:task-roots-end"
+// Rust: Compiler/Bootstrap/Tests.rs:2667
+fn append_generated_artifact_main(source: String, task_roots: Bool) -> String {
+    complete := ^source
+    if task_roots { &complete.push_str(GENERATED_ARTIFACT_MAIN); return complete }
+    rest := GENERATED_ARTIFACT_MAIN
+    loop {
+        begin :: rest.find(TASK_ROOTS_BEGIN) ?? break
+        &complete.push_str(rest[..<begin])
+        end :: rest[begin..].find(TASK_ROOTS_END) ?? panic("generated artifact main has an unterminated task-root region")
+        rest = rest[(begin + end + TASK_ROOTS_END.bytes().len())..]
+    }
+    &complete.push_str(rest)
+    complete
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2685
+fn backend_identity_build_script(repo: OSPath, native_library: (OSPath, String)?) -> String {
+    native_link_directives := ""
+    if native_library == .Val((directory, library)) -> native_link_directives = "    println!(\"cargo:rustc-link-search=native={{}}\", {rust_debug_string(directory.display())});\n    println!(\"cargo:rustc-link-lib=static={library}\");\n"
+    inline_module :: fn(relative: String) -> String {
+        path :: repo.join(relative)
+        fs.read_to_string(path) catch error { panic("cannot read backend build-script module `{path}`: {error}") }
+    }
+    sha256 :: inline_module("crates/jet-foundation/src/SHA256.rs")
+    build_identity :: inline_module("Compiler/Bootstrap/BuildIdentity.rs")
+    // This text is the real emitted backend build script, not a Jet-to-Rust bridge.
+    script := "use std::fs;\nuse std::path::Path;\n\n#[allow(dead_code, non_snake_case)]\nmod SHA256 {{\n{sha256}\n}}\n\n#[allow(dead_code, non_snake_case)]\nmod BuildIdentity {{\n{build_identity}\n}}\n\nfn main() {{\n    let root = Path::new({rust_debug_string(repo.display())});\n    let manifest_dir = Path::new(env!(\"CARGO_MANIFEST_DIR\"));\n    let source = fs::read(manifest_dir.join(\"generated.rs\"))\n        .expect(\"generated artifact source must be readable\");\n    let manifest = fs::read(manifest_dir.join(\"Cargo.toml\"))\n        .expect(\"generated artifact manifest must be readable\");\n    let build_script = fs::read(manifest_dir.join(\"build.rs\"))\n        .expect(\"generated artifact build script must be readable\");\n    let facts = BuildIdentity::build_facts()\n        .expect(\"Cargo-supplied backend build facts must be readable\");\n    let mut extras = vec![\n        (\"Compiler/Bootstrap/__generated_compiler.rs\".to_string(), source),\n        (\"Compiler/Bootstrap/__generated_cargo_manifest.toml\".to_string(), manifest),\n        (\"Compiler/Bootstrap/__generated_cargo_build.rs\".to_string(), build_script),\n    ];\n    // A compiler artifact embeds its image with `include_bytes!` from here.\n    let image_path = manifest_dir.join(\"src/compiler.image\");\n    if let Ok(image) = fs::read(&image_path) {{\n        extras.push((\"Compiler/Bootstrap/__generated_compiler.image\".to_string(), image));\n        println!(\"cargo:rerun-if-changed={{}}\", image_path.display());\n    }}\n    let identity = BuildIdentity::semantic_id_with_extra(\n        root,\n        BuildIdentity::COMPILER_DOMAIN,\n        BuildIdentity::COMPILER_SOURCES,\n        &facts,\n        &extras,\n    )\n    .expect(\"generated compiler identity must be computable\");\n    fs::write(manifest_dir.join(\".bootstrap-artifact-id\"), &identity)\n        .expect(\"generated compiler identity receipt must be writable\");\n    println!(\"cargo:rustc-env=JET_COMPILER_BUILD_ID={{identity}}\");\n    // The identity of the compiler sources, without generated extras.\n    let source_identity = BuildIdentity::semantic_id(\n        root,\n        BuildIdentity::COMPILER_DOMAIN,\n        BuildIdentity::COMPILER_SOURCES,\n        &facts,\n    )\n    .expect(\"generated compiler source identity must be computable\");\n    println!(\"cargo:rustc-env=JET_COMPILER_SOURCE_ID={{source_identity}}\");\n    println!(\"cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)\");\n    println!(\"cargo:rustc-cfg=jet_bootstrap_compiler_artifact\");\n    println!(\"cargo:rerun-if-changed={{}}\", manifest_dir.join(\"generated.rs\").display());\n    println!(\"cargo:rerun-if-changed={{}}\", manifest_dir.join(\"Cargo.toml\").display());\n    println!(\"cargo:rerun-if-changed={{}}\", manifest_dir.join(\"build.rs\").display());\n    // SOURCE_ID hashes these roots and build facts.\n    for input in BuildIdentity::COMPILER_SOURCES {{\n        println!(\"cargo:rerun-if-changed={{}}\", root.join(input).display());\n    }}\n    for key in [\n        \"RUSTC\",\n        \"TARGET\",\n        \"HOST\",\n        \"PROFILE\",\n        \"OPT_LEVEL\",\n        \"DEBUG\",\n        \"CARGO_CFG_TARGET_FEATURE\",\n        \"CARGO_ENCODED_RUSTFLAGS\",\n    ] {{\n        println!(\"cargo:rerun-if-env-changed={{key}}\");\n    }}\n    for key in BuildIdentity::profile_override_keys() {{\n        println!(\"cargo:rerun-if-env-changed={{key}}\");\n    }}\n    if let Some(spec) = BuildIdentity::target_spec_path() {{\n        println!(\"cargo:rerun-if-changed={{}}\", spec.display());\n    }}\n{native_link_directives}}}\n"
+    script
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2803
+struct BackendFfiCrate { name: String, dir: OSPath }
+impl BackendFfiCrate {
+    // Rust: Compiler/Bootstrap/Tests.rs:2810
+    fn dependency(self) -> String { "{self.name} = {{ path = {rust_debug_string(self.dir.display())} }}\n" }
+    // Rust: Compiler/Bootstrap/Tests.rs:2816
+    fn parse(record: String) -> BackendFfiCrate? {
+        (name, path) :: record.split_once('\n') ?? return None
+        trimmed := path.trim_end_matches('\n') // #4303
+        Val(BackendFfiCrate{name: name, dir: OSPath(trimmed)})
+    }
+}
+// Rust: Compiler/Bootstrap/Tests.rs:2825
+struct BackendUnit { crate_name: String, deps: [String], source: String, shards: [BackendShard] }
+// Rust: Compiler/Bootstrap/Tests.rs:2839
+struct BackendShard { name: String, source: String, cold: Bool }
+// Rust: Compiler/Bootstrap/Tests.rs:2850
+struct BackendWorkspace { runtime_lib: String, units: [BackendUnit], main: String }
+// Rust: Compiler/Bootstrap/Tests.rs:2863
+fn split_backend_workspace(source: String) -> BackendWorkspace? {
+    split :: split_runtime_crate(source) catch error { panic("backend source: {error}") }
+    parts :: split ?? {
+        assert(!source.contains(UNIT_BEGIN_MARKER), "unit-split backend source has no runtime block")
+        return None
+    }
+    sections := [BootstrapSourceUnit]{}
+    positions := [String:Int]{}
+    main := ""
+    open := Int?{None}
+    loop line in parts.program.split_inclusive('\n') {
+        if line.strip_prefix(UNIT_BEGIN_MARKER) == .Val(name_view) {
+            name := name_view.trim_end() // #4303
+            assert(open == None, "backend unit section `{name}` opens inside another section")
+            index := positions.get(name)
+            if index == None {
+                index = Val(sections.len())
+                positions[name] = sections.len()
+                &sections.push(BootstrapSourceUnit{name: name, source: ""})
+            }
+            open = index
+        } else if line.strip_prefix(UNIT_END_MARKER) == .Val(name_view) {
+            index :: open ?? panic("backend unit section `{name_view.trim_end()}` closes without opening")
+            open = None
+            assert_eq(sections[index].name, name_view.trim_end(), "backend unit sections interleave")
+        } else if open == .Val(index) -> &sections[index].source.push_str(line)
+        else -> &main.push_str(line)
+    }
+    assert(open == None, "backend unit section is unterminated")
+    catalog :: bootstrap_unit_catalog(sections)
+    crate_names := [String]{}
+    loop members in catalog.components {
+        names := [String]{}
+        loop member in members -> &names.push(sections[member].name)
+        &names.sort()
+        name :: names.join("_").to_ascii_lowercase()
+        cleaned := ""
+        loop character in name.chars() -> &cleaned.push(if character.is_ascii_alphanumeric() -> character else -> '_')
+        &crate_names.push("jetc_{cleaned}")
+    }
+    units := [BackendUnit]{}
+    loop (component, members) in catalog.components.iter().enumerate() {
+        dependency_set := Set<Int>{}
+        loop member in members {
+            loop target in catalog.edges[member] {
+                other :: catalog.component_of[target]
+                if other != component -> _ :: &dependency_set.insert(other)
+            }
+        }
+        dependency_indices := dependency_set.to_list()
+        &dependency_indices.sort()
+        deps := [String]{}
+        loop target in dependency_indices -> &deps.push(crate_names[target])
+        crate_name :: crate_names[component]
+        prelude := "#![allow(warnings)]\nuse jet_runtime::*;\n"
+        loop dep in deps -> &prelude.push_str("use {dep}::*;\n")
+        text := ""
+        loop member in members -> &text.push_str(sections[member].source)
+        projected := ""
+        shards := [BackendShard]{}
+        if shard_unit(text, BACKEND_SHARD_BYTES) == .Val(sharded) {
+            projected = "{prelude}{export_crate_source(sharded.facade)}unsafe extern \"Rust\" {{\n{sharded.declarations}}}\n"
+            loop (index, shard_text) in sharded.shards.iter().enumerate() -> &shards.push(BackendShard{name: "{crate_name}_s{index}", source: "{prelude}use {crate_name}::*;\n{export_crate_source(shard_text)}", cold: false})
+            loop (index, shard_text) in sharded.cold_shards.iter().enumerate() -> &shards.push(BackendShard{name: "{crate_name}_cold{index}", source: "{prelude}use {crate_name}::*;\n{export_crate_source(shard_text)}", cold: true})
+        } else -> projected = "{prelude}{export_crate_source(text)}"
+        &units.push(BackendUnit{crate_name: crate_name, deps: deps, source: projected, shards: shards})
+    }
+    anchor :: "use jet_runtime::*;\n"
+    at :: (main.find(anchor) ?? panic("split backend main has no `jet_runtime` import")) + anchor.bytes().len()
+    uses := ""
+    loop unit in units {
+        &uses.push_str("use {unit.crate_name}::*;\n")
+        loop shard in unit.shards -> &uses.push_str("use {shard.name} as _;\n")
+    }
+    &main.insert_str(at, uses)
+    Val(BackendWorkspace{runtime_lib: parts.runtime_lib, units: units, main: main})
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3012
+// unit_definitions -> WorkspaceCatalog.jet::bootstrap_unit_definitions (foreign blocks and column-zero filtering).
+// Rust: Compiler/Bootstrap/Tests.rs:3033
+// defined_unit_item -> WorkspaceCatalog.jet::bootstrap_defined_unit_item (visibility, qualifiers, const fn and all item kinds).
+// Rust: Compiler/Bootstrap/Tests.rs:3061
+// unit_symbol_at -> WorkspaceCatalog.jet::bootstrap_unit_symbol_at (ASCII whole identifier).
+// Rust: Compiler/Bootstrap/Tests.rs:3070
+// unit_symbols -> WorkspaceCatalog.jet::bootstrap_unit_symbols (whole-identifier boundaries).
+// Rust: Compiler/Bootstrap/Tests.rs:3082
+// strongly_connected_units -> WorkspaceCatalog.jet::bootstrap_strongly_connected_units.
+// Rust: Compiler/Bootstrap/Tests.rs:3093
+// Tarjan::visit -> its iterative frame traversal, preserving sorted-edge DFS and dependency-first components.
+// Rust: Compiler/Bootstrap/Tests.rs:3148
+fn write_backend_workspace(units_root: OSPath, workspace: BackendWorkspace, ffi: BackendFfiCrate?) -> String {
+    ffi_dependency :: if ffi == { Val(value) -> value.dependency() None -> "" }
+    runtime_digest :: sha256_hex("{ffi_dependency}{TEXT_NUL}{workspace.runtime_lib}".bytes())
+    runtime_dir_name :: "jet_runtime_{runtime_digest[..<16]}"
+    runtime_dir :: units_root.join(runtime_dir_name)
+    write_backend_crate(runtime_dir, "jet_runtime", [], ffi_dependency, workspace.runtime_lib)
+    dependencies := "jet_runtime = {{ path = {rust_debug_string(runtime_dir.display())} }}\n"
+    unit_extra_dependencies :: "jet_runtime = {{ path = \"../{runtime_dir_name}\" }}\n{ffi_dependency}"
+    loop unit in workspace.units {
+        dir :: units_root.join(unit.crate_name)
+        deps := unit.deps
+        write_backend_crate(dir, unit.crate_name, deps, unit_extra_dependencies, unit.source)
+        &dependencies.push_str("{unit.crate_name} = {{ path = {rust_debug_string(dir.display())} }}\n")
+        &deps.push(unit.crate_name)
+        loop shard in unit.shards {
+            shard_dir :: units_root.join(shard.name)
+            write_backend_crate(shard_dir, shard.name, deps, unit_extra_dependencies, shard.source)
+            &dependencies.push_str("{shard.name} = {{ path = {rust_debug_string(shard_dir.display())} }}\n")
+        }
+    }
+    dependencies
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3187
+fn backend_unit_profiles(workspace: BackendWorkspace, release: String?) -> String {
+    out := ""
+    if release == {
+        None -> {
+            &out.push_str("\n[profile.dev.package.jet_runtime]\n{BACKEND_UNIT_PROFILE}")
+            loop unit in workspace.units -> &out.push_str("\n[profile.dev.package.{unit.crate_name}]\n{BACKEND_UNIT_PROFILE}")
+            loop unit in workspace.units { loop shard in unit.shards -> &out.push_str("\n[profile.dev.package.{shard.name}]\n{BACKEND_UNIT_PROFILE}") }
+        }
+        Val(profile) -> {
+            loop unit in workspace.units { loop shard in unit.shards { if shard.cold -> &out.push_str("\n[profile.{profile}.package.{shard.name}]\n{BACKEND_COLD_PROFILE}") } }
+        }
+    }
+    out
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3204
+fn write_backend_crate(dir: OSPath, name: String, deps: [String], extra_dependencies: String, lib: String) {
+    manifest := "[package]\nname = {rust_debug_string(name)}\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\n"
+    loop dep in deps -> &manifest.push_str("{dep} = {{ path = \"../{dep}\" }}\n")
+    &manifest.push_str(extra_dependencies)
+    loop (path, text) in [(dir.join("Cargo.toml"), manifest), (dir.join("src/lib.rs"), lib)] {
+        if fs.read(path).ok() == .Val(existing) { if existing == text.bytes() -> next }
+        if path.parent() == .Val(parent) -> fs.create_dir_all(parent) catch error { panic("cannot create backend crate directory `{parent}`: {error}") }
+        fs.write(path, text) catch error { panic("cannot write backend crate file `{path}`: {error}") }
+    }
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3227
+struct ShardedUnit { facade: String, declarations: String, shards: [String], cold_shards: [String] }
+// Rust: Compiler/Bootstrap/Tests.rs:3241
+struct MovedFunction { declaration: String, definition: String, cold: Bool }
+// Rust: Compiler/Bootstrap/Tests.rs:3262
+fn shard_unit(text: String, shard_bytes: Int) -> ShardedUnit? {
+    if text.bytes().len() <= shard_bytes -> return None
+    mask :: rust_code_mask(text)
+    (items, end) :: masked_items(mask)
+    facade := ""
+    uses := ""
+    declarations := ""
+    moved := [MovedFunction]{}
+    loop (start, stop) in items {
+        item :: text[start..<stop]
+        code :: mask[start..<stop]
+        head :: code[item_head(code)..]
+        if head.starts_with("macro_rules!") -> return None
+        if head.starts_with("use ") || head.starts_with("pub use ") -> &uses.push_str(item)
+        if movable_function(item, code) == .Val(function) {
+            &declarations.push_str(function.declaration)
+            &moved.push(function)
+        } else if delegate_impl_methods(item, code) == .Val((rewritten, functions)) {
+            &facade.push_str(rewritten)
+            loop function in functions { &declarations.push_str(function.declaration); &moved.push(function) }
+        } else -> &facade.push_str(item)
+    }
+    &facade.push_str(text[end..])
+    shards := [String]{}
+    cold_shards := [String]{}
+    loop function in moved {
+        if function.cold {
+            last :: cold_shards.len() - 1
+            if last >= 0 && cold_shards[last].bytes().len() + function.definition.bytes().len() <= shard_bytes -> &cold_shards[last].push_str(function.definition)
+            else -> &cold_shards.push("{uses}{function.definition}")
+        } else {
+            last :: shards.len() - 1
+            if last >= 0 && shards[last].bytes().len() + function.definition.bytes().len() <= shard_bytes -> &shards[last].push_str(function.definition)
+            else -> &shards.push("{uses}{function.definition}")
+        }
+    }
+    Val(ShardedUnit{facade: facade, declarations: declarations, shards: shards, cold_shards: cold_shards})
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3316
+fn masked_items(code: String) -> ([(Int, Int)], Int) {
+    items := [(Int, Int)]{}
+    start := 0
+    depth := 0
+    loop (at, byte) in code.bytes().iter().enumerate() {
+        if byte == {
+            123 -> depth += 1
+            40 -> depth += 1
+            91 -> depth += 1
+            125 -> {
+                if depth == 0 -> panic("backend unit source closes an unopened bracket at byte {at}")
+                depth -= 1
+                if depth == 0 { &items.push((start, at + 1)); start = at + 1 }
+            }
+            41 -> { if depth == 0 -> panic("backend unit source closes an unopened bracket at byte {at}"); depth -= 1 }
+            93 -> { if depth == 0 -> panic("backend unit source closes an unopened bracket at byte {at}"); depth -= 1 }
+            59 -> { if depth == 0 { &items.push((start, at + 1)); start = at + 1 } }
+            else -> {}
+        }
+    }
+    (items, start)
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3342
+fn matching_bracket(code: String, open: Int) -> Int {
+    depth := 0
+    bytes :: code.bytes()
+    loop at in open..<bytes.len() {
+        byte :: bytes[at]
+        if byte == 123 || byte == 40 || byte == 91 -> depth += 1
+        else if byte == 125 || byte == 41 || byte == 93 {
+            depth -= 1
+            if depth == 0 -> return at
+        }
+    }
+    panic("backend unit source leaves a bracket open at byte {open}")
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3361
+fn item_head(code: String) -> Int {
+    at := code.bytes().len() - code.trim_start().bytes().len()
+    loop code[at..].starts_with("#[") {
+        at = matching_bracket(code, at + 1) + 1
+        at += code[at..].bytes().len() - code[at..].trim_start().bytes().len()
+    }
+    at
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3372
+fn movable_attributes(attributes: String) -> Bool {
+    loop attribute in attributes.split("#[").skip(1) {
+        if !attribute.starts_with("inline") && !attribute.starts_with("allow(") && !attribute.starts_with("cold]") -> return false
+    }
+    true
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3381
+fn split_top_level(code: String, separator: U8) -> [(Int, Int)] {
+    bytes :: code.bytes()
+    parts := [(Int, Int)]{}
+    start := 0
+    depth := 0
+    loop (at, byte) in bytes.iter().enumerate() {
+        if byte == 123 || byte == 40 || byte == 91 || byte == 60 -> depth += 1
+        else if byte == 62 && at > 0 && bytes[at - 1] == 45 -> {}
+        else if byte == 125 || byte == 41 || byte == 93 || byte == 62 -> depth -= 1
+        else if byte == separator && depth == 0 { &parts.push((start, at)); start = at + 1 }
+    }
+    &parts.push((start, bytes.len()))
+    parts
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3402
+fn parameter_colon(code: String) -> Int? {
+    bytes :: code.bytes()
+    loop (_, at) in split_top_level(code, 58) {
+        if at < bytes.len() && (at + 1 >= bytes.len() || bytes[at + 1] != 58) && (at == 0 || bytes[at - 1] != 58) -> return Val(at)
+    }
+    None
+}
+// Rust: Compiler/Bootstrap/Tests.rs:3409
+fn is_identifier(text: String) -> Bool {
+    if text.is_empty() -> return false
+    loop byte in text.bytes() {
+        if !((byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 95) -> return false
+    }
+    true
+}

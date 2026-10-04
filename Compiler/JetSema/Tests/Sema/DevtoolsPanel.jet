@@ -1,0 +1,42 @@
+use jet_foundation.[DevtoolsRegistry, DevtoolsPanel, DevtoolsStateField, DevtoolsFactPublication, DevtoolsRegistryError, Type, Span, Diagnostic, CallArg]
+use jet_sema.DevtoolsPanel.[check_devtools_publish, check_unfed_state_fields, unfed_state_fields, registry_error]
+
+// Rust: crates/jet-sema/src/Sema/DevtoolsPanel.rs:131-153 (behavioral controls; no inline Rust tests)
+#Test("devtools_publication_requires_explicit_field_and_value_labels") {
+    registry :: DevtoolsRegistry.default()
+    args := [CallArg]{}
+    facts := [DevtoolsFactPublication]{}
+    diagnostics := [Diagnostic]{}
+    accepted :: check_devtools_publish("pkg", "main", &args, Val(Type.Int), Span{start: 1, end: 3}, registry, &facts, &diagnostics)
+    assert(!accepted)
+    assert(facts.is_empty())
+    assert(diagnostics.len() == 1)
+    assert(diagnostics[0].code == "E1404")
+    assert(diagnostics[0].what == "this published value has no gate")
+}
+
+// Rust: crates/jet-sema/src/Sema/DevtoolsPanel.rs:211/233 (behavioral control)
+#Test("unfed_panel_fields_are_reported_after_body_checks") {
+    registry := DevtoolsRegistry.default()
+    span :: Span{start: 4, end: 8}
+    panel :: DevtoolsPanel.new("pkg", "main", "panel", Type.Named("State"), [DevtoolsStateField.new("count", Type.Option(Type.Int), span, false)], span)
+    registered :: &registry.register_panel(^panel)
+    assert(registered == .Ok(()))
+    fields :: unfed_state_fields("pkg", registry).collect()
+    assert(fields.len() == 1)
+    assert(fields[0].1.name == "count")
+    assert(unfed_state_fields("other", registry).collect().is_empty())
+    diagnostics := [Diagnostic]{}
+    check_unfed_state_fields(registry, &diagnostics)
+    assert(diagnostics.len() == 1)
+    assert(diagnostics[0].code == "E1414")
+    assert(diagnostics[0].what == "devtools panel `pkg::main::panel` state field `count` has no publication")
+}
+
+// Rust: crates/jet-sema/src/Sema/DevtoolsPanel.rs:336 (behavioral control)
+#Test("panel_registry_type_error_preserves_declared_and_actual_types") {
+    diagnostic :: registry_error(DevtoolsRegistryError.StateFieldTypeMismatch{package: "pkg", module: "main", panel: "panel", field: "count", expected: Type.Int, actual: Type.String, span: Span{start: 2, end: 6}})
+    assert(diagnostic.code == "E1413")
+    assert(diagnostic.what.contains("type `String`"))
+    assert(diagnostic.why == "the panel state field has type `Int`")
+}

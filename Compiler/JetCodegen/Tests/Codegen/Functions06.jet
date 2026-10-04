@@ -1,0 +1,24 @@
+use jet_foundation.[TFuncKind, Type, AccessConvention, SymbolID]
+use jet_codegen.Codegen.TIR.[NO_RUNNABLE_ENTRY, CLI_ENTRY_MISSING_RUN]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:6427-6428 (behavioral control; no inline Rust test)
+#Test("checked_program_entry_refusal_messages") {
+    assert(NO_RUNNABLE_ENTRY == "no runnable entry")
+    assert(CLI_ENTRY_MISSING_RUN == "cli entry missing `run`")
+    assert(NO_RUNNABLE_ENTRY != CLI_ENTRY_MISSING_RUN)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:6677-6690 (behavioral control)
+#Test("function_receiver_is_absent_for_free_and_static_methods") {
+    assert(TFuncKind.TopLevel.receiver() == None)
+    assert(TFuncKind.Method(None, Type.String).receiver() == None)
+    assert(TFuncKind.TraitMethod(false, None, Type.String, SymbolID{value: 0}, None).receiver() == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:6677-6690 (behavioral control)
+#Test("function_receiver_preserves_owner_and_access") {
+    assert(TFuncKind.Method(Val(AccessConvention.Read), Type.String).receiver() == Val((Type.String, AccessConvention.Read)))
+    assert(TFuncKind.Method(Val(AccessConvention.Mutate), Type.String).receiver() == Val((Type.String, AccessConvention.Mutate)))
+    assert(TFuncKind.Method(Val(AccessConvention.Move), Type.String).receiver() == Val((Type.String, AccessConvention.Move)))
+    assert(TFuncKind.TraitMethod(true, Val(AccessConvention.Mutate), Type.String, SymbolID{value: 0}, None).receiver() == Val((Type.String, AccessConvention.Mutate)))
+}

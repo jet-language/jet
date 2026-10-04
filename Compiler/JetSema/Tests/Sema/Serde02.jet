@@ -1,0 +1,48 @@
+use jet_foundation.[Span, Type, TypeParam]
+use jet_sema.Sema.Registration.Serde.[has_derive, add_auto_codec_marker, codec_params, serde_impl, serde_method]
+use jet_generics.[ENCODE, DECODE]
+use std.collections.[HashSet]
+
+// Rust: crates/jet-sema/src/Sema/Registration/Serde.rs:484-516
+#Test("serde_auto_marker_preserves_explicit_marker_and_source_span") {
+    span :: Span.new(3, 7)
+    automatic := HashSet<String>.new()
+    &automatic.insert("Packet")
+    derives := [(ENCODE, span)]
+    add_auto_codec_marker(&derives, ENCODE, automatic, "Packet", Span.new(0, 0))
+    assert(derives.len() == 1)
+    assert(derives[0].1 == span)
+    add_auto_codec_marker(&derives, DECODE, automatic, "Packet", span)
+    assert(derives.len() == 2)
+    assert(has_derive(derives, DECODE))
+    add_auto_codec_marker(&derives, DECODE, automatic, "Other", span)
+    assert(derives.len() == 2)
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Serde.rs:518-550
+#Test("serde_codec_parameters_only_constrain_wire_reachable_types") {
+    span :: Span.new(0, 0)
+    parameters :: [TypeParam{name: "T", bounds: [], span: span}, TypeParam{name: "U", bounds: [], span: span}]
+    output :: codec_params(parameters, [Type.List(Type.Named("T"))], true, false)
+    assert(output[0].bounds == [ENCODE])
+    assert(output[1].bounds.is_empty())
+    both :: codec_params(output, [Type.Named("T")], true, true)
+    assert(both[0].bounds == [ENCODE, DECODE])
+    assert(both[1].bounds.is_empty())
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Serde.rs:829-864
+#Test("serde_generated_method_and_impl_keep_generated_identity") {
+    span :: Span.new(5, 9)
+    method :: serde_method("encode", [], [], Val(Type.Int), [], span)
+    assert(method.name == "encode")
+    assert(method.name_span == span)
+    assert(method.return_type_span == Val(span))
+    assert(method.compiler_generated)
+    implementation :: serde_impl("Packet", ENCODE, method, span)
+    assert(implementation.type_name == "Packet")
+    assert(implementation.trait_name == Val(ENCODE))
+    assert(implementation.is_generated_serde)
+    assert(implementation.methods.len() == 1)
+    assert(implementation.os_target == None)
+}

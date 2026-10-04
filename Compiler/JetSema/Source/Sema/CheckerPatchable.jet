@@ -1,362 +1,180 @@
-// PORT-PENDING 0423 crates-jet-sema-src-sema-checkerpatchable-module-group: crates/jet-sema/src/Sema/CheckerPatchable.rs:1-358
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-PATCH1 (card #181): `#[Patchable]` derive — synthetic `T.Patch` type + apply/diff/merge.
-//RS 
-//RS use crate::Diagnostics::Diagnostic;
-//RS use crate::Syntax;
-//RS use crate::AST::{AccessConvention, Field, Item, StructDef, Type};
-//RS 
-//RS use super::{MethodSig, TypeDef, TypeRegistry};
-//RS 
-//RS pub(crate) fn patch_type_name(base: &str) -> String {
-//RS     format!("{base}.Patch")
-//RS }
-//RS 
-//RS fn has_patchable(s: &StructDef) -> bool {
-//RS     s.derives.iter().any(|(t, _)| t == Syntax::MARKER_PATCHABLE)
-//RS }
-//RS 
-//RS /// Append synthetic `T.Patch` struct items (Codable via Encode+Decode) before registration.
-//RS pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
-//RS     let mut to_add = Vec::new();
-//RS     let mut generated_base_methods = Vec::new();
-//RS     for item in items.iter() {
-//RS         let Item::Struct(s) = item else { continue };
-//RS         if !has_patchable(s) {
-//RS             continue;
-//RS         }
-//RS         if let Some(d) = validate_patchable_struct(s) {
-//RS             diags.push(d);
-//RS             continue;
-//RS         }
-//RS         let patch_name = patch_type_name(&s.name);
-//RS         // D-FIELDPOL1: a computed field can't hold an "unchanged" sentinel —
-//RS         // it never appears in `T.Patch`, and `apply`/`diff`/`merge` skip it.
-//RS         let fields: Vec<Field> = s
-//RS             .fields
-//RS             .iter()
-//RS             .filter(|f| f.computed.is_none())
-//RS             .map(|f| Field {
-//RS                 name: f.name.clone(),
-//RS                 name_span: f.name_span,
-//RS                 ty: Type::Option(Box::new(f.ty.clone())),
-//RS                 ty_span: f.ty_span,
-//RS                 is_pub: f.is_pub,
-//RS                 is_package_pub: f.is_package_pub,
-//RS                 serde_markers: Vec::new(),
-//RS                 redact: false,
-//RS                 computed: None,
-//RS                 default: None,
-//RS                 default_ct: None,
-//RS             })
-//RS             .collect();
-//RS         let (base_methods, patch_methods) = generated_patchable_methods(s);
-//RS         to_add.push(Item::Struct(StructDef {
-//RS             span: s.span,
-//RS             is_pub: s.is_pub,
-//RS             is_package_pub: s.is_package_pub,
-//RS             name: patch_name.clone(),
-//RS             name_span: s.name_span,
-//RS             type_params: Vec::new(),
-//RS             fields,
-//RS             state: None,
-//RS             methods: patch_methods,
-//RS             cli_bindings: Vec::new(),
-//RS             trait_impls: Vec::new(),
-//RS             derives: Vec::new(),
-//RS             // D-PATCH1: `T.Patch` serde is deferred; do not inherit the
-//RS             // source struct's package auto-derive default.
-//RS             auto_derive_default: false,
-//RS             is_published_schema: false,
-//RS             published_schema_span: None,
-//RS             is_single_use: false,
-//RS             single_use_span: None,
-//RS             is_must_use: false,
-//RS             must_use_span: None,
-//RS             layout: None,
-//RS             layout_span: None,
-//RS             serde_markers: Vec::new(),
-//RS             type_markers: Vec::new(),
-//RS             validate_block: Vec::new(),
-//RS             validate_span: None,
-//RS         }));
-//RS         generated_base_methods.push((s.name.clone(), base_methods));
-//RS     }
-//RS     for (name, methods) in generated_base_methods {
-//RS         if let Some(Item::Struct(s)) = items.iter_mut().find(|item| {
-//RS             matches!(item, Item::Struct(definition) if definition.name == name)
-//RS         }) {
-//RS             s.methods.extend(methods);
-//RS         }
-//RS     }
-//RS     items.extend(to_add);
-//RS }
-//RS 
-//RS fn generated_patchable_methods(
-//RS     s: &StructDef,
-//RS ) -> (Vec<crate::AST::Func>, Vec<crate::AST::Func>) {
-//RS     let base = s.name.as_str();
-//RS     let patch = patch_type_name(base);
-//RS     let fields = s
-//RS         .fields
-//RS         .iter()
-//RS         .filter(|field| field.computed.is_none())
-//RS         .map(|field| field.name.clone())
-//RS         .collect::<Vec<_>>();
-//RS     let mut source = String::new();
-//RS     source.push_str(&format!("struct __JetPatchableMethods {{\n"));
-//RS     source.push_str(&format!(
-//RS         "    fn apply(self, patch: {patch}) -> {base} {{\n        return {base}{{\n"
-//RS     ));
-//RS     for (index, field) in fields.iter().enumerate() {
-//RS         if index != 0 {
-//RS             source.push_str(",\n");
-//RS         }
-//RS         source.push_str(&format!(
-//RS             "            {field}: patch.{field} ?? self.{field}"
-//RS         ));
-//RS     }
-//RS     source.push_str("\n        }\n    }\n\n");
-//RS     source.push_str(&format!(
-//RS         "    fn diff(^new: {base}, ^old: {base}) -> {patch} {{\n        return {patch}{{\n"
-//RS     ));
-//RS     for (index, field) in fields.iter().enumerate() {
-//RS         if index != 0 {
-//RS             source.push_str(",\n");
-//RS         }
-//RS         source.push_str(&format!(
-//RS             "            {field}: if new.{field} == old.{field} -> None else -> Val(new.{field})"
-//RS         ));
-//RS     }
-//RS     source.push_str("\n        }\n    }\n}\n\n");
-//RS     source.push_str("struct __JetPatchablePatchMethods {\n");
-//RS     source.push_str(&format!(
-//RS         "    fn merge(self, ^other: {patch}) -> {patch} {{\n        return {patch}{{\n"
-//RS     ));
-//RS     for (index, field) in fields.iter().enumerate() {
-//RS         if index != 0 {
-//RS             source.push_str(",\n");
-//RS         }
-//RS         source.push_str(&format!(
-//RS             "            {field}: if self.{field} == None -> other.{field} else -> self.{field}"
-//RS         ));
-//RS     }
-//RS     source.push_str("\n        }\n    }\n}\n");
-//RS 
-//RS     let (tokens, lex_diagnostics) = crate::Lexer::lex_generated(&source);
-//RS     if !lex_diagnostics.is_empty() {
-//RS         panic!("invalid generated Patchable methods: {lex_diagnostics:?}");
-//RS     }
-//RS     let mut program = crate::Parser::parse(&tokens)
-//RS         .unwrap_or_else(|diagnostics| panic!("invalid generated Patchable methods: {diagnostics:?}"));
-//RS     let mut base_methods = Vec::new();
-//RS     let mut patch_methods = Vec::new();
-//RS     for item in &mut program.items {
-//RS         let Item::Struct(definition) = item else {
-//RS             continue;
-//RS         };
-//RS         for method in &mut definition.methods {
-//RS             method.span = s.span;
-//RS             method.name_span = s.name_span;
-//RS             method.compiler_generated = true;
-//RS         }
-//RS         if definition.name == "__JetPatchableMethods" {
-//RS             base_methods = std::mem::take(&mut definition.methods);
-//RS         } else if definition.name == "__JetPatchablePatchMethods" {
-//RS             patch_methods = std::mem::take(&mut definition.methods);
-//RS         }
-//RS     }
-//RS     (base_methods, patch_methods)
-//RS }
-//RS 
-//RS 
-//RS 
-//RS 
-//RS fn validate_patchable_struct(s: &StructDef) -> Option<Diagnostic> {
-//RS     if !s.type_params.is_empty() {
-//RS         return Some(Diagnostic::error(
-//RS             "E0336",
-//RS             format!(
-//RS                 "`#[Patchable]` on generic struct `{}` isn't supported yet",
-//RS                 s.name
-//RS             ),
-//RS             "`T.Patch` codegen needs a concrete field list — generic patches are a follow-on"
-//RS                 .to_string(),
-//RS             "remove the type parameters, or drop `#[Patchable]` for now".to_string(),
-//RS             Some(s.name_span),
-//RS         ));
-//RS     }
-//RS     for f in &s.fields {
-//RS         if matches!(f.ty, Type::Fn { .. }) {
-//RS             return Some(Diagnostic::error(
-//RS                 "E0337",
-//RS                 format!(
-//RS                     "`#[Patchable]` struct `{}` field `{}` has function type",
-//RS                     s.name, f.name
-//RS                 ),
-//RS                 "patches are data values — function-typed fields can't be patched".to_string(),
-//RS                 "store a callable handle type instead, or drop `#[Patchable]`".to_string(),
-//RS                 Some(f.name_span),
-//RS             ));
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS /// Register apply / diff / merge after base + Patch types exist in the registry.
-//RS pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegistry) {
-//RS     for item in items {
-//RS         let Item::Struct(s) = item else { continue };
-//RS         if !has_patchable(s) {
-//RS             continue;
-//RS         }
-//RS         let patch = patch_type_name(&s.name);
-//RS         if !registry.contains(&patch) {
-//RS             continue;
-//RS         }
-//RS         let base = s.name.clone();
-//RS         let generated = items.iter().any(|item| {
-//RS             matches!(
-//RS                 item,
-//RS                 Item::Struct(definition)
-//RS                     if definition.name == base
-//RS                         && definition.methods.iter().any(|method| {
-//RS                             method.compiler_generated && method.name == "apply"
-//RS                         })
-//RS                         && definition.methods.iter().any(|method| {
-//RS                             method.compiler_generated && method.name == "diff"
-//RS                         })
-//RS             )
-//RS         }) && items.iter().any(|item| {
-//RS             matches!(
-//RS                 item,
-//RS                 Item::Struct(definition)
-//RS                     if definition.name == patch
-//RS                         && definition.methods.iter().any(|method| {
-//RS                             method.compiler_generated && method.name == "merge"
-//RS                         })
-//RS             )
-//RS         });
-//RS         if generated {
-//RS             continue;
-//RS         }
-//RS         let base_ty = Type::Named(base.clone());
-//RS         let patch_ty = Type::Named(patch.clone());
-//RS 
-//RS         if let Some(TypeDef::Struct { methods, .. }) = registry.types.get_mut(&base) {
-//RS             methods.insert(
-//RS                 "apply".to_string(),
-//RS                 MethodSig {
-//RS                     params: vec![
-//RS                         (AccessConvention::Read, base_ty.clone()),
-//RS                         (AccessConvention::Move, patch_ty.clone()),
-//RS                     ],
-//RS                     return_type: Some(base_ty.clone()),
-//RS                     deprecation: None,
-//RS                     type_params: Vec::new(),
-//RS                     is_static: false,
-//RS                     self_conv: Some(AccessConvention::Read),
-//RS                     param_info: vec![("patch".to_string(), false)],
-//RS                     param_call: vec![("patch".to_string(), crate::AST::ParamZone::Either)],
-//RS                     param_variadic: vec![false],
-//RS                     defaults: vec![None],
-//RS                     must_use: false,
-//RS                     return_view_provenance: Default::default(),
-//RS                 },
-//RS             );
-//RS             methods.insert(
-//RS                 "diff".to_string(),
-//RS                 MethodSig {
-//RS                     params: vec![
-//RS                         (AccessConvention::Move, base_ty.clone()),
-//RS                         (AccessConvention::Move, base_ty),
-//RS                     ],
-//RS                     return_type: Some(patch_ty.clone()),
-//RS                     deprecation: None,
-//RS                     type_params: Vec::new(),
-//RS                     is_static: true,
-//RS                     self_conv: None,
-//RS                     param_info: vec![("new".to_string(), false), ("old".to_string(), false)],
-//RS                     param_call: vec![
-//RS                         ("new".to_string(), crate::AST::ParamZone::Either),
-//RS                         ("old".to_string(), crate::AST::ParamZone::Either),
-//RS                     ],
-//RS                     param_variadic: vec![false, false],
-//RS                     defaults: vec![None, None],
-//RS                     must_use: false,
-//RS                     return_view_provenance: Default::default(),
-//RS                 },
-//RS             );
-//RS         }
-//RS         if let Some(TypeDef::Struct { methods, .. }) = registry.types.get_mut(&patch) {
-//RS             methods.insert(
-//RS                 "merge".to_string(),
-//RS                 MethodSig {
-//RS                     params: vec![
-//RS                         (AccessConvention::Read, patch_ty.clone()),
-//RS                         (AccessConvention::Move, patch_ty),
-//RS                     ],
-//RS                     return_type: Some(Type::Named(patch)),
-//RS                     deprecation: None,
-//RS                     type_params: Vec::new(),
-//RS                     is_static: false,
-//RS                     self_conv: Some(AccessConvention::Read),
-//RS                     param_info: vec![("other".to_string(), false)],
-//RS                     param_call: vec![("other".to_string(), crate::AST::ParamZone::Either)],
-//RS                     param_variadic: vec![false],
-//RS                     defaults: vec![None],
-//RS                     must_use: false,
-//RS                     return_view_provenance: Default::default(),
-//RS                 },
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-SHAPE-PROJECT1=A: every `#CLI` struct owns the precedence combinator
-//RS /// `T.merge(flags, settings) T ![FieldError]`: an explicit flag wins, then an
-//RS /// environment value, then the field default. A present invalid value is a
-//RS /// `FieldError` from the layer that decoded it, never absence.
-//RS pub(crate) fn register_cli_merge_methods(items: &[Item], registry: &mut TypeRegistry) {
-//RS     for item in items {
-//RS         let Item::Struct(s) = item else { continue };
-//RS         if !s.derives.iter().any(|(name, _)| name == crate::Syntax::MARKER_CLI) {
-//RS             continue;
-//RS         }
-//RS         let Some(TypeDef::Struct { methods, .. }) = registry.types.get_mut(&s.name) else {
-//RS             continue;
-//RS         };
-//RS         if methods.contains_key("merge") {
-//RS             continue;
-//RS         }
-//RS         let ty = Type::Named(s.name.clone());
-//RS         methods.insert(
-//RS             "merge".to_string(),
-//RS             MethodSig {
-//RS                 params: vec![
-//RS                     (AccessConvention::Read, ty.clone()),
-//RS                     (AccessConvention::Read, ty.clone()),
-//RS                 ],
-//RS                 return_type: Some(Type::Result {
-//RS                     ok: Box::new(ty),
-//RS                     err: Box::new(Type::List(Box::new(Type::Named("FieldError".to_string())))),
-//RS                 }),
-//RS                 deprecation: None,
-//RS                 type_params: Vec::new(),
-//RS                 is_static: true,
-//RS                 self_conv: None,
-//RS                 param_info: vec![("flags".to_string(), false), ("settings".to_string(), false)],
-//RS                 param_call: vec![
-//RS                     ("flags".to_string(), crate::AST::ParamZone::Either),
-//RS                     ("settings".to_string(), crate::AST::ParamZone::Either),
-//RS                 ],
-//RS                 param_variadic: vec![false, false],
-//RS                 defaults: vec![None, None],
-//RS                 must_use: true,
-//RS                 return_view_provenance: Default::default(),
-//RS             },
-//RS         );
-//RS     }
-//RS }
-// END-PORT-PENDING 0423 crates/jet-sema/src/Sema/CheckerPatchable.rs:1-358
+// D-PATCH1: synthetic T.Patch type and apply/diff/merge methods.
+use jet_foundation.[Diagnostic, Field, Item, StructDef, Type, Func, AccessConvention, ParamZone]
+use jet_foundation.Syntax
+use jet_sema.[MethodSig, TypeDef, TypeRegistry]
+use jet_lexer.lex_generated
+use jet_parser.parse
 
+// Rust: crates/jet-sema/src/Sema/CheckerPatchable.rs:9
+pub fn patch_type_name(base: String) -> String { "{base}.Patch" }
+// Rust: crates/jet-sema/src/Sema/CheckerPatchable.rs:13
+fn has_patchable(s: StructDef) -> Bool {
+    s.derives.iter().any(fn(t, _) { t == Syntax.MARKER_PATCHABLE })
+}
+// Rust: crates/jet-sema/src/Sema/CheckerPatchable.rs:18
+pub fn inject_patchable_types(items: &[Item], diags: &[Diagnostic]) {
+    to_add := [Item]{}
+    generated_base_methods := [(USize, [Func])]{}
+    loop index, item in items.enumerate() {
+        if item != .Struct(s) -> continue
+        if !has_patchable(s) -> continue
+        if validate_patchable_struct(s) == .Val(d) { diags.push(d); continue }
+        patch_name :: patch_type_name(s.name)
+        fields := [Field]{}
+        // Computed fields cannot hold an unchanged sentinel.
+        loop f in s.fields {
+            if f.computed.is_some() -> continue
+            fields.push(Field{
+                name: f.name.clone(), name_span: f.name_span,
+                ty: Type.Option(f.ty.clone()), ty_span: f.ty_span,
+                is_pub: f.is_pub, is_package_pub: f.is_package_pub,
+                serde_markers: [], redact: false, computed: None,
+                default: None, default_ct: None,
+            })
+        }
+        (base_methods, patch_methods) :: generated_patchable_methods(s)
+        to_add.push(Item.Struct(StructDef{
+            span: s.span, is_pub: s.is_pub, is_package_pub: s.is_package_pub,
+            name: patch_name, name_span: s.name_span, type_params: [], fields: ^fields,
+            state: None, methods: patch_methods, cli_bindings: [], trait_impls: [], derives: [],
+            // Patch serde is deferred; do not inherit package auto-derive.
+            auto_derive_default: false, is_published_schema: false, published_schema_span: None,
+            is_single_use: false, single_use_span: None, is_must_use: false, must_use_span: None,
+            layout: None, layout_span: None, serde_markers: [], type_markers: [],
+            validate_block: [], validate_span: None,
+        }))
+        generated_base_methods.push((index, base_methods))
+    }
+    loop (index, methods) in generated_base_methods {
+        if items[index] == .Struct(s) { s.methods.extend(methods) }
+    }
+    items.extend(to_add)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerPatchable.rs:93
+fn generated_patchable_methods(s: StructDef) -> ([Func], [Func]) {
+    base :: s.name
+    patch :: patch_type_name(base)
+    fields := [String]{}
+    loop field in s.fields { if field.computed.is_none() { fields.push(field.name.clone()) } }
+    source := String.new()
+    source.push_str("struct __JetPatchableMethods {{\n")
+    source.push_str("    fn apply(self, patch: {patch}) -> {base} {{\n        return {base}{{\n")
+    loop index, field in fields.enumerate() {
+        if index != 0 { source.push_str(",\n") }
+        source.push_str("            {field}: patch.{field} ?? self.{field}")
+    }
+    source.push_str("\n        }\n    }\n\n")
+    source.push_str("    fn diff(^new: {base}, ^old: {base}) -> {patch} {{\n        return {patch}{{\n")
+    loop index, field in fields.enumerate() {
+        if index != 0 { source.push_str(",\n") }
+        source.push_str("            {field}: if new.{field} == old.{field} -> None else -> Val(new.{field})")
+    }
+    source.push_str("\n        }\n    }\n}\n\n")
+    source.push_str("struct __JetPatchablePatchMethods {{\n")
+    source.push_str("    fn merge(self, ^other: {patch}) -> {patch} {{\n        return {patch}{{\n")
+    loop index, field in fields.enumerate() {
+        if index != 0 { source.push_str(",\n") }
+        source.push_str("            {field}: if self.{field} == None -> other.{field} else -> self.{field}")
+    }
+    source.push_str("\n        }\n    }\n}\n")
+    (tokens, lex_diagnostics) :: lex_generated(source)
+    if !lex_diagnostics.is_empty() { panic("invalid generated Patchable methods: {lex_diagnostics:?}") }
+    program := parse(tokens) or diagnostics => { panic("invalid generated Patchable methods: {diagnostics:?}") }
+    base_methods := [Func]{}
+    patch_methods := [Func]{}
+    loop &item in program.items {
+        if item != .Struct(definition) -> continue
+        loop &method in definition.methods {
+            method.span = s.span
+            method.name_span = s.name_span
+            method.compiler_generated = true
+        }
+        if definition.name == "__JetPatchableMethods" {
+            base_methods = ^definition.methods
+            definition.methods = []
+        } else if definition.name == "__JetPatchablePatchMethods" {
+            patch_methods = ^definition.methods
+            definition.methods = []
+        }
+    }
+    (^base_methods, ^patch_methods)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerPatchable.rs:173
+fn validate_patchable_struct(s: StructDef) -> Diagnostic? {
+    if !s.type_params.is_empty() {
+        return Val(Diagnostic.error("E0336", "`#[Patchable]` on generic struct `{s.name}` isn't supported yet",
+            "`T.Patch` codegen needs a concrete field list — generic patches are a follow-on",
+            "remove the type parameters, or drop `#[Patchable]` for now", Val(s.name_span)))
+    }
+    loop f in s.fields {
+        if f.ty == .Fn(..) {
+            return Val(Diagnostic.error("E0337", "`#[Patchable]` struct `{s.name}` field `{f.name}` has function type",
+                "patches are data values — function-typed fields can't be patched",
+                "store a callable handle type instead, or drop `#[Patchable]`", Val(f.name_span)))
+        }
+    }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerPatchable.rs:205
+pub fn register_patchable_methods(items: [Item], registry: &TypeRegistry) {
+    loop item in items {
+        if item != .Struct(s) -> continue
+        if !has_patchable(s) -> continue
+        patch :: patch_type_name(s.name)
+        if !registry.contains(patch) -> continue
+        base :: s.name
+        generated :: items.iter().any(fn(item) {
+            if item == .Struct(definition) {
+                definition.name == base && definition.methods.iter().any(fn(method) { method.compiler_generated && method.name == "apply" })
+                    && definition.methods.iter().any(fn(method) { method.compiler_generated && method.name == "diff" })
+            } else -> false
+        }) && items.iter().any(fn(item) {
+            if item == .Struct(definition) {
+                definition.name == patch && definition.methods.iter().any(fn(method) { method.compiler_generated && method.name == "merge" })
+            } else -> false
+        })
+        if generated -> continue
+        base_ty :: Type.Named(base.clone())
+        patch_ty :: Type.Named(patch.clone())
+        if registry.types.get_mut(base) == .Val(.Struct(methods: methods, ..)) {
+            _ :: methods.insert("apply", MethodSig{
+                params: [(.Read, base_ty.clone()), (.Move, patch_ty.clone())], return_type: Val(base_ty.clone()),
+                deprecation: None, type_params: [], is_static: false, self_conv: Val(.Read),
+                param_info: [("patch", false)], param_call: [("patch", ParamZone.Either)],
+                param_variadic: [false], defaults: [None], must_use: false, return_view_provenance: .default(),
+            })
+            _ :: methods.insert("diff", MethodSig{
+                params: [(.Move, base_ty.clone()), (.Move, base_ty.clone())], return_type: Val(patch_ty.clone()),
+                deprecation: None, type_params: [], is_static: true, self_conv: None,
+                param_info: [("new", false), ("old", false)], param_call: [("new", ParamZone.Either), ("old", ParamZone.Either)],
+                param_variadic: [false, false], defaults: [None, None], must_use: false, return_view_provenance: .default(),
+            })
+        }
+        if registry.types.get_mut(patch) == .Val(.Struct(methods: methods, ..)) {
+            _ :: methods.insert("merge", MethodSig{
+                params: [(.Read, patch_ty.clone()), (.Move, patch_ty.clone())], return_type: Val(Type.Named(patch.clone())),
+                deprecation: None, type_params: [], is_static: false, self_conv: Val(.Read),
+                param_info: [("other", false)], param_call: [("other", ParamZone.Either)],
+                param_variadic: [false], defaults: [None], must_use: false, return_view_provenance: .default(),
+            })
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerPatchable.rs:318
+// Explicit flags win, then environment settings, then defaults. Invalid present values remain FieldError.
+pub fn register_cli_merge_methods(items: [Item], registry: &TypeRegistry) {
+    loop item in items {
+        if item != .Struct(s) -> continue
+        if !s.derives.iter().any(fn(name, _) { name == Syntax.MARKER_CLI }) -> continue
+        if registry.types.get_mut(s.name) != .Val(.Struct(methods: methods, ..)) -> continue
+        if methods.contains_key("merge") -> continue
+        ty :: Type.Named(s.name.clone())
+        _ :: methods.insert("merge", MethodSig{
+            params: [(.Read, ty.clone()), (.Read, ty.clone())],
+            return_type: Val(Type.Result{ok: ty.clone(), err: Type.List(Type.Named("FieldError"))}),
+            deprecation: None, type_params: [], is_static: true, self_conv: None,
+            param_info: [("flags", false), ("settings", false)], param_call: [("flags", ParamZone.Either), ("settings", ParamZone.Either)],
+            param_variadic: [false, false], defaults: [None, None], must_use: true, return_view_provenance: .default(),
+        })
+    }
+}

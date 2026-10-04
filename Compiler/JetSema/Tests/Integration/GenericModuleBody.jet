@@ -1,1101 +1,302 @@
-// PORT-PENDING 0452 crates-jet-sema-tests-generic-module-body-module-group: crates/jet-sema/tests/generic_module_body.rs:1-914
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use jet_sema::Diagnostics::{Diagnostic, Severity};
-//RS use jet_sema::Sema::{check_bundle, CompileMode};
-//RS use jet_sema::AST::{CFfi, CtValue, Item, LoadedModule, ProgramBundle, TagMarker, Type};
-//RS use jet_sema::{Lexer, Parser, Syntax};
-//RS use std::collections::{HashMap, HashSet};
-//RS use std::path::PathBuf;
-//RS use std::sync::Once;
-//RS 
-//RS fn ensure_mir_bridge() {
-//RS     static INSTALL: Once = Once::new();
-//RS     INSTALL.call_once(|| {
-//RS         jet_codegen::Codegen::MIREval::install_mir_bridge();
-//RS     });
-//RS }
-//RS 
-//RS fn check(src: &str) -> (ProgramBundle, Vec<Diagnostic>) {
-//RS     check_at(src, ".")
-//RS }
-//RS 
-//RS fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
-//RS     ensure_mir_bridge();
-//RS     let (tokens, lex) = Lexer::lex(src);
-//RS     assert!(lex.is_empty(), "lexer diagnostics: {lex:?}");
-//RS     let mut program = Parser::parse(&tokens).expect("source parses");
-//RS     let mut bundle = ProgramBundle {
-//RS         entry: 0,
-//RS         project_root: PathBuf::from(root),
-//RS         modules: vec![LoadedModule {
-//RS             path: PathBuf::from("generic_module_body.jet"),
-//RS             display: "generic_module_body.jet".into(),
-//RS             alias: "main".into(),
-//RS             imports: std::mem::take(&mut program.imports),
-//RS             items: std::mem::take(&mut program.items),
-//RS             script_body: std::mem::take(&mut program.script_body),
-//RS             source: src.into(),
-//RS             block_spans: std::mem::take(&mut program.block_spans),
-//RS             web_target_ceiling: program.web_target_ceiling,
-//RS             pub_file: program.pub_file,
-//RS             no_prelude: program.no_prelude,
-//RS             default_target: program.default_target,
-//RS             html_path: program.html_path,
-//RS             policy_declarations: program.policy_declarations.clone(),
-//RS             user_policy_declarations: program.user_policy_declarations.clone(),
-//RS             rule_facts: std::mem::take(&mut program.rule_facts),
-//RS         }],
-//RS         devtools_registry: jet_sema::AST::DevtoolsRegistry::default(),
-//RS         parse_teaching: Vec::new(),
-//RS         used_core: HashSet::new(),
-//RS         ffi_callback_fns: HashSet::new(),
-//RS         cffi: CFfi::default(),
-//RS         comptime_inputs: Vec::new(),
-//RS         name_ledger: jet_sema::AST::NameLedger::default(),
-//RS         layer_ceiling: None,
-//RS         inferred_layer: Syntax::RuntimeLayer::Core,
-//RS         web_partitions: HashMap::new(),
-//RS         web_partition_enforced: false,
-//RS         web_partition_report: None,
-//RS         dep_roots: HashMap::new(),
-//RS         package_guarantees: Default::default(),
-//RS         program_allocator: Default::default(),
-//RS         active_os: Syntax::OSTarget::host(),
-//RS         build_facts: Default::default(),
-//RS         edition: "2027".to_string(),
-//RS     };
-//RS     let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);
-//RS     (bundle, diagnostics)
-//RS }
-//RS 
-//RS fn only_instance_fingerprint(src: &str, root: &str) -> String {
-//RS     let (bundle, diagnostics) = check_at(src, root);
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS     bundle.modules[0]
-//RS         .items
-//RS         .iter()
-//RS         .find_map(|item| match item {
-//RS             Item::CodeModule(module) => module
-//RS                 .instance_identity
-//RS                 .as_ref()
-//RS                 .map(|identity| identity.fingerprint.clone()),
-//RS             _ => None,
-//RS         })
-//RS         .expect("generic instance fingerprint")
-//RS }
-//RS 
-//RS fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, Vec<Diagnostic>) {
-//RS     ensure_mir_bridge();
-//RS     let mut modules = Vec::new();
-//RS     let mut name_ledger = jet_sema::AST::NameLedger::default();
-//RS     for (module_idx, (path, src, targets)) in sources.iter().enumerate() {
-//RS         let (tokens, lex) = Lexer::lex(src);
-//RS         assert!(lex.is_empty(), "lexer diagnostics: {lex:?}");
-//RS         let mut program = Parser::parse(&tokens).expect("source parses");
-//RS         for (alias, target) in *targets {
-//RS             let import = program
-//RS                 .imports
-//RS                 .iter()
-//RS                 .find(|import| {
-//RS                     import.import_alias() == *alias
-//RS                         && !matches!(import.kind, jet_sema::AST::ImportKind::Unqualified { .. })
-//RS                 })
-//RS                 .unwrap();
-//RS             name_ledger.record_import_target(module_idx, import.span, *target);
-//RS         }
-//RS         modules.push(LoadedModule {
-//RS             path: PathBuf::from(path),
-//RS             display: (*path).into(),
-//RS             alias: path.trim_end_matches(".jet").into(),
-//RS             imports: std::mem::take(&mut program.imports),
-//RS             items: std::mem::take(&mut program.items),
-//RS             script_body: std::mem::take(&mut program.script_body),
-//RS             source: (*src).into(),
-//RS             block_spans: std::mem::take(&mut program.block_spans),
-//RS             web_target_ceiling: program.web_target_ceiling,
-//RS             pub_file: program.pub_file,
-//RS             no_prelude: program.no_prelude,
-//RS             default_target: program.default_target,
-//RS             html_path: program.html_path,
-//RS             policy_declarations: program.policy_declarations.clone(),
-//RS             user_policy_declarations: program.user_policy_declarations.clone(),
-//RS             rule_facts: std::mem::take(&mut program.rule_facts),
-//RS         });
-//RS     }
-//RS     let mut bundle = ProgramBundle {
-//RS         entry: sources.len() - 1,
-//RS         project_root: PathBuf::from("pkg-a"),
-//RS         modules,
-//RS         devtools_registry: jet_sema::AST::DevtoolsRegistry::default(),
-//RS         parse_teaching: Vec::new(),
-//RS         used_core: HashSet::new(),
-//RS         ffi_callback_fns: HashSet::new(),
-//RS         cffi: CFfi::default(),
-//RS         comptime_inputs: Vec::new(),
-//RS         name_ledger,
-//RS         layer_ceiling: None,
-//RS         inferred_layer: Syntax::RuntimeLayer::Core,
-//RS         web_partitions: HashMap::new(),
-//RS         web_partition_enforced: false,
-//RS         web_partition_report: None,
-//RS         dep_roots: HashMap::new(),
-//RS         package_guarantees: Default::default(),
-//RS         program_allocator: Default::default(),
-//RS         active_os: Syntax::OSTarget::host(),
-//RS         build_facts: Default::default(),
-//RS         edition: "2027".to_string(),
-//RS     };
-//RS     let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);
-//RS     (bundle, diagnostics)
-//RS }
-//RS 
-//RS fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
-//RS     diags
-//RS         .iter()
-//RS         .filter(|d| d.severity == Severity::Error)
-//RS         .map(|d| d.code.as_ref())
-//RS         .collect()
-//RS }
-//RS 
-//RS #[test]
-//RS fn equivalent_instances_are_interned_and_project_one_nominal_identity() {
-//RS     let src = r#"
-//RS module boxed<T>(size: Int) {
-//RS     struct Box { value: T }
-//RS     fn identity(value: Box) -> Box { return ~value }
-//RS }
-//RS module other<T>(size: Int) { struct Box { value: T } }
-//RS module first :: boxed<Int>(3)
-//RS module equivalent :: boxed<Int>(3)
-//RS module forward :: equivalent
-//RS module different_type :: boxed<String>(3)
-//RS module different_value :: boxed<Int>(4)
-//RS module different_template :: other<Int>(3)
-//RS fn accepts_first(value: first.Box) -> first.Box { return ~value }
-//RS fn accepts_projection(value: equivalent.Box) -> first.Box { return ~value }
-//RS fn accepts_chain(value: forward.Box) -> first.Box { return ~value }
-//RS fn accepts_surface(value: first.Box) -> first.Box { return ~value }
-//RS fn accepts_forward_surface(value: forward.Box) -> first.Box { return ~value }
-//RS fn run() {}
-//RS "#;
-//RS     let (bundle, diagnostics) = check(src);
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS     assert_eq!(
-//RS         bundle.name_ledger.display_path(0, "M5FirstBox", Some(0)),
-//RS         Some("first.Box".to_string()),
-//RS         "generic nominal names stay internal to diagnostics and tooling",
-//RS     );
-//RS     let items = &bundle.modules[0].items;
-//RS     let modules: Vec<&str> = items
-//RS         .iter()
-//RS         .filter_map(|item| match item {
-//RS             Item::CodeModule(module) => Some(module.name.as_str()),
-//RS             _ => None,
-//RS         })
-//RS         .collect();
-//RS     assert_eq!(modules.iter().filter(|name| **name == "first").count(), 1);
-//RS     assert!(!modules.contains(&"equivalent"));
-//RS     assert!(!modules.contains(&"forward"));
-//RS     assert!(modules.contains(&"different_type"));
-//RS     assert!(modules.contains(&"different_value"));
-//RS     assert!(modules.contains(&"different_template"));
-//RS     assert_eq!(
-//RS         items
-//RS             .iter()
-//RS             .filter(|item| matches!(item, Item::Struct(def) if def.name == "M5FirstBox"))
-//RS             .count(),
-//RS         1
-//RS     );
-//RS     for name in ["accepts_projection", "accepts_chain"] {
-//RS         let Item::Func(func) = items
-//RS             .iter()
-//RS             .find(|item| matches!(item, Item::Func(func) if func.name == name))
-//RS             .unwrap()
-//RS         else {
-//RS             unreachable!()
-//RS         };
-//RS         assert_eq!(func.params[0].ty, Type::Named("M5FirstBox".into()));
-//RS         assert_eq!(func.return_type, Some(Type::Named("M5FirstBox".into())));
-//RS     }
-//RS     for name in ["accepts_surface", "accepts_forward_surface"] {
-//RS         let Item::Func(func) = items
-//RS             .iter()
-//RS             .find(|item| matches!(item, Item::Func(func) if func.name == name))
-//RS             .unwrap()
-//RS         else {
-//RS             unreachable!()
-//RS         };
-//RS         assert_eq!(func.params[0].ty, Type::Named("M5FirstBox".into()));
-//RS         assert_eq!(func.return_type, Some(Type::Named("M5FirstBox".into())));
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn generic_module_comptime_bindings_survive_item_registration() {
-//RS     let (bundle, diagnostics) = check(
-//RS         r#"
-//RS module cache<K>(capacity: Int) {
-//RS     BASE :: prep { capacity }
-//RS     COMPUTED_SIZE :: prep { BASE + 1 }
-//RS     fn size() -> Int -> COMPUTED_SIZE
-//RS }
-//RS module instance :: cache<Int>(3)
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS     let items = &bundle.modules[0].items;
-//RS     assert!(items.iter().any(|item| matches!(
-//RS         item,
-//RS         Item::Const(constant)
-//RS             if constant.name == "instance_@base"
-//RS                 && constant.ct == Some(CtValue::Int(3))
-//RS     )));
-//RS     assert!(items.iter().any(|item| matches!(
-//RS         item,
-//RS         Item::Const(constant)
-//RS             if constant.name == "instance_@computed_size"
-//RS                 && constant.ct == Some(CtValue::Int(4))
-//RS     )));
-//RS }
-//RS 
-//RS #[test]
-//RS fn soft_public_aliases_keep_distinct_casing_safe_type_names() {
-//RS     let (bundle, diagnostics) = check(
-//RS         r#"
-//RS module holder<T> { struct Item { value: T } }
-//RS module cache :: holder<Int>
-//RS module _cache :: holder<String>
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS     let names: Vec<_> = bundle.modules[0]
-//RS         .items
-//RS         .iter()
-//RS         .filter_map(|item| match item {
-//RS             Item::Struct(def) => Some(def.name.as_str()),
-//RS             _ => None,
-//RS         })
-//RS         .collect();
-//RS     assert!(names.contains(&"M5CacheItem"), "{names:?}");
-//RS     assert!(names.contains(&"_M5CacheItem"), "{names:?}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn imported_template_is_interned_once_across_consumers() {
-//RS     let template = r#"
-//RS pub module boxed<T>(size: Int) { pub struct Box { value: T } }
-//RS pub module other<T>(size: Int) { pub struct Box { value: T } }
-//RS "#;
-//RS     let first = r#"
-//RS use "./templates" as templates
-//RS use templates.[boxed]
-//RS pub module first :: boxed<Int>(3)
-//RS fn run() {}
-//RS "#;
-//RS     let second = r#"
-//RS use "./templates" as templates
-//RS use templates.[boxed, other]
-//RS module second :: boxed<Int>(3)
-//RS module different_arg :: boxed<Int>(4)
-//RS module different_template :: other<Int>(3)
-//RS fn accepts_projection(value: second.Box) -> first.Box { return ~value }
-//RS fn run() {}
-//RS "#;
-//RS     let (bundle, diagnostics) = check_modules(&[
-//RS         ("templates.jet", template, &[]),
-//RS         ("first.jet", first, &[("templates", 0)]),
-//RS         ("second.jet", second, &[("templates", 0)]),
-//RS     ]);
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS     assert_eq!(
-//RS         bundle
-//RS             .modules
-//RS             .iter()
-//RS             .flat_map(|module| &module.items)
-//RS             .filter(|item| matches!(item, Item::Struct(def) if def.name == "M5FirstBox"))
-//RS             .count(),
-//RS         1
-//RS     );
-//RS     assert!(!bundle.modules[2]
-//RS         .items
-//RS         .iter()
-//RS         .any(|item| matches!(item, Item::CodeModule(module) if module.name == "second")));
-//RS     assert!(bundle.modules[2]
-//RS         .items
-//RS         .iter()
-//RS         .any(|item| matches!(item, Item::CodeModule(module) if module.name == "different_arg")));
-//RS     assert!(bundle.modules[2].items.iter().any(
-//RS         |item| matches!(item, Item::CodeModule(module) if module.name == "different_template")
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn imported_struct_returns_expose_all_fields_but_scalars_keep_e0302() {
-//RS     let provider = r#"
-//RS pub struct IngestResult {
-//RS     pub provider: String
-//RS     pub name: String
-//RS     pub version: String
-//RS     pub reference: String
-//RS     pub source: String
-//RS     pub expected_hash: String
-//RS }
-//RS 
-//RS pub struct RealizeResult {
-//RS     pub provider: String
-//RS     pub name: String
-//RS     pub version: String
-//RS     pub reference: String
-//RS     pub source: String
-//RS     pub expected_hash: String
-//RS }
-//RS 
-//RS pub fn ingest() -> IngestResult {
-//RS     return IngestResult{
-//RS         provider: "local",
-//RS         name: "demo",
-//RS         version: "1",
-//RS         reference: "main",
-//RS         source: "/tmp/demo",
-//RS         expected_hash: "hash"
-//RS     }
-//RS }
-//RS 
-//RS pub fn realize() -> RealizeResult {
-//RS     return RealizeResult{
-//RS         provider: "local",
-//RS         name: "demo",
-//RS         version: "1",
-//RS         reference: "main",
-//RS         source: "/tmp/demo",
-//RS         expected_hash: "hash"
-//RS     }
-//RS }
-//RS "#;
-//RS     let consumer = r#"
-//RS use "./provider" as provider
-//RS 
-//RS fn run() {
-//RS     ingested :: provider.ingest() ?? panic("ingest")
-//RS     print(ingested.provider)
-//RS     print(ingested.name)
-//RS     print(ingested.version)
-//RS     print(ingested.reference)
-//RS     print(ingested.source)
-//RS     print(ingested.expected_hash)
-//RS 
-//RS     realized :: provider.realize() ?? panic("realize")
-//RS     print(realized.provider)
-//RS     print(realized.name)
-//RS     print(realized.version)
-//RS     print(realized.reference)
-//RS     print(realized.source)
-//RS     print(realized.expected_hash)
-//RS 
-//RS     scalar :: 1
-//RS     print(scalar.provider)
-//RS }
-//RS "#;
-//RS     let (_, diagnostics) = check_modules(&[
-//RS         ("provider.jet", provider, &[]),
-//RS         ("consumer.jet", consumer, &[("provider", 0)]),
-//RS     ]);
-//RS     assert_eq!(error_codes(&diagnostics), vec!["E0302"], "{diagnostics:#?}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn imported_module_alias_preserves_local_struct_fields() {
-//RS     let records = r#"
-//RS pub struct Record {
-//RS     pub value: String
-//RS }
-//RS 
-//RS pub fn inspect(record: Record) -> String {
-//RS     return record.value
-//RS }
-//RS 
-//RS pub fn make() -> Record {
-//RS     return Record{value: "ok"}
-//RS }
-//RS "#;
-//RS     let consumer = r#"
-//RS use records as alias
-//RS 
-//RS fn run() {
-//RS     record :: alias.make() ?? panic("make")
-//RS     print(record.value)
-//RS     inspected :: alias.inspect(record) ?? panic("inspect")
-//RS     print(inspected)
-//RS 
-//RS     scalar :: 1
-//RS     print(scalar.value)
-//RS }
-//RS "#;
-//RS     let (_, diagnostics) = check_modules(&[
-//RS         ("records.jet", records, &[]),
-//RS         ("consumer.jet", consumer, &[("alias", 0)]),
-//RS     ]);
-//RS     assert_eq!(error_codes(&diagnostics), vec!["E0302"], "{diagnostics:#?}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn fallible_binding_exposes_propagated_struct_success_fields() {
-//RS     let source = r#"
-//RS #Error
-//RS struct LocalError {
-//RS     message: String
-//RS }
-//RS 
-//RS struct Record {
-//RS     value: String
-//RS }
-//RS 
-//RS fn make() -> Record LocalError! {
-//RS     return Ok(Record{value: "ok"})
-//RS }
-//RS 
-//RS fn consume() -> String LocalError! {
-//RS     record :: make()
-//RS     return Ok(record.value)
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#;
-//RS     let (_, diagnostics) = check_modules(&[("main.jet", source, &[])]);
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn instance_fingerprint_is_nominal_and_ignores_body_shape() {
-//RS     let base = "module boxed<T>(n: Int) { fn value() -> Int { return n } }\nmodule instance :: boxed<Int>(3)\nfn run() {}";
-//RS     let shifted = "\n\nmodule boxed<T>(n: Int) {   fn value() -> Int { return n } }\nmodule renamed :: boxed<Int>(3)\nfn run() {}";
-//RS     let body = "module boxed<T>(n: Int) { fn value() -> Int { return n + 1 } }\nmodule instance :: boxed<Int>(3)\nfn run() {}";
-//RS     let arg = "module boxed<T>(n: Int) { fn value() -> Int { return n } }\nmodule instance :: boxed<Int>(4)\nfn run() {}";
-//RS     let fp = only_instance_fingerprint(base, "pkg-a");
-//RS     assert_eq!(fp, only_instance_fingerprint(shifted, "pkg-a"));
-//RS     assert_eq!(fp, only_instance_fingerprint(body, "pkg-a"));
-//RS     assert_ne!(fp, only_instance_fingerprint(arg, "pkg-a"));
-//RS     assert_eq!(
-//RS         fp,
-//RS         only_instance_fingerprint(base, "pkg-b"),
-//RS         "manifest-less host paths are non-semantic"
-//RS     );
-//RS 
-//RS     let roots = std::env::temp_dir().join(format!(
-//RS         "jet_genmod_nominal_packages_{}",
-//RS         std::process::id()
-//RS     ));
-//RS     let package_a = roots.join("checkout-a");
-//RS     let package_b = roots.join("checkout-b");
-//RS     std::fs::create_dir_all(&package_a).unwrap();
-//RS     std::fs::create_dir_all(&package_b).unwrap();
-//RS     std::fs::write(
-//RS         package_a.join("pkg.jet"),
-//RS         "payload: { name: \"package-a\", version: \"1.0.0\" }",
-//RS     )
-//RS     .unwrap();
-//RS     std::fs::write(
-//RS         package_b.join("pkg.jet"),
-//RS         "payload: { name: \"package-b\", version: \"1.0.0\" }",
-//RS     )
-//RS     .unwrap();
-//RS     assert_ne!(
-//RS         only_instance_fingerprint(base, package_a.to_str().unwrap()),
-//RS         only_instance_fingerprint(base, package_b.to_str().unwrap()),
-//RS         "canonical package identity remains nominal",
-//RS     );
-//RS     let _ = std::fs::remove_dir_all(roots);
-//RS }
-//RS 
-//RS #[test]
-//RS fn instance_definition_identity_tracks_manifest_semver_not_formatting_or_workspace_lock_noise() {
-//RS     let base = std::env::temp_dir().join(format!("jet_genmod_identity_{}", std::process::id()));
-//RS     let a = base.join("a");
-//RS     let b = base.join("b");
-//RS     std::fs::create_dir_all(a.join(".jet")).unwrap();
-//RS     std::fs::create_dir_all(b.join(".jet")).unwrap();
-//RS     std::fs::write(
-//RS         a.join("pkg.jet"),
-//RS         "payload: {\n name: \"demo\",\n version: \"1.0.0\"\n}",
-//RS     )
-//RS     .unwrap();
-//RS     std::fs::write(
-//RS         b.join("pkg.jet"),
-//RS         "payload: {\n name: \"demo\",\n version: \"2.0.0\"\n}",
-//RS     )
-//RS     .unwrap();
-//RS     std::fs::write(a.join(".jet/lock"), "source = a").unwrap();
-//RS     std::fs::write(b.join(".jet/lock"), "source = b").unwrap();
-//RS     let src = "module boxed<T> { fn value(v: T) -> T { return v } }\nmodule instance :: boxed<Int>\nfn run() {}";
-//RS     assert_ne!(
-//RS         only_instance_fingerprint(src, a.to_str().unwrap()),
-//RS         only_instance_fingerprint(src, b.to_str().unwrap())
-//RS     );
-//RS     std::fs::write(
-//RS         b.join("pkg.jet"),
-//RS         "payload: { name: \"demo\", version: \"1.0.0\" }",
-//RS     )
-//RS     .unwrap();
-//RS     assert_eq!(
-//RS         only_instance_fingerprint(src, a.to_str().unwrap()),
-//RS         only_instance_fingerprint(src, b.to_str().unwrap())
-//RS     );
-//RS     std::fs::write(b.join(".jet/lock"), "source = a\n").unwrap();
-//RS     assert_eq!(
-//RS         only_instance_fingerprint(src, a.to_str().unwrap()),
-//RS         only_instance_fingerprint(src, b.to_str().unwrap())
-//RS     );
-//RS     let _ = std::fs::remove_dir_all(base);
-//RS }
-//RS 
-//RS #[test]
-//RS fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph() {
-//RS     let src = r#"
-//RS module laws<T> {
-//RS     tag Audited { deny: [Net] }
-//RS     fn audited(value: #Audited T) -> #Audited T { return ~value }
-//RS     trait Reveal {
-//RS         type Output
-//RS         fn reveal(self) -> T
-//RS     }
-//RS     struct Wrapped { value: T }
-//RS     impl Wrapped.Reveal {
-//RS         type Output = T
-//RS         fn reveal(self) -> T { return self.value }
-//RS     }
-//RS     enum SourceErr { Bad(T) }
-//RS     enum TargetErr { Wrapped(SourceErr) }
-//RS     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
-//RS }
-//RS module int_laws :: laws<Int>
-//RS fn run() {}
-//RS "#;
-//RS     let (bundle, diagnostics) = check(src);
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS     let items = &bundle.modules[0].items;
-//RS     assert!(items.iter().any(|item| matches!(item, Item::Trait(t) if t.name == "M3Int4LawsReveal" && t.methods[0].return_type == Some(Type::Int))));
-//RS     assert!(items
-//RS         .iter()
-//RS         .any(|item| matches!(item, Item::Tag(t) if t.name == "M3Int4LawsAudited")));
-//RS     let Item::CodeModule(instance) = items
-//RS         .iter()
-//RS         .find(|item| matches!(item, Item::CodeModule(m) if m.name == "int_laws"))
-//RS         .unwrap()
-//RS     else {
-//RS         unreachable!()
-//RS     };
-//RS     let tagged = instance
-//RS         .body
-//RS         .as_ref()
-//RS         .unwrap()
-//RS         .iter()
-//RS         .find_map(|item| match item {
-//RS             Item::Func(f) if f.name == "audited" => Some(&f.params[0].ty),
-//RS             _ => None,
-//RS         })
-//RS         .unwrap();
-//RS     assert!(
-//RS         matches!(tagged, Type::Tagged { marker, inner } if matches!(marker, TagMarker::User(name) if name == "M3Int4LawsAudited") && **inner == Type::Int),
-//RS         "{tagged:?}"
-//RS     );
-//RS     assert!(items.iter().any(|item| matches!(item, Item::Impl(i) if i.type_name == "M3Int4LawsWrapped" && i.trait_name.as_deref() == Some("M3Int4LawsReveal") && i.assoc_type_impls[0].2 == Type::Int)));
-//RS     assert!(items.iter().any(|item| matches!(item, Item::ErrorConv(ec) if ec.from_ty == "M3Int4LawsSourceErr" && ec.to_ty == "M3Int4LawsTargetErr")));
-//RS }
-//RS 
-//RS #[test]
-//RS fn tag_method_inside_instance_keeps_e0732() {
-//RS     // The parser owns the tag-method rejection now; the diagnostic text is
-//RS     // unchanged. The template body still may not smuggle a method through a
-//RS     // generic instance.
-//RS     let (tokens, lex) = Lexer::lex(
-//RS         r#"
-//RS module bad<T> { tag Marker { fn forbidden(self) -> T } }
-//RS module instance :: bad<Int>
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     assert!(lex.is_empty(), "lexer diagnostics: {lex:?}");
-//RS     let err = Parser::parse(&tokens).expect_err("tag methods are rejected at parse time");
-//RS     assert!(
-//RS         err.iter().any(|d| d.code == "E0732"),
-//RS         "expected E0732 in parse diagnostics: {err:?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn deriving_instance_tag_keeps_e0731() {
-//RS     let (_, diagnostics) = check(
-//RS         r#"
-//RS module bad<T> {
-//RS     tag Marker { deny: [Net] }
-//RS     #Marker
-//RS     struct Value { item: T }
-//RS }
-//RS module instance :: bad<Int>
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     assert_eq!(error_codes(&diagnostics), vec!["E0731"]);
-//RS }
-//RS 
-//RS #[test]
-//RS fn duplicate_error_conversion_inside_instance_keeps_coherence_diagnostic() {
-//RS     let (_, diagnostics) = check(
-//RS         r#"
-//RS module bad<T> {
-//RS     enum Source { Bad(T) }
-//RS     enum Target { Wrapped(Source) }
-//RS     impl Source -> Target { return Target.Wrapped(self) }
-//RS     impl Source -> Target { return Target.Wrapped(self) }
-//RS }
-//RS module instance :: bad<Int>
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     assert_eq!(error_codes(&diagnostics), vec!["E2405"]);
-//RS }
-//RS 
-//RS #[test]
-//RS fn generic_module_does_not_launder_error_conversion_orphans() {
-//RS     let (_, diagnostics) = check(
-//RS         r#"
-//RS module bad<T> { impl Int -> String { return "number" } }
-//RS module instance :: bad<Int>
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     assert!(
-//RS         error_codes(&diagnostics).contains(&"E2406"),
-//RS         "{diagnostics:#?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn nested_generic_alias_closes_over_outer_type_and_value_arguments() {
-//RS     let (bundle, diagnostics) = check(
-//RS         r#"
-//RS module outer<T>(count: Int) {
-//RS     module inner<U> { pub fn keep(value: T, other: U) -> T { return ~value } }
-//RS     module fixed :: inner<Int>
-//RS     module forward :: fixed
-//RS }
-//RS module text_outer :: outer<String>(3)
-//RS module other_outer :: outer<String>(4)
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS     let inner = bundle.modules[0]
-//RS         .items
-//RS         .iter()
-//RS         .find_map(|item| match item {
-//RS             Item::CodeModule(module) if module.name == "text_outer_fixed" => Some(module),
-//RS             _ => None,
-//RS         })
-//RS         .expect("nested alias expanded into a checked module");
-//RS     let Item::Func(keep) = &inner.body.as_ref().unwrap()[0] else {
-//RS         panic!("nested function")
-//RS     };
-//RS     assert_eq!(keep.params[0].ty, Type::String);
-//RS     assert_eq!(keep.params[1].ty, Type::Int);
-//RS     assert_eq!(keep.return_type, Some(Type::String));
-//RS     assert!(!bundle.modules[0].items.iter().any(|item| matches!(item,
-//RS         Item::CodeModule(module) if module.name == "text_outer_forward")));
-//RS     let identity = inner
-//RS         .instance_identity
-//RS         .as_ref()
-//RS         .expect("nested applicative identity");
-//RS     assert_eq!(
-//RS         identity
-//RS             .applications
-//RS             .iter()
-//RS             .map(|application| application.name.as_str())
-//RS             .collect::<Vec<_>>(),
-//RS         vec!["text_outer_fixed", "text_outer_forward"],
-//RS     );
-//RS     let other = bundle.modules[0]
-//RS         .items
-//RS         .iter()
-//RS         .find_map(|item| match item {
-//RS             Item::CodeModule(module) if module.name == "other_outer_fixed" => Some(module),
-//RS             _ => None,
-//RS         })
-//RS         .expect("different enclosing values keep distinct nested identities");
-//RS     assert_ne!(
-//RS         identity.fingerprint,
-//RS         other.instance_identity.as_ref().unwrap().fingerprint,
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn ordinary_nested_module_recursively_expands_generic_aliases() {
-//RS     let (bundle, diagnostics) = check(
-//RS         r#"
-//RS module outer<T>(count: Int) {
-//RS     module plain {
-//RS         module inner<U> { pub fn total(value: U) -> Int { return count } }
-//RS         module closed :: inner<T>
-//RS         pub fn result(value: T) -> Int { return closed.total(value) }
-//RS     }
-//RS     pub fn result(value: T) -> Int { return plain.result(value) }
-//RS }
-//RS module selected :: outer<Int>(6)
-//RS fn run() { print(selected.result(1)) }
-//RS "#,
-//RS     );
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS     let items = &bundle.modules[0].items;
-//RS     let plain = items
-//RS         .iter()
-//RS         .find_map(|item| match item {
-//RS             Item::CodeModule(module) if module.name == "selected_plain" => Some(module),
-//RS             _ => None,
-//RS         })
-//RS         .expect("ordinary nested module remains a real checked module");
-//RS     assert!(!plain
-//RS         .body
-//RS         .as_ref()
-//RS         .unwrap()
-//RS         .iter()
-//RS         .any(|item| matches!(item, Item::GenericModule(_) | Item::ModuleAlias(_))));
-//RS     let closed = items
-//RS         .iter()
-//RS         .find_map(|item| match item {
-//RS             Item::CodeModule(module) if module.name == "selected_plain_closed" => Some(module),
-//RS             _ => None,
-//RS         })
-//RS         .expect("contained generic alias expands to a real module");
-//RS     assert!(closed.instance_identity.is_some());
-//RS }
-//RS 
-//RS #[test]
-//RS fn ordinary_nested_module_rejects_unknown_generic_target() {
-//RS     let (_, diagnostics) = check(
-//RS         r#"
-//RS module outer<T> {
-//RS     module plain {
-//RS         module bad :: missing<T>
-//RS     }
-//RS }
-//RS module selected :: outer<Int>
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     assert_eq!(error_codes(&diagnostics), vec!["E0850"]);
-//RS }
-//RS 
-//RS #[test]
-//RS fn measured_tests_are_specialized_once_per_instance_with_unique_names() {
-//RS     let (bundle, diagnostics) = check(
-//RS         r#"
-//RS module checks<T>(count: Int) {
-//RS     #Test fn identity(value: T) { expect(count == count) }
-//RS     #Test("work") { .measure { assert(count == count) } }
-//RS }
-//RS module int_checks :: checks<Int>(2)
-//RS module text_checks :: checks<String>(4)
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS     let items = &bundle.modules[0].items;
-//RS     let tests: Vec<_> = items
-//RS         .iter()
-//RS         .filter_map(|item| match item {
-//RS             Item::Test(t) => Some(t),
-//RS             _ => None,
-//RS         })
-//RS         .collect();
-//RS     assert_eq!(
-//RS         tests.iter().map(|t| t.name.as_deref()).collect::<Vec<_>>(),
-//RS         vec![Some("int_checks_identity"), Some("text_checks_identity")]
-//RS     );
-//RS     assert_eq!(tests[0].params[0].ty, Type::Int);
-//RS     assert_eq!(tests[1].params[0].ty, Type::String);
-//RS }
-//RS 
-//RS #[test]
-//RS fn qualified_core_alias_counts_as_import_use() {
-//RS     let (_, diagnostics) = check(
-//RS         r#"
-//RS use core.compute.solve as solve
-//RS use core.files as files
-//RS 
-//RS fn run() {
-//RS     solver := solve.Solver.new(42)
-//RS     print(solver.status())
-//RS }
-//RS "#,
-//RS     );
-//RS     let lints: Vec<_> = diagnostics
-//RS         .iter()
-//RS         .filter(|diagnostic| diagnostic.severity == Severity::Lint)
-//RS         .collect();
-//RS     assert_eq!(
-//RS         lints
-//RS             .iter()
-//RS             .map(|diagnostic| diagnostic.code.as_str())
-//RS             .collect::<Vec<_>>(),
-//RS         vec!["L0103"]
-//RS     );
-//RS     assert_eq!(
-//RS         lints[0].span,
-//RS         Some(jet_sema::Diagnostics::Span::new(51, 56))
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn qualified_core_alias_does_not_consume_same_target_alias() {
-//RS     let (_, diagnostics) = check(
-//RS         r#"
-//RS use core.compute.solve as solve
-//RS use core.compute.solve as other
-//RS 
-//RS fn run() {
-//RS     solver := solve.Solver.new(42)
-//RS     print(solver.status())
-//RS }
-//RS "#,
-//RS     );
-//RS     let lints: Vec<_> = diagnostics
-//RS         .iter()
-//RS         .filter(|diagnostic| diagnostic.severity == Severity::Lint)
-//RS         .collect();
-//RS     assert_eq!(
-//RS         lints.iter().map(|diagnostic| diagnostic.code.as_str()).collect::<Vec<_>>(),
-//RS         vec!["L0103"]
-//RS     );
-//RS     assert!(lints[0].what.contains("other"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn failed_qualified_core_use_does_not_consume_alias() {
-//RS     let (_, diagnostics) = check(
-//RS         r#"
-//RS use core.compute.solve as solve
-//RS 
-//RS fn run() {
-//RS     solve.not_a_real_call()
-//RS }
-//RS "#,
-//RS     );
-//RS     assert!(
-//RS         diagnostics
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.code == "L0103" && diagnostic.what.contains("solve")),
-//RS         "failed qualified use must leave alias unused: {diagnostics:#?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn selective_alias_ledger_keeps_local_binding_span() {
-//RS     let src = r#"
-//RS module util {
-//RS     pub fn double(x: Int) -> Int -> x * 2
-//RS     pub fn triple(x: Int) -> Int -> x * 3
-//RS }
-//RS use util.[double as d, triple as t]
-//RS fn run() { print(d(5)) }
-//RS "#;
-//RS     let (bundle, diagnostics) = check(src);
-//RS     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
-//RS     let alias = bundle
-//RS         .name_ledger
-//RS         .alias(0, "t")
-//RS         .expect("selective import alias");
-//RS     let alias_start = src.find("triple as t").expect("alias source") + "triple as ".len();
-//RS     let expected_span = jet_sema::Diagnostics::Span::new(alias_start, alias_start + 1);
-//RS     assert_eq!(alias.span, expected_span);
-//RS     let lint = diagnostics
-//RS         .iter()
-//RS         .find(|diagnostic| diagnostic.code == "L0103" && diagnostic.what.contains("t"))
-//RS         .expect("unused selective alias lint");
-//RS     assert_eq!(lint.span, Some(expected_span));
-//RS }
-// END-PORT-PENDING 0452 crates/jet-sema/tests/generic_module_body.rs:1-914
-
-// PORT-PENDING 0452 crates-jet-sema-tests-generic-module-body-module-group: crates/jet-sema/tests/must_use.rs:1-179
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-MUSTUSE1 (c18iwxqx): `#MustUse` ignored-result diagnostics (E0419).
-//RS 
-//RS use jet_sema::Diagnostics::{Diagnostic, Severity};
-//RS use jet_sema::Lexer;
-//RS use jet_sema::Parser;
-//RS use jet_sema::Sema::{check_bundle, CompileMode};
-//RS use jet_sema::Syntax;
-//RS use jet_sema::AST::{CFfi, LoadedModule, ProgramBundle};
-//RS use std::collections::{HashMap, HashSet};
-//RS use std::path::PathBuf;
-//RS 
-//RS fn err_codes(src: &str) -> Vec<String> {
-//RS     let (toks, lex_diags) = Lexer::lex(src);
-//RS     if !lex_diags.is_empty() {
-//RS         return lex_diags.into_iter().map(|d| d.code.to_string()).collect();
-//RS     }
-//RS     let mut prog = match Parser::parse(&toks) {
-//RS         Ok(p) => p,
-//RS         Err(ds) => return ds.into_iter().map(|d| d.code.to_string()).collect(),
-//RS     };
-//RS     let mut bundle = ProgramBundle {
-//RS         entry: 0,
-//RS         project_root: PathBuf::from("."),
-//RS         modules: vec![LoadedModule {
-//RS             path: PathBuf::from("test.jet"),
-//RS             display: "test.jet".to_string(),
-//RS             alias: "main".to_string(),
-//RS             imports: std::mem::take(&mut prog.imports),
-//RS             items: std::mem::take(&mut prog.items),
-//RS             script_body: std::mem::take(&mut prog.script_body),
-//RS             block_spans: std::mem::take(&mut prog.block_spans),
-//RS             source: src.to_string(),
-//RS             web_target_ceiling: prog.web_target_ceiling,
-//RS             pub_file: prog.pub_file,
-//RS             no_prelude: prog.no_prelude,
-//RS             default_target: prog.default_target,
-//RS             html_path: prog.html_path.clone(),
-//RS             policy_declarations: prog.policy_declarations.clone(),
-//RS             user_policy_declarations: prog.user_policy_declarations.clone(),
-//RS             rule_facts: std::mem::take(&mut prog.rule_facts),
-//RS         }],
-//RS         devtools_registry: jet_sema::AST::DevtoolsRegistry::default(),
-//RS         parse_teaching: Vec::new(),
-//RS         used_core: HashSet::new(),
-//RS         ffi_callback_fns: HashSet::new(),
-//RS         cffi: CFfi::default(),
-//RS         comptime_inputs: Vec::new(),
-//RS         name_ledger: jet_sema::AST::NameLedger::default(),
-//RS         layer_ceiling: None,
-//RS         inferred_layer: Syntax::RuntimeLayer::Core,
-//RS         web_partitions: HashMap::new(),
-//RS         web_partition_enforced: false,
-//RS         web_partition_report: None,
-//RS         dep_roots: std::collections::HashMap::new(),
-//RS         package_guarantees: Default::default(),
-//RS         program_allocator: Default::default(),
-//RS         active_os: Syntax::OSTarget::host(),
-//RS         build_facts: Default::default(),
-//RS         edition: "2027".to_string(),
-//RS     };
-//RS     check_bundle(&mut bundle, CompileMode::Eval)
-//RS         .into_iter()
-//RS         .filter(|d: &Diagnostic| d.severity == Severity::Error)
-//RS         .map(|d| d.code.to_string())
-//RS         .collect()
-//RS }
-//RS 
-//RS #[test]
-//RS fn top_level_impl_method_keeps_owned_generic_scope() {
-//RS     let codes = err_codes(
-//RS         r#"
-//RS struct Counter { value: Int }
-//RS 
-//RS impl Counter {
-//RS     fn identity<T>(value: ^T) -> T {
-//RS         return value
-//RS     }
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     assert!(codes.is_empty(), "unexpected errors: {codes:?}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn must_use_fn_ignored_is_e0419() {
-//RS     let src = r#"
-//RS #MustUse fn ticket() -> Int {
-//RS     return 1
-//RS }
-//RS fn run() {
-//RS     ticket()
-//RS }
-//RS "#;
-//RS     let codes = err_codes(src);
-//RS     assert!(
-//RS         codes.iter().any(|c| c == "E0419"),
-//RS         "expected E0419, got {:?}",
-//RS         codes
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn must_use_type_ignored_is_e0419() {
-//RS     let src = r#"
-//RS #MustUse struct Receipt {
-//RS     id: Int
-//RS }
-//RS fn issue() -> Receipt {
-//RS     return Receipt.{ id: 1 }
-//RS }
-//RS fn run() {
-//RS     issue()
-//RS }
-//RS "#;
-//RS     let codes = err_codes(src);
-//RS     assert!(
-//RS         codes.iter().any(|c| c == "E0419"),
-//RS         "expected E0419, got {:?}",
-//RS         codes
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn must_use_drop_suppresses_e0419() {
-//RS     let src = r#"
-//RS #MustUse fn ping() -> Int {
-//RS     return 1
-//RS }
-//RS fn run() {
-//RS     ping().drop("telemetry only")
-//RS }
-//RS "#;
-//RS     let codes = err_codes(src);
-//RS     assert!(
-//RS         !codes.iter().any(|c| c == "E0419"),
-//RS         "drop should silence E0419, got {:?}",
-//RS         codes
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn must_use_enum_ignored_is_e0419() {
-//RS     let src = r#"
-//RS #MustUse enum Ticket {
-//RS     Open
-//RS     Closed
-//RS }
-//RS fn issue() -> Ticket {
-//RS     return Ticket.Open
-//RS }
-//RS fn run() {
-//RS     issue()
-//RS }
-//RS "#;
-//RS     let codes = err_codes(src);
-//RS     assert!(
-//RS         codes.iter().any(|c| c == "E0419"),
-//RS         "expected E0419, got {:?}",
-//RS         codes
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn must_use_bound_value_ok() {
-//RS     let src = r#"
-//RS #MustUse struct Token { id: Int }
-//RS #MustUse fn mint(id: Int) -> Token {
-//RS     return Token.{ id: id }
-//RS }
-//RS fn run() {
-//RS     t := mint(1)
-//RS     print(t.id)
-//RS }
-//RS "#;
-//RS     let codes = err_codes(src);
-//RS     assert!(codes.is_empty(), "expected clean compile, got {:?}", codes);
-//RS }
-// END-PORT-PENDING 0452 crates/jet-sema/tests/must_use.rs:1-179
-
+use jet_sema.Diagnostics.[Diagnostic, Severity, Span]
+use jet_sema.Sema.[check_bundle, CompileMode]
+use jet_sema.AST.[CFfi, CtValue, Item, LoadedModule, ProgramBundle, TagMarker, Type, NameLedger, DevtoolsRegistry, ImportKind]
+use jet_sema.[Lexer, Parser]
+use jet_sema.Syntax as Syntax
+use jet_codegen.Codegen.MIREval.[install_mir_bridge]
+use std.sync.[Once]
+use std.collections.[HashSet]
+use core.files as files
+use std.env as env
+use std.process as process
+// Rust: crates/jet-sema/tests/generic_module_body.rs:9
+fn ensure_mir_bridge() Never! {
+    // GATE #4494: installs the canonical Jet comptime evaluator once.
+    static INSTALL: Once = Once.new()
+    INSTALL.call_once(fn() { install_mir_bridge() })
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:16
+fn check(src: String) -> (ProgramBundle, [Diagnostic]) { check_at(src, ".") }
+// Rust: crates/jet-sema/tests/generic_module_body.rs:20
+fn check_at(src: String, root: String) -> (ProgramBundle, [Diagnostic]) {
+    ensure_mir_bridge()
+    (tokens, lex) :: Lexer.lex(src)
+    assert(lex.is_empty(), "lexer diagnostics: {lex:?}")
+    program := Parser.parse(tokens).expect("source parses")
+    bundle := ProgramBundle{
+        entry: 0, project_root: OSPath.from(root),
+        modules: [LoadedModule{path: OSPath.from("generic_module_body.jet"), display: "generic_module_body.jet", alias: "main",
+            imports: ^program.imports, items: ^program.items, script_body: ^program.script_body, source: src,
+            block_spans: ^program.block_spans, web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
+            no_prelude: program.no_prelude, default_target: program.default_target, html_path: ^program.html_path,
+            policy_declarations: ^program.policy_declarations, user_policy_declarations: ^program.user_policy_declarations, rule_facts: ^program.rule_facts}],
+        devtools_registry: DevtoolsRegistry.default(), parse_teaching: [], used_core: HashSet[String].new(), ffi_callback_fns: HashSet[String].new(),
+        cffi: CFfi.default(), comptime_inputs: [], name_ledger: NameLedger.default(), layer_ceiling: None, inferred_layer: Syntax.RuntimeLayer.Core,
+        web_partitions: [:], web_partition_enforced: false, web_partition_report: None, dep_roots: [:], package_guarantees: .default(),
+        program_allocator: .default(), active_os: Syntax.OSTarget.host(), build_facts: .default(), edition: "2027"
+    }
+    diagnostics :: check_bundle(&bundle, CompileMode.Eval)
+    (bundle, diagnostics)
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:69
+fn only_instance_fingerprint(src: String, root: String) -> String {
+    (bundle, diagnostics) :: check_at(src, root)
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+    bundle.modules[0].items.find_map(fn(item) { if item == { .CodeModule(module) -> module.instance_identity.map(fn(identity) { identity.fingerprint }); else -> None } }).expect("generic instance fingerprint")
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:85
+fn check_modules(sources: [(String, String, [(String, Int)])]) -> (ProgramBundle, [Diagnostic]) {
+    ensure_mir_bridge()
+    modules := [LoadedModule]{}
+    name_ledger := NameLedger.default()
+    loop (module_idx, (path, src, targets)) in sources.enumerate() {
+        (tokens, lex) :: Lexer.lex(src)
+        assert(lex.is_empty(), "lexer diagnostics: {lex:?}")
+        program := Parser.parse(tokens).expect("source parses")
+        loop (alias, target) in targets {
+            import :: program.imports.find(fn(import) { import.import_alias() == alias && !(import.kind is ImportKind.Unqualified) }).unwrap()
+            &name_ledger.record_import_target(module_idx, import.span, target)
+        }
+        &modules.push(LoadedModule{path: OSPath.from(path), display: path, alias: path.trim_end_matches(".jet").to_string(),
+            imports: ^program.imports, items: ^program.items, script_body: ^program.script_body, source: src,
+            block_spans: ^program.block_spans, web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
+            no_prelude: program.no_prelude, default_target: program.default_target, html_path: ^program.html_path,
+            policy_declarations: ^program.policy_declarations, user_policy_declarations: ^program.user_policy_declarations, rule_facts: ^program.rule_facts})
+    }
+    bundle := ProgramBundle{entry: sources.len() - 1, project_root: OSPath.from("pkg-a"), modules: ^modules,
+        devtools_registry: DevtoolsRegistry.default(), parse_teaching: [], used_core: HashSet[String].new(), ffi_callback_fns: HashSet[String].new(),
+        cffi: CFfi.default(), comptime_inputs: [], name_ledger: ^name_ledger, layer_ceiling: None, inferred_layer: Syntax.RuntimeLayer.Core,
+        web_partitions: [:], web_partition_enforced: false, web_partition_report: None, dep_roots: [:], package_guarantees: .default(),
+        program_allocator: .default(), active_os: Syntax.OSTarget.host(), build_facts: .default(), edition: "2027"}
+    diagnostics :: check_bundle(&bundle, CompileMode.Eval)
+    (bundle, diagnostics)
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:150
+fn error_codes(diags: [Diagnostic]) -> [String] Never! {
+    diags.filter(fn(d) { d.severity == Severity.Error }).map(fn(d) { d.code }).to_array()
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:159
+#Test("equivalent_instances_are_interned_and_project_one_nominal_identity") {
+    src :: "\nmodule boxed<T>(size: Int) {\n    struct Box { value: T }\n    fn identity(value: Box) -> Box { return ~value }\n}\nmodule other<T>(size: Int) { struct Box { value: T } }\nmodule first :: boxed<Int>(3)\nmodule equivalent :: boxed<Int>(3)\nmodule forward :: equivalent\nmodule different_type :: boxed<String>(3)\nmodule different_value :: boxed<Int>(4)\nmodule different_template :: other<Int>(3)\nfn accepts_first(value: first.Box) -> first.Box { return ~value }\nfn accepts_projection(value: equivalent.Box) -> first.Box { return ~value }\nfn accepts_chain(value: forward.Box) -> first.Box { return ~value }\nfn accepts_surface(value: first.Box) -> first.Box { return ~value }\nfn accepts_forward_surface(value: forward.Box) -> first.Box { return ~value }\nfn run() {}\n"
+    (bundle, diagnostics) :: check(src)
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+    assert(bundle.name_ledger.display_path(0, "M5FirstBox", Val(0)) == Val("first.Box"), "generic nominal names stay internal to diagnostics and tooling")
+    items :: bundle.modules[0].items
+    modules :: items.filter_map(fn(item) { if item == { .CodeModule(module) -> Val(module.name); else -> None } }).to_array()
+    assert(modules.filter(fn(name) { name == "first" }).count() == 1)
+    assert(!modules.contains("equivalent"))
+    assert(!modules.contains("forward"))
+    assert(modules.contains("different_type"))
+    assert(modules.contains("different_value"))
+    assert(modules.contains("different_template"))
+    assert(items.filter(fn(item) { if item == { .Struct(definition) -> definition.name == "M5FirstBox"; else -> false } }).count() == 1)
+    loop name in ["accepts_projection", "accepts_chain"] {
+        function :: items.find_map(fn(item) { if item == { .Func(f) -> if f.name == name -> Val(f) else -> None; else -> None } }).unwrap()
+        assert(function.params[0].ty == Type.Named("M5FirstBox"))
+        assert(function.return_type == Val(Type.Named("M5FirstBox")))
+    }
+    loop name in ["accepts_surface", "accepts_forward_surface"] {
+        function :: items.find_map(fn(item) { if item == { .Func(f) -> if f.name == name -> Val(f) else -> None; else -> None } }).unwrap()
+        assert(function.params[0].ty == Type.Named("M5FirstBox"))
+        assert(function.return_type == Val(Type.Named("M5FirstBox")))
+    }
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:232
+#Test("generic_module_comptime_bindings_survive_item_registration") {
+    (bundle, diagnostics) :: check("\nmodule cache<K>(capacity: Int) {\n    BASE :: prep { capacity }\n    COMPUTED_SIZE :: prep { BASE + 1 }\n    fn size() -> Int -> COMPUTED_SIZE\n}\nmodule instance :: cache<Int>(3)\nfn run() {}\n")
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+    items :: bundle.modules[0].items
+    assert(items.any(fn(item) { if item == { .Const(c) -> c.name == "instance_@base" && c.ct == Val(CtValue.Int(3)); else -> false } }))
+    assert(items.any(fn(item) { if item == { .Const(c) -> c.name == "instance_@computed_size" && c.ct == Val(CtValue.Int(4)); else -> false } }))
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:261
+#Test("soft_public_aliases_keep_distinct_casing_safe_type_names") {
+    (bundle, diagnostics) :: check("\nmodule holder<T> { struct Item { value: T } }\nmodule cache :: holder<Int>\nmodule _cache :: holder<String>\nfn run() {}\n")
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+    names :: bundle.modules[0].items.filter_map(fn(item) { if item == { .Struct(definition) -> Val(definition.name); else -> None } }).to_array()
+    assert(names.contains("M5CacheItem"), "{names:?}")
+    assert(names.contains("_M5CacheItem"), "{names:?}")
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:284
+#Test("imported_template_is_interned_once_across_consumers") {
+    template :: "\npub module boxed<T>(size: Int) { pub struct Box { value: T } }\npub module other<T>(size: Int) { pub struct Box { value: T } }\n"
+    first :: "\nuse \"./templates\" as templates\nuse templates.[boxed]\npub module first :: boxed<Int>(3)\nfn run() {}\n"
+    second :: "\nuse \"./templates\" as templates\nuse templates.[boxed, other]\nmodule second :: boxed<Int>(3)\nmodule different_arg :: boxed<Int>(4)\nmodule different_template :: other<Int>(3)\nfn accepts_projection(value: second.Box) -> first.Box { return ~value }\nfn run() {}\n"
+    (bundle, diagnostics) :: check_modules([("templates.jet", template, []), ("first.jet", first, [("templates", 0)]), ("second.jet", second, [("templates", 0)])])
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+    count := 0
+    loop module in bundle.modules {
+        count += module.items.filter(fn(item) { if item == { .Struct(definition) -> definition.name == "M5FirstBox"; else -> false } }).count()
+    }
+    assert(count == 1)
+    assert(!bundle.modules[2].items.any(fn(item) { if item == { .CodeModule(m) -> m.name == "second"; else -> false } }))
+    assert(bundle.modules[2].items.any(fn(item) { if item == { .CodeModule(m) -> m.name == "different_arg"; else -> false } }))
+    assert(bundle.modules[2].items.any(fn(item) { if item == { .CodeModule(m) -> m.name == "different_template"; else -> false } }))
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:333
+#Test("imported_struct_returns_expose_all_fields_but_scalars_keep_e0302") {
+    provider :: "\npub struct IngestResult {\n    pub provider: String\n    pub name: String\n    pub version: String\n    pub reference: String\n    pub source: String\n    pub expected_hash: String\n}\n\npub struct RealizeResult {\n    pub provider: String\n    pub name: String\n    pub version: String\n    pub reference: String\n    pub source: String\n    pub expected_hash: String\n}\n\npub fn ingest() -> IngestResult {\n    return IngestResult{\n        provider: \"local\",\n        name: \"demo\",\n        version: \"1\",\n        reference: \"main\",\n        source: \"/tmp/demo\",\n        expected_hash: \"hash\"\n    }\n}\n\npub fn realize() -> RealizeResult {\n    return RealizeResult{\n        provider: \"local\",\n        name: \"demo\",\n        version: \"1\",\n        reference: \"main\",\n        source: \"/tmp/demo\",\n        expected_hash: \"hash\"\n    }\n}\n"
+    consumer :: "\nuse \"./provider\" as provider\n\nfn run() {\n    ingested :: provider.ingest() ?? panic(\"ingest\")\n    print(ingested.provider)\n    print(ingested.name)\n    print(ingested.version)\n    print(ingested.reference)\n    print(ingested.source)\n    print(ingested.expected_hash)\n\n    realized :: provider.realize() ?? panic(\"realize\")\n    print(realized.provider)\n    print(realized.name)\n    print(realized.version)\n    print(realized.reference)\n    print(realized.source)\n    print(realized.expected_hash)\n\n    scalar :: 1\n    print(scalar.provider)\n}\n"
+    (_, diagnostics) :: check_modules([("provider.jet", provider, []), ("consumer.jet", consumer, [("provider", 0)])])
+    assert(error_codes(diagnostics) == ["E0302"], "{diagnostics:#?}")
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:407
+#Test("imported_module_alias_preserves_local_struct_fields") {
+    records :: "\npub struct Record {\n    pub value: String\n}\n\npub fn inspect(record: Record) -> String {\n    return record.value\n}\n\npub fn make() -> Record {\n    return Record{value: \"ok\"}\n}\n"
+    consumer :: "\nuse records as alias\n\nfn run() {\n    record :: alias.make() ?? panic(\"make\")\n    print(record.value)\n    inspected :: alias.inspect(record) ?? panic(\"inspect\")\n    print(inspected)\n\n    scalar :: 1\n    print(scalar.value)\n}\n"
+    (_, diagnostics) :: check_modules([("records.jet", records, []), ("consumer.jet", consumer, [("alias", 0)])])
+    assert(error_codes(diagnostics) == ["E0302"], "{diagnostics:#?}")
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:442
+#Test("fallible_binding_exposes_propagated_struct_success_fields") {
+    source :: "\n#Error\nstruct LocalError {\n    message: String\n}\n\nstruct Record {\n    value: String\n}\n\nfn make() -> Record LocalError! {\n    return Ok(Record{value: \"ok\"})\n}\n\nfn consume() -> String LocalError! {\n    record :: make()\n    return Ok(record.value)\n}\n\nfn run() {}\n"
+    (_, diagnostics) :: check_modules([("main.jet", source, [])])
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:469
+#Test("instance_fingerprint_is_nominal_and_ignores_body_shape") {
+    base :: "module boxed<T>(n: Int) { fn value() -> Int { return n } }\nmodule instance :: boxed<Int>(3)\nfn run() {}"
+    shifted :: "\n\nmodule boxed<T>(n: Int) {   fn value() -> Int { return n } }\nmodule renamed :: boxed<Int>(3)\nfn run() {}"
+    body :: "module boxed<T>(n: Int) { fn value() -> Int { return n + 1 } }\nmodule instance :: boxed<Int>(3)\nfn run() {}"
+    arg :: "module boxed<T>(n: Int) { fn value() -> Int { return n } }\nmodule instance :: boxed<Int>(4)\nfn run() {}"
+    fp :: only_instance_fingerprint(base, "pkg-a")
+    assert(fp == only_instance_fingerprint(shifted, "pkg-a"))
+    assert(fp == only_instance_fingerprint(body, "pkg-a"))
+    assert(fp != only_instance_fingerprint(arg, "pkg-a"))
+    assert(fp == only_instance_fingerprint(base, "pkg-b"), "manifest-less host paths are non-semantic")
+    // GATE #4494: real native temporary directories and process id.
+    roots :: env.temp_dir().join("jet_genmod_nominal_packages_{process.id()}")
+    package_a :: roots.join("checkout-a")
+    package_b :: roots.join("checkout-b")
+    files.mkdir(package_a, true).unwrap()
+    files.mkdir(package_b, true).unwrap()
+    files.write(package_a.join("pkg.jet"), "payload: { name: \"package-a\", version: \"1.0.0\" }").unwrap()
+    files.write(package_b.join("pkg.jet"), "payload: { name: \"package-b\", version: \"1.0.0\" }").unwrap()
+    assert(only_instance_fingerprint(base, package_a.to_str().unwrap()) != only_instance_fingerprint(base, package_b.to_str().unwrap()), "canonical package identity remains nominal")
+    _ :: files.remove_dir_all(roots)
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:511
+#Test("instance_definition_identity_tracks_manifest_semver_not_formatting_or_workspace_lock_noise") {
+    base :: env.temp_dir().join("jet_genmod_identity_{process.id()}")
+    a :: base.join("a")
+    b :: base.join("b")
+    files.mkdir(a.join(".jet"), true).unwrap()
+    files.mkdir(b.join(".jet"), true).unwrap()
+    files.write(a.join("pkg.jet"), "payload: {\n name: \"demo\",\n version: \"1.0.0\"\n}").unwrap()
+    files.write(b.join("pkg.jet"), "payload: {\n name: \"demo\",\n version: \"2.0.0\"\n}").unwrap()
+    files.write(a.join(".jet/lock"), "source = a").unwrap()
+    files.write(b.join(".jet/lock"), "source = b").unwrap()
+    src :: "module boxed<T> { fn value(v: T) -> T { return v } }\nmodule instance :: boxed<Int>\nfn run() {}"
+    assert(only_instance_fingerprint(src, a.to_str().unwrap()) != only_instance_fingerprint(src, b.to_str().unwrap()))
+    files.write(b.join("pkg.jet"), "payload: { name: \"demo\", version: \"1.0.0\" }").unwrap()
+    assert(only_instance_fingerprint(src, a.to_str().unwrap()) == only_instance_fingerprint(src, b.to_str().unwrap()))
+    files.write(b.join(".jet/lock"), "source = a\n").unwrap()
+    assert(only_instance_fingerprint(src, a.to_str().unwrap()) == only_instance_fingerprint(src, b.to_str().unwrap()))
+    _ :: files.remove_dir_all(base)
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:552
+#Test("trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph") {
+    src :: "\nmodule laws<T> {\n    tag Audited { deny: [Net] }\n    fn audited(value: #Audited T) -> #Audited T { return ~value }\n    trait Reveal {\n        type Output\n        fn reveal(self) -> T\n    }\n    struct Wrapped { value: T }\n    impl Wrapped.Reveal {\n        type Output = T\n        fn reveal(self) -> T { return self.value }\n    }\n    enum SourceErr { Bad(T) }\n    enum TargetErr { Wrapped(SourceErr) }\n    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }\n}\nmodule int_laws :: laws<Int>\nfn run() {}\n"
+    (bundle, diagnostics) :: check(src)
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+    items :: bundle.modules[0].items
+    assert(items.any(fn(item) { if item == { .Trait(t) -> t.name == "M3Int4LawsReveal" && t.methods[0].return_type == Val(Type.Int); else -> false } }))
+    assert(items.any(fn(item) { if item == { .Tag(t) -> t.name == "M3Int4LawsAudited"; else -> false } }))
+    instance :: items.find_map(fn(item) { if item == { .CodeModule(m) -> if m.name == "int_laws" -> Val(m) else -> None; else -> None } }).unwrap()
+    tagged :: instance.body.unwrap().find_map(fn(item) { if item == { .Func(f) -> if f.name == "audited" -> Val(f.params[0].ty) else -> None; else -> None } }).unwrap()
+    assert(if tagged == { .Tagged{marker, inner} -> (if marker == { .User(name) -> name == "M3Int4LawsAudited"; else -> false }) && inner == Type.Int; else -> false }, "{tagged:?}")
+    assert(items.any(fn(item) { if item == { .Impl(i) -> i.type_name == "M3Int4LawsWrapped" && i.trait_name == Val("M3Int4LawsReveal") && i.assoc_type_impls[0].2 == Type.Int; else -> false } }))
+    assert(items.any(fn(item) { if item == { .ErrorConv(ec) -> ec.from_ty == "M3Int4LawsSourceErr" && ec.to_ty == "M3Int4LawsTargetErr"; else -> false } }))
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:606
+#Test("tag_method_inside_instance_keeps_e0732") {
+    (tokens, lex) :: Lexer.lex("\nmodule bad<T> { tag Marker { fn forbidden(self) -> T } }\nmodule instance :: bad<Int>\nfn run() {}\n")
+    assert(lex.is_empty(), "lexer diagnostics: {lex:?}")
+    err :: Parser.parse(tokens).expect_err("tag methods are rejected at parse time")
+    assert(err.any(fn(d) { d.code == "E0732" }), "expected E0732 in parse diagnostics: {err:?}")
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:626
+#Test("deriving_instance_tag_keeps_e0731") {
+    (_, diagnostics) :: check("\nmodule bad<T> {\n    tag Marker { deny: [Net] }\n    #Marker\n    struct Value { item: T }\n}\nmodule instance :: bad<Int>\nfn run() {}\n")
+    assert(error_codes(diagnostics) == ["E0731"])
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:642
+#Test("duplicate_error_conversion_inside_instance_keeps_coherence_diagnostic") {
+    (_, diagnostics) :: check("\nmodule bad<T> {\n    enum Source { Bad(T) }\n    enum Target { Wrapped(Source) }\n    impl Source -> Target { return Target.Wrapped(self) }\n    impl Source -> Target { return Target.Wrapped(self) }\n}\nmodule instance :: bad<Int>\nfn run() {}\n")
+    assert(error_codes(diagnostics) == ["E2405"])
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:659
+#Test("generic_module_does_not_launder_error_conversion_orphans") {
+    (_, diagnostics) :: check("\nmodule bad<T> { impl Int -> String { return \"number\" } }\nmodule instance :: bad<Int>\nfn run() {}\n")
+    assert(error_codes(diagnostics).contains("E2406"), "{diagnostics:#?}")
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:674
+#Test("nested_generic_alias_closes_over_outer_type_and_value_arguments") {
+    (bundle, diagnostics) :: check("\nmodule outer<T>(count: Int) {\n    module inner<U> { pub fn keep(value: T, other: U) -> T { return ~value } }\n    module fixed :: inner<Int>\n    module forward :: fixed\n}\nmodule text_outer :: outer<String>(3)\nmodule other_outer :: outer<String>(4)\nfn run() {}\n")
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+    inner :: bundle.modules[0].items.find_map(fn(item) { if item == { .CodeModule(m) -> if m.name == "text_outer_fixed" -> Val(m) else -> None; else -> None } }).expect("nested alias expanded into a checked module")
+    keep :: if inner.body.unwrap()[0] == { .Func(f) -> f; else -> panic("nested function") }
+    assert(keep.params[0].ty == Type.String)
+    assert(keep.params[1].ty == Type.Int)
+    assert(keep.return_type == Val(Type.String))
+    assert(!bundle.modules[0].items.any(fn(item) { if item == { .CodeModule(m) -> m.name == "text_outer_forward"; else -> false } }))
+    identity :: inner.instance_identity.expect("nested applicative identity")
+    assert(identity.applications.map(fn(application) { application.name }).to_array() == ["text_outer_fixed", "text_outer_forward"])
+    other :: bundle.modules[0].items.find_map(fn(item) { if item == { .CodeModule(m) -> if m.name == "other_outer_fixed" -> Val(m) else -> None; else -> None } }).expect("different enclosing values keep distinct nested identities")
+    assert(identity.fingerprint != other.instance_identity.unwrap().fingerprint)
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:731
+#Test("ordinary_nested_module_recursively_expands_generic_aliases") {
+    (bundle, diagnostics) :: check("\nmodule outer<T>(count: Int) {\n    module plain {\n        module inner<U> { pub fn total(value: U) -> Int { return count } }\n        module closed :: inner<T>\n        pub fn result(value: T) -> Int { return closed.total(value) }\n    }\n    pub fn result(value: T) -> Int { return plain.result(value) }\n}\nmodule selected :: outer<Int>(6)\nfn run() { print(selected.result(1)) }\n")
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+    items :: bundle.modules[0].items
+    plain :: items.find_map(fn(item) { if item == { .CodeModule(m) -> if m.name == "selected_plain" -> Val(m) else -> None; else -> None } }).expect("ordinary nested module remains a real checked module")
+    assert(!plain.body.unwrap().any(fn(item) { item is Item.GenericModule || item is Item.ModuleAlias }))
+    closed :: items.find_map(fn(item) { if item == { .CodeModule(m) -> if m.name == "selected_plain_closed" -> Val(m) else -> None; else -> None } }).expect("contained generic alias expands to a real module")
+    assert(closed.instance_identity != None)
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:772
+#Test("ordinary_nested_module_rejects_unknown_generic_target") {
+    (_, diagnostics) :: check("\nmodule outer<T> {\n    module plain {\n        module bad :: missing<T>\n    }\n}\nmodule selected :: outer<Int>\nfn run() {}\n")
+    assert(error_codes(diagnostics) == ["E0850"])
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:788
+#Test("measured_tests_are_specialized_once_per_instance_with_unique_names") {
+    (bundle, diagnostics) :: check("\nmodule checks<T>(count: Int) {\n    #Test fn identity(value: T) { expect(count == count) }\n    #Test(\"work\") { .measure { assert(count == count) } }\n}\nmodule int_checks :: checks<Int>(2)\nmodule text_checks :: checks<String>(4)\nfn run() {}\n")
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+    tests :: bundle.modules[0].items.filter_map(fn(item) { if item == { .Test(t) -> Val(t); else -> None } }).to_array()
+    assert(tests.map(fn(t) { t.name }).to_array() == [Val("int_checks_identity"), Val("text_checks_identity")])
+    assert(tests[0].params[0].ty == Type.Int)
+    assert(tests[1].params[0].ty == Type.String)
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:818
+#Test("qualified_core_alias_counts_as_import_use") {
+    (_, diagnostics) :: check("\nuse core.compute.solve as solve\nuse core.files as files\n\nfn run() {\n    solver := solve.Solver.new(42)\n    print(solver.status())\n}\n")
+    lints :: diagnostics.filter(fn(diagnostic) { diagnostic.severity == Severity.Lint }).to_array()
+    assert(lints.map(fn(diagnostic) { diagnostic.code }).to_array() == ["L0103"])
+    assert(lints[0].span == Val(Span.new(51, 56)))
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:848
+#Test("qualified_core_alias_does_not_consume_same_target_alias") {
+    (_, diagnostics) :: check("\nuse core.compute.solve as solve\nuse core.compute.solve as other\n\nfn run() {\n    solver := solve.Solver.new(42)\n    print(solver.status())\n}\n")
+    lints :: diagnostics.filter(fn(diagnostic) { diagnostic.severity == Severity.Lint }).to_array()
+    assert(lints.map(fn(diagnostic) { diagnostic.code }).to_array() == ["L0103"])
+    assert(lints[0].what.contains("other"))
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:872
+#Test("failed_qualified_core_use_does_not_consume_alias") {
+    (_, diagnostics) :: check("\nuse core.compute.solve as solve\n\nfn run() {\n    solve.not_a_real_call()\n}\n")
+    assert(diagnostics.any(fn(diagnostic) { diagnostic.code == "L0103" && diagnostic.what.contains("solve") }), "failed qualified use must leave alias unused: {diagnostics:#?}")
+}
+// Rust: crates/jet-sema/tests/generic_module_body.rs:891
+#Test("selective_alias_ledger_keeps_local_binding_span") {
+    src :: "\nmodule util {\n    pub fn double(x: Int) -> Int -> x * 2\n    pub fn triple(x: Int) -> Int -> x * 3\n}\nuse util.[double as d, triple as t]\nfn run() { print(d(5)) }\n"
+    (bundle, diagnostics) :: check(src)
+    assert(error_codes(diagnostics).is_empty(), "{diagnostics:#?}")
+    alias :: bundle.name_ledger.alias(0, "t").expect("selective import alias")
+    alias_start :: src.find("triple as t").expect("alias source") + "triple as ".len()
+    expected_span :: Span.new(alias_start, alias_start + 1)
+    assert(alias.span == expected_span)
+    lint :: diagnostics.find(fn(diagnostic) { diagnostic.code == "L0103" && diagnostic.what.contains("t") }).expect("unused selective alias lint")
+    assert(lint.span == Val(expected_span))
+}

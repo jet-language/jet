@@ -1,0 +1,43 @@
+use Compiler.JetEval.Comptime.Methods.CoreCalls.History.*
+use jet_foundation.TestingHistory.*
+use crate.AST.[CtValue, Type]
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/history.rs:340
+#Test("history_count_preserves_u64_and_rejects_negative") {
+    assert(history_u64_from_ct(history_count_to_ct(U64.MAX)) == Ok(U64.MAX))
+    assert(history_u64_from_ct(CtValue.Int(-1)) == Err("history count must be a non-negative Int"))
+    assert(history_u64_from_ct(CtValue.Str("1")) == Err("history count must be an exact non-negative Int"))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/history.rs:370
+#Test("history_optional_variants_and_malformed_payload") {
+    assert(history_option_value(CtValue.Present(CtValue.Int(3))) == Ok(Val(CtValue.Int(3))))
+    assert(history_option_value(CtValue.absent(Type.Int)) == Ok(None))
+    assert(history_option_value(CtValue.Enum{type_name: "", variant: "None", args: []}) == Ok(None))
+    assert(history_option_value(CtValue.Enum{type_name: "", variant: "Val", args: []}) == Err("malformed optional history value"))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/history.rs:489
+#Test("history_scalar_roundtrip") {
+    loop value in [HistoryValue.Integer(-8), HistoryValue.Boolean(true), HistoryValue.Text("é"), HistoryValue.Handle(HandleId{value: U32.MAX}), HistoryValue.Redacted("secret")] {
+        assert(history_value_from_ct(history_value_to_ct(value)) == Ok(value))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/history.rs:149
+#Test("history_enum_schema_enforces_bounds_and_char_width") {
+    schema :: HistoryCommandSchema{command_type: "Command", variants: [HistoryCommandVariant{operation: "put", variant: "Put", fields: [(Val("count"), HistorySchemaField.Integer{lo: -8, hi: 8}), (Val("char"), HistorySchemaField.Char)]}], unsupported_reason: None, provenance: None}
+    operation := HistoryOperation{index: 0, name: "put", arguments: [HistoryValue.Integer(8), HistoryValue.Text("é")], creates: [], consumes: [], preconditions: [], depends_on: [], task: None, event: None}
+    assert(comptime_history_enum_command(operation, schema) == Ok(CtValue.Enum{type_name: "Command", variant: "Put", args: [(Val("count"), CtValue.Int(8)), (Val("char"), CtValue.Char('é'))]}))
+    operation.arguments = [HistoryValue.Integer(9), HistoryValue.Text("é")]
+    assert(comptime_history_enum_command(operation, schema) == Err("history operation `put` has an argument with the wrong scalar kind"))
+    operation.arguments = [HistoryValue.Integer(8), HistoryValue.Text("ab")]
+    assert(comptime_history_enum_command(operation, schema) == Err("history operation `put` has an invalid Char argument"))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/history.rs:1213
+#Test("history_callback_fingerprint_preserves_type_and_identity") {
+    assert(history_callback_fingerprint("", []) == Err("history callback has no checked function identity"))
+    integer :: history_callback_fingerprint("checked/a", [CtValue.Int(1)])?
+    text :: history_callback_fingerprint("checked/a", [CtValue.Str("1")])?
+    other :: history_callback_fingerprint("checked/b", [CtValue.Int(1)])?
+    assert(integer != text)
+    assert(integer != other)
+    assert(history_callback_fingerprint("checked/a", [CtValue.Int(1)]) == Ok(integer))
+}

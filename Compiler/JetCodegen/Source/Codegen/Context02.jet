@@ -1,1949 +1,721 @@
-// PORT-PENDING 0455 crates-jet-codegen-src-codegen-context-slice-1796: crates/jet-codegen/src/Codegen/Context.rs:1796-3740
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(crate) fn type_contains_boxed_edge(&self, ty: &Type) -> bool {
-//RS         fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
-//RS             match ty {
-//RS                 Type::Named(name) => {
-//RS                     if cx.boxed_edges.iter().any(|(owner, _)| owner == name) {
-//RS                         return true;
-//RS                     }
-//RS                     if !seen.insert(name.clone()) {
-//RS                         return false;
-//RS                     }
-//RS                     let found = cx.struct_fields.get(name).is_some_and(|fields| {
-//RS                         fields
-//RS                             .iter()
-//RS                             .any(|(_, field_ty)| contains(cx, field_ty, seen))
-//RS                     });
-//RS                     // Visited stays marked: this is reachability, so a revisit adds nothing (and unmarking made the walk exponential).
-//RS                     found
-//RS                 }
-//RS                 Type::Apply { name, args } => {
-//RS                     args.iter().any(|arg| contains(cx, arg, seen))
-//RS                         || contains(cx, &Type::Named(name.clone()), seen)
-//RS                 }
-//RS                 Type::List(inner)
-//RS                 | Type::Shared(inner)
-//RS                 | Type::Option(inner)
-//RS                 | Type::Tagged { inner, .. }
-//RS                 | Type::InlineRange { base: inner, .. } => contains(cx, inner, seen),
-//RS                 Type::Map { key, value, .. }
-//RS                 | Type::Result {
-//RS                     ok: key,
-//RS                     err: value,
-//RS                 } => contains(cx, key, seen) || contains(cx, value, seen),
-//RS                 Type::Tuple(fields) => fields
-//RS                     .iter()
-//RS                     .any(|(_, field_ty)| contains(cx, field_ty, seen)),
-//RS                 Type::FixedList { elem, .. } => contains(cx, elem, seen),
-//RS                 Type::Fn { params, ret, .. } => {
-//RS                     params.iter().any(|param| contains(cx, param, seen))
-//RS                         || ret.as_deref().is_some_and(|ret| contains(cx, ret, seen))
-//RS                 }
-//RS                 Type::Union(members) => members.iter().any(|member| contains(cx, member, seen)),
-//RS                 Type::Quantity { base, .. } => contains(cx, base, seen),
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS 
-//RS         contains(self, ty, &mut HashSet::new())
-//RS     }
-//RS 
-//RS     /// `CtValue::serialize` has no expected-type context: it emits every list
-//RS     /// as `Vec` and every integer as `i64`. Keep a folded value on the typed
-//RS     /// source-lowering path when a struct or enum payload contains a shape
-//RS     /// that serialization cannot preserve.
-//RS     pub(crate) fn type_contains_typed_literal_edge(&self, ty: &Type) -> bool {
-//RS         fn payload_contains(cx: &Cx, payload: &VariantPayload, seen: &mut HashSet<String>) -> bool {
-//RS             match payload {
-//RS                 VariantPayload::Unit => false,
-//RS                 VariantPayload::Single(ty, _) => contains(cx, ty, seen),
-//RS                 VariantPayload::Named(fields) => {
-//RS                     fields.iter().any(|field| contains(cx, &field.ty, seen))
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
-//RS             match ty {
-//RS                 Type::IntN { .. } | Type::InlineRange { .. } | Type::FixedList { .. } => true,
-//RS                 Type::Named(name) => {
-//RS                     if !seen.insert(name.clone()) {
-//RS                         return false;
-//RS                     }
-//RS                     let found = cx.struct_fields.get(name).is_some_and(|fields| {
-//RS                         fields
-//RS                             .iter()
-//RS                             .any(|(_, field_ty)| contains(cx, field_ty, seen))
-//RS                     }) || cx.enum_variants.get(name).is_some_and(|variants| {
-//RS                         variants
-//RS                             .iter()
-//RS                             .any(|(_, payload)| payload_contains(cx, payload, seen))
-//RS                     });
-//RS                     // Visited stays marked: this is reachability, so a revisit adds nothing (and unmarking made the walk exponential).
-//RS                     found
-//RS                 }
-//RS                 Type::Apply { name, args } => {
-//RS                     args.iter().any(|arg| contains(cx, arg, seen))
-//RS                         || contains(cx, &Type::Named(name.clone()), seen)
-//RS                 }
-//RS                 Type::List(inner)
-//RS                 | Type::Shared(inner)
-//RS                 | Type::Option(inner)
-//RS                 | Type::Tagged { inner, .. } => contains(cx, inner, seen),
-//RS                 Type::Map { key, value, .. }
-//RS                 | Type::Result {
-//RS                     ok: key,
-//RS                     err: value,
-//RS                 } => contains(cx, key, seen) || contains(cx, value, seen),
-//RS                 Type::Tuple(fields) => fields
-//RS                     .iter()
-//RS                     .any(|(_, field_ty)| contains(cx, field_ty, seen)),
-//RS                 Type::Fn { params, ret, .. } => {
-//RS                     params.iter().any(|param| contains(cx, param, seen))
-//RS                         || ret.as_deref().is_some_and(|ret| contains(cx, ret, seen))
-//RS                 }
-//RS                 Type::Union(members) => members.iter().any(|member| contains(cx, member, seen)),
-//RS                 Type::Quantity { base, .. } => contains(cx, base, seen),
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS 
-//RS         contains(self, ty, &mut HashSet::new())
-//RS     }
-//RS 
-//RS     pub(crate) fn type_contains_mutable_view(&self, ty: &Type) -> bool {
-//RS         self.type_contains_view_matching(ty, true)
-//RS     }
-//RS 
-//RS     fn type_contains_view_matching(&self, ty: &Type, mutable_only: bool) -> bool {
-//RS         fn payload_contains(
-//RS             cx: &Cx,
-//RS             payload: &VariantPayload,
-//RS             seen: &mut HashSet<String>,
-//RS             mutable_only: bool,
-//RS         ) -> bool {
-//RS             match payload {
-//RS                 VariantPayload::Unit => false,
-//RS                 VariantPayload::Single(ty, _) => contains(cx, ty, seen, mutable_only),
-//RS                 VariantPayload::Named(fields) => fields
-//RS                     .iter()
-//RS                     .any(|field| contains(cx, &field.ty, seen, mutable_only)),
-//RS             }
-//RS         }
-//RS 
-//RS         fn named_contains(
-//RS             cx: &Cx,
-//RS             name: &str,
-//RS             seen: &mut HashSet<String>,
-//RS             mutable_only: bool,
-//RS         ) -> bool {
-//RS             if !seen.insert(name.to_string()) {
-//RS                 return false;
-//RS             }
-//RS             let found = cx.struct_fields.get(name).is_some_and(|fields| {
-//RS                 fields
-//RS                     .iter()
-//RS                     .any(|(_, ty)| contains(cx, ty, seen, mutable_only))
-//RS             }) || cx.enum_variants.get(name).is_some_and(|variants| {
-//RS                 variants
-//RS                     .iter()
-//RS                     .any(|(_, payload)| payload_contains(cx, payload, seen, mutable_only))
-//RS             });
-//RS             // Visited stays marked: this is reachability, so a revisit adds nothing (and unmarking made the walk exponential).
-//RS             found
-//RS         }
-//RS 
-//RS         fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>, mutable_only: bool) -> bool {
-//RS             match ty {
-//RS                 // D-PIN1=A: `Pin<T>` is a borrowed window like `View`/`ViewMut`,
-//RS                 // so it needs the same hidden Rust lifetime everywhere it is
-//RS                 // stored or returned. It is always a write window.
-//RS                 Type::Apply { name, args }
-//RS                     if matches!(
-//RS                         name.as_str(),
-//RS                         "View" | "ViewMut" | "ComputeViewMut" | Syntax::TYPE_PIN
-//RS                     ) && args.len() == 1 =>
-//RS                 {
-//RS                     !mutable_only
-//RS                         || matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
-//RS                         || name == Syntax::TYPE_PIN
-//RS                 }
-//RS                 Type::Named(name) => named_contains(cx, name, seen, mutable_only),
-//RS                 Type::Apply { name, args } => {
-//RS                     args.iter().any(|arg| contains(cx, arg, seen, mutable_only))
-//RS                         || named_contains(cx, name, seen, mutable_only)
-//RS                 }
-//RS                 Type::Tagged { marker, .. }
-//RS                     if matches!(
-//RS                         marker,
-//RS                         crate::AST::TagMarker::Internal(crate::AST::InternalTag::AllocatorView)
-//RS                     ) =>
-//RS                 {
-//RS                     true
-//RS                 }
-//RS                 Type::List(inner)
-//RS                 | Type::Shared(inner)
-//RS                 | Type::Option(inner)
-//RS                 | Type::Tagged { inner, .. } => contains(cx, inner, seen, mutable_only),
-//RS                 Type::Map { key, value, .. }
-//RS                 | Type::Result {
-//RS                     ok: key,
-//RS                     err: value,
-//RS                 } => {
-//RS                     contains(cx, key, seen, mutable_only) || contains(cx, value, seen, mutable_only)
-//RS                 }
-//RS                 Type::Tuple(fields) => fields
-//RS                     .iter()
-//RS                     .any(|(_, ty)| contains(cx, ty, seen, mutable_only)),
-//RS                 Type::FixedList { elem, .. } => contains(cx, elem, seen, mutable_only),
-//RS                 Type::Fn { params, ret, .. } => {
-//RS                     params.iter().any(|ty| contains(cx, ty, seen, mutable_only))
-//RS                         || ret
-//RS                             .as_deref()
-//RS                             .is_some_and(|ty| contains(cx, ty, seen, mutable_only))
-//RS                 }
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS 
-//RS         contains(
-//RS             self,
-//RS             &self.expand_type_aliases(ty),
-//RS             &mut HashSet::new(),
-//RS             mutable_only,
-//RS         )
-//RS     }
-//RS 
-//RS     pub(crate) fn type_contains_shared_guard(&self, ty: &Type) -> bool {
-//RS         fn payload_contains(cx: &Cx, payload: &VariantPayload, seen: &mut HashSet<String>) -> bool {
-//RS             match payload {
-//RS                 VariantPayload::Unit => false,
-//RS                 VariantPayload::Single(ty, _) => contains(cx, ty, seen),
-//RS                 VariantPayload::Named(fields) => {
-//RS                     fields.iter().any(|field| contains(cx, &field.ty, seen))
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         fn named_contains(cx: &Cx, name: &str, seen: &mut HashSet<String>) -> bool {
-//RS             if !seen.insert(name.to_string()) {
-//RS                 return false;
-//RS             }
-//RS             cx.struct_fields
-//RS                 .get(name)
-//RS                 .is_some_and(|fields| fields.iter().any(|(_, ty)| contains(cx, ty, seen)))
-//RS                 || cx.enum_variants.get(name).is_some_and(|variants| {
-//RS                     variants
-//RS                         .iter()
-//RS                         .any(|(_, payload)| payload_contains(cx, payload, seen))
-//RS                 })
-//RS         }
-//RS 
-//RS         fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
-//RS             match ty {
-//RS                 Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_GUARD => true,
-//RS                 Type::Named(name) => named_contains(cx, name, seen),
-//RS                 Type::Apply { name, args } => {
-//RS                     args.iter().any(|arg| contains(cx, arg, seen)) || named_contains(cx, name, seen)
-//RS                 }
-//RS                 Type::List(inner)
-//RS                 | Type::Shared(inner)
-//RS                 | Type::Option(inner)
-//RS                 | Type::Tagged { inner, .. } => contains(cx, inner, seen),
-//RS                 Type::Map { key, value, .. }
-//RS                 | Type::Result {
-//RS                     ok: key,
-//RS                     err: value,
-//RS                 } => contains(cx, key, seen) || contains(cx, value, seen),
-//RS                 Type::Tuple(fields) => fields.iter().any(|(_, ty)| contains(cx, ty, seen)),
-//RS                 Type::Union(members) => members.iter().any(|ty| contains(cx, ty, seen)),
-//RS                 Type::FixedList { elem, .. } => contains(cx, elem, seen),
-//RS                 Type::Fn { params, ret, .. } => {
-//RS                     params.iter().any(|ty| contains(cx, ty, seen))
-//RS                         || ret.as_deref().is_some_and(|ty| contains(cx, ty, seen))
-//RS                 }
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS 
-//RS         contains(self, &self.expand_type_aliases(ty), &mut HashSet::new())
-//RS     }
-//RS 
-//RS     /// Core crypto values are move-only and intentionally do not implement
-//RS     /// Rust `Debug` or `Clone`. Do not let a containing user record derive
-//RS     /// either backend trait; its Jet debug path already honors `#Redact`.
-//RS     ///
-//RS     /// Returns every struct or enum name whose declaration reaches a Core
-//RS     /// crypto tag, directly or through the types it names. Callers ask this
-//RS     /// for every declared type, so the reachability is computed once for the
-//RS     /// whole graph rather than walked per type (#3661).
-//RS     pub(crate) fn secret_containing_types(&self) -> HashSet<String> {
-//RS         fn walk<'t>(ty: &'t Type, names: &mut Vec<&'t str>, direct: &mut bool) {
-//RS             match ty {
-//RS                 Type::Tagged {
-//RS                     marker:
-//RS                         crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
-//RS                     ..
-//RS                 } => *direct = true,
-//RS                 Type::Named(name) => names.push(name),
-//RS                 Type::Apply { name, args } => {
-//RS                     names.push(name);
-//RS                     for arg in args {
-//RS                         walk(arg, names, direct);
-//RS                     }
-//RS                 }
-//RS                 Type::List(inner)
-//RS                 | Type::Shared(inner)
-//RS                 | Type::Option(inner)
-//RS                 | Type::Tagged { inner, .. } => walk(inner, names, direct),
-//RS                 Type::Map { key, value, .. }
-//RS                 | Type::Result {
-//RS                     ok: key,
-//RS                     err: value,
-//RS                 } => {
-//RS                     walk(key, names, direct);
-//RS                     walk(value, names, direct);
-//RS                 }
-//RS                 Type::Tuple(fields) => {
-//RS                     for (_, ty) in fields {
-//RS                         walk(ty, names, direct);
-//RS                     }
-//RS                 }
-//RS                 Type::Union(members) => {
-//RS                     for ty in members {
-//RS                         walk(ty, names, direct);
-//RS                     }
-//RS                 }
-//RS                 Type::FixedList { elem, .. }
-//RS                 | Type::InlineRange { base: elem, .. }
-//RS                 | Type::Quantity { base: elem, .. } => walk(elem, names, direct),
-//RS                 Type::Fn { params, ret, .. } => {
-//RS                     for ty in params {
-//RS                         walk(ty, names, direct);
-//RS                     }
-//RS                     if let Some(ty) = ret.as_deref() {
-//RS                         walk(ty, names, direct);
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS 
-//RS         let owners = self
-//RS             .struct_fields
-//RS             .keys()
-//RS             .chain(self.enum_variants.keys())
-//RS             .map(String::as_str)
-//RS             .collect::<HashSet<_>>();
-//RS         let mut dependents = HashMap::<&str, Vec<&str>>::new();
-//RS         let mut secret = HashSet::new();
-//RS         let mut pending = Vec::new();
-//RS         for owner in owners {
-//RS             let mut names = Vec::new();
-//RS             let mut direct = false;
-//RS             for (_, ty) in self.struct_fields.get(owner).into_iter().flatten() {
-//RS                 walk(ty, &mut names, &mut direct);
-//RS             }
-//RS             for (_, payload) in self.enum_variants.get(owner).into_iter().flatten() {
-//RS                 match payload {
-//RS                     VariantPayload::Unit => {}
-//RS                     VariantPayload::Single(ty, _) => walk(ty, &mut names, &mut direct),
-//RS                     VariantPayload::Named(fields) => {
-//RS                         for field in fields {
-//RS                             walk(&field.ty, &mut names, &mut direct);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             for name in names {
-//RS                 dependents.entry(name).or_default().push(owner);
-//RS             }
-//RS             if direct && secret.insert(owner) {
-//RS                 pending.push(owner);
-//RS             }
-//RS         }
-//RS         while let Some(name) = pending.pop() {
-//RS             for &owner in dependents.get(name).into_iter().flatten() {
-//RS                 if secret.insert(owner) {
-//RS                     pending.push(owner);
-//RS                 }
-//RS             }
-//RS         }
-//RS         secret.into_iter().map(str::to_string).collect()
-//RS     }
-//RS 
-//RS     /// Render a type whose view-bearing leaves borrow the function's hidden
-//RS     /// owner lifetime. Wrappers stay wrappers; only references and generated
-//RS     /// aggregate types receive the lifetime argument.
-//RS     pub(crate) fn rust_type_with_view_lifetime(&self, ty: &Type) -> String {
-//RS         self.rust_type_with_view_lifetime_using(ty, &|ty| self.rust_type(ty))
-//RS     }
-//RS 
-//RS     fn rust_type_with_view_lifetime_using(
-//RS         &self,
-//RS         ty: &Type,
-//RS         base: &impl Fn(&Type) -> String,
-//RS     ) -> String {
-//RS         fn add_reference_lifetime(rust: String) -> String {
-//RS             if let Some(rest) = rust.strip_prefix("&mut ") {
-//RS                 jet_format!("&'{jet_prefix}view mut {rest}")
-//RS             } else if let Some(rest) = rust.strip_prefix('&') {
-//RS                 jet_format!("&'{jet_prefix}view {rest}")
-//RS             } else if let Some(prefix) = rust.strip_suffix("JetComputeViewMut<'_>") {
-//RS                 jet_format!("{prefix}JetComputeViewMut<'{jet_prefix}view>")
-//RS             } else {
-//RS                 rust
-//RS             }
-//RS         }
-//RS 
-//RS         fn add_type_lifetime(rust: String) -> String {
-//RS             if let Some(open) = rust.find('<') {
-//RS                 jet_format!("{}<'{jet_prefix}view, {}", &rust[..open], &rust[open + 1..])
-//RS             } else {
-//RS                 jet_format!("{rust}<'{jet_prefix}view>")
-//RS             }
-//RS         }
-//RS 
-//RS         fn definition_contains_view(cx: &Cx, name: &str) -> bool {
-//RS             cx.struct_fields
-//RS                 .get(name)
-//RS                 .is_some_and(|fields| fields.iter().any(|(_, ty)| cx.type_contains_view(ty)))
-//RS                 || cx.enum_variants.get(name).is_some_and(|variants| {
-//RS                     variants.iter().any(|(_, payload)| match payload {
-//RS                         VariantPayload::Unit => false,
-//RS                         VariantPayload::Single(ty, _) => cx.type_contains_view(ty),
-//RS                         VariantPayload::Named(fields) => {
-//RS                             fields.iter().any(|field| cx.type_contains_view(&field.ty))
-//RS                         }
-//RS                     })
-//RS                 })
-//RS         }
-//RS 
-//RS         fn render(cx: &Cx, ty: &Type, base: &impl Fn(&Type) -> String) -> String {
-//RS             match ty {
-//RS                 Type::Apply { name, args }
-//RS                     if matches!(
-//RS                         name.as_str(),
-//RS                         "View" | "ViewMut" | "ComputeViewMut" | Syntax::TYPE_PIN
-//RS                     ) && args.len() == 1 =>
-//RS                 {
-//RS                     add_reference_lifetime(base(ty))
-//RS                 }
-//RS                 Type::Tagged { marker, .. }
-//RS                     if matches!(
-//RS                         marker,
-//RS                         crate::AST::TagMarker::Internal(crate::AST::InternalTag::AllocatorView)
-//RS                     ) =>
-//RS                 {
-//RS                     add_reference_lifetime(base(ty))
-//RS                 }
-//RS                 Type::List(inner) if cx.type_contains_view(inner) => {
-//RS                     format!("Vec<{}>", render(cx, inner, base))
-//RS                 }
-//RS                 Type::Map { key, value, .. } if cx.type_contains_view(ty) => format!(
-//RS                     "{}JetMap<{}, {}>",
-//RS                     cx.root_prefix,
-//RS                     render(cx, key, base),
-//RS                     render(cx, value, base)
-//RS                 ),
-//RS                 Type::Shared(inner) if cx.type_contains_view(inner) => format!(
-//RS                     "{}jet_std::JetShared<{}>",
-//RS                     cx.root_prefix,
-//RS                     render(cx, inner, base)
-//RS                 ),
-//RS                 Type::Option(inner) if cx.type_contains_view(inner) => {
-//RS                     format!(
-//RS                         "{0}JetOutcome<{1}, {0}JetAbsent>",
-//RS                         cx.root_prefix,
-//RS                         render(cx, inner, base)
-//RS                     )
-//RS                 }
-//RS                 Type::Result { ok, err } if cx.type_contains_view(ty) => {
-//RS                     format!(
-//RS                         "{}JetOutcome<{}, {}>",
-//RS                         cx.root_prefix,
-//RS                         render(cx, ok, base),
-//RS                         render(cx, err, base)
-//RS                     )
-//RS                 }
-//RS                 Type::Tuple(fields) if cx.type_contains_view(ty) => {
-//RS                     add_type_lifetime(tuple_struct_name(&tuple_fields_plain(fields)))
-//RS                 }
-//RS                 Type::FixedList { elem, len, .. } if cx.type_contains_view(elem) => {
-//RS                     format!("[{}; {len}]", render(cx, elem, base))
-//RS                 }
-//RS                 Type::Tagged { inner, .. } if cx.type_contains_view(inner) => {
-//RS                     render(cx, inner, base)
-//RS                 }
-//RS                 Type::Named(name) if definition_contains_view(cx, name) => {
-//RS                     add_type_lifetime(base(ty))
-//RS                 }
-//RS                 Type::Apply { name, args }
-//RS                     if definition_contains_view(cx, name)
-//RS                         || args.iter().any(|arg| cx.type_contains_view(arg)) =>
-//RS                 {
-//RS                     let head = base(&Type::Named(name.clone()));
-//RS                     let args = args
-//RS                         .iter()
-//RS                         .map(|arg| render(cx, arg, base))
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ");
-//RS                     let life = definition_contains_view(cx, name)
-//RS                         .then(|| jet_format!("'{jet_prefix}view"))
-//RS                         .into_iter()
-//RS                         .chain((!args.is_empty()).then(|| args.clone()))
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ");
-//RS                     format!("{head}<{life}>")
-//RS                 }
-//RS                 _ => base(ty),
-//RS             }
-//RS         }
-//RS 
-//RS         render(self, &self.expand_type_aliases(ty), base)
-//RS     }
-//RS 
-//RS     /// D-SOA1: is `name` a `#layout(columnar)` struct (local or imported)? The
-//RS     /// columnar set only carries local structs; an imported columnar struct is
-//RS     /// not tracked, so `[ImportedColumnar]` still lowers AoS — acceptable for v1
-//RS     /// (columnar lists don't cross module boundaries in the shipped examples).
-//RS     pub(crate) fn is_columnar_struct(&self, name: &str) -> bool {
-//RS         self.columnar.contains(name)
-//RS     }
-//RS 
-//RS     /// D-SOA-TIER1=A: if `inner` is a `#layout(columnar)` struct type, the Rust
-//RS     /// type of a `[inner]` collection — the Prelude-owned `JetColumnList<S>`
-//RS     /// over THE shared column store. `None` for any non-columnar element.
-//RS     ///
-//RS     /// There is deliberately no per-struct storage type here any more: the
-//RS     /// layout, the row bookkeeping and the gather read are Prelude source, and
-//RS     /// codegen emits only the `JetRow` marshalling adapter for `S`.
-//RS     pub(crate) fn columnar_list_type(&self, inner: &Type) -> Option<String> {
-//RS         if let Type::Named(name) = inner {
-//RS             if self.is_columnar_struct(name) {
-//RS                 return Some(format!("JetColumnList<{}>", self.rust_type(inner)));
-//RS             }
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS     /// D-SOA-TIER1=A: the column index of `field` on columnar struct `name` —
-//RS     /// its position in declaration order among STORED fields, which is exactly
-//RS     /// the column order the store was built with. A computed field is never a
-//RS     /// column (D-FIELDPOL1) and `struct_fields` already excludes it.
-//RS     pub(crate) fn columnar_column_index(&self, name: &str, field: &str) -> Option<usize> {
-//RS         self.struct_fields
-//RS             .get(name)?
-//RS             .iter()
-//RS             .position(|(candidate, _)| candidate == field)
-//RS     }
-//RS     /// D-DATA-PLOT1=A: derive the canonical identity shared by table schema
-//RS     /// columns and typed plot selectors through the Foundation identity kernel.
-//RS     pub(crate) fn data_plot_field_id(&self, name: &str, ty: &Type) -> String {
-//RS         let type_name = ty.name();
-//RS         jet_foundation::PreludeDataFlow::column_identity(name, &type_name)
-//RS     }
-//RS 
-//RS     /// D-TYPEALIAS1 / D-ALIAS-OP1=B: expand `alias Name<T> :: …` applications to their target type.
-//RS     pub(crate) fn expand_type_aliases(&self, ty: &Type) -> Type {
-//RS         match ty {
-//RS             Type::Apply { name, args } if self.type_aliases.contains_key(name) => {
-//RS                 let (params, target) = self.type_aliases.get(name).unwrap();
-//RS                 let subst: HashMap<String, Type> = params
-//RS                     .iter()
-//RS                     .zip(args.iter())
-//RS                     .map(|(p, a)| (p.name.clone(), a.clone()))
-//RS                     .collect();
-//RS                 self.expand_type_aliases(&Generics::substitute_type(target, &subst))
-//RS             }
-//RS             Type::Apply { name, args } => Type::Apply {
-//RS                 name: name.clone(),
-//RS                 args: args.iter().map(|a| self.expand_type_aliases(a)).collect(),
-//RS             },
-//RS             Type::List(inner) => Type::List(Box::new(self.expand_type_aliases(inner))),
-//RS             Type::Map {
-//RS                 key,
-//RS                 key_span,
-//RS                 value,
-//RS             } => Type::Map {
-//RS                 key: Box::new(self.expand_type_aliases(key)),
-//RS                 key_span: *key_span,
-//RS                 value: Box::new(self.expand_type_aliases(value)),
-//RS             },
-//RS             Type::Shared(inner) => Type::Shared(Box::new(self.expand_type_aliases(inner))),
-//RS             Type::Option(inner) => Type::Option(Box::new(self.expand_type_aliases(inner))),
-//RS             Type::Result { ok, err } => Type::Result {
-//RS                 ok: Box::new(self.expand_type_aliases(ok)),
-//RS                 err: Box::new(self.expand_type_aliases(err)),
-//RS             },
-//RS             Type::Fn {
-//RS                 params,
-//RS                 ret,
-//RS                 param_contract,
-//RS                 effect_bound,
-//RS                 call_metadata,
-//RS                 return_view_provenance,
-//RS             } => Type::Fn {
-//RS                 params: params.iter().map(|p| self.expand_type_aliases(p)).collect(),
-//RS                 ret: ret.as_ref().map(|r| Box::new(self.expand_type_aliases(r))),
-//RS                 effect_bound: effect_bound.clone(),
-//RS                 param_contract: param_contract.clone(),
-//RS                 call_metadata: call_metadata.clone(),
-//RS                 return_view_provenance: return_view_provenance.clone(),
-//RS             },
-//RS             Type::Tuple(fields) => Type::Tuple(
-//RS                 fields
-//RS                     .iter()
-//RS                     .map(|(n, t)| (n.clone(), Box::new(self.expand_type_aliases(t))))
-//RS                     .collect(),
-//RS             ),
-//RS             Type::Tagged { marker, inner } => Type::Tagged {
-//RS                 marker: marker.clone(),
-//RS                 inner: Box::new(self.expand_type_aliases(inner)),
-//RS             },
-//RS             Type::FixedList { elem, len } => Type::FixedList {
-//RS                 elem: Box::new(self.expand_type_aliases(elem)),
-//RS                 len: len.clone(),
-//RS             },
-//RS             Type::InlineRange { base, lo, hi } => Type::InlineRange {
-//RS                 base: Box::new(self.expand_type_aliases(base)),
-//RS                 lo: *lo,
-//RS                 hi: *hi,
-//RS             },
-//RS             Type::Union(members) => crate::AST::canonicalize_union(
-//RS                 members
-//RS                     .iter()
-//RS                     .map(|m| self.expand_type_aliases(m))
-//RS                     .collect(),
-//RS             ),
-//RS             other => other.clone(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Project source types into the checked trait-object form consumed by
-//RS     /// TIR/MIR. Explicit binders supplement the method-level scope already
-//RS     /// held by this context, so a generic name can shadow a trait name.
-//RS     pub(crate) fn canonicalize_checked_type<'a>(
-//RS         &self,
-//RS         ty: &Type,
-//RS         binders: impl IntoIterator<Item = &'a String>,
-//RS     ) -> Type {
-//RS         let mut binder_names = self.current_type_params.borrow().clone();
-//RS         for name in binders {
-//RS             if !binder_names.contains(name) {
-//RS                 binder_names.insert(name.clone());
-//RS             }
-//RS         }
-//RS         let expanded = self.canonicalize_core_type_aliases(&self.expand_type_aliases(ty));
-//RS         crate::Codegen::TIR::tir_to_mir_types::canonicalize_checked_trait_types(
-//RS             &expanded,
-//RS             &self.trait_names,
-//RS             &self.type_names,
-//RS             &binder_names,
-//RS         )
-//RS     }
-//RS     fn canonicalize_core_type_aliases(&self, ty: &Type) -> Type {
-//RS         fn canonical_name(cx: &Cx, name: &str) -> String {
-//RS             cx.core_qualified_rust_type_name(name)
-//RS                 .map(str::to_owned)
-//RS                 .unwrap_or_else(|| name.to_string())
-//RS         }
-//RS 
-//RS         match ty {
-//RS             Type::Named(name) => Type::Named(canonical_name(self, name)),
-//RS             Type::List(inner) => Type::List(Box::new(self.canonicalize_core_type_aliases(inner))),
-//RS             Type::Map {
-//RS                 key,
-//RS                 key_span,
-//RS                 value,
-//RS             } => Type::Map {
-//RS                 key: Box::new(self.canonicalize_core_type_aliases(key)),
-//RS                 key_span: *key_span,
-//RS                 value: Box::new(self.canonicalize_core_type_aliases(value)),
-//RS             },
-//RS             Type::Shared(inner) => {
-//RS                 Type::Shared(Box::new(self.canonicalize_core_type_aliases(inner)))
-//RS             }
-//RS             Type::Option(inner) => {
-//RS                 Type::Option(Box::new(self.canonicalize_core_type_aliases(inner)))
-//RS             }
-//RS             Type::Result { ok, err } => Type::Result {
-//RS                 ok: Box::new(self.canonicalize_core_type_aliases(ok)),
-//RS                 err: Box::new(self.canonicalize_core_type_aliases(err)),
-//RS             },
-//RS             Type::Fn {
-//RS                 params,
-//RS                 ret,
-//RS                 effect_bound,
-//RS                 param_contract,
-//RS                 call_metadata,
-//RS                 return_view_provenance,
-//RS             } => Type::Fn {
-//RS                 params: params
-//RS                     .iter()
-//RS                     .map(|param| self.canonicalize_core_type_aliases(param))
-//RS                     .collect(),
-//RS                 ret: ret
-//RS                     .as_ref()
-//RS                     .map(|ret| Box::new(self.canonicalize_core_type_aliases(ret))),
-//RS                 effect_bound: effect_bound.clone(),
-//RS                 param_contract: param_contract.clone(),
-//RS                 call_metadata: call_metadata.clone(),
-//RS                 return_view_provenance: return_view_provenance.clone(),
-//RS             },
-//RS             Type::Apply { name, args } => Type::Apply {
-//RS                 name: canonical_name(self, name),
-//RS                 args: args
-//RS                     .iter()
-//RS                     .map(|arg| self.canonicalize_core_type_aliases(arg))
-//RS                     .collect(),
-//RS             },
-//RS             Type::Tuple(fields) => Type::Tuple(
-//RS                 fields
-//RS                     .iter()
-//RS                     .map(|(name, ty)| {
-//RS                         (
-//RS                             name.clone(),
-//RS                             Box::new(self.canonicalize_core_type_aliases(ty)),
-//RS                         )
-//RS                     })
-//RS                     .collect(),
-//RS             ),
-//RS             Type::FixedList { elem, len } => Type::FixedList {
-//RS                 elem: Box::new(self.canonicalize_core_type_aliases(elem)),
-//RS                 len: len.clone(),
-//RS             },
-//RS             Type::InlineRange { base, lo, hi } => Type::InlineRange {
-//RS                 base: Box::new(self.canonicalize_core_type_aliases(base)),
-//RS                 lo: *lo,
-//RS                 hi: *hi,
-//RS             },
-//RS             Type::Tagged { marker, inner } => Type::Tagged {
-//RS                 marker: marker.clone(),
-//RS                 inner: Box::new(self.canonicalize_core_type_aliases(inner)),
-//RS             },
-//RS             Type::Union(members) => crate::AST::canonicalize_union(
-//RS                 members
-//RS                     .iter()
-//RS                     .map(|member| self.canonicalize_core_type_aliases(member))
-//RS                     .collect(),
-//RS             ),
-//RS             Type::Quantity { base, dimension } => Type::Quantity {
-//RS                 base: Box::new(self.canonicalize_core_type_aliases(base)),
-//RS                 dimension: dimension.clone(),
-//RS             },
-//RS             other => other.clone(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn rust_type(&self, ty: &Type) -> String {
-//RS         let ty = self.expand_type_aliases(ty);
-//RS         if let Some((base, _)) = ty.quantity_parts() {
-//RS             return self.rust_type(base);
-//RS         }
-//RS         match &ty {
-//RS             Type::Int => "i64".to_string(),
-//RS             Type::Float => "f64".to_string(),
-//RS             Type::IntN { signed, bits } => {
-//RS                 format!("{}{}", if *signed { 'i' } else { 'u' }, bits)
-//RS             }
-//RS             Type::InlineRange { base, .. } => self.rust_type(base),
-//RS             Type::Float32 => "f32".to_string(),
-//RS             Type::Bool => "bool".to_string(),
-//RS             Type::String => "String".to_string(),
-//RS             Type::Char => "char".to_string(),
-//RS             // D-SOA1 / D-SOA-TIER1=A: a `[S]` of a `#layout(columnar)` struct
-//RS             // lowers to the Prelude `JetColumnList<S>`, not `Vec<S>`.
-//RS             Type::List(inner) if self.columnar_list_type(inner).is_some() => {
-//RS                 self.columnar_list_type(inner).unwrap()
-//RS             }
-//RS             Type::List(inner) => format!("Vec<{}>", self.rust_type(inner)),
-//RS             Type::Map { key, value, .. } => format!(
-//RS                 "{}JetMap<{}, {}>",
-//RS                 self.root_prefix,
-//RS                 self.rust_type(key),
-//RS                 self.rust_type(value)
-//RS             ),
-//RS             // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` — a lock-guarded shared
-//RS             // handle (`.read(f)`/`.edit(f)` closure API). Was a plain read-only
-//RS             // `Arc<T>` before this stage (never actually constructible — no
-//RS             // `Shared.new` existed — so there is no live behavior to preserve);
-//RS             // now `Arc<RwLock<T>>`, wrapped so `.clone()` stays a cheap Arc clone.
-//RS             Type::Shared(inner) => format!(
-//RS                 "{}jet_std::JetShared<{}>",
-//RS                 self.root_prefix,
-//RS                 self.rust_type(inner)
-//RS             ),
-//RS             // D-FAIL-CARRIER1=A: `?T` and `T !E` are two views of one carrier.
-//RS             // The optional view's report is `JetAbsent` — absence is clean.
-//RS             Type::Option(inner) => format!(
-//RS                 "{0}JetOutcome<{1}, {0}JetAbsent>",
-//RS                 self.root_prefix,
-//RS                 self.rust_type(inner)
-//RS             ),
-//RS             Type::Result { ok, err } => {
-//RS                 format!(
-//RS                     "{}JetOutcome<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(ok),
-//RS                     self.rust_type(err)
-//RS                 )
-//RS             }
-//RS             // Items inside an imported file live in `mod __jet_<alias>`; the
-//RS             // module provides the namespace, so item names stay plain.
-//RS             // c148: also recognize multi-char type params from `current_type_params`.
-//RS             Type::Named(name)
-//RS                 if (Generics::is_type_var_name(name)
-//RS                     || self.current_type_params.borrow().contains(name.as_str()))
-//RS                     && !self.type_names.contains(name) =>
-//RS             {
-//RS                 name.clone()
-//RS             }
-//RS             // Sema keeps visible imported leaves in user signatures (for example
-//RS             // `Note`), while the codegen registry stores the canonical nominal
-//RS             // identity. Resolve that projection before any prelude-name fallback
-//RS             // so imported types cannot be emitted as local `__jet_Note` names.
-//RS             Type::Named(name) if self.foreign_type_identity("", name).is_some() => {
-//RS                 let identity = self
-//RS                     .foreign_type_identity("", name)
-//RS                     .expect("foreign identity was checked above");
-//RS                 let rust_mod = self
-//RS                     .foreign_types
-//RS                     .get(&identity)
-//RS                     .expect("foreign identity must have a Rust module");
-//RS                 let leaf = nominal_leaf(&identity);
-//RS                 format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
-//RS             }
-//RS             Type::Named(name) if (name == "Unit") && !self.type_names.contains(name) => {
-//RS                 "()".to_string()
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_REMOVE_BY && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}JetRemoveBy", self.root_prefix)
-//RS             }
-//RS             // D-CONC-FAIL1=A: task joins carry the shared Prelude failure
-//RS             // value. Keep this builtin mapping ahead of user named types.
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_TASK_FAILURE && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}JetTaskFailure", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_TASKGROUP && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}jet_std::JetTaskGroup", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_CONDITION && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}jet_std::JetCondition", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_SHARED_REVISION_ERROR
-//RS                     && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}jet_std::JetSharedRevisionError", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == Syntax::TYPE_NEVER => {
-//RS                 "std::convert::Infallible".to_string()
-//RS             }
-//RS             Type::Named(name) if name == Syntax::TYPE_ALLOC_ERROR => {
-//RS                 format!("{}AllocError", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetAuthClaims", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetAuthError", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "Session" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetAuthSession", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "Auth" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetAuthApp", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "SyncText" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetSyncText", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "SyncCounter" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetSyncCounter", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "SyncMap" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetSyncMap", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "SyncList" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetSyncList", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "RowPolicy" => {
-//RS                 format!("{}JetRowPolicy", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if !self.type_names.contains(name)
-//RS                     && core_crypto_rust_type_name(name).is_some() =>
-//RS             {
-//RS                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-//RS                 let rust = core_crypto_rust_type_name(name).unwrap();
-//RS                 format!("{ffi}::{rust}")
-//RS             }
-//RS             Type::Named(name) if matches!(name.as_str(), "KeyStatus" | "VaultError") => {
-//RS                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-//RS                 let rust = if name == "KeyStatus" {
-//RS                     "JetVaultKeyStatus"
-//RS                 } else {
-//RS                     "JetVaultError"
-//RS                 };
-//RS                 format!("{ffi}::{rust}")
-//RS             }
-//RS             // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
-//RS             Type::Named(name) if name == "Unknown" => "_".to_string(),
-//RS             // D-APPROX1=A: sketch types → opaque Rust structs.
-//RS             Type::Named(name) if name == "HyperLogLog" => "JetHyperLogLog".to_string(),
-//RS             Type::Named(name) if name == "TDigest" => "JetTDigest".to_string(),
-//RS             Type::Named(name) if name == "CountMinSketch" => "JetCountMinSketch".to_string(),
-//RS             Type::Named(name) if name == "ReservoirSampler" => "JetReservoirSampler".to_string(),
-//RS             // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.
-//RS             Type::Named(name) if name == "Date" => "JetDate".to_string(),
-//RS             Type::Named(name) if name == "LocalDate" => "JetDate".to_string(),
-//RS             Type::Named(name) if name == "LocalTime" => "JetLocalTime".to_string(),
-//RS             Type::Named(name) if name == "DateTime" => "JetDateTime".to_string(),
-//RS             Type::Named(name) if name == "Instant" => "JetInstant".to_string(),
-//RS             Type::Named(name) if name == "Period" => "JetPeriod".to_string(),
-//RS             Type::Named(name) if name == "Zone" => "JetZone".to_string(),
-//RS             Type::Named(name) if name == "ZonedDateTime" => "JetZonedDateTime".to_string(),
-//RS             // D-URL1=A: URL/MIME values live in the corelib prelude module.
-//RS             Type::Named(name) if name == "URL" => {
-//RS                 format!("{}jet_std::JetURL", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "MIME" => {
-//RS                 format!("{}jet_std::JetMIME", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if matches!(
-//RS                     name.as_str(),
-//RS                     "Address"
-//RS                         | "Message"
-//RS                         | "Attachment"
-//RS                         | "Envelope"
-//RS                         | "SMTPSecurity"
-//RS                         | "RecipientPolicy"
-//RS                         | "RecipientReport"
-//RS                         | "SendReport"
-//RS                         | "EmailError"
-//RS                         | "Limits"
-//RS                 ) && !self.type_names.contains(name) =>
-//RS             {
-//RS                 let rust = match name.as_str() {
-//RS                     "Address" => "Address",
-//RS                     "Message" => "Message",
-//RS                     "Attachment" => "Attachment",
-//RS                     "Envelope" => "Envelope",
-//RS                     "SMTPSecurity" => "SMTPSecurity",
-//RS                     "RecipientPolicy" => "RecipientPolicy",
-//RS                     "RecipientReport" => "RecipientReport",
-//RS                     "SendReport" => "SendReport",
-//RS                     "Limits" => "Limits",
-//RS                     _ => "Error",
-//RS                 };
-//RS                 format!("{}jet_email::{rust}", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "SMTPAuth" && !self.type_names.contains(name) => {
-//RS                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-//RS                 format!("{}jet_email::SMTPAuth<{}::Secret>", self.root_prefix, ffi)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if matches!(name.as_str(), "DKIMConfig" | "SMTPConfig")
-//RS                     && !self.type_names.contains(name) =>
-//RS             {
-//RS                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-//RS                 format!("{}jet_email::{}<{}::Secret>", self.root_prefix, name, ffi)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if matches!(name.as_str(), "TLSTrust" | "Mailer")
-//RS                     && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}jet_email::{}", self.root_prefix, name)
-//RS             }
-//RS             // D-WS1=B: WebSocket types.
-//RS             Type::Named(name) if name == "WsConn" => "JetWsConn".to_string(),
-//RS             Type::Named(name) if name == "WsError" => "JetWsError".to_string(),
-//RS             Type::Named(name) if name == "WsMessage" => "JetWsMessage".to_string(),
-//RS             // D-BROWSER-AUTO1=A: native BiDi opaque types.
-//RS             Type::Named(name) if name == "Browser" => "JetBrowser".to_string(),
-//RS             Type::Named(name) if name == "BrowserContext" => "JetBrowserContext".to_string(),
-//RS             Type::Named(name) if name == "BrowserPage" => "JetBrowserPage".to_string(),
-//RS             Type::Named(name) if name == "BrowserFrame" => "JetBrowserFrame".to_string(),
-//RS             Type::Named(name) if name == "BrowserLocator" => "JetBrowserLocator".to_string(),
-//RS             Type::Named(name) if name == "BrowserIntercept" => "JetBrowserIntercept".to_string(),
-//RS             Type::Named(name) if name == "BrowserEvent" => "JetBrowserEvent".to_string(),
-//RS             Type::Named(name) if name == "BrowserTrace" => "JetBrowserTrace".to_string(),
-//RS             Type::Named(name) if name == "BrowserReceipt" => "JetBrowserReceipt".to_string(),
-//RS             Type::Named(name) if name == "BrowserPrivacy" => "JetBrowserPrivacy".to_string(),
-//RS             Type::Named(name) if name == "BrowserError" => "JetBrowserError".to_string(),
-//RS             Type::Named(name) if name == "BrowserAbilities" => "JetBrowserAbilities".to_string(),
-//RS             Type::Named(name) if name == "BrowserProfile" => "JetBrowserProfile".to_string(),
-//RS             Type::Named(name) if name == "BrowserTimeout" => "JetBrowserTimeout".to_string(),
-//RS             Type::Named(name) if name == "BrowserProtocol" => "JetBrowserProtocol".to_string(),
-//RS             // c97/D-STRPARSE1: the builtin parse error (`Int.parse`, `Float.parse`)
-//RS             // erases to a plain message — never user-constructed.
-//RS             // A user enum named `ParseError` (in `type_names`) keeps its own lowering.
-//RS             Type::Named(name) if name == "ParseError" && !self.type_names.contains(name) => {
-//RS                 "String".to_string()
-//RS             }
-//RS             // D-TYPEDSQL-SINK1=A: `SQL` carries checked template text and its
-//RS             // ordered `DBValue` bindings together. `HTML` is already the fully
-//RS             // escaped text, so it is just a `String` underneath.
-//RS             Type::Named(name) if name == "SQL" => format!("{}jet_std::SQL", self.root_prefix),
-//RS             Type::Named(name) if name == "HTML" => "String".to_string(),
-//RS             Type::Named(name) if name == "Sh" => "Vec<String>".to_string(),
-//RS             // D-DEFER1: ScopeGuard is generic over F (the closure type); emit `_`
-//RS             // so Rust infers the monomorphised type from the initialiser expression.
-//RS             Type::Named(name) if name == "ScopeGuard" => "_".to_string(),
-//RS             // D-TERM1 (ratified 2026-06-22): `Key` is a top-level prelude enum.
-//RS             Type::Named(name) if name == "Key" => format!("{}JetKey", self.root_prefix),
-//RS             Type::Named(name)
-//RS                 if core_ui_rust_type_name(name).is_some() && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}Jet{}", self.root_prefix, name)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == "UIFileFilterResult" && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<{}JetUiFileFilter>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name) if name == "UIFSGrantResult" && !self.type_names.contains(name) => {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<{}JetUiFsGrant>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name) if name == "UIShortcutResult" && !self.type_names.contains(name) => {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<{}JetUiShortcut>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == "UiShortcutBindingResult" && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<{}JetUiShortcutBinding>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == "UIAccessibilityResult" && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<{}JetUiAccessibility>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == "UIFileDialogResult" && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<{}JetUiFileDialogSelection>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == "UIClipboardTextResult" && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<{}JetUiClipboardText>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == "UIClipboardWriteResult" && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<{}JetUiClipboardWrite>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name) if name == "UIIMEResult" && !self.type_names.contains(name) => {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<Option<{}JetUiImeEvent>>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name) if name == "UIDragResult" && !self.type_names.contains(name) => {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<Option<{}JetUiDragEvent>>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == "UIShortcutDispatchResult" && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<{}JetUiShortcutDispatch>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == "UIAccessibilityAttachResult" && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}JetUiServiceResult<()>", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == "UIAccessibilityProjectionResult" && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<Option<{}JetUiAccessibilityProjection>>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == "UIAccessibilityNodeResult" && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetUiServiceResult<{}JetUiNode>",
-//RS                     self.root_prefix, self.root_prefix
-//RS                 )
-//RS             }
-//RS             // D-SPACE-GEOMETRY1=A: static coordinate-space tags erase in the
-//RS             // native carrier. Frame identity is retained by JetTransform2,
-//RS             // not by allocating a marker per point.
-//RS             Type::Named(name)
-//RS                 if matches!(
-//RS                     name.as_str(),
-//RS                     "ScreenPoint"
-//RS                         | "WorldPoint"
-//RS                         | "ViewPoint"
-//RS                         | "CameraPoint"
-//RS                         | "DevicePoint"
-//RS                         | "ScreenDelta"
-//RS                         | "WorldDelta"
-//RS                         | "ViewDelta"
-//RS                         | "CameraDelta"
-//RS                         | "DeviceDelta"
-//RS                 ) && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}JetCoord2", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if matches!(name.as_str(), "TransformError" | "FrameId")
-//RS                     && !self.type_names.contains(name) =>
-//RS             {
-//RS                 if name == "FrameId" {
-//RS                     format!("{}i64", self.root_prefix)
-//RS                 } else {
-//RS                     format!("{}JetErr", self.root_prefix)
-//RS                 }
-//RS             }
-//RS             // c-devserver (owner-directed 2026-07-01): DevServer is a
-//RS             // top-level prelude struct (Prelude/DevServer.rs).
-//RS             Type::Named(name) if name == "DevServer" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetDevServer", self.root_prefix)
-//RS             }
-//RS             // D-WEBAPP1=D: App / WebPage opaque builder types.
-//RS             Type::Named(name) if name == "App" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetApp", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "WebPage" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetWebPage", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "LiveQuery" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetLiveQuery", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == Syntax::TYPE_RANGE && !self.type_names.contains(name) => {
-//RS                 format!("{}JetRange", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "DimensionAxis" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetDimensionAxis", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "DimensionInfo" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetDimensionInfo", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "StateRef" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetStateRef", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "StateInfo" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetStateInfo", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "EffectInfo" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetEffectInfo", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == "OriginInfo" && !self.type_names.contains(name) => {
-//RS                 format!("{}JetOriginInfo", self.root_prefix)
-//RS             }
-//RS             Type::Named(name) if name == Syntax::TYPE_EFFECT && !self.type_names.contains(name) => {
-//RS                 format!("{}jet_std::JetReactiveEffect", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_SUBSCRIPTION && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}jet_std::JetSubscription", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_EVENT_SCOPE && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}jet_std::JetEventScope", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_EVENT_POLICY && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}jet_std::JetEventPolicy", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_EVENT_TRACE && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}jet_std::JetEventTrace", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_HOOK_POLICY && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}jet_std::JetHookPolicy", self.root_prefix)
-//RS             }
-//RS             // E2-M7: file handle types are top-level in the prelude (not in jet_std).
-//RS             Type::Named(name) if file_handle_rust_type(name).is_some() => {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     file_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             // D-RAYLIB1=A: the raylib bridge lives in the
-//RS             // top-level corelib prelude today, so generated user bindings must
-//RS             // reference `RaylibWindow`/`RaylibColor` directly.
-//RS             Type::Named(name) if raylib_handle_rust_type(name).is_some() => {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     raylib_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             Type::Named(name) if game_handle_rust_type(name).is_some() => {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     game_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             // E2-M10: networking opaque types are top-level in the prelude.
-//RS             Type::Named(name) if net_handle_rust_type(name).is_some() => {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     net_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             // D-COMPUTE1=D: Tensor / compute error / device handles.
-//RS             Type::Named(name) if compute_handle_rust_type(name).is_some() => {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     compute_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             Type::Named(name) if service_handle_rust_type(name).is_some() => {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     service_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if matches!(name.as_str(), "Point2" | "Delta2") && args.len() == 2 =>
-//RS             {
-//RS                 format!("{}JetCoord2", self.root_prefix)
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if matches!(name.as_str(), "Transform" | "Transform2")
-//RS                     && (args.len() == 2 || args.len() == 3) =>
-//RS             {
-//RS                 format!("{}JetTransform2", self.root_prefix)
-//RS             }
-//RS             Type::Apply { name, args } if name == "Ray2" && args.len() == 3 => {
-//RS                 format!("{}JetRay2", self.root_prefix)
-//RS             }
-//RS 
-//RS             Type::Apply { name, args }
-//RS                 if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix")
-//RS                     && (name != "Tensor" || args.len() <= 1)
-//RS                     && compute_handle_rust_type("Tensor").is_some() =>
-//RS             {
-//RS                 format!("{}JetTensor", self.root_prefix)
-//RS             }
-//RS             Type::Apply { name, args } if name == "VJPRun" && args.len() == 1 => {
-//RS                 format!(
-//RS                     "{}JetComputeVjpRun<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
-//RS             Type::Named(name) if alloc_handle_rust_type(name).is_some() => {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     alloc_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             // D-ARGS1 (ratified 2026-06-22): ArgsSpec / ParsedArgs are top-level prelude structs.
-//RS             Type::Named(name) if args_handle_rust_type(name).is_some() => {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     args_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s Value/Field handles. `Value`
-//RS             // and `Field` are common enough words that a user struct sharing the name
-//RS             // is likely (`Examples/features/memory/zerocopy.jet` already declares its
-//RS             // own `Field`) — same guard as the layout/core-rust-type-name arms below:
-//RS             // a user type of that name always wins.
-//RS             Type::Named(name)
-//RS                 if reflect_handle_rust_type(name).is_some() && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     reflect_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — plausible
-//RS             // user type names, same collision guard as `Value`/`Field` above.
-//RS             Type::Named(name)
-//RS                 if binary_text_handle_rust_type(name).is_some()
-//RS                     && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     binary_text_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             // D-LAYOUT1 / D-LAYOUT-GATES1: `layout` runtime types are top-level
-//RS             // in their own `jet_layout` module (like the alloc/file/net handles
-//RS             // above, not nested in `jet_std`).
-//RS             Type::Named(name)
-//RS                 if layout_handle_rust_type(name).is_some() && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     layout_handle_rust_type(name).unwrap()
-//RS                 )
-//RS             }
-//RS             // D-TYPE2-IMAG1=A: Complex lives in the shared MathLibPure root,
-//RS             // not in the JetStd namespace used by the older precise numerics.
-//RS             Type::Named(name)
-//RS                 if name == Syntax::TYPE_COMPLEX && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}JetComplex", self.root_prefix)
-//RS             }
-//RS             Type::Named(name)
-//RS                 if root_prelude_rust_type_name(name).is_some()
-//RS                     && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}{}",
-//RS                     self.root_prefix,
-//RS                     root_prelude_rust_type_name(name).unwrap()
-//RS                 )
-//RS             }
-//RS             // A user struct/enum sharing a built-in Core type name (e.g. a user
-//RS             // `Vec3`) wins — it keeps its own `__jet_<Name>` lowering. Only fall to the
-//RS             // built-in jet_std struct when the name is NOT a user type.
-//RS             Type::Named(name)
-//RS                 if core_rust_type_name(name).is_some() && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::{}",
-//RS                     self.root_prefix,
-//RS                     core_rust_type_name(name).unwrap()
-//RS                 )
-//RS             }
-//RS             Type::Named(name) if self.core_qualified_rust_type_name(name).is_some() => {
-//RS                 let resolved = self.core_qualified_rust_type_name(name).unwrap();
-//RS                 if let Some(rust) = job_queue_rust_type(resolved) {
-//RS                     return format!("{}{rust}", self.root_prefix);
-//RS                 }
-//RS                 if resolved == "AllocError" {
-//RS                     return format!("{}AllocError", self.root_prefix);
-//RS                 }
-//RS                 if resolved == "Claims"
-//RS                     || resolved == "AuthError"
-//RS                     || resolved == "Session"
-//RS                     || resolved == "Auth"
-//RS                     || resolved == "SyncText"
-//RS                     || resolved == "SyncCounter"
-//RS                     || resolved == "SyncMap"
-//RS                     || resolved == "Counter"
-//RS                     || resolved == "OrderedMap"
-//RS                     || resolved == "Layer"
-//RS                     || resolved == "Chain"
-//RS                     || resolved == "StringSet"
-//RS                     || resolved == "RowPolicy"
-//RS                 {
-//RS                     let rust = match resolved {
-//RS                         "Claims" => "JetAuthClaims",
-//RS                         "AuthError" => "JetAuthError",
-//RS                         "Session" => "JetAuthSession",
-//RS                         "Auth" => "JetAuthApp",
-//RS                         "SyncText" => "JetSyncText",
-//RS                         "SyncCounter" => "JetSyncCounter",
-//RS                         "SyncMap" => "JetSyncMap",
-//RS                         "SyncList" => "JetSyncList",
-//RS                         "Counter" => "JetCounter",
-//RS                         "OrderedMap" => "JetOrderedMap",
-//RS                         "Layer" => "JetLayer",
-//RS                         "StringSet" => "JetStringSet",
-//RS                         "Chain" => "JetChain",
-//RS                         "RowPolicy" => "JetRowPolicy",
-//RS                         _ => resolved,
-//RS                     };
-//RS                     return format!("{}{rust}", self.root_prefix);
-//RS                 }
-//RS                 if let Some(rust) = core_crypto_rust_type_name(resolved) {
-//RS                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-//RS                     return format!("{ffi}::{rust}");
-//RS                 }
-//RS                 if matches!(
-//RS                     resolved,
-//RS                     "Address"
-//RS                         | "Message"
-//RS                         | "Attachment"
-//RS                         | "Envelope"
-//RS                         | "SMTPSecurity"
-//RS                         | "RecipientPolicy"
-//RS                         | "RecipientReport"
-//RS                         | "SendReport"
-//RS                         | "EmailError"
-//RS                         | "Limits"
-//RS                 ) {
-//RS                     let rust = if resolved == "EmailError" {
-//RS                         "Error"
-//RS                     } else {
-//RS                         resolved
-//RS                     };
-//RS                     return format!("{}jet_email::{rust}", self.root_prefix);
-//RS                 }
-//RS                 if matches!(resolved, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") {
-//RS                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-//RS                     return format!(
-//RS                         "{}jet_email::{}<{}::Secret>",
-//RS                         self.root_prefix, resolved, ffi
-//RS                     );
-//RS                 }
-//RS                 if resolved == "TLSTrust" || resolved == "Mailer" {
-//RS                     return format!("{}jet_email::{}", self.root_prefix, resolved);
-//RS                 }
-//RS                 format!("{}jet_std::{}", self.root_prefix, resolved)
-//RS             }
-//RS             Type::Named(name) if self.trait_names.contains(name) => {
-//RS                 format!("Box<dyn {}>", crate::Codegen::rust_trait_name(name))
-//RS             }
-//RS             Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
-//RS                 let rust_mod = &self.foreign_types[name.as_str()];
-//RS                 let leaf = nominal_leaf(name);
-//RS                 format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
-//RS             }
-//RS             Type::Named(name) if name.contains('.') => {
-//RS                 let (alias, leaf) = name.split_once('.').unwrap();
-//RS                 match self.import_mods.get(alias) {
-//RS                     Some(rust_mod) => {
-//RS                         format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
-//RS                     }
-//RS                     None => mangle_path(name),
-//RS                 }
-//RS             }
-//RS             Type::Named(n) if n == "Expired" => "JetExpired".to_string(),
-//RS             Type::Named(name) => mangle_path(name),
-//RS             // D-CONC-FAIL1=A: every source `Task<T>` uses one AOT handle
-//RS             // representation. A spawned body's private `Result` is the
-//RS             // scheduler value, and its error is projected to `TaskFailure` by
-//RS             // the join adapter; only an already-carried TIR task keeps its
-//RS             // existing inner error type.
-//RS             // D-PLACE1=A: `Atomic<T>` is the root Prelude's one-word carrier,
-//RS             // not a JetStd member. The exact-Int marker keeps source `Int`
-//RS             // distinct from fixed-width `I64` despite their shared i64 ABI.
-//RS             Type::Apply { name, args } if name == "Atomic" && args.len() == 1 => {
-//RS                 let inner = if matches!(args[0].without_user_tags(), Type::Int) {
-//RS                     "JetAtomicInt".to_string()
-//RS                 } else {
-//RS                     self.rust_type(&args[0])
-//RS                 };
-//RS                 format!("{}JetAtomic<{inner}>", self.root_prefix)
-//RS             }
-//RS             Type::Apply { name, args } if name == "Task" && !args.is_empty() => {
-//RS                 let item = self.rust_type(&args[0]);
-//RS                 let carrier = if matches!(args[0].without_user_tags(), Type::Result { .. }) {
-//RS                     item
-//RS                 } else {
-//RS                     format!("Result<{item}, {}JetErr>", self.root_prefix)
-//RS                 };
-//RS                 format!("{}jet_std::JetTask<{carrier}>", self.root_prefix)
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if matches!(
-//RS                     name.as_str(),
-//RS                     "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
-//RS                 ) && args.len() == 1 =>
-//RS             {
-//RS                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-//RS                 let rust = match name.as_str() {
-//RS                     "KeyRef" => "JetVaultKeyRef",
-//RS                     "MutationPlan" => "JetVaultMutationPlan",
-//RS                     "VaultWrite" => "JetVaultWrite",
-//RS                     "Rotation" => "JetVaultRotation",
-//RS                     _ => "JetVaultWrappedImportPlan",
-//RS                 };
-//RS                 format!("{ffi}::{rust}<{}>", self.rust_type(&args[0]))
-//RS             }
-//RS             // Generic Prelude handles share their canonical Rust names with MIR.
-//RS             Type::Apply { name, args }
-//RS                 if !args.is_empty()
-//RS                     && matches!(
-//RS                         core_rust_type_name(name),
-//RS                         Some("JetReceiver") | Some("JetSender") | Some("JetPool") | Some("JetId")
-//RS                     ) =>
-//RS             {
-//RS                 let rust = core_rust_type_name(name).unwrap();
-//RS                 format!(
-//RS                     "{}jet_std::{rust}<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             // D-LOCALCELL1=A: local interior-mutability handles and their
-//RS             // dynamically checked projected guards.
-//RS             Type::Apply { name, args } if name == "Cell" && !args.is_empty() => {
-//RS                 format!(
-//RS                     "{}jet_std::JetCell<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == "CellReadGuard" && !args.is_empty() => {
-//RS                 format!(
-//RS                     "{}jet_std::JetCellReadGuard<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == "CellEditGuard" && !args.is_empty() => {
-//RS                 format!(
-//RS                     "{}jet_std::JetCellEditGuard<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             // D-CONC-STREAM1=A: a generator's `Stream<T>` is the Prelude's
-//RS             // rendezvous receiver. Its owned iterator closes the receiver when
-//RS             // D-FOUND-COREAPI1 / #2853: event-time stream adapters retain the
-//RS             // shared kernel's event, keyed-view, and window carriers.
-//RS             Type::Apply { name, args } if name == "StreamEventTime" && args.len() == 1 => {
-//RS                 format!(
-//RS                     "{}jet_std::JetStream<{}jet_std::JetStreamEvent<{}>>",
-//RS                     self.root_prefix,
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == "KeyedStream" && args.len() == 2 => {
-//RS                 format!(
-//RS                     "{}jet_std::JetKeyedStream<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == "Window" && args.len() == 2 => {
-//RS                 format!(
-//RS                     "{}jet_std::JetStreamWindow<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             // a consumer breaks or drops it, so a blocked producer observes the
-//RS             // same cancellation rule on every emitted program.
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_STREAM && !args.is_empty() => {
-//RS                 format!(
-//RS                     "{}jet_std::JetStream<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             // D-REACT1=B: reactive handle types lower to the std-only jet_std runtime.
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_SIGNAL && !args.is_empty() => {
-//RS                 format!(
-//RS                     "{}jet_std::JetSignal<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if (name == Syntax::TYPE_DERIVED || name == Syntax::TYPE_COMPUTED)
-//RS                     && !args.is_empty() =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::JetDerived<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_EVENT && !args.is_empty() => {
-//RS                 format!(
-//RS                     "{}jet_std::JetEvent<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_ASYNC_EVENT && args.len() == 2 => {
-//RS                 format!(
-//RS                     "{}jet_std::JetAsyncEvent<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == Syntax::TYPE_DISPATCH_REPORT && !args.is_empty() =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::JetDispatchReport<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == Syntax::TYPE_DISPATCH_FAILURE && !args.is_empty() =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::JetDispatchFailure<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_HOOK && args.len() == 2 => {
-//RS                 format!(
-//RS                     "{}jet_std::JetHook<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_DECISION_HOOK && args.len() == 2 => {
-//RS                 format!(
-//RS                     "{}jet_std::JetDecisionHook<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_HOOK_DECISION && args.len() == 2 => {
-//RS                 format!(
-//RS                     "{}jet_std::JetHookDecision<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_HOOK_OUTCOME && args.len() == 2 => {
-//RS                 format!(
-//RS                     "{}jet_std::JetHookOutcome<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             // D-QUERY-RETAIN1=A: Query<T> defers a typed computation, while
-//RS             // Group<K, V> retains both nominal key and reducer value types.
-//RS             Type::Apply { name, args }
-//RS                 if name == "Query" && args.len() == 1 && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::DataQuery<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == "Group" && args.len() == 2 && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::GroupValue<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == "DataGroupedQuery"
-//RS                     && args.len() == 2
-//RS                     && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::DataGroupedQuery<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == "DataLoader" && args.len() == 1 && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::DataLoader<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == Syntax::TYPE_SHARED_SNAPSHOT
-//RS                     && args.len() == 2
-//RS                     && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::JetSharedSnapshot<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == "DataSnapshot" && args.len() == 1 && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::DataSnapshot<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == "JetDataPlotColumn"
-//RS                     && args.len() == 1
-//RS                     && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetDataPlotColumn<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == "JetDataPlot" && args.len() == 1 && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}JetDataPlot<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             // D-DATAFLOW1=A: pull stream is one opaque Rust handle; Jet keeps T.
-//RS             Type::Apply { name, args }
-//RS                 if name == "DataStream" && !args.is_empty() && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!("{}jet_std::DataStream", self.root_prefix)
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == "DataJoin" && args.len() == 2 && !self.type_names.contains(name) =>
-//RS             {
-//RS                 format!(
-//RS                     "{}jet_std::DataJoin<{}, {}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             // D-HONESTNUM1=A: Measurement<T> → jet_std::JetMeasurement<T>.
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_MEASUREMENT && !args.is_empty() => {
-//RS                 format!(
-//RS                     "{}jet_std::JetMeasurement<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 => {
-//RS                 format!(
-//RS                     "{}jet_std::JetSharedGuard<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_SHARED_WEAK && args.len() == 1 => {
-//RS                 format!(
-//RS                     "{}jet_std::JetSharedWeak<{}>",
-//RS                     self.root_prefix,
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             // D-PENDING1=B: Loadable<T,E> → JetLoadable<T,E>.
-//RS             Type::Apply { name, args } if name == "Loadable" && args.len() == 2 => {
-//RS                 format!(
-//RS                     "JetLoadable<{}, {}>",
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             // D-DYNARRAY1: View<T> -> a genuine borrowed Rust slice `&[T]`. Zero-
-//RS             // copy (a slice is a plain (ptr, len) pair, no allocation) and
-//RS             // ordinary safe Rust — the lifetime is elided, valid as long as the
-//RS             // borrow stays local, exactly the shape sema's E2305 owner-outlives
-//RS             // check proves before this type is ever emitted (I2/I3: sema
-//RS             // decides, codegen just emits the reference).
-//RS             Type::Apply { name, args } if name == "View" && args.len() == 1 => {
-//RS                 if matches!(&args[0], Type::Named(inner) if inner == "str") {
-//RS                     "&str".to_string()
-//RS                 } else if let Type::List(inner) = &args[0] {
-//RS                     format!("&[{}]", self.rust_type(inner))
-//RS                 } else {
-//RS                     format!("&[{}]", self.rust_type(&args[0]))
-//RS                 }
-//RS             }
-//RS             Type::Apply { name, args } if name == "ComputeViewMut" && args.len() == 1 => {
-//RS                 format!("{}JetComputeViewMut<'_>", self.root_prefix)
-//RS             }
-//RS             Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
-//RS                 format!("&mut [{}]", self.rust_type(&args[0]))
-//RS             }
-//RS             // D-PIN1=A: `Pin<T>` is the address-stability contract, which sema
-//RS             // proves before this type is ever emitted (I3). The value itself is
-//RS             // an ordinary exclusive Rust reference to the pinned place — that is
-//RS             // exactly what "the storage does not move while the pin is live"
-//RS             // means once the proof is done, so no runtime wrapper is emitted.
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_PIN && args.len() == 1 => {
-//RS                 format!("&mut {}", self.rust_type(&args[0]))
-//RS             }
-//RS             // D-ITERTOOLS1=A: Iter<T> → JetIter<T> (must-use move-only lazy view).
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
-//RS                 format!(
-//RS                     "{}{}<{}>",
-//RS                     self.root_prefix,
-//RS                     root_prelude_rust_type_name(name).expect("registered iterator carrier"),
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             // D-FOUND-VIEW1=A: `ViewIter<T>` retains the source owner while
-//RS             // yielding borrowed windows; its carrier is not an eager `Iter`.
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_VIEW_ITER && args.len() == 1 => {
-//RS                 format!("JetViewIter<{}>", self.rust_type(&args[0]))
-//RS             }
-//RS             // D-CORE-SECRETS1=A: generic TTL stays distinct from secret lifecycle.
-//RS             Type::Apply { name, args }
-//RS                 if name == Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 =>
-//RS             {
-//RS                 format!("JetExpiring<{}>", self.rust_type(&args[0]))
-//RS             }
-//RS             // D-TTLVAL1=A: the one secret-lifetime wrapper.
-//RS             Type::Apply { name, args } if name == "ExpiringSecret" && args.len() == 1 => {
-//RS                 format!("JetExpiringSecret<{}>", self.rust_type(&args[0]))
-//RS             }
-//RS             // D-COLLBREADTH1=A: Set<T> → HashSet<T>, Queue<T> → VecDeque<T>.
-//RS             Type::Apply { name, args } if name == "Set" && !args.is_empty() => {
-//RS                 format!("std::collections::HashSet<{}>", self.rust_type(&args[0]))
-//RS             }
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_RANK && !args.is_empty() => {
-//RS                 format!("std::collections::BTreeSet<{}>", self.rust_type(&args[0]))
-//RS             }
-//RS             Type::Apply { name, args }
-//RS                 if name == Syntax::TYPE_PRIORITY_QUEUE && !args.is_empty() =>
-//RS             {
-//RS                 format!("std::collections::BinaryHeap<{}>", self.rust_type(&args[0]))
-//RS             }
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_LRU && args.len() >= 2 => {
-//RS                 format!(
-//RS                     "JetCache<{}, {}>",
-//RS                     self.rust_type(&args[0]),
-//RS                     self.rust_type(&args[1])
-//RS                 )
-//RS             }
-//RS             // D-TAG1: Tally<T> → HashMap<T, usize>.
-//RS             Type::Apply { name, args } if name == crate::Syntax::TYPE_TALLY && !args.is_empty() => {
-//RS                 format!(
-//RS                     "std::collections::HashMap<{}, usize>",
-//RS                     self.rust_type(&args[0])
-//RS                 )
-//RS             }
-//RS             Type::Apply { name, args } if name == crate::Syntax::TYPE_QUEUE && !args.is_empty() => {
-//RS                 format!("std::collections::VecDeque<{}>", self.rust_type(&args[0]))
-//RS             }
-//RS             // S58 (E2-M13): `Ptr<T>` lowers to a Rust raw pointer `*mut T`.
-//RS             // Memory safety is enforced in sema (the `#Unsafe` gate); codegen
-//RS             // is dumb.
-//RS             Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
-//RS                 format!("*mut {}", self.rust_type(&args[0]))
-//RS             }
-//RS             Type::Apply { name, args } => {
-//RS                 let head = if let Some((alias, leaf)) = name.split_once('.') {
-//RS                     self.import_mods.get(alias).map_or_else(
-//RS                         || mangle_path(name),
-//RS                         |rust_mod| {
-//RS                             format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
-//RS                         },
-//RS                     )
-//RS                 } else {
-//RS                     mangle_path(name)
-//RS                 };
-//RS                 if args.is_empty() {
-//RS                     head
-//RS                 } else {
-//RS                     format!(
-//RS                         "{}<{args}>",
-//RS                         head,
-//RS                         args = args
-//RS                             .iter()
-//RS                             .map(|a| self.rust_type(a))
-//RS                             .collect::<Vec<_>>()
-//RS                             .join(", ")
-//RS                     )
-//RS                 }
-//RS             }
-//RS             // Codegen only ever constructs/sees a singleton `TraitObject` (the
-//RS             // D-ANY-JAI1 multi-trait bound loop element never reaches codegen —
-//RS             // see the type's doc comment); join defensively rather than assume.
-//RS             Type::TraitObject(t) => format!(
-//RS                 "Box<dyn {}>",
-//RS                 t.iter()
-//RS                     .map(|n| crate::Codegen::rust_trait_name(n))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(" + ")
-//RS             ),
-//RS             Type::Fn {
-//RS                 params,
-//RS                 ret,
-//RS                 return_view_provenance,
-//RS                 ..
-//RS             } => self.rust_fn_trait(params, ret.as_deref(), return_view_provenance.as_ref()),
-//RS             Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
-//RS             // D-FIXARR1 (ratified 2026-06-22): [T#N] lowers to a real Rust stack array [T; N].
-//RS             // All size/bounds checks live in sema (I3). The Rust type is [E; N].
-//RS             Type::FixedList { elem, len, .. } => format!("[{}; {}]", self.rust_type(elem), len),
-//RS             // D-QUAL4=A: tagged types are transparent to codegen.
-//RS             Type::Tagged { marker, inner }
-//RS                 if matches!(
-//RS                     marker,
-//RS                     crate::AST::TagMarker::Internal(crate::AST::InternalTag::AllocatorView)
-//RS                 ) =>
-//RS             {
-//RS                 format!("&mut {}", self.rust_type(inner))
-//RS             }
-//RS             Type::Tagged { inner, .. } => self.rust_type(inner),
-//RS             // D-UNIONTYPE1=A: closed structural sum → one compiler-generated enum.
-//RS             Type::Union(members) => {
-//RS                 jet_foundation::Names::mangle(&crate::AST::union_enum_name(members))
-//RS             }
-//RS             // Erased by the `quantity_parts()` guard above `rust_type` returns
-//RS             // through; a runtime quantity value IS its base numeric type.
-//RS             Type::Quantity { .. } => unreachable!("quantity_parts() erased above"),
-//RS             // A compile-time measure only ever appears as a `Vec`/`Matrix`
-//RS             // shape arg, intercepted by name above before reaching the
-//RS             // generic `Type::Apply` args recursion that would call here.
-//RS             Type::Measure(_) => {
-//RS                 unreachable!("type measure handled by the Vec/Matrix Apply arm above")
-//RS             }
-//RS         }
-//RS     }
-//RS 
-// END-PORT-PENDING 0455 crates/jet-codegen/src/Codegen/Context.rs:1796-3740
+use jet_foundation.AST.[Type, VariantPayload, TagMarker, InternalTag, canonicalize_union, union_enum_name]
+use jet_foundation.PreludeDataFlow.column_identity
+use jet_foundation.Names
+use jet_codegen.Codegen.Context.[Cx, nominal_leaf, core_crypto_rust_type_name, core_ui_rust_type_name, file_handle_rust_type, raylib_handle_rust_type, game_handle_rust_type, net_handle_rust_type, compute_handle_rust_type, service_handle_rust_type, alloc_handle_rust_type, args_handle_rust_type, reflect_handle_rust_type, binary_text_handle_rust_type, layout_handle_rust_type, root_prelude_rust_type_name, core_rust_type_name, job_queue_rust_type]
+use jet_codegen.Codegen.[mangle_path, tuple_fields_plain, tuple_struct_name, rust_trait_name, generated_prefix]
+use jet_codegen.Codegen.TIR.tir_to_mir_types.canonicalize_checked_trait_types
+use jet_codegen.Generics
+use jet_foundation.Syntax
 
+// Private fragment of Codegen.Context; all methods extend the canonical Cx.
+impl Cx {
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1796
+    pub fn type_contains_boxed_edge(self, ty: Type) -> Bool Never! {
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:1797
+        fn contains(cx: Cx, ty: Type, seen: &Set<String>) -> Bool Never! {
+            if ty == {
+                .Named(name) -> {
+                    loop (owner, _) in cx.boxed_edges { if owner == name -> return true }
+                    if !seen.insert(name) -> return false
+                    if cx.struct_fields.get(name) == .Val(fields) {
+                        loop (_, field_ty) in fields { if contains(cx, field_ty, &seen) -> return true }
+                    }
+                    // Reachability keeps visited nodes marked; unmarking is exponential.
+                    false
+                }
+                .Apply(name, args) -> {
+                    loop arg in args { if contains(cx, arg, &seen) -> return true }
+                    contains(cx, .Named(name), &seen)
+                }
+                .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> contains(cx, inner, &seen)
+                .Map(key, _, value) | .Result(key, value) -> contains(cx, key, &seen) || contains(cx, value, &seen)
+                .Tuple(fields) -> {
+                    loop (_, field_ty) in fields { if contains(cx, field_ty, &seen) -> return true }
+                    false
+                }
+                .FixedList(elem, _) -> contains(cx, elem, &seen)
+                .Fn(params, ret, _, _, _, _) -> {
+                    loop param in params { if contains(cx, param, &seen) -> return true }
+                    if ret == .Val(value) -> return contains(cx, value, &seen)
+                    false
+                }
+                .Union(members) -> {
+                    loop member in members { if contains(cx, member, &seen) -> return true }
+                    false
+                }
+                .Quantity(base, _) -> contains(cx, base, &seen)
+                else -> false
+            }
+        }
+        seen := Set<String>.new()
+        contains(self, ty, &seen)
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1849
+    // Untyped CtValue serialization emits Vec/i64; retain typed lowering for these edges.
+    pub fn type_contains_typed_literal_edge(self, ty: Type) -> Bool Never! {
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:1850
+        fn payload_contains(cx: Cx, payload: VariantPayload, seen: &Set<String>) -> Bool Never! {
+            if payload == {
+                .Unit -> false
+                .Single(ty, _) -> contains(cx, ty, &seen)
+                .Named(fields) -> {
+                    loop field in fields { if contains(cx, field.ty, &seen) -> return true }
+                    false
+                }
+            }
+        }
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:1860
+        fn contains(cx: Cx, ty: Type, seen: &Set<String>) -> Bool Never! {
+            if ty == {
+                .IntN(_, _) | .InlineRange(_, _, _) | .FixedList(_, _) -> true
+                .Named(name) -> {
+                    if !seen.insert(name) -> return false
+                    if cx.struct_fields.get(name) == .Val(fields) {
+                        loop (_, field_ty) in fields { if contains(cx, field_ty, &seen) -> return true }
+                    }
+                    if cx.enum_variants.get(name) == .Val(variants) {
+                        loop (_, payload) in variants { if payload_contains(cx, payload, &seen) -> return true }
+                    }
+                    false
+                }
+                .Apply(name, args) -> {
+                    loop arg in args { if contains(cx, arg, &seen) -> return true }
+                    contains(cx, .Named(name), &seen)
+                }
+                .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) -> contains(cx, inner, &seen)
+                .Map(key, _, value) | .Result(key, value) -> contains(cx, key, &seen) || contains(cx, value, &seen)
+                .Tuple(fields) -> {
+                    loop (_, field_ty) in fields { if contains(cx, field_ty, &seen) -> return true }
+                    false
+                }
+                .Fn(params, ret, _, _, _, _) -> {
+                    loop param in params { if contains(cx, param, &seen) -> return true }
+                    if ret == .Val(value) -> return contains(cx, value, &seen)
+                    false
+                }
+                .Union(members) -> {
+                    loop member in members { if contains(cx, member, &seen) -> return true }
+                    false
+                }
+                .Quantity(base, _) -> contains(cx, base, &seen)
+                else -> false
+            }
+        }
+        seen := Set<String>.new()
+        contains(self, ty, &seen)
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1908
+    pub fn type_contains_mutable_view(self, ty: Type) -> Bool Never! { self.type_contains_view_matching(ty, true) }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:1912
+    fn type_contains_view_matching(self, ty: Type, mutable_only: Bool) -> Bool Never! {
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:1913
+        fn payload_contains(cx: Cx, payload: VariantPayload, seen: &Set<String>, mutable_only: Bool) -> Bool Never! {
+            if payload == {
+                .Unit -> false
+                .Single(ty, _) -> contains(cx, ty, &seen, mutable_only)
+                .Named(fields) -> {
+                    loop field in fields { if contains(cx, field.ty, &seen, mutable_only) -> return true }
+                    false
+                }
+            }
+        }
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:1928
+        fn named_contains(cx: Cx, name: String, seen: &Set<String>, mutable_only: Bool) -> Bool Never! {
+            if !seen.insert(name) -> return false
+            if cx.struct_fields.get(name) == .Val(fields) {
+                loop (_, ty) in fields { if contains(cx, ty, &seen, mutable_only) -> return true }
+            }
+            if cx.enum_variants.get(name) == .Val(variants) {
+                loop (_, payload) in variants { if payload_contains(cx, payload, &seen, mutable_only) -> return true }
+            }
+            false
+        }
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:1950
+        fn contains(cx: Cx, ty: Type, seen: &Set<String>, mutable_only: Bool) -> Bool Never! {
+            if ty == {
+                .Apply(name, args) -> {
+                    // Pin is always a write window, with the same hidden lifetime as ViewMut.
+                    if args.len() == 1 && (name == "View" || name == "ViewMut" || name == "ComputeViewMut" || name == Syntax.TYPE_PIN) -> return !mutable_only || name == "ViewMut" || name == "ComputeViewMut" || name == Syntax.TYPE_PIN
+                    loop arg in args { if contains(cx, arg, &seen, mutable_only) -> return true }
+                    named_contains(cx, name, &seen, mutable_only)
+                }
+                .Named(name) -> named_contains(cx, name, &seen, mutable_only)
+                .Tagged(.Internal(.AllocatorView), _) -> true
+                .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) -> contains(cx, inner, &seen, mutable_only)
+                .Map(key, _, value) | .Result(key, value) -> contains(cx, key, &seen, mutable_only) || contains(cx, value, &seen, mutable_only)
+                .Tuple(fields) -> {
+                    loop (_, ty) in fields { if contains(cx, ty, &seen, mutable_only) -> return true }
+                    false
+                }
+                .FixedList(elem, _) -> contains(cx, elem, &seen, mutable_only)
+                .Fn(params, ret, _, _, _, _) -> {
+                    loop ty in params { if contains(cx, ty, &seen, mutable_only) -> return true }
+                    if ret == .Val(value) -> return contains(cx, value, &seen, mutable_only)
+                    false
+                }
+                else -> false
+            }
+        }
+        seen := Set<String>.new()
+        expanded :: self.expand_type_aliases(ty)
+        contains(self, expanded, &seen, mutable_only)
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2011
+    pub fn type_contains_shared_guard(self, ty: Type) -> Bool Never! {
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:2012
+        fn payload_contains(cx: Cx, payload: VariantPayload, seen: &Set<String>) -> Bool Never! {
+            if payload == {
+                .Unit -> false
+                .Single(ty, _) -> contains(cx, ty, &seen)
+                .Named(fields) -> {
+                    loop field in fields { if contains(cx, field.ty, &seen) -> return true }
+                    false
+                }
+            }
+        }
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:2022
+        fn named_contains(cx: Cx, name: String, seen: &Set<String>) -> Bool Never! {
+            if !seen.insert(name) -> return false
+            if cx.struct_fields.get(name) == .Val(fields) {
+                loop (_, ty) in fields { if contains(cx, ty, &seen) -> return true }
+            }
+            if cx.enum_variants.get(name) == .Val(variants) {
+                loop (_, payload) in variants { if payload_contains(cx, payload, &seen) -> return true }
+            }
+            false
+        }
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:2036
+        fn contains(cx: Cx, ty: Type, seen: &Set<String>) -> Bool Never! {
+            if ty == {
+                .Apply(name, args) -> {
+                    if name == Syntax.TYPE_SHARED_GUARD -> return true
+                    loop arg in args { if contains(cx, arg, &seen) -> return true }
+                    named_contains(cx, name, &seen)
+                }
+                .Named(name) -> named_contains(cx, name, &seen)
+                .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) -> contains(cx, inner, &seen)
+                .Map(key, _, value) | .Result(key, value) -> contains(cx, key, &seen) || contains(cx, value, &seen)
+                .Tuple(fields) -> {
+                    loop (_, ty) in fields { if contains(cx, ty, &seen) -> return true }
+                    false
+                }
+                .Union(members) -> {
+                    loop ty in members { if contains(cx, ty, &seen) -> return true }
+                    false
+                }
+                .FixedList(elem, _) -> contains(cx, elem, &seen)
+                .Fn(params, ret, _, _, _, _) -> {
+                    loop ty in params { if contains(cx, ty, &seen) -> return true }
+                    if ret == .Val(value) -> return contains(cx, value, &seen)
+                    false
+                }
+                else -> false
+            }
+        }
+        seen := Set<String>.new()
+        expanded :: self.expand_type_aliases(ty)
+        contains(self, expanded, &seen)
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2074
+    // Crypto values cannot derive Clone/Debug. Compute reverse reachability once for all owners.
+    pub fn secret_containing_types(self) -> Set<String> Never! {
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:2075
+        fn walk(ty: Type, names: &[String], direct: &Bool) Never! {
+            if ty == {
+                .Tagged(.Internal(.CoreCryptoNominal), _) -> direct = true
+                .Named(name) -> names.push(name)
+                .Apply(name, args) -> {
+                    names.push(name)
+                    loop arg in args { walk(arg, &names, &direct) }
+                }
+                .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) -> walk(inner, &names, &direct)
+                .Map(key, _, value) | .Result(key, value) -> { walk(key, &names, &direct); walk(value, &names, &direct) }
+                .Tuple(fields) -> { loop (_, ty) in fields { walk(ty, &names, &direct) } }
+                .Union(members) -> { loop ty in members { walk(ty, &names, &direct) } }
+                .FixedList(elem, _) | .InlineRange(elem, _, _) | .Quantity(elem, _) -> walk(elem, &names, &direct)
+                .Fn(params, ret, _, _, _, _) -> {
+                    loop ty in params { walk(ty, &names, &direct) }
+                    if ret == .Val(ty) { walk(ty, &names, &direct) }
+                }
+                else -> {}
+            }
+        }
+        owners := Set<String>.new()
+        loop owner in self.struct_fields.keys() { _ :: owners.insert(owner) }
+        loop owner in self.enum_variants.keys() { _ :: owners.insert(owner) }
+        dependents := [String:[String]]{}
+        secret := Set<String>.new()
+        pending := [String]{}
+        loop owner in owners {
+            names := [String]{}
+            direct := false
+            if self.struct_fields.get(owner) == .Val(fields) { loop (_, ty) in fields { walk(ty, &names, &direct) } }
+            if self.enum_variants.get(owner) == .Val(variants) {
+                loop (_, payload) in variants {
+                    if payload == {
+                        .Unit -> {}
+                        .Single(ty, _) -> walk(ty, &names, &direct)
+                        .Named(fields) -> { loop field in fields { walk(field.ty, &names, &direct) } }
+                    }
+                }
+            }
+            loop name in names { dependents.entry(name).or_default().push(owner) }
+            if direct && secret.insert(owner) { pending.push(owner) }
+        }
+        loop {
+            name := pending.pop() ?? break
+            if dependents.get(name) == .Val(owners) {
+                loop owner in owners { if secret.insert(owner) { pending.push(owner) } }
+            }
+        }
+        ^secret
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2172
+    pub fn rust_type_with_view_lifetime(self, ty: Type) -> String Never! {
+        self.rust_type_with_view_lifetime_using(ty, (value) => self.rust_type(value))
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2176
+    fn rust_type_with_view_lifetime_using(self, ty: Type, base: (Type) -> String) -> String Never! {
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:2181
+        fn add_reference_lifetime(rust: String) -> String Never! {
+            jet_prefix :: generated_prefix()
+            if rust.strip_prefix("&mut ") == .Val(rest) -> return "&'{jet_prefix}view mut {rest}"
+            if rust.strip_prefix("&") == .Val(rest) -> return "&'{jet_prefix}view {rest}"
+            if rust.strip_suffix("JetComputeViewMut<'_>") == .Val(prefix) -> return "{prefix}JetComputeViewMut<'{jet_prefix}view>"
+            rust
+        }
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:2193
+        fn add_type_lifetime(rust: String) -> String Never! {
+            jet_prefix :: generated_prefix()
+            if rust.find("<") == .Val(open) -> return "{rust.slice(0, open)}<'{jet_prefix}view, {rust.slice(open + 1, rust.len())}"
+            "{rust}<'{jet_prefix}view>"
+        }
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:2201
+        fn definition_contains_view(cx: Cx, name: String) -> Bool Never! {
+            if cx.struct_fields.get(name) == .Val(fields) {
+                loop (_, ty) in fields { if cx.type_contains_view(ty) -> return true }
+            }
+            if cx.enum_variants.get(name) == .Val(variants) {
+                loop (_, payload) in variants {
+                    if payload == {
+                        .Unit -> {}
+                        .Single(ty, _) -> { if cx.type_contains_view(ty) -> return true }
+                        .Named(fields) -> { loop field in fields { if cx.type_contains_view(field.ty) -> return true } }
+                    }
+                }
+            }
+            false
+        }
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:2216
+        fn render(cx: Cx, ty: Type, base: (Type) -> String) -> String Never! {
+            if ty == {
+                .Apply(name, args) -> {
+                    if args.len() == 1 && (name == "View" || name == "ViewMut" || name == "ComputeViewMut" || name == Syntax.TYPE_PIN) -> return add_reference_lifetime(base(ty))
+                    contains_view :: definition_contains_view(cx, name)
+                    if contains_view || args.iter().any((arg) => cx.type_contains_view(arg)) {
+                        head :: base(.Named(name))
+                        rendered :: args.iter().map((arg) => render(cx, arg, base)).collect<[String]>().join(", ")
+                        lifetime := [String]{}
+                        if contains_view { lifetime.push("'{generated_prefix()}view") }
+                        if !rendered.is_empty() { lifetime.push(rendered) }
+                        return "{head}<{lifetime.join(", ")}>"
+                    }
+                    base(ty)
+                }
+                .Tagged(.Internal(.AllocatorView), _) -> add_reference_lifetime(base(ty))
+                .List(inner) -> if cx.type_contains_view(inner) -> "Vec<{render(cx, inner, base)}>" else -> base(ty)
+                .Map(key, _, value) -> if cx.type_contains_view(ty) -> "{cx.root_prefix}JetMap<{render(cx, key, base)}, {render(cx, value, base)}>" else -> base(ty)
+                .Shared(inner) -> if cx.type_contains_view(inner) -> "{cx.root_prefix}jet_std::JetShared<{render(cx, inner, base)}>" else -> base(ty)
+                .Option(inner) -> if cx.type_contains_view(inner) -> "{cx.root_prefix}JetOutcome<{render(cx, inner, base)}, {cx.root_prefix}JetAbsent>" else -> base(ty)
+                .Result(ok, err) -> if cx.type_contains_view(ty) -> "{cx.root_prefix}JetOutcome<{render(cx, ok, base)}, {render(cx, err, base)}>" else -> base(ty)
+                .Tuple(fields) -> if cx.type_contains_view(ty) -> add_type_lifetime(tuple_struct_name(tuple_fields_plain(fields))) else -> base(ty)
+                .FixedList(elem, len) -> if cx.type_contains_view(elem) -> "[{render(cx, elem, base)}; {len}]" else -> base(ty)
+                .Tagged(_, inner) -> if cx.type_contains_view(inner) -> render(cx, inner, base) else -> base(ty)
+                .Named(name) -> if definition_contains_view(cx, name) -> add_type_lifetime(base(ty)) else -> base(ty)
+                else -> base(ty)
+            }
+        }
+        expanded :: self.expand_type_aliases(ty)
+        render(self, expanded, base)
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2304
+    pub fn is_columnar_struct(self, name: String) -> Bool Never! { self.columnar.contains(name) }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2315
+    // The shared Prelude store owns layout/rows/gather; only local columnar structs are tracked.
+    pub fn columnar_list_type(self, inner: Type) -> String? Never! {
+        if inner == .Named(name) { if self.is_columnar_struct(name) -> return Val("JetColumnList<{self.rust_type(inner)}>") }
+        None
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2328
+    // Stored-field declaration order is the column order; computed fields are excluded upstream.
+    pub fn columnar_column_index(self, name: String, field: String) -> Int? Never! {
+        fields := self.struct_fields.get(name) ?? return None
+        fields.iter().position((entry) => entry.0 == field)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2336
+    pub fn data_plot_field_id(self, name: String, ty: Type) -> String Never! {
+        type_name :: ty.name()
+        column_identity(name, type_name)
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2342
+    pub fn expand_type_aliases(self, ty: Type) -> Type Never! {
+        if ty == {
+            .Apply(name, args) -> {
+                if self.type_aliases.get(name) == .Val((params, target)) {
+                    subst := [String:Type]{}
+                    loop (param, arg) in params.iter().zip(args.iter()) { subst.insert(param.name, ~arg) }
+                    return self.expand_type_aliases(Generics.substitute_type(target, subst))
+                }
+                .Apply(~name, args.iter().map((arg) => self.expand_type_aliases(arg)).collect<[Type]>())
+            }
+            .List(inner) -> .List(self.expand_type_aliases(inner))
+            .Map(key, key_span, value) -> .Map(self.expand_type_aliases(key), key_span, self.expand_type_aliases(value))
+            .Shared(inner) -> .Shared(self.expand_type_aliases(inner))
+            .Option(inner) -> .Option(self.expand_type_aliases(inner))
+            .Result(ok, err) -> .Result(self.expand_type_aliases(ok), self.expand_type_aliases(err))
+            .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> .Fn(params.iter().map((param) => self.expand_type_aliases(param)).collect<[Type]>(), ret.map((value) => self.expand_type_aliases(value)), ~effect_bound, ~param_contract, ~call_metadata, ~return_view_provenance)
+            .Tuple(fields) -> .Tuple(fields.iter().map((field) => (~field.0, self.expand_type_aliases(field.1))).collect())
+            .Tagged(marker, inner) -> .Tagged(~marker, self.expand_type_aliases(inner))
+            .FixedList(elem, len) -> .FixedList(self.expand_type_aliases(elem), ~len)
+            .InlineRange(base, lo, hi) -> .InlineRange(self.expand_type_aliases(base), lo, hi)
+            .Union(members) -> canonicalize_union(members.iter().map((member) => self.expand_type_aliases(member)).collect<[Type]>())
+            else -> ~ty
+        }
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2420
+    pub fn canonicalize_checked_type(self, ty: Type, binders: [String]) -> Type Never! {
+        binder_names := ~self.current_type_params.borrow()
+        loop name in binders { if !binder_names.contains(name) { _ :: binder_names.insert(name) } }
+        expanded :: self.canonicalize_core_type_aliases(self.expand_type_aliases(ty))
+        canonicalize_checked_trait_types(expanded, self.trait_names, self.type_names, binder_names)
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2439
+    fn canonicalize_core_type_aliases(self, ty: Type) -> Type Never! {
+        // Rust: crates/jet-codegen/src/Codegen/Context.rs:2440
+        fn canonical_name(cx: Cx, name: String) -> String Never! { cx.core_qualified_rust_type_name(name) ?? name }
+        if ty == {
+            .Named(name) -> .Named(canonical_name(self, name))
+            .List(inner) -> .List(self.canonicalize_core_type_aliases(inner))
+            .Map(key, key_span, value) -> .Map(self.canonicalize_core_type_aliases(key), key_span, self.canonicalize_core_type_aliases(value))
+            .Shared(inner) -> .Shared(self.canonicalize_core_type_aliases(inner))
+            .Option(inner) -> .Option(self.canonicalize_core_type_aliases(inner))
+            .Result(ok, err) -> .Result(self.canonicalize_core_type_aliases(ok), self.canonicalize_core_type_aliases(err))
+            .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> .Fn(params.iter().map((param) => self.canonicalize_core_type_aliases(param)).collect<[Type]>(), ret.map((value) => self.canonicalize_core_type_aliases(value)), ~effect_bound, ~param_contract, ~call_metadata, ~return_view_provenance)
+            .Apply(name, args) -> .Apply(canonical_name(self, name), args.iter().map((arg) => self.canonicalize_core_type_aliases(arg)).collect<[Type]>())
+            .Tuple(fields) -> .Tuple(fields.iter().map((field) => (~field.0, self.canonicalize_core_type_aliases(field.1))).collect())
+            .FixedList(elem, len) -> .FixedList(self.canonicalize_core_type_aliases(elem), ~len)
+            .InlineRange(base, lo, hi) -> .InlineRange(self.canonicalize_core_type_aliases(base), lo, hi)
+            .Tagged(marker, inner) -> .Tagged(~marker, self.canonicalize_core_type_aliases(inner))
+            .Union(members) -> canonicalize_union(members.iter().map((member) => self.canonicalize_core_type_aliases(member)).collect<[Type]>())
+            .Quantity(base, dimension) -> .Quantity(self.canonicalize_core_type_aliases(base), ~dimension)
+            else -> ~ty
+        }
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/Context.rs:2533
+    pub fn rust_type(self, ty: Type) -> String Never! {
+        expanded :: self.expand_type_aliases(ty)
+        if expanded.quantity_parts() == .Val((base, _)) -> return self.rust_type(base)
+        if expanded == {
+            .Int -> "i64"
+            .Float -> "f64"
+            .IntN(signed, bits) -> "{if signed -> "i" else -> "u"}{bits}"
+            .InlineRange(base, _, _) -> self.rust_type(base)
+            .Float32 -> "f32"
+            .Bool -> "bool"
+            .String -> "String"
+            .Char -> "char"
+            .List(inner) -> self.columnar_list_type(inner) ?? "Vec<{self.rust_type(inner)}>"
+            .Map(key, _, value) -> "{self.root_prefix}JetMap<{self.rust_type(key)}, {self.rust_type(value)}>"
+            .Shared(inner) -> "{self.root_prefix}jet_std::JetShared<{self.rust_type(inner)}>"
+            .Option(inner) -> "{self.root_prefix}JetOutcome<{self.rust_type(inner)}, {self.root_prefix}JetAbsent>"
+            .Result(ok, err) -> "{self.root_prefix}JetOutcome<{self.rust_type(ok)}, {self.rust_type(err)}>"
+            .Named(name) -> {
+                if (Generics.is_type_var_name(name) || self.current_type_params.borrow().contains(name)) && !self.type_names.contains(name) -> return name
+                if self.foreign_type_identity("", name) == .Val(identity) {
+                    rust_mod :: self.foreign_types.get(identity).expect("foreign identity must have a Rust module")
+                    leaf :: nominal_leaf(identity)
+                    return "{self.root_prefix}{rust_mod}::{mangle_path(leaf)}"
+                }
+                if name == "Unit" && !self.type_names.contains(name) -> return "()"
+                if name == Syntax.TYPE_REMOVE_BY && !self.type_names.contains(name) -> return "{self.root_prefix}JetRemoveBy"
+                if name == Syntax.TYPE_TASK_FAILURE && !self.type_names.contains(name) -> return "{self.root_prefix}JetTaskFailure"
+                if name == Syntax.TYPE_TASKGROUP && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::JetTaskGroup"
+                if name == Syntax.TYPE_CONDITION && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::JetCondition"
+                if name == Syntax.TYPE_SHARED_REVISION_ERROR && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::JetSharedRevisionError"
+                if name == Syntax.TYPE_NEVER -> return "std::convert::Infallible"
+                if name == Syntax.TYPE_ALLOC_ERROR -> return "{self.root_prefix}AllocError"
+                if name == "Claims" && !self.type_names.contains(name) -> return "{self.root_prefix}JetAuthClaims"
+                if name == "AuthError" && !self.type_names.contains(name) -> return "{self.root_prefix}JetAuthError"
+                if name == "Session" && !self.type_names.contains(name) -> return "{self.root_prefix}JetAuthSession"
+                if name == "Auth" && !self.type_names.contains(name) -> return "{self.root_prefix}JetAuthApp"
+                if name == "SyncText" && !self.type_names.contains(name) -> return "{self.root_prefix}JetSyncText"
+                if name == "SyncCounter" && !self.type_names.contains(name) -> return "{self.root_prefix}JetSyncCounter"
+                if name == "SyncMap" && !self.type_names.contains(name) -> return "{self.root_prefix}JetSyncMap"
+                if name == "SyncList" && !self.type_names.contains(name) -> return "{self.root_prefix}JetSyncList"
+                if name == "RowPolicy" -> return "{self.root_prefix}JetRowPolicy"
+                if !self.type_names.contains(name) {
+                    if core_crypto_rust_type_name(name) == .Val(rust) {
+                        ffi :: self.ffi_crate ?? "jet_ffi"
+                        return "{ffi}::{rust}"
+                    }
+                }
+                if name == "KeyStatus" || name == "VaultError" {
+                    ffi :: self.ffi_crate ?? "jet_ffi"
+                    rust :: if name == "KeyStatus" -> "JetVaultKeyStatus" else -> "JetVaultError"
+                    return "{ffi}::{rust}"
+                }
+                if name == "Unknown" -> return "_"
+                if name == "HyperLogLog" -> return "JetHyperLogLog"
+                if name == "TDigest" -> return "JetTDigest"
+                if name == "CountMinSketch" -> return "JetCountMinSketch"
+                if name == "ReservoirSampler" -> return "JetReservoirSampler"
+                if name == "Date" || name == "LocalDate" -> return "JetDate"
+                if name == "LocalTime" -> return "JetLocalTime"
+                if name == "DateTime" -> return "JetDateTime"
+                if name == "Instant" -> return "JetInstant"
+                if name == "Period" -> return "JetPeriod"
+                if name == "Zone" -> return "JetZone"
+                if name == "ZonedDateTime" -> return "JetZonedDateTime"
+                if name == "URL" -> return "{self.root_prefix}jet_std::JetURL"
+                if name == "MIME" -> return "{self.root_prefix}jet_std::JetMIME"
+                if !self.type_names.contains(name) && (name == "Address" || name == "Message" || name == "Attachment" || name == "Envelope" || name == "SMTPSecurity" || name == "RecipientPolicy" || name == "RecipientReport" || name == "SendReport" || name == "EmailError" || name == "Limits") {
+                    rust :: if name == "EmailError" -> "Error" else -> name
+                    return "{self.root_prefix}jet_email::{rust}"
+                }
+                if name == "SMTPAuth" && !self.type_names.contains(name) -> return "{self.root_prefix}jet_email::SMTPAuth<{self.ffi_crate ?? "jet_ffi"}::Secret>"
+                if (name == "DKIMConfig" || name == "SMTPConfig") && !self.type_names.contains(name) -> return "{self.root_prefix}jet_email::{name}<{self.ffi_crate ?? "jet_ffi"}::Secret>"
+                if (name == "TLSTrust" || name == "Mailer") && !self.type_names.contains(name) -> return "{self.root_prefix}jet_email::{name}"
+                if name == "WsConn" -> return "JetWsConn"
+                if name == "WsError" -> return "JetWsError"
+                if name == "WsMessage" -> return "JetWsMessage"
+                if name == "Browser" -> return "JetBrowser"
+                if name == "BrowserContext" -> return "JetBrowserContext"
+                if name == "BrowserPage" -> return "JetBrowserPage"
+                if name == "BrowserFrame" -> return "JetBrowserFrame"
+                if name == "BrowserLocator" -> return "JetBrowserLocator"
+                if name == "BrowserIntercept" -> return "JetBrowserIntercept"
+                if name == "BrowserEvent" -> return "JetBrowserEvent"
+                if name == "BrowserTrace" -> return "JetBrowserTrace"
+                if name == "BrowserReceipt" -> return "JetBrowserReceipt"
+                if name == "BrowserPrivacy" -> return "JetBrowserPrivacy"
+                if name == "BrowserError" -> return "JetBrowserError"
+                if name == "BrowserAbilities" -> return "JetBrowserAbilities"
+                if name == "BrowserProfile" -> return "JetBrowserProfile"
+                if name == "BrowserTimeout" -> return "JetBrowserTimeout"
+                if name == "BrowserProtocol" -> return "JetBrowserProtocol"
+                if name == "ParseError" && !self.type_names.contains(name) -> return "String"
+                if name == "SQL" -> return "{self.root_prefix}jet_std::SQL"
+                if name == "HTML" -> return "String"
+                if name == "Sh" -> return "Vec<String>"
+                if name == "ScopeGuard" -> return "_"
+                if name == "Key" -> return "{self.root_prefix}JetKey"
+                if core_ui_rust_type_name(name).is_some() && !self.type_names.contains(name) -> return "{self.root_prefix}Jet{name}"
+                if name == "UIFileFilterResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<{self.root_prefix}JetUiFileFilter>"
+                if name == "UIFSGrantResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<{self.root_prefix}JetUiFsGrant>"
+                if name == "UIShortcutResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<{self.root_prefix}JetUiShortcut>"
+                if name == "UiShortcutBindingResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<{self.root_prefix}JetUiShortcutBinding>"
+                if name == "UIAccessibilityResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<{self.root_prefix}JetUiAccessibility>"
+                if name == "UIFileDialogResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<{self.root_prefix}JetUiFileDialogSelection>"
+                if name == "UIClipboardTextResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<{self.root_prefix}JetUiClipboardText>"
+                if name == "UIClipboardWriteResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<{self.root_prefix}JetUiClipboardWrite>"
+                if name == "UIIMEResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<Option<{self.root_prefix}JetUiImeEvent>>"
+                if name == "UIDragResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<Option<{self.root_prefix}JetUiDragEvent>>"
+                if name == "UIShortcutDispatchResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<{self.root_prefix}JetUiShortcutDispatch>"
+                if name == "UIAccessibilityAttachResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<()>"
+                if name == "UIAccessibilityProjectionResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<Option<{self.root_prefix}JetUiAccessibilityProjection>>"
+                if name == "UIAccessibilityNodeResult" && !self.type_names.contains(name) -> return "{self.root_prefix}JetUiServiceResult<{self.root_prefix}JetUiNode>"
+                if !self.type_names.contains(name) && (name == "ScreenPoint" || name == "WorldPoint" || name == "ViewPoint" || name == "CameraPoint" || name == "DevicePoint" || name == "ScreenDelta" || name == "WorldDelta" || name == "ViewDelta" || name == "CameraDelta" || name == "DeviceDelta") -> return "{self.root_prefix}JetCoord2"
+                if (name == "TransformError" || name == "FrameId") && !self.type_names.contains(name) -> return if name == "FrameId" -> "{self.root_prefix}i64" else -> "{self.root_prefix}JetErr"
+                if name == "DevServer" && !self.type_names.contains(name) -> return "{self.root_prefix}JetDevServer"
+                if name == "App" && !self.type_names.contains(name) -> return "{self.root_prefix}JetApp"
+                if name == "WebPage" && !self.type_names.contains(name) -> return "{self.root_prefix}JetWebPage"
+                if name == "LiveQuery" && !self.type_names.contains(name) -> return "{self.root_prefix}JetLiveQuery"
+                if name == Syntax.TYPE_RANGE && !self.type_names.contains(name) -> return "{self.root_prefix}JetRange"
+                if name == "DimensionAxis" && !self.type_names.contains(name) -> return "{self.root_prefix}JetDimensionAxis"
+                if name == "DimensionInfo" && !self.type_names.contains(name) -> return "{self.root_prefix}JetDimensionInfo"
+                if name == "StateRef" && !self.type_names.contains(name) -> return "{self.root_prefix}JetStateRef"
+                if name == "StateInfo" && !self.type_names.contains(name) -> return "{self.root_prefix}JetStateInfo"
+                if name == "EffectInfo" && !self.type_names.contains(name) -> return "{self.root_prefix}JetEffectInfo"
+                if name == "OriginInfo" && !self.type_names.contains(name) -> return "{self.root_prefix}JetOriginInfo"
+                if name == Syntax.TYPE_EFFECT && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::JetReactiveEffect"
+                if name == Syntax.TYPE_SUBSCRIPTION && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::JetSubscription"
+                if name == Syntax.TYPE_EVENT_SCOPE && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::JetEventScope"
+                if name == Syntax.TYPE_EVENT_POLICY && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::JetEventPolicy"
+                if name == Syntax.TYPE_EVENT_TRACE && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::JetEventTrace"
+                if name == Syntax.TYPE_HOOK_POLICY && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::JetHookPolicy"
+                if file_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                if raylib_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                if game_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                if net_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                if compute_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                if service_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                if alloc_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                if args_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                if !self.type_names.contains(name) {
+                    if reflect_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                    if binary_text_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                    if layout_handle_rust_type(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                }
+                if name == Syntax.TYPE_COMPLEX && !self.type_names.contains(name) -> return "{self.root_prefix}JetComplex"
+                if !self.type_names.contains(name) {
+                    if root_prelude_rust_type_name(name) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                    if core_rust_type_name(name) == .Val(rust) -> return "{self.root_prefix}jet_std::{rust}"
+                }
+                if self.core_qualified_rust_type_name(name) == .Val(resolved) {
+                    if job_queue_rust_type(resolved) == .Val(rust) -> return "{self.root_prefix}{rust}"
+                    if resolved == "AllocError" -> return "{self.root_prefix}AllocError"
+                    if resolved == "Claims" || resolved == "AuthError" || resolved == "Session" || resolved == "Auth" || resolved == "SyncText" || resolved == "SyncCounter" || resolved == "SyncMap" || resolved == "Counter" || resolved == "OrderedMap" || resolved == "Layer" || resolved == "Chain" || resolved == "StringSet" || resolved == "RowPolicy" {
+                        rust :: if resolved == {
+                            "Claims" -> "JetAuthClaims"
+                            "AuthError" -> "JetAuthError"
+                            "Session" -> "JetAuthSession"
+                            "Auth" -> "JetAuthApp"
+                            "SyncText" -> "JetSyncText"
+                            "SyncCounter" -> "JetSyncCounter"
+                            "SyncMap" -> "JetSyncMap"
+                            "SyncList" -> "JetSyncList"
+                            "Counter" -> "JetCounter"
+                            "OrderedMap" -> "JetOrderedMap"
+                            "Layer" -> "JetLayer"
+                            "StringSet" -> "JetStringSet"
+                            "Chain" -> "JetChain"
+                            "RowPolicy" -> "JetRowPolicy"
+                            else -> resolved
+                        }
+                        return "{self.root_prefix}{rust}"
+                    }
+                    if core_crypto_rust_type_name(resolved) == .Val(rust) -> return "{self.ffi_crate ?? "jet_ffi"}::{rust}"
+                    if resolved == "Address" || resolved == "Message" || resolved == "Attachment" || resolved == "Envelope" || resolved == "SMTPSecurity" || resolved == "RecipientPolicy" || resolved == "RecipientReport" || resolved == "SendReport" || resolved == "EmailError" || resolved == "Limits" {
+                        rust :: if resolved == "EmailError" -> "Error" else -> resolved
+                        return "{self.root_prefix}jet_email::{rust}"
+                    }
+                    if resolved == "SMTPAuth" || resolved == "DKIMConfig" || resolved == "SMTPConfig" -> return "{self.root_prefix}jet_email::{resolved}<{self.ffi_crate ?? "jet_ffi"}::Secret>"
+                    if resolved == "TLSTrust" || resolved == "Mailer" -> return "{self.root_prefix}jet_email::{resolved}"
+                    return "{self.root_prefix}jet_std::{resolved}"
+                }
+                if self.trait_names.contains(name) -> return "Box<dyn {rust_trait_name(name)}>"
+                if self.foreign_types.get(name) == .Val(rust_mod) -> return "{self.root_prefix}{rust_mod}::{mangle_path(nominal_leaf(name))}"
+                if name.split_once(".") == .Val((alias, leaf)) {
+                    if self.import_mods.get(alias) == .Val(rust_mod) -> return "{self.root_prefix}{rust_mod}::{mangle_path(leaf)}"
+                    return mangle_path(name)
+                }
+                if name == "Expired" -> return "JetExpired"
+                mangle_path(name)
+            }
+            .Apply(name, args) -> {
+                if (name == "Point2" || name == "Delta2") && args.len() == 2 -> return "{self.root_prefix}JetCoord2"
+                if (name == "Transform" || name == "Transform2") && (args.len() == 2 || args.len() == 3) -> return "{self.root_prefix}JetTransform2"
+                if name == "Ray2" && args.len() == 3 -> return "{self.root_prefix}JetRay2"
+                if (name == "Tensor" || name == "Vec" || name == "Matrix") && (name != "Tensor" || args.len() <= 1) && compute_handle_rust_type("Tensor").is_some() -> return "{self.root_prefix}JetTensor"
+                if name == "VJPRun" && args.len() == 1 -> return "{self.root_prefix}JetComputeVjpRun<{self.rust_type(args[0])}>"
+                // Exact Int is distinct from I64 despite its shared backend ABI.
+                if name == "Atomic" && args.len() == 1 {
+                    inner :: if args[0].without_user_tags() == .Int -> "JetAtomicInt" else -> self.rust_type(args[0])
+                    return "{self.root_prefix}JetAtomic<{inner}>"
+                }
+                if name == "Task" && !args.is_empty() {
+                    item :: self.rust_type(args[0])
+                    carried :: if args[0].without_user_tags() == { .Result(_, _) -> true else -> false }
+                    carrier :: if carried -> item else -> "Result<{item}, {self.root_prefix}JetErr>"
+                    return "{self.root_prefix}jet_std::JetTask<{carrier}>"
+                }
+                if args.len() == 1 && (name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" || name == "Rotation" || name == "WrappedImportPlan") {
+                    rust :: if name == {
+                        "KeyRef" -> "JetVaultKeyRef"
+                        "MutationPlan" -> "JetVaultMutationPlan"
+                        "VaultWrite" -> "JetVaultWrite"
+                        "Rotation" -> "JetVaultRotation"
+                        else -> "JetVaultWrappedImportPlan"
+                    }
+                    return "{self.ffi_crate ?? "jet_ffi"}::{rust}<{self.rust_type(args[0])}>"
+                }
+                if !args.is_empty() {
+                    if core_rust_type_name(name) == .Val(rust) {
+                        if rust == "JetReceiver" || rust == "JetSender" || rust == "JetPool" || rust == "JetId" -> return "{self.root_prefix}jet_std::{rust}<{self.rust_type(args[0])}>"
+                    }
+                }
+                if name == "Cell" && !args.is_empty() -> return "{self.root_prefix}jet_std::JetCell<{self.rust_type(args[0])}>"
+                if name == "CellReadGuard" && !args.is_empty() -> return "{self.root_prefix}jet_std::JetCellReadGuard<{self.rust_type(args[0])}>"
+                if name == "CellEditGuard" && !args.is_empty() -> return "{self.root_prefix}jet_std::JetCellEditGuard<{self.rust_type(args[0])}>"
+                if name == "StreamEventTime" && args.len() == 1 -> return "{self.root_prefix}jet_std::JetStream<{self.root_prefix}jet_std::JetStreamEvent<{self.rust_type(args[0])}>>"
+                if name == "KeyedStream" && args.len() == 2 -> return "{self.root_prefix}jet_std::JetKeyedStream<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == "Window" && args.len() == 2 -> return "{self.root_prefix}jet_std::JetStreamWindow<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == Syntax.TYPE_STREAM && !args.is_empty() -> return "{self.root_prefix}jet_std::JetStream<{self.rust_type(args[0])}>"
+                if name == Syntax.TYPE_SIGNAL && !args.is_empty() -> return "{self.root_prefix}jet_std::JetSignal<{self.rust_type(args[0])}>"
+                if (name == Syntax.TYPE_DERIVED || name == Syntax.TYPE_COMPUTED) && !args.is_empty() -> return "{self.root_prefix}jet_std::JetDerived<{self.rust_type(args[0])}>"
+                if name == Syntax.TYPE_EVENT && !args.is_empty() -> return "{self.root_prefix}jet_std::JetEvent<{self.rust_type(args[0])}>"
+                if name == Syntax.TYPE_ASYNC_EVENT && args.len() == 2 -> return "{self.root_prefix}jet_std::JetAsyncEvent<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == Syntax.TYPE_DISPATCH_REPORT && !args.is_empty() -> return "{self.root_prefix}jet_std::JetDispatchReport<{self.rust_type(args[0])}>"
+                if name == Syntax.TYPE_DISPATCH_FAILURE && !args.is_empty() -> return "{self.root_prefix}jet_std::JetDispatchFailure<{self.rust_type(args[0])}>"
+                if name == Syntax.TYPE_HOOK && args.len() == 2 -> return "{self.root_prefix}jet_std::JetHook<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == Syntax.TYPE_DECISION_HOOK && args.len() == 2 -> return "{self.root_prefix}jet_std::JetDecisionHook<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == Syntax.TYPE_HOOK_DECISION && args.len() == 2 -> return "{self.root_prefix}jet_std::JetHookDecision<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == Syntax.TYPE_HOOK_OUTCOME && args.len() == 2 -> return "{self.root_prefix}jet_std::JetHookOutcome<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == "Query" && args.len() == 1 && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::DataQuery<{self.rust_type(args[0])}>"
+                if name == "Group" && args.len() == 2 && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::GroupValue<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == "DataGroupedQuery" && args.len() == 2 && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::DataGroupedQuery<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == "DataLoader" && args.len() == 1 && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::DataLoader<{self.rust_type(args[0])}>"
+                if name == Syntax.TYPE_SHARED_SNAPSHOT && args.len() == 2 && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::JetSharedSnapshot<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == "DataSnapshot" && args.len() == 1 && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::DataSnapshot<{self.rust_type(args[0])}>"
+                if name == "JetDataPlotColumn" && args.len() == 1 && !self.type_names.contains(name) -> return "{self.root_prefix}JetDataPlotColumn<{self.rust_type(args[0])}>"
+                if name == "JetDataPlot" && args.len() == 1 && !self.type_names.contains(name) -> return "{self.root_prefix}JetDataPlot<{self.rust_type(args[0])}>"
+                if name == "DataStream" && !args.is_empty() && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::DataStream"
+                if name == "DataJoin" && args.len() == 2 && !self.type_names.contains(name) -> return "{self.root_prefix}jet_std::DataJoin<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == Syntax.TYPE_MEASUREMENT && !args.is_empty() -> return "{self.root_prefix}jet_std::JetMeasurement<{self.rust_type(args[0])}>"
+                if name == Syntax.TYPE_SHARED_GUARD && args.len() == 1 -> return "{self.root_prefix}jet_std::JetSharedGuard<{self.rust_type(args[0])}>"
+                if name == Syntax.TYPE_SHARED_WEAK && args.len() == 1 -> return "{self.root_prefix}jet_std::JetSharedWeak<{self.rust_type(args[0])}>"
+                if name == "Loadable" && args.len() == 2 -> return "JetLoadable<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                if name == "View" && args.len() == 1 {
+                    if args[0] == {
+                        .Named(inner) -> if inner == "str" -> "&str" else -> "&[{self.rust_type(args[0])}]"
+                        .List(inner) -> "&[{self.rust_type(inner)}]"
+                        else -> "&[{self.rust_type(args[0])}]"
+                    }
+                } else {
+                    if name == "ComputeViewMut" && args.len() == 1 -> return "{self.root_prefix}JetComputeViewMut<'_>"
+                    if name == "ViewMut" && args.len() == 1 -> return "&mut [{self.rust_type(args[0])}]"
+                    if name == Syntax.TYPE_PIN && args.len() == 1 -> return "&mut {self.rust_type(args[0])}"
+                    if name == Syntax.TYPE_ITER && args.len() == 1 -> return "{self.root_prefix}{root_prelude_rust_type_name(name).expect("registered iterator carrier")}<{self.rust_type(args[0])}>"
+                    if name == Syntax.TYPE_VIEW_ITER && args.len() == 1 -> return "JetViewIter<{self.rust_type(args[0])}>"
+                    if name == Syntax.EXPIRING_VALUE_TYPE && args.len() == 1 -> return "JetExpiring<{self.rust_type(args[0])}>"
+                    if name == "ExpiringSecret" && args.len() == 1 -> return "JetExpiringSecret<{self.rust_type(args[0])}>"
+                    if name == "Set" && !args.is_empty() -> return "std::collections::HashSet<{self.rust_type(args[0])}>"
+                    if name == Syntax.TYPE_RANK && !args.is_empty() -> return "std::collections::BTreeSet<{self.rust_type(args[0])}>"
+                    if name == Syntax.TYPE_PRIORITY_QUEUE && !args.is_empty() -> return "std::collections::BinaryHeap<{self.rust_type(args[0])}>"
+                    if name == Syntax.TYPE_LRU && args.len() >= 2 -> return "JetCache<{self.rust_type(args[0])}, {self.rust_type(args[1])}>"
+                    if name == Syntax.TYPE_TALLY && !args.is_empty() -> return "std::collections::HashMap<{self.rust_type(args[0])}, usize>"
+                    if name == Syntax.TYPE_QUEUE && !args.is_empty() -> return "std::collections::VecDeque<{self.rust_type(args[0])}>"
+                    if name == Syntax.TYPE_PTR && args.len() == 1 -> return "*mut {self.rust_type(args[0])}"
+                    head := mangle_path(name)
+                    if name.split_once(".") == .Val((alias, leaf)) {
+                        if self.import_mods.get(alias) == .Val(rust_mod) { head = "{self.root_prefix}{rust_mod}::{mangle_path(leaf)}" }
+                    }
+                    if args.is_empty() -> return head
+                    rendered :: args.iter().map((arg) => self.rust_type(arg)).collect<[String]>().join(", ")
+                    "{head}<{rendered}>"
+                }
+            }
+            .TraitObject(traits) -> "Box<dyn {traits.iter().map((name) => rust_trait_name(name)).collect<[String]>().join(" + ")}>"
+            .Fn(params, ret, _, _, _, return_view_provenance) -> self.rust_fn_trait(params, ret, return_view_provenance)
+            .Tuple(fields) -> tuple_struct_name(tuple_fields_plain(fields))
+            .FixedList(elem, len) -> "[{self.rust_type(elem)}; {len}]"
+            .Tagged(.Internal(.AllocatorView), inner) -> "&mut {self.rust_type(inner)}"
+            .Tagged(_, inner) -> self.rust_type(inner)
+            .Union(members) -> Names.mangle(union_enum_name(members))
+            .Quantity(_, _) -> panic("quantity_parts() erased above")
+            .Measure(_) -> panic("type measure handled by the Vec/Matrix Apply arm above")
+        }
+    }
+}

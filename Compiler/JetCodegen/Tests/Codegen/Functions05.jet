@@ -1,0 +1,45 @@
+use jet_foundation.AST.[Func, Item]
+use jet_foundation.Diagnostics.Span
+use jet_foundation.WebPartition
+use jet_codegen.Codegen.Context.[build_cx_items, ExternFn]
+use jet_codegen.Codegen.TIR.[child_module_identity, record_web_partition_key, collect_web_partition_keys, lower_contract_unavailable_item, artifact_plan]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4946 (behavioral control; no inline Rust test)
+#Test("child_module_identity_preserves_declaring_owner") {
+    assert(child_module_identity("", "tools") == "tools")
+    assert(child_module_identity("app", "tools") == "app::tools")
+    assert(child_module_identity("app::tools", "parse") == "app::tools::parse")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4772-4792,4794-4809 (behavioral control)
+#Test("web_partition_source_keys_preserve_file_and_module_scope") {
+    span :: Span.new(4, 9)
+    function := Func.implicit_run([], span)
+    function.name = "render"
+    rows := [(String, USize, USize):String]{}
+    record_web_partition_key(function, "render", "main.jet", "main", true, None, &rows)
+    record_web_partition_key(function, "render", "helper.jet", "helper", false, None, &rows)
+    record_web_partition_key(function, "render", "inline.jet", "helper", false, Val("Panel"), &rows)
+    assert(rows.len() == 3)
+    assert(rows.get(("main.jet", 4, 9)) == Val(WebPartition.partition_key(None, None, "render")))
+    assert(rows.get(("helper.jet", 4, 9)) == Val(WebPartition.partition_key(Val("helper"), None, "render")))
+    assert(rows.get(("inline.jet", 4, 9)) == Val(WebPartition.partition_key(None, Val("Panel"), "render")))
+    collected := [(String, USize, USize):String]{}
+    collect_web_partition_keys([Item.Func(function)], "helper.jet", "helper", false, None, &collected)
+    assert(collected.get(("helper.jet", 4, 9)) == rows.get(("helper.jet", 4, 9)))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:4723-4740 (behavioral control)
+#Test("unavailable_contract_sampling_materializes_resolvable_callable") {
+    span :: Span.new(1, 4)
+    function := Func.implicit_run([], span)
+    function.name = "candidate"
+    cx :: build_cx_items([Item]{}, "", "contract.jet", None, [String:ExternFn]{}, "2026")
+    lowered :: lower_contract_unavailable_item(function, "contract", cx)
+    expected :: artifact_plan.contract_key("contract", function)
+    assert(lowered.key == expected)
+    assert(lowered.name == expected)
+    assert(lowered.module == "contract")
+    assert(lowered.source_span == span)
+    assert(lowered.synthetic)
+}

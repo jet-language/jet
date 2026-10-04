@@ -1,0 +1,56 @@
+use jet_sema.Sema.GateLedger.[GateLedger, source_entry, append_fact_gates]
+use jet_foundation.[GateKind, GateEntry, Span, NameLedger, StructureFact, StructureFactKind, BuildFactSnapshot, FactContribution, FactValue, SourceScope, ContributionLayer, FactKey]
+use jet_foundation.Policy as Policy
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:697
+fn entry(kind: GateKind, source: String, span: Int) -> GateEntry Never! {
+    source_entry(kind, "test", "test", source, Span.new(span, span + 1), "x", None, "x", "recorded")
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:712
+#Test("security_entries_sort_before_knowledge_entries") {
+    ledger := GateLedger.default()
+    &ledger.push(entry(GateKind.PrecisionDemotion, "a.jet", 1))
+    &ledger.push(entry(GateKind.Unsafe, "a.jet", 2))
+    &ledger.sort()
+    assert(ledger.entries()[0].kind == GateKind.Unsafe)
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:721
+#Test("duplicate_fact_keeps_both_provenance_rows") {
+    ledger := GateLedger.default()
+    first := entry(GateKind.TrustGrant, "trust", 0)
+    first.provenance = ["trust store"]
+    second := ~first
+    second.provenance = ["lockfile"]
+    &ledger.push(first)
+    &ledger.push(second)
+    assert(ledger.entries().len() == 1)
+    assert(ledger.entries()[0].provenance.len() == 2)
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:734
+#Test("structure_facts_use_the_same_gate_ledger") {
+    names := NameLedger.default()
+    &names.record_structure_fact(StructureFact.new(StructureFactKind.Liveness, "files", "app.jet", Span.new(4, 9), "unused", "remove or rename to _files", Val("_name")))
+    ledger := GateLedger.default()
+    &ledger.append_structure_facts(names)
+    assert(ledger.entries().len() == 1)
+    assert(ledger.entries()[0].kind == GateKind.Structure)
+    assert(ledger.entries()[0].domain == "structure")
+    assert(ledger.entries()[0].reason == Val("_name"))
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:756
+#Test("forced_build_fact_is_one_build_gate_entry") {
+    span :: Span.new(7, 12)
+    contribution :: FactContribution.new("Build.Settings.tls", FactValue.Bool(false), SourceScope.Package, ContributionLayer.System, "system.jet").at(span).force_with_reason("fleet certification")
+    fact :: Policy.resolve(FactKey.new("Build.Settings.tls"), [contribution]).expect("system force is a valid build contribution").expect("the forced writer resolves")
+    facts := BuildFactSnapshot.default()
+    facts.contributions[fact.key.name] = fact
+    ledger := GateLedger.default()
+    append_fact_gates(&ledger, facts)
+    assert(ledger.entries().len() == 1)
+    row :: ledger.entries()[0]
+    assert(row.kind == GateKind.BuildFlag)
+    assert(row.domain == "build")
+    assert(row.subject == "Build.Settings.tls")
+    assert(row.source == "system.jet")
+    assert(row.reason == Val("fleet certification"))
+    assert(row.span == Val(span))
+}

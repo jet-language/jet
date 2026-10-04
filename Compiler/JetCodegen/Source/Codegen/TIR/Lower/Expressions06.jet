@@ -1,1597 +1,579 @@
-// PORT-PENDING 0480 crates-jet-codegen-src-codegen-tir-lower-expressions-slice-7367: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:7367-8959
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         Expr::Field(receiver, member, span) => {
-//RS             in_own_frame(|| {
-//RS                 if let Some((key, ty)) =
-//RS                     cx.checked_const_ref_sites.get(&(span.start, span.end))
-//RS                 {
-//RS                     return TExpr {
-//RS                         ty: ty.clone(),
-//RS                         kind: TExprKind::ConstRef(key.clone()),
-//RS                     };
-//RS                 }
-//RS                 if core_module_path_from_receiver(receiver, cx, env).as_deref() == Some("core.math")
-//RS                 {
-//RS                     // Module fields, not calls. A 0-arg CoreCall left resident
-//RS                     // JIT looking for unregistered `jet_std_math_pi`. The
-//RS                     // Prelude function is `f64::consts::PI`; keep that one
-//RS                     // constant here (I9).
-//RS                     if let Some(value) = match member.as_str() {
-//RS                         "pi" => Some(std::f64::consts::PI),
-//RS                         "e" => Some(std::f64::consts::E),
-//RS                         "tau" => Some(std::f64::consts::TAU),
-//RS                         "infinity" => Some(f64::INFINITY),
-//RS                         "nan" => Some(f64::NAN),
-//RS                         _ => None,
-//RS                     } {
-//RS                         return TExpr {
-//RS                             ty: Type::Float,
-//RS                             kind: TExprKind::FloatLit(value),
-//RS                         };
-//RS                     }
-//RS                 }
-//RS                 // D-LAYOUT-FACTS1=B: derive bodies bind their type parameter as a
-//RS                 // local type fact for that binding. Keep `@layout` on the field
-//RS                 // path so `T.$layout` is not mistaken for an enum literal.
-//RS                 let compiler_fact_receiver = match receiver.as_ref() {
-//RS                     // A qualified type path lowers as a field chain. The final
-//RS                     // segment is still the type name (`module.Packet`), while a
-//RS                     // value path such as `info.layout` remains lowercase.
-//RS                     Expr::Ident(name, _) => {
-//RS                         name.chars().next().is_some_and(char::is_uppercase)
-//RS                             || matches!(
-//RS                                 env.ty_of(name),
-//RS                                 Some(Type::Named(type_name))
-//RS                                     if matches!(
-//RS                                         type_name.as_str(),
-//RS                                         "FieldInfo" | "MethodInfo" | "TypeParamInfo"
-//RS                                     )
-//RS                             )
-//RS                     }
-//RS                     Expr::Field(_, name, _) => name.chars().next().is_some_and(char::is_uppercase),
-//RS                     _ => false,
-//RS                 };
-//RS                 let fact_member = Syntax::compiler_fact_member(member).is_some()
-//RS                     || jet_foundation::Registry::fact_read(member).is_some();
-//RS                 // Fact projections can follow a reflected list index, for example
-//RS                 // `info.methods[0].$effects`. Recovering this carrier type here
-//RS                 // keeps the projection canonical instead of falling through to
-//RS                 // the integer sentinel used only for impossible field shapes.
-//RS                 let reflected_fact_receiver =
-//RS                     crate::Codegen::TIR::declared_field_ty(receiver, cx, env).is_some_and(|ty| {
-//RS                         matches!(
-//RS                             ty.without_user_tags(),
-//RS                             Type::Named(type_name)
-//RS                                 if matches!(
-//RS                                     type_name.as_str(),
-//RS                                     "TypeInfo"
-//RS                                         | "FunctionInfo"
-//RS                                         | "MethodInfo"
-//RS                                         | "FieldInfo"
-//RS                                         | "TypeParamInfo"
-//RS                                         | "FactInfo"
-//RS                                         | "FactValue"
-//RS                                 )
-//RS                         )
-//RS                     });
-//RS                 if fact_member && (compiler_fact_receiver || reflected_fact_receiver) {
-//RS                     return in_own_frame(|| {
-//RS                         let recv = lower_expr(receiver, cx, env);
-//RS                         return TExpr {
-//RS                             ty: compiler_fact_type(member),
-//RS                             kind: TExprKind::Field {
-//RS                                 recv: Box::new(recv),
-//RS                                 field: member.clone(),
-//RS                                 boxed: false,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if let Some((enum_type, variant)) =
-//RS                     grouped_enum_unit_variant(cx, receiver, member, |name| {
-//RS                         env.ty_of(name).is_some()
-//RS                     })
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         return TExpr {
-//RS                             ty: Type::Named(enum_type.clone()),
-//RS                             kind: TExprKind::EnumLit {
-//RS                                 enum_type,
-//RS                                 variant,
-//RS                                 payload: TEnumPayload::Unit,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // c109 Phase 4: a *unit* enum literal (`Light.Yellow`) reaches codegen as
-//RS                 // a `Field` whose receiver is the enum-name ident (sema re-types but does
-//RS                 // not rewrite the node). The gate proved this is a covered enum + unit
-//RS                 // variant; emit `__jet_<Enum>::__jet_<variant>` (the AST path's form).
-//RS                 if let Expr::Ident(enum_name, _) = receiver.as_ref() {
-//RS                     let resolved_enum = cx
-//RS                         .core_qualified_rust_type_name(enum_name)
-//RS                         .unwrap_or(enum_name.as_str());
-//RS                     if env.ty_of(enum_name).is_none()
-//RS                         && matches!(
-//RS                             enum_name.as_str(),
-//RS                             "Overflow"
-//RS                                 | "FailurePolicy"
-//RS                                 | "DispatchState"
-//RS                                 | "HookPolicy"
-//RS                                 | "HookDecision"
-//RS                                 | "HookOutcome"
-//RS                         )
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             let ty = match env.ret_ty.as_ref() {
-//RS                                 Some(Type::Apply { name, args }) if name == enum_name => {
-//RS                                     Type::Apply {
-//RS                                         name: name.clone(),
-//RS                                         args: args.clone(),
-//RS                                     }
-//RS                                 }
-//RS                                 _ => Type::Named(enum_name.clone()),
-//RS                             };
-//RS                             return TExpr {
-//RS                                 ty,
-//RS                                 kind: TExprKind::EnumLit {
-//RS                                     enum_type: enum_name.clone(),
-//RS                                     variant: member.clone(),
-//RS                                     payload: TEnumPayload::Unit,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     if env.ty_of(enum_name).is_none()
-//RS                         && enum_name == "DataEvent"
-//RS                         && matches!(
-//RS                             member.as_str(),
-//RS                             "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd"
-//RS                         )
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named("DataEvent".to_string()),
-//RS                                 kind: TExprKind::EnumLit {
-//RS                                     enum_type: "DataEvent".to_string(),
-//RS                                     variant: member.clone(),
-//RS                                     payload: TEnumPayload::Unit,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     // D-LISTREMOVE1/F: `RemoveBy.Val` / `RemoveBy.Slot` is a
-//RS                     // built-in enum with a registered type fact, so it does not
-//RS                     // pass through the user-enum field path above.
-//RS                     if enum_name == crate::Syntax::TYPE_REMOVE_BY
-//RS                         && matches!(member.as_str(), "Val" | "Slot")
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(crate::Syntax::TYPE_REMOVE_BY.to_string()),
-//RS                                 kind: TExprKind::EnumLit {
-//RS                                     enum_type: crate::Syntax::TYPE_REMOVE_BY.to_string(),
-//RS                                     variant: member.clone(),
-//RS                                     payload: TEnumPayload::Unit,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     if enum_name == "EncodingErrorKind"
-//RS                         && matches!(
-//RS                             member.as_str(),
-//RS                             "Syntax" | "Truncated" | "Unsupported" | "Limit" | "IO" | "State"
-//RS                         )
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(enum_name.clone()),
-//RS                                 kind: TExprKind::EnumLit {
-//RS                                     enum_type: enum_name.clone(),
-//RS                                     variant: member.clone(),
-//RS                                     payload: TEnumPayload::Unit,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     if enum_name == "EncodingFormat"
-//RS                         && matches!(
-//RS                             member.as_str(),
-//RS                             "JSON" | "JSONL" | "CSV" | "TOML" | "YAML" | "XML" | "CBOR"
-//RS                         )
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(enum_name.clone()),
-//RS                                 kind: TExprKind::EnumLit {
-//RS                                     enum_type: enum_name.clone(),
-//RS                                     variant: member.clone(),
-//RS                                     payload: TEnumPayload::Unit,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     if env.ty_of(enum_name).is_none()
-//RS                         && matches!(
-//RS                             resolved_enum,
-//RS                             "SMTPSecurity" | "RecipientPolicy" | "SMTPAuth" | "TLSTrust"
-//RS                         )
-//RS                         && ((resolved_enum == "SMTPSecurity"
-//RS                             && matches!(member.as_str(), "StartTLS" | "TLS"))
-//RS                             || (resolved_enum == "RecipientPolicy"
-//RS                                 && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
-//RS                             || (resolved_enum == "SMTPAuth" && member == "None")
-//RS                             || (resolved_enum == "TLSTrust" && member == "System"))
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(resolved_enum.to_string()),
-//RS                                 kind: TExprKind::EnumLit {
-//RS                                     enum_type: resolved_enum.to_string(),
-//RS                                     variant: member.clone(),
-//RS                                     payload: TEnumPayload::Unit,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     // Core unit enums reach codegen as Field (`NetReadyInterest.Write`).
-//RS                     if env.ty_of(enum_name).is_none()
-//RS                         && ((resolved_enum == "NetReadyInterest"
-//RS                             && matches!(member.as_str(), "Read" | "Write" | "ReadWrite"))
-//RS                             || (resolved_enum == "NetShutdown"
-//RS                                 && matches!(member.as_str(), "Read" | "Write" | "Both")))
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(resolved_enum.to_string()),
-//RS                                 kind: TExprKind::EnumLit {
-//RS                                     enum_type: resolved_enum.to_string(),
-//RS                                     variant: member.clone(),
-//RS                                     payload: TEnumPayload::Unit,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     if env.ty_of(enum_name).is_none()
-//RS                         && cx.variant_owner.get(member).map(String::as_str)
-//RS                             == Some(enum_name.as_str())
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             // c109 Phase 24: a FOREIGN enum's unit literal (`NoteType.User` in
-//RS                             // search.jet) qualifies with the module path, exactly as `emit_expr`'s
-//RS                             // `Field` arm (Expression.rs ~L232): `{root}{mod}::__jet_<Enum>::<V>`.
-//RS                             // Keyed on the ENUM-name (`enum_name`, the receiver) in `cx.foreign_types`,
-//RS                             // NOT the variant — matching the AST byte-for-byte.
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(enum_name.clone()),
-//RS                                 kind: TExprKind::EnumLit {
-//RS                                     enum_type: enum_name.clone(),
-//RS                                     variant: member.clone(),
-//RS                                     payload: TEnumPayload::Unit,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     if env.ty_of(enum_name).is_none() {
-//RS                         if let Some(owner) = cx
-//RS                             .variant_owner
-//RS                             .get(member)
-//RS                             .filter(|owner| owner.rsplit("::").next() == Some(enum_name))
-//RS                         {
-//RS                             return in_own_frame(|| {
-//RS                                 return TExpr {
-//RS                                     ty: Type::Named(owner.clone()),
-//RS                                     kind: TExprKind::EnumLit {
-//RS                                         enum_type: owner.clone(),
-//RS                                         variant: member.clone(),
-//RS                                         payload: TEnumPayload::Unit,
-//RS                                     },
-//RS                                 };
-//RS                             });
-//RS                         }
-//RS                     }
-//RS                     // D-ENC-DYN1=A+: `Data.Null` → `{root}jet_std::DataTree::Null` (a unit
-//RS                     // construction reaching codegen as a `Field`, the gate proved it).
-//RS                     if env.ty_of(enum_name).is_none()
-//RS                         && is_json_type_name(enum_name)
-//RS                         && member == "Null"
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(Syntax::TYPE_DATA.to_string()),
-//RS                                 kind: TExprKind::JSONLit {
-//RS                                     variant: "Null".to_string(),
-//RS                                     arg: None,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     // D-DBDRIVER1: `DBValue.Null` — same no-arg-`Field` shape as `Data.Null`.
-//RS                     if env.ty_of(enum_name).is_none()
-//RS                         && is_db_value_type_name(enum_name)
-//RS                         && member == "Null"
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
-//RS                                 kind: TExprKind::DBValueLit {
-//RS                                     variant: "Null".to_string(),
-//RS                                     arg: None,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                     // c109 Phase 28: a numeric BOUNDS constant (`U8.MAX`/`I32.MIN`/
-//RS                     // `Float.INFINITY`/…). The gate proved the receiver is a numeric type
-//RS                     // name and `member` a bounds-const name. Reproduce the AST `emit_expr`
-//RS                     // Field arm (Expression.rs ~L224): `{rust_type(nt)}::{member}`. The
-//RS                     // rendered Rust string is total here; the result type is the numeric
-//RS                     // type itself (`U8` for `U8.MAX`, `Float` for `Float.INFINITY`).
-//RS                     if env.ty_of(enum_name).is_none() {
-//RS                         if let Some(nt) = crate::AST::numeric_type_from_name(enum_name) {
-//RS                             if is_numeric_bounds_const(member) {
-//RS                                 return in_own_frame(|| {
-//RS                                     return TExpr {
-//RS                                         ty: nt.clone(),
-//RS                                         kind: TExprKind::HostCall(Box::new(
-//RS                                             crate::Codegen::TIR::THostCall::NumericBounds {
-//RS                                                 ty: nt.clone(),
-//RS                                                 member: member.to_string(),
-//RS                                             },
-//RS                                         )),
-//RS                                     };
-//RS                                 });
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     // User unit-enum construction (`Light.Green`) reaches codegen as
-//RS                     // a Field on an unbound type name. Fragment Cx may omit enum
-//RS                     // items, so `variant_owner` is empty; the spelling is still a
-//RS                     // unit variant when both segments are type-case and unbound.
-//RS                     if env.ty_of(enum_name).is_none()
-//RS                         && enum_name.chars().next().is_some_and(char::is_uppercase)
-//RS                         && member.chars().next().is_some_and(char::is_uppercase)
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: Type::Named(resolved_enum.to_string()),
-//RS                                 kind: TExprKind::EnumLit {
-//RS                                     enum_type: resolved_enum.to_string(),
-//RS                                     variant: member.clone(),
-//RS                                     payload: TEnumPayload::Unit,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 // D-SOA1 / D-SOA-TIER1=A: a fused `xs[i].field` where `xs` is a
-//RS                 // columnar list reads that field's column directly through the
-//RS                 // shared store — the cache-friendly path, no whole-`S` gather.
-//RS                 // The result is the same owned, bounds-checked field value the
-//RS                 // array-of-structs form would produce.
-//RS                 if let Expr::Index {
-//RS                     base,
-//RS                     index,
-//RS                     span,
-//RS                     kind,
-//RS                 } = receiver.as_ref()
-//RS                 {
-//RS                     if matches!(kind, IndexKind::List) {
-//RS                         let base_t = lower_expr(base, cx, env);
-//RS                         if let Type::List(elem) = &base_t.ty {
-//RS                             if cx.columnar_list_type(elem).is_some() {
-//RS                                 // The column index comes from the ONE stored-field
-//RS                                 // order every tier reads, so a fused read and the
-//RS                                 // emitted column set can never disagree. A member
-//RS                                 // that is not a stored column (a computed field)
-//RS                                 // is not a fused read at all and falls through to
-//RS                                 // the ordinary getter path below.
-//RS                                 if let Type::Named(elem_name) = elem.as_ref() {
-//RS                                     if let Some(column) =
-//RS                                         cx.columnar_column_index(elem_name, member)
-//RS                                     {
-//RS                                         if let Some(field_ty) = struct_field_type(cx, elem, member)
-//RS                                         {
-//RS                                             let index_t = lower_expr(index, cx, env);
-//RS                                             let line = cx.src_line_col(span.start).0;
-//RS                                             return TExpr {
-//RS                                                 ty: field_ty,
-//RS                                                 kind: TExprKind::ColumnarColumnRead {
-//RS                                                     owner: elem_name.clone(),
-//RS                                                     base: Box::new(base_t),
-//RS                                                     index: Box::new(index_t),
-//RS                                                     field: member.clone(),
-//RS                                                     column,
-//RS                                                     line,
-//RS                                                 },
-//RS                                             };
-//RS                                         }
-//RS                                     }
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 let recv = lower_expr(receiver, cx, env);
-//RS                 let recv = match recv.ty.clone() {
-//RS                     Type::Result { ok, .. }
-//RS                         if struct_field_type(cx, ok.as_ref(), member).is_some() =>
-//RS                     {
-//RS                         let (line, column) = cx.src_line_col(span.start);
-//RS                         TExpr {
-//RS                             ty: ok.as_ref().clone(),
-//RS                             kind: TExprKind::Try {
-//RS                                 inner: Box::new(recv),
-//RS                                 note: None,
-//RS                                 convert: TTryConvert::None,
-//RS                                 file: escape_rust_str(&cx.file),
-//RS                                 line,
-//RS                                 column,
-//RS                                 fn_name: escape_rust_str(&env.fn_name),
-//RS                             },
-//RS                         }
-//RS                     }
-//RS                     _ => recv,
-//RS                 };
-//RS                 if let Some(guard_value) = shared_guard_value_field(recv.clone(), member) {
-//RS                     return in_own_frame(|| guard_value);
-//RS                 }
-//RS                 if member == "path"
-//RS                     && cx.core_imports.values().any(|module| module == "core.files")
-//RS                 {
-//RS                     if let Type::Named(type_name) = &recv.ty {
-//RS                         let op = if cx.local_type_names.contains(type_name) {
-//RS                             None
-//RS                         } else {
-//RS                             match crate::Sema::core_file_handle_dispatch_name(type_name) {
-//RS                                 Some("FileReader") => Some(THandleOp::FileReaderPath),
-//RS                                 Some("FileWriter") => Some(THandleOp::FileWriterPath),
-//RS                                 _ => None,
-//RS                             }
-//RS                         };
-//RS                         if let Some(op) = op {
-//RS                             return TExpr {
-//RS                                 ty: Type::String,
-//RS                                 kind: TExprKind::HandleMethod {
-//RS                                     recv: Box::new(recv),
-//RS                                     op,
-//RS                                     args: Vec::new(),
-//RS                                 },
-//RS                             };
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-FIELDPOL1: a computed field is not a Rust struct member — sema
-//RS                 // (`CheckerFieldPolicy`) already synthesized it as a getter method
-//RS                 // on `s.methods`; route the read to a call of that method instead
-//RS                 // of a member access. `boxed` never applies (a getter call, not a
-//RS                 // stored recursive edge). `self`'s own env type is deliberately
-//RS                 // `None` (`recv.ty` falls back to `Type::Int`, see `LowerEnv::bind`),
-//RS                 // so a bare `self.field` (every computed field's rewritten body
-//RS                 // reads its siblings this way) resolves the owner via
-//RS                 // `env.self_owner` instead of `recv.ty`.
-//RS                 let field_owner: Option<&str> = if matches!(receiver.as_ref(), Expr::Ident(n, _) if n == Syntax::KW_SELF)
-//RS                 {
-//RS                     env.self_owner.as_deref()
-//RS                 } else if let Type::Named(type_name) = &recv.ty {
-//RS                     Some(type_name.as_str())
-//RS                 } else {
-//RS                     None
-//RS                 };
-//RS                 if let Some(type_name) = field_owner {
-//RS                     if cx
-//RS                         .computed_fields
-//RS                         .get(type_name)
-//RS                         .is_some_and(|c| c.contains(member))
-//RS                     {
-//RS                         let field_ty =
-//RS                             struct_field_type(cx, &Type::Named(type_name.to_string()), member)
-//RS                                 .unwrap_or(Type::Int);
-//RS                         let call = TExpr {
-//RS                             ty: Type::Result {
-//RS                                 ok: Box::new(field_ty.clone()),
-//RS                                 err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
-//RS                             },
-//RS                             kind: TExprKind::MethodCall {
-//RS                                 recv: Box::new(recv),
-//RS                                 method: crate::Codegen::TIR::TMethodRef::inherent(member),
-//RS                                 type_args: Vec::new(),
-//RS                                 args: vec![],
-//RS                                 source_first_string_literal: None,
-//RS                                 operator_line: None,
-//RS                             },
-//RS                         };
-//RS                         let (line, column) = cx.src_line_col(span.start);
-//RS                         // D-SERDE2: a raw Encode method cannot propagate the
-//RS                         // getter's Result with `?`; consume it at the protocol
-//RS                         // boundary, matching the legacy field_self_read path.
-//RS                         let convert = if env.raw_protocol_return {
-//RS                             TTryConvert::ProtocolExit
-//RS                         } else {
-//RS                             TTryConvert::None
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: field_ty,
-//RS                             kind: TExprKind::Try {
-//RS                                 inner: Box::new(call),
-//RS                                 note: None,
-//RS                                 convert,
-//RS                                 file: escape_rust_str(&cx.file),
-//RS                                 line,
-//RS                                 column,
-//RS                                 fn_name: escape_rust_str(&env.fn_name),
-//RS                             },
-//RS                         };
-//RS                     }
-//RS                 }
-//RS                 if let Type::Named(type_name) = &recv.ty {
-//RS                     if crate::Sema::is_swizzleable_math_type(type_name)
-//RS                         && !cx.struct_fields.contains_key(type_name)
-//RS                     {
-//RS                         if let crate::Sema::SwizzleParse::Ok(lanes) =
-//RS                             crate::Sema::parse_swizzle_member(member, type_name)
-//RS                         {
-//RS                             let lanes_u8: Vec<u8> = lanes.iter().map(|&i| i as u8).collect();
-//RS                             return TExpr {
-//RS                                 ty: crate::Sema::swizzle_read_type(type_name, lanes.len()),
-//RS                                 kind: TExprKind::MathSwizzleRead {
-//RS                                     type_name: type_name.clone(),
-//RS                                     recv: Box::new(recv),
-//RS                                     lanes: lanes_u8,
-//RS                                 },
-//RS                             };
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // The `Int` here is a LAST RESORT, never a default: it is the
-//RS                 // guess that emitted `jet_int_to_string(<String>)` for
-//RS                 // `child.output` and made rustc reject Jet's own output (card
-//RS                 // 2021, an I2 internal compiler error). `struct_field_type` now
-//RS                 // answers from the table sema declared the field in, so the
-//RS                 // guess is unreachable for every user struct and every CORE
-//RS                 // struct. Anything still reaching it is a receiver sema itself
-//RS                 // could not name — do not widen it, and never make print's
-//RS                 // integer fast path (`emit/expressions.rs`, `Type::Int`) key on
-//RS                 // a type that came from here.
-//RS                 let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
-//RS                 // Preserve the checked field label; the native adapter owns its Rust spelling.
-//RS                 let field = member.to_string();
-//RS                 // A self-referential (recursive) edge has Rust type `Box<…>`; the read derefs
-//RS                 // to the inner type (total fact from `cx.boxed_edges`, keyed on the receiver's
-//RS                 // resolved struct name — mirrors the AST `boxed_field_read`).
-//RS                 let boxed = match &recv.ty {
-//RS                     Type::Named(n) => cx.boxed_edges.contains(&(n.clone(), member.to_string())),
-//RS                     _ => false,
-//RS                 };
-//RS                 TExpr {
-//RS                     ty: field_ty,
-//RS                     kind: TExprKind::Field {
-//RS                         recv: Box::new(recv),
-//RS                         field,
-//RS                         boxed,
-//RS                     },
-//RS                 }
-//RS             })
-//RS         }
-//RS         // c109 Phase 4/16: an enum literal. Each payload arg carries its resolved
-//RS         // `clone`/`boxed` decisions (`emit_boxed_enum_arg`): a non-scalar payload from
-//RS         // a borrowed-in-env ident → `(…).clone()`; a recursive boxed edge →
-//RS         // `Box::new(…)`. For a scalar payload from a non-borrowed value both are false
-//RS         // (the Phase-4 no-op), so emit is byte-identical. Positional edges key on the
-//RS         // variant name; named edges on `"Variant.label"` (never a clone — matches AST).
-//RS         Expr::EnumLit {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS             leading_dot,
-//RS             span,
-//RS             ..
-//RS         } => {
-//RS             // D-MODULE-VALUE1: a comptime table can lower a helper body before
-//RS             // sema rewrites contextual `Val(x)` / `None` to `Expr::Present` /
-//RS             // `Expr::Absent`. Keep that early shape on the Option carrier
-//RS             // instead of an unnamed enum. Lower the payload in place: the
-//RS             // worklist already cached it under this node's address, and a
-//RS             // cloned temporary would leave stale entries keyed by freed
-//RS             // addresses (an enum path's receiver read as a local).
-//RS             if type_name.is_empty() && variant == Syntax::LIT_VALUE {
-//RS                 if let [EnumLitArg::Positional(inner)] = args.as_slice() {
-//RS                     return in_own_frame(|| lower_present(inner, cx, env));
-//RS                 }
-//RS             }
-//RS             if type_name.is_empty() && variant == Syntax::LIT_NULL && args.is_empty() {
-//RS                 return lower_expr(&Expr::Absent(*span), cx, env);
-//RS             }
-//RS             let contextual_type;
-//RS             let type_name = if *leading_dot && type_name.is_empty() {
-//RS                 if let Some(lowered) = in_own_frame(|| {
-//RS                     lower_raw_contextual_result_variant(variant, args, *span, cx, env)
-//RS                 }) {
-//RS                     return lowered;
-//RS                 }
-//RS                 contextual_type = raw_contextual_return_enum(variant, cx, env);
-//RS                 contextual_type.as_ref().unwrap_or(type_name)
-//RS             } else {
-//RS                 type_name
-//RS             };
-//RS             in_own_frame(|| {
-//RS                 let resolved_type = cx
-//RS                     .local_type_identities
-//RS                     .get(type_name)
-//RS                     .map(String::as_str)
-//RS                     .or_else(|| cx.core_qualified_rust_type_name(type_name))
-//RS                     .unwrap_or(type_name.as_str());
-//RS                 let payload = in_own_frame(|| {
-//RS                     if args.is_empty() {
-//RS                         TEnumPayload::Unit
-//RS                     } else if args.iter().all(|a| matches!(a, EnumLitArg::Positional(_))) {
-//RS                         let pos = args
-//RS                             .iter()
-//RS                             .map(|a| match a {
-//RS                                 EnumLitArg::Positional(e) => {
-//RS                                     lower_enum_arg(resolved_type, variant, variant, e, cx, env)
-//RS                                 }
-//RS                                 _ => unreachable!("all positional in this branch"),
-//RS                             })
-//RS                             .collect();
-//RS                         TEnumPayload::Positional(pos)
-//RS                     } else {
-//RS                         // Keep checked source labels through TIR; MIRRust owns Rust-name mangling.
-//RS                         let named = args
-//RS                             .iter()
-//RS                             .map(|a| match a {
-//RS                                 EnumLitArg::Named { label, expr } => {
-//RS                                     let edge = format!("{}.{}", variant, label);
-//RS                                     (
-//RS                                         label.clone(),
-//RS                                         lower_enum_arg(
-//RS                                             resolved_type,
-//RS                                             variant,
-//RS                                             &edge,
-//RS                                             expr,
-//RS                                             cx,
-//RS                                             env,
-//RS                                         ),
-//RS                                     )
-//RS                                 }
-//RS                                 // A positional arg mixed with named is a sema error that
-//RS                                 // never reaches a covered function; default to a field.
-//RS                                 EnumLitArg::Positional(e) => (
-//RS                                     String::new(),
-//RS                                     lower_enum_arg(resolved_type, variant, variant, e, cx, env),
-//RS                                 ),
-//RS                             })
-//RS                             .collect();
-//RS                         TEnumPayload::Named(named)
-//RS                     }
-//RS                 });
-//RS                 let ty = match env.ret_ty.as_ref() {
-//RS                     Some(Type::Apply { name, args })
-//RS                         if name == type_name || name == resolved_type =>
-//RS                     {
-//RS                         Type::Apply {
-//RS                             name: name.clone(),
-//RS                             args: args.clone(),
-//RS                         }
-//RS                     }
-//RS                     _ => Type::Named(resolved_type.to_string()),
-//RS                 };
-//RS                 TExpr {
-//RS                     ty,
-//RS                     kind: TExprKind::EnumLit {
-//RS                         enum_type: resolved_type.to_string(),
-//RS                         variant: variant.clone(),
-//RS                         payload,
-//RS                     },
-//RS                 }
-//RS             })
-//RS         }
-//RS         // c109 Phase 5: a list literal. Lowers each element as-is (mirrors the AST
-//RS         // `vec![…]` form — no clone/coercion at the literal site). The result type
-//RS         // is `[E]` with `E` taken from the first element; an empty `[]` has no
-//RS         // element to read, so its element type is unresolved (`Int` placeholder),
-//RS         // but the emitted `vec![]` is type-inferred by Rust from the binding context.
-//RS         Expr::ListLit(elems, _) => lower_list_lit(elems, cx, env),
-//RS         // c109 Phase 23: a named-tuple literal. The gate guaranteed `ty` is
-//RS         // `Some(Type::Tuple)`. The CANONICAL field order + struct name come from
-//RS         // the type; each canonical field's value is taken from the literal (by
-//RS         // name) and lowered. Fields keep their checked names: MIR keys a tuple
-//RS         // field by `<instance>::<name>` against the `Type::Tuple` shape, and
-//RS         // each backend mangles from its own field row.
-//RS         Expr::TupleLit(lit_fields, _, ty) => {
-//RS             in_own_frame(|| {
-//RS                 let canonical = match ty {
-//RS                     Some(Type::Tuple(fs)) => tuple_fields_plain(fs),
-//RS                     _ => Vec::new(),
-//RS                 };
-//RS                 let struct_name = tuple_struct_name(&canonical);
-//RS                 // Map field-name → its literal value expr (the literal may list fields in
-//RS                 // any order; the type fixes the canonical order — exactly the AST path).
-//RS                 let mut value_of: std::collections::HashMap<&str, &Expr> =
-//RS                     std::collections::HashMap::new();
-//RS                 for (n, e) in lit_fields {
-//RS                     value_of.insert(n.as_str(), e);
-//RS                 }
-//RS                 let fields: Vec<(String, TExpr)> = canonical
-//RS                     .iter()
-//RS                     .map(|(n, fty)| {
-//RS                         let v = match value_of.get(n.as_str()) {
-//RS                             Some(e) => lower_expr(e, cx, env),
-//RS                             // A missing field never occurs in a sema-checked tuple literal;
-//RS                             // mirror the AST's `0i64` default defensively (an Int literal).
-//RS                             None => TExpr {
-//RS                                 ty: fty.clone(),
-//RS                                 kind: TExprKind::IntLit(0, None),
-//RS                             },
-//RS                         };
-//RS                         (n.clone(), v)
-//RS                     })
-//RS                     .collect();
-//RS                 TExpr {
-//RS                     ty: ty.clone().unwrap_or_else(|| Type::Tuple(Vec::new())),
-//RS                     kind: TExprKind::TupleLit {
-//RS                         struct_name,
-//RS                         fields,
-//RS                     },
-//RS                 }
-//RS             })
-//RS         }
-//RS         // A map literal is one typed value. Keep every lowered pair on the node so
-//RS         // nested maps stay values of the outer map instead of sharing a synthetic
-//RS         // mutable-map local with it.
-//RS         Expr::MapLit(entries, _) => in_own_frame(|| {
-//RS             let tentries: Vec<(TExpr, TExpr)> = entries
-//RS                 .iter()
-//RS                 .map(|(k, v)| (lower_expr(k, cx, env), lower_expr(v, cx, env)))
-//RS                 .collect();
-//RS             let (kt, vt) = tentries
-//RS                 .first()
-//RS                 .map(|(k, v)| (k.ty.clone(), v.ty.clone()))
-//RS                 .unwrap_or((Type::String, Type::Int));
-//RS             let map_ty = Type::Map {
-//RS                 key: Box::new(kt),
-//RS                 key_span: None,
-//RS                 value: Box::new(vt),
-//RS             };
-//RS             TExpr {
-//RS                 ty: map_ty,
-//RS                 kind: TExprKind::MapLit(tentries),
-//RS             }
-//RS         }),
-//RS         // c109 Phase 5: indexing `coll[i]`. Checked functions carry the
-//RS         // canonical `IndexKind` from sema; pre-sema fragments may leave it
-//RS         // unknown, so the same route is recovered from lowered operand types.
-//RS         // The result type remains the element/value type of the lowered base.
-//RS         // Nothing here re-infers a checked index contract during emission.
-//RS         Expr::Index {
-//RS             base,
-//RS             index,
-//RS             span,
-//RS             kind,
-//RS         } => {
-//RS             in_own_frame(|| {
-//RS                 let base_t = lower_expr(base, cx, env);
-//RS                 let index_t = lower_expr(index, cx, env);
-//RS                 let inferred_kind = if matches!(kind, IndexKind::Unknown) {
-//RS                     resolve_unknown_index_kind(&base_t, &index_t, index, cx)
-//RS                 } else {
-//RS                     None
-//RS                 };
-//RS                 let kind = inferred_kind.as_ref().unwrap_or(kind);
-//RS                 if matches!(kind, IndexKind::Unknown) {
-//RS                     let message = format!(
-//RS                         "sema-to-TIR handoff violated: unresolved index kind; file={}; function={}; span={}..{}; base={:?}; index={:?}",
-//RS                         cx.file,
-//RS                         cx.current_fn.borrow().as_str(),
-//RS                         span.start,
-//RS                         span.end,
-//RS                         base_t.ty,
-//RS                         index_t.ty,
-//RS                     );
-//RS                     debug_assert!(false, "{message}");
-//RS                     return invariant_violation_expr(*span, message);
-//RS                 }
-//RS                 // D-LAYOUT-FACTS1=B: select the checked layout field through
-//RS                 // the typed `fields.find(...).unwrap()` path. The exact-name
-//RS                 // predicate preserves the checked selector meaning: an absent
-//RS                 // field stays absent and is not replaced with another field.
-//RS                 if let IndexKind::LayoutField(field_name) = kind {
-//RS                     let layout_field_ty = Type::Named(Syntax::TYPE_LAYOUT_FIELD.to_string());
-//RS                     let line = cx.src_line_col(span.start).0;
-//RS                     let fields = TExpr {
-//RS                         ty: Type::List(Box::new(layout_field_ty.clone())),
-//RS                         kind: TExprKind::Field {
-//RS                             recv: Box::new(base_t.clone()),
-//RS                             field: "fields".to_string(),
-//RS                             boxed: false,
-//RS                         },
-//RS                     };
-//RS                     let field_param = TExpr {
-//RS                         ty: layout_field_ty.clone(),
-//RS                         kind: TExprKind::Local(TLocal::user("layout_field").through_ref()),
-//RS                     };
-//RS                     let predicate_body = TExpr {
-//RS                         ty: Type::Bool,
-//RS                         kind: TExprKind::Binary {
-//RS                             op: BinOp::Eq,
-//RS                             overflow: false,
-//RS                             line: line as u32,
-//RS                             lhs: Box::new(TExpr {
-//RS                                 ty: Type::String,
-//RS                                 kind: TExprKind::Field {
-//RS                                     recv: Box::new(field_param),
-//RS                                     field: "name".to_string(),
-//RS                                     boxed: false,
-//RS                                 },
-//RS                             }),
-//RS                             rhs: Box::new(TExpr {
-//RS                                 ty: Type::String,
-//RS                                 kind: TExprKind::StrLit(vec![TStrPart::Lit(field_name.clone())]),
-//RS                             }),
-//RS                         },
-//RS                     };
-//RS                     let callback = TExpr {
-//RS                         ty: Type::Fn {
-//RS                             params: vec![layout_field_ty.clone()],
-//RS                             ret: Some(Box::new(Type::Bool)),
-//RS                             effect_bound: None,
-//RS                             param_contract: None,
-//RS                             call_metadata: None,
-//RS                             return_view_provenance: None,
-//RS                         },
-//RS                         kind: TExprKind::Lambda(Box::new(TLambda {
-//RS                             source_params: vec!["layout_field".to_string()],
-//RS                             param_types: vec![layout_field_ty.clone()],
-//RS                             ret: Some(Type::Bool),
-//RS                             failure_carrier: TFailureCarrier::Infallible,
-//RS                             executable: TLambdaBody::Expr(Box::new(predicate_body)),
-//RS                             source_span: *span,
-//RS                             frame_schedule: None,
-//RS                             frame_schedule_derivation: None,
-//RS                             capture_facts: crate::Codegen::TIR::TCaptureFacts::default(),
-//RS                             host_param_conventions: None,
-//RS                             effects: crate::Codegen::TIR::TEffectFacts::default(),
-//RS                             jit_name: String::new(),
-//RS                             is_move: true,
-//RS                             boxed: false,
-//RS                             rc: false,
-//RS                             arc: false,
-//RS                             captures: Vec::new(),
-//RS                             capture_origins: Default::default(),
-//RS                             materialized_captures: Vec::new(),
-//RS                             frozen_captures: Vec::new(),
-//RS                             uses_stack_sentry: false,
-//RS                         })),
-//RS                     };
-//RS                     let found = TExpr {
-//RS                         ty: Type::Option(Box::new(layout_field_ty.clone())),
-//RS                         kind: TExprKind::ClosureMethod {
-//RS                             recv: Box::new(fields),
-//RS                             op: crate::Codegen::TIR::TClosureOp::Find,
-//RS                             args: vec![callback],
-//RS                         },
-//RS                     };
-//RS                     return TExpr {
-//RS                         ty: layout_field_ty,
-//RS                         kind: TExprKind::HostCall(Box::new(THostCall::OptionProbe {
-//RS                             inner: Box::new(found),
-//RS                             kind: TOptionProbe::Unwrap,
-//RS                         })),
-//RS                     };
-//RS                 }
-//RS                 let base_ty = base_t.ty.without_user_tags();
-//RS                 let line = cx.src_line_col(span.start).0;
-//RS                 if matches!(kind, IndexKind::Range) {
-//RS                     return in_own_frame(|| {
-//RS                         let zero = || TExpr {
-//RS                             ty: Type::Int,
-//RS                             kind: TExprKind::IntLit(0, None),
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: base_t.ty.clone(),
-//RS                             kind: TExprKind::Slice {
-//RS                                 base: Box::new(base_t),
-//RS                                 start: Box::new(zero()),
-//RS                                 end: Box::new(zero()),
-//RS                                 range: Some(Box::new(index_t)),
-//RS                                 line,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-SIMD2: `v[i]` lane access on a SIMD lane type → a bounds-checked lane
-//RS                 // read. The result is the lane scalar; sema resolved `IndexKind::Lane`.
-//RS                 if let IndexKind::Lane(lane_ty) = kind {
-//RS                     return in_own_frame(|| {
-//RS                         return TExpr {
-//RS                             ty: crate::Sema::math_scalar_ty(lane_ty),
-//RS                             kind: TExprKind::MathLaneIndex {
-//RS                                 lane_ty: lane_ty.clone(),
-//RS                                 base: Box::new(base_t),
-//RS                                 index: Box::new(index_t),
-//RS                                 line: line as u32,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 if let IndexKind::User(type_name) = kind {
-//RS                     return in_own_frame(|| {
-//RS                         let value_ty = cx
-//RS                             .index_hooks
-//RS                             .get(type_name)
-//RS                             .map(|h| h.value_type.clone())
-//RS                             .unwrap_or(Type::Int);
-//RS                         return TExpr {
-//RS                             ty: value_ty,
-//RS                             kind: TExprKind::IndexHook {
-//RS                                 type_name: type_name.clone(),
-//RS                                 base: Box::new(base_t),
-//RS                                 index: Box::new(index_t),
-//RS                                 line,
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-MEM1 S6 (D-POOLID-API1=A): `pool[id]` read — a generation-checked
-//RS                 // clone of `T` via `jet_pool_get` (panics on a stale `id`, mirroring the
-//RS                 // array-oob panic precedent). `ConstInline` is the pragmatic vehicle: no
-//RS                 // new `TExprKind` needed for a single free-function call, same as the
-//RS                 // `SQL.raw` escape in `lower_method_call` below.
-//RS                 if matches!(kind, IndexKind::Pool) {
-//RS                     let elem_ty = match base_ty {
-//RS                         Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
-//RS                             args[0].clone()
-//RS                         }
-//RS                         _ => Type::Int,
-//RS                     };
-//RS                     let src_line = cx.src_line_text(line).to_string();
-//RS                     return TExpr {
-//RS                         ty: elem_ty,
-//RS                         kind: TExprKind::PoolSlot {
-//RS                             pool: Box::new(base_t),
-//RS                             id: Box::new(index_t),
-//RS                             mutable: false,
-//RS                             field: None,
-//RS                             line,
-//RS                             src_line,
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 if matches!(kind, IndexKind::FixedListProof) {
-//RS                     let elem_ty = match base_ty {
-//RS                         Type::FixedList { elem, .. } => (**elem).clone(),
-//RS                         _ => Type::Int,
-//RS                     };
-//RS                     return TExpr {
-//RS                         ty: elem_ty,
-//RS                         kind: TExprKind::HostCall(Box::new(
-//RS                             crate::Codegen::TIR::THostCall::FixedListIndex {
-//RS                                 base: Box::new(base_t),
-//RS                                 index: Box::new(index_t),
-//RS                                 line: line as u32,
-//RS                             },
-//RS                         )),
-//RS                     };
-//RS                 }
-//RS                 let result_ty = match base_ty {
-//RS                     Type::List(elem) => (**elem).clone(),
-//RS                     Type::Map { value, .. } => (**value).clone(),
-//RS                     Type::FixedList { elem, .. } => (**elem).clone(),
-//RS                     // D-DYNARRAY1: `window[i]` on a `View<T>`.
-//RS                     Type::Apply { name, args }
-//RS                         if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
-//RS                             && args.len() == 1 =>
-//RS                     {
-//RS                         args[0].clone()
-//RS                     }
-//RS                     _ => Type::Int,
-//RS                 };
-//RS                 // D-SOA1: `xs[i]` on a columnar list gathers the logical `S` from the
-//RS                 // columns. (A fused `xs[i].field` is handled in the `Field` arm before
-//RS                 // this point — that path reads a single column directly.)
-//RS                 if let Type::List(elem) = base_ty {
-//RS                     if cx.columnar_list_type(elem).is_some() {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: result_ty,
-//RS                                 kind: TExprKind::ColumnarGather {
-//RS                                     base: Box::new(base_t),
-//RS                                     index: Box::new(index_t),
-//RS                                     line,
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 TExpr {
-//RS                     ty: result_ty,
-//RS                     kind: TExprKind::Index {
-//RS                         base: Box::new(base_t),
-//RS                         index: Box::new(index_t),
-//RS                         is_map: matches!(kind, IndexKind::Map),
-//RS                         uninit_fixed: matches!(
-//RS                             base.as_ref(),
-//RS                             Expr::Ident(name, _) if env.is_uninit_fixed(name)
-//RS                         ),
-//RS                         line,
-//RS                     },
-//RS                 }
-//RS             })
-//RS         }
-//RS         // Owned slicing lowers here. Place contexts are handled above and use
-//RS         // ViewNew/ViewMutNew, preserving the owner's storage.
-//RS         Expr::Slice {
-//RS             base,
-//RS             start,
-//RS             end,
-//RS             range,
-//RS             span,
-//RS         } => in_own_frame(|| {
-//RS             let base_t = lower_expr(base, cx, env);
-//RS             let start_t = lower_expr(start, cx, env);
-//RS             let end_t = lower_expr(end, cx, env);
-//RS             let range_t = range
-//RS                 .as_ref()
-//RS                 .map(|range| Box::new(lower_expr(range, cx, env)));
-//RS             let result_ty = base_t.ty.clone();
-//RS             let line = cx.src_line_col(span.start).0;
-//RS             TExpr {
-//RS                 ty: result_ty,
-//RS                 kind: TExprKind::Slice {
-//RS                     base: Box::new(base_t),
-//RS                     start: Box::new(start_t),
-//RS                     end: Box::new(end_t),
-//RS                     range: range_t,
-//RS                     line,
-//RS                 },
-//RS             }
-//RS         }),
-//RS         // D-TAINT1: `#Tainted expr` — the value-fact tag is **erased in codegen**
-//RS         // (I3). Lower the inner expression unchanged; taint exists only as a
-//RS         // compile-time sema proof, never a runtime value.
-//RS         Expr::Tainted(inner, _, _) => lower_expr(inner, cx, env),
-//RS         Expr::Present(inner, _) => in_own_frame(|| lower_present(inner, cx, env)),
-//RS         // c109 Phase 8: bare `null` → `None`. The element type is unresolved here
-//RS         // (`Int` placeholder) — like an empty `vec![]`, Rust infers it from the
-//RS         // binding/return context. Mirrors `Expr::Absent`.
-//RS         Expr::Absent(_) => TExpr {
-//RS             ty: Type::Option(Box::new(Type::Int)),
-//RS             kind: TExprKind::Absent,
-//RS         },
-//RS         // D-FAIL-BREACH1=A: a `#Todo` typed goal becomes the E3011 Prelude stop.
-//RS         // The enclosing checked return type lives on TExpr.ty; MIR interns that
-//RS         // type directly instead of carrying or reparsing a display string.
-//RS         Expr::Todo { span, .. } => in_own_frame(|| {
-//RS             let line = cx.src_line_col(span.start).0;
-//RS             TExpr {
-//RS                 ty: env.ret_ty.clone().unwrap_or_else(unit_type),
-//RS                 kind: TExprKind::Todo { line },
-//RS             }
-//RS         }),
-//RS         // Card #1440: the dead end of an else-less exhaustive dispatch. Sema
-//RS         // proved coverage (E0307); like Todo, the result `ty` is never
-//RS         // load-bearing — the node diverges on every tier.
-//RS         Expr::NoElse(span) => in_own_frame(|| {
-//RS             let line = cx.src_line_col(span.start).0;
-//RS             TExpr {
-//RS                 ty: Type::Named("Unit".to_string()),
-//RS                 kind: TExprKind::Unreachable { line },
-//RS             }
-//RS         }),
-//RS         Expr::Ok(inner, _) => in_own_frame(|| {
-//RS             let mut t = lower_owned_expr(inner, cx, env);
-//RS             // Sema checks `Ok` against the enclosing success payload, while
-//RS             // the executable value must carry that callable's exact error
-//RS             // row. Preserve the existing carrier when this is already the
-//RS             // expected result; otherwise lift the raw payload with the
-//RS             // checked error type instead of manufacturing the default `Err`.
-//RS             if env.ret_ty.as_ref() == Some(&t.ty) {
-//RS                 return t;
-//RS             }
-//RS             if let Some(Type::Result { ok, .. }) = &env.ret_ty {
-//RS                 // `None` carries no payload to type it; the checked success
-//RS                 // slot (`T?` in `T? E!`) does.
-//RS                 if matches!(t.kind, TExprKind::Absent) && matches!(ok.as_ref(), Type::Option(_)) {
-//RS                     t.ty = (**ok).clone();
-//RS                 }
-//RS                 t = preserve_typed_list_shape(t, ok, cx);
-//RS                 t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok);
-//RS             }
-//RS             let err_ty = match env.ret_ty.as_ref() {
-//RS                 Some(Type::Result { err, .. }) => (**err).clone(),
-//RS                 _ => Type::Named(Syntax::TYPE_ERR.to_string()),
-//RS             };
-//RS             TExpr {
-//RS                 ty: Type::Result {
-//RS                     ok: Box::new(t.ty.clone()),
-//RS                     err: Box::new(err_ty),
-//RS                 },
-//RS                 kind: TExprKind::Ok(Box::new(t)),
-//RS             }
-//RS         }),
-//RS         // c109 Phase 8: `Err(e)` → `Err(e)`. The err type is the inner's; the ok type
-//RS         // is unresolved here (inferred from the function return context).
-//RS         Expr::Err(inner, _) => in_own_frame(|| {
-//RS             let mut t = lower_owned_expr(inner, cx, env);
-//RS             let ok_ty = match env.ret_ty.as_ref() {
-//RS                 Some(Type::Result { ok, .. }) => (**ok).clone(),
-//RS                 _ => Type::Int,
-//RS             };
-//RS             if let Some(Type::Result { err, .. }) = &env.ret_ty {
-//RS                 t = preserve_typed_list_shape(t, err, cx);
-//RS                 t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, err);
-//RS             }
-//RS             TExpr {
-//RS                 ty: Type::Result {
-//RS                     ok: Box::new(ok_ty),
-//RS                     err: Box::new(t.ty.clone()),
-//RS                 },
-//RS                 kind: TExprKind::Err(Box::new(t), None),
-//RS             }
-//RS         }),
-//RS         // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is the
-//RS         // total sema fact — reproduce it exactly (including Typed source/target). The result
-//RS         // type is the inner `Result`'s ok type (the `?` unwraps it). The trace-frame
-//RS         // location is resolved here so emit never reads `cx.current_fn`/`cx.src`.
-//RS         Expr::Try(inner, span, convert, note) => {
-//RS             in_own_frame(|| {
-//RS                 // A sema-elaborated `?` owns the same carrier-preserving
-//RS                 // subject boundary as `??`: keep the inner call's effective
-//RS                 // Result/Option visible until this outer Try consumes it.
-//RS                 // Isolate the worklist cache so nested argument lowering does
-//RS                 // not replay values from the surrounding normal-value pass.
-//RS                 let inner_t = {
-//RS                     let _try_subject_cache_scope = ExprCacheScope::enter();
-//RS                     let fallback_subject = env.fallback_subject;
-//RS                     env.fallback_subject = true;
-//RS                     let inner_t = lower_expr(inner, cx, env);
-//RS                     env.fallback_subject = fallback_subject;
-//RS                     inner_t
-//RS                 };
-//RS                 if matches!(&inner_t.ty, Type::Named(name) if name == Syntax::TYPE_NEVER) {
-//RS                     return inner_t;
-//RS                 }
-//RS                 let note_t = note
-//RS                     .as_ref()
-//RS                     .map(|note| Box::new(lower_expr(note, cx, env)));
-//RS                 // `?` unwraps a `Result<T, E>` or a `T?` to `T` (the value type),
-//RS                 // exactly the success value MIR's try lowering produces; a
-//RS                 // `return x?` in a `T?` function then re-wraps it in `Present`.
-//RS                 // Any other inner type stays as it is.
-//RS                 let result_ty = match &inner_t.ty {
-//RS                     Type::Result { ok, .. } | Type::Option(ok) => (**ok).clone(),
-//RS                     other => other.clone(),
-//RS                 };
-//RS                 let tconvert = match convert {
-//RS                     TryConvert::None => TTryConvert::None,
-//RS                     TryConvert::Never => TTryConvert::Never,
-//RS                     TryConvert::DefaultErr => TTryConvert::DefaultErr,
-//RS                     TryConvert::Typed {
-//RS                         fn_name,
-//RS                         source,
-//RS                         target,
-//RS                     } => TTryConvert::Typed {
-//RS                         fn_name: fn_name.clone(),
-//RS                         source: source.clone(),
-//RS                         target: target.clone(),
-//RS                     },
-//RS                     TryConvert::WidenUnion { enum_name, tag } => TTryConvert::WidenUnion {
-//RS                         enum_name: enum_name.clone(),
-//RS                         tag: tag.clone(),
-//RS                     },
-//RS                 };
-//RS                 let (line, column) = cx.src_line_col(span.start);
-//RS                 TExpr {
-//RS                     ty: result_ty,
-//RS                     kind: TExprKind::Try {
-//RS                         inner: Box::new(inner_t),
-//RS                         note: note_t,
-//RS                         convert: tconvert,
-//RS                         file: escape_rust_str(&cx.file),
-//RS                         line,
-//RS                         column,
-//RS                         fn_name: escape_rust_str(&env.fn_name),
-//RS                     },
-//RS                 }
-//RS             })
-//RS         }
-//RS         // c109 Phase 8: the `??` fallback operator. D-FAIL-CARRIER1=A: one carrier,
-//RS         // so the value type alone gives the payload type. Mirrors `emit_or_fallback`.
-//RS         Expr::OrFallback {
-//RS             value, fallback, ..
-//RS         } => lower_or_fallback(value, fallback, cx, env),
-//RS         // c109 Phase 8: optional chaining `base?.member`. The `flatten` fact is total
-//RS         // (from sema): true → `.and_then`, false → `.map`. Resolve the projected
-//RS         // optional type in canonical TIR so every backend sees the same carrier.
-//RS         Expr::OptField {
-//RS             base,
-//RS             member,
-//RS             flatten,
-//RS             ..
-//RS         } => in_own_frame(|| {
-//RS             let base_t = lower_expr(base, cx, env);
-//RS             let ty = match &base_t.ty {
-//RS                 Type::Option(payload_ty) => struct_field_type(cx, payload_ty, member)
-//RS                     .map(|field_ty| {
-//RS                         if *flatten {
-//RS                             match field_ty {
-//RS                                 Type::Option(inner) => Type::Option(inner),
-//RS                                 other => Type::Option(Box::new(other)),
-//RS                             }
-//RS                         } else {
-//RS                             Type::Option(Box::new(field_ty))
-//RS                         }
-//RS                     })
-//RS                     .unwrap_or_else(|| base_t.ty.clone()),
-//RS                 _ => base_t.ty.clone(),
-//RS             };
-//RS             TExpr {
-//RS                 ty,
-//RS                 kind: TExprKind::OptField {
-//RS                     base: Box::new(base_t),
-//RS                     member: member.to_string(),
-//RS                     flatten: *flatten,
-//RS                 },
-//RS             }
-//RS         }),
-//RS         // c109 Phase 11: a lambda/closure literal. The gate proved the body is
-//RS         // in-subset; lower it via `lower_lambda` (capture/escape facts total from
-//RS         // `Lambda.meta`). The result type is the closure's fn type — rarely
-//RS         // load-bearing in emit (a closure is consumed in arg position), so carry a
-//RS         // placeholder `Fn` type; the binding/arg context supplies the real Rust type.
-//RS         Expr::Lambda(lam) => in_own_frame(|| {
-//RS             let tl = lower_lambda(lam, cx, env);
-//RS             let params = tl.param_types.clone();
-//RS             let ret = tl.ret.clone().map(Box::new);
-//RS             TExpr {
-//RS                 ty: Type::Fn {
-//RS                     params,
-//RS                     ret,
-//RS                     effect_bound: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                     return_view_provenance: lam.meta.return_view_provenance.clone(),
-//RS                 },
-//RS                 kind: TExprKind::Lambda(Box::new(tl)),
-//RS             }
-//RS         }),
-//RS         // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (S58). The result type is
-//RS         // `Ptr<elem>` (`ptr_type`), total from the node's `elem`. The element's Rust type
-//RS         // is resolved here (`cx.rust_type`) so emit makes no decision (I3). The cast is
-//RS         // safe Rust (no `unsafe`).
-//RS         Expr::PtrFromAddr { elem, addr, .. } => in_own_frame(|| {
-//RS             let taddr = lower_expr(addr, cx, env);
-//RS             TExpr {
-//RS                 ty: crate::Sema::ptr_type(elem.clone()),
-//RS                 kind: TExprKind::PtrFromAddr {
-//RS                     elem: elem.clone(),
-//RS                     addr: Box::new(taddr),
-//RS                 },
-//RS             }
-//RS         }),
-//RS         // These nodes are compile-time syntax or condition-only shapes. Sema
-//RS         // consumes them before value lowering; retaining an explicit typed
-//RS         // violation prevents a checked node from disappearing into a fallback.
-//RS         Expr::StrMatchLit(_, span) => invariant_violation_expr(*span, "StrMatchLit"),
-//RS         Expr::BinMatchLit(_, span) => invariant_violation_expr(*span, "BinMatchLit"),
-//RS         Expr::MemberSpread { span, .. } => invariant_violation_expr(*span, "MemberSpread"),
-//RS         Expr::Spread(_, span) => invariant_violation_expr(*span, "Spread"),
-//RS         Expr::ReduceMarker(_, span) => invariant_violation_expr(*span, "ReduceMarker"),
-//RS         Expr::Paren(inner, _) => lower_expr(inner, cx, env),
-//RS 
-//RS         // D-UNITLIT1 / D-TYPE2-IMAG1=A: Comptime/MirBridge lower the raw AST,
-//RS         // so sema's unit-literal rewrite has not run yet. Reproduce it and
-//RS         // lower the result. An unsupported suffix is an impossible checked
-//RS         // shape, represented explicitly instead of as a successful Todo.
-//RS         Expr::UnitLit { suffix, span, .. } => match unit_lit_elaborated(e, cx) {
-//RS             Some(rewritten) => lower_temporary_expr(&rewritten, cx, env),
-//RS             None => invariant_violation_expr(*span, format!("UnitLit `{suffix}`")),
-//RS         },
-//RS 
-//RS         // Comptime/MirBridge can evaluate function bodies before sema elaborates
-//RS         // `Type.{ … }` (eval_comptime_items runs early). Mirror elaborate_typed_lit.
-//RS         // Sema also keeps the head on an EMPTY list/map literal (`[U8]{}`,
-//RS         // `[String:Int]{}`) on purpose: the head is the only source of the
-//RS         // element type, and this arm carries it into `t.ty` in every position.
-//RS         Expr::TypedLit { head, body, span } => {
-//RS             in_own_frame(|| {
-//RS                 let Some(head) = head.clone() else {
-//RS                     return invariant_violation_expr(*span, "TypedLit without head");
-//RS                 };
-//RS                 if let Type::Named(type_name) = &head {
-//RS                     if let Some(lowered) = lower_boundary_typed_lit(type_name, body, cx, env) {
-//RS                         return lowered;
-//RS                     }
-//RS                 }
-//RS                 if head == Type::Named(Syntax::TYPE_REGEX.to_string()) {
-//RS                     if let TypedLitBody::Value(pattern) = body {
-//RS                         return in_own_frame(|| {
-//RS                             return core_call_expr(
-//RS                                 head,
-//RS                                 "core.regex",
-//RS                                 "literal",
-//RS                                 vec![lower_expr(pattern, cx, env)],
-//RS                                 *span,
-//RS                                 vec![false],
-//RS                             );
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 let rewritten = match (head.clone(), body.clone()) {
-//RS                     (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Empty) => {
-//RS                         Expr::ListLit(Vec::new(), *span)
-//RS                     }
-//RS                     (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(elems)) => {
-//RS                         Expr::ListLit(elems, *span)
-//RS                     }
-//RS                     (Type::List(_) | Type::FixedList { .. }, TypedLitBody::ByteText(parts)) => {
-//RS                         let Some(elems) = byte_text_exprs(&parts, *span) else {
-//RS                             return invariant_violation_expr(*span, "TypedLit byte text");
-//RS                         };
-//RS                         Expr::ListLit(elems, *span)
-//RS                     }
-//RS                     (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Value(inner)) => {
-//RS                         Expr::ListLit(vec![*inner], *span)
-//RS                     }
-//RS                     (Type::Map { .. }, TypedLitBody::Empty) => Expr::MapLit(Vec::new(), *span),
-//RS                     (Type::Map { .. }, TypedLitBody::Entries(entries)) => {
-//RS                         Expr::MapLit(entries, *span)
-//RS                     }
-//RS                     (Type::Named(name), TypedLitBody::Fields(fields)) => Expr::StructLit {
-//RS                         type_name: name,
-//RS                         type_args: Vec::new(),
-//RS                         import_ns: None,
-//RS                         as_trait: None,
-//RS                         fields,
-//RS                         inferred: false,
-//RS                         span: *span,
-//RS                     },
-//RS                     (Type::Apply { name, args }, TypedLitBody::Fields(fields)) => Expr::StructLit {
-//RS                         type_name: name,
-//RS                         type_args: args,
-//RS                         import_ns: None,
-//RS                         as_trait: None,
-//RS                         fields,
-//RS                         inferred: false,
-//RS                         span: *span,
-//RS                     },
-//RS                     (Type::Named(name), TypedLitBody::Empty) => Expr::StructLit {
-//RS                         type_name: name,
-//RS                         type_args: Vec::new(),
-//RS                         import_ns: None,
-//RS                         as_trait: None,
-//RS                         fields: Vec::new(),
-//RS                         inferred: false,
-//RS                         span: *span,
-//RS                     },
-//RS                     (Type::Apply { name, args }, TypedLitBody::Empty) => Expr::StructLit {
-//RS                         type_name: name,
-//RS                         type_args: args,
-//RS                         import_ns: None,
-//RS                         as_trait: None,
-//RS                         fields: Vec::new(),
-//RS                         inferred: false,
-//RS                         span: *span,
-//RS                     },
-//RS                     (_, TypedLitBody::Value(inner)) => {
-//RS                         // Scalar `U8.{ 13 }` / `F32.{ -0.0 }` — lower the value, then
-//RS                         // retag with head width (including nested float operands so
-//RS                         // unary/binary keep F32/F64 lanes matched).
-//RS                         let mut t = lower_temporary_expr(&inner, cx, env);
-//RS                         // `T?{None}` names the option type its absent value lacks.
-//RS                         if matches!(t.kind, TExprKind::Absent) && matches!(head, Type::Option(_)) {
-//RS                             t.ty = head.clone();
-//RS                             return t;
-//RS                         }
-//RS                         retag_numeric_width(
-//RS                             &mut t,
-//RS                             &head,
-//RS                             cx.src_line_col(span.start).0 as u32,
-//RS                         );
-//RS                         return t;
-//RS                     }
-//RS                     (_, TypedLitBody::Elements(elems)) if elems.len() == 1 => {
-//RS                         let mut t = lower_temporary_expr(&elems[0], cx, env);
-//RS                         retag_numeric_width(
-//RS                             &mut t,
-//RS                             &head,
-//RS                             cx.src_line_col(span.start).0 as u32,
-//RS                         );
-//RS                         return t;
-//RS                     }
-//RS                     _ => {
-//RS                         return invariant_violation_expr(
-//RS                             *span,
-//RS                             format!("typed literal body vs head `{}`", head.name()),
-//RS                         );
-//RS                     }
-//RS                 };
-//RS                 in_own_frame(|| {
-//RS                     let mut t = lower_temporary_expr(&rewritten, cx, env);
-//RS                     // Prefer the typed head when the rewritten form under-specifies (empty list/map).
-//RS                     // Function types in that head keep source spelling (`fn(...) T`);
-//RS                     // stored callables use the effective Result carrier.
-//RS                     if matches!(
-//RS                         head,
-//RS                         Type::List(_)
-//RS                             | Type::FixedList { .. }
-//RS                             | Type::Map { .. }
-//RS                             | Type::Named(_)
-//RS                             | Type::Apply { .. }
-//RS                             | Type::Int
-//RS                             | Type::IntN { .. }
-//RS                             | Type::InlineRange { .. }
-//RS                             | Type::Float
-//RS                             | Type::Float32
-//RS                     ) {
-//RS                         t.ty = head.with_effective_fn_returns();
-//RS                     }
-//RS                     // D-SG9: retag list-element IntLits from a `[U8]`/`[I32]`/… head so
-//RS                     // emit uses the right Rust suffix even if sema left width unset.
-//RS                     if let Type::List(elem) | Type::FixedList { elem, .. } = &head {
-//RS                         if let Type::IntN { signed, bits } = elem.as_ref() {
-//RS                             if let TExprKind::ListLit(elems) = &mut t.kind {
-//RS                                 for el in elems.iter_mut() {
-//RS                                     if let TExprKind::IntLit(_, width) = &mut el.kind {
-//RS                                         *width = Some((*signed, *bits));
-//RS                                         el.ty = elem.as_ref().clone();
-//RS                                     }
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         if matches!(elem.as_ref(), Type::Float | Type::Float32) {
-//RS                             let line = cx.src_line_col(span.start).0 as u32;
-//RS                             if let TExprKind::ListLit(elems) = &mut t.kind {
-//RS                                 for el in elems.iter_mut() {
-//RS                                     retag_numeric_width(el, elem, line);
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         // `[T?]{…, None}`: a bare `None` carries only the `Int`
-//RS                         // placeholder; the head names its checked option type.
-//RS                         if matches!(elem.as_ref(), Type::Option(_)) {
-//RS                             if let TExprKind::ListLit(elems) = &mut t.kind {
-//RS                                 for el in elems.iter_mut() {
-//RS                                     if matches!(el.kind, TExprKind::Absent) {
-//RS                                         el.ty = elem.as_ref().clone();
-//RS                                     }
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     t
-//RS                 })
-//RS             })
-//RS         }
-//RS         // A binding-free variant test in value position resolves its owner
-//RS         // from the checked subject type (user or Core enum), exactly as the
-//RS         // condition lowerer does, with the name-only owner map as fallback.
-//RS         Expr::PatternTest {
-//RS             subject,
-//RS             pattern: pattern @ Pattern::Variant { bindings, .. },
-//RS             ..
-//RS         } if bindings.is_empty() => {
-//RS             lower_binding_free_variant_pattern_test(subject, pattern, cx, env)
-//RS         }
-//RS         // S31: a nested pattern in expression position is one structural
-//RS         // test; MIR resolves each nested owner from its payload type. A
-//RS         // variant test whose payload slots bind nothing (`.Scalar(_)`) is the
-//RS         // same structural test.
-//RS         Expr::PatternTest {
-//RS             subject, pattern, ..
-//RS         } if pattern.has_nested_pattern() || pattern_binds_nothing(pattern) => {
-//RS             let subj = lower_expr(subject, cx, env);
-//RS             let enum_type = match pattern {
-//RS                 Pattern::Variant { .. } | Pattern::Or(..) => {
-//RS                     super::patterns::resolved_enum_subject_type(cx, &subj.ty).ok()
-//RS                 }
-//RS                 _ => None,
-//RS             };
-//RS             TExpr {
-//RS                 ty: Type::Bool,
-//RS                 kind: TExprKind::PatternMatches {
-//RS                     subj: Box::new(subj),
-//RS                     pattern: TPattern::from_ast(
-//RS                         pattern.clone(),
-//RS                         enum_type,
-//RS                         TPatternPosition::Arm,
-//RS                         false,
-//RS                         false,
-//RS                     ),
-//RS                 },
-//RS             }
-//RS         }
-//RS         // Result tag tests in expression position have no bindings to carry.
-//RS         // Reuse structural MIR pattern matching, which probes the same Result
-//RS         // carrier on AOT, JIT, and interpreter without evaluating the subject twice.
-//RS         Expr::PatternTest {
-//RS             subject,
-//RS             pattern:
-//RS                 pattern @ (Pattern::Ok { binding, .. } | Pattern::Err { binding, .. }),
-//RS             ..
-//RS         } if binding.is_empty() || binding == "_" => TExpr {
-//RS             ty: Type::Bool,
-//RS             kind: TExprKind::PatternMatches {
-//RS                 subj: Box::new(lower_expr(subject, cx, env)),
-//RS                 pattern: TPattern::from_ast(
-//RS                     pattern.clone(),
-//RS                     None,
-//RS                     TPatternPosition::Arm,
-//RS                     false,
-//RS                     false,
-//RS                 ),
-//RS             },
-//RS         },
-//RS         // D-FAIL-CARRIER1: sema represents expression-position `value == None`
-//RS         // as an absent pattern test.  Probe the same carrier used by TIR `if`
-//RS         // conditions, then negate its presence.  The evaluator and resident JIT
-//RS         // marshal this existing probe; the emitted program uses JetOptionalView.
-//RS         Expr::PatternTest {
-//RS             subject,
-//RS             pattern: Pattern::Absent(_),
-//RS             ..
-//RS         } => {
-//RS             let subject = lower_expr(subject, cx, env);
-//RS             let present = TExpr {
-//RS                 ty: Type::Bool,
-//RS                 kind: TExprKind::HostCall(Box::new(THostCall::OptionProbe {
-//RS                     inner: Box::new(subject),
-//RS                     kind: TOptionProbe::IsSome,
-//RS                 })),
-//RS             };
-//RS             TExpr {
-//RS                 ty: Type::Bool,
-//RS                 kind: TExprKind::Unary {
-//RS                     op: UnOp::Not,
-//RS                     operand: Box::new(present),
-//RS                 },
-//RS             }
-//RS         }
-//RS         Expr::PatternTest {
-//RS             subject,
-//RS             pattern: pattern @ Pattern::BinMatch { .. },
-//RS             ..
-//RS         } => {
-//RS             let subject = lower_expr(subject, cx, env);
-//RS             super::patterns::bin_match_pattern_cond_expr(pattern, subject, cx)
-//RS         }
-//RS         Expr::PatternTest {
-//RS             subject,
-//RS             pattern: pattern @ Pattern::StrMatch { .. },
-//RS             ..
-//RS         } => {
-//RS             let subject = lower_expr(subject, cx, env);
-//RS             super::patterns::str_match_pattern_cond_expr(pattern, subject, cx)
-//RS         }
-//RS         // S31: a pattern-bound name is in scope only for the rest of an `if`
-//RS         // condition, so sema never brings a value-position binding into scope
-//RS         // (`return r == .Val(name)` binds a fresh, unread `name`, even when an
-//RS         // outer `name` exists). The value is the truth of the same condition:
-//RS         // `if <test> { true } else { false }`, lowered by the if-condition
-//RS         // lowerer, which owns every carrier, refinement, and binding shape.
-//RS         Expr::PatternTest { .. } => {
-//RS             let (cond, _bindings, then_body) = super::control_flow::lower_if_cond(e, cx, env);
-//RS             canonicalize_pre_tier_expr(TExpr {
-//RS                 ty: Type::Bool,
-//RS                 kind: TExprKind::IfExpr {
-//RS                     cond: Box::new(cond),
-//RS                     then_body,
-//RS                     then_value: Box::new(TExpr {
-//RS                         ty: Type::Bool,
-//RS                         kind: TExprKind::BoolLit(true),
-//RS                     }),
-//RS                     else_body: Vec::new(),
-//RS                     else_value: Box::new(TExpr {
-//RS                         ty: Type::Bool,
-//RS                         kind: TExprKind::BoolLit(false),
-//RS                     }),
-//RS                 },
-//RS             })
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A variant test (or an or-pattern of variant tests) that binds no name, so
-//RS /// it has a value in expression position (`abi == .Scalar(_)`).
-// END-PORT-PENDING 0480 crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:7367-8959
+use jet_foundation.[Expr, Type, EnumLitArg, IndexKind, TypedLitBody, Pattern, TryConvert, BinOp, UnOp, Span]
+use jet_codegen.Codegen.Context.[Cx]
+use jet_codegen.TIR.[LowerEnv, TExpr, TExprKind, TEnumPayload, THostCall, TTryConvert, THandleOp, TMethodRef, TLocal, TStrPart, TLambda, TLambdaBody, TFailureCarrier, TCaptureFacts, TEffectFacts, TClosureOp, TOptionProbe, TPattern, TPatternPosition, lower_enum_arg, struct_field_type, shared_guard_value_field, declared_field_ty, is_numeric_bounds_const, preserve_typed_list_shape, maybe_widen_expr_to_union, lower_lambda, unit_type, canonicalize_pre_tier_expr]
+use jet_codegen.TIR.Lower.Expressions.[in_own_frame, lower_expr, lower_owned_expr, lower_list_lit, lower_present, lower_raw_contextual_result_variant, raw_contextual_return_enum, grouped_enum_unit_variant, compiler_fact_type, core_module_path_from_receiver, resolve_unknown_index_kind, invariant_violation_expr, ExprCacheScope, lower_or_fallback, lower_temporary_expr, unit_lit_elaborated, lower_boundary_typed_lit, byte_text_exprs, retag_numeric_width, core_call_expr, pattern_binds_nothing, lower_binding_free_variant_pattern_test]
+use jet_codegen.TIR.Lower.Patterns.[resolved_enum_subject_type, bin_match_pattern_cond_expr, str_match_pattern_cond_expr]
+use jet_codegen.TIR.Lower.ControlFlow.[lower_if_cond]
+use jet_codegen.Codegen.[escape_rust_str, is_json_type_name, is_db_value_type_name, tuple_fields_plain, tuple_struct_name]
+use jet_sema.[core_file_handle_dispatch_name, is_swizzleable_math_type, SwizzleParse, parse_swizzle_member, swizzle_read_type, math_scalar_ty, ptr_type]
+use jet_ast.[numeric_type_from_name]
+use jet_foundation.Registry as Registry
+use jet_syntax as Syntax
 
+// Private fragments of the canonical Expressions.lower_expr_inner dispatch.
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:7367
+fn lower_expr_inner_field(receiver: Expr, member: String, span: Span, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        if cx.checked_const_ref_sites.get((span.start, span.end)) == Val((key, ty)) -> {
+            return TExpr{ty: ~ty, kind: TExprKind.ConstRef(~key)}
+        }
+        if core_module_path_from_receiver(receiver, cx, env) == Val("core.math") -> {
+            value :: if member == {
+                "pi" -> Val(Float.PI)
+                "e" -> Val(Float.E)
+                "tau" -> Val(Float.TAU)
+                "infinity" -> Val(Float.INFINITY)
+                "nan" -> Val(Float.NAN)
+                else -> None
+            }
+            if value == Val(v) -> return TExpr{ty: Type.Float, kind: TExprKind.FloatLit(v)}
+        }
+        // A derive's local type fact and reflected list-index carriers use the same projection.
+        compiler_fact_receiver :: if receiver == {
+            .Ident(name, _) -> name.chars().next().is_some_and(fn(c) { c.is_uppercase() }) || env.ty_of(name).is_some_and(fn(ty) {
+                if ty == .Named(n) -> ["FieldInfo", "MethodInfo", "TypeParamInfo"].contains(n) else -> false
+            })
+            .Field(_, name, _) -> name.chars().next().is_some_and(fn(c) { c.is_uppercase() })
+            else -> false
+        }
+        fact_member :: Syntax.compiler_fact_member(member).is_some() || Registry.fact_read(member).is_some()
+        reflected_fact_receiver :: declared_field_ty(receiver, cx, env).is_some_and(fn(ty) {
+            if ty.without_user_tags() == .Named(n) -> ["TypeInfo", "FunctionInfo", "MethodInfo", "FieldInfo", "TypeParamInfo", "FactInfo", "FactValue"].contains(n) else -> false
+        })
+        if fact_member && (compiler_fact_receiver || reflected_fact_receiver) -> {
+            return in_own_frame(fn() -> TExpr {
+                recv :: lower_expr(receiver, cx, env)
+                TExpr{ty: compiler_fact_type(member), kind: TExprKind.Field{recv: ^recv, field: ~member, boxed: false}}
+            })
+        }
+        if grouped_enum_unit_variant(cx, receiver, member, fn(name) { env.ty_of(name).is_some() }) == Val((enum_type, variant)) -> {
+            return in_own_frame(fn() -> TExpr {
+                TExpr{ty: Type.Named(~enum_type), kind: TExprKind.EnumLit{enum_type: ^enum_type, variant: ^variant, payload: TEnumPayload.Unit}}
+            })
+        }
+        if receiver == .Ident(enum_name, _) -> {
+            resolved_enum :: cx.core_qualified_rust_type_name(enum_name) ?? enum_name
+            if env.ty_of(enum_name).is_none() && ["Overflow", "FailurePolicy", "DispatchState", "HookPolicy", "HookDecision", "HookOutcome"].contains(enum_name) -> {
+                return in_own_frame(fn() -> TExpr {
+                    ty :: if env.ret_ty == {
+                        Val(.Apply(name, args)) if name == enum_name -> Type.Apply(~name, ~args)
+                        else -> Type.Named(~enum_name)
+                    }
+                    TExpr{ty: ^ty, kind: TExprKind.EnumLit{enum_type: ~enum_name, variant: ~member, payload: TEnumPayload.Unit}}
+                })
+            }
+            if env.ty_of(enum_name).is_none() && enum_name == "DataEvent" && ["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"].contains(member) -> {
+                return in_own_frame(fn() -> TExpr {
+                    TExpr{ty: Type.Named("DataEvent"), kind: TExprKind.EnumLit{enum_type: "DataEvent", variant: ~member, payload: TEnumPayload.Unit}}
+                })
+            }
+            if enum_name == Syntax.TYPE_REMOVE_BY && ["Val", "Slot"].contains(member) -> {
+                return in_own_frame(fn() -> TExpr {
+                    TExpr{ty: Type.Named(Syntax.TYPE_REMOVE_BY), kind: TExprKind.EnumLit{enum_type: Syntax.TYPE_REMOVE_BY, variant: ~member, payload: TEnumPayload.Unit}}
+                })
+            }
+            if enum_name == "EncodingErrorKind" && ["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"].contains(member) -> {
+                return in_own_frame(fn() -> TExpr {
+                    TExpr{ty: Type.Named(~enum_name), kind: TExprKind.EnumLit{enum_type: ~enum_name, variant: ~member, payload: TEnumPayload.Unit}}
+                })
+            }
+            if enum_name == "EncodingFormat" && ["JSON", "JSONL", "CSV", "TOML", "YAML", "XML", "CBOR"].contains(member) -> {
+                return in_own_frame(fn() -> TExpr {
+                    TExpr{ty: Type.Named(~enum_name), kind: TExprKind.EnumLit{enum_type: ~enum_name, variant: ~member, payload: TEnumPayload.Unit}}
+                })
+            }
+            if env.ty_of(enum_name).is_none() && ["SMTPSecurity", "RecipientPolicy", "SMTPAuth", "TLSTrust"].contains(resolved_enum) &&
+                ((resolved_enum == "SMTPSecurity" && ["StartTLS", "TLS"].contains(member)) ||
+                 (resolved_enum == "RecipientPolicy" && ["RequireAll", "DeliverAccepted"].contains(member)) ||
+                 (resolved_enum == "SMTPAuth" && member == "None") || (resolved_enum == "TLSTrust" && member == "System")) -> {
+                return in_own_frame(fn() -> TExpr {
+                    TExpr{ty: Type.Named(~resolved_enum), kind: TExprKind.EnumLit{enum_type: ~resolved_enum, variant: ~member, payload: TEnumPayload.Unit}}
+                })
+            }
+            if env.ty_of(enum_name).is_none() &&
+                ((resolved_enum == "NetReadyInterest" && ["Read", "Write", "ReadWrite"].contains(member)) ||
+                 (resolved_enum == "NetShutdown" && ["Read", "Write", "Both"].contains(member))) -> {
+                return in_own_frame(fn() -> TExpr {
+                    TExpr{ty: Type.Named(~resolved_enum), kind: TExprKind.EnumLit{enum_type: ~resolved_enum, variant: ~member, payload: TEnumPayload.Unit}}
+                })
+            }
+            if env.ty_of(enum_name).is_none() && cx.variant_owner.get(member) == Val(enum_name) -> {
+                return in_own_frame(fn() -> TExpr {
+                    TExpr{ty: Type.Named(~enum_name), kind: TExprKind.EnumLit{enum_type: ~enum_name, variant: ~member, payload: TEnumPayload.Unit}}
+                })
+            }
+            if env.ty_of(enum_name).is_none() -> {
+                if cx.variant_owner.get(member).filter(fn(owner) { owner.rsplit("::").next() == Val(enum_name) }) == Val(owner) -> {
+                    return in_own_frame(fn() -> TExpr {
+                        TExpr{ty: Type.Named(~owner), kind: TExprKind.EnumLit{enum_type: ~owner, variant: ~member, payload: TEnumPayload.Unit}}
+                    })
+                }
+            }
+            if env.ty_of(enum_name).is_none() && is_json_type_name(enum_name) && member == "Null" -> {
+                return in_own_frame(fn() -> TExpr {
+                    TExpr{ty: Type.Named(Syntax.TYPE_DATA), kind: TExprKind.JSONLit{variant: "Null", arg: None}}
+                })
+            }
+            if env.ty_of(enum_name).is_none() && is_db_value_type_name(enum_name) && member == "Null" -> {
+                return in_own_frame(fn() -> TExpr {
+                    TExpr{ty: Type.Named(Syntax.TYPE_DB_VALUE), kind: TExprKind.DBValueLit{variant: "Null", arg: None}}
+                })
+            }
+            if env.ty_of(enum_name).is_none() -> {
+                if numeric_type_from_name(enum_name) == Val(nt) && is_numeric_bounds_const(member) -> {
+                    return in_own_frame(fn() -> TExpr {
+                        TExpr{ty: ~nt, kind: TExprKind.HostCall(THostCall.NumericBounds{ty: ~nt, member: ~member})}
+                    })
+                }
+            }
+            if env.ty_of(enum_name).is_none() && enum_name.chars().next().is_some_and(fn(c) { c.is_uppercase() }) && member.chars().next().is_some_and(fn(c) { c.is_uppercase() }) -> {
+                return in_own_frame(fn() -> TExpr {
+                    TExpr{ty: Type.Named(~resolved_enum), kind: TExprKind.EnumLit{enum_type: ~resolved_enum, variant: ~member, payload: TEnumPayload.Unit}}
+                })
+            }
+        }
+        // A fused column read never gathers the whole struct; computed fields fall through.
+        if receiver == .Index(base, index, index_span, kind) && kind == IndexKind.List -> {
+            base_t :: lower_expr(base, cx, env)
+            if base_t.ty == .List(elem) && cx.columnar_list_type(elem).is_some() -> {
+                if elem == .Named(elem_name) -> {
+                    if cx.columnar_column_index(elem_name, member) == Val(column) -> {
+                        if struct_field_type(cx, elem, member) == Val(field_ty) -> {
+                            index_t :: lower_expr(index, cx, env)
+                            line :: cx.src_line_col(index_span.start).0
+                            return TExpr{ty: ^field_ty, kind: TExprKind.ColumnarColumnRead{owner: ~elem_name, base: ^base_t, index: ^index_t, field: ~member, column: column, line: line}}
+                        }
+                    }
+                }
+            }
+        }
+        recv := lower_expr(receiver, cx, env)
+        if recv.ty == .Result(ok, _) && struct_field_type(cx, ok, member).is_some() -> {
+            (line, column) :: cx.src_line_col(span.start)
+            recv = TExpr{ty: ~ok, kind: TExprKind.Try{inner: ^recv, note: None, convert: TTryConvert.None, file: escape_rust_str(cx.file), line: line, column: column, fn_name: escape_rust_str(env.fn_name)}}
+        }
+        if shared_guard_value_field(~recv, member) == Val(guard_value) -> return in_own_frame(fn() -> TExpr { ^guard_value })
+        if member == "path" && cx.core_imports.values().any(fn(module) { module == "core.files" }) -> {
+            if recv.ty == .Named(type_name) -> {
+                op :: if cx.local_type_names.contains(type_name) -> None else -> {
+                    if core_file_handle_dispatch_name(type_name) == {
+                        Val("FileReader") -> Val(THandleOp.FileReaderPath)
+                        Val("FileWriter") -> Val(THandleOp.FileWriterPath)
+                        else -> None
+                    }
+                }
+                if op == Val(handle_op) -> return TExpr{ty: Type.String, kind: TExprKind.HandleMethod{recv: ^recv, op: handle_op, args: []}}
+            }
+        }
+        field_owner :: if receiver == .Ident(n, _) && n == Syntax.KW_SELF -> env.self_owner else -> {
+            if recv.ty == .Named(type_name) -> Val(type_name) else -> None
+        }
+        if field_owner == Val(type_name) && cx.computed_fields.get(type_name).is_some_and(fn(c) { c.contains(member) }) -> {
+            field_ty :: struct_field_type(cx, Type.Named(type_name), member) ?? Type.Int
+            call :: TExpr{ty: Type.Result(~field_ty, Type.Named(Syntax.TYPE_ERR)), kind: TExprKind.MethodCall{recv: ^recv, method: TMethodRef.inherent(member), type_args: [], args: [], source_first_string_literal: None, operator_line: None}}
+            (line, column) :: cx.src_line_col(span.start)
+            convert :: if env.raw_protocol_return -> TTryConvert.ProtocolExit else -> TTryConvert.None
+            return TExpr{ty: ^field_ty, kind: TExprKind.Try{inner: ^call, note: None, convert: convert, file: escape_rust_str(cx.file), line: line, column: column, fn_name: escape_rust_str(env.fn_name)}}
+        }
+        if recv.ty == .Named(type_name) && is_swizzleable_math_type(type_name) && !cx.struct_fields.contains_key(type_name) -> {
+            if parse_swizzle_member(member, type_name) == SwizzleParse.Ok(lanes) -> {
+                lanes_u8 :: lanes.map(fn(i) { i as U8 })
+                return TExpr{ty: swizzle_read_type(type_name, lanes.len()), kind: TExprKind.MathSwizzleRead{type_name: ~type_name, recv: ^recv, lanes: ^lanes_u8}}
+            }
+        }
+        // Int is only the original impossible-shape last resort, not a checked field default.
+        field_ty :: struct_field_type(cx, recv.ty, member) ?? Type.Int
+        // GATE #4499: composite boxed-edge keys retain canonical equality/hash.
+        boxed :: if recv.ty == .Named(n) -> cx.boxed_edges.contains((n, member)) else -> false
+        TExpr{ty: ^field_ty, kind: TExprKind.Field{recv: ^recv, field: ~member, boxed: boxed}}
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:7946
+fn lower_expr_inner_enum_lit(type_name: String, variant: String, args: [EnumLitArg], leading_dot: Bool, span: Span, cx: Cx, env: &LowerEnv) -> TExpr {
+    // Preserve the early Option shape and payload identity in the worklist cache.
+    if type_name.is_empty() && variant == Syntax.LIT_VALUE && args == [.Positional(inner)] -> return in_own_frame(fn() -> TExpr { lower_present(inner, cx, env) })
+    if type_name.is_empty() && variant == Syntax.LIT_NULL && args.is_empty() -> return lower_expr(Expr.Absent(span), cx, env)
+    contextual_type := None
+    selected_type := type_name
+    if leading_dot && type_name.is_empty() -> {
+        if in_own_frame(fn() { lower_raw_contextual_result_variant(variant, args, span, cx, env) }) == Val(lowered) -> return ^lowered
+        contextual_type = raw_contextual_return_enum(variant, cx, env)
+        selected_type = contextual_type ?? type_name
+    }
+    in_own_frame(fn() -> TExpr {
+        resolved_type :: cx.local_type_identities.get(selected_type) ?? cx.core_qualified_rust_type_name(selected_type) ?? selected_type
+        payload :: in_own_frame(fn() -> TEnumPayload {
+            if args.is_empty() -> TEnumPayload.Unit
+            else if args.all(fn(a) { if a == .Positional(_) -> true else -> false }) -> {
+                pos := []
+                loop a in args -> {
+                    if a == .Positional(e) -> &pos.push(lower_enum_arg(resolved_type, variant, variant, e, cx, env))
+                    else -> panic("all positional in this branch")
+                }
+                TEnumPayload.Positional(^pos)
+            } else -> {
+                named := []
+                loop a in args -> {
+                    if a == {
+                        .Named{label, expr} -> {
+                            edge :: "{variant}.{label}"
+                            &named.push((~label, lower_enum_arg(resolved_type, variant, edge, expr, cx, env)))
+                        }
+                        .Positional(e) -> &named.push(("", lower_enum_arg(resolved_type, variant, variant, e, cx, env)))
+                    }
+                }
+                TEnumPayload.Named(^named)
+            }
+        })
+        ty :: if env.ret_ty == {
+            Val(.Apply(name, type_args)) if name == selected_type || name == resolved_type -> Type.Apply(~name, ~type_args)
+            else -> Type.Named(~resolved_type)
+        }
+        TExpr{ty: ^ty, kind: TExprKind.EnumLit{enum_type: ~resolved_type, variant: ~variant, payload: ^payload}}
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8058
+// Expr.ListLit routes directly to canonical lower_list_lit; there is no additional arm body.
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8065
+fn lower_expr_inner_tuple_lit(lit_fields: [(String, Expr)], ty: Type?, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        canonical :: if ty == Val(.Tuple(fs)) -> tuple_fields_plain(fs) else -> []
+        struct_name :: tuple_struct_name(canonical)
+        value_of := [String:Expr]{}
+        loop (n, e) in lit_fields -> &value_of.insert(n, e)
+        fields := [(String, TExpr)]{}
+        loop (n, fty) in canonical -> {
+            v :: if value_of.get(n) == Val(e) -> lower_expr(e, cx, env) else -> TExpr{ty: ~fty, kind: TExprKind.IntLit(0, None)}
+            &fields.push((~n, ^v))
+        }
+        TExpr{ty: ty ?? Type.Tuple([]), kind: TExprKind.TupleLit{struct_name: ^struct_name, fields: ^fields}}
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8106
+fn lower_expr_inner_map_lit(entries: [(Expr, Expr)], cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        tentries := [(TExpr, TExpr)]{}
+        loop (k, v) in entries -> &tentries.push((lower_expr(k, cx, env), lower_expr(v, cx, env)))
+        (kt, vt) :: if tentries.first() == Val((k, v)) -> (~k.ty, ~v.ty) else -> (Type.String, Type.Int)
+        TExpr{ty: Type.Map{key: ^kt, key_span: None, value: ^vt}, kind: TExprKind.MapLit(^tentries)}
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8130
+fn lower_expr_inner_index(base: Expr, index: Expr, span: Span, kind: IndexKind, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        base_t :: lower_expr(base, cx, env)
+        index_t :: lower_expr(index, cx, env)
+        inferred_kind :: if kind == IndexKind.Unknown -> resolve_unknown_index_kind(base_t, index_t, index, cx) else -> None
+        selected_kind :: inferred_kind ?? kind
+        if selected_kind == IndexKind.Unknown -> {
+            message :: "sema-to-TIR handoff violated: unresolved index kind; file={cx.file}; function={cx.current_fn.borrow()}; span={span.start}..{span.end}; base={base_t.ty:?}; index={index_t.ty:?}"
+            debug_assert(false, message)
+            return invariant_violation_expr(span, message)
+        }
+        if selected_kind == .LayoutField(field_name) -> {
+            layout_field_ty :: Type.Named(Syntax.TYPE_LAYOUT_FIELD)
+            line :: cx.src_line_col(span.start).0
+            fields :: TExpr{ty: Type.List(~layout_field_ty), kind: TExprKind.Field{recv: ~base_t, field: "fields", boxed: false}}
+            field_param :: TExpr{ty: ~layout_field_ty, kind: TExprKind.Local(TLocal.user("layout_field").through_ref())}
+            predicate_body :: TExpr{ty: Type.Bool, kind: TExprKind.Binary{op: BinOp.Eq, overflow: false, line: line as U32,
+                lhs: TExpr{ty: Type.String, kind: TExprKind.Field{recv: ^field_param, field: "name", boxed: false}},
+                rhs: TExpr{ty: Type.String, kind: TExprKind.StrLit([TStrPart.Lit(~field_name)])}}}
+            callback :: TExpr{ty: Type.Fn{params: [~layout_field_ty], ret: Val(Type.Bool), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None},
+                kind: TExprKind.Lambda(TLambda{source_params: ["layout_field"], param_types: [~layout_field_ty], ret: Val(Type.Bool),
+                    failure_carrier: TFailureCarrier.Infallible, executable: TLambdaBody.Expr(^predicate_body), source_span: span,
+                    frame_schedule: None, frame_schedule_derivation: None, capture_facts: TCaptureFacts.default(), host_param_conventions: None,
+                    effects: TEffectFacts.default(), jit_name: "", is_move: true, boxed: false, rc: false, arc: false, captures: [],
+                    capture_origins: [:], materialized_captures: [], frozen_captures: [], uses_stack_sentry: false})}
+            found :: TExpr{ty: Type.Option(~layout_field_ty), kind: TExprKind.ClosureMethod{recv: ^fields, op: TClosureOp.Find, args: [^callback]}}
+            return TExpr{ty: ^layout_field_ty, kind: TExprKind.HostCall(THostCall.OptionProbe{inner: ^found, kind: TOptionProbe.Unwrap})}
+        }
+        base_ty :: base_t.ty.without_user_tags()
+        line :: cx.src_line_col(span.start).0
+        if selected_kind == IndexKind.Range -> return in_own_frame(fn() -> TExpr {
+            zero :: fn() -> TExpr { TExpr{ty: Type.Int, kind: TExprKind.IntLit(0, None)} }
+            TExpr{ty: ~base_t.ty, kind: TExprKind.Slice{base: ^base_t, start: zero(), end: zero(), range: Val(^index_t), line: line}}
+        })
+        if selected_kind == .Lane(lane_ty) -> return in_own_frame(fn() -> TExpr {
+            TExpr{ty: math_scalar_ty(lane_ty), kind: TExprKind.MathLaneIndex{lane_ty: ~lane_ty, base: ^base_t, index: ^index_t, line: line as U32}}
+        })
+        if selected_kind == .User(type_name) -> return in_own_frame(fn() -> TExpr {
+            value_ty :: cx.index_hooks.get(type_name).map(fn(h) { ~h.value_type }) ?? Type.Int
+            TExpr{ty: ^value_ty, kind: TExprKind.IndexHook{type_name: ~type_name, base: ^base_t, index: ^index_t, line: line}}
+        })
+        if selected_kind == IndexKind.Pool -> {
+            elem_ty :: if base_ty == .Apply(name, args) && name == "Pool" && !args.is_empty() -> ~args[0] else -> Type.Int
+            src_line :: cx.src_line_text(line).to_string()
+            return TExpr{ty: ^elem_ty, kind: TExprKind.PoolSlot{pool: ^base_t, id: ^index_t, mutable: false, field: None, line: line, src_line: ^src_line}}
+        }
+        if selected_kind == IndexKind.FixedListProof -> {
+            elem_ty :: if base_ty == .FixedList{elem, ..} -> ~elem else -> Type.Int
+            return TExpr{ty: ^elem_ty, kind: TExprKind.HostCall(THostCall.FixedListIndex{base: ^base_t, index: ^index_t, line: line as U32})}
+        }
+        result_ty :: if base_ty == {
+            .List(elem) | .Map{value: elem, ..} | .FixedList{elem, ..} -> ~elem
+            .Apply(name, args) if ["View", "ViewMut", "ComputeViewMut"].contains(name) && args.len() == 1 -> ~args[0]
+            else -> Type.Int
+        }
+        if base_ty == .List(elem) && cx.columnar_list_type(elem).is_some() -> return in_own_frame(fn() -> TExpr {
+            TExpr{ty: ^result_ty, kind: TExprKind.ColumnarGather{base: ^base_t, index: ^index_t, line: line}}
+        })
+        uninit_fixed :: if base == .Ident(name, _) -> env.is_uninit_fixed(name) else -> false
+        TExpr{ty: ^result_ty, kind: TExprKind.Index{base: ^base_t, index: ^index_t, is_map: selected_kind == IndexKind.Map, uninit_fixed: uninit_fixed, line: line}}
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8387
+fn lower_expr_inner_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span: Span, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        base_t :: lower_expr(base, cx, env)
+        start_t :: lower_expr(start, cx, env)
+        end_t :: lower_expr(end, cx, env)
+        range_t :: range.map(fn(r) { lower_expr(r, cx, env) })
+        result_ty :: ~base_t.ty
+        line :: cx.src_line_col(span.start).0
+        TExpr{ty: ^result_ty, kind: TExprKind.Slice{base: ^base_t, start: ^start_t, end: ^end_t, range: ^range_t, line: line}}
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8416
+// Expr.Tainted(inner, _, _) routes to lower_expr(inner, cx, env); value-fact tags erase.
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8417
+// Expr.Present(inner, _) routes to in_own_frame(fn() { lower_present(inner, cx, env) }).
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8421
+fn lower_expr_inner_absent() -> TExpr { TExpr{ty: Type.Option(Type.Int), kind: TExprKind.Absent} }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8428
+fn lower_expr_inner_todo(span: Span, cx: Cx, env: LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        line :: cx.src_line_col(span.start).0
+        TExpr{ty: env.ret_ty ?? unit_type(), kind: TExprKind.Todo{line: line}}
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8438
+fn lower_expr_inner_no_else(span: Span, cx: Cx) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        line :: cx.src_line_col(span.start).0
+        TExpr{ty: Type.Named("Unit"), kind: TExprKind.Unreachable{line: line}}
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8445
+fn lower_expr_inner_ok(inner: Expr, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        t := lower_owned_expr(inner, cx, env)
+        if env.ret_ty == Val(t.ty) -> return ^t
+        if env.ret_ty == Val(.Result(ok, _)) -> {
+            if t.kind == TExprKind.Absent && ok == .Option(_) -> t.ty = ~ok
+            t = preserve_typed_list_shape(^t, ok, cx)
+            t = maybe_widen_expr_to_union(^t, ok)
+        }
+        err_ty :: if env.ret_ty == Val(.Result(_, err)) -> ~err else -> Type.Named(Syntax.TYPE_ERR)
+        TExpr{ty: Type.Result(~t.ty, ^err_ty), kind: TExprKind.Ok(^t)}
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8478
+fn lower_expr_inner_err(inner: Expr, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        t := lower_owned_expr(inner, cx, env)
+        ok_ty :: if env.ret_ty == Val(.Result(ok, _)) -> ~ok else -> Type.Int
+        if env.ret_ty == Val(.Result(_, err)) -> {
+            t = preserve_typed_list_shape(^t, err, cx)
+            t = maybe_widen_expr_to_union(^t, err)
+        }
+        TExpr{ty: Type.Result(^ok_ty, ~t.ty), kind: TExprKind.Err(^t, None)}
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8500
+fn lower_expr_inner_try(inner: Expr, span: Span, convert: TryConvert, note: Expr?, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        inner_t :: do {
+            // GATE #4494: ExprCacheScope retains scoped TLS cache cleanup on all exits.
+            try_subject_cache_scope :: ExprCacheScope.enter()
+            fallback_subject :: env.fallback_subject
+            env.fallback_subject = true
+            t :: lower_expr(inner, cx, env)
+            env.fallback_subject = fallback_subject
+            ^t
+        }
+        if inner_t.ty == .Named(name) && name == Syntax.TYPE_NEVER -> return ^inner_t
+        note_t :: note.map(fn(n) { lower_expr(n, cx, env) })
+        result_ty :: if inner_t.ty == { .Result(ok, _) | .Option(ok) -> ~ok; other -> ~other }
+        tconvert :: if convert == {
+            .None -> TTryConvert.None
+            .Never -> TTryConvert.Never
+            .DefaultErr -> TTryConvert.DefaultErr
+            .Typed{fn_name, source, target} -> TTryConvert.Typed{fn_name: ~fn_name, source: ~source, target: ~target}
+            .WidenUnion{enum_name, tag} -> TTryConvert.WidenUnion{enum_name: ~enum_name, tag: ~tag}
+        }
+        (line, column) :: cx.src_line_col(span.start)
+        TExpr{ty: ^result_ty, kind: TExprKind.Try{inner: ^inner_t, note: ^note_t, convert: ^tconvert, file: escape_rust_str(cx.file), line: line, column: column, fn_name: escape_rust_str(env.fn_name)}}
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8564
+// Expr.OrFallback(value, fallback, ..) routes directly to lower_or_fallback(value, fallback, cx, env).
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8570
+fn lower_expr_inner_opt_field(base: Expr, member: String, flatten: Bool, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        base_t :: lower_expr(base, cx, env)
+        ty :: if base_t.ty == .Option(payload_ty) -> {
+            struct_field_type(cx, payload_ty, member).map(fn(field_ty) {
+                if flatten -> {
+                    if field_ty == .Option(inner) -> Type.Option(^inner) else -> Type.Option(^field_ty)
+                } else -> Type.Option(^field_ty)
+            }) ?? ~base_t.ty
+        } else -> ~base_t.ty
+        TExpr{ty: ^ty, kind: TExprKind.OptField{base: ^base_t, member: ~member, flatten: flatten}}
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8606
+fn lower_expr_inner_lambda(lam: jet_foundation.Lambda, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        tl :: lower_lambda(lam, cx, env)
+        params :: ~tl.param_types
+        ret :: ~tl.ret
+        TExpr{ty: Type.Fn{params: ^params, ret: ^ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: ~lam.meta.return_view_provenance}, kind: TExprKind.Lambda(^tl)}
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8626
+fn lower_expr_inner_ptr_from_addr(elem: Type, addr: Expr, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        taddr :: lower_expr(addr, cx, env)
+        TExpr{ty: ptr_type(~elem), kind: TExprKind.PtrFromAddr{elem: ~elem, addr: ^taddr}}
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8639
+// Direct invariant routes: StrMatchLit -> "StrMatchLit", BinMatchLit -> "BinMatchLit",
+// MemberSpread -> "MemberSpread", Spread -> "Spread", ReduceMarker -> "ReduceMarker".
+// Each routes its exact span to invariant_violation_expr; Paren lowers the inner unchanged.
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8650
+fn lower_expr_inner_unit_lit(e: Expr, suffix: String, span: Span, cx: Cx, env: &LowerEnv) -> TExpr {
+    if unit_lit_elaborated(e, cx) == Val(rewritten) -> lower_temporary_expr(rewritten, cx, env)
+    else -> invariant_violation_expr(span, "UnitLit `{suffix}`")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8660
+fn lower_expr_inner_typed_lit(head: Type?, body: TypedLitBody, span: Span, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr {
+        checked_head :: head ?? return invariant_violation_expr(span, "TypedLit without head")
+        if checked_head == .Named(type_name) -> {
+            if lower_boundary_typed_lit(type_name, body, cx, env) == Val(lowered) -> return ^lowered
+        }
+        if checked_head == Type.Named(Syntax.TYPE_REGEX) && body == .Value(pattern) -> {
+            return in_own_frame(fn() -> TExpr { core_call_expr(checked_head, "core.regex", "literal", [lower_expr(pattern, cx, env)], span, [false]) })
+        }
+        rewritten :: if (checked_head, body) == {
+            (.List(_) | .FixedList{..}, .Empty) -> Expr.ListLit([], span)
+            (.List(_) | .FixedList{..}, .Elements(elems)) -> Expr.ListLit(~elems, span)
+            (.List(_) | .FixedList{..}, .ByteText(parts)) -> {
+                elems :: byte_text_exprs(parts, span) ?? return invariant_violation_expr(span, "TypedLit byte text")
+                Expr.ListLit(^elems, span)
+            }
+            (.List(_) | .FixedList{..}, .Value(inner)) -> Expr.ListLit([~inner], span)
+            (.Map{..}, .Empty) -> Expr.MapLit([], span)
+            (.Map{..}, .Entries(entries)) -> Expr.MapLit(~entries, span)
+            (.Named(name), .Fields(fields)) -> Expr.StructLit{type_name: ~name, type_args: [], import_ns: None, as_trait: None, fields: ~fields, inferred: false, span: span}
+            (.Apply(name, args), .Fields(fields)) -> Expr.StructLit{type_name: ~name, type_args: ~args, import_ns: None, as_trait: None, fields: ~fields, inferred: false, span: span}
+            (.Named(name), .Empty) -> Expr.StructLit{type_name: ~name, type_args: [], import_ns: None, as_trait: None, fields: [], inferred: false, span: span}
+            (.Apply(name, args), .Empty) -> Expr.StructLit{type_name: ~name, type_args: ~args, import_ns: None, as_trait: None, fields: [], inferred: false, span: span}
+            (_, .Value(inner)) -> {
+                t := lower_temporary_expr(inner, cx, env)
+                if t.kind == TExprKind.Absent && checked_head == .Option(_) -> { t.ty = ~checked_head; return ^t }
+                retag_numeric_width(&t, checked_head, cx.src_line_col(span.start).0 as U32)
+                return ^t
+            }
+            (_, .Elements(elems)) if elems.len() == 1 -> {
+                t := lower_temporary_expr(elems[0], cx, env)
+                retag_numeric_width(&t, checked_head, cx.src_line_col(span.start).0 as U32)
+                return ^t
+            }
+            else -> return invariant_violation_expr(span, "typed literal body vs head `{checked_head.name()}`")
+        }
+        in_own_frame(fn() -> TExpr {
+            t := lower_temporary_expr(rewritten, cx, env)
+            // Stored function types use effective carriers, not the source head spelling.
+            if checked_head == .List(_) | .FixedList{..} | .Map{..} | .Named(_) | .Apply(..) | .Int | .IntN{..} | .InlineRange{..} | .Float | .Float32 -> t.ty = checked_head.with_effective_fn_returns()
+            if checked_head == .List(elem) | .FixedList{elem, ..} -> {
+                if elem == .IntN{signed, bits} && t.kind == .ListLit(elems) -> {
+                    loop el in &elems -> {
+                        if el.kind == .IntLit(_, width) -> { width = Val((signed, bits)); el.ty = ~elem }
+                    }
+                }
+                if (elem == Type.Float || elem == Type.Float32) && t.kind == .ListLit(elems) -> {
+                    line :: cx.src_line_col(span.start).0 as U32
+                    loop el in &elems -> retag_numeric_width(&el, elem, line)
+                }
+                if elem == .Option(_) && t.kind == .ListLit(elems) -> {
+                    loop el in &elems -> { if el.kind == TExprKind.Absent -> el.ty = ~elem }
+                }
+            }
+            ^t
+        })
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8833
+fn lower_expr_inner_pattern_test(e: Expr, subject: Expr, pattern: Pattern, cx: Cx, env: &LowerEnv) -> TExpr {
+    if pattern == .Variant{bindings, ..} && bindings.is_empty() -> return lower_binding_free_variant_pattern_test(subject, pattern, cx, env)
+    if pattern.has_nested_pattern() || pattern_binds_nothing(pattern) -> {
+        subj :: lower_expr(subject, cx, env)
+        enum_type :: if pattern == .Variant{..} | .Or(..) -> resolved_enum_subject_type(cx, subj.ty).ok() else -> None
+        return TExpr{ty: Type.Bool, kind: TExprKind.PatternMatches{subj: ^subj, pattern: TPattern.from_ast(~pattern, ^enum_type, TPatternPosition.Arm, false, false)}}
+    }
+    if pattern == .Ok{binding, ..} | .Err{binding, ..} && (binding.is_empty() || binding == "_") -> {
+        return TExpr{ty: Type.Bool, kind: TExprKind.PatternMatches{subj: lower_expr(subject, cx, env), pattern: TPattern.from_ast(~pattern, None, TPatternPosition.Arm, false, false)}}
+    }
+    if pattern == .Absent(_) -> {
+        lowered_subject :: lower_expr(subject, cx, env)
+        present :: TExpr{ty: Type.Bool, kind: TExprKind.HostCall(THostCall.OptionProbe{inner: ^lowered_subject, kind: TOptionProbe.IsSome})}
+        return TExpr{ty: Type.Bool, kind: TExprKind.Unary{op: UnOp.Not, operand: ^present}}
+    }
+    if pattern == .BinMatch{..} -> {
+        lowered_subject :: lower_expr(subject, cx, env)
+        return bin_match_pattern_cond_expr(pattern, ^lowered_subject, cx)
+    }
+    if pattern == .StrMatch{..} -> {
+        lowered_subject :: lower_expr(subject, cx, env)
+        return str_match_pattern_cond_expr(pattern, ^lowered_subject, cx)
+    }
+    // Value-position bindings live only within the generated condition, not its caller.
+    (cond, _bindings, then_body) :: lower_if_cond(e, cx, env)
+    canonicalize_pre_tier_expr(TExpr{ty: Type.Bool, kind: TExprKind.IfExpr{cond: ^cond, then_body: ^then_body,
+        then_value: TExpr{ty: Type.Bool, kind: TExprKind.BoolLit(true)}, else_body: [], else_value: TExpr{ty: Type.Bool, kind: TExprKind.BoolLit(false)}}})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8058
+fn lower_expr_inner_list_lit(elems: [Expr], cx: Cx, env: &LowerEnv) -> TExpr {
+    lower_list_lit(elems, cx, env)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8416
+fn lower_expr_inner_tainted(inner: Expr, cx: Cx, env: &LowerEnv) -> TExpr {
+    lower_expr(inner, cx, env)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8417
+fn lower_expr_inner_present(inner: Expr, cx: Cx, env: &LowerEnv) -> TExpr {
+    in_own_frame(fn() -> TExpr { lower_present(inner, cx, env) })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8564
+fn lower_expr_inner_or_fallback(value: Expr, fallback: jet_foundation.OrFallback, cx: Cx, env: &LowerEnv) -> TExpr {
+    lower_or_fallback(value, fallback, cx, env)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8639
+fn lower_expr_inner_str_match_lit(span: Span) -> TExpr { invariant_violation_expr(span, "StrMatchLit") }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8640
+fn lower_expr_inner_bin_match_lit(span: Span) -> TExpr { invariant_violation_expr(span, "BinMatchLit") }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8641
+fn lower_expr_inner_member_spread(span: Span) -> TExpr { invariant_violation_expr(span, "MemberSpread") }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8642
+fn lower_expr_inner_spread(span: Span) -> TExpr { invariant_violation_expr(span, "Spread") }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8643
+fn lower_expr_inner_reduce_marker(span: Span) -> TExpr { invariant_violation_expr(span, "ReduceMarker") }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:8644
+fn lower_expr_inner_paren(inner: Expr, cx: Cx, env: &LowerEnv) -> TExpr { lower_expr(inner, cx, env) }

@@ -1,1815 +1,758 @@
-// PORT-PENDING 0564 crates-jet-comptime-src-comptime-build-execution-runtime-slice-1: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1-1811
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::actions_policy::{ActionCache, BuildAction, BuildCapability, LegacyWrapperKind};
-//RS use super::cache_cas::{
-//RS     atomic_restore_file, ensure_real_directory, hex_decode, hex_encode, remote_execution_identity,
-//RS     remote_policy_digest, secure_read_file, ActionCacheProvenance, ActionCacheStatus,
-//RS     ActionInputSnapshot, ActionKey, ActionOutcome, ActionOutputRecord, ActionResultRecord,
-//RS     BuildArtifactStore, CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion,
-//RS     RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
-//RS     RemoteDeniedReason, RemoteExecutionRequest,
-//RS };
-//RS use super::errors_keys::BuildError;
-//RS use super::execution_helpers::action_pools;
-//RS use super::handles::{ActionHandle, ActionId, ProbeId, ToolchainHandle};
-//RS use super::plan_graph::{BuildExecutionReport, BuildPlan};
-//RS use super::provenance_toolchains::{ProbeKind, ReproducibilityClass, ToolchainResolution};
-//RS use super::targets::BuildPath;
-//RS use super::validation::resolve_under;
-//RS use super::{RemoteAttemptError, RemoteBuildRequest, RemoteBuilder, RemoteScheduler};
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::path::{Component, Path, PathBuf};
-//RS use std::process::Output;
-//RS use std::sync::atomic::{AtomicU64, Ordering};
-//RS use std::{
-//RS     fs, io,
-//RS     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-//RS };
-//RS 
-//RS mod jet_process_sandbox {
-//RS     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs");
-//RS     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs");
-//RS }
-//RS pub use jet_process_sandbox::ReadOnlyMount;
-//RS 
-//RS static REMOTE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
-//RS const MAX_REMOTE_EXECUTION_ATTEMPTS: usize = 2;
-//RS 
-//RS struct RemoteAttemptFailure {
-//RS     error: BuildExecutionError,
-//RS     retryable: bool,
-//RS }
-//RS 
-//RS impl RemoteAttemptFailure {
-//RS     fn terminal(error: BuildExecutionError) -> Self {
-//RS         Self {
-//RS             error,
-//RS             retryable: false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn retryable(error: BuildExecutionError) -> Self {
-//RS         Self {
-//RS             error,
-//RS             retryable: true,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl From<BuildExecutionError> for RemoteAttemptFailure {
-//RS     fn from(error: BuildExecutionError) -> Self {
-//RS         Self::terminal(error)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BuildProbeFact {
-//RS     pub name: String,
-//RS     pub success: bool,
-//RS     pub detail: String,
-//RS     pub reproducibility: ReproducibilityClass,
-//RS     pub toolchain: ToolchainHandle,
-//RS     pub toolchain_provenance: ContentDigest,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BuildExecutionResult {
-//RS     pub report: BuildExecutionReport,
-//RS     pub probes: Vec<BuildProbeFact>,
-//RS }
-//RS 
-//RS /// Driver-owned implementation for a compiler action cache miss. The
-//RS /// executor still owns declared-output validation, atomic restore, CAS capture,
-//RS /// and action records.
-//RS pub type CompilerActionRunner<'a> =
-//RS     dyn Fn(&BuildAction, &[ActionInputSnapshot]) -> Result<Vec<Vec<u8>>, String> + Sync + 'a;
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum BuildExecutionError {
-//RS     MissingGrant {
-//RS         action: String,
-//RS         capability: BuildCapability,
-//RS     },
-//RS     SandboxUnavailable,
-//RS     IO {
-//RS         action: String,
-//RS         detail: String,
-//RS     },
-//RS     ProbeFailed {
-//RS         probe: String,
-//RS         detail: String,
-//RS     },
-//RS     /// The one structured action-failure route. The report is retained when
-//RS     /// the action is local, restored from cache, or returned by a remote
-//RS     /// worker; no runner reparses its display text.
-//RS     Reported {
-//RS         report: jet_foundation::Outcome::JetErrorReport,
-//RS     },
-//RS     InvalidGraph(BuildError),
-//RS }
-//RS 
-//RS impl BuildExecutionError {
-//RS     pub fn report(&self) -> Option<&jet_foundation::Outcome::JetErrorReport> {
-//RS         match self {
-//RS             Self::Reported { report } => Some(report),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn is_reported_action_failure(&self) -> bool {
-//RS         matches!(self, Self::Reported { .. })
-//RS     }
-//RS }
-//RS 
-//RS fn action_failure_report(
-//RS     action: &str,
-//RS     exit_code: i32,
-//RS     stderr: &str,
-//RS ) -> jet_foundation::Outcome::JetErrorReport {
-//RS     let mut error = jet_foundation::Outcome::jet_err_with_identity(
-//RS         format!("build action `{action}` exited with status {exit_code}"),
-//RS         Ok("E3505".to_string()),
-//RS         Err(jet_foundation::Outcome::JetAbsent),
-//RS         "BuildAction::Failed".to_string(),
-//RS     );
-//RS     jet_foundation::Outcome::jet_err_set_details(
-//RS         &mut error,
-//RS         jet_foundation::Outcome::JetErrorDetails {
-//RS             variant: "BuildActionFailure".to_string(),
-//RS             fields: vec![
-//RS                 jet_foundation::Outcome::JetErrorField {
-//RS                     name: "action".to_string(),
-//RS                     value: report_json_string(action),
-//RS                 },
-//RS                 jet_foundation::Outcome::JetErrorField {
-//RS                     name: "exit_code".to_string(),
-//RS                     value: exit_code.to_string(),
-//RS                 },
-//RS                 jet_foundation::Outcome::JetErrorField {
-//RS                     name: "stderr".to_string(),
-//RS                     value: report_json_string(stderr),
-//RS                 },
-//RS             ],
-//RS             source_span: None,
-//RS         },
-//RS     );
-//RS     jet_foundation::Outcome::jet_error_report(&error)
-//RS }
-//RS 
-//RS fn report_json_string(value: &str) -> String {
-//RS     format!("\"{}\"", jet_foundation::JSON::json_escape(value))
-//RS }
-//RS 
-//RS /// The one native child-isolation substrate shared by hermetic build actions
-//RS /// and Jetpack adapter recipes. The policy is deliberately a receipt, not a
-//RS /// claim inferred from user namespaces or a tool's exit status.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct NativeSandboxStatus {
-//RS     pub available: bool,
-//RS     pub mechanism: String,
-//RS     pub policy: String,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS pub enum NativeSandboxError {
-//RS     Unsupported(String),
-//RS     Io(String),
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS pub struct NativeSandboxOutput {
-//RS     pub output: Output,
-//RS     pub mechanism: String,
-//RS     pub policy: String,
-//RS }
-//RS 
-//RS /// Probe the exact native backend before a build claims strong isolation.
-//RS /// Each platform reports only a backend that can prepare the same boundary
-//RS /// used for real actions.
-//RS pub fn native_sandbox_status() -> NativeSandboxStatus {
-//RS     if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
-//RS         return NativeSandboxStatus {
-//RS             available: false,
-//RS             mechanism: "test-sandbox-unavailable".to_string(),
-//RS             policy: "not-enforced".to_string(),
-//RS             reason: "test sandbox override prevents the native backend probe".to_string(),
-//RS         };
-//RS     }
-//RS 
-//RS     #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS     {
-//RS         let native = jet_process_sandbox::status();
-//RS         return NativeSandboxStatus {
-//RS             available: native.available,
-//RS             mechanism: native.mechanism,
-//RS             policy: native.policy,
-//RS             reason: native.reason,
-//RS         };
-//RS     }
-//RS 
-//RS     #[cfg(target_os = "windows")]
-//RS     {
-//RS         let native = jet_process_sandbox::windows_status();
-//RS         return NativeSandboxStatus {
-//RS             available: native.available,
-//RS             mechanism: native.mechanism,
-//RS             policy: native.policy,
-//RS             reason: native.reason,
-//RS         };
-//RS     }
-//RS 
-//RS     #[cfg(all(
-//RS         not(target_os = "linux"),
-//RS         not(target_os = "macos"),
-//RS         not(target_os = "windows")
-//RS     ))]
-//RS     {
-//RS         return NativeSandboxStatus {
-//RS             available: false,
-//RS             mechanism: "unsupported".to_string(),
-//RS             policy: "not-enforced".to_string(),
-//RS             reason:
-//RS                 "Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"
-//RS                     .to_string(),
-//RS         };
-//RS     }
-//RS }
-//RS 
-//RS /// Run one executable action through the shared native sandbox. `source_dir`
-//RS /// is read-only when `output_dir` is present; only that output directory is
-//RS /// writable. With no output directory, the private work tree is writable for
-//RS /// the hermetic BuildPlan executor and is copied back through declared outputs.
-//RS pub fn run_native_sandboxed(
-//RS     executable: &Path,
-//RS     args: &[String],
-//RS     source_dir: &Path,
-//RS     output_dir: Option<&Path>,
-//RS     env: &BTreeMap<String, String>,
-//RS     share_network: bool,
-//RS ) -> Result<NativeSandboxOutput, NativeSandboxError> {
-//RS     run_native_sandboxed_with_timeout(
-//RS         executable,
-//RS         args,
-//RS         source_dir,
-//RS         output_dir,
-//RS         env,
-//RS         share_network,
-//RS         None,
-//RS     )
-//RS }
-//RS /// Run one executable action through the shared native sandbox with additional
-//RS /// immutable host directories projected at the declared destinations.
-//RS pub fn run_native_sandboxed_with_mounts(
-//RS     executable: &Path,
-//RS     args: &[String],
-//RS     source_dir: &Path,
-//RS     output_dir: Option<&Path>,
-//RS     env: &BTreeMap<String, String>,
-//RS     share_network: bool,
-//RS     mounts: &[ReadOnlyMount],
-//RS ) -> Result<NativeSandboxOutput, NativeSandboxError> {
-//RS     run_native_sandboxed_with_timeout_and_mounts(
-//RS         executable,
-//RS         args,
-//RS         source_dir,
-//RS         output_dir,
-//RS         env,
-//RS         share_network,
-//RS         mounts,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn run_native_sandboxed_with_timeout(
-//RS     executable: &Path,
-//RS     args: &[String],
-//RS     source_dir: &Path,
-//RS     output_dir: Option<&Path>,
-//RS     env: &BTreeMap<String, String>,
-//RS     share_network: bool,
-//RS     timeout: Option<Duration>,
-//RS ) -> Result<NativeSandboxOutput, NativeSandboxError> {
-//RS     run_native_sandboxed_with_timeout_and_mounts(
-//RS         executable,
-//RS         args,
-//RS         source_dir,
-//RS         output_dir,
-//RS         env,
-//RS         share_network,
-//RS         &[],
-//RS         timeout,
-//RS     )
-//RS }
-//RS 
-//RS fn run_native_sandboxed_with_timeout_and_mounts(
-//RS     executable: &Path,
-//RS     args: &[String],
-//RS     source_dir: &Path,
-//RS     output_dir: Option<&Path>,
-//RS     env: &BTreeMap<String, String>,
-//RS     share_network: bool,
-//RS     mounts: &[jet_process_sandbox::ReadOnlyMount],
-//RS     timeout: Option<Duration>,
-//RS ) -> Result<NativeSandboxOutput, NativeSandboxError> {
-//RS     #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS     {
-//RS         let output_is_separate = output_dir.is_some();
-//RS         let output = jet_process_sandbox::output_with_read_only_mounts(
-//RS             executable,
-//RS             args,
-//RS             source_dir,
-//RS             output_dir,
-//RS             env,
-//RS             share_network,
-//RS             mounts,
-//RS             timeout,
-//RS         )
-//RS         .map_err(|error| match error {
-//RS             jet_process_sandbox::Error::Unsupported(detail) => {
-//RS                 NativeSandboxError::Unsupported(detail)
-//RS             }
-//RS             jet_process_sandbox::Error::Io(detail) => NativeSandboxError::Io(detail),
-//RS         })?;
-//RS         return Ok(NativeSandboxOutput {
-//RS             output,
-//RS             mechanism: if cfg!(target_os = "linux") {
-//RS                 "linux-bwrap".to_string()
-//RS             } else {
-//RS                 "macos-seatbelt".to_string()
-//RS             },
-//RS             policy: jet_process_sandbox::policy(output_is_separate, share_network),
-//RS         });
-//RS     }
-//RS 
-//RS     #[cfg(target_os = "windows")]
-//RS     {
-//RS         return jet_process_sandbox::windows_output_with_read_only_mounts(
-//RS             executable,
-//RS             args,
-//RS             source_dir,
-//RS             output_dir,
-//RS             env,
-//RS             share_network,
-//RS             true,
-//RS             output_dir.is_none(),
-//RS             mounts,
-//RS             timeout.map(|limit| limit.as_millis().min(i64::MAX as u128) as i64),
-//RS             Some(64 * 1024 * 1024),
-//RS         )
-//RS         .map_err(|error| match error {
-//RS             jet_process_sandbox::WindowsSandboxError::Unsupported(detail) => {
-//RS                 NativeSandboxError::Unsupported(detail)
-//RS             }
-//RS             jet_process_sandbox::WindowsSandboxError::Io(detail) => NativeSandboxError::Io(detail),
-//RS         })
-//RS         .map(|result| NativeSandboxOutput {
-//RS             output: result.output,
-//RS             mechanism: result.mechanism,
-//RS             policy: result.policy,
-//RS         });
-//RS     }
-//RS 
-//RS     #[cfg(all(
-//RS         not(target_os = "linux"),
-//RS         not(target_os = "macos"),
-//RS         not(target_os = "windows")
-//RS     ))]
-//RS     {
-//RS         return Err(NativeSandboxError::Unsupported(
-//RS             "Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"
-//RS                 .to_string(),
-//RS         ));
-//RS     }
-//RS }
-//RS 
-//RS /// Execute the canonical action graph through the platform-native child
-//RS /// boundary. Linux uses Bubblewrap, macOS Seatbelt, and Windows AppContainer;
-//RS /// there is no unsandboxed fallback.
-//RS pub fn execute_build_plan(
-//RS     plan: &BuildPlan,
-//RS     project_root: &Path,
-//RS     artifact_store: &dyn BuildArtifactStore,
-//RS     grants: &BTreeSet<BuildCapability>,
-//RS ) -> Result<BuildExecutionResult, BuildExecutionError> {
-//RS     execute_build_plan_with_front_end_and_remote(
-//RS         plan,
-//RS         project_root,
-//RS         artifact_store,
-//RS         grants,
-//RS         FrontEndCompletion::all_complete(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Same as [`execute_build_plan`], but cache lookup requires a complete
-//RS /// parser/sema/policy/diagnostics front end (E4-JP2 / #419).
-//RS pub fn execute_build_plan_with_front_end(
-//RS     plan: &BuildPlan,
-//RS     project_root: &Path,
-//RS     artifact_store: &dyn BuildArtifactStore,
-//RS     grants: &BTreeSet<BuildCapability>,
-//RS     front_end: FrontEndCompletion,
-//RS ) -> Result<BuildExecutionResult, BuildExecutionError> {
-//RS     execute_build_plan_with_front_end_and_remote(
-//RS         plan,
-//RS         project_root,
-//RS         artifact_store,
-//RS         grants,
-//RS         front_end,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Execute with an explicitly selected host-owned builder binding. No
-//RS /// environment variable, repository field, or command-line endpoint can
-//RS /// activate this path.
-//RS pub fn execute_build_plan_with_front_end_and_remote(
-//RS     plan: &BuildPlan,
-//RS     project_root: &Path,
-//RS     artifact_store: &dyn BuildArtifactStore,
-//RS     grants: &BTreeSet<BuildCapability>,
-//RS     front_end: FrontEndCompletion,
-//RS     remote_binding: Option<&RemoteBuildBinding>,
-//RS ) -> Result<BuildExecutionResult, BuildExecutionError> {
-//RS     execute_build_plan_with_front_end_and_remote_and_compiler(
-//RS         plan,
-//RS         project_root,
-//RS         artifact_store,
-//RS         grants,
-//RS         front_end,
-//RS         remote_binding,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Execute a plan with compiler-owned package actions. User actions retain
-//RS /// the ordinary sandbox path; only compiler-owned cache misses call `runner`.
-//RS pub fn execute_build_plan_with_front_end_and_compiler(
-//RS     plan: &BuildPlan,
-//RS     project_root: &Path,
-//RS     artifact_store: &dyn BuildArtifactStore,
-//RS     grants: &BTreeSet<BuildCapability>,
-//RS     front_end: FrontEndCompletion,
-//RS     runner: &CompilerActionRunner<'_>,
-//RS ) -> Result<BuildExecutionResult, BuildExecutionError> {
-//RS     execute_build_plan_with_front_end_and_remote_and_compiler(
-//RS         plan,
-//RS         project_root,
-//RS         artifact_store,
-//RS         grants,
-//RS         front_end,
-//RS         None,
-//RS         Some(runner),
-//RS     )
-//RS }
-//RS 
-//RS pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
-//RS     plan: &BuildPlan,
-//RS     project_root: &Path,
-//RS     artifact_store: &dyn BuildArtifactStore,
-//RS     grants: &BTreeSet<BuildCapability>,
-//RS     front_end: FrontEndCompletion,
-//RS     remote_binding: Option<&RemoteBuildBinding>,
-//RS     compiler: Option<&CompilerActionRunner<'_>>,
-//RS ) -> Result<BuildExecutionResult, BuildExecutionError> {
-//RS     let selected_actions = plan
-//RS         .selected_action_ids()
-//RS         .map_err(BuildExecutionError::InvalidGraph)?;
-//RS     for action in plan
-//RS         .actions
-//RS         .iter()
-//RS         .filter(|action| selected_actions.contains(&action.id))
-//RS     {
-//RS         for cap in &action.caps {
-//RS             if !grants.contains(cap) {
-//RS                 return Err(BuildExecutionError::MissingGrant {
-//RS                     action: action.name.clone(),
-//RS                     capability: *cap,
-//RS                 });
-//RS             }
-//RS         }
-//RS     }
-//RS     let selected_probes = plan
-//RS         .selected_probe_ids()
-//RS         .map_err(BuildExecutionError::InvalidGraph)?;
-//RS     if !selected_probes.is_empty() && !grants.contains(&BuildCapability::Exec) {
-//RS         let probe = &plan.probes[selected_probes.iter().next().unwrap().0];
-//RS         return Err(BuildExecutionError::MissingGrant {
-//RS             action: format!("probe {}", probe.name),
-//RS             capability: BuildCapability::Exec,
-//RS         });
-//RS     }
-//RS     let probes = execute_probes(plan, &selected_probes)?;
-//RS     let model = plan
-//RS         .execution_model()
-//RS         .map_err(BuildExecutionError::InvalidGraph)?;
-//RS     let remote_scheduler = remote_binding
-//RS         .filter(|binding| binding.is_enabled())
-//RS         .map(remote_scheduler_for_binding)
-//RS         .transpose()
-//RS         .map_err(|error| BuildExecutionError::IO {
-//RS             action: "remote scheduler".to_string(),
-//RS             detail: error,
-//RS         })?;
-//RS     let mut outcomes = Vec::new();
-//RS     for stage in model.stages {
-//RS         for batch in execution_batches(plan, &stage.actions) {
-//RS             for action_id in &batch {
-//RS                 let action = &plan.actions[action_id.0];
-//RS                 for cap in &action.caps {
-//RS                     if !grants.contains(cap) {
-//RS                         return Err(BuildExecutionError::MissingGrant {
-//RS                             action: action.name.clone(),
-//RS                             capability: cap.clone(),
-//RS                         });
-//RS                     }
-//RS                 }
-//RS             }
-//RS             let mut completed = std::thread::scope(|scope| {
-//RS                 let artifact_store = artifact_store;
-//RS                 let probe_facts = &probes;
-//RS                 let remote_scheduler = remote_scheduler.as_ref();
-//RS                 let jobs = batch
-//RS                     .iter()
-//RS                     .map(|action_id| {
-//RS                         let action = &plan.actions[action_id.0];
-//RS                         let handle = ActionHandle {
-//RS                             id: action.id,
-//RS                             context: plan.context,
-//RS                         };
-//RS                         (
-//RS                             handle,
-//RS                             scope.spawn(move || {
-//RS                                 execute_one_action(
-//RS                                     plan,
-//RS                                     action,
-//RS                                     handle,
-//RS                                     project_root,
-//RS                                     artifact_store,
-//RS                                     grants,
-//RS                                     probe_facts,
-//RS                                     front_end,
-//RS                                     remote_binding,
-//RS                                     remote_scheduler,
-//RS                                     compiler,
-//RS                                 )
-//RS                             }),
-//RS                         )
-//RS                     })
-//RS                     .collect::<Vec<_>>();
-//RS                 jobs.into_iter()
-//RS                     .map(|(handle, job)| {
-//RS                         let result = job.join().map_err(|_| BuildExecutionError::IO {
-//RS                             action: plan.actions[handle.id.0].name.clone(),
-//RS                             detail: "sandbox worker panicked".to_string(),
-//RS                         })?;
-//RS                         Ok((handle, result?))
-//RS                     })
-//RS                     .collect::<Result<Vec<_>, BuildExecutionError>>()
-//RS             })?;
-//RS             completed.sort_by_key(|(handle, _)| handle.id);
-//RS             outcomes.extend(completed);
-//RS         }
-//RS     }
-//RS     let report = plan
-//RS         .execution_report(&outcomes)
-//RS         .map_err(BuildExecutionError::InvalidGraph)?;
-//RS     Ok(BuildExecutionResult { report, probes })
-//RS }
-//RS 
-//RS /// Deterministic resource-pool packing. CPU/memory pools use automatic
-//RS /// capacity; linker/console/GPU/custom pools serialize by name.
-//RS fn execution_batches(plan: &BuildPlan, actions: &[ActionId]) -> Vec<Vec<ActionId>> {
-//RS     let mut batches: Vec<Vec<ActionId>> = Vec::new();
-//RS     let limits = plan
-//RS         .resource_pools()
-//RS         .into_iter()
-//RS         .map(|spec| (spec.pool.as_str().to_string(), spec.slots))
-//RS         .collect::<BTreeMap<_, _>>();
-//RS     let mut held: Vec<BTreeMap<String, usize>> = Vec::new();
-//RS     for action_id in actions {
-//RS         let pools = action_pools(&plan.actions[action_id.0])
-//RS             .into_iter()
-//RS             .map(|pool| pool.as_str().to_string())
-//RS             .collect::<BTreeSet<_>>();
-//RS         let slot = held
-//RS             .iter()
-//RS             .position(|used| {
-//RS                 pools.iter().all(|pool| {
-//RS                     let limit = limits.get(pool).copied().unwrap_or(1);
-//RS                     limit == 0 || used.get(pool).copied().unwrap_or(0) < limit
-//RS                 })
-//RS             })
-//RS             .unwrap_or_else(|| {
-//RS                 batches.push(Vec::new());
-//RS                 held.push(BTreeMap::new());
-//RS                 batches.len() - 1
-//RS             });
-//RS         for pool in pools {
-//RS             *held[slot].entry(pool).or_default() += 1;
-//RS         }
-//RS         batches[slot].push(*action_id);
-//RS     }
-//RS     batches
-//RS }
-//RS 
-//RS fn execute_one_action(
-//RS     plan: &BuildPlan,
-//RS     action: &BuildAction,
-//RS     handle: ActionHandle,
-//RS     project_root: &Path,
-//RS     artifact_store: &dyn BuildArtifactStore,
-//RS     grants: &BTreeSet<BuildCapability>,
-//RS     probe_facts: &[BuildProbeFact],
-//RS     front_end: FrontEndCompletion,
-//RS     remote_binding: Option<&RemoteBuildBinding>,
-//RS     remote_scheduler: Option<&RemoteScheduler>,
-//RS     compiler: Option<&CompilerActionRunner<'_>>,
-//RS ) -> Result<ActionOutcome, BuildExecutionError> {
-//RS     let cache_lookup_allowed = front_end.authorize_cache_lookup().is_ok();
-//RS     let snapshots =
-//RS         super::cache_cas::snapshot_declared_inputs(artifact_store, project_root, action)
-//RS             .map_err(|e| io_action(action, e))?;
-//RS     let remote_requested = remote_binding.is_some_and(RemoteBuildBinding::is_enabled);
-//RS     let (executable, executable_digest) = if action.is_compiler_owned() {
-//RS         (
-//RS             PathBuf::from("<jet-compiler>"),
-//RS             ContentDigest::from_bytes(b"jet-compiler"),
-//RS         )
-//RS     } else {
-//RS         let executable = resolve_program_path(plan, action.toolchain, &action.argv[0])
-//RS             .or_else(|| {
-//RS                 // A remote cache hit also needs a stable command identity, but it
-//RS                 // must not require the local machine to have the target toolchain.
-//RS                 // The declared argv spelling is the remote identity fallback; a
-//RS                 // local miss still fails below instead of silently running it from
-//RS                 // PATH.
-//RS                 remote_requested.then(|| PathBuf::from(&action.argv[0]))
-//RS             })
-//RS             .ok_or_else(|| BuildExecutionError::IO {
-//RS                 action: action.name.clone(),
-//RS                 detail: format!("tool {} was not found", action.argv[0]),
-//RS             })?;
-//RS         let executable_bytes = if executable.is_file() {
-//RS             fs::read(&executable).map_err(|e| io_action(action, e))?
-//RS         } else {
-//RS             action.argv[0].as_bytes().to_vec()
-//RS         };
-//RS         (executable, ContentDigest::from_bytes(&executable_bytes))
-//RS     };
-//RS     let action_probe_names = action
-//RS         .probes
-//RS         .iter()
-//RS         .map(|probe| plan.probes[probe.id.0].name.as_str())
-//RS         .collect::<BTreeSet<_>>();
-//RS     let effective_probe_facts = probe_facts
-//RS         .iter()
-//RS         .filter(|fact| action_probe_names.contains(fact.name.as_str()))
-//RS         .cloned()
-//RS         .collect::<Vec<_>>();
-//RS     let key = plan
-//RS         .effective_action_key(
-//RS             handle,
-//RS             &snapshots,
-//RS             grants,
-//RS             &executable,
-//RS             &executable_digest,
-//RS             &effective_probe_facts,
-//RS         )
-//RS         .map_err(BuildExecutionError::InvalidGraph)?;
-//RS     let remote = if action.is_compiler_owned() {
-//RS         None
-//RS     } else {
-//RS         remote_for_action(plan, action, &key, grants, remote_binding, remote_scheduler)?
-//RS     };
-//RS     let mut restore_failure = None;
-//RS     if action.cache == ActionCache::Cached {
-//RS         // E4-JP2: no cache lookup may bypass parser/sema/policy/diagnostics.
-//RS         if cache_lookup_allowed {
-//RS             match read_action_record(artifact_store, key.clone()) {
-//RS                 Ok(Some(record)) => {
-//RS                     if record.failure_report.is_some() {
-//RS                         super::cache_cas::record_comptime_cache_event(
-//RS                             &action.name,
-//RS                             &key,
-//RS                             ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
-//RS                             "terminal",
-//RS                             Some(record.outcome),
-//RS                         );
-//RS                     }
-//RS                     if let Some(report) = record.failure_report {
-//RS                         return Err(BuildExecutionError::Reported { report });
-//RS                     }
-//RS                     match super::cache_cas::restore_action_outputs(
-//RS                         artifact_store,
-//RS                         project_root,
-//RS                         action,
-//RS                         &record,
-//RS                     ) {
-//RS                         Ok(()) => {
-//RS                             super::cache_cas::record_comptime_cache_event(
-//RS                                 &action.name,
-//RS                                 &key,
-//RS                                 ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
-//RS                                 "restore",
-//RS                                 Some(ActionOutcome::RestoredFromCache),
-//RS                             );
-//RS                             return Ok(ActionOutcome::RestoredFromCache);
-//RS                         }
-//RS                         Err(error) => {
-//RS                             restore_failure = Some(cache_restore_miss_reason(&error));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Ok(None) => {}
-//RS                 Err(error) => restore_failure = Some(cache_restore_miss_reason(&error)),
-//RS             }
-//RS         } else {
-//RS             restore_failure = Some(CacheMissReason::FrontEndIncomplete);
-//RS         }
-//RS     }
-//RS     if action.cache == ActionCache::Cached && cache_lookup_allowed {
-//RS         if let Some((transport, policy, _execute)) = &remote {
-//RS             match transport.download_action_record(&key, policy) {
-//RS                 Ok(record) => {
-//RS                     if let Some(report) = record.failure_report {
-//RS                         return Err(BuildExecutionError::Reported { report });
-//RS                     }
-//RS                     if !matches!(
-//RS                         record.outcome,
-//RS                         ActionOutcome::Succeeded { .. } | ActionOutcome::RestoredFromCache
-//RS                     ) {
-//RS                         return Err(remote_action(
-//RS                             action,
-//RS                             "remote cache record contains a failed outcome without a report"
-//RS                                 .to_string(),
-//RS                         ));
-//RS                     }
-//RS                     match restore_remote_outputs(
-//RS                         transport,
-//RS                         policy,
-//RS                         project_root,
-//RS                         action,
-//RS                         &record,
-//RS                         super::cache_cas::RemoteActionRequest::CacheRead,
-//RS                     ) {
-//RS                         Ok(restored) => {
-//RS                             restored.commit();
-//RS                             super::cache_cas::record_comptime_cache_event(
-//RS                                 &action.name,
-//RS                                 &key,
-//RS                                 ActionCacheStatus::Hit(CacheHitReason::DeclaredOutputsRestored),
-//RS                                 "restore",
-//RS                                 Some(ActionOutcome::RestoredFromCache),
-//RS                             );
-//RS                             return Ok(ActionOutcome::RestoredFromCache);
-//RS                         }
-//RS                         Err(_detail)
-//RS                             if remote_binding.is_some_and(|binding| binding.fallback_local) => {}
-//RS                         Err(detail) => return Err(remote_action(action, detail)),
-//RS                     }
-//RS                 }
-//RS                 Err(RemoteCacheError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
-//RS                 Err(RemoteCacheError::Denied(denied))
-//RS                     if denied.reason == RemoteDeniedReason::GrantNotAllowed => {}
-//RS                 Err(_error) if remote_binding.is_some_and(|binding| binding.fallback_local) => {}
-//RS                 Err(error) => return Err(remote_action(action, error.to_string())),
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let rebuild_status = if action.cache == ActionCache::UncachedPhony {
-//RS         ActionCacheStatus::Miss(CacheMissReason::UncachedAction)
-//RS     } else if let Some(reason) = restore_failure {
-//RS         ActionCacheStatus::Miss(reason)
-//RS     } else {
-//RS         ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord)
-//RS     };
-//RS     super::cache_cas::record_comptime_cache_event(
-//RS         &action.name,
-//RS         &key,
-//RS         rebuild_status,
-//RS         "lookup",
-//RS         None,
-//RS     );
-//RS 
-//RS     if action.legacy_wrapper == Some(LegacyWrapperKind::Npm)
-//RS         && action
-//RS             .labels
-//RS             .keys()
-//RS             .any(|key| key.starts_with("legacy.dependency."))
-//RS     {
-//RS         return Err(io_action(
-//RS             action,
-//RS             io::Error::new(
-//RS                 io::ErrorKind::Unsupported,
-//RS                 "npm dependency-bearing imports require a provisioned locked dependency tree",
-//RS             ),
-//RS         ));
-//RS     }
-//RS 
-//RS     if action.is_compiler_owned() {
-//RS         let runner = compiler.ok_or_else(|| BuildExecutionError::IO {
-//RS             action: action.name.clone(),
-//RS             detail: "compiler-owned action has no compiler runner".to_string(),
-//RS         })?;
-//RS         let bytes = runner(action, &snapshots).map_err(|detail| BuildExecutionError::IO {
-//RS             action: action.name.clone(),
-//RS             detail,
-//RS         })?;
-//RS         if bytes.len() != action.outputs.len() {
-//RS             return Err(BuildExecutionError::IO {
-//RS                 action: action.name.clone(),
-//RS                 detail: format!(
-//RS                     "compiler runner returned {} outputs for {} declarations",
-//RS                     bytes.len(),
-//RS                     action.outputs.len()
-//RS                 ),
-//RS             });
-//RS         }
-//RS         for (output, bytes) in action.outputs.iter().zip(bytes) {
-//RS             let path =
-//RS                 resolve_under(project_root, output.as_str()).map_err(|e| io_action(action, e))?;
-//RS             prepare_output_destination(project_root, &path).map_err(|e| io_action(action, e))?;
-//RS             super::cache_cas::atomic_restore_file(project_root, &path, &bytes)
-//RS                 .map_err(|e| io_action(action, e))?;
-//RS         }
-//RS         let outcome = ActionOutcome::Succeeded { exit_code: 0 };
-//RS         if action.cache == ActionCache::Cached {
-//RS             let record = super::cache_cas::capture_declared_outputs(
-//RS                 artifact_store,
-//RS                 project_root,
-//RS                 action,
-//RS                 key.clone(),
-//RS                 outcome,
-//RS                 ActionCacheProvenance::miss(rebuild_status_reason(rebuild_status)),
-//RS             )
-//RS             .map_err(|e| io_action(action, e))?;
-//RS             write_action_record(artifact_store, &key, &record).map_err(|e| io_action(action, e))?;
-//RS         }
-//RS         super::cache_cas::record_comptime_cache_event(
-//RS             &action.name,
-//RS             &key,
-//RS             rebuild_status,
-//RS             "publish",
-//RS             Some(outcome),
-//RS         );
-//RS         return Ok(outcome);
-//RS     }
-//RS 
-//RS     if let Some((_transport, _policy, true)) = &remote {
-//RS         let timeout_ms = remote_binding
-//RS             .map(|binding| binding.timeout_ms)
-//RS             .unwrap_or(30_000);
-//RS         let remote_result = execute_remote_action(
-//RS             plan,
-//RS             action,
-//RS             project_root,
-//RS             artifact_store,
-//RS             &snapshots,
-//RS             &key,
-//RS             timeout_ms,
-//RS             remote_scheduler.expect("enabled remote execution requires its scheduler"),
-//RS             remote_binding.expect("enabled remote execution requires its host binding"),
-//RS         );
-//RS         match remote_result {
-//RS             Ok(outcome) => return Ok(outcome),
-//RS             Err(error)
-//RS                 if remote_binding.is_some_and(|binding| binding.fallback_local)
-//RS                     && !error.is_reported_action_failure() => {}
-//RS             Err(error) => return Err(error),
-//RS         }
-//RS     }
-//RS 
-//RS     if remote_binding
-//RS         .is_some_and(|binding| binding.cache_read && !binding.execute && !binding.fallback_local)
-//RS     {
-//RS         return Err(remote_action(
-//RS             action,
-//RS             "remote cache miss cannot fall back to local execution".to_string(),
-//RS         ));
-//RS     }
-//RS 
-//RS     let sandbox = project_root.join(".jet/build-sandbox").join(format!(
-//RS         "{}-{}-{}",
-//RS         std::process::id(),
-//RS         action.id.0,
-//RS         key.as_str().trim_start_matches("act-sha256:")
-//RS     ));
-//RS     let sandbox_root = sandbox.parent().ok_or_else(|| {
-//RS         io_action(
-//RS             action,
-//RS             io::Error::new(io::ErrorKind::InvalidInput, "sandbox has no parent"),
-//RS         )
-//RS     })?;
-//RS     ensure_real_directory(sandbox_root).map_err(|e| io_action(action, e))?;
-//RS     if let Ok(metadata) = fs::symlink_metadata(&sandbox) {
-//RS         if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS             return Err(io_action(
-//RS                 action,
-//RS                 io::Error::new(
-//RS                     io::ErrorKind::PermissionDenied,
-//RS                     "action sandbox is not a real directory",
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
-//RS     }
-//RS     ensure_real_directory(&sandbox).map_err(|e| io_action(action, e))?;
-//RS     for input in &action.inputs {
-//RS         let from = resolve_under(project_root, input.as_str()).map_err(|e| io_action(action, e))?;
-//RS         let to = resolve_under(&sandbox, input.as_str()).map_err(|e| io_action(action, e))?;
-//RS         if let Some(parent) = to.parent() {
-//RS             fs::create_dir_all(parent).map_err(|e| io_action(action, e))?;
-//RS         }
-//RS         let bytes = super::cache_cas::secure_read_file(project_root, &from)
-//RS             .map_err(|e| io_action(action, e))?;
-//RS         fs::write(to, bytes).map_err(|e| io_action(action, e))?;
-//RS     }
-//RS     for output in &action.outputs {
-//RS         let path = resolve_under(&sandbox, output.as_str()).map_err(|e| io_action(action, e))?;
-//RS         if let Some(parent) = path.parent() {
-//RS             fs::create_dir_all(parent).map_err(|e| io_action(action, e))?;
-//RS         }
-//RS     }
-//RS 
-//RS     let env = action
-//RS         .env
-//RS         .iter()
-//RS         .filter(|(key, _)| {
-//RS             action.env_allowlist.is_empty() || action.env_allowlist.contains(key.as_str())
-//RS         })
-//RS         .map(|(key, value)| (key.clone(), value.clone()))
-//RS         .collect::<BTreeMap<_, _>>();
-//RS     let runtime_args = runtime_toolchain_arguments(plan, action.toolchain, &action.argv[1..]);
-//RS     let runtime_env = runtime_toolchain_environment(plan, action.toolchain, &env);
-//RS     let mounts = plan
-//RS         .toolchain(action.toolchain)
-//RS         .map(|toolchain| {
-//RS             toolchain
-//RS                 .mounts
-//RS                 .iter()
-//RS                 .map(|mount| {
-//RS                     jet_process_sandbox::ReadOnlyMount::new(
-//RS                         PathBuf::from(&mount.source),
-//RS                         PathBuf::from(&mount.destination),
-//RS                     )
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS         })
-//RS         .unwrap_or_default();
-//RS     let output = match run_native_sandboxed_with_timeout_and_mounts(
-//RS         &executable,
-//RS         &runtime_args,
-//RS         &sandbox,
-//RS         None,
-//RS         &runtime_env,
-//RS         grants.contains(&BuildCapability::Net) && action.caps.contains(&BuildCapability::Net),
-//RS         &mounts,
-//RS         Some(jet_process_sandbox::DEFAULT_ACTION_TIMEOUT),
-//RS     ) {
-//RS         Ok(result) => result.output,
-//RS         Err(error) => {
-//RS             let _ = fs::remove_dir_all(&sandbox);
-//RS             return Err(native_sandbox_error(action, error));
-//RS         }
-//RS     };
-//RS     let code = output.status.code().unwrap_or(1);
-//RS     if !output.status.success() {
-//RS         let _ = fs::remove_dir_all(&sandbox);
-//RS         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-//RS         let report = action_failure_report(&action.name, code, &stderr);
-//RS         if action.cache == ActionCache::Cached {
-//RS             let record = ActionResultRecord {
-//RS                 key: key.clone(),
-//RS                 outcome: ActionOutcome::Failed { exit_code: code },
-//RS                 outputs: Vec::new(),
-//RS                 failure_report: Some(report.clone()),
-//RS                 provenance: ActionCacheProvenance::miss(rebuild_status_reason(rebuild_status)),
-//RS             };
-//RS             if let Some((transport, policy, _execute)) = &remote {
-//RS                 if policy
-//RS                     .check(super::cache_cas::RemoteActionRequest::CacheWrite)
-//RS                     .is_ok()
-//RS                 {
-//RS                     publish_remote_outputs(transport, policy, project_root, &record)
-//RS                         .map_err(|detail| remote_action(action, detail))?;
-//RS                 }
-//RS             }
-//RS             write_action_record(artifact_store, &key, &record).map_err(|e| io_action(action, e))?;
-//RS             super::cache_cas::record_comptime_cache_event(
-//RS                 &action.name,
-//RS                 &key,
-//RS                 rebuild_status,
-//RS                 "terminal",
-//RS                 Some(ActionOutcome::Failed { exit_code: code }),
-//RS             );
-//RS         }
-//RS         return Err(BuildExecutionError::Reported { report });
-//RS     }
-//RS     for declared in &action.outputs {
-//RS         let from = resolve_under(&sandbox, declared.as_str()).map_err(|e| io_action(action, e))?;
-//RS         let to =
-//RS             resolve_under(project_root, declared.as_str()).map_err(|e| io_action(action, e))?;
-//RS         let bytes = super::cache_cas::secure_read_file(&sandbox, &from)
-//RS             .map_err(|e| io_action(action, e))?;
-//RS         prepare_output_destination(project_root, &to).map_err(|e| io_action(action, e))?;
-//RS         super::cache_cas::atomic_restore_file(project_root, &to, &bytes)
-//RS             .map_err(|e| io_action(action, e))?;
-//RS     }
-//RS     let outcome = ActionOutcome::Succeeded { exit_code: code };
-//RS     if action.cache == ActionCache::Cached {
-//RS         let record = super::cache_cas::capture_declared_outputs(
-//RS             artifact_store,
-//RS             project_root,
-//RS             action,
-//RS             key.clone(),
-//RS             outcome,
-//RS             ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
-//RS         )
-//RS         .map_err(|e| io_action(action, e))?;
-//RS         if let Some((transport, policy, _execute)) = &remote {
-//RS             if policy
-//RS                 .check(super::cache_cas::RemoteActionRequest::CacheWrite)
-//RS                 .is_ok()
-//RS             {
-//RS                 publish_remote_outputs(transport, policy, project_root, &record)
-//RS                     .map_err(|detail| remote_action(action, detail))?;
-//RS             }
-//RS         }
-//RS         write_action_record(artifact_store, &key, &record).map_err(|e| io_action(action, e))?;
-//RS         super::cache_cas::record_comptime_cache_event(
-//RS             &action.name,
-//RS             &key,
-//RS             ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord),
-//RS             "publish",
-//RS             Some(outcome),
-//RS         );
-//RS     }
-//RS     fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
-//RS     Ok(outcome)
-//RS }
-//RS 
-//RS fn execute_remote_action(
-//RS     plan: &BuildPlan,
-//RS     action: &BuildAction,
-//RS     project_root: &Path,
-//RS     artifact_store: &dyn BuildArtifactStore,
-//RS     snapshots: &[ActionInputSnapshot],
-//RS     key: &ActionKey,
-//RS     timeout_ms: u64,
-//RS     scheduler: &RemoteScheduler,
-//RS     binding: &RemoteBuildBinding,
-//RS ) -> Result<ActionOutcome, BuildExecutionError> {
-//RS     let request = remote_execution_request(action, key, binding);
-//RS     let mut last_failure = None;
-//RS     let dispatch = scheduler.dispatch(&request, |builder| {
-//RS         let transport = RemoteCacheTransport::for_binding(&builder.binding)
-//RS             .map_err(RemoteAttemptError::rejected)?;
-//RS         let policy = remote_attempt_policy(plan, action, key, &builder.binding, &transport)
-//RS             .map_err(|error| RemoteAttemptError::rejected(format!("{error:?}")))?;
-//RS         match execute_remote_candidate(
-//RS             plan,
-//RS             action,
-//RS             project_root,
-//RS             artifact_store,
-//RS             snapshots,
-//RS             key,
-//RS             &transport,
-//RS             &policy,
-//RS             timeout_ms,
-//RS             &builder.binding,
-//RS         ) {
-//RS             Ok(outcome) => Ok(outcome),
-//RS             Err(failure) if failure.retryable => {
-//RS                 let detail = format!("{:?}", failure.error);
-//RS                 last_failure = Some(failure.error);
-//RS                 Err(RemoteAttemptError::worker_lost(detail))
-//RS             }
-//RS             Err(failure) => {
-//RS                 let detail = format!("{:?}", failure.error);
-//RS                 last_failure = Some(failure.error);
-//RS                 Err(RemoteAttemptError::rejected(detail))
-//RS             }
-//RS         }
-//RS     });
-//RS     match dispatch {
-//RS         Ok(dispatch) => Ok(dispatch.value),
-//RS         Err(error) => Err(last_failure.unwrap_or_else(|| remote_action(action, error.to_string()))),
-//RS     }
-//RS }
-//RS 
-//RS fn execute_remote_candidate(
-//RS     plan: &BuildPlan,
-//RS     action: &BuildAction,
-//RS     project_root: &Path,
-//RS     artifact_store: &dyn BuildArtifactStore,
-//RS     snapshots: &[ActionInputSnapshot],
-//RS     key: &ActionKey,
-//RS     transport: &RemoteCacheTransport,
-//RS     policy: &RemoteCachePolicy,
-//RS     timeout_ms: u64,
-//RS     binding: &RemoteBuildBinding,
-//RS ) -> Result<ActionOutcome, RemoteAttemptFailure> {
-//RS     let mut policy = policy.clone();
-//RS     let mut last_failure = None;
-//RS     for attempt in 0..MAX_REMOTE_EXECUTION_ATTEMPTS {
-//RS         match execute_remote_attempt(
-//RS             plan,
-//RS             action,
-//RS             project_root,
-//RS             artifact_store,
-//RS             snapshots,
-//RS             key,
-//RS             transport,
-//RS             &policy,
-//RS             timeout_ms,
-//RS         ) {
-//RS             Ok(outcome) => return Ok(outcome),
-//RS             Err(failure) if failure.retryable && attempt + 1 < MAX_REMOTE_EXECUTION_ATTEMPTS => {
-//RS                 last_failure = Some(failure);
-//RS                 policy = remote_attempt_policy(plan, action, key, binding, transport)?;
-//RS             }
-//RS             Err(failure) => return Err(failure),
-//RS         }
-//RS     }
-//RS     Err(last_failure.expect("remote execution attempt loop must produce a result"))
-//RS }
-//RS 
-//RS fn execute_remote_attempt(
-//RS     plan: &BuildPlan,
-//RS     action: &BuildAction,
-//RS     project_root: &Path,
-//RS     artifact_store: &dyn BuildArtifactStore,
-//RS     snapshots: &[ActionInputSnapshot],
-//RS     key: &ActionKey,
-//RS     transport: &RemoteCacheTransport,
-//RS     policy: &RemoteCachePolicy,
-//RS     timeout_ms: u64,
-//RS ) -> Result<ActionOutcome, RemoteAttemptFailure> {
-//RS     let proof = policy
-//RS         .proof()
-//RS         .cloned()
-//RS         .ok_or_else(|| remote_action(action, "remote sandbox proof is missing".to_string()))?;
-//RS     for snapshot in snapshots {
-//RS         let path = resolve_under(project_root, snapshot.path.as_str())
-//RS             .map_err(|e| io_action(action, e))?;
-//RS         let bytes = secure_read_file(project_root, &path).map_err(|e| io_action(action, e))?;
-//RS         let digest = transport
-//RS             .upload_execution_blob(&bytes, policy)
-//RS             .map_err(|error| remote_action(action, error.to_string()))?;
-//RS         if digest != snapshot.digest || bytes.len() as u64 != snapshot.byte_len {
-//RS             return Err(RemoteAttemptFailure::terminal(remote_action(
-//RS                 action,
-//RS                 format!(
-//RS                     "remote input CAS identity changed for {}",
-//RS                     snapshot.path.as_str()
-//RS                 ),
-//RS             )));
-//RS         }
-//RS     }
-//RS     let request = RemoteExecutionRequest {
-//RS         key: key.clone(),
-//RS         attempt_id: proof.attempt_id.clone(),
-//RS         argv: action.argv.clone(),
-//RS         inputs: snapshots.to_vec(),
-//RS         outputs: action.outputs.clone(),
-//RS         toolchain_digest: toolchain_provenance_digest(plan, action.toolchain),
-//RS         sandbox: proof,
-//RS     };
-//RS     let expected_execution_id = remote_execution_identity(&request);
-//RS     transport
-//RS         .submit_execution(&request, policy)
-//RS         .map_err(|error| remote_action(action, error.to_string()))?;
-//RS     let result = wait_remote_execution_result(
-//RS         transport,
-//RS         policy,
-//RS         key,
-//RS         action,
-//RS         &expected_execution_id,
-//RS         timeout_ms,
-//RS     )?;
-//RS     match result.outcome {
-//RS         ActionOutcome::Succeeded { exit_code } => {
-//RS             let restored = restore_remote_outputs(
-//RS                 transport,
-//RS                 policy,
-//RS                 project_root,
-//RS                 action,
-//RS                 &ActionResultRecord {
-//RS                     key: result.key.clone(),
-//RS                     outcome: result.outcome,
-//RS                     outputs: result.outputs.clone(),
-//RS                     failure_report: None,
-//RS                     provenance: ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
-//RS                 },
-//RS                 super::cache_cas::RemoteActionRequest::Execute,
-//RS             )
-//RS             .map_err(|detail| remote_action(action, detail))?;
-//RS             if action.cache == ActionCache::Cached {
-//RS                 let record = super::cache_cas::capture_declared_outputs(
-//RS                     artifact_store,
-//RS                     project_root,
-//RS                     action,
-//RS                     key.clone(),
-//RS                     ActionOutcome::Succeeded { exit_code },
-//RS                     ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
-//RS                 )
-//RS                 .map_err(|e| io_action(action, e))?;
-//RS                 if record.outputs != result.outputs {
-//RS                     return Err(RemoteAttemptFailure::terminal(remote_action(
-//RS                         action,
-//RS                         "remote output changed before local publication".to_string(),
-//RS                     )));
-//RS                 }
-//RS                 if policy
-//RS                     .check(super::cache_cas::RemoteActionRequest::CacheWrite)
-//RS                     .is_ok()
-//RS                 {
-//RS                     publish_remote_outputs(transport, policy, project_root, &record)
-//RS                         .map_err(|detail| remote_action(action, detail))?;
-//RS                 }
-//RS                 write_action_record(artifact_store, key, &record)
-//RS                     .map_err(|e| io_action(action, e))?;
-//RS                 super::cache_cas::record_comptime_cache_event(
-//RS                     &action.name,
-//RS                     key,
-//RS                     ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
-//RS                     "publish",
-//RS                     Some(ActionOutcome::Succeeded { exit_code }),
-//RS                 );
-//RS             }
-//RS             restored.commit();
-//RS             Ok(ActionOutcome::Succeeded { exit_code })
-//RS         }
-//RS         ActionOutcome::Failed { exit_code } => {
-//RS             let stderr = transport
-//RS                 .download_execution_blob(&result.stderr_digest, policy)
-//RS                 .map_err(|error| {
-//RS                     RemoteAttemptFailure::terminal(remote_action(action, error.to_string()))
-//RS                 })?;
-//RS             let stderr = String::from_utf8_lossy(&stderr).trim().to_string();
-//RS             let report = action_failure_report(&action.name, exit_code, &stderr);
-//RS             if action.cache == ActionCache::Cached {
-//RS                 let record = ActionResultRecord {
-//RS                     key: key.clone(),
-//RS                     outcome: ActionOutcome::Failed { exit_code },
-//RS                     outputs: Vec::new(),
-//RS                     failure_report: Some(report.clone()),
-//RS                     provenance: ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
-//RS                 };
-//RS                 if policy
-//RS                     .check(super::cache_cas::RemoteActionRequest::CacheWrite)
-//RS                     .is_ok()
-//RS                 {
-//RS                     publish_remote_outputs(transport, policy, project_root, &record).map_err(
-//RS                         |detail| RemoteAttemptFailure::terminal(remote_action(action, detail)),
-//RS                     )?;
-//RS                 }
-//RS                 write_action_record(artifact_store, key, &record)
-//RS                     .map_err(|error| RemoteAttemptFailure::terminal(io_action(action, error)))?;
-//RS                 super::cache_cas::record_comptime_cache_event(
-//RS                     &action.name,
-//RS                     key,
-//RS                     ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
-//RS                     "terminal",
-//RS                     Some(ActionOutcome::Failed { exit_code }),
-//RS                 );
-//RS             }
-//RS             Err(RemoteAttemptFailure::terminal(
-//RS                 BuildExecutionError::Reported { report },
-//RS             ))
-//RS         }
-//RS         ActionOutcome::RestoredFromCache => Err(RemoteAttemptFailure::terminal(remote_action(
-//RS             action,
-//RS             "remote execution returned a cache-only outcome".to_string(),
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn remote_for_action(
-//RS     plan: &BuildPlan,
-//RS     action: &BuildAction,
-//RS     key: &ActionKey,
-//RS     grants: &BTreeSet<BuildCapability>,
-//RS     binding: Option<&RemoteBuildBinding>,
-//RS     scheduler: Option<&RemoteScheduler>,
-//RS ) -> Result<Option<(RemoteCacheTransport, RemoteCachePolicy, bool)>, BuildExecutionError> {
-//RS     let Some(binding) = binding.filter(|binding| binding.is_enabled()) else {
-//RS         return Ok(None);
-//RS     };
-//RS     if binding.trust_domain.trim().is_empty() {
-//RS         return Err(remote_action(
-//RS             action,
-//RS             "remote builder binding has no trust domain".to_string(),
-//RS         ));
-//RS     }
-//RS     if binding.trust_domain.len() > 256
-//RS         || binding
-//RS             .trust_domain
-//RS             .chars()
-//RS             .any(|character| character.is_control())
-//RS     {
-//RS         return Err(remote_action(
-//RS             action,
-//RS             "remote builder binding has an invalid trust domain".to_string(),
-//RS         ));
-//RS     }
-//RS     if !grants.contains(&BuildCapability::Net) {
-//RS         return Err(BuildExecutionError::MissingGrant {
-//RS             action: format!("remote build transport for {}", action.name),
-//RS             capability: BuildCapability::Net,
-//RS         });
-//RS     }
-//RS     let transport = RemoteCacheTransport::for_binding(binding)
-//RS         .map_err(|detail| remote_action(action, detail))?;
-//RS     if !action.caps.contains(&BuildCapability::Net) {
-//RS         return Err(BuildExecutionError::MissingGrant {
-//RS             action: format!("remote build transport for {}", action.name),
-//RS             capability: BuildCapability::Net,
-//RS         });
-//RS     }
-//RS     // The CLI names one host-owned binding as the primary candidate. The
-//RS     // canonical scheduler may add compatible host bindings for retryable
-//RS     // worker-loss failover; cache policy still belongs to the named binding.
-//RS     let request = action_pools(action)
-//RS         .into_iter()
-//RS         .fold(RemoteBuildRequest::new(key.clone()), |request, pool| {
-//RS             request.with_pool(pool)
-//RS         })
-//RS         .with_platform(binding.platform.clone())
-//RS         .with_trust_domain(binding.trust_domain.clone())
-//RS         .with_cache_read(binding.cache_read)
-//RS         .with_cache_write(binding.cache_write)
-//RS         .with_execute(binding.execute)
-//RS         .with_local_fallback(binding.fallback_local);
-//RS     let scheduler = scheduler.ok_or_else(|| {
-//RS         remote_action(
-//RS             action,
-//RS             "remote builder binding has no canonical scheduler".to_string(),
-//RS         )
-//RS     })?;
-//RS     match scheduler.select(&request) {
-//RS         Ok(_) => {}
-//RS         Err(_error) if binding.fallback_local => return Ok(None),
-//RS         Err(error) => return Err(remote_action(action, error.to_string())),
-//RS     }
-//RS     let policy = remote_attempt_policy(plan, action, key, binding, &transport)?;
-//RS     Ok(Some((transport, policy, binding.execute)))
-//RS }
-//RS 
-//RS fn remote_scheduler_for_binding(binding: &RemoteBuildBinding) -> Result<RemoteScheduler, String> {
-//RS     let mut selected = RemoteBuilder::from_binding(binding.clone());
-//RS     // `--builder` names the primary binding. Other compatible host bindings
-//RS     // remain deterministic failover candidates after it loses its worker.
-//RS     selected.capabilities.priority = 1;
-//RS     let mut builders = vec![selected];
-//RS 
-//RS     let selected_is_registered = match RemoteBuildBinding::load_host(&binding.builder) {
-//RS         Ok(registered) => registered == *binding,
-//RS         Err(_) => false,
-//RS     };
-//RS     if selected_is_registered {
-//RS         for name in RemoteBuildBinding::list_host()? {
-//RS             if name == binding.builder {
-//RS                 continue;
-//RS             }
-//RS             let Ok(candidate) = RemoteBuildBinding::load_host(&name) else {
-//RS                 continue;
-//RS             };
-//RS             let mut candidate = RemoteBuilder::from_binding(candidate);
-//RS             candidate.capabilities.priority = 0;
-//RS             builders.push(candidate);
-//RS         }
-//RS     }
-//RS     RemoteScheduler::new(builders).map_err(|error| error.to_string())
-//RS }
-//RS 
-//RS fn remote_execution_request(
-//RS     action: &BuildAction,
-//RS     key: &ActionKey,
-//RS     binding: &RemoteBuildBinding,
-//RS ) -> RemoteBuildRequest {
-//RS     action_pools(action)
-//RS         .into_iter()
-//RS         .fold(RemoteBuildRequest::new(key.clone()), |request, pool| {
-//RS             request.with_pool(pool)
-//RS         })
-//RS         .with_platform(binding.platform.clone())
-//RS         .with_trust_domain(binding.trust_domain.clone())
-//RS         .with_execute(true)
-//RS         .with_local_fallback(binding.fallback_local)
-//RS }
-//RS 
-//RS fn remote_attempt_policy(
-//RS     plan: &BuildPlan,
-//RS     action: &BuildAction,
-//RS     key: &ActionKey,
-//RS     binding: &RemoteBuildBinding,
-//RS     transport: &RemoteCacheTransport,
-//RS ) -> Result<RemoteCachePolicy, BuildExecutionError> {
-//RS     let attempt = REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed);
-//RS     let timestamp = SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .unwrap_or_default()
-//RS         .as_nanos();
-//RS     let attempt_id = format!("attempt-{}-{timestamp}-{attempt}", std::process::id());
-//RS     let proof = transport
-//RS         .sandbox_proof(
-//RS             format!(
-//RS                 "remote:{}:{}:local-{}-{}-{attempt}",
-//RS                 binding.builder,
-//RS                 binding.trust_domain,
-//RS                 std::process::id(),
-//RS                 action.id.0,
-//RS             ),
-//RS             attempt_id,
-//RS             key.as_str(),
-//RS             remote_provenance_digest(plan, action),
-//RS         )
-//RS         .map_err(|detail| remote_action(action, detail))?;
-//RS     Ok(RemoteCachePolicy::with_grants(
-//RS         binding.cache_read,
-//RS         binding.cache_write,
-//RS         binding.execute,
-//RS         proof,
-//RS     ))
-//RS }
-//RS 
-//RS fn wait_remote_execution_result(
-//RS     transport: &RemoteCacheTransport,
-//RS     policy: &RemoteCachePolicy,
-//RS     key: &ActionKey,
-//RS     action: &BuildAction,
-//RS     expected_execution_id: &ContentDigest,
-//RS     timeout_ms: u64,
-//RS ) -> Result<super::cache_cas::RemoteExecutionResult, RemoteAttemptFailure> {
-//RS     let timeout = Duration::from_millis(timeout_ms);
-//RS     let deadline = Instant::now() + timeout;
-//RS     loop {
-//RS         match transport.download_execution_result(key, policy) {
-//RS             Ok(result) if result.execution_id != *expected_execution_id => {
-//RS                 let detail = format!(
-//RS                     "remote execution identity mismatch: expected {}, got {}",
-//RS                     expected_execution_id.as_str(),
-//RS                     result.execution_id.as_str(),
-//RS                 );
-//RS                 let detail = match transport.cancel_execution(key, policy) {
-//RS                     Ok(()) => detail,
-//RS                     Err(cancel_error) => format!("{detail}; cancellation failed: {cancel_error}"),
-//RS                 };
-//RS                 super::cache_cas::record_comptime_cache_event(
-//RS                     &action.name,
-//RS                     key,
-//RS                     ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
-//RS                     "interrupted",
-//RS                     None,
-//RS                 );
-//RS                 return Err(RemoteAttemptFailure::terminal(remote_action(
-//RS                     action, detail,
-//RS                 )));
-//RS             }
-//RS             Ok(result) => return Ok(result),
-//RS             Err(RemoteCacheError::Io(error))
-//RS                 if error.kind() == io::ErrorKind::NotFound && Instant::now() < deadline =>
-//RS             {
-//RS                 std::thread::sleep(Duration::from_millis(10));
-//RS             }
-//RS             Err(RemoteCacheError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
-//RS                 super::cache_cas::record_comptime_cache_event(
-//RS                     &action.name,
-//RS                     key,
-//RS                     ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
-//RS                     "interrupted",
-//RS                     None,
-//RS                 );
-//RS                 return match transport.cancel_execution(key, policy) {
-//RS                     Ok(()) => Err(RemoteAttemptFailure::retryable(remote_action(
-//RS                         action,
-//RS                         format!(
-//RS                             "remote worker did not publish a result within {}ms",
-//RS                             timeout.as_millis()
-//RS                         ),
-//RS                     ))),
-//RS                     Err(cancel_error) => Err(RemoteAttemptFailure::terminal(remote_action(
-//RS                         action,
-//RS                         format!(
-//RS                             "remote worker did not publish a result within {}ms; cancellation failed: {cancel_error}",
-//RS                             timeout.as_millis()
-//RS                         ),
-//RS                     ))),
-//RS                 };
-//RS             }
-//RS             Err(error) => {
-//RS                 let detail = match transport.cancel_execution(key, policy) {
-//RS                     Ok(()) => error.to_string(),
-//RS                     Err(cancel_error) => {
-//RS                         format!("{}; cancellation failed: {cancel_error}", error)
-//RS                     }
-//RS                 };
-//RS                 super::cache_cas::record_comptime_cache_event(
-//RS                     &action.name,
-//RS                     key,
-//RS                     ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
-//RS                     "interrupted",
-//RS                     None,
-//RS                 );
-//RS                 return Err(RemoteAttemptFailure::terminal(remote_action(
-//RS                     action, detail,
-//RS                 )));
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn restore_remote_outputs<'a>(
-//RS     transport: &RemoteCacheTransport,
-//RS     policy: &RemoteCachePolicy,
-//RS     project_root: &'a Path,
-//RS     action: &BuildAction,
-//RS     record: &ActionResultRecord,
-//RS     blob_request: super::cache_cas::RemoteActionRequest,
-//RS ) -> Result<RemoteOutputRestore<'a>, String> {
-//RS     if record.outputs.len() != action.outputs.len()
-//RS         || record
-//RS             .outputs
-//RS             .iter()
-//RS             .zip(&action.outputs)
-//RS             .any(|(output, declared)| output.path != *declared)
-//RS     {
-//RS         return Err("remote output record does not exactly match action declarations".to_string());
-//RS     }
-//RS     let mut staged = Vec::with_capacity(record.outputs.len());
-//RS     let mut backups = Vec::with_capacity(record.outputs.len());
-//RS     for output in &record.outputs {
-//RS         let bytes = match blob_request {
-//RS             super::cache_cas::RemoteActionRequest::CacheRead => {
-//RS                 transport.download_blob(&output.digest, policy)
-//RS             }
-//RS             super::cache_cas::RemoteActionRequest::Execute => {
-//RS                 transport.download_execution_blob(&output.digest, policy)
-//RS             }
-//RS             super::cache_cas::RemoteActionRequest::CacheWrite => {
-//RS                 return Err("remote output restore cannot use a cache-write grant".to_string());
-//RS             }
-//RS         }
-//RS         .map_err(|error| error.to_string())?;
-//RS         if bytes.len() as u64 != output.byte_len
-//RS             || ContentDigest::from_bytes(&bytes) != output.digest
-//RS         {
-//RS             return Err(format!(
-//RS                 "remote output blob {} failed digest or length verification",
-//RS                 output.path.as_str()
-//RS             ));
-//RS         }
-//RS         let path =
-//RS             resolve_under(project_root, output.path.as_str()).map_err(|error| error.to_string())?;
-//RS         let previous = match secure_read_file(project_root, &path) {
-//RS             Ok(bytes) => Some(bytes),
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-//RS             Err(error) => return Err(error.to_string()),
-//RS         };
-//RS         backups.push((path.clone(), previous));
-//RS         staged.push((path, bytes));
-//RS     }
-//RS     for (path, bytes) in &staged {
-//RS         if let Err(error) = prepare_output_destination(project_root, path)
-//RS             .and_then(|()| atomic_restore_file(project_root, path, bytes))
-//RS         {
-//RS             rollback_output_restore(project_root, &backups);
-//RS             return Err(error.to_string());
-//RS         }
-//RS     }
-//RS     Ok(RemoteOutputRestore {
-//RS         project_root,
-//RS         backups,
-//RS         committed: false,
-//RS     })
-//RS }
-//RS 
-//RS struct RemoteOutputRestore<'a> {
-//RS     project_root: &'a Path,
-//RS     backups: Vec<(PathBuf, Option<Vec<u8>>)>,
-//RS     committed: bool,
-//RS }
-//RS 
-//RS impl RemoteOutputRestore<'_> {
-//RS     fn commit(mut self) {
-//RS         self.committed = true;
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for RemoteOutputRestore<'_> {
-//RS     fn drop(&mut self) {
-//RS         if !self.committed {
-//RS             rollback_output_restore(self.project_root, &self.backups);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn rollback_output_restore(project_root: &Path, backups: &[(PathBuf, Option<Vec<u8>>)]) {
-//RS     for (path, previous) in backups.iter().rev() {
-//RS         match previous {
-//RS             Some(bytes) => {
-//RS                 let _ = prepare_output_destination(project_root, path)
-//RS                     .and_then(|()| atomic_restore_file(project_root, path, bytes));
-//RS             }
-//RS             None => match fs::symlink_metadata(path) {
-//RS                 Ok(metadata) if metadata.file_type().is_symlink() => {}
-//RS                 Ok(metadata) if metadata.is_file() => {
-//RS                     let _ = fs::remove_file(path);
-//RS                 }
-//RS                 _ => {}
-//RS             },
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn publish_remote_outputs(
-//RS     transport: &RemoteCacheTransport,
-//RS     policy: &RemoteCachePolicy,
-//RS     project_root: &Path,
-//RS     record: &ActionResultRecord,
-//RS ) -> Result<(), String> {
-//RS     let mut outputs = Vec::with_capacity(record.outputs.len());
-//RS     for output in &record.outputs {
-//RS         let path =
-//RS             resolve_under(project_root, output.path.as_str()).map_err(|error| error.to_string())?;
-//RS         let bytes = secure_read_file(project_root, &path).map_err(|error| error.to_string())?;
-//RS         let digest = transport
-//RS             .upload_blob(&bytes, policy)
-//RS             .map_err(|error| error.to_string())?;
-//RS         if digest != output.digest || bytes.len() as u64 != output.byte_len {
-//RS             return Err(format!(
-//RS                 "remote output CAS identity changed for {}",
-//RS                 output.path.as_str()
-//RS             ));
-//RS         }
-//RS         outputs.push(ActionOutputRecord {
-//RS             path: output.path.clone(),
-//RS             digest,
-//RS             byte_len: bytes.len() as u64,
-//RS         });
-//RS     }
-//RS     transport
-//RS         .upload_action_record(
-//RS             &ActionResultRecord {
-//RS                 key: record.key.clone(),
-//RS                 outcome: record.outcome,
-//RS                 outputs,
-//RS                 failure_report: record.failure_report.clone(),
-//RS                 provenance: record.provenance.clone(),
-//RS             },
-//RS             policy,
-//RS         )
-//RS         .map_err(|error| error.to_string())?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn remote_action(action: &BuildAction, detail: String) -> BuildExecutionError {
-//RS     BuildExecutionError::IO {
-//RS         action: format!("remote {}", action.name),
-//RS         detail,
-//RS     }
-//RS }
-//RS 
-//RS fn rebuild_status_reason(status: ActionCacheStatus) -> CacheMissReason {
-//RS     match status {
-//RS         ActionCacheStatus::Miss(reason) => reason,
-//RS         ActionCacheStatus::Hit(_) => CacheMissReason::NoLocalActionRecord,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn prepare_output_destination(root: &Path, output: &Path) -> io::Result<()> {
-//RS     let parent = output.parent().unwrap_or(root);
-//RS     let relative = parent.strip_prefix(root).map_err(|_| {
-//RS         io::Error::new(
-//RS             io::ErrorKind::InvalidInput,
-//RS             "build output parent escapes project root",
-//RS         )
-//RS     })?;
-//RS     let mut current = root.to_path_buf();
-//RS     for component in relative.components() {
-//RS         if let Component::Normal(part) = component {
-//RS             current.push(part);
-//RS             match fs::symlink_metadata(&current) {
-//RS                 Ok(meta) if meta.file_type().is_symlink() => {
-//RS                     return Err(io::Error::new(
-//RS                         io::ErrorKind::PermissionDenied,
-//RS                         format!("build output parent `{}` is a symlink", current.display()),
-//RS                     ))
-//RS                 }
-//RS                 Ok(meta) if !meta.is_dir() => {
-//RS                     return Err(io::Error::new(
-//RS                         io::ErrorKind::NotADirectory,
-//RS                         format!(
-//RS                             "build output parent `{}` is not a directory",
-//RS                             current.display()
-//RS                         ),
-//RS                     ))
-//RS                 }
-//RS                 Ok(_) => {}
-//RS                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
-//RS                     match fs::create_dir(&current) {
-//RS                         Ok(()) => {}
-//RS                         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-//RS                             let metadata = fs::symlink_metadata(&current)?;
-//RS                             if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS                                 return Err(io::Error::new(
-//RS                                     io::ErrorKind::PermissionDenied,
-//RS                                     format!(
-//RS                                         "build output parent `{}` is not a real directory",
-//RS                                         current.display()
-//RS                                     ),
-//RS                                 ));
-//RS                             }
-//RS                         }
-//RS                         Err(error) => return Err(error),
-//RS                     }
-//RS                 }
-//RS                 Err(error) => return Err(error),
-//RS             }
-//RS         }
-//RS     }
-//RS     if fs::symlink_metadata(output).is_ok_and(|meta| meta.file_type().is_symlink()) {
-//RS         fs::remove_file(output)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn execute_probes(
-//RS     plan: &BuildPlan,
-//RS     selected: &BTreeSet<ProbeId>,
-//RS ) -> Result<Vec<BuildProbeFact>, BuildExecutionError> {
-//RS     let mut facts = Vec::new();
-//RS     for probe in plan
-//RS         .probes
-//RS         .iter()
-//RS         .filter(|probe| selected.contains(&probe.id))
-//RS     {
-//RS         let (success, detail) = match &probe.kind {
-//RS             ProbeKind::FindProgram { program } => {
-//RS                 match resolve_program_path(plan, probe.toolchain, program) {
-//RS                     Some(path) => (true, path.display().to_string()),
-//RS                     None => (false, format!("program `{program}` not found")),
-//RS                 }
-//RS             }
-//RS             ProbeKind::PkgConfig {
-//RS                 package,
-//RS                 min_version,
-//RS             } => {
-//RS                 let Some(pkg_config) = resolve_program_path(plan, probe.toolchain, "pkg-config")
-//RS                 else {
-//RS                     return Err(BuildExecutionError::ProbeFailed {
-//RS                         probe: probe.name.clone(),
-//RS                         detail: "pkg-config not found".to_string(),
-//RS                     });
-//RS                 };
-//RS                 let mut args = vec!["--exists".to_string()];
-//RS                 if let Some(version) = min_version {
-//RS                     args.push(format!("{package} >= {version}"));
-//RS                 } else {
-//RS                     args.push(package.clone());
-//RS                 }
-//RS                 let output = run_probe_sandboxed(&pkg_config, &args, None)?;
-//RS                 (
-//RS                     output.status.success(),
-//RS                     format!("pkg-config exit {}", output.status.code().unwrap_or(1)),
-//RS                 )
-//RS             }
-//RS             ProbeKind::HeaderCheck { header } => {
-//RS                 let source = format!("#include <{header}>\nint main(void) {{ return 0; }}\n");
-//RS                 run_compile_probe(plan, probe.toolchain, &source)?
-//RS             }
-//RS             ProbeKind::CompileCheck { includes, code, .. } => {
-//RS                 let mut source = String::new();
-//RS                 for header in includes {
-//RS                     source.push_str(&format!("#include <{header}>\n"));
-//RS                 }
-//RS                 source.push_str("int main(void) {\n");
-//RS                 source.push_str(code);
-//RS                 source.push_str("\nreturn 0;\n}\n");
-//RS                 run_compile_probe(plan, probe.toolchain, &source)?
-//RS             }
-//RS         };
-//RS         facts.push(BuildProbeFact {
-//RS             name: probe.name.clone(),
-//RS             success,
-//RS             detail: detail.clone(),
-//RS             reproducibility: probe.reproducibility,
-//RS             toolchain: probe.toolchain,
-//RS             toolchain_provenance: toolchain_provenance_digest(plan, probe.toolchain),
-//RS         });
-//RS         if !success {
-//RS             return Err(BuildExecutionError::ProbeFailed {
-//RS                 probe: probe.name.clone(),
-//RS                 detail,
-//RS             });
-//RS         }
-//RS     }
-//RS     Ok(facts)
-//RS }
-//RS 
-// END-PORT-PENDING 0564 crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1-1811
+use jet_comptime.Comptime.Build.ActionsPolicy.[ActionCache, BuildAction, BuildCapability, LegacyWrapperKind]
+use jet_comptime.Comptime.Build.CacheCas.[atomic_restore_file, ensure_real_directory, hex_decode, hex_encode, remote_execution_identity, remote_policy_digest, secure_read_file, ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ActionOutputRecord, ActionResultRecord, BuildArtifactStore, CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult, RemoteActionRequest, snapshot_declared_inputs, restore_action_outputs, capture_declared_outputs, record_comptime_cache_event]
+use jet_comptime.Comptime.Build.ErrorsKeys.BuildError
+use jet_comptime.Comptime.Build.ExecutionHelpers.action_pools
+use jet_comptime.Comptime.Build.Handles.[ActionHandle, ActionId, ProbeId, ToolchainHandle]
+use jet_comptime.Comptime.Build.PlanGraph.[BuildExecutionReport, BuildPlan]
+use jet_comptime.Comptime.Build.ProvenanceToolchains.[ProbeKind, ReproducibilityClass, ToolchainResolution]
+use jet_comptime.Comptime.Build.Targets.BuildPath
+use jet_comptime.Comptime.Build.Validation.resolve_under
+use jet_comptime.Comptime.Build.RemoteScheduler.[RemoteAttemptError, RemoteBuildRequest, RemoteBuilder, RemoteScheduler]
+use jet_comptime.Comptime.Build.ExecutionRuntime02.[read_action_record, write_action_record, cache_restore_miss_reason, io_action, native_sandbox_error, resolve_program_path, runtime_toolchain_arguments, runtime_toolchain_environment, toolchain_provenance_digest, remote_provenance_digest, run_probe_sandboxed, run_compile_probe]
+use jet_foundation.Outcome.[JetErrorReport, JetAbsent, JetErrorDetails, JetErrorField, jet_err_with_identity, jet_err_set_details, jet_error_report]
+use jet_foundation.JSON.json_escape
+use std.fs
+use std.io
+use std.path.Component
+use std.process
+use std.process.Output
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+use std.thread
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:27
+// GATE #4494: canonical native process-isolation backends, not a Rust bridge.
+use jet_codegen.Prelude.CoreLib.Top.ProcessSandbox as jet_process_sandbox
+use jet_codegen.Prelude.CoreLib.Top.ProcessWindowsSandbox as jet_windows_sandbox
+use jet_codegen.Prelude.CoreLib.Top.ProcessSandbox.ReadOnlyMount
 
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:33
+// GATE #4494: atomic process-wide attempt counter.
+const REMOTE_ATTEMPT: AtomicU64 = AtomicU64.new(1)
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:34
+const MAX_REMOTE_EXECUTION_ATTEMPTS: USize = 2
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:36
+#Error
+struct RemoteAttemptFailure { error: BuildExecutionError, retryable: Bool }
+impl RemoteAttemptFailure {
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:42
+    fn terminal(error: BuildExecutionError) -> Self { Self{error: ^error, retryable: false} }
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:49
+    fn retryable(error: BuildExecutionError) -> Self { Self{error: ^error, retryable: true} }
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:58
+    fn from(error: BuildExecutionError) -> Self { Self.terminal(^error) }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:64
+pub struct BuildProbeFact {
+    pub name: String
+    pub success: Bool
+    pub detail: String
+    pub reproducibility: ReproducibilityClass
+    pub toolchain: ToolchainHandle
+    pub toolchain_provenance: ContentDigest
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:74
+pub struct BuildExecutionResult { pub report: BuildExecutionReport, pub probes: [BuildProbeFact] }
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:82
+// Driver owns compiler misses; executor owns output validation, restore and CAS records.
+pub type CompilerActionRunner = fn(&BuildAction, &[ActionInputSnapshot]) -> [[U8]] Err!
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:86
+#Error
+pub enum BuildExecutionError {
+    MissingGrant(action: String, capability: BuildCapability)
+    SandboxUnavailable
+    IO(action: String, detail: String)
+    ProbeFailed(probe: String, detail: String)
+    Reported(report: JetErrorReport)
+    InvalidGraph(BuildError)
+}
+impl BuildExecutionError {
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:110
+    pub fn report(self: &Self) -> JetErrorReport? {
+        if self == { .Reported(report) -> Some(report); _ -> None }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:117
+    pub fn is_reported_action_failure(self: &Self) -> Bool { self is .Reported }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:122
+fn action_failure_report(action: String, exit_code: I32, stderr: String) -> JetErrorReport {
+    error := jet_err_with_identity("build action `{action}` exited with status {exit_code}", Ok("E3505"), Err(JetAbsent), "BuildAction::Failed")
+    jet_err_set_details(&error, JetErrorDetails{
+        variant: "BuildActionFailure",
+        fields: [JetErrorField{name: "action", value: report_json_string(action)},
+                 JetErrorField{name: "exit_code", value: exit_code.to_string()},
+                 JetErrorField{name: "stderr", value: report_json_string(stderr)}],
+        source_span: None,
+    })
+    jet_error_report(&error)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:157
+fn report_json_string(value: String) -> String { "\"{json_escape(value)}\"" }
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:165
+pub struct NativeSandboxStatus { pub available: Bool, pub mechanism: String, pub policy: String, pub reason: String }
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:173
+#Error
+pub enum NativeSandboxError { Unsupported(String), Io(String) }
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:179
+pub struct NativeSandboxOutput { pub output: Output, pub mechanism: String, pub policy: String }
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:188
+pub fn native_sandbox_status() -> NativeSandboxStatus {
+    // GATE #4494: native environment/backend probe. GATE #4483: selected-target OS.
+    if std.env.var_os("JETPACK_FAKE_SANDBOX").is_some() {
+        return NativeSandboxStatus{available: false, mechanism: "test-sandbox-unavailable", policy: "not-enforced", reason: "test sandbox override prevents the native backend probe"}
+    }
+    os := core.sys.target.selected_os()
+    if os == "linux" || os == "macos" {
+        native := jet_process_sandbox.status()
+        return NativeSandboxStatus{available: native.available, mechanism: native.mechanism, policy: native.policy, reason: native.reason}
+    }
+    if os == "windows" {
+        native := jet_windows_sandbox.windows_status()
+        return NativeSandboxStatus{available: native.available, mechanism: native.mechanism, policy: native.policy, reason: native.reason}
+    }
+    NativeSandboxStatus{available: false, mechanism: "unsupported", policy: "not-enforced", reason: "Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"}
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:241
+pub fn run_native_sandboxed(executable: &OSPath, args: &[String], source_dir: &OSPath, output_dir: OSPath?, env: &[String:String], share_network: Bool) -> NativeSandboxOutput NativeSandboxError! {
+    run_native_sandboxed_with_timeout(executable, args, source_dir, output_dir, env, share_network, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:261
+pub fn run_native_sandboxed_with_mounts(executable: &OSPath, args: &[String], source_dir: &OSPath, output_dir: OSPath?, env: &[String:String], share_network: Bool, mounts: &[ReadOnlyMount]) -> NativeSandboxOutput NativeSandboxError! {
+    run_native_sandboxed_with_timeout_and_mounts(executable, args, source_dir, output_dir, env, share_network, mounts, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:282
+fn run_native_sandboxed_with_timeout(executable: &OSPath, args: &[String], source_dir: &OSPath, output_dir: OSPath?, env: &[String:String], share_network: Bool, timeout: Duration?) -> NativeSandboxOutput NativeSandboxError! {
+    run_native_sandboxed_with_timeout_and_mounts(executable, args, source_dir, output_dir, env, share_network, [], timeout)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:303
+fn run_native_sandboxed_with_timeout_and_mounts(executable: &OSPath, args: &[String], source_dir: &OSPath, output_dir: OSPath?, env: &[String:String], share_network: Bool, mounts: &[ReadOnlyMount], timeout: Duration?) -> NativeSandboxOutput NativeSandboxError! {
+    // GATE #4483, #4494: dispatch each original native sandbox arm by selected target.
+    os := core.sys.target.selected_os()
+    if os == "linux" || os == "macos" {
+        output_is_separate := output_dir.is_some()
+        output := jet_process_sandbox.output_with_read_only_mounts(executable, args, source_dir, output_dir, env, share_network, mounts, timeout).map_err(fn(error) {
+            if error == { .Unsupported(detail) -> NativeSandboxError.Unsupported(detail); .Io(detail) -> NativeSandboxError.Io(detail) }
+        })?
+        return Ok(NativeSandboxOutput{output: ^output, mechanism: if os == "linux" -> "linux-bwrap" else -> "macos-seatbelt", policy: jet_process_sandbox.policy(output_is_separate, share_network)})
+    }
+    if os == "windows" {
+        result := jet_windows_sandbox.windows_output_with_read_only_mounts(executable, args, source_dir, output_dir, env, share_network, true, output_dir.is_none(), mounts, timeout.map(fn(limit) { limit.as_millis().min(I64.MAX as U128) as I64 }), Some(64 * 1024 * 1024)).map_err(fn(error) {
+            if error == { .Unsupported(detail) -> NativeSandboxError.Unsupported(detail); .Io(detail) -> NativeSandboxError.Io(detail) }
+        })?
+        return Ok(NativeSandboxOutput{output: ^result.output, mechanism: ^result.mechanism, policy: ^result.policy})
+    }
+    Err(NativeSandboxError.Unsupported("Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:387
+pub fn execute_build_plan(plan: &BuildPlan, project_root: &OSPath, artifact_store: &BuildArtifactStore, grants: &Set<BuildCapability>) -> BuildExecutionResult BuildExecutionError! {
+    execute_build_plan_with_front_end_and_remote(plan, project_root, artifact_store, grants, FrontEndCompletion.all_complete(), None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:405
+pub fn execute_build_plan_with_front_end(plan: &BuildPlan, project_root: &OSPath, artifact_store: &BuildArtifactStore, grants: &Set<BuildCapability>, front_end: FrontEndCompletion) -> BuildExecutionResult BuildExecutionError! {
+    execute_build_plan_with_front_end_and_remote(plan, project_root, artifact_store, grants, front_end, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:425
+pub fn execute_build_plan_with_front_end_and_remote(plan: &BuildPlan, project_root: &OSPath, artifact_store: &BuildArtifactStore, grants: &Set<BuildCapability>, front_end: FrontEndCompletion, remote_binding: RemoteBuildBinding?) -> BuildExecutionResult BuildExecutionError! {
+    execute_build_plan_with_front_end_and_remote_and_compiler(plan, project_root, artifact_store, grants, front_end, remote_binding, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:446
+pub fn execute_build_plan_with_front_end_and_compiler(plan: &BuildPlan, project_root: &OSPath, artifact_store: &BuildArtifactStore, grants: &Set<BuildCapability>, front_end: FrontEndCompletion, runner: &CompilerActionRunner) -> BuildExecutionResult BuildExecutionError! {
+    execute_build_plan_with_front_end_and_remote_and_compiler(plan, project_root, artifact_store, grants, front_end, None, Some(runner))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:465
+pub fn execute_build_plan_with_front_end_and_remote_and_compiler(plan: &BuildPlan, project_root: &OSPath, artifact_store: &BuildArtifactStore, grants: &Set<BuildCapability>, front_end: FrontEndCompletion, remote_binding: RemoteBuildBinding?, compiler: CompilerActionRunner?) -> BuildExecutionResult BuildExecutionError! {
+    selected_actions := plan.selected_action_ids().map_err(fn(error) { BuildExecutionError.InvalidGraph(error) })?
+    for action in plan.actions.iter().filter(fn(action) { selected_actions.contains(action.id) }) {
+        for cap in action.caps {
+            if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant(action: action.name.clone(), capability: cap))
+        }
+    }
+    selected_probes := plan.selected_probe_ids().map_err(fn(error) { BuildExecutionError.InvalidGraph(error) })?
+    if !selected_probes.is_empty() && !grants.contains(BuildCapability.Exec) {
+        ids := selected_probes.iter().collect::<[ProbeId]>()
+        ids.sort()
+        probe := plan.probes[ids[0].0]
+        return Err(BuildExecutionError.MissingGrant(action: "probe {probe.name}", capability: BuildCapability.Exec))
+    }
+    probes := execute_probes(plan, &selected_probes)?
+    model := plan.execution_model().map_err(fn(error) { BuildExecutionError.InvalidGraph(error) })?
+    remote_scheduler := if remote_binding is Some(binding) && binding.is_enabled() {
+        Some(remote_scheduler_for_binding(binding).map_err(fn(error) { BuildExecutionError.IO(action: "remote scheduler", detail: error) })?)
+    } else { None }
+    outcomes := [(ActionHandle, ActionOutcome)].new()
+    for stage in model.stages {
+        for batch in execution_batches(plan, &stage.actions) {
+            for action_id in batch {
+                action := plan.actions[action_id.0]
+                for cap in action.caps {
+                    if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant(action: action.name.clone(), capability: cap))
+                }
+            }
+            // GATE #4494: scoped workers must join before borrowed execution state expires.
+            completed := thread.scope(fn(scope) -> [(ActionHandle, ActionOutcome)] BuildExecutionError! {
+                jobs := batch.iter().map(fn(action_id) {
+                    action := &plan.actions[action_id.0]
+                    handle := ActionHandle{id: action.id, context: plan.context}
+                    (handle, scope.spawn(fn() {
+                        execute_one_action(plan, action, handle, project_root, artifact_store, grants, &probes, front_end, remote_binding, remote_scheduler.as_ref(), compiler)
+                    }))
+                }).collect::<[_]>()
+                jobs.into_iter().map(fn(pair) -> (ActionHandle, ActionOutcome) BuildExecutionError! {
+                    (handle, job) := ^pair
+                    result := job.join().map_err(fn(_) { BuildExecutionError.IO(action: plan.actions[handle.id.0].name.clone(), detail: "sandbox worker panicked") })?
+                    Ok((handle, result?))
+                }).collect::<[_] BuildExecutionError!>()
+            })?
+            completed.sort_by_key(fn(pair) { pair.0.id })
+            outcomes.extend(^completed)
+        }
+    }
+    report := plan.execution_report(&outcomes).map_err(fn(error) { BuildExecutionError.InvalidGraph(error) })?
+    Ok(BuildExecutionResult{report: ^report, probes: ^probes})
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:581
+fn execution_batches(plan: &BuildPlan, actions: &[ActionId]) -> [[ActionId]] {
+    batches := [[ActionId]].new()
+    limits := [String:USize].new()
+    for spec in plan.resource_pools() { limits.insert(spec.pool.as_str().to_string(), spec.slots) }
+    held := [[String:USize]].new()
+    for action_id in actions {
+        pools := action_pools(&plan.actions[action_id.0]).iter().map(fn(pool) { pool.as_str().to_string() }).collect::<Set<String>>()
+        slot := held.iter().position(fn(used) {
+            pools.iter().all(fn(pool) {
+                limit := limits.get(pool) ?? 1
+                limit == 0 || (used.get(pool) ?? 0) < limit
+            })
+        }) ?? {
+            batches.push([])
+            held.push([String:USize].new())
+            batches.len() - 1
+        }
+        for pool in pools { held[slot].insert(pool.clone(), (held[slot].get(pool) ?? 0) + 1) }
+        batches[slot].push(action_id)
+    }
+    ^batches
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:615
+fn execute_one_action(plan: &BuildPlan, action: &BuildAction, handle: ActionHandle, project_root: &OSPath, artifact_store: &BuildArtifactStore, grants: &Set<BuildCapability>, probe_facts: &[BuildProbeFact], front_end: FrontEndCompletion, remote_binding: RemoteBuildBinding?, remote_scheduler: RemoteScheduler?, compiler: CompilerActionRunner?) -> ActionOutcome BuildExecutionError! {
+    cache_lookup_allowed := front_end.authorize_cache_lookup().is_ok()
+    snapshots := snapshot_declared_inputs(artifact_store, project_root, action).map_err(fn(e) { io_action(action, e) })?
+    remote_requested := remote_binding.is_some_and(fn(binding) { binding.is_enabled() })
+    (executable, executable_digest) := if action.is_compiler_owned() {
+        (OSPath.from("<jet-compiler>"), ContentDigest.from_bytes(b"jet-compiler"))
+    } else {
+        executable := resolve_program_path(plan, action.toolchain, &action.argv[0]).or_else(fn() {
+            if remote_requested -> Some(OSPath.from(action.argv[0])) else -> None
+        }) ?? return Err(BuildExecutionError.IO(action: action.name.clone(), detail: "tool {action.argv[0]} was not found"))
+        executable_bytes := if executable.is_file() {
+            fs.read(&executable).map_err(fn(e) { io_action(action, e) })?
+        } else { action.argv[0].as_bytes().to_vec() }
+        (^executable, ContentDigest.from_bytes(&executable_bytes))
+    }
+    action_probe_names := action.probes.iter().map(fn(probe) { plan.probes[probe.id.0].name }).collect::<Set<String>>()
+    effective_probe_facts := probe_facts.iter().filter(fn(fact) { action_probe_names.contains(fact.name) }).cloned().collect::<[BuildProbeFact]>()
+    key := plan.effective_action_key(handle, &snapshots, grants, &executable, &executable_digest, &effective_probe_facts).map_err(fn(error) { BuildExecutionError.InvalidGraph(error) })?
+    remote := if action.is_compiler_owned() -> None else -> remote_for_action(plan, action, &key, grants, remote_binding, remote_scheduler)?
+    restore_failure: CacheMissReason? = None
+    if action.cache == ActionCache.Cached {
+        if cache_lookup_allowed {
+            if read_action_record(artifact_store, key.clone()) == {
+                .Ok(Some(record)) -> {
+                    if record.failure_report.is_some() {
+                        record_comptime_cache_event(action.name, &key, ActionCacheStatus.Hit(CacheHitReason.LocalActionRecordMatched), "terminal", Some(record.outcome))
+                    }
+                    if record.failure_report is Some(report) -> return Err(BuildExecutionError.Reported(report: ^report))
+                    if restore_action_outputs(artifact_store, project_root, action, &record) == {
+                        .Ok(_) -> {
+                            record_comptime_cache_event(action.name, &key, ActionCacheStatus.Hit(CacheHitReason.LocalActionRecordMatched), "restore", Some(ActionOutcome.RestoredFromCache))
+                            return Ok(ActionOutcome.RestoredFromCache)
+                        }
+                        .Err(error) -> { restore_failure = Some(cache_restore_miss_reason(&error)) }
+                    }
+                }
+                .Ok(None) -> {}
+                .Err(error) -> { restore_failure = Some(cache_restore_miss_reason(&error)) }
+            }
+        } else { restore_failure = Some(CacheMissReason.FrontEndIncomplete) }
+    }
+    if action.cache == ActionCache.Cached && cache_lookup_allowed {
+        if remote is Some((transport, policy, _execute)) {
+            if transport.download_action_record(&key, policy) == {
+                .Ok(record) -> {
+                    if record.failure_report is Some(report) -> return Err(BuildExecutionError.Reported(report: ^report))
+                    if !(record.outcome is .Succeeded || record.outcome is .RestoredFromCache) {
+                        return Err(remote_action(action, "remote cache record contains a failed outcome without a report"))
+                    }
+                    if restore_remote_outputs(transport, policy, project_root, action, &record, RemoteActionRequest.CacheRead) == {
+                        .Ok(restored) -> {
+                            restored.commit()
+                            record_comptime_cache_event(action.name, &key, ActionCacheStatus.Hit(CacheHitReason.DeclaredOutputsRestored), "restore", Some(ActionOutcome.RestoredFromCache))
+                            return Ok(ActionOutcome.RestoredFromCache)
+                        }
+                        .Err(detail) -> {
+                            if !remote_binding.is_some_and(fn(binding) { binding.fallback_local }) -> return Err(remote_action(action, detail))
+                        }
+                    }
+                }
+                .Err(RemoteCacheError.Io(error)) if error.kind() == io.ErrorKind.NotFound -> {}
+                .Err(RemoteCacheError.Denied(denied)) if denied.reason == RemoteDeniedReason.GrantNotAllowed -> {}
+                .Err(error) -> {
+                    if !remote_binding.is_some_and(fn(binding) { binding.fallback_local }) -> return Err(remote_action(action, error.to_string()))
+                }
+            }
+        }
+    }
+    rebuild_status := if action.cache == ActionCache.UncachedPhony {
+        ActionCacheStatus.Miss(CacheMissReason.UncachedAction)
+    } else if restore_failure is Some(reason) { ActionCacheStatus.Miss(reason) }
+    else { ActionCacheStatus.Miss(CacheMissReason.NoLocalActionRecord) }
+    record_comptime_cache_event(action.name, &key, rebuild_status, "lookup", None)
+    if action.legacy_wrapper == Some(LegacyWrapperKind.Npm) && action.labels.keys().any(fn(key) { key.starts_with("legacy.dependency.") }) {
+        // GATE #4409: preserve Unsupported IO kind.
+        return Err(io_action(action, io.Error.new(io.ErrorKind.Unsupported, "npm dependency-bearing imports require a provisioned locked dependency tree")))
+    }
+    if action.is_compiler_owned() {
+        runner := compiler ?? return Err(BuildExecutionError.IO(action: action.name.clone(), detail: "compiler-owned action has no compiler runner"))
+        bytes := runner(action, &snapshots).map_err(fn(detail) { BuildExecutionError.IO(action: action.name.clone(), detail: detail) })?
+        if bytes.len() != action.outputs.len() {
+            return Err(BuildExecutionError.IO(action: action.name.clone(), detail: "compiler runner returned {bytes.len()} outputs for {action.outputs.len()} declarations"))
+        }
+        for (output, bytes) in action.outputs.iter().zip(bytes) {
+            path := resolve_under(project_root, output.as_str()).map_err(fn(e) { io_action(action, e) })?
+            prepare_output_destination(project_root, &path).map_err(fn(e) { io_action(action, e) })?
+            atomic_restore_file(project_root, &path, &bytes).map_err(fn(e) { io_action(action, e) })?
+        }
+        outcome := ActionOutcome.Succeeded(exit_code: 0)
+        if action.cache == ActionCache.Cached {
+            record := capture_declared_outputs(artifact_store, project_root, action, key.clone(), outcome, ActionCacheProvenance.miss(rebuild_status_reason(rebuild_status))).map_err(fn(e) { io_action(action, e) })?
+            write_action_record(artifact_store, &key, &record).map_err(fn(e) { io_action(action, e) })?
+        }
+        record_comptime_cache_event(action.name, &key, rebuild_status, "publish", Some(outcome))
+        return Ok(outcome)
+    }
+    if remote is Some((_transport, _policy, true)) {
+        timeout_ms := remote_binding.map(fn(binding) { binding.timeout_ms }) ?? 30_000
+        result := execute_remote_action(plan, action, project_root, artifact_store, &snapshots, &key, timeout_ms, remote_scheduler.expect("enabled remote execution requires its scheduler"), remote_binding.expect("enabled remote execution requires its host binding"))
+        if result == {
+            .Ok(outcome) -> return Ok(outcome)
+            .Err(error) -> {
+                if !(remote_binding.is_some_and(fn(binding) { binding.fallback_local }) && !error.is_reported_action_failure()) -> return Err(error)
+            }
+        }
+    }
+    if remote_binding.is_some_and(fn(binding) { binding.cache_read && !binding.execute && !binding.fallback_local }) {
+        return Err(remote_action(action, "remote cache miss cannot fall back to local execution"))
+    }
+    // GATE #4494: real native filesystem and process identity, with exact IO kinds (#4409).
+    key_suffix := key.as_str().trim_start_matches("act-sha256:") // #4303
+    sandbox := project_root.join(".jet/build-sandbox").join("{process.id()}-{action.id.0}-{key_suffix}")
+    sandbox_root := sandbox.parent() ?? return Err(io_action(action, io.Error.new(io.ErrorKind.InvalidInput, "sandbox has no parent")))
+    ensure_real_directory(sandbox_root).map_err(fn(e) { io_action(action, e) })?
+    if fs.symlink_metadata(&sandbox) is .Ok(metadata) {
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(io_action(action, io.Error.new(io.ErrorKind.PermissionDenied, "action sandbox is not a real directory")))
+        }
+        fs.remove_dir_all(&sandbox).map_err(fn(e) { io_action(action, e) })?
+    }
+    ensure_real_directory(&sandbox).map_err(fn(e) { io_action(action, e) })?
+    for input in action.inputs {
+        from := resolve_under(project_root, input.as_str()).map_err(fn(e) { io_action(action, e) })?
+        to := resolve_under(&sandbox, input.as_str()).map_err(fn(e) { io_action(action, e) })?
+        if to.parent() is Some(parent) { fs.create_dir_all(parent).map_err(fn(e) { io_action(action, e) })? }
+        bytes := secure_read_file(project_root, &from).map_err(fn(e) { io_action(action, e) })?
+        fs.write(to, bytes).map_err(fn(e) { io_action(action, e) })?
+    }
+    for output in action.outputs {
+        path := resolve_under(&sandbox, output.as_str()).map_err(fn(e) { io_action(action, e) })?
+        if path.parent() is Some(parent) { fs.create_dir_all(parent).map_err(fn(e) { io_action(action, e) })? }
+    }
+    env := action.env.iter().filter(fn(pair) { action.env_allowlist.is_empty() || action.env_allowlist.contains(pair.0) }).map(fn(pair) { (pair.0.clone(), pair.1.clone()) }).collect::<[String:String]>()
+    runtime_args := runtime_toolchain_arguments(plan, action.toolchain, &action.argv[1..])
+    runtime_env := runtime_toolchain_environment(plan, action.toolchain, &env)
+    mounts := plan.toolchain(action.toolchain).map(fn(toolchain) {
+        toolchain.mounts.iter().map(fn(mount) { ReadOnlyMount.new(OSPath.from(mount.source), OSPath.from(mount.destination)) }).collect::<[ReadOnlyMount]>()
+    }) ?? []
+    output := if run_native_sandboxed_with_timeout_and_mounts(&executable, &runtime_args, &sandbox, None, &runtime_env, grants.contains(BuildCapability.Net) && action.caps.contains(BuildCapability.Net), &mounts, Some(jet_process_sandbox.DEFAULT_ACTION_TIMEOUT)) == {
+        .Ok(result) -> ^result.output
+        .Err(error) -> {
+            _ :: fs.remove_dir_all(&sandbox)
+            return Err(native_sandbox_error(action, error))
+        }
+    }
+    code := output.status.code() ?? 1
+    if !output.status.success() {
+        _ :: fs.remove_dir_all(&sandbox)
+        stderr_view := String.from_utf8_lossy(&output.stderr).trim() // #4303
+        stderr := stderr_view.to_string()
+        report := action_failure_report(action.name, code, stderr)
+        if action.cache == ActionCache.Cached {
+            record := ActionResultRecord{key: key.clone(), outcome: ActionOutcome.Failed(exit_code: code), outputs: [], failure_report: Some(report.clone()), provenance: ActionCacheProvenance.miss(rebuild_status_reason(rebuild_status))}
+            if remote is Some((transport, policy, _execute)) {
+                if policy.check(RemoteActionRequest.CacheWrite).is_ok() {
+                    publish_remote_outputs(transport, policy, project_root, &record).map_err(fn(detail) { remote_action(action, detail) })?
+                }
+            }
+            write_action_record(artifact_store, &key, &record).map_err(fn(e) { io_action(action, e) })?
+            record_comptime_cache_event(action.name, &key, rebuild_status, "terminal", Some(ActionOutcome.Failed(exit_code: code)))
+        }
+        return Err(BuildExecutionError.Reported(report: ^report))
+    }
+    for declared in action.outputs {
+        from := resolve_under(&sandbox, declared.as_str()).map_err(fn(e) { io_action(action, e) })?
+        to := resolve_under(project_root, declared.as_str()).map_err(fn(e) { io_action(action, e) })?
+        bytes := secure_read_file(&sandbox, &from).map_err(fn(e) { io_action(action, e) })?
+        prepare_output_destination(project_root, &to).map_err(fn(e) { io_action(action, e) })?
+        atomic_restore_file(project_root, &to, &bytes).map_err(fn(e) { io_action(action, e) })?
+    }
+    outcome := ActionOutcome.Succeeded(exit_code: code)
+    if action.cache == ActionCache.Cached {
+        record := capture_declared_outputs(artifact_store, project_root, action, key.clone(), outcome, ActionCacheProvenance.miss(CacheMissReason.NoLocalActionRecord)).map_err(fn(e) { io_action(action, e) })?
+        if remote is Some((transport, policy, _execute)) {
+            if policy.check(RemoteActionRequest.CacheWrite).is_ok() {
+                publish_remote_outputs(transport, policy, project_root, &record).map_err(fn(detail) { remote_action(action, detail) })?
+            }
+        }
+        write_action_record(artifact_store, &key, &record).map_err(fn(e) { io_action(action, e) })?
+        record_comptime_cache_event(action.name, &key, ActionCacheStatus.Miss(CacheMissReason.NoLocalActionRecord), "publish", Some(outcome))
+    }
+    fs.remove_dir_all(&sandbox).map_err(fn(e) { io_action(action, e) })?
+    Ok(outcome)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1052
+fn execute_remote_action(plan: &BuildPlan, action: &BuildAction, project_root: &OSPath, artifact_store: &BuildArtifactStore, snapshots: &[ActionInputSnapshot], key: &ActionKey, timeout_ms: U64, scheduler: &RemoteScheduler, binding: &RemoteBuildBinding) -> ActionOutcome BuildExecutionError! {
+    request := remote_execution_request(action, key, binding)
+    last_failure: BuildExecutionError? = None
+    dispatch := scheduler.dispatch(&request, fn(builder) -> ActionOutcome RemoteAttemptError! {
+        transport := RemoteCacheTransport.for_binding(&builder.binding).map_err(fn(detail) { RemoteAttemptError.rejected(detail) })?
+        policy := remote_attempt_policy(plan, action, key, &builder.binding, &transport).map_err(fn(error) { RemoteAttemptError.rejected("{error:?}") })?
+        if execute_remote_candidate(plan, action, project_root, artifact_store, snapshots, key, &transport, &policy, timeout_ms, &builder.binding) == {
+            .Ok(outcome) -> Ok(outcome)
+            .Err(failure) -> {
+                detail := "{failure.error:?}"
+                retryable := failure.retryable
+                last_failure = Some(^failure.error)
+                if retryable -> Err(RemoteAttemptError.worker_lost(detail)) else -> Err(RemoteAttemptError.rejected(detail))
+            }
+        }
+    })
+    if dispatch == {
+        .Ok(dispatch) -> Ok(^dispatch.value)
+        .Err(error) -> Err(last_failure ?? remote_action(action, error.to_string()))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1101
+fn execute_remote_candidate(plan: &BuildPlan, action: &BuildAction, project_root: &OSPath, artifact_store: &BuildArtifactStore, snapshots: &[ActionInputSnapshot], key: &ActionKey, transport: &RemoteCacheTransport, policy: &RemoteCachePolicy, timeout_ms: U64, binding: &RemoteBuildBinding) -> ActionOutcome RemoteAttemptFailure! {
+    policy := policy.clone()
+    last_failure: RemoteAttemptFailure? = None
+    for attempt in 0..MAX_REMOTE_EXECUTION_ATTEMPTS {
+        if execute_remote_attempt(plan, action, project_root, artifact_store, snapshots, key, transport, &policy, timeout_ms) == {
+            .Ok(outcome) -> return Ok(outcome)
+            .Err(failure) -> {
+                if failure.retryable && attempt + 1 < MAX_REMOTE_EXECUTION_ATTEMPTS {
+                    last_failure = Some(^failure)
+                    policy = remote_attempt_policy(plan, action, key, binding, transport).map_err(fn(error) { RemoteAttemptFailure.from(error) })?
+                } else { return Err(^failure) }
+            }
+        }
+    }
+    Err(last_failure.expect("remote execution attempt loop must produce a result"))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1138
+fn execute_remote_attempt(plan: &BuildPlan, action: &BuildAction, project_root: &OSPath, artifact_store: &BuildArtifactStore, snapshots: &[ActionInputSnapshot], key: &ActionKey, transport: &RemoteCacheTransport, policy: &RemoteCachePolicy, timeout_ms: U64) -> ActionOutcome RemoteAttemptFailure! {
+    proof := policy.proof().cloned() ?? return Err(RemoteAttemptFailure.terminal(remote_action(action, "remote sandbox proof is missing")))
+    for snapshot in snapshots {
+        path := resolve_under(project_root, snapshot.path.as_str()).map_err(fn(e) { RemoteAttemptFailure.from(io_action(action, e)) })?
+        bytes := secure_read_file(project_root, &path).map_err(fn(e) { RemoteAttemptFailure.from(io_action(action, e)) })?
+        digest := transport.upload_execution_blob(&bytes, policy).map_err(fn(error) { RemoteAttemptFailure.from(remote_action(action, error.to_string())) })?
+        if digest != snapshot.digest || bytes.len() as U64 != snapshot.byte_len {
+            return Err(RemoteAttemptFailure.terminal(remote_action(action, "remote input CAS identity changed for {snapshot.path.as_str()}")))
+        }
+    }
+    request := RemoteExecutionRequest{key: key.clone(), attempt_id: proof.attempt_id.clone(), argv: action.argv.clone(), inputs: snapshots.to_vec(), outputs: action.outputs.clone(), toolchain_digest: toolchain_provenance_digest(plan, action.toolchain), sandbox: ^proof}
+    expected_execution_id := remote_execution_identity(&request)
+    transport.submit_execution(&request, policy).map_err(fn(error) { RemoteAttemptFailure.from(remote_action(action, error.to_string())) })?
+    result := wait_remote_execution_result(transport, policy, key, action, &expected_execution_id, timeout_ms)?
+    if result.outcome == {
+        .Succeeded(exit_code) -> {
+            restored := restore_remote_outputs(transport, policy, project_root, action, &ActionResultRecord{key: result.key.clone(), outcome: result.outcome, outputs: result.outputs.clone(), failure_report: None, provenance: ActionCacheProvenance.miss(CacheMissReason.RemoteDenied)}, RemoteActionRequest.Execute).map_err(fn(detail) { RemoteAttemptFailure.from(remote_action(action, detail)) })?
+            if action.cache == ActionCache.Cached {
+                record := capture_declared_outputs(artifact_store, project_root, action, key.clone(), ActionOutcome.Succeeded(exit_code: exit_code), ActionCacheProvenance.miss(CacheMissReason.RemoteDenied)).map_err(fn(e) { RemoteAttemptFailure.from(io_action(action, e)) })?
+                if record.outputs != result.outputs {
+                    return Err(RemoteAttemptFailure.terminal(remote_action(action, "remote output changed before local publication")))
+                }
+                if policy.check(RemoteActionRequest.CacheWrite).is_ok() {
+                    publish_remote_outputs(transport, policy, project_root, &record).map_err(fn(detail) { RemoteAttemptFailure.from(remote_action(action, detail)) })?
+                }
+                write_action_record(artifact_store, key, &record).map_err(fn(e) { RemoteAttemptFailure.from(io_action(action, e)) })?
+                record_comptime_cache_event(action.name, key, ActionCacheStatus.Miss(CacheMissReason.RemoteDenied), "publish", Some(ActionOutcome.Succeeded(exit_code: exit_code)))
+            }
+            restored.commit()
+            Ok(ActionOutcome.Succeeded(exit_code: exit_code))
+        }
+        .Failed(exit_code) -> {
+            stderr := transport.download_execution_blob(&result.stderr_digest, policy).map_err(fn(error) { RemoteAttemptFailure.terminal(remote_action(action, error.to_string())) })?
+            stderr_view := String.from_utf8_lossy(&stderr).trim() // #4303
+            report := action_failure_report(action.name, exit_code, stderr_view.to_string())
+            if action.cache == ActionCache.Cached {
+                record := ActionResultRecord{key: key.clone(), outcome: ActionOutcome.Failed(exit_code: exit_code), outputs: [], failure_report: Some(report.clone()), provenance: ActionCacheProvenance.miss(CacheMissReason.RemoteDenied)}
+                if policy.check(RemoteActionRequest.CacheWrite).is_ok() {
+                    publish_remote_outputs(transport, policy, project_root, &record).map_err(fn(detail) { RemoteAttemptFailure.terminal(remote_action(action, detail)) })?
+                }
+                write_action_record(artifact_store, key, &record).map_err(fn(error) { RemoteAttemptFailure.terminal(io_action(action, error)) })?
+                record_comptime_cache_event(action.name, key, ActionCacheStatus.Miss(CacheMissReason.RemoteDenied), "terminal", Some(ActionOutcome.Failed(exit_code: exit_code)))
+            }
+            Err(RemoteAttemptFailure.terminal(BuildExecutionError.Reported(report: ^report)))
+        }
+        .RestoredFromCache -> Err(RemoteAttemptFailure.terminal(remote_action(action, "remote execution returned a cache-only outcome")))
+    }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1289
+fn remote_for_action(plan: &BuildPlan, action: &BuildAction, key: &ActionKey, grants: &Set<BuildCapability>, binding: RemoteBuildBinding?, scheduler: RemoteScheduler?) -> (RemoteCacheTransport, RemoteCachePolicy, Bool)? BuildExecutionError! {
+    binding := binding.filter(fn(binding) { binding.is_enabled() }) ?? return Ok(None)
+    trust_domain := binding.trust_domain.trim() // #4303
+    if trust_domain.is_empty() -> return Err(remote_action(action, "remote builder binding has no trust domain"))
+    if binding.trust_domain.len() > 256 || binding.trust_domain.chars().any(fn(character) { character.is_control() }) {
+        return Err(remote_action(action, "remote builder binding has an invalid trust domain"))
+    }
+    if !grants.contains(BuildCapability.Net) -> return Err(BuildExecutionError.MissingGrant(action: "remote build transport for {action.name}", capability: BuildCapability.Net))
+    transport := RemoteCacheTransport.for_binding(binding).map_err(fn(detail) { remote_action(action, detail) })?
+    if !action.caps.contains(BuildCapability.Net) -> return Err(BuildExecutionError.MissingGrant(action: "remote build transport for {action.name}", capability: BuildCapability.Net))
+    request := action_pools(action).into_iter().fold(RemoteBuildRequest.new(key.clone()), fn(request, pool) { request.with_pool(pool) })
+        .with_platform(binding.platform.clone()).with_trust_domain(binding.trust_domain.clone())
+        .with_cache_read(binding.cache_read).with_cache_write(binding.cache_write).with_execute(binding.execute).with_local_fallback(binding.fallback_local)
+    scheduler := scheduler ?? return Err(remote_action(action, "remote builder binding has no canonical scheduler"))
+    if scheduler.select(&request) == {
+        .Ok(_) -> {}
+        .Err(error) -> { if binding.fallback_local -> return Ok(None) else -> return Err(remote_action(action, error.to_string())) }
+    }
+    policy := remote_attempt_policy(plan, action, key, binding, &transport)?
+    Ok(Some((^transport, ^policy, binding.execute)))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1360
+fn remote_scheduler_for_binding(binding: &RemoteBuildBinding) -> RemoteScheduler Err! {
+    selected := RemoteBuilder.from_binding(binding.clone())
+    selected.capabilities.priority = 1
+    builders := [^selected]
+    selected_is_registered := if RemoteBuildBinding.load_host(binding.builder) == { .Ok(registered) -> registered == binding; .Err(_) -> false }
+    if selected_is_registered {
+        for name in RemoteBuildBinding.list_host()? {
+            if name == binding.builder -> continue
+            candidate := if RemoteBuildBinding.load_host(name) == { .Ok(candidate) -> ^candidate; .Err(_) -> continue }
+            candidate := RemoteBuilder.from_binding(^candidate)
+            candidate.capabilities.priority = 0
+            builders.push(^candidate)
+        }
+    }
+    RemoteScheduler.new(^builders).map_err(fn(error) { error.to_string() })
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1387
+fn remote_execution_request(action: &BuildAction, key: &ActionKey, binding: &RemoteBuildBinding) -> RemoteBuildRequest {
+    action_pools(action).into_iter().fold(RemoteBuildRequest.new(key.clone()), fn(request, pool) { request.with_pool(pool) })
+        .with_platform(binding.platform.clone()).with_trust_domain(binding.trust_domain.clone()).with_execute(true).with_local_fallback(binding.fallback_local)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1403
+fn remote_attempt_policy(plan: &BuildPlan, action: &BuildAction, key: &ActionKey, binding: &RemoteBuildBinding, transport: &RemoteCacheTransport) -> RemoteCachePolicy BuildExecutionError! {
+    // GATE #4494: atomics, wall clock and native process id.
+    attempt := REMOTE_ATTEMPT.fetch_add(1, Ordering.Relaxed)
+    timestamp := SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos()
+    attempt_id := "attempt-{process.id()}-{timestamp}-{attempt}"
+    proof := transport.sandbox_proof("remote:{binding.builder}:{binding.trust_domain}:local-{process.id()}-{action.id.0}-{attempt}", attempt_id, key.as_str(), remote_provenance_digest(plan, action)).map_err(fn(detail) { remote_action(action, detail) })?
+    Ok(RemoteCachePolicy.with_grants(binding.cache_read, binding.cache_write, binding.execute, ^proof))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1438
+fn wait_remote_execution_result(transport: &RemoteCacheTransport, policy: &RemoteCachePolicy, key: &ActionKey, action: &BuildAction, expected_execution_id: &ContentDigest, timeout_ms: U64) -> RemoteExecutionResult RemoteAttemptFailure! {
+    // GATE #4494: monotonic clock, cancellation, native sleep. #4409: NotFound fidelity.
+    timeout := Duration.from_millis(timeout_ms)
+    deadline := Instant.now() + timeout
+    loop {
+        if transport.download_execution_result(key, policy) == {
+            .Ok(result) -> {
+                if result.execution_id != expected_execution_id {
+                    detail := "remote execution identity mismatch: expected {expected_execution_id.as_str()}, got {result.execution_id.as_str()}"
+                    detail := if transport.cancel_execution(key, policy) == {
+                        .Ok(_) -> ^detail
+                        .Err(cancel_error) -> "{detail}; cancellation failed: {cancel_error}"
+                    }
+                    record_comptime_cache_event(action.name, key, ActionCacheStatus.Miss(CacheMissReason.RemoteDenied), "interrupted", None)
+                    return Err(RemoteAttemptFailure.terminal(remote_action(action, detail)))
+                }
+                return Ok(^result)
+            }
+            .Err(RemoteCacheError.Io(error)) if error.kind() == io.ErrorKind.NotFound && Instant.now() < deadline -> {
+                thread.sleep(Duration.from_millis(10))
+            }
+            .Err(RemoteCacheError.Io(error)) if error.kind() == io.ErrorKind.NotFound -> {
+                record_comptime_cache_event(action.name, key, ActionCacheStatus.Miss(CacheMissReason.RemoteDenied), "interrupted", None)
+                return if transport.cancel_execution(key, policy) == {
+                    .Ok(_) -> Err(RemoteAttemptFailure.retryable(remote_action(action, "remote worker did not publish a result within {timeout.as_millis()}ms")))
+                    .Err(cancel_error) -> Err(RemoteAttemptFailure.terminal(remote_action(action, "remote worker did not publish a result within {timeout.as_millis()}ms; cancellation failed: {cancel_error}")))
+                }
+            }
+            .Err(error) -> {
+                detail := if transport.cancel_execution(key, policy) == {
+                    .Ok(_) -> error.to_string()
+                    .Err(cancel_error) -> "{error}; cancellation failed: {cancel_error}"
+                }
+                record_comptime_cache_event(action.name, key, ActionCacheStatus.Miss(CacheMissReason.RemoteDenied), "interrupted", None)
+                return Err(RemoteAttemptFailure.terminal(remote_action(action, detail)))
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1524
+fn restore_remote_outputs(transport: &RemoteCacheTransport, policy: &RemoteCachePolicy, project_root: &OSPath, action: &BuildAction, record: &ActionResultRecord, blob_request: RemoteActionRequest) -> RemoteOutputRestore Err! {
+    if record.outputs.len() != action.outputs.len() || record.outputs.iter().zip(&action.outputs).any(fn(pair) { pair.0.path != pair.1 }) {
+        return Err("remote output record does not exactly match action declarations")
+    }
+    staged := [(OSPath, [U8])].with_capacity(record.outputs.len())
+    backups := [(OSPath, [U8]?)].with_capacity(record.outputs.len())
+    for output in record.outputs {
+        bytes := if blob_request == {
+            .CacheRead -> transport.download_blob(&output.digest, policy)
+            .Execute -> transport.download_execution_blob(&output.digest, policy)
+            .CacheWrite -> return Err("remote output restore cannot use a cache-write grant")
+        }.map_err(fn(error) { error.to_string() })?
+        if bytes.len() as U64 != output.byte_len || ContentDigest.from_bytes(&bytes) != output.digest {
+            return Err("remote output blob {output.path.as_str()} failed digest or length verification")
+        }
+        path := resolve_under(project_root, output.path.as_str()).map_err(fn(error) { error.to_string() })?
+        previous := if secure_read_file(project_root, &path) == {
+            .Ok(bytes) -> Some(^bytes)
+            .Err(error) if error.kind() == io.ErrorKind.NotFound -> None
+            .Err(error) -> return Err(error.to_string())
+        }
+        backups.push((path.clone(), ^previous))
+        staged.push((^path, ^bytes))
+    }
+    for (path, bytes) in staged {
+        if prepare_output_destination(project_root, path).and_then(fn(_) { atomic_restore_file(project_root, path, bytes) }) is .Err(error) {
+            rollback_output_restore(project_root, &backups)
+            return Err(error.to_string())
+        }
+    }
+    Ok(RemoteOutputRestore{project_root: project_root, backups: ^backups, committed: false})
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1589
+struct RemoteOutputRestore { project_root: &OSPath, backups: [(OSPath, [U8]?)], committed: Bool }
+impl RemoteOutputRestore {
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1596
+    fn commit(self: Self) { self.committed = true }
+}
+impl Drop for RemoteOutputRestore {
+    // Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1602
+    fn drop(self: &Self) { if !self.committed { rollback_output_restore(self.project_root, &self.backups) } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1609
+fn rollback_output_restore(project_root: &OSPath, backups: &[(OSPath, [U8]?)]) {
+    for (path, previous) in backups.iter().rev() {
+        if previous == {
+            Some(bytes) -> { _ :: prepare_output_destination(project_root, path).and_then(fn(_) { atomic_restore_file(project_root, path, bytes) }) }
+            None -> {
+                if fs.symlink_metadata(path) == {
+                    .Ok(metadata) if metadata.file_type().is_symlink() -> {}
+                    .Ok(metadata) if metadata.is_file() -> { _ :: fs.remove_file(path) }
+                    _ -> {}
+                }
+            }
+        }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1627
+fn publish_remote_outputs(transport: &RemoteCacheTransport, policy: &RemoteCachePolicy, project_root: &OSPath, record: &ActionResultRecord) -> () Err! {
+    outputs := [ActionOutputRecord].with_capacity(record.outputs.len())
+    for output in record.outputs {
+        path := resolve_under(project_root, output.path.as_str()).map_err(fn(error) { error.to_string() })?
+        bytes := secure_read_file(project_root, &path).map_err(fn(error) { error.to_string() })?
+        digest := transport.upload_blob(&bytes, policy).map_err(fn(error) { error.to_string() })?
+        if digest != output.digest || bytes.len() as U64 != output.byte_len {
+            return Err("remote output CAS identity changed for {output.path.as_str()}")
+        }
+        outputs.push(ActionOutputRecord{path: output.path.clone(), digest: ^digest, byte_len: bytes.len() as U64})
+    }
+    transport.upload_action_record(&ActionResultRecord{key: record.key.clone(), outcome: record.outcome, outputs: ^outputs, failure_report: record.failure_report.clone(), provenance: record.provenance.clone()}, policy).map_err(fn(error) { error.to_string() })?
+    Ok(())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1668
+fn remote_action(action: &BuildAction, detail: String) -> BuildExecutionError { BuildExecutionError.IO(action: "remote {action.name}", detail: ^detail) }
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1675
+fn rebuild_status_reason(status: ActionCacheStatus) -> CacheMissReason {
+    if status == { .Miss(reason) -> reason; .Hit(_) -> CacheMissReason.NoLocalActionRecord }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1682
+fn prepare_output_destination(root: &OSPath, output: &OSPath) -> () io.Error! {
+    // GATE #4494 native filesystem; #4409 preserves InvalidInput/PermissionDenied/NotADirectory.
+    parent := output.parent() ?? root
+    relative := parent.strip_prefix(root).map_err(fn(_) { io.Error.new(io.ErrorKind.InvalidInput, "build output parent escapes project root") })?
+    current := root.to_path_buf()
+    for component in relative.components() {
+        if component is Component.Normal(part) {
+            current.push(part)
+            if fs.symlink_metadata(&current) == {
+                .Ok(meta) if meta.file_type().is_symlink() -> return Err(io.Error.new(io.ErrorKind.PermissionDenied, "build output parent `{current.display()}` is a symlink"))
+                .Ok(meta) if !meta.is_dir() -> return Err(io.Error.new(io.ErrorKind.NotADirectory, "build output parent `{current.display()}` is not a directory"))
+                .Ok(_) -> {}
+                .Err(error) if error.kind() == io.ErrorKind.NotFound -> {
+                    if fs.create_dir(&current) == {
+                        .Ok(_) -> {}
+                        .Err(error) if error.kind() == io.ErrorKind.AlreadyExists -> {
+                            metadata := fs.symlink_metadata(&current)?
+                            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                                return Err(io.Error.new(io.ErrorKind.PermissionDenied, "build output parent `{current.display()}` is not a real directory"))
+                            }
+                        }
+                        .Err(error) -> return Err(error)
+                    }
+                }
+                .Err(error) -> return Err(error)
+            }
+        }
+    }
+    if fs.symlink_metadata(output).is_ok_and(fn(meta) { meta.file_type().is_symlink() }) { fs.remove_file(output)? }
+    Ok(())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:1739
+fn execute_probes(plan: &BuildPlan, selected: &Set<ProbeId>) -> [BuildProbeFact] BuildExecutionError! {
+    facts := [BuildProbeFact].new()
+    for probe in plan.probes.iter().filter(fn(probe) { selected.contains(probe.id) }) {
+        (success, detail) := if probe.kind == {
+            .FindProgram(program) -> {
+                if resolve_program_path(plan, probe.toolchain, program) == {
+                    Some(path) -> (true, path.display().to_string())
+                    None -> (false, "program `{program}` not found")
+                }
+            }
+            .PkgConfig(package, min_version) -> {
+                pkg_config := resolve_program_path(plan, probe.toolchain, "pkg-config") ?? return Err(BuildExecutionError.ProbeFailed(probe: probe.name.clone(), detail: "pkg-config not found"))
+                args := ["--exists"]
+                if min_version is Some(version) { args.push("{package} >= {version}") } else { args.push(package.clone()) }
+                output := run_probe_sandboxed(&pkg_config, &args, None)?
+                (output.status.success(), "pkg-config exit {output.status.code() ?? 1}")
+            }
+            .HeaderCheck(header) -> {
+                source := "#include <{header}>\nint main(void) {{ return 0; }}\n"
+                run_compile_probe(plan, probe.toolchain, &source)?
+            }
+            .CompileCheck(includes, code, ..) -> {
+                source := String.new()
+                for header in includes { source.push_str("#include <{header}>\n") }
+                source.push_str("int main(void) {\n")
+                source.push_str(code)
+                source.push_str("\nreturn 0;\n}\n")
+                run_compile_probe(plan, probe.toolchain, &source)?
+            }
+        }
+        facts.push(BuildProbeFact{name: probe.name.clone(), success: success, detail: detail.clone(), reproducibility: probe.reproducibility, toolchain: probe.toolchain, toolchain_provenance: toolchain_provenance_digest(plan, probe.toolchain)})
+        if !success -> return Err(BuildExecutionError.ProbeFailed(probe: probe.name.clone(), detail: ^detail))
+    }
+    Ok(^facts)
+}

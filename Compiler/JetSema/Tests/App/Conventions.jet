@@ -11,8 +11,8 @@ use jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, MIRAppGraph, MIRAppRenderMode,
 use jet_parser.[parse_source]
 use jet_sema.[SemaBuildFacts, SemaGraphResult, SemaRegistrationHostHooks, SemaRegistrationModuleInput, SemaSourceOrigin, sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_test_prepare_graph, sema_app_convention_path, sema_app_convention_handler]
 
-fn app_convention_module(program: ^Program, identity: String, path: String) -> SemaRegistrationModuleInput Never! {
-    SemaRegistrationModuleInput{package_identity: "app-fixture", module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, foreign_handles: []}
+fn app_convention_module(program: ^Program, source: String, identity: String, path: String) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: "app-fixture", module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, unit_source: source, foreign_handles: []}
 }
 fn app_convention_check(root: String, entry: String, files: [String]) -> SemaGraphResult {
     inputs := [SemaRegistrationModuleInput]{}
@@ -21,11 +21,12 @@ fn app_convention_check(root: String, entry: String, files: [String]) -> SemaGra
         source :: check_reads_read_to_string(path) ?? panic("fixture input: {path}")
         parsed :: parse_source(source.bytes())
         assert(parsed.diagnostics.len() == 0, "original App source must parse")
-        &inputs.push(app_convention_module(^parsed.program, file, path))
+        &inputs.push(app_convention_module(^parsed.program, source, file, path))
     }
-    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    effects_source :: foundation_embedded_core().effect_source()
+    effects :: parse_source(effects_source.bytes())
     assert(effects.diagnostics.len() == 0)
-    &inputs.push(SemaRegistrationModuleInput{package_identity: "jet:canonical-prelude", module_identity: "effects", module_name: "effects", module_path: "Prelude/Effects.jet", source_file: "Prelude/Effects.jet", source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: ^effects.program, foreign_handles: []})
+    &inputs.push(SemaRegistrationModuleInput{package_identity: "jet:canonical-prelude", module_identity: "effects", module_name: "effects", module_path: "Prelude/Effects.jet", source_file: "Prelude/Effects.jet", source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: ^effects.program, unit_source: effects_source, foreign_handles: []})
     build :: SemaBuildFacts{package_name: "app-fixture", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "app-test", stamp_at: "", artifact_build: false}
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
     registration :: sema_test_prepare_graph(inputs, [], "app-fixture", entry, "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)

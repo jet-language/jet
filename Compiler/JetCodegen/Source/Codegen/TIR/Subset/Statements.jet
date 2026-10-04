@@ -1,1115 +1,461 @@
-// PORT-PENDING 0525 crates-jet-codegen-src-codegen-tir-subset-statements: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:1-1111
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::refusal;
-//RS use crate::AST::{
-//RS     BinOp, BindPattern, Expr, ForKind, IndexKind, LValue, PatSlot, Pattern, Stmt, SwitchArm,
-//RS };
-//RS use crate::Codegen::Cx;
-//RS use crate::Codegen::TIR::add_bin_match_pattern_binding_names;
-//RS use crate::Codegen::TIR::add_pattern_binding_names;
-//RS use crate::Codegen::TIR::add_str_match_pattern_binding_names;
-//RS use crate::Codegen::TIR::add_struct_pattern_binding_names;
-//RS use crate::Codegen::TIR::arm_bin_match_pattern;
-//RS use crate::Codegen::TIR::arm_fallible_pattern;
-//RS use crate::Codegen::TIR::arm_guarded_variant_pattern;
-//RS use crate::Codegen::TIR::arm_head_range;
-//RS use crate::Codegen::TIR::arm_is_plain_cond;
-//RS use crate::Codegen::TIR::arm_str_match_pattern;
-//RS use crate::Codegen::TIR::arm_struct_pattern;
-//RS use crate::Codegen::TIR::arm_variant_pattern;
-//RS use crate::Codegen::TIR::enum_is_covered;
-//RS use crate::Codegen::TIR::enum_tag_is_covered;
-//RS use crate::Codegen::TIR::expr_in_subset;
-//RS use crate::Codegen::TIR::fallible_pattern_binding;
-//RS use crate::Codegen::TIR::is_data_event_variant;
-//RS use crate::Codegen::TIR::is_hook_outcome_variant;
-//RS use crate::Codegen::TIR::orfallback_rhs_in_subset;
-//RS use crate::Codegen::TIR::pattern_is_variant_or_orvariant;
-//RS use crate::Codegen::TIR::struct_pattern_values_in_subset;
-//RS use crate::Codegen::TIR::variant_pattern_enum;
-//RS use crate::Codegen::TIR::variant_pattern_uses_payload;
-//RS use crate::Codegen::is_json_variant;
-//RS use crate::Codegen::is_key_variant;
-//RS use crate::Diagnostics::Span;
-//RS use crate::Syntax;
-//RS use std::collections::HashSet;
-//RS 
-//RS fn scoped_stmts_in_subset(body: &[Stmt], cx: &Cx, locals: &HashSet<String>) -> bool {
-//RS     let mut scoped = locals.clone();
-//RS     body.iter().all(|s| stmt_in_subset(s, cx, &mut scoped))
-//RS }
-//RS 
-//RS /// `locals` is the set of names bound as params/locals so far in this scope.
-//RS /// It is threaded so an `Expr::Ident` can be classified: a name that is not a
-//RS /// local must not be a const/fn-value (excluded). Bindings extend it in order.
-//RS /// I2 self-report: a refusal records the statement it was about (`subset::refusal`)
-//RS /// so a gate/emitter disagreement names a construct, not just a function.
-//RS pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
-//RS     if stmt_in_subset_inner(s, cx, locals) {
-//RS         return true;
-//RS     }
-//RS     refusal::note(refusal::STMT, s.span());
-//RS     false
-//RS }
-//RS 
-//RS fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
-//RS     match s {
-//RS         Stmt::Val(b) => {
-//RS             // c109 Phase 19: an `arena_view` binding (`x :: arena.alloc(v)` / `x ::
-//RS             // arena.alloc(v)`) IS covered — it lowers to a plain `let <x> = <init>;` (no
-//RS             // type, no mut) with a deref'd slot, exactly as `emit_let`'s `arena_view`
-//RS             // branch (the init is a covered `arena.alloc(v)` handle call). The escape/
-//RS             // use-after-reset rules (E0631/E0632) are enforced entirely in sema.
-//RS             match &b.pattern {
-//RS                 // c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,
-//RS                 // `BindPattern::Tuple`). The AST `emit_stmt` borrows the init into a temp,
-//RS                 // then binds each name from `(tmp).__jet_<canonical-field>.clone()` (pairing
-//RS                 // elems to the type's canonical fields BY POSITION). Covered when the init
-//RS                 // is in-subset (its lowered `.ty` is a `Type::Tuple` — sema guarantees a
-//RS                 // tuple pattern destructures a tuple value, so the canonical field names
-//RS                 // are total at lowering). The Struct/List destructure forms stay on the
-//RS                 // AST path (no live-suite use; can be a later slice).
-//RS                 Some(BindPattern::Tuple { elems, .. }) => {
-//RS                     let ok = !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
-//RS                     for e in elems {
-//RS                         locals.insert(e.name.clone());
-//RS                     }
-//RS                     ok
-//RS                 }
-//RS                 // c109 Phase 26: a LIST-destructuring binding `[a, b, c] :: <init>` (S74,
-//RS                 // `BindPattern::List`). The AST `emit_stmt` borrows the init into a temp,
-//RS                 // then binds each name via `jet_unpack_vec(tmp, want, i, file, line)`
-//RS                 // (a runtime bounds-checked element move). Covered when the init is
-//RS                 // in-subset; the element type partiality (`expr_jet_ty`'s
-//RS                 // `Some(List(inner))`-only match) is reproduced at lowering. The
-//RS                 // fan-out result-list destructure (`41_fan_out` `main`) is exactly this.
-//RS                 Some(BindPattern::List { elems, .. }) => {
-//RS                     let ok = !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
-//RS                     for e in elems {
-//RS                         locals.insert(e.name.clone());
-//RS                     }
-//RS                     ok
-//RS                 }
-//RS                 // c109: a STRUCT-destructuring binding `Type { x, y } :: <init>`
-//RS                 // (S74, `BindPattern::Struct`). The AST `emit_stmt` borrows the init
-//RS                 // into a temp, then binds each field via `(tmp).__jet_<field>.clone()`
-//RS                 // (the pattern's field name is both the bound local and the read).
-//RS                 // Covered when the init is in-subset; the per-field type comes from
-//RS                 // `cx.struct_fields` at lowering (total — sema proved the pattern
-//RS                 // destructures a struct value).
-//RS                 Some(BindPattern::Struct { fields, .. }) => {
-//RS                     let ok = !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
-//RS                     for f in fields {
-//RS                         // D-DESTRUCT1: the LOCAL (possibly renamed) name is what's
-//RS                         // in scope, not the source field name.
-//RS                         locals.insert(f.local_name().to_string());
-//RS                     }
-//RS                     ok
-//RS                 }
-//RS                 // D-CHOOSE-TEST1=A: Result/Option success bindings reuse the
-//RS                 // canonical `??` unwrap TIR. Before body sema, the comptime
-//RS                 // fragment still carries those contextual heads as `.Ok` /
-//RS                 // `.Val` variants; admit that raw shape here and let lowering
-//RS                 // verify it against the subject carrier type. A user-enum
-//RS                 // variant uses the shared `RefutableBind` node so every tier
-//RS                 // keeps captures in the surrounding scope after the miss
-//RS                 // route diverges.
-//RS                 Some(BindPattern::Refutable {
-//RS                     pattern,
-//RS                     fallback,
-//RS                     names,
-//RS                     ..
-//RS                 }) if matches!(pattern, Pattern::Ok { .. } | Pattern::Present { .. })
-//RS                     || matches!(
-//RS                         pattern,
-//RS                         Pattern::Variant { variant, .. }
-//RS                             if cx.variant_owner.contains_key(variant)
-//RS                     ) =>
-//RS                 {
-//RS                     let ok = !b.is_comptime
-//RS                         && !b.uninit
-//RS                         && expr_in_subset(&b.init, cx, locals)
-//RS                         && orfallback_rhs_in_subset(fallback, cx, locals);
-//RS                     for name in names {
-//RS                         locals.insert(name.local_name().to_string());
-//RS                     }
-//RS                     ok
-//RS                 }
-//RS                 // Forward-safety default: a future BindPattern variant defaults to the
-//RS                 // safe exclusion. Currently unreachable — Tuple/List/Struct are all matched.
-//RS                 #[allow(unreachable_patterns)]
-//RS                 Some(_) => false,
-//RS                 None => {
-//RS                     // D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2: a
-//RS                     // `Type.{ uninit }` binding needs no init expression to be in-subset —
-//RS                     // lower.rs emits `MaybeUninit::uninit().assume_init()` verbatim
-//RS                     // (the placeholder `Expr::Int(0, …)` init is never evaluated or
-//RS                     // lowered).
-//RS                     //
-//RS                     // c109 (S57/M9.5): a comptime LOCAL `@name :: expr`. Sema
-//RS                     // evaluates the value into `b.ct` and the AST `emit_let` emits it as
-//RS                     // literal data (`let <name>[: <ty>] = <ct.serialize()>;`) — the runtime
-//RS                     // `init` expr is NEVER emitted, so it need not be in-subset. Covered
-//RS                     // whenever the resolved value is present (`b.ct.is_some()`).
-//RS                     // `b.uninit` cannot co-occur with comptime or pattern.
-//RS                     let ok = if b.uninit {
-//RS                         true
-//RS                     } else if b.is_comptime {
-//RS                         // Unresolved inside an `@ { … }` block: the
-//RS                         // interpreter evaluates the init itself.
-//RS                         b.ct.is_some() || expr_in_subset(&b.init, cx, locals)
-//RS                     } else {
-//RS                         expr_in_subset(&b.init, cx, locals)
-//RS                     };
-//RS                     // The binding's name is in scope for subsequent statements.
-//RS                     locals.insert(b.name.clone());
-//RS                     ok
-//RS                 }
-//RS             }
-//RS         }
-//RS         Stmt::Assign { target, value, .. } => match target {
-//RS             LValue::Local { .. } => expr_in_subset(value, cx, locals),
-//RS             // c109 Phase 5: indexed assignment `coll[i] = v`. The base, index, and
-//RS             // value must all be in-subset; the `IndexKind` (List/Map) is carried
-//RS             // totally from sema and dispatched at lowering (never re-inferred). An
-//RS             // `IndexKind::Unknown` means sema did not resolve it — exclude (the AST
-//RS             // path falls back to an env type-inference the TIR must not reproduce).
-//RS             LValue::Index {
-//RS                 base, index, kind, ..
-//RS             } => {
-//RS                 !matches!(kind, IndexKind::Unknown)
-//RS                     && expr_in_subset(base, cx, locals)
-//RS                     && expr_in_subset(index, cx, locals)
-//RS                     && expr_in_subset(value, cx, locals)
-//RS             }
-//RS             // D-MUTSELF1: a field-assignment `place.field = v`. The base place (a
-//RS             // field-read expr, e.g. `self`) and the value must both be in-subset; the
-//RS             // place is rendered through the same field-read lowering, so its
-//RS             // resolution is total. Compound ops (`+=`, S17) ride the same path.
-//RS             LValue::Field { base, .. } => {
-//RS                 expr_in_subset(base, cx, locals) && expr_in_subset(value, cx, locals)
-//RS             }
-//RS         },
-//RS         Stmt::Return(Some(e), _) => expr_in_subset(e, cx, locals),
-//RS         Stmt::Return(None, _) => true,
-//RS         // D-ONCE-WORD1 / D-CONC-STREAM1: `yield e` inside a generator.
-//RS         Stmt::Yield(e, _) => expr_in_subset(e, cx, locals),
-//RS         // D-IGNORERET2=A: `.drop("reason")` lowers to an ExprStmt of the receiver;
-//RS         // the method call itself is erased. Covered iff the receiver is in-subset.
-//RS         Stmt::DeferClose { close, .. } => expr_in_subset(close, cx, locals),
-//RS         Stmt::Expr(Expr::MethodCall {
-//RS             receiver, method, ..
-//RS         }) if method == Syntax::METHOD_DROP => expr_in_subset(receiver, cx, locals),
-//RS         Stmt::Expr(e) => expr_in_subset(e, cx, locals),
-//RS         // c109 Phase 2: control-flow loops. Each loop body is its own scope; check
-//RS         // it on a clone so a `let` inside the loop doesn't leak past it.
-//RS         Stmt::Loop { body, .. } => {
-//RS             let mut body_locals = locals.clone();
-//RS             body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
-//RS         }
-//RS         Stmt::While { cond, body, .. } => {
-//RS             if !expr_in_subset(cond, cx, locals) {
-//RS                 return false;
-//RS             }
-//RS             let mut body_locals = locals.clone();
-//RS             body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
-//RS         }
-//RS         // D-LOOP-SEMICOLON1=A: init var is in scope for cond, step, and body.
-//RS         Stmt::CountedLoop {
-//RS             init,
-//RS             cond,
-//RS             step,
-//RS             body,
-//RS             ..
-//RS         } => {
-//RS             if !expr_in_subset(&init.init, cx, locals) {
-//RS                 return false;
-//RS             }
-//RS             let mut inner = locals.clone();
-//RS             inner.insert(init.name.clone());
-//RS             if !expr_in_subset(cond, cx, &inner) {
-//RS                 return false;
-//RS             }
-//RS             if step
-//RS                 .as_ref()
-//RS                 .is_some_and(|step| !stmt_in_subset(step.as_ref(), cx, &mut inner))
-//RS             {
-//RS                 return false;
-//RS             }
-//RS             body.iter().all(|s| stmt_in_subset(s, cx, &mut inner))
-//RS         }
-//RS         Stmt::For {
-//RS             var,
-//RS             var2,
-//RS             kind,
-//RS             body,
-//RS             ..
-//RS         } => match kind {
-//RS             // `loop i in start..end [step k]` — start/end/step must be in-subset
-//RS             // integer expressions; the loop var `i` is an Int local in the body.
-//RS             // The two-binding `key, value` form is map iteration (a collection),
-//RS             // outside this phase.
-//RS             ForKind::Range {
-//RS                 start,
-//RS                 end,
-//RS                 step,
-//RS                 exclusive: _,
-//RS             } if var2.is_none() => {
-//RS                 if !expr_in_subset(start, cx, locals) || !expr_in_subset(end, cx, locals) {
-//RS                     return false;
-//RS                 }
-//RS                 if let Some(st) = step {
-//RS                     if !expr_in_subset(st, cx, locals) {
-//RS                         return false;
-//RS                     }
-//RS                 }
-//RS                 let mut body_locals = locals.clone();
-//RS                 body_locals.insert(var.clone());
-//RS                 body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
-//RS             }
-//RS             // c109 Phase 5/22: `loop x in coll` / `loop (k, v) in map` (ForKind::In).
-//RS             // A method-call collection (`.chars()`/`.lines()`/`.split(…)`) takes a
-//RS             // distinct `emit_for_in` branch; Phase 22 reproduces each (`forin_method_
-//RS             // collection_in_subset`). A non-method-call collection is the plain
-//RS             // `.iter()` form (single- or two-binding map). The loop var(s) bind in the
-//RS             // body scope with an *unresolved* type (matching the AST slot's `jet_ty:
-//RS             // None`, so they never enable the overflow trap).
-//RS             ForKind::In { collection, step } => {
-//RS                 if step
-//RS                     .as_ref()
-//RS                     .is_some_and(|step| !expr_in_subset(step, cx, locals))
-//RS                 {
-//RS                     return false;
-//RS                 }
-//RS                 // The TWO-BINDING map form (`loop (k, v) in map`) ALWAYS emits
-//RS                 // `({coll}).iter()` (the `var2` branch of `emit_for_in` fires first,
-//RS                 // before the `.chars()`/`.lines()` method-call branches). So a method-call
-//RS                 // collection in the two-binding position (notably an owning-field-read
-//RS                 // `idx.notes` that sema rewrote to `idx.notes.clone()` — the Phase-3
-//RS                 // finding) is just a plain in-subset collection value, not one of the
-//RS                 // single-binding `chars`/`lines` special forms. Check it as a plain
-//RS                 // expr. The SINGLE-binding form keeps the method-call classification
-//RS                 // (`.chars()`/`.lines()`/`.split(…)` → `forin_method_collection_in_subset`).
-//RS                 if var2.is_some() {
-//RS                     if !expr_in_subset(collection, cx, locals) {
-//RS                         return false;
-//RS                     }
-//RS                 } else if let Expr::MethodCall { .. } = collection {
-//RS                     // A single-binding method-call collection: the form must be one
-//RS                     // `emit_for_in` reproduces (`chars`/`lines`/`.iter().cloned()` default).
-//RS                     if !forin_method_collection_in_subset(collection, cx, locals) {
-//RS                         return false;
-//RS                     }
-//RS                 } else if !expr_in_subset(collection, cx, locals) {
-//RS                     return false;
-//RS                 }
-//RS                 let mut body_locals = locals.clone();
-//RS                 body_locals.insert(var.clone());
-//RS                 if let Some((v2, _)) = var2 {
-//RS                     body_locals.insert(v2.clone());
-//RS                 }
-//RS                 body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
-//RS             }
-//RS             // The Range form with a second binding (`k, v in a..b`) is not a Jet
-//RS             // construct; stay on the AST path defensively.
-//RS             _ => false,
-//RS         },
-//RS         // `break`/`next`, labeled or not, carry no sub-expressions to check.
-//RS         // The parser only admits them inside a loop body, so they are always valid
-//RS         // where they appear; the label name is reproduced verbatim at lowering.
-//RS         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => true,
-//RS         Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
-//RS             expr_in_subset(value, cx, locals)
-//RS         }
-//RS         // c109 Phase 4: a `when`/match (`Stmt::Switch`). Covered only in the two
-//RS         // shapes the TIR reproduces exactly — an exhaustive enum match or an
-//RS         // all-range-arm scalar switch (see `switch_in_subset`).
-//RS         Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS         } => switch_in_subset(subject, arms, else_body, *span, cx, locals),
-//RS         // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `@ { … }` erases entirely.
-//RS         // Always "in subset" since it emits nothing in Rust (I3).
-//RS         Stmt::ComptimeBlock { .. } => true,
-//RS         // Scope classification mirrors lowering: an emitted Rust block gets a cloned
-//RS         // locals set. Selected comptime-if, `layout`, and `.setup` are the only statement
-//RS         // bodies emitted inline, so only those intentionally extend `locals`.
-//RS         // c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema picks the
-//RS         // branch (`selected_then`); codegen emits ONLY that branch's statements inline.
-//RS         // The gate must classify the SELECTED branch (the unselected one is dropped and
-//RS         // never reaches codegen — it is name-resolution-only, D-WHEN2). Its statements
-//RS         // leak into the outer scope (the AST shares `&mut env`), so they extend `locals`.
-//RS         // Before sema resolves `selected_then` (a `build_cx`-only gate test), default to
-//RS         // the `then` branch so the gate is still exercised; at real codegen
-//RS         // `selected_then` is always set.
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             selected_then,
-//RS             ..
-//RS         } => {
-//RS             let chosen: &[Stmt] = match selected_then {
-//RS                 Some(true) | None => then_body,
-//RS                 Some(false) => else_body.as_deref().unwrap_or(&[]),
-//RS             };
-//RS             chosen.iter().all(|s| stmt_in_subset(s, cx, locals))
-//RS         }
-//RS         // c109 Phase 18: an audited `#Unsafe { … }` gate region (`Stmt::Unsafe`). It
-//RS         // emits a Rust lexical block, so body declarations stay in a child locals set.
-//RS         // The `#Audit("…")` annotation emits
-//RS         // nothing. I1: this is the source gate — the only place a Rust `unsafe` block is
-//RS         // produced — so admitting it here cannot introduce an ungated `unsafe`.
-//RS         Stmt::Unsafe { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-//RS         // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (I3).
-//RS         Stmt::Impure { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-//RS         // Reactive bodies emit as closures, another lexical boundary.
-//RS         Stmt::Reactive { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-//RS         // D-SHIELDNAME1=A: runtime enter/RAII-leave guards wrap a lexical block.
-//RS         Stmt::Shield { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-//RS         // D-CANVASSTATE1=D: `#Off` erases; `#DebugOnly` lowers in a lexical
-//RS         // debug-only block, so its local declarations do not extend `locals`.
-//RS         Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => true,
-//RS         Stmt::Switched { body, .. } => {
-//RS             let mut scoped = locals.clone();
-//RS             body.iter().all(|s| stmt_in_subset(s, cx, &mut scoped))
-//RS         }
-//RS         // Plain Rust lexical blocks.
-//RS         Stmt::Region { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-//RS         Stmt::Policy { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-//RS         Stmt::TaskGroup { name, body, .. } => {
-//RS             let mut scoped = locals.clone();
-//RS             scoped.insert(name.clone());
-//RS             body.iter()
-//RS                 .all(|statement| stmt_in_subset(statement, cx, &mut scoped))
-//RS         }
-//RS         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }`. UNLIKE `Region`/
-//RS         // `TaskGroup`, `name` is a REAL runtime binding that must stay valid
-//RS         // for statements AFTER this one (`lower_stmt`/`TStmt::Layout` binds
-//RS         // it before lowering the body) — register it into `locals` here too,
-//RS         // so a later `form.value(…)` etc. is itself recognized as in-subset.
-//RS         Stmt::Layout { name, body, .. } => {
-//RS             locals.insert(name.clone());
-//RS             body.iter().all(|s| stmt_in_subset(s, cx, locals))
-//RS         }
-//RS         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1) — a plain block
-//RS         // with a per-field guard. Field values use the outer scope; the body is lexical.
-//RS         Stmt::ContextBlock { fields, body, .. } => {
-//RS             fields.iter().all(|(_, v, _)| expr_in_subset(v, cx, locals))
-//RS                 && scoped_stmts_in_subset(body, cx, locals)
-//RS         }
-//RS         // c109 Phase 26 / D-AUTHORITY-NAME1=A: the effect ceiling is sema-only,
-//RS         // but the named form also introduces a real Authority local for TIR.
-//RS         // Keep that local in the subset environment so the gate and lowering
-//RS         // agree on the same executable body.
-//RS         Stmt::AuthorityScope { binding, body, .. } => {
-//RS             let mut scoped = locals.clone();
-//RS             if let Some(binding) = binding {
-//RS                 scoped.insert(binding.clone());
-//RS             }
-//RS             body.iter().all(|s| stmt_in_subset(s, cx, &mut scoped))
-//RS         }
-//RS         // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.
-//RS         Stmt::Live { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-//RS         // D-DOTSCOPE1: a `#Test` scope member — in-subset iff its region body is.
-//RS         // Args are literals folded at lowering, not lowered as exprs, so only the
-//RS         // body gates the subset. `.setup` emits inline and intentionally extends the
-//RS         // test scope; every other member emits a Rust lexical block.
-//RS         Stmt::ScopeMember { name, body, .. } if name == Syntax::SCOPE_TEST_SETUP => {
-//RS             body.iter().all(|s| stmt_in_subset(s, cx, locals))
-//RS         }
-//RS         Stmt::ScopeMember { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-//RS         // D-DET1: `assume_deterministic { … }` erases to a plain Rust block (the
-//RS         // determinism suspension is a compile-time fact, I3).
-//RS         Stmt::AssumeDet { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-//RS         // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` lowers to a
-//RS         // transaction-guarded Rust block. The handle `name` is a covered local
-//RS         // inside the body (so `name.on_commit(…)` resolves); check the body with it
-//RS         // in scope.
-//RS         Stmt::Transact { name, body, .. } => {
-//RS             let mut inner = locals.clone();
-//RS             if let Some(name) = name {
-//RS                 inner.insert(name.clone());
-//RS             }
-//RS             body.iter().all(|s| stmt_in_subset(s, cx, &mut inner))
-//RS         }
-//RS         // Forward-safety default: a future Stmt variant defaults to the safe AST path
-//RS         // (I2 — a false negative keeps a fn off the TIR; a false positive would be unsafe).
-//RS         // Currently unreachable because every variant above is matched.
-//RS         #[allow(unreachable_patterns)]
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// c109 Phase 22: is a method-call collection iteration (`loop x in <coll>` where
-//RS /// `<coll>` is an `Expr::MethodCall`) in-subset? Mirrors `emit_for_in`'s
-//RS /// `Expr::MethodCall` branches (Source/Codegen/Statement.rs):
-//RS ///  - `.chars()` — char iteration; only the *receiver* (a string) is emitted, so it
-//RS ///    must be in-subset.
-//RS ///  - `.lines()` — streaming `BufRead::lines`; the receiver is a `FileReader`/
-//RS ///    `StdinHandle` (or inline `io.stdin()`), again emitted on its own, so it must be
-//RS ///    in-subset. (Both lines shapes route here; the FileReader-vs-stdin split is
-//RS ///    resolved at lowering off `tir_recv_jet_ty`/the inline-`stdin` shape.)
-//RS ///  - any other method — the `.iter().cloned()` default, which emits the WHOLE method
-//RS ///    call as the collection value, so the whole call must be in-subset (e.g. a
-//RS ///    Phase-9 `.split(…)` builtin returns a `[String]` value).
-//RS pub(crate) fn forin_method_collection_in_subset(
-//RS     collection: &Expr,
-//RS     cx: &Cx,
-//RS     locals: &HashSet<String>,
-//RS ) -> bool {
-//RS     let Expr::MethodCall {
-//RS         receiver, method, ..
-//RS     } = collection
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     match method.as_str() {
-//RS         "chars" | "lines" => expr_in_subset(receiver, cx, locals),
-//RS         _ => expr_in_subset(collection, cx, locals),
-//RS     }
-//RS }
-//RS 
-//RS /// c109 Phase 22: classify an `if` condition. Returns `None` if the condition is not
-//RS /// in-subset; otherwise returns the binding name(s) the condition introduces into the
-//RS /// then-branch scope (empty for a plain/`is_none` condition). Mirrors `emit_if`'s
-//RS /// condition shapes via `if_pattern_test` (Source/Codegen/Statement.rs):
-//RS ///  - a plain boolean expr → in-subset iff `expr_in_subset`, no bindings;
-//RS ///  - an `x == null` test (`Pattern::Absent`) → `is_none`, subject in-subset, no bindings;
-//RS ///  - an optional-binding test (`value(b)`/`Ok(b)`/`Err(b)`) → if-let, subject in-subset,
-//RS ///    the binding `b` in scope. Variant/Or/Range patterns in an `if` condition stay on
-//RS ///    the AST path (conservative — not covered here).
-//RS pub(crate) fn if_cond_in_subset(
-//RS     cond: &Expr,
-//RS     cx: &Cx,
-//RS     locals: &HashSet<String>,
-//RS ) -> Option<Vec<String>> {
-//RS     if let Expr::Binary(BinOp::And, left, right, _) = cond {
-//RS         let mut bindings = if_cond_in_subset(left, cx, locals)?;
-//RS         let mut right_locals = locals.clone();
-//RS         right_locals.extend(bindings.iter().cloned());
-//RS         bindings.extend(if_cond_in_subset(right, cx, &right_locals)?);
-//RS         return Some(bindings);
-//RS     }
-//RS     // The `x == null` (`Pattern::Absent`) form: `if {subj}.is_none()`.
-//RS     if let Expr::PatternTest {
-//RS         subject,
-//RS         pattern: Pattern::Absent(_),
-//RS         ..
-//RS     } = cond
-//RS     {
-//RS         return expr_in_subset(subject, cx, locals).then(Vec::new);
-//RS     }
-//RS     // D-DESTRUCT1: a struct-pattern condition in an expression-position dispatch
-//RS     // (`if value == { { field: literal, bound, .. } -> ... }`). The parser stores
-//RS     // value dispatch as a nested `Expr::If` chain, so this path is the expression
-//RS     // counterpart of `switch_in_subset`'s mixed-switch arm admission.
-//RS     if let Expr::PatternTest {
-//RS         subject,
-//RS         pattern: pattern @ Pattern::Struct { .. },
-//RS         ..
-//RS     } = cond
-//RS     {
-//RS         if !expr_in_subset(subject, cx, locals)
-//RS             || !struct_pattern_values_in_subset(pattern, cx, locals)
-//RS         {
-//RS             return None;
-//RS         }
-//RS         let mut names = HashSet::new();
-//RS         add_struct_pattern_binding_names(pattern, &mut names);
-//RS         return Some(names.into_iter().collect());
-//RS     }
-//RS     // D-PARSESTR1: a string interpolation pattern is a structured condition
-//RS     // in value-form dispatch. Its holes become locals in the then-branch, and
-//RS     // lowering supplies the same scan tuple before the branch body runs.
-//RS     if let Expr::PatternTest {
-//RS         subject,
-//RS         pattern: pattern @ Pattern::StrMatch { .. },
-//RS         ..
-//RS     } = cond
-//RS     {
-//RS         if !expr_in_subset(subject, cx, locals) {
-//RS             return None;
-//RS         }
-//RS         let mut names = HashSet::new();
-//RS         add_str_match_pattern_binding_names(pattern, &mut names);
-//RS         return Some(names.into_iter().collect());
-//RS     }
-//RS     // D-BINPAT1: a binary-pattern condition in value-form dispatch. Its
-//RS     // captured fields become locals in the then-branch, just like string
-//RS     // interpolation holes; lowering performs the shared scan before entering
-//RS     // that branch.
-//RS     if let Expr::PatternTest {
-//RS         subject,
-//RS         pattern: pattern @ Pattern::BinMatch { .. },
-//RS         ..
-//RS     } = cond
-//RS     {
-//RS         if !expr_in_subset(subject, cx, locals) {
-//RS             return None;
-//RS         }
-//RS         let mut names = HashSet::new();
-//RS         add_bin_match_pattern_binding_names(pattern, &mut names);
-//RS         return Some(names.into_iter().collect());
-//RS     }
-//RS     // The atomic optional-binding (if-let) form. Conjunctions recurse above so each
-//RS     // later atom is checked with every earlier binding in scope.
-//RS     if let Expr::PatternTest {
-//RS         subject, pattern, ..
-//RS     } = cond
-//RS     {
-//RS         if !expr_in_subset(subject, cx, locals) {
-//RS             return None;
-//RS         }
-//RS         if matches!(pattern, Pattern::Or(..))
-//RS             && pattern_is_variant_or_orvariant(pattern)
-//RS             && variant_pattern_enum(cx, pattern).is_some_and(|owner| enum_is_covered(&owner, cx))
-//RS         {
-//RS             return Some(
-//RS                 pattern
-//RS                     .binding_names()
-//RS                     .into_iter()
-//RS                     .map(|binding| binding.local_name().to_owned())
-//RS                     .collect(),
-//RS             );
-//RS         }
-//RS         // S31: a nested payload pattern lowers through the structural MIR
-//RS         // pattern test; it binds the names its nested patterns introduce.
-//RS         if pattern.has_nested_pattern() {
-//RS             return Some(
-//RS                 pattern
-//RS                     .binding_names()
-//RS                     .into_iter()
-//RS                     .map(|binding| binding.local_name().to_owned())
-//RS                     .filter(|name| name != "_")
-//RS                     .collect(),
-//RS             );
-//RS         }
-//RS         // c109 Phase 24: a JSON variant if-let (`if data == Object(entries)` /
-//RS         // `if port == Number(n)`). The prelude JSON enum is matched via a single-payload
-//RS         // variant pattern (`Object`/`Number`/`Text`/`Boolean`/`Array`) binding one name.
-//RS         // The Rust if-let pattern (`{root}jet_std::JSON::Object(user_entries)`) is produced
-//RS         // by the JSON-aware `emit_if_let_pattern` (reused at lowering), and the binding's
-//RS         // type comes from `core_json_pattern_types` (totality). Cover ONLY the JSON-variant
-//RS         // single-bind case (a user-enum variant if-let stays on the AST path — conservative,
-//RS         // not yet covered as an if-condition form); `Null` is the `Absent`-style form, but
-//RS         // `data == Null` would parse as a variant pattern with no binding (not used in the
-//RS         // live suite — excluded here, single-bind only).
-//RS         if let Pattern::Variant {
-//RS             variant,
-//RS             bindings,
-//RS             leading_dot: _,
-//RS             span: _,
-//RS         } = pattern
-//RS         {
-//RS             // DataEvent is a prelude enum and therefore has no user-variant
-//RS             // owner entries. Its single-payload and unit patterns are still
-//RS             // fully represented by the typed if-let lowering.
-//RS             // HookOutcome/DataEvent are prelude enums. They may also appear in
-//RS             // `variant_owner`; the typed if-let lowering still owns both shapes.
-//RS             // Other slot shapes fall through: a user enum may spell a variant
-//RS             // like a builtin (`Int(lo: Int, hi: Int)`).
-//RS             if is_data_event_variant(variant) || is_hook_outcome_variant(variant) {
-//RS                 if bindings.is_empty() || matches!(bindings.first(), Some(PatSlot::Wildcard)) {
-//RS                     return Some(Vec::new());
-//RS                 }
-//RS                 if bindings.len() == 1 {
-//RS                     if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
-//RS                         return Some(vec![name.clone()]);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if is_json_variant(variant)
-//RS                 && bindings.len() == 1
-//RS                 && matches!(bindings[0], PatSlot::Bind { .. })
-//RS             {
-//RS                 if let PatSlot::Bind { name, .. } = &bindings[0] {
-//RS                     return Some(vec![name.clone()]);
-//RS                 }
-//RS             }
-//RS             // D-TERM1 (ratified 2026-06-22): a `Key` variant if-let.
-//RS             // `if k == Key.Char(c)` → `if let JetKey::Char(user_c) = (k).clone() { … }`.
-//RS             // Unit variants (`if k == Key.Enter`) → `if let JetKey::Enter = (k).clone()`.
-//RS             if is_key_variant(variant) {
-//RS                 if bindings.is_empty()
-//RS                     || (bindings.len() == 1 && matches!(bindings[0], PatSlot::Bind { .. }))
-//RS                 {
-//RS                     let names: Vec<String> = bindings
-//RS                         .iter()
-//RS                         .filter_map(|s| {
-//RS                             if let PatSlot::Bind { name, .. } = s {
-//RS                                 Some(name.clone())
-//RS                             } else {
-//RS                                 None
-//RS                             }
-//RS                         })
-//RS                         .collect();
-//RS                     return Some(names);
-//RS                 }
-//RS             }
-//RS             // c109 (B4): a USER-enum variant if-let (`if m == Ping(n)`). Covered when
-//RS             // the variant is a single-payload variant (one `Bind` slot) of a covered
-//RS             // user enum — the AST `emit_if` already emits the correct
-//RS             // `if let __jet_E::__jet_V(user_b) = <subj>` head. The subject was checked
-//RS             // above; require the owning enum to be covered so the prefix/payload are
-//RS             // total. Multi-bind / unit variants stay on the AST path (the single-bind
-//RS             // shape mirrors the JSON-variant if-let exactly).
-//RS             //
-//RS             // D-UNIONTYPE1=A: anonymous-union member tags are not in `variant_owner`
-//RS             // (they collide with DataTree/etc.), same as `switch_in_subset`'s
-//RS             // `union_shaped` fallback — accept the single-bind case and resolve the
-//RS             // generated `__JetUnion_*` enum from the subject's type at lowering.
-//RS             if !bindings.is_empty()
-//RS                 && bindings.iter().all(|slot| {
-//RS                     matches!(
-//RS                         slot,
-//RS                         PatSlot::Bind { .. } | PatSlot::Wildcard | PatSlot::Range { .. }
-//RS                     )
-//RS                 })
-//RS             {
-//RS                 let names: Vec<String> = bindings
-//RS                     .iter()
-//RS                     .filter_map(|slot| match slot {
-//RS                         PatSlot::Bind { name, .. } => Some(name.clone()),
-//RS                         _ => None,
-//RS                     })
-//RS                     .collect();
-//RS                 if let Some(owner) = cx.variant_owner.get(variant) {
-//RS                     let covered = if variant_pattern_uses_payload(pattern) {
-//RS                         enum_is_covered(owner, cx)
-//RS                     } else {
-//RS                         enum_tag_is_covered(owner, cx)
-//RS                     };
-//RS                     if covered {
-//RS                         return Some(names);
-//RS                     }
-//RS                 } else {
-//RS                     return Some(names);
-//RS                 }
-//RS             }
-//RS             // D-TAG1: a binding-free variant/group test (`if d == .Fire { … }`)
-//RS             // is a plain Bool condition — the expression subset lowers it to
-//RS             // `matches!` (`TExprKind::PatternMatches`), no if-let, no bindings.
-//RS             if bindings.is_empty() && cx.variant_owner.contains_key(variant) {
-//RS                 return Some(Vec::new());
-//RS             }
-//RS             return None;
-//RS         }
-//RS         // D-PATR / D-IFDIST1: expression-position range arm heads
-//RS         // (`return if n == { 0..9 -> 1 }`) desugar to `PatternTest` Range conds.
-//RS         // RangeSwitch re-emits the subject spelling, so only Ident subjects
-//RS         // stay covered (D-IF3 / rejects_range_switch_over_non_ident_subject).
-//RS         if let Pattern::Range { .. } = pattern {
-//RS             if matches!(subject.as_ref(), Expr::Ident(..)) {
-//RS                 return Some(Vec::new());
-//RS             }
-//RS             return None;
-//RS         }
-//RS         return match pattern {
-//RS             Pattern::Present { binding, .. }
-//RS             | Pattern::Ok { binding, .. }
-//RS             | Pattern::Err { binding, .. } => Some(vec![binding.clone()]),
-//RS             _ => None,
-//RS         };
-//RS     }
-//RS     // A plain boolean condition.
-//RS     expr_in_subset(cond, cx, locals).then(Vec::new)
-//RS }
-//RS 
-//RS /// c109 Phase 4: is a `Stmt::Switch` (`when`/match) inside the subset? Covered in
-//RS /// exactly the two shapes the TIR reproduces byte-for-byte:
-//RS ///   (A) **exhaustive enum match** — every arm is a variant pattern over a covered
-//RS ///       enum subject (`switch_arm_pattern_owned` is Some, none are ranges). Lowers
-//RS ///       to a Rust `match` (`emit_pattern_match_switch`).
-//RS ///   (B) **range switch** — every arm is an arm-head range pattern (`0..59 -> …`)
-//RS ///       over a scalar subject AND an `else` is present. Lowers to an if/else chain
-//RS ///       (`emit_mixed_switch`).
-//RS /// Anything else (mixed comparison/Bool arms, optional/`ok`/`err` patterns, a
-//RS /// non-covered subject) stays on the AST path.
-//RS pub(crate) fn switch_in_subset(
-//RS     subject: &Expr,
-//RS     arms: &[SwitchArm],
-//RS     else_body: &Option<Vec<Stmt>>,
-//RS     span: Span,
-//RS     cx: &Cx,
-//RS     locals: &mut HashSet<String>,
-//RS ) -> bool {
-//RS     if arms.is_empty() {
-//RS         return false;
-//RS     }
-//RS     // The subject must itself be in-subset (so it lowers + so `it` never escapes).
-//RS     if !expr_in_subset(subject, cx, locals) {
-//RS         return false;
-//RS     }
-//RS     // RangeSwitch re-emits the subject spelling twice per arm. A call/field/index
-//RS     // subject with a range head would evaluate 2n times, so keep it uncovered.
-//RS     if !matches!(subject, Expr::Ident(..))
-//RS         && arms.iter().any(|arm| {
-//RS             matches!(
-//RS                 &arm.cond,
-//RS                 Expr::PatternTest {
-//RS                     pattern: Pattern::Range { .. },
-//RS                     ..
-//RS                 }
-//RS             )
-//RS         })
-//RS     {
-//RS         return false;
-//RS     }
-//RS     if crate::AST::is_subjectless_guard(subject, span) {
-//RS         // D-CONC-CHAN2=D: a subjectless readiness table is one covered TIR
-//RS         // wait, not an ordinary boolean guard. Keep the coverage proof in
-//RS         // lockstep with `lower_readiness_switch`: every head is a receive or
-//RS         // Duration expression, and only a receive head adds a body binding.
-//RS         if arms
-//RS             .iter()
-//RS             .any(|arm| crate::AST::readiness_head(&arm.cond).is_some())
-//RS         {
-//RS             let mut has_wait = false;
-//RS             for arm in arms {
-//RS                 let Some(head) = crate::AST::readiness_head(&arm.cond) else {
-//RS                     return false;
-//RS                 };
-//RS                 let bindings = match head {
-//RS                     crate::AST::ReadinessHead::Receive { binding, source } => {
-//RS                         has_wait = true;
-//RS                         if !expr_in_subset(source, cx, locals) {
-//RS                             return false;
-//RS                         }
-//RS                         vec![binding.to_string()]
-//RS                     }
-//RS                     crate::AST::ReadinessHead::After { duration } => {
-//RS                         has_wait = true;
-//RS                         if !expr_in_subset(duration, cx, locals) {
-//RS                             return false;
-//RS                         }
-//RS                         Vec::new()
-//RS                     }
-//RS                 };
-//RS                 let mut body_locals = locals.clone();
-//RS                 body_locals.extend(bindings);
-//RS                 if !arm
-//RS                     .body
-//RS                     .iter()
-//RS                     .all(|stmt| stmt_in_subset(stmt, cx, &mut body_locals))
-//RS                 {
-//RS                     return false;
-//RS                 }
-//RS             }
-//RS             if !has_wait {
-//RS                 return false;
-//RS             }
-//RS             return else_body.as_ref().is_none_or(|body| {
-//RS                 let mut else_locals = locals.clone();
-//RS                 body.iter()
-//RS                     .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
-//RS             });
-//RS         }
-//RS         for arm in arms {
-//RS             let Some(bindings) = if_cond_in_subset(&arm.cond, cx, locals) else {
-//RS                 return false;
-//RS             };
-//RS             let mut body_locals = locals.clone();
-//RS             body_locals.extend(bindings);
-//RS             if !arm
-//RS                 .body
-//RS                 .iter()
-//RS                 .all(|stmt| stmt_in_subset(stmt, cx, &mut body_locals))
-//RS             {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         return else_body.as_ref().is_none_or(|body| {
-//RS             let mut else_locals = locals.clone();
-//RS             body.iter()
-//RS                 .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
-//RS         });
-//RS     }
-//RS     // S31: `lower_switch` routes a table with a nested payload pattern through
-//RS     // the guard chain; each arm head is an ordinary condition.
-//RS     if arms
-//RS         .iter()
-//RS         .any(|arm| crate::Codegen::TIR::arm_has_nested_pattern(&arm.cond))
-//RS     {
-//RS         for arm in arms {
-//RS             let Some(bindings) = if_cond_in_subset(&arm.cond, cx, locals) else {
-//RS                 return false;
-//RS             };
-//RS             let mut body_locals = locals.clone();
-//RS             body_locals.extend(bindings);
-//RS             if !arm
-//RS                 .body
-//RS                 .iter()
-//RS                 .all(|stmt| stmt_in_subset(stmt, cx, &mut body_locals))
-//RS             {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         return else_body.as_ref().is_none_or(|body| {
-//RS             let mut else_locals = locals.clone();
-//RS             body.iter()
-//RS                 .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
-//RS         });
-//RS     }
-//RS     // D-ENC-DYN1=A+ / card #2356: DataTree dispatch uses the same typed
-//RS     // if-let lowering as the expression condition path, but its tags are not
-//RS     // in `variant_owner` and therefore cannot satisfy the generic exhaustive
-//RS     // enum branch below. Admit unit, wildcard, and bound payload slots here;
-//RS     // `lower_switch` routes the matching table through `lower_guard_switch`.
-//RS     if arms.iter().all(|arm| {
-//RS         arm_variant_pattern(cx, &arm.cond, subject).is_some_and(|pattern| {
-//RS             matches!(
-//RS                 pattern,
-//RS                 Pattern::Variant { ref variant, .. } if is_json_variant(variant)
-//RS             )
-//RS         })
-//RS     }) {
-//RS         for arm in arms {
-//RS             let pattern = arm_variant_pattern(cx, &arm.cond, subject)
-//RS                 .expect("DataTree switch arm was checked above");
-//RS             let mut body_locals = locals.clone();
-//RS             add_pattern_binding_names(&pattern, &mut body_locals);
-//RS             if !arm
-//RS                 .body
-//RS                 .iter()
-//RS                 .all(|stmt| stmt_in_subset(stmt, cx, &mut body_locals))
-//RS             {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         if let Some(body) = else_body {
-//RS             let mut else_locals = locals.clone();
-//RS             if !body
-//RS                 .iter()
-//RS                 .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
-//RS             {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         return true;
-//RS     }
-//RS     // Shape A-GUARD: a variant-pattern switch with boolean guards on one or more
-//RS     // arms. Lowering uses the ordinary TIfCond conjunction path, so payload names
-//RS     // are bound only after the variant test and remain available to the guard and
-//RS     // that arm's body. Restrict the shape to an explicit else: a guard can make an
-//RS     // otherwise exhaustive enum table fall through, and the AST requires that
-//RS     // residual behavior to be represented explicitly.
-//RS     let has_guarded_variant = arms
-//RS         .iter()
-//RS         .any(|a| arm_guarded_variant_pattern(cx, &a.cond, subject).is_some());
-//RS     if else_body.is_some()
-//RS         && has_guarded_variant
-//RS         && arms.iter().all(|a| {
-//RS             arm_variant_pattern(cx, &a.cond, subject).is_some()
-//RS                 || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
-//RS         })
-//RS     {
-//RS         for arm in arms {
-//RS             let Some(bindings) = if_cond_in_subset(&arm.cond, cx, locals) else {
-//RS                 return false;
-//RS             };
-//RS             let mut body_locals = locals.clone();
-//RS             body_locals.extend(bindings);
-//RS             if !arm
-//RS                 .body
-//RS                 .iter()
-//RS                 .all(|stmt| stmt_in_subset(stmt, cx, &mut body_locals))
-//RS             {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         let Some(body) = else_body else {
-//RS             unreachable!("guarded variant shape requires else");
-//RS         };
-//RS         let mut else_locals = locals.clone();
-//RS         return body
-//RS             .iter()
-//RS             .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals));
-//RS     }
-//RS     // Shape A: all arms are variant patterns (exhaustive enum match).
-//RS     if arms
-//RS         .iter()
-//RS         .all(|a| arm_variant_pattern(cx, &a.cond, subject).is_some())
-//RS     {
-//RS         // Subject must be a covered enum (its variants are scalar-payload only).
-//RS         let subj_enum = arms.iter().find_map(|a| {
-//RS             arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
-//RS         });
-//RS         let payload_used = arms.iter().any(|a| {
-//RS             arm_variant_pattern(cx, &a.cond, subject)
-//RS                 .is_some_and(|pattern| variant_pattern_uses_payload(&pattern))
-//RS         });
-//RS         // D-UNIONTYPE1=A: union matches use member-type arm heads. Those tags are
-//RS         // not in `variant_owner` (they collide with DataTree/etc.), so the owning
-//RS         // enum is resolved later from the subject's Jet type in `lower_enum_match`.
-//RS         let union_shaped = subj_enum.is_none()
-//RS             && arms.iter().all(|a| {
-//RS                 matches!(
-//RS                     arm_variant_pattern(cx, &a.cond, subject),
-//RS                     Some(Pattern::Variant { bindings, .. }) if bindings.len() == 1
-//RS                 )
-//RS             });
-//RS         if subj_enum.is_none() && !union_shaped {
-//RS             return false;
-//RS         }
-//RS         if let Some(enum_name) = &subj_enum {
-//RS             let covered = if payload_used {
-//RS                 enum_is_covered(enum_name, cx)
-//RS             } else {
-//RS                 enum_tag_is_covered(enum_name, cx)
-//RS             };
-//RS             if enum_name != "HookOutcome" && !covered {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         for a in arms {
-//RS             let pat = arm_variant_pattern(cx, &a.cond, subject).expect("checked above");
-//RS             // Each arm's payload bindings extend the body scope; check on a clone.
-//RS             let mut body_locals = locals.clone();
-//RS             add_pattern_binding_names(&pat, &mut body_locals);
-//RS             if !a
-//RS                 .body
-//RS                 .iter()
-//RS                 .all(|s| stmt_in_subset(s, cx, &mut body_locals))
-//RS             {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         if let Some(body) = else_body {
-//RS             let mut else_locals = locals.clone();
-//RS             if !body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals)) {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         return true;
-//RS     }
-//RS     // Shape B: all arms are arm-head range patterns over a scalar subject, with an
-//RS     // `else`. Lowering binds any covered subject expression once; range arms bind
-//RS     // nothing and read that shared switch-subject value.
-//RS     if else_body.is_some()
-//RS         && arms
-//RS             .iter()
-//RS             .all(|a| arm_head_range(cx, &a.cond, subject).is_some())
-//RS     {
-//RS         for a in arms {
-//RS             let mut body_locals = locals.clone();
-//RS             if !a
-//RS                 .body
-//RS                 .iter()
-//RS                 .all(|s| stmt_in_subset(s, cx, &mut body_locals))
-//RS             {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         if let Some(body) = else_body {
-//RS             let mut else_locals = locals.clone();
-//RS             if !body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals)) {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         return true;
-//RS     }
-//RS     // Shape C (c109 Phase 8): a fallible/optional pattern match — every arm head is
-//RS     // an `Ok(b)`/`Err(b)`/`value(b)`/`null` pattern over the subject. Lowers to a
-//RS     // Rust `match` over the subject's `Result`/`Option`, exactly like the enum-match
-//RS     // shape but with `Ok(..)`/`Err(..)`/`Some(..)`/`None` patterns. The subject must
-//RS     // be in-subset (checked above) and resolve to a `Result`/`Option` — but a covered
-//RS     // subject already guarantees that here (its type came from a covered fn/local).
-//RS     if arms
-//RS         .iter()
-//RS         .all(|a| arm_fallible_pattern(cx, &a.cond, subject).is_some())
-//RS     {
-//RS         for a in arms {
-//RS             let pat = arm_fallible_pattern(cx, &a.cond, subject).expect("checked above");
-//RS             let mut body_locals = locals.clone();
-//RS             // `Ok(b)`/`Err(b)`/`value(b)` bind one name; `null` binds nothing.
-//RS             if let Some(b) = fallible_pattern_binding(&pat) {
-//RS                 body_locals.insert(b);
-//RS             }
-//RS             if !a
-//RS                 .body
-//RS                 .iter()
-//RS                 .all(|s| stmt_in_subset(s, cx, &mut body_locals))
-//RS             {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         if let Some(body) = else_body {
-//RS             let mut else_locals = locals.clone();
-//RS             if !body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals)) {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         return true;
-//RS     }
-//RS     // Shape D (c109 Phase 15): a MIXED comparison/Bool switch — the general
-//RS     // `emit_mixed_switch` `if/else if … else` chain used when the arms are NOT all
-//RS     // variant (shape A), NOT all range (shape B), and NOT all fallible (shape C). Every
-//RS     // arm head must be a PLAIN in-subset comparison/Bool expression — i.e. the
-//RS     // `_ => emit_expr(cond)` branch of `emit_switch_arm_cond` (NOT a variant/Eq-variant
-//RS     // pattern, which would route through `emit_pattern_matches`).
-//RS     //
-//RS     // D-IF3: a range head (`400..499 ->`) is admitted into this chain too, lowered to
-//RS     // `subject >= lo && subject <= hi`, so a value+range mix (`200 -> …` next to
-//RS     // `400..499 -> …`) is covered. The shared switch-subject value keeps calls
-//RS     // and field expressions single-evaluation.
-//RS     // D-DESTRUCT1: a struct-pattern arm head (`.{ kind: "page", title, .. }`) also
-//RS     // lowers through this chain: value fields become boolean equality checks, and bind
-//RS     // fields clone from the borrowed `__jet_switch_subject` at the top of the arm body.
-//RS     // Conservative: a variant/fallible pattern-test arm in the chain excludes the whole
-//RS     // switch (stays on the AST path). The `else` is optional.
-//RS     if arms.iter().all(|a| {
-//RS         arm_is_plain_cond(cx, &a.cond, subject)
-//RS             || arm_head_range(cx, &a.cond, subject).is_some()
-//RS             || arm_struct_pattern(cx, &a.cond, subject).is_some()
-//RS             || arm_str_match_pattern(cx, &a.cond, subject).is_some()
-//RS             || arm_bin_match_pattern(cx, &a.cond, subject).is_some()
-//RS     }) {
-//RS         // D-PARSESTR1: sema already proved a str-match arm's subject is
-//RS         // `String` (E0305 otherwise) — trusted here, same as shape C trusts
-//RS         // sema for `ok`/`err`/`value` subject types (I3).
-//RS         for a in arms {
-//RS             // A range head lowers to a comparison string from `subject_str`; only the
-//RS             // PLAIN-cond arms carry a sub-expression that must itself be in-subset.
-//RS             if arm_head_range(cx, &a.cond, subject).is_none()
-//RS                 && arm_struct_pattern(cx, &a.cond, subject).is_none()
-//RS                 && arm_str_match_pattern(cx, &a.cond, subject).is_none()
-//RS                 && arm_bin_match_pattern(cx, &a.cond, subject).is_none()
-//RS                 && !expr_in_subset(&a.cond, cx, locals)
-//RS             {
-//RS                 return false;
-//RS             }
-//RS             let mut body_locals = locals.clone();
-//RS             if let Some(pat) = arm_struct_pattern(cx, &a.cond, subject) {
-//RS                 if !struct_pattern_values_in_subset(&pat, cx, locals) {
-//RS                     return false;
-//RS                 }
-//RS                 add_struct_pattern_binding_names(&pat, &mut body_locals);
-//RS             }
-//RS             if let Some(pat) = arm_str_match_pattern(cx, &a.cond, subject) {
-//RS                 add_str_match_pattern_binding_names(&pat, &mut body_locals);
-//RS             }
-//RS             if let Some(pat) = arm_bin_match_pattern(cx, &a.cond, subject) {
-//RS                 add_bin_match_pattern_binding_names(&pat, &mut body_locals);
-//RS             }
-//RS             if !a
-//RS                 .body
-//RS                 .iter()
-//RS                 .all(|s| stmt_in_subset(s, cx, &mut body_locals))
-//RS             {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         if let Some(body) = else_body {
-//RS             let mut else_locals = locals.clone();
-//RS             if !body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals)) {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         return true;
-//RS     }
-//RS     false
-//RS }
-// END-PORT-PENDING 0525 crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:1-1111
+use JetSema.AST.*
+use JetSema.Syntax
+use JetCodegen.Codegen.Cx
+use JetCodegen.Codegen.[is_json_variant, is_key_variant]
+use JetCodegen.Codegen.TIR.*
+use JetCodegen.Codegen.TIR.Subset.Refusal as refusal
+use JetDiagnostics.Span
+use core.collections.Set
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:35
+fn scoped_stmts_in_subset(body: [Stmt], cx: Cx, locals: Set<String>) -> Bool {
+    scoped := locals.clone()
+    body.iter().all(fn(s) { stmt_in_subset(s, cx, &scoped) })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:45
+// Bindings extend locals in source order; refusals identify the actual statement.
+pub fn stmt_in_subset(s: Stmt, cx: Cx, locals: &Set<String>) -> Bool {
+    if stmt_in_subset_inner(s, cx, locals) -> return true
+    refusal.note(refusal.STMT, s.span())
+    false
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:53
+fn stmt_in_subset_inner(s: Stmt, cx: Cx, locals: &Set<String>) -> Bool {
+    if s == {
+        .Val(b) -> if b.pattern == {
+            Val(.Tuple(elems: elems, ..)) | Val(.List(elems: elems, ..)) -> {
+                ok := !b.is_comptime && !b.uninit && expr_in_subset(b.init, cx, locals)
+                for e in elems { _ :: locals.insert(e.name.clone()) }
+                ok
+            }
+            Val(.Struct(fields: fields, ..)) -> {
+                ok := !b.is_comptime && !b.uninit && expr_in_subset(b.init, cx, locals)
+                for f in fields { _ :: locals.insert(f.local_name().to_string()) }
+                ok
+            }
+            Val(.Refutable(pattern: pattern, fallback: fallback, names: names, ..)) -> {
+                admitted := if pattern == {
+                    .Ok(..) | .Present(..) -> true
+                    .Variant(variant: variant, ..) -> cx.variant_owner.contains_key(variant)
+                    else -> false
+                }
+                if !admitted -> return false
+                ok := !b.is_comptime && !b.uninit && expr_in_subset(b.init, cx, locals)
+                    && orfallback_rhs_in_subset(fallback, cx, locals)
+                for name in names { _ :: locals.insert(name.local_name().to_string()) }
+                ok
+            }
+            Val(_) -> false
+            None -> {
+                // Uninit has no evaluated initializer; resolved comptime data is literal.
+                ok := if b.uninit { true } else if b.is_comptime {
+                    b.ct.is_some() || expr_in_subset(b.init, cx, locals)
+                } else { expr_in_subset(b.init, cx, locals) }
+                _ :: locals.insert(b.name.clone())
+                ok
+            }
+        }
+        .Assign(target: target, value: value, ..) -> if target == {
+            .Local(..) -> expr_in_subset(value, cx, locals)
+            .Index(base: base, index: index, kind: kind, ..) -> kind != IndexKind.Unknown
+                && expr_in_subset(base, cx, locals) && expr_in_subset(index, cx, locals)
+                && expr_in_subset(value, cx, locals)
+            .Field(base: base, ..) -> expr_in_subset(base, cx, locals) && expr_in_subset(value, cx, locals)
+        }
+        .Return(Val(e), _) -> expr_in_subset(e, cx, locals)
+        .Return(None, _) -> true
+        .Yield(e, _) -> expr_in_subset(e, cx, locals)
+        .DeferClose(close: close, ..) -> expr_in_subset(close, cx, locals)
+        .Expr(e) -> {
+            if e == {
+                .MethodCall(receiver: receiver, method: method, ..) -> {
+                    if method == Syntax.METHOD_DROP -> return expr_in_subset(receiver, cx, locals)
+                }
+                else -> {}
+            }
+            expr_in_subset(e, cx, locals)
+        }
+        .Loop(body: body, ..) -> {
+            body_locals := locals.clone()
+            body.iter().all(fn(s) { stmt_in_subset(s, cx, &body_locals) })
+        }
+        .While(cond: cond, body: body, ..) -> {
+            if !expr_in_subset(cond, cx, locals) -> return false
+            body_locals := locals.clone()
+            body.iter().all(fn(s) { stmt_in_subset(s, cx, &body_locals) })
+        }
+        .CountedLoop(init: init, cond: cond, step: step, body: body, ..) -> {
+            if !expr_in_subset(init.init, cx, locals) -> return false
+            inner := locals.clone()
+            _ :: inner.insert(init.name.clone())
+            if !expr_in_subset(cond, cx, inner) -> return false
+            if step.is_some_and(fn(step) { !stmt_in_subset(step, cx, &inner) }) -> return false
+            body.iter().all(fn(s) { stmt_in_subset(s, cx, &inner) })
+        }
+        .For(var: var, var2: var2, kind: kind, body: body, ..) -> if kind == {
+            .Range(start: start, end: end, step: step, ..) -> {
+                if var2.is_some() -> return false
+                if !expr_in_subset(start, cx, locals) || !expr_in_subset(end, cx, locals) -> return false
+                if step == { Val(st) -> { if !expr_in_subset(st, cx, locals) -> return false }; else -> {} }
+                body_locals := locals.clone()
+                _ :: body_locals.insert(var.clone())
+                body.iter().all(fn(s) { stmt_in_subset(s, cx, &body_locals) })
+            }
+            .In(collection, step) -> {
+                if step.is_some_and(fn(step) { !expr_in_subset(step, cx, locals) }) -> return false
+                if var2.is_some() {
+                    if !expr_in_subset(collection, cx, locals) -> return false
+                } else {
+                    if collection == {
+                        .MethodCall(..) -> { if !forin_method_collection_in_subset(collection, cx, locals) -> return false }
+                        else -> { if !expr_in_subset(collection, cx, locals) -> return false }
+                    }
+                }
+                body_locals := locals.clone()
+                _ :: body_locals.insert(var.clone())
+                if var2 == { Val((v2, _)) -> { _ :: body_locals.insert(v2.clone()) }; else -> {} }
+                body.iter().all(fn(s) { stmt_in_subset(s, cx, &body_locals) })
+            }
+            else -> false
+        }
+        .Break(_) | .Continue(_) | .BreakLabel(..) | .ContinueLabel(..) -> true
+        .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> expr_in_subset(value, cx, locals)
+        .Switch(subject, arms, else_body, span) -> switch_in_subset(subject, arms, else_body, span, cx, locals)
+        .ComptimeBlock(..) -> true
+        .ComptimeIf(then_body: then_body, else_body: else_body, selected_then: selected_then, ..) -> {
+            chosen := if selected_then == {
+                Val(true) | None -> then_body
+                Val(false) -> else_body.unwrap_or([])
+            }
+            chosen.iter().all(fn(s) { stmt_in_subset(s, cx, locals) })
+        }
+        .Unsafe(body: body, ..) | .Impure(body: body, ..) | .Reactive(body: body, ..)
+        | .Shield(body: body, ..) -> scoped_stmts_in_subset(body, cx, locals)
+        .Switched(marker: marker, body: body, ..) -> {
+            if switched_off(marker) -> return true
+            scoped := locals.clone()
+            body.iter().all(fn(s) { stmt_in_subset(s, cx, &scoped) })
+        }
+        .Region(body: body, ..) | .Policy(body: body, ..) -> scoped_stmts_in_subset(body, cx, locals)
+        .TaskGroup(name: name, body: body, ..) -> {
+            scoped := locals.clone()
+            _ :: scoped.insert(name.clone())
+            body.iter().all(fn(statement) { stmt_in_subset(statement, cx, &scoped) })
+        }
+        // Layout and setup deliberately extend the enclosing runtime scope.
+        .Layout(name: name, body: body, ..) -> {
+            _ :: locals.insert(name.clone())
+            body.iter().all(fn(s) { stmt_in_subset(s, cx, locals) })
+        }
+        .ContextBlock(fields: fields, body: body, ..) -> fields.iter().all(fn((_, v, _)) {
+            expr_in_subset(v, cx, locals)
+        }) && scoped_stmts_in_subset(body, cx, locals)
+        .AuthorityScope(binding: binding, body: body, ..) -> {
+            scoped := locals.clone()
+            if binding == { Val(binding) -> { _ :: scoped.insert(binding.clone()) }; else -> {} }
+            body.iter().all(fn(s) { stmt_in_subset(s, cx, &scoped) })
+        }
+        .Live(body: body, ..) -> scoped_stmts_in_subset(body, cx, locals)
+        .ScopeMember(name: name, body: body, ..) -> {
+            if name == Syntax.SCOPE_TEST_SETUP { body.iter().all(fn(s) { stmt_in_subset(s, cx, locals) }) }
+            else { scoped_stmts_in_subset(body, cx, locals) }
+        }
+        .AssumeDet(body: body, ..) -> scoped_stmts_in_subset(body, cx, locals)
+        .Transact(name: name, body: body, ..) -> {
+            inner := locals.clone()
+            if name == { Val(name) -> { _ :: inner.insert(name.clone()) }; else -> {} }
+            body.iter().all(fn(s) { stmt_in_subset(s, cx, &inner) })
+        }
+        else -> false
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:455
+pub fn forin_method_collection_in_subset(collection: Expr, cx: Cx, locals: Set<String>) -> Bool {
+    if collection == {
+        .MethodCall(receiver: receiver, method: method, ..) -> {
+            if method == "chars" || method == "lines" { expr_in_subset(receiver, cx, locals) }
+            else { expr_in_subset(collection, cx, locals) }
+        }
+        else -> false
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:481
+pub fn if_cond_in_subset(cond: Expr, cx: Cx, locals: Set<String>) -> [String]? {
+    if cond == { .Binary(BinOp.And, left, right, _) -> {
+        bindings := if_cond_in_subset(left, cx, locals) ?? return None
+        right_locals := locals.clone()
+        right_locals.extend(bindings.iter().cloned())
+        bindings.extend(if_cond_in_subset(right, cx, right_locals) ?? return None)
+        return Val(^bindings)
+    }; else -> {} }
+    if cond == { .PatternTest(subject: subject, pattern: pattern, ..) -> {
+        if pattern == {
+            .Absent(_) -> return if expr_in_subset(subject, cx, locals) { Val([]) } else { None }
+            .Struct(..) -> {
+                if !expr_in_subset(subject, cx, locals) || !struct_pattern_values_in_subset(pattern, cx, locals) -> return None
+                names: Set<String> := Set.new()
+                add_struct_pattern_binding_names(pattern, &names)
+                return Val(names.into_iter().collect())
+            }
+            .StrMatch(..) -> {
+                if !expr_in_subset(subject, cx, locals) -> return None
+                names: Set<String> := Set.new()
+                add_str_match_pattern_binding_names(pattern, &names)
+                return Val(names.into_iter().collect())
+            }
+            .BinMatch(..) -> {
+                if !expr_in_subset(subject, cx, locals) -> return None
+                names: Set<String> := Set.new()
+                add_bin_match_pattern_binding_names(pattern, &names)
+                return Val(names.into_iter().collect())
+            }
+            else -> {}
+        }
+        if !expr_in_subset(subject, cx, locals) -> return None
+        is_or := if pattern == { .Or(..) -> true; else -> false }
+        if is_or && pattern_is_variant_or_orvariant(pattern)
+            && variant_pattern_enum(cx, pattern).is_some_and(fn(owner) { enum_is_covered(owner, cx) }) {
+            return Val(pattern.binding_names().into_iter().map(fn(binding) { binding.local_name().to_owned() }).collect())
+        }
+        if pattern.has_nested_pattern() {
+            return Val(pattern.binding_names().into_iter().map(fn(binding) { binding.local_name().to_owned() })
+                .filter(fn(name) { name != "_" }).collect())
+        }
+        if pattern == { .Variant(variant: variant, bindings: bindings, ..) -> {
+            if is_data_event_variant(variant) || is_hook_outcome_variant(variant) {
+                wildcard_first := if bindings.first() == { Val(.Wildcard) -> true; else -> false }
+                if bindings.is_empty() || wildcard_first -> return Val([])
+                if bindings.len() == 1 {
+                    if bindings.first() == { Val(.Bind(name: name, ..)) -> return Val([name.clone()]); else -> {} }
+                }
+            }
+            if is_json_variant(variant) && bindings.len() == 1 {
+                if bindings[0] == { .Bind(name: name, ..) -> return Val([name.clone()]); else -> {} }
+            }
+            if is_key_variant(variant) {
+                single_bind := bindings.len() == 1 && if bindings[0] == { .Bind(..) -> true; else -> false }
+                if bindings.is_empty() || single_bind {
+                    names: [String] := bindings.iter().filter_map(fn(s) {
+                        if s == { .Bind(name: name, ..) -> Val(name.clone()); else -> None }
+                    }).collect()
+                    return Val(^names)
+                }
+            }
+            if !bindings.is_empty() && bindings.iter().all(fn(slot) {
+                if slot == { .Bind(..) | .Wildcard | .Range(..) -> true; else -> false }
+            }) {
+                names: [String] := bindings.iter().filter_map(fn(slot) {
+                    if slot == { .Bind(name: name, ..) -> Val(name.clone()); else -> None }
+                }).collect()
+                if cx.variant_owner.get(variant) == {
+                    Val(owner) -> {
+                        covered := if variant_pattern_uses_payload(pattern) { enum_is_covered(owner, cx) }
+                            else { enum_tag_is_covered(owner, cx) }
+                        if covered -> return Val(^names)
+                    }
+                    None -> return Val(^names)
+                }
+            }
+            if bindings.is_empty() && cx.variant_owner.contains_key(variant) -> return Val([])
+            return None
+        }; else -> {} }
+        if pattern == { .Range(..) -> {
+            if subject == { .Ident(..) -> return Val([]); else -> {} }
+            return None
+        }; else -> {} }
+        return if pattern == {
+            .Present(binding: binding, ..) | .Ok(binding: binding, ..) | .Err(binding: binding, ..) -> Val([binding.clone()])
+            else -> None
+        }
+    }; else -> {} }
+    if expr_in_subset(cond, cx, locals) { Val([]) } else { None }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:728
+pub fn switch_in_subset(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, cx: Cx, locals: &Set<String>) -> Bool {
+    if arms.is_empty() -> return false
+    if !expr_in_subset(subject, cx, locals) -> return false
+    ident_subject := if subject == { .Ident(..) -> true; else -> false }
+    // RangeSwitch repeats its subject spelling; preserve single-evaluation semantics.
+    if !ident_subject && arms.iter().any(fn(arm) {
+        if arm.cond == { .PatternTest(pattern: Pattern.Range(..), ..) -> true; else -> false }
+    }) -> return false
+    if is_subjectless_guard(subject, span) {
+        if arms.iter().any(fn(arm) { readiness_head(arm.cond).is_some() }) {
+            has_wait := false
+            for arm in arms {
+                head := readiness_head(arm.cond) ?? return false
+                bindings := if head == {
+                    .Receive(binding, source) -> {
+                        has_wait = true
+                        if !expr_in_subset(source, cx, locals) -> return false
+                        [binding.to_string()]
+                    }
+                    .After(duration) -> {
+                        has_wait = true
+                        if !expr_in_subset(duration, cx, locals) -> return false
+                        []
+                    }
+                }
+                body_locals := locals.clone()
+                body_locals.extend(^bindings)
+                if !arm.body.iter().all(fn(stmt) { stmt_in_subset(stmt, cx, &body_locals) }) -> return false
+            }
+            if !has_wait -> return false
+            return else_body.is_none_or(fn(body) {
+                else_locals := locals.clone()
+                body.iter().all(fn(stmt) { stmt_in_subset(stmt, cx, &else_locals) })
+            })
+        }
+        for arm in arms {
+            bindings := if_cond_in_subset(arm.cond, cx, locals) ?? return false
+            body_locals := locals.clone()
+            body_locals.extend(^bindings)
+            if !arm.body.iter().all(fn(stmt) { stmt_in_subset(stmt, cx, &body_locals) }) -> return false
+        }
+        return else_body.is_none_or(fn(body) {
+            else_locals := locals.clone()
+            body.iter().all(fn(stmt) { stmt_in_subset(stmt, cx, &else_locals) })
+        })
+    }
+    // Nested payload patterns use the guard chain and ordinary condition bindings.
+    if arms.iter().any(fn(arm) { arm_has_nested_pattern(arm.cond) }) {
+        for arm in arms {
+            bindings := if_cond_in_subset(arm.cond, cx, locals) ?? return false
+            body_locals := locals.clone()
+            body_locals.extend(^bindings)
+            if !arm.body.iter().all(fn(stmt) { stmt_in_subset(stmt, cx, &body_locals) }) -> return false
+        }
+        return else_body.is_none_or(fn(body) {
+            else_locals := locals.clone()
+            body.iter().all(fn(stmt) { stmt_in_subset(stmt, cx, &else_locals) })
+        })
+    }
+    // DataTree tags have no user-variant ownership entries.
+    if arms.iter().all(fn(arm) {
+        arm_variant_pattern(cx, arm.cond, subject).is_some_and(fn(pattern) {
+            if pattern == { .Variant(variant: variant, ..) -> is_json_variant(variant); else -> false }
+        })
+    }) {
+        for arm in arms {
+            pattern := arm_variant_pattern(cx, arm.cond, subject).expect("DataTree switch arm was checked above")
+            body_locals := locals.clone()
+            add_pattern_binding_names(pattern, &body_locals)
+            if !arm.body.iter().all(fn(stmt) { stmt_in_subset(stmt, cx, &body_locals) }) -> return false
+        }
+        if else_body == { Val(body) -> {
+            else_locals := locals.clone()
+            if !body.iter().all(fn(stmt) { stmt_in_subset(stmt, cx, &else_locals) }) -> return false
+        }; else -> {} }
+        return true
+    }
+    // Guards can leave residual enum cases; require an explicit else.
+    has_guarded_variant := arms.iter().any(fn(a) { arm_guarded_variant_pattern(cx, a.cond, subject).is_some() })
+    if else_body.is_some() && has_guarded_variant && arms.iter().all(fn(a) {
+        arm_variant_pattern(cx, a.cond, subject).is_some() || arm_guarded_variant_pattern(cx, a.cond, subject).is_some()
+    }) {
+        for arm in arms {
+            bindings := if_cond_in_subset(arm.cond, cx, locals) ?? return false
+            body_locals := locals.clone()
+            body_locals.extend(^bindings)
+            if !arm.body.iter().all(fn(stmt) { stmt_in_subset(stmt, cx, &body_locals) }) -> return false
+        }
+        body := else_body.expect("guarded variant shape requires else")
+        else_locals := locals.clone()
+        return body.iter().all(fn(stmt) { stmt_in_subset(stmt, cx, &else_locals) })
+    }
+    // Shape A: exhaustive enum match, with tag-only and union-owner alternatives.
+    if arms.iter().all(fn(a) { arm_variant_pattern(cx, a.cond, subject).is_some() }) {
+        subj_enum := arms.iter().find_map(fn(a) {
+            arm_variant_pattern(cx, a.cond, subject).and_then(fn(p) { variant_pattern_enum(cx, p) })
+        })
+        payload_used := arms.iter().any(fn(a) {
+            arm_variant_pattern(cx, a.cond, subject).is_some_and(fn(pattern) { variant_pattern_uses_payload(pattern) })
+        })
+        union_shaped := subj_enum.is_none() && arms.iter().all(fn(a) {
+            if arm_variant_pattern(cx, a.cond, subject) == {
+                Val(.Variant(bindings: bindings, ..)) -> bindings.len() == 1
+                else -> false
+            }
+        })
+        if subj_enum.is_none() && !union_shaped -> return false
+        if subj_enum == { Val(enum_name) -> {
+            covered := if payload_used { enum_is_covered(enum_name, cx) } else { enum_tag_is_covered(enum_name, cx) }
+            if enum_name != "HookOutcome" && !covered -> return false
+        }; else -> {} }
+        for a in arms {
+            pat := arm_variant_pattern(cx, a.cond, subject).expect("checked above")
+            body_locals := locals.clone()
+            add_pattern_binding_names(pat, &body_locals)
+            if !a.body.iter().all(fn(s) { stmt_in_subset(s, cx, &body_locals) }) -> return false
+        }
+        if else_body == { Val(body) -> {
+            else_locals := locals.clone()
+            if !body.iter().all(fn(s) { stmt_in_subset(s, cx, &else_locals) }) -> return false
+        }; else -> {} }
+        return true
+    }
+    // Shape B: range-only table with else, no new bindings.
+    if else_body.is_some() && arms.iter().all(fn(a) { arm_head_range(cx, a.cond, subject).is_some() }) {
+        for a in arms {
+            body_locals := locals.clone()
+            if !a.body.iter().all(fn(s) { stmt_in_subset(s, cx, &body_locals) }) -> return false
+        }
+        if else_body == { Val(body) -> {
+            else_locals := locals.clone()
+            if !body.iter().all(fn(s) { stmt_in_subset(s, cx, &else_locals) }) -> return false
+        }; else -> {} }
+        return true
+    }
+    // Shape C: fallible/optional match, one binding for success/failure/present.
+    if arms.iter().all(fn(a) { arm_fallible_pattern(cx, a.cond, subject).is_some() }) {
+        for a in arms {
+            pat := arm_fallible_pattern(cx, a.cond, subject).expect("checked above")
+            body_locals := locals.clone()
+            if fallible_pattern_binding(pat) == { Val(b) -> { _ :: body_locals.insert(^b) }; else -> {} }
+            if !a.body.iter().all(fn(s) { stmt_in_subset(s, cx, &body_locals) }) -> return false
+        }
+        if else_body == { Val(body) -> {
+            else_locals := locals.clone()
+            if !body.iter().all(fn(s) { stmt_in_subset(s, cx, &else_locals) }) -> return false
+        }; else -> {} }
+        return true
+    }
+    // Shape D: mixed comparisons/ranges/struct/string/binary patterns.
+    if arms.iter().all(fn(a) {
+        arm_is_plain_cond(cx, a.cond, subject) || arm_head_range(cx, a.cond, subject).is_some()
+            || arm_struct_pattern(cx, a.cond, subject).is_some()
+            || arm_str_match_pattern(cx, a.cond, subject).is_some()
+            || arm_bin_match_pattern(cx, a.cond, subject).is_some()
+    }) {
+        for a in arms {
+            if arm_head_range(cx, a.cond, subject).is_none()
+                && arm_struct_pattern(cx, a.cond, subject).is_none()
+                && arm_str_match_pattern(cx, a.cond, subject).is_none()
+                && arm_bin_match_pattern(cx, a.cond, subject).is_none()
+                && !expr_in_subset(a.cond, cx, locals) -> return false
+            body_locals := locals.clone()
+            if arm_struct_pattern(cx, a.cond, subject) == { Val(pat) -> {
+                if !struct_pattern_values_in_subset(pat, cx, locals) -> return false
+                add_struct_pattern_binding_names(pat, &body_locals)
+            }; else -> {} }
+            if arm_str_match_pattern(cx, a.cond, subject) == {
+                Val(pat) -> add_str_match_pattern_binding_names(pat, &body_locals); else -> {}
+            }
+            if arm_bin_match_pattern(cx, a.cond, subject) == {
+                Val(pat) -> add_bin_match_pattern_binding_names(pat, &body_locals); else -> {}
+            }
+            if !a.body.iter().all(fn(s) { stmt_in_subset(s, cx, &body_locals) }) -> return false
+        }
+        if else_body == { Val(body) -> {
+            else_locals := locals.clone()
+            if !body.iter().all(fn(s) { stmt_in_subset(s, cx, &else_locals) }) -> return false
+        }; else -> {} }
+        return true
+    }
+    false
+}

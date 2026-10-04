@@ -1,0 +1,32 @@
+use jet_comptime.Comptime.Methods.ReplProcess.[run_repl_process]
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.files.host.retained_descriptor.[open_reader, open_directory, OpenOptions]
+use std.time.[Duration, Instant]
+use std.io.[ErrorKind]
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:671
+#Test("timeout_kills_and_reaps_the_process_group") {
+    if core.sys.target.selected_family() == "unix" {
+        // GATE #4494: real descriptor-pinned native process and pipe readers.
+        executable :: open_reader(OSPath.from_text("/bin/sh"), OpenOptions{}).expect("pin /bin/sh")
+        root :: open_directory(OSPath.from_text("."), OpenOptions{}).expect("open cwd")
+        cmd :: [String]{"/bin/sh", "-c", "while :; do :; done"}
+        started :: Instant.now()
+        error :: run_repl_process(&cmd, &OSPath.from_text("."), Val(&executable), Val(&root), Duration.from_millis(50)).expect_err("long process must time out")
+        assert(error.kind() == ErrorKind.TimedOut)
+        assert(started.elapsed() < Duration.from_secs(2))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:693
+#Test("output_limit_kills_a_flooding_process_before_capture_grows_unbounded") {
+    if core.sys.target.selected_family() == "unix" {
+        // GATE #4494: real descriptor-pinned native process and pipe readers.
+        executable :: open_reader(OSPath.from_text("/bin/sh"), OpenOptions{}).expect("pin /bin/sh")
+        root :: open_directory(OSPath.from_text("."), OpenOptions{}).expect("open cwd")
+        // PATH is cleared: flood with the shell builtin, not an external program.
+        cmd :: [String]{"/bin/sh", "-c", "while :; do printf %s xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done"}
+        started :: Instant.now()
+        error :: run_repl_process(&cmd, &OSPath.from_text("."), Val(&executable), Val(&root), Duration.from_secs(10)).expect_err("output beyond the REPL budget must fail")
+        assert(error.to_string().contains("output exceeded"), "unexpected output-limit error: {error}")
+        assert(started.elapsed() < Duration.from_secs(10))
+    }
+}

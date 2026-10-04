@@ -1,0 +1,34 @@
+use jet_foundation.[Type]
+use jet_codegen.TIR.[TExpr, TExprKind, TStaticOwner, TFnValueKind]
+use jet_foundation.Registry.CoreCallRows06.[safe_limits_static_expr, send_handle_callback]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:10891-10943
+// Behavioral control: safe constructors preserve their checked static owner and ABI.
+#Test("safe_limits_static_expr_preserves_static_call_contract") {
+    owner :: TStaticOwner.Prelude{rooted: false, path: "core.email", generics: []}
+    value :: safe_limits_static_expr("Limits", owner, "limits_safe")
+    assert_eq(value.ty, Type.Named("Limits"))
+    if value.kind == .StaticCall{owner, owner_type, method, type_args, args} {
+        assert_eq(owner, TStaticOwner.Prelude{rooted: false, path: "core.email", generics: []})
+        assert_eq(owner_type, None)
+        assert_eq(method.name, "limits_safe")
+        assert(type_args.is_empty())
+        assert(args.is_empty())
+    } else -> panic("safe constructor must be a static call")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:10708-10718
+#Test("stream_callback_send_wrapper_preserves_callable_type_and_value") {
+    callable_ty :: Type.Fn{params: [Type]{Type.Int}, ret: Val(Type.String), effect_bound: None,
+        return_view_provenance: None, param_contract: None, call_metadata: None}
+    callable :: TExpr{ty: ~callable_ty, kind: TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val("event_key"), lambda: None}}}
+    wrapped :: send_handle_callback(callable)
+    assert_eq(wrapped.ty, callable_ty)
+    if wrapped.kind == .FnValue{kind: .Send{value}} {
+        assert_eq(value.ty, callable_ty)
+        if value.kind == .FnValue{kind: .NamedFn{name, lambda}} {
+            assert_eq(name, Val("event_key"))
+            assert_eq(lambda, None)
+        } else -> panic("send wrapper must retain the original callback")
+    } else -> panic("stream callback must carry Send")
+}

@@ -1,0 +1,25 @@
+use jet_comptime.Build.*
+
+// Behavioral controls for Rust build.rs:123/215 (no original inline tests).
+#Test("unindent_removes_exactly_four_spaces_and_joins_lines") {
+    assert_eq(unindent("    first\n  second\n        third\n"), "first\n  second\n    third")
+    assert_eq(unindent(""), "")
+}
+#Test("strip_orphan_derives_removes_repeated_trailing_annotations") {
+    body := String.from("item\n#[derive(Clone)]\n#[derive(Clone, Copy)] \n")
+    strip_orphan_derives(&body)
+    assert_eq(body, "item")
+    kept := String.from("item\n#[derive(Debug)]\n")
+    strip_orphan_derives(&kept)
+    assert_eq(kept, "item\n#[derive(Debug)]\n")
+}
+// Behavioral controls for Rust build.rs:206.
+#Test("extract_stm_keeps_module_and_rewrites_crate_paths") {
+    raw :: "prefix\nmod jet_stm {\ncrate::value\n}\ntrait __jet_Serialize\nsuffix"
+    assert_eq(extract_stm(raw), "mod jet_stm {\nsuper::super::value\n}")
+}
+// Behavioral controls for Rust build.rs:181.
+#Test("extract_shared_excludes_jit_interop_and_unindents") {
+    raw :: "    #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n    pub enum JetSharedRevisionError {}\n    crate::keep\n    // jet:source-shared-interop-jit-begin\n    remove_me\n    // jet:source-shared-interop-jit-end\n    crate::after\n    enum JetPoolSlot<T> {}"
+    assert_eq(extract_shared(raw), "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\npub enum JetSharedRevisionError {}\nsuper::super::keep\nsuper::super::after")
+}

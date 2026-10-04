@@ -1,0 +1,19 @@
+use JetCodegen.Codegen.TIR.Lower.MethodCalls.[app_route_type_name, host_named_type, infer_comptime_host_owner]
+use JetFoundation.AST.[Type, Expr]
+use JetFoundation.Diagnostics.Span
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:3609-3620,3720-3727
+#Test("method_route_wire_types_and_nested_host_owners") {
+    assert(app_route_type_name(&Type.Int) == "Int")
+    assert(app_route_type_name(&Type.Float) == "Float")
+    assert(app_route_type_name(&Type.Bool) == "Bool")
+    assert(app_route_type_name(&Type.String) == "String")
+    assert(app_route_type_name(&Type.Named("Search")) == "Search")
+    assert(host_named_type(&Type.Option(Type.Result { ok: Type.Named("CompilerChecked"), err: Type.String })) == Some("CompilerChecked"))
+    assert(host_named_type(&Type.List(Type.Named("CompilerChecked"))) == None)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:3700-3718
+#Test("ordinary_names_do_not_infer_comptime_host_owners") {
+    assert(infer_comptime_host_owner(&Expr.Ident("CompilerLexed", Span.new(0, 0)), "tokens") == None)
+    assert(infer_comptime_host_owner(&Expr.Ident("checked", Span.new(0, 0)), "functions") == None)
+}

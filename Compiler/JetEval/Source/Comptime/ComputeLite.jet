@@ -1,2116 +1,676 @@
-// PORT-PENDING 0575 crates-jet-comptime-src-comptime-computelite: crates/jet-comptime/src/Comptime/ComputeLite.rs:1-2112
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-COMPUTE1=D / I9: `core.compute` ambient mirrors AOT Prelude `jet_compute_*`
-//RS //! by including the same compute and view-access sources
-//RS //! (`Prelude/CoreLib/Top/Compute.rs`, `Prelude/Core/ViewAccess.rs`). Marshalling
-//RS //! to `CtValue` lives here; engines must not re-encode tensor law.
-//RS //! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs
-//RS 
-//RS use super::CollectionEval::collection_semantics::{
-//RS     jet_simd_reduce_fixed_iter, JetSimdScalar,
-//RS };
-//RS use super::Diagnostics::unsupported;
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::{
-//RS     ClosureData, CtFloat, CtOpaque, CtReport, CtValue, Lambda, LambdaBody, LambdaMeta, Type,
-//RS };
-//RS 
-//RS trait JetShow {
-//RS     fn jet_show(&self) -> String;
-//RS }
-//RS 
-//RS trait JetDisplay {
-//RS     fn jet_display(&self) -> String;
-//RS }
-//RS 
-//RS // The shared compute core uses the same range law as the rest of the
-//RS // evaluator.  Comptime has its own value boundary, so it supplies only the
-//RS // small range carrier and panic adapter needed to include that core source.
-//RS mod compute_range_semantics {
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS     use jet_foundation::StructuralDebug::jet_debug_range;
-//RS     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
-//RS }
-//RS use compute_range_semantics::jet_range_bounds;
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS struct JetRange {
-//RS     start: i64,
-//RS     end: i64,
-//RS     exclusive: bool,
-//RS }
-//RS 
-//RS fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
-//RS     jet_foundation::ice!(None, "{} (at {}:{})", msg, file, line)
-//RS }
-//RS 
-//RS #[allow(unused_imports)]
-//RS pub use jet_foundation::Outcome::*;
-//RS include!("../../../jet-codegen/src/Prelude/Core/ViewAccess.rs");
-//RS include!("../../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
-//RS include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
-//RS 
-//RS fn device_to_ct(device: JetComputeDevice) -> CtValue {
-//RS     CtValue::Enum {
-//RS         type_name: "ComputeDevice".to_string(),
-//RS         variant: match device {
-//RS             JetComputeDevice::Auto => "Auto".to_string(),
-//RS             JetComputeDevice::Cpu => "CPU".to_string(),
-//RS             JetComputeDevice::Metal => "Metal".to_string(),
-//RS             JetComputeDevice::Cuda => "CUDA".to_string(),
-//RS             JetComputeDevice::Vulkan => "Vulkan".to_string(),
-//RS             JetComputeDevice::WebGpu => "WebGPU".to_string(),
-//RS         },
-//RS         args: Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn ct_to_device(value: &CtValue, span: Span) -> Result<JetComputeDevice, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Enum {
-//RS             type_name, variant, ..
-//RS         } if type_name == "ComputeDevice" => match variant.as_str() {
-//RS             "Auto" => Ok(JetComputeDevice::Auto),
-//RS             "CPU" | "Cpu" => Ok(JetComputeDevice::Cpu),
-//RS             "Metal" | "METAL" => Ok(JetComputeDevice::Metal),
-//RS             "CUDA" | "Cuda" => Ok(JetComputeDevice::Cuda),
-//RS             "Vulkan" | "VULKAN" => Ok(JetComputeDevice::Vulkan),
-//RS             "WebGPU" | "WEBGPU" | "Webgpu" => Ok(JetComputeDevice::WebGpu),
-//RS             _ => Err(unsupported("ComputeDevice variant", span)),
-//RS         },
-//RS         CtValue::Str(s) if s == "Auto" => Ok(JetComputeDevice::Auto),
-//RS         CtValue::Str(s) if s == "CPU" || s == "Cpu" => Ok(JetComputeDevice::Cpu),
-//RS         CtValue::Str(s) if s == "Metal" || s == "METAL" => Ok(JetComputeDevice::Metal),
-//RS         CtValue::Str(s) if s == "CUDA" || s == "Cuda" => Ok(JetComputeDevice::Cuda),
-//RS         CtValue::Str(s) if s == "Vulkan" || s == "VULKAN" => Ok(JetComputeDevice::Vulkan),
-//RS         CtValue::Str(s) if s == "WebGPU" || s == "WEBGPU" || s == "Webgpu" => {
-//RS             Ok(JetComputeDevice::WebGpu)
-//RS         }
-//RS         _ => Err(unsupported("ComputeDevice", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn receipt_to_ct(receipt: &JetComputePlacementReceipt) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "ComputePlacement".to_string(),
-//RS         fields: vec![
-//RS             ("requested".to_string(), device_to_ct(receipt.requested)),
-//RS             ("selected".to_string(), device_to_ct(receipt.selected)),
-//RS             ("backend".to_string(), CtValue::Str(receipt.backend.clone())),
-//RS             ("version".to_string(), CtValue::Str(receipt.version.clone())),
-//RS             ("profile".to_string(), CtValue::Str(receipt.profile.clone())),
-//RS             ("cache".to_string(), CtValue::Str(receipt.cache.clone())),
-//RS             (
-//RS                 "abilities".to_string(),
-//RS                 CtValue::List(
-//RS                     receipt
-//RS                         .abilities
-//RS                         .iter()
-//RS                         .cloned()
-//RS                         .map(CtValue::Str)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS             ("reason".to_string(), CtValue::Str(receipt.reason.clone())),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn ct_to_receipt(value: &CtValue, span: Span) -> Result<JetComputePlacementReceipt, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("ComputePlacement", span));
-//RS     };
-//RS     if type_name != "ComputePlacement" && type_name != "JetComputePlacementReceipt" {
-//RS         return Err(unsupported("ComputePlacement", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find(|(n, _)| n == name)
-//RS             .map(|(_, v)| v)
-//RS             .ok_or_else(|| unsupported("ComputePlacement field", span))
-//RS     };
-//RS     let requested = ct_to_device(field("requested")?, span)?;
-//RS     let selected = ct_to_device(field("selected")?, span)?;
-//RS     let text = |name: &str| match field(name)? {
-//RS         CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => Ok(s.clone()),
-//RS         _ => Err(unsupported("ComputePlacement text field", span)),
-//RS     };
-//RS     let abilities = match field("abilities")? {
-//RS         CtValue::List(values) => values
-//RS             .iter()
-//RS             .map(|value| match value {
-//RS                 CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => {
-//RS                     Ok(s.clone())
-//RS                 }
-//RS                 _ => Err(unsupported("ComputePlacement ability", span)),
-//RS             })
-//RS             .collect::<Result<Vec<_>, _>>()?,
-//RS         _ => return Err(unsupported("ComputePlacement abilities", span)),
-//RS     };
-//RS     let reason = match field("reason")? {
-//RS         CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => s.clone(),
-//RS         _ => return Err(unsupported("placement reason", span)),
-//RS     };
-//RS     let receipt = JetComputePlacementReceipt {
-//RS         requested,
-//RS         selected,
-//RS         backend: text("backend")?,
-//RS         version: text("version")?,
-//RS         profile: text("profile")?,
-//RS         cache: text("cache")?,
-//RS         abilities,
-//RS         reason,
-//RS     };
-//RS     jet_compute_validate_placement(receipt.selected, &receipt).map_err(|error| {
-//RS         unsupported(
-//RS             &format!("ComputePlacement metadata: {}", error.jet_show()),
-//RS             span,
-//RS         )
-//RS     })?;
-//RS     Ok(receipt)
-//RS }
-//RS 
-//RS fn transfer_to_ct(transfer: &JetComputeTransferReceipt) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "ComputeTransfer".to_string(),
-//RS         fields: vec![
-//RS             ("from".to_string(), device_to_ct(transfer.from)),
-//RS             ("to".to_string(), device_to_ct(transfer.to)),
-//RS             ("bytes".to_string(), CtValue::Int(transfer.bytes)),
-//RS             (
-//RS                 "fallback".to_string(),
-//RS                 CtValue::Str(transfer.fallback.clone()),
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn ct_to_transfer(value: &CtValue, span: Span) -> Result<JetComputeTransferReceipt, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("ComputeTransfer", span));
-//RS     };
-//RS     if type_name != "ComputeTransfer" && type_name != "JetComputeTransferReceipt" {
-//RS         return Err(unsupported("ComputeTransfer", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find(|(n, _)| n == name)
-//RS             .map(|(_, v)| v)
-//RS             .ok_or_else(|| unsupported("ComputeTransfer field", span))
-//RS     };
-//RS     let from = ct_to_device(field("from")?, span)?;
-//RS     let to = ct_to_device(field("to")?, span)?;
-//RS     let bytes = match field("bytes")? {
-//RS         CtValue::Int(n) if *n >= 0 => *n,
-//RS         _ => return Err(unsupported("transfer bytes", span)),
-//RS     };
-//RS     let fallback = match field("fallback")? {
-//RS         CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => s.clone(),
-//RS         _ => return Err(unsupported("transfer fallback", span)),
-//RS     };
-//RS     Ok(JetComputeTransferReceipt {
-//RS         from,
-//RS         to,
-//RS         bytes,
-//RS         fallback,
-//RS     })
-//RS }
-//RS 
-//RS fn tape_rule_to_ct(rule: Option<&JetComputeTapeRule>) -> CtValue {
-//RS     let Some(rule) = rule else {
-//RS         return CtValue::Str("input".to_string());
-//RS     };
-//RS     let (kind, source_shape, axis) = match rule {
-//RS         JetComputeTapeRule::Add => ("add", None, None),
-//RS         JetComputeTapeRule::Sub => ("sub", None, None),
-//RS         JetComputeTapeRule::Mul => ("mul", None, None),
-//RS         JetComputeTapeRule::Div => ("div", None, None),
-//RS         JetComputeTapeRule::Maximum => ("maximum", None, None),
-//RS         JetComputeTapeRule::Minimum => ("minimum", None, None),
-//RS         JetComputeTapeRule::Matmul => ("matmul", None, None),
-//RS         JetComputeTapeRule::MatmulF32Tile => ("matmul_f32_tile", None, None),
-//RS         JetComputeTapeRule::MseLoss => ("mse_loss", None, None),
-//RS         JetComputeTapeRule::SgdStep { .. } => ("sgd_step", None, None),
-//RS         JetComputeTapeRule::Unary(op) => (op.as_str(), None, None),
-//RS         JetComputeTapeRule::Reshape { source_shape } => ("reshape", Some(source_shape), None),
-//RS         JetComputeTapeRule::Broadcast { source_shape } => ("broadcast", Some(source_shape), None),
-//RS         JetComputeTapeRule::ReduceToShape { source_shape } => {
-//RS             ("reduce_to_shape", Some(source_shape), None)
-//RS         }
-//RS         JetComputeTapeRule::Transpose => ("transpose", None, None),
-//RS         JetComputeTapeRule::SumAxis { axis, source_shape } => {
-//RS             ("sum_axis", Some(source_shape), Some(*axis as i64))
-//RS         }
-//RS     };
-//RS     let mut fields = vec![("kind".to_string(), CtValue::Str(kind.to_string()))];
-//RS     if let Some(shape) = source_shape {
-//RS         fields.push((
-//RS             "source_shape".to_string(),
-//RS             CtValue::List(shape.iter().map(|value| CtValue::Int(*value)).collect()),
-//RS         ));
-//RS     }
-//RS     if let Some(axis) = axis {
-//RS         fields.push(("axis".to_string(), CtValue::Int(axis)));
-//RS     }
-//RS     if let JetComputeTapeRule::SgdStep { learning_rate } = rule {
-//RS         fields.push((
-//RS             "learning_rate".to_string(),
-//RS             CtValue::Float(CtFloat::f64(*learning_rate)),
-//RS         ));
-//RS     }
-//RS     CtValue::Struct {
-//RS         type_name: "__JetComputeRule".to_string(),
-//RS         fields,
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetComputeTapeHandle {
-//RS     tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
-//RS }
-//RS 
-//RS const TENSOR_HANDLE_FIELD: &str = "__jet_tensor_handle";
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetComputeTensorHandle {
-//RS     tensor: std::sync::Arc<std::sync::Mutex<JetTensor>>,
-//RS     valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetComputeWindowHandle {
-//RS     valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS     tensor_valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS }
-//RS 
-//RS fn tape_handle_to_ct(tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>) -> CtValue {
-//RS     CtValue::Closure(std::sync::Arc::new(ClosureData {
-//RS         lambda: Lambda {
-//RS             take_names: Vec::new(),
-//RS             params: Vec::new(),
-//RS             result_type: None,
-//RS             error_type: None,
-//RS             effects: None,
-//RS             body: LambdaBody::Block(Vec::new()),
-//RS             span: Span::new(0, 0),
-//RS             meta: LambdaMeta::default(),
-//RS         },
-//RS         captured: std::collections::HashMap::new(),
-//RS         return_type: None,
-//RS         opaque: Some(CtOpaque::new(JetComputeTapeHandle { tape })),
-//RS     }))
-//RS }
-//RS 
-//RS fn tensor_handle_to_ct(
-//RS     tensor: std::sync::Arc<std::sync::Mutex<JetTensor>>,
-//RS     valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS ) -> CtValue {
-//RS     CtValue::Closure(std::sync::Arc::new(ClosureData {
-//RS         lambda: Lambda {
-//RS             take_names: Vec::new(),
-//RS             params: Vec::new(),
-//RS             result_type: None,
-//RS             error_type: None,
-//RS             effects: None,
-//RS             body: LambdaBody::Block(Vec::new()),
-//RS             span: Span::new(0, 0),
-//RS             meta: LambdaMeta::default(),
-//RS         },
-//RS         captured: std::collections::HashMap::new(),
-//RS         return_type: None,
-//RS         opaque: Some(CtOpaque::new(JetComputeTensorHandle { tensor, valid })),
-//RS     }))
-//RS }
-//RS 
-//RS fn opaque_closure<T: std::any::Any + Send + Sync>(opaque: T) -> CtValue {
-//RS     CtValue::Closure(std::sync::Arc::new(ClosureData {
-//RS         lambda: Lambda {
-//RS             take_names: Vec::new(),
-//RS             params: Vec::new(),
-//RS             result_type: None,
-//RS             error_type: None,
-//RS             effects: None,
-//RS             body: LambdaBody::Block(Vec::new()),
-//RS             span: Span::new(0, 0),
-//RS             meta: LambdaMeta::default(),
-//RS         },
-//RS         captured: std::collections::HashMap::new(),
-//RS         return_type: None,
-//RS         opaque: Some(CtOpaque::new(opaque)),
-//RS     }))
-//RS }
-//RS 
-//RS const TENSOR_WINDOW_HANDLE_FIELD: &str = "__jet_tensor_window_handle";
-//RS 
-//RS pub fn tensor_window_handle(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let tensor = tensor_handle_state(value, span)?;
-//RS     Ok(opaque_closure(JetComputeWindowHandle {
-//RS         valid: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
-//RS         tensor_valid: tensor.valid,
-//RS     }))
-//RS }
-//RS 
-//RS pub fn tensor_window_is_live(fields: &[(String, CtValue)]) -> bool {
-//RS     let Some(value) = fields
-//RS         .iter()
-//RS         .find(|(name, _)| name == TENSOR_WINDOW_HANDLE_FIELD)
-//RS         .map(|(_, value)| value)
-//RS     else {
-//RS         return true;
-//RS     };
-//RS     let CtValue::Closure(data) = value else {
-//RS         return false;
-//RS     };
-//RS     data.opaque
-//RS         .as_ref()
-//RS         .and_then(|opaque| opaque.downcast_ref::<JetComputeWindowHandle>())
-//RS         .is_some_and(|handle| {
-//RS             handle.valid.load(std::sync::atomic::Ordering::Acquire)
-//RS                 && handle
-//RS                     .tensor_valid
-//RS                     .load(std::sync::atomic::Ordering::Acquire)
-//RS         })
-//RS }
-//RS 
-//RS pub fn tensor_window_drop_value(value: &CtValue, span: Span) -> Result<(), Diagnostic> {
-//RS     let CtValue::Struct { fields, .. } = value else {
-//RS         return Err(unsupported("Tensor window", span));
-//RS     };
-//RS     let Some(value) = fields
-//RS         .iter()
-//RS         .find(|(name, _)| name == TENSOR_WINDOW_HANDLE_FIELD)
-//RS         .map(|(_, value)| value)
-//RS     else {
-//RS         return Ok(());
-//RS     };
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported("Tensor window handle", span));
-//RS     };
-//RS     let handle = data
-//RS         .opaque
-//RS         .as_ref()
-//RS         .and_then(|opaque| opaque.downcast_ref::<JetComputeWindowHandle>())
-//RS         .ok_or_else(|| unsupported("Tensor window handle", span))?;
-//RS     handle
-//RS         .valid
-//RS         .store(false, std::sync::atomic::Ordering::Release);
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub fn tensor_window_values_share_handle(left: &CtValue, right: &CtValue) -> bool {
-//RS     let handle = |value: &CtValue| {
-//RS         let CtValue::Struct { fields, .. } = value else {
-//RS             return None;
-//RS         };
-//RS         let CtValue::Closure(data) = fields
-//RS             .iter()
-//RS             .find(|(name, _)| name == TENSOR_WINDOW_HANDLE_FIELD)
-//RS             .map(|(_, value)| value)?
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         data.opaque
-//RS             .as_ref()
-//RS             .and_then(|opaque| opaque.downcast_ref::<JetComputeWindowHandle>())
-//RS             .map(|handle| std::sync::Arc::clone(&handle.valid))
-//RS     };
-//RS     handle(left)
-//RS         .zip(handle(right))
-//RS         .is_some_and(|(left, right)| std::sync::Arc::ptr_eq(&left, &right))
-//RS }
-//RS 
-//RS fn tensor_handle_from_fields(
-//RS     fields: &[(String, CtValue)],
-//RS     span: Span,
-//RS ) -> Result<Option<JetComputeTensorHandle>, Diagnostic> {
-//RS     let Some(value) = fields
-//RS         .iter()
-//RS         .find(|(name, _)| name == TENSOR_HANDLE_FIELD)
-//RS         .map(|(_, value)| value)
-//RS     else {
-//RS         return Ok(None);
-//RS     };
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported("Tensor handle", span));
-//RS     };
-//RS     data.opaque
-//RS         .as_ref()
-//RS         .and_then(|opaque| opaque.downcast_ref::<JetComputeTensorHandle>())
-//RS         .filter(|handle| handle.valid.load(std::sync::atomic::Ordering::Acquire))
-//RS         .cloned()
-//RS         .map(Some)
-//RS         .ok_or_else(|| unsupported("Tensor handle", span))
-//RS }
-//RS 
-//RS fn tensor_handle_state(value: &CtValue, span: Span) -> Result<JetComputeTensorHandle, Diagnostic> {
-//RS     let CtValue::Struct { fields, .. } = value else {
-//RS         return Err(unsupported("Tensor", span));
-//RS     };
-//RS     tensor_handle_from_fields(fields, span)?.ok_or_else(|| unsupported("Tensor handle", span))
-//RS }
-//RS 
-//RS fn trace_to_ct(trace: &JetComputeTrace) -> CtValue {
-//RS     let tape_handle = trace.tape.upgrade().unwrap_or_else(|| {
-//RS         jet_panic(
-//RS             "ComputeLite::trace_to_ct",
-//RS             line!(),
-//RS             "autodiff tape ended before its trace was marshalled",
-//RS         )
-//RS     });
-//RS     let tape = tape_handle.lock().unwrap_or_else(|_| {
-//RS         jet_panic(
-//RS             "ComputeLite::trace_to_ct",
-//RS             line!(),
-//RS             "autodiff tape is poisoned",
-//RS         )
-//RS     });
-//RS     let nodes = tape
-//RS         .nodes
-//RS         .iter()
-//RS         .map(|node| CtValue::Struct {
-//RS             type_name: "__JetComputeNode".to_string(),
-//RS             fields: vec![
-//RS                 (
-//RS                     "parents".to_string(),
-//RS                     CtValue::List(
-//RS                         node.parents
-//RS                             .iter()
-//RS                             .map(|parent| CtValue::Int(parent.map_or(-1, |value| value as i64)))
-//RS                             .collect(),
-//RS                     ),
-//RS                 ),
-//RS                 ("rule".to_string(), tape_rule_to_ct(node.rule.as_ref())),
-//RS                 (
-//RS                     "values".to_string(),
-//RS                     CtValue::List(
-//RS                         node.values
-//RS                             .iter()
-//RS                             .map(|value| tensor_to_ct_inner(value, false))
-//RS                             .collect(),
-//RS                     ),
-//RS                 ),
-//RS                 (
-//RS                     "output".to_string(),
-//RS                     tensor_to_ct_inner(&node.output, false),
-//RS                 ),
-//RS             ],
-//RS         })
-//RS         .collect();
-//RS     let inputs = CtValue::List(
-//RS         tape.inputs
-//RS             .iter()
-//RS             .map(|value| tensor_to_ct_inner(value, false))
-//RS             .collect(),
-//RS     );
-//RS     drop(tape);
-//RS     let mut fields = vec![
-//RS         ("identity".to_string(), tape_handle_to_ct(tape_handle)),
-//RS         ("node".to_string(), CtValue::Int(trace.node as i64)),
-//RS         ("inputs".to_string(), inputs),
-//RS         ("nodes".to_string(), CtValue::List(nodes)),
-//RS     ];
-//RS     if let Some(parent) = &trace.parent {
-//RS         fields.push((
-//RS             "parent".to_string(),
-//RS             CtValue::Present(Box::new(trace_to_ct(parent))),
-//RS         ));
-//RS     }
-//RS     CtValue::Struct {
-//RS         type_name: "__JetComputeTrace".to_string(),
-//RS         fields,
-//RS     }
-//RS }
-//RS 
-//RS fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
-//RS     let handle = std::sync::Arc::new(std::sync::Mutex::new(tensor.clone()));
-//RS     let valid = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-//RS     tensor_to_ct_with_handle(tensor, handle, valid, true)
-//RS }
-//RS 
-//RS fn tensor_to_ct_inner(tensor: &JetTensor, include_trace: bool) -> CtValue {
-//RS     let handle = std::sync::Arc::new(std::sync::Mutex::new(tensor.clone()));
-//RS     let valid = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-//RS     tensor_to_ct_with_handle(tensor, handle, valid, include_trace)
-//RS }
-//RS 
-//RS fn tensor_to_ct_with_handle(
-//RS     tensor: &JetTensor,
-//RS     handle: std::sync::Arc<std::sync::Mutex<JetTensor>>,
-//RS     valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS     include_trace: bool,
-//RS ) -> CtValue {
-//RS     // The opaque Prelude handle owns storage. Keep only bounded metadata here:
-//RS     // copying elements into CtValue would inflate and duplicate every tensor.
-//RS     if let Err(error) = jet_compute_validate_tensor(tensor) {
-//RS         jet_panic(
-//RS             "ComputeLite::tensor_to_ct",
-//RS             line!(),
-//RS             &format!("invalid Tensor result: {}", error.jet_show()),
-//RS         );
-//RS     }
-//RS     // Preserve the existing logical metadata projection without copying data.
-//RS     let strides = match jet_compute_row_major_strides(&tensor.shape) {
-//RS         Ok(strides) => strides,
-//RS         Err(error) => jet_panic(
-//RS             "ComputeLite::tensor_to_ct",
-//RS             line!(),
-//RS             &format!("invalid Tensor view metadata: {}", error.jet_show()),
-//RS         ),
-//RS     };
-//RS     let mut fields = vec![
-//RS         (
-//RS             "shape".to_string(),
-//RS             CtValue::List(tensor.shape.iter().map(|d| CtValue::Int(*d)).collect()),
-//RS         ),
-//RS         (
-//RS             "strides".to_string(),
-//RS             CtValue::List(strides.iter().map(|d| CtValue::Int(*d)).collect()),
-//RS         ),
-//RS         ("device".to_string(), device_to_ct(tensor.device)),
-//RS         (
-//RS             "last_placement".to_string(),
-//RS             receipt_to_ct(&tensor.last_placement),
-//RS         ),
-//RS         (
-//RS             "last_transfer".to_string(),
-//RS             tensor
-//RS                 .last_transfer
-//RS                 .as_ref()
-//RS                 .map(transfer_to_ct)
-//RS                 .map(|value| CtValue::Present(Box::new(value)))
-//RS                 .unwrap_or_else(|| CtValue::absent(Type::Named("ComputeTransfer".to_string()))),
-//RS         ),
-//RS     ];
-//RS     if include_trace {
-//RS         if let Some(trace) = &tensor.trace {
-//RS             fields.push((
-//RS                 "autodiff".to_string(),
-//RS                 CtValue::Present(Box::new(trace_to_ct(trace))),
-//RS             ));
-//RS         }
-//RS     }
-//RS     fields.push((
-//RS         TENSOR_HANDLE_FIELD.to_string(),
-//RS         tensor_handle_to_ct(handle, valid),
-//RS     ));
-//RS     CtValue::Struct {
-//RS         type_name: "Tensor".to_string(),
-//RS         fields,
-//RS     }
-//RS }
-//RS 
-//RS fn as_i64_list(value: &CtValue, span: Span) -> Result<Vec<i64>, Diagnostic> {
-//RS     match value {
-//RS         CtValue::List(xs) => xs
-//RS             .iter()
-//RS             .map(|x| match x {
-//RS                 CtValue::Int(n) => Ok(*n),
-//RS                 _ => Err(unsupported("Int list element", span)),
-//RS             })
-//RS             .collect(),
-//RS         _ => Err(unsupported("[Int]", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn as_f64_list(value: &CtValue, span: Span) -> Result<Vec<f64>, Diagnostic> {
-//RS     match value {
-//RS         CtValue::List(xs) => xs
-//RS             .iter()
-//RS             .map(|x| match x {
-//RS                 CtValue::Float(f) => Ok(f.as_f64()),
-//RS                 CtValue::Int(n) => Ok(*n as f64),
-//RS                 _ => Err(unsupported("Float list element", span)),
-//RS             })
-//RS             .collect(),
-//RS         _ => Err(unsupported("[Float]", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn tape_rule_from_ct(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<Option<JetComputeTapeRule>, Diagnostic> {
-//RS     let kind = match value {
-//RS         CtValue::Str(kind) => kind.as_str(),
-//RS         CtValue::Struct { type_name, fields } if type_name == "__JetComputeRule" => fields
-//RS             .iter()
-//RS             .find_map(|(name, value)| (name == "kind").then_some(value))
-//RS             .and_then(|value| match value {
-//RS                 CtValue::Str(kind) => Some(kind.as_str()),
-//RS                 _ => None,
-//RS             })
-//RS             .ok_or_else(|| unsupported("autodiff tape rule", span))?,
-//RS         _ => return Err(unsupported("autodiff tape rule", span)),
-//RS     };
-//RS     if kind == "input" {
-//RS         return Ok(None);
-//RS     }
-//RS     let CtValue::Struct { fields, .. } = value else {
-//RS         return Err(unsupported("autodiff tape rule", span));
-//RS     };
-//RS     let source_shape = || {
-//RS         fields
-//RS             .iter()
-//RS             .find_map(|(name, value)| (name == "source_shape").then_some(value))
-//RS             .ok_or_else(|| unsupported("autodiff source shape", span))
-//RS             .and_then(|value| as_i64_list(value, span))
-//RS     };
-//RS     let axis = || {
-//RS         fields
-//RS             .iter()
-//RS             .find_map(|(name, value)| (name == "axis").then_some(value))
-//RS             .and_then(|value| match value {
-//RS                 CtValue::Int(axis) => Some(*axis),
-//RS                 _ => None,
-//RS             })
-//RS             .ok_or_else(|| unsupported("autodiff reduction axis", span))
-//RS     };
-//RS     let learning_rate = || {
-//RS         fields
-//RS             .iter()
-//RS             .find_map(|(name, value)| (name == "learning_rate").then_some(value))
-//RS             .ok_or_else(|| unsupported("autodiff learning rate", span))
-//RS             .and_then(|value| match value {
-//RS                 CtValue::Float(rate) => Ok(rate.as_f64()),
-//RS                 CtValue::Int(rate) => Ok(*rate as f64),
-//RS                 _ => Err(unsupported("autodiff learning rate", span)),
-//RS             })
-//RS     };
-//RS     Ok(Some(match kind {
-//RS         "add" => JetComputeTapeRule::Add,
-//RS         "sub" => JetComputeTapeRule::Sub,
-//RS         "mul" => JetComputeTapeRule::Mul,
-//RS         "div" => JetComputeTapeRule::Div,
-//RS         "maximum" => JetComputeTapeRule::Maximum,
-//RS         "minimum" => JetComputeTapeRule::Minimum,
-//RS         "matmul" => JetComputeTapeRule::Matmul,
-//RS         "matmul_f32_tile" => JetComputeTapeRule::MatmulF32Tile,
-//RS         "mse_loss" => JetComputeTapeRule::MseLoss,
-//RS         "sgd_step" => JetComputeTapeRule::SgdStep {
-//RS             learning_rate: learning_rate()?,
-//RS         },
-//RS         "negate" | "abs" | "exp" | "log" | "sqrt" => JetComputeTapeRule::Unary(kind.to_string()),
-//RS         "reshape" => JetComputeTapeRule::Reshape {
-//RS             source_shape: source_shape()?,
-//RS         },
-//RS         "broadcast" => JetComputeTapeRule::Broadcast {
-//RS             source_shape: source_shape()?,
-//RS         },
-//RS         "reduce_to_shape" => JetComputeTapeRule::ReduceToShape {
-//RS             source_shape: source_shape()?,
-//RS         },
-//RS         "transpose" => JetComputeTapeRule::Transpose,
-//RS         "sum_axis" => JetComputeTapeRule::SumAxis {
-//RS             axis: usize::try_from(axis()?)
-//RS                 .map_err(|_| unsupported("autodiff reduction axis", span))?,
-//RS             source_shape: source_shape()?,
-//RS         },
-//RS         _ => return Err(unsupported("autodiff tape operation", span)),
-//RS     }))
-//RS }
-//RS 
-//RS fn trace_from_ct(value: &CtValue, span: Span) -> Result<JetComputeTrace, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("autodiff trace", span));
-//RS     };
-//RS     if type_name != "__JetComputeTrace" {
-//RS         return Err(unsupported("autodiff trace", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find(|(field, _)| field == name)
-//RS             .map(|(_, value)| value)
-//RS             .ok_or_else(|| unsupported("autodiff trace field", span))
-//RS     };
-//RS     let tape_handle = match field("identity")? {
-//RS         CtValue::Closure(data) => data
-//RS             .opaque
-//RS             .as_ref()
-//RS             .and_then(|opaque| opaque.downcast_ref::<JetComputeTapeHandle>())
-//RS             .map(|handle| handle.tape.clone())
-//RS             .ok_or_else(|| unsupported("autodiff trace identity", span))?,
-//RS         _ => return Err(unsupported("autodiff trace identity", span)),
-//RS     };
-//RS     let node = match field("node")? {
-//RS         CtValue::Int(node) if *node >= 0 => {
-//RS             usize::try_from(*node).map_err(|_| unsupported("autodiff trace node", span))?
-//RS         }
-//RS         _ => return Err(unsupported("autodiff trace node", span)),
-//RS     };
-//RS     let _inputs = match field("inputs")? {
-//RS         CtValue::List(values) => values
-//RS             .iter()
-//RS             .map(|value| ct_to_tensor_inner(value, span, false))
-//RS             .collect::<Result<Vec<_>, _>>()?,
-//RS         _ => return Err(unsupported("autodiff trace inputs", span)),
-//RS     };
-//RS     let nodes = match field("nodes")? {
-//RS         CtValue::List(values) => values
-//RS             .iter()
-//RS             .map(|value| {
-//RS                 let CtValue::Struct { type_name, fields } = value else {
-//RS                     return Err(unsupported("autodiff tape node", span));
-//RS                 };
-//RS                 if type_name != "__JetComputeNode" {
-//RS                     return Err(unsupported("autodiff tape node", span));
-//RS                 }
-//RS                 let node_field = |name: &str| {
-//RS                     fields
-//RS                         .iter()
-//RS                         .find(|(field, _)| field == name)
-//RS                         .map(|(_, value)| value)
-//RS                         .ok_or_else(|| unsupported("autodiff tape node field", span))
-//RS                 };
-//RS                 let parents = match node_field("parents")? {
-//RS                     CtValue::List(values) => values
-//RS                         .iter()
-//RS                         .map(|value| match value {
-//RS                             CtValue::Int(value) if *value < 0 => Ok(None),
-//RS                             CtValue::Int(value) => usize::try_from(*value)
-//RS                                 .map(Some)
-//RS                                 .map_err(|_| unsupported("autodiff parent", span)),
-//RS                             _ => Err(unsupported("autodiff parent", span)),
-//RS                         })
-//RS                         .collect::<Result<Vec<_>, _>>()?,
-//RS                     _ => return Err(unsupported("autodiff parents", span)),
-//RS                 };
-//RS                 let rule = tape_rule_from_ct(node_field("rule")?, span)?;
-//RS                 let values = match node_field("values")? {
-//RS                     CtValue::List(values) => values
-//RS                         .iter()
-//RS                         .map(|value| ct_to_tensor_inner(value, span, false))
-//RS                         .collect::<Result<Vec<_>, _>>()?,
-//RS                     _ => return Err(unsupported("autodiff node values", span)),
-//RS                 };
-//RS                 let output = ct_to_tensor_inner(node_field("output")?, span, false)?;
-//RS                 Ok(JetComputeTapeNode {
-//RS                     parents,
-//RS                     rule,
-//RS                     values,
-//RS                     output,
-//RS                 })
-//RS             })
-//RS             .collect::<Result<Vec<_>, Diagnostic>>()?,
-//RS         _ => return Err(unsupported("autodiff trace nodes", span)),
-//RS     };
-//RS     if node >= nodes.len() {
-//RS         return Err(unsupported("autodiff trace node", span));
-//RS     }
-//RS     let parent = match fields
-//RS         .iter()
-//RS         .find(|(name, _)| name == "parent")
-//RS         .map(|(_, value)| value)
-//RS     {
-//RS         Some(CtValue::Present(value)) => Some(Box::new(trace_from_ct(value, span)?)),
-//RS         Some(CtValue::Failed(CtReport::Clean(_))) | None => None,
-//RS         Some(_) => return Err(unsupported("autodiff trace parent", span)),
-//RS     };
-//RS     Ok(JetComputeTrace {
-//RS         tape: std::sync::Arc::downgrade(&tape_handle),
-//RS         node,
-//RS         parent,
-//RS     })
-//RS }
-//RS 
-//RS fn ct_to_tensor(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
-//RS     ct_to_tensor_inner(value, span, true)
-//RS }
-//RS 
-//RS pub fn autodiff_tensor_to_ct(tensor: &JetTensor) -> CtValue {
-//RS     tensor_to_ct(tensor)
-//RS }
-//RS 
-//RS pub fn autodiff_tensor_from_ct(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
-//RS     ct_to_tensor(value, span)
-//RS }
-//RS 
-//RS pub fn autodiff_error_message(error: &JetComputeError) -> String {
-//RS     error.jet_show()
-//RS }
-//RS 
-//RS fn ct_to_tensor_inner(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS     include_trace: bool,
-//RS ) -> Result<JetTensor, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("Tensor", span));
-//RS     };
-//RS     if type_name != "Tensor" && type_name != "JetTensor" {
-//RS         return Err(unsupported("Tensor", span));
-//RS     }
-//RS     let handle = tensor_handle_from_fields(fields, span)?
-//RS         .ok_or_else(|| unsupported("Tensor handle", span))?;
-//RS     let mut tensor = handle
-//RS         .tensor
-//RS         .lock()
-//RS         .map_err(|_| unsupported("Tensor handle", span))?
-//RS         .clone();
-//RS     if !include_trace {
-//RS         tensor.trace = None;
-//RS     }
-//RS     jet_compute_validate_tensor(&tensor)
-//RS         .map_err(|error| unsupported(&format!("Tensor metadata: {}", error.jet_show()), span))?;
-//RS     if let Some(receipt) = &tensor.last_transfer {
-//RS         jet_compute_validate_transfer_receipt(&tensor, receipt).map_err(|error| {
-//RS             unsupported(
-//RS                 &format!("Tensor transfer metadata: {}", error.jet_show()),
-//RS                 span,
-//RS             )
-//RS         })?;
-//RS     }
-//RS     Ok(tensor)
-//RS }
-//RS 
-//RS fn tensor_window_args(args: &[CtValue], span: Span) -> Result<(i64, i64, bool), Diagnostic> {
-//RS     match args {
-//RS         [CtValue::Struct { type_name, fields }] if type_name == crate::Syntax::TYPE_RANGE => {
-//RS             let field = |name: &str| {
-//RS                 fields
-//RS                     .iter()
-//RS                     .find(|(field, _)| field == name)
-//RS                     .map(|(_, value)| value)
-//RS             };
-//RS             let start = match field("start") {
-//RS                 Some(CtValue::Int(value)) => *value,
-//RS                 _ => return Err(unsupported("Range.start", span)),
-//RS             };
-//RS             let end = match field("end") {
-//RS                 Some(CtValue::Int(value)) => *value,
-//RS                 _ => return Err(unsupported("Range.end", span)),
-//RS             };
-//RS             Ok((
-//RS                 start,
-//RS                 end,
-//RS                 matches!(field("exclusive"), Some(CtValue::Bool(true))),
-//RS             ))
-//RS         }
-//RS         [CtValue::Int(start), CtValue::Int(end)] => Ok((*start, *end, false)),
-//RS         _ => Err(unsupported("Tensor view range", span)),
-//RS     }
-//RS }
-//RS 
-//RS /// Ambient marshalling for a read-only Tensor view.  The CtValue boundary has
-//RS /// no borrowed slice carrier, so the view is materialized only at this engine
-//RS /// boundary; bounds and first-axis slab selection still come from Prelude.
-//RS pub fn tensor_view_window(
-//RS     value: &CtValue,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<(usize, usize), Diagnostic> {
-//RS     let tensor = ct_to_tensor(value, span)?;
-//RS     let (start, end, exclusive) = tensor_window_args(args, span)?;
-//RS     jet_compute_view_checked(&tensor, start, end, exclusive)
-//RS         .map(|view| (0, view.len()))
-//RS         .map_err(|error| unsupported(&format!("Tensor view: {}", error.jet_show()), span))
-//RS }
-//RS 
-//RS /// Ambient marshalling for a mutable Tensor view. Construction uses the same
-//RS /// trace, bounds, and exclusivity checker as AOT and resident JIT; the returned
-//RS /// range is only a CtValue carrier fact.
-//RS pub fn tensor_view_mut_window(
-//RS     value: &CtValue,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<(usize, usize), Diagnostic> {
-//RS     let handle = tensor_handle_state(value, span)?;
-//RS     let mut tensor = handle
-//RS         .tensor
-//RS         .lock()
-//RS         .map_err(|_| unsupported("Tensor handle", span))?;
-//RS     let (start, end, exclusive) = tensor_window_args(args, span)?;
-//RS     let view =
-//RS         jet_compute_view_mut_checked(&mut tensor, start, end, exclusive).map_err(|error| {
-//RS             unsupported(&format!("Tensor mutable view: {}", error.jet_show()), span)
-//RS         })?;
-//RS     let len =
-//RS         usize::try_from(view.len()).map_err(|_| unsupported("Tensor mutable view length", span))?;
-//RS     Ok((0, len))
-//RS }
-//RS 
-//RS /// Mutable/read-only Tensor-window indexing is an adapter concern at the
-//RS /// CtValue boundary. Window addressing and element access come from the
-//RS /// shared Prelude helpers used by AOT and the resident JIT.
-//RS pub fn tensor_view_get_value(
-//RS     value: &CtValue,
-//RS     args: &[CtValue],
-//RS     index: i64,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let tensor = ct_to_tensor(value, span)?;
-//RS     let (start, end, exclusive) = tensor_window_args(args, span)?;
-//RS     jet_compute_window_get(&tensor, start, end, exclusive, index)
-//RS         .map(|value| CtValue::Float(CtFloat::f64(value)))
-//RS         .map_err(|error| unsupported(&format!("Tensor view: {error}"), span))
-//RS }
-//RS 
-//RS pub fn tensor_view_set_value(
-//RS     value: &CtValue,
-//RS     args: &[CtValue],
-//RS     index: i64,
-//RS     replacement: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let handle = tensor_handle_state(value, span)?;
-//RS     let mut tensor = handle
-//RS         .tensor
-//RS         .lock()
-//RS         .map_err(|_| unsupported("Tensor handle", span))?;
-//RS     let (start, end, exclusive) = tensor_window_args(args, span)?;
-//RS     let replacement = as_float(replacement, span)?;
-//RS     jet_compute_window_set(&mut tensor, start, end, exclusive, index, replacement)
-//RS         .map_err(|error| unsupported(&format!("Tensor view: {error}"), span))?;
-//RS     let snapshot = (*tensor).clone();
-//RS     drop(tensor);
-//RS     Ok(tensor_to_ct_with_handle(
-//RS         &snapshot,
-//RS         std::sync::Arc::clone(&handle.tensor),
-//RS         handle.valid,
-//RS         true,
-//RS     ))
-//RS }
-//RS 
-//RS pub fn tensor_view_list(
-//RS     value: &CtValue,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let tensor = ct_to_tensor(value, span)?;
-//RS     let (start, end, exclusive) = tensor_window_args(args, span)?;
-//RS     let view = jet_compute_view_checked(&tensor, start, end, exclusive)
-//RS         .map_err(|error| unsupported(&format!("Tensor view: {}", error.jet_show()), span))?;
-//RS     Ok(CtValue::List(
-//RS         view.iter()
-//RS             .map(|value| CtValue::Float(CtFloat::f64(*value)))
-//RS             .collect(),
-//RS     ))
-//RS }
-//RS 
-//RS pub fn tensor_to_list_value(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let tensor = ct_to_tensor(value, span)?;
-//RS     Ok(CtValue::List(
-//RS         jet_compute_tensor_to_list(&tensor)
-//RS             .into_iter()
-//RS             .map(|value| CtValue::Float(CtFloat::f64(value)))
-//RS             .collect(),
-//RS     ))
-//RS }
-//RS 
-//RS pub fn tensor_slice_value(
-//RS     value: &CtValue,
-//RS     start: i64,
-//RS     end: i64,
-//RS     exclusive: bool,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let tensor = ct_to_tensor(value, span)?;
-//RS     jet_compute_slice_checked(&tensor, start, end, exclusive)
-//RS         .map(|slice| tensor_to_ct(&slice))
-//RS         .map_err(|error| unsupported(&format!("Tensor slice: {}", error.jet_show()), span))
-//RS }
-//RS 
-//RS pub fn tensor_copy_value(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let tensor = ct_to_tensor(value, span)?;
-//RS     jet_compute_copy_checked(&tensor)
-//RS         .map(|copy| tensor_to_ct(&copy))
-//RS         .map_err(|error| unsupported(&format!("Tensor copy: {}", error.jet_show()), span))
-//RS }
-//RS 
-//RS /// The TIR clone node is the implicit Tensor sharing operation. Keep its
-//RS /// storage Arc shared while giving the clone its own canonical handle, exactly
-//RS /// as a Prelude `JetTensor::clone` does at the AOT/JIT boundary.
-//RS pub fn tensor_clone_value(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let tensor = ct_to_tensor(value, span)?;
-//RS     let cloned = tensor.clone();
-//RS     Ok(tensor_to_ct(&cloned))
-//RS }
-//RS 
-//RS pub fn tensor_drop_value(value: &CtValue, span: Span) -> Result<(), Diagnostic> {
-//RS     let CtValue::Struct { fields, .. } = value else {
-//RS         return Err(unsupported("Tensor", span));
-//RS     };
-//RS     let value = fields
-//RS         .iter()
-//RS         .find(|(name, _)| name == TENSOR_HANDLE_FIELD)
-//RS         .map(|(_, value)| value)
-//RS         .ok_or_else(|| unsupported("Tensor handle", span))?;
-//RS     let CtValue::Closure(data) = value else {
-//RS         return Err(unsupported("Tensor handle", span));
-//RS     };
-//RS     let handle = data
-//RS         .opaque
-//RS         .as_ref()
-//RS         .and_then(|opaque| opaque.downcast_ref::<JetComputeTensorHandle>())
-//RS         .ok_or_else(|| unsupported("Tensor handle", span))?;
-//RS     handle
-//RS         .valid
-//RS         .store(false, std::sync::atomic::Ordering::Release);
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub fn tensor_values_share_handle(left: &CtValue, right: &CtValue) -> bool {
-//RS     let handle = |value: &CtValue| {
-//RS         let CtValue::Struct { fields, .. } = value else {
-//RS             return None;
-//RS         };
-//RS         let CtValue::Closure(data) = fields
-//RS             .iter()
-//RS             .find(|(name, _)| name == TENSOR_HANDLE_FIELD)
-//RS             .map(|(_, value)| value)?
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         data.opaque
-//RS             .as_ref()
-//RS             .and_then(|opaque| opaque.downcast_ref::<JetComputeTensorHandle>())
-//RS             .map(|handle| std::sync::Arc::clone(&handle.valid))
-//RS     };
-//RS     handle(left)
-//RS         .zip(handle(right))
-//RS         .is_some_and(|(left, right)| std::sync::Arc::ptr_eq(&left, &right))
-//RS }
-//RS 
-//RS pub fn tensor_replace_data(
-//RS     value: &CtValue,
-//RS     items: Vec<CtValue>,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let handle = tensor_handle_state(value, span)?;
-//RS     let mut tensor = handle
-//RS         .tensor
-//RS         .lock()
-//RS         .map_err(|_| unsupported("Tensor handle", span))?;
-//RS     let values = as_f64_list(&CtValue::List(items), span)?;
-//RS     if values.len() != jet_compute_tensor_values(&tensor).len() {
-//RS         return Err(unsupported("Tensor write-back length", span));
-//RS     }
-//RS     jet_compute_replace_data_checked(&mut tensor, values)
-//RS         .map_err(|error| unsupported(&format!("Tensor write-back: {}", error.jet_show()), span))?;
-//RS     let snapshot = (*tensor).clone();
-//RS     drop(tensor);
-//RS     Ok(tensor_to_ct_with_handle(
-//RS         &snapshot,
-//RS         std::sync::Arc::clone(&handle.tensor),
-//RS         handle.valid,
-//RS         true,
-//RS     ))
-//RS }
-//RS 
-//RS fn map_err(err: JetComputeError) -> CtValue {
-//RS     let (variant, message) = match err {
-//RS         JetComputeError::InvalidShape(m) => ("InvalidShape", m),
-//RS         JetComputeError::RankMismatch(m) => ("RankMismatch", m),
-//RS         JetComputeError::OutOfBounds(m) => ("OutOfBounds", m),
-//RS         JetComputeError::Device(m) => ("Device", m),
-//RS         JetComputeError::Unsupported(m) => ("Unsupported", m),
-//RS         JetComputeError::Arithmetic(m) => ("Arithmetic", m),
-//RS         JetComputeError::Serialization(m) => ("Serialization", m),
-//RS     };
-//RS     CtValue::Enum {
-//RS         type_name: "ComputeError".to_string(),
-//RS         variant: variant.to_string(),
-//RS         args: vec![(None, CtValue::Str(message))],
-//RS     }
-//RS }
-//RS 
-//RS fn stream_to_ct(s: &JetComputeStream) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "ComputeStream".to_string(),
-//RS         fields: vec![
-//RS             ("id".to_string(), CtValue::Int(s.id)),
-//RS             ("device".to_string(), device_to_ct(s.device)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn ct_to_stream(value: &CtValue, span: Span) -> Result<JetComputeStream, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("ComputeStream", span));
-//RS     };
-//RS     if type_name != "ComputeStream" && type_name != "JetComputeStream" {
-//RS         return Err(unsupported("ComputeStream", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find(|(n, _)| n == name)
-//RS             .map(|(_, v)| v)
-//RS             .ok_or_else(|| unsupported("ComputeStream field", span))
-//RS     };
-//RS     let device = ct_to_device(field("device")?, span)?;
-//RS     let cuda = if device == JetComputeDevice::Cuda {
-//RS         Some(std::sync::Arc::new(
-//RS             jet_compute_cuda::stream_new().map_err(|_| unsupported("CUDA compute stream", span))?,
-//RS         ))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let vulkan = if device == JetComputeDevice::Vulkan {
-//RS         Some(std::sync::Arc::new(
-//RS             jet_compute_vulkan::stream_new()
-//RS                 .map_err(|_| unsupported("Vulkan compute stream", span))?,
-//RS         ))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     Ok(JetComputeStream {
-//RS         id: match field("id")? {
-//RS             CtValue::Int(n) if *n > 0 => *n,
-//RS             _ => return Err(unsupported("compute stream id", span)),
-//RS         },
-//RS         device,
-//RS         cuda,
-//RS         vulkan,
-//RS     })
-//RS }
-//RS 
-//RS fn sparse_to_ct(s: &JetSparseCsr) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "SparseTensor".to_string(),
-//RS         fields: vec![
-//RS             ("rows".to_string(), CtValue::Int(s.rows)),
-//RS             ("cols".to_string(), CtValue::Int(s.cols)),
-//RS             (
-//RS                 "row_ptr".to_string(),
-//RS                 CtValue::List(s.row_ptr.iter().copied().map(CtValue::Int).collect()),
-//RS             ),
-//RS             (
-//RS                 "col_idx".to_string(),
-//RS                 CtValue::List(s.col_idx.iter().copied().map(CtValue::Int).collect()),
-//RS             ),
-//RS             (
-//RS                 "values".to_string(),
-//RS                 CtValue::List(
-//RS                     s.values
-//RS                         .iter()
-//RS                         .map(|v| CtValue::Float(CtFloat::f64(*v)))
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn ct_to_sparse(value: &CtValue, span: Span) -> Result<JetSparseCsr, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("SparseTensor", span));
-//RS     };
-//RS     if type_name != "SparseTensor" && type_name != "JetSparseCsr" {
-//RS         return Err(unsupported("SparseTensor", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find(|(n, _)| n == name)
-//RS             .map(|(_, v)| v)
-//RS             .ok_or_else(|| unsupported("SparseTensor field", span))
-//RS     };
-//RS     let sparse = JetSparseCsr {
-//RS         rows: match field("rows")? {
-//RS             CtValue::Int(n) => *n,
-//RS             _ => return Err(unsupported("sparse rows", span)),
-//RS         },
-//RS         cols: match field("cols")? {
-//RS             CtValue::Int(n) => *n,
-//RS             _ => return Err(unsupported("sparse cols", span)),
-//RS         },
-//RS         row_ptr: as_i64_list(field("row_ptr")?, span)?,
-//RS         col_idx: as_i64_list(field("col_idx")?, span)?,
-//RS         values: as_f64_list(field("values")?, span)?,
-//RS     };
-//RS     jet_compute_validate_sparse(&sparse).map_err(|error| {
-//RS         unsupported(
-//RS             &format!("SparseTensor metadata: {}", error.jet_show()),
-//RS             span,
-//RS         )
-//RS     })?;
-//RS     Ok(sparse)
-//RS }
-//RS 
-//RS fn ok_sparse(s: JetSparseCsr) -> CtValue {
-//RS     CtValue::Present(Box::new(sparse_to_ct(&s)))
-//RS }
-//RS 
-//RS fn ok_tensor(tensor: JetTensor) -> CtValue {
-//RS     CtValue::Present(Box::new(tensor_to_ct(&tensor)))
-//RS }
-//RS 
-//RS fn err_compute(err: JetComputeError) -> CtValue {
-//RS     CtValue::failed(Box::new(map_err(err)))
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct ComputeCallback {
-//RS     handle: JetComputeHandle,
-//RS     result_type: Type,
-//RS     identity_key: String,
-//RS     identity_captures: std::sync::Arc<Vec<CtValue>>,
-//RS     callback_error: std::sync::Arc<std::sync::Mutex<Option<Diagnostic>>>,
-//RS }
-//RS 
-//RS impl ComputeCallback {
-//RS     fn into_value(self) -> CtValue {
-//RS         let result_type = self.result_type.clone();
-//RS         CtValue::Closure(std::sync::Arc::new(ClosureData {
-//RS             lambda: Lambda {
-//RS                 take_names: Vec::new(),
-//RS                 params: Vec::new(),
-//RS                 result_type: Some(result_type.clone()),
-//RS                 error_type: None,
-//RS                 effects: None,
-//RS                 body: LambdaBody::Block(Vec::new()),
-//RS                 span: Span::new(0, 0),
-//RS                 meta: LambdaMeta::default(),
-//RS             },
-//RS             captured: std::collections::HashMap::new(),
-//RS             return_type: Some(result_type),
-//RS             opaque: Some(CtOpaque::new(super::AmbientStandaloneClosure::new(self))),
-//RS         }))
-//RS     }
-//RS 
-//RS     fn call(&self, args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS         let tensors = args
-//RS             .iter()
-//RS             .map(|value| ct_to_tensor(value, span))
-//RS             .collect::<Result<Vec<_>, _>>()?;
-//RS         let result = jet_compute_call_curried(
-//RS             self.handle.raw(),
-//RS             JetComputeInputPack::from_flat(tensors),
-//RS         );
-//RS         if let Some(error) = self
-//RS             .callback_error
-//RS             .lock()
-//RS             .unwrap_or_else(std::sync::PoisonError::into_inner)
-//RS             .take()
-//RS         {
-//RS             return Err(error);
-//RS         }
-//RS         let result = result.map_err(|error| {
-//RS             unsupported(&format!("autodiff: {}", error.jet_show()), span)
-//RS         })?;
-//RS         match result {
-//RS             JetComputeCurriedResult::Gradient(gradients) => {
-//RS                 gradient_to_ct(gradients, &self.result_type, span)
-//RS             }
-//RS             JetComputeCurriedResult::ValueAndGradient { value, gradients } => {
-//RS                 let Type::Tuple(fields) = &self.result_type else {
-//RS                     return Err(unsupported("checked value-and-gradient result type", span));
-//RS                 };
-//RS                 let [_, (_, gradient_type)] = fields.as_slice() else {
-//RS                     return Err(unsupported("checked value-and-gradient result fields", span));
-//RS                 };
-//RS                 tuple_to_ct(
-//RS                     vec![
-//RS                         tensor_to_ct(&value),
-//RS                         gradient_to_ct(gradients, gradient_type, span)?,
-//RS                     ],
-//RS                     &self.result_type,
-//RS                     span,
-//RS                 )
-//RS             }
-//RS             JetComputeCurriedResult::Jvp { value, tangent } => tuple_to_ct(
-//RS                 vec![tensor_to_ct(&value), tensor_to_ct(&tangent)],
-//RS                 &self.result_type,
-//RS                 span,
-//RS             ),
-//RS             JetComputeCurriedResult::Vjp { value, pull, grads } => {
-//RS                 let pull = JetComputeHandle::new(pull);
-//RS                 let grads = JetComputeHandle::new(grads);
-//RS                 let Type::Apply { name, args: types } = &self.result_type else {
-//RS                     return Err(unsupported("checked VJPRun result type", span));
-//RS                 };
-//RS                 let [gradient_type] = types.as_slice() else {
-//RS                     return Err(unsupported("checked VJPRun gradient type", span));
-//RS                 };
-//RS                 let captures = std::sync::Arc::new(vec![
-//RS                     self.clone().into_value(),
-//RS                     CtValue::List(args),
-//RS                 ]);
-//RS                 let continuation = |handle, role: &str| {
-//RS                     ComputeCallback {
-//RS                         handle,
-//RS                         result_type: gradient_type.clone(),
-//RS                         identity_key: format!("compute.vjp.{role}"),
-//RS                         identity_captures: captures.clone(),
-//RS                         callback_error: self.callback_error.clone(),
-//RS                     }
-//RS                     .into_value()
-//RS                 };
-//RS                 Ok(CtValue::Struct {
-//RS                     type_name: name.clone(),
-//RS                     fields: vec![
-//RS                         ("value".to_string(), tensor_to_ct(&value)),
-//RS                         ("pull".to_string(), continuation(pull, "pull")),
-//RS                         ("grads".to_string(), continuation(grads, "grads")),
-//RS                     ],
-//RS                 })
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl super::StandaloneClosureHost for ComputeCallback {
-//RS     fn invoke(&self, args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS         self.call(args, span)
-//RS     }
-//RS 
-//RS     fn history_callback_identity(&self) -> Result<String, String> {
-//RS         super::history_callback_fingerprint(&self.identity_key, &self.identity_captures)
-//RS     }
-//RS }
-//RS 
-//RS fn tuple_to_ct(values: Vec<CtValue>, ty: &Type, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let Type::Tuple(fields) = ty else {
-//RS         return Err(unsupported("checked autodiff tuple type", span));
-//RS     };
-//RS     if values.len() != fields.len() {
-//RS         return Err(unsupported("checked autodiff tuple arity", span));
-//RS     }
-//RS     Ok(CtValue::Struct {
-//RS         type_name: "tuple".to_string(),
-//RS         fields: fields
-//RS             .iter()
-//RS             .zip(values)
-//RS             .map(|((name, _), value)| (name.clone(), value))
-//RS             .collect(),
-//RS     })
-//RS }
-//RS 
-//RS fn gradient_to_ct(
-//RS     gradients: Vec<Vec<JetTensor>>,
-//RS     ty: &Type,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let Type::Tuple(fields) = ty else {
-//RS         return Err(unsupported("checked gradient result type", span));
-//RS     };
-//RS     if gradients.len() != fields.len() {
-//RS         return Err(unsupported("checked gradient result arity", span));
-//RS     }
-//RS     let values = gradients
-//RS         .into_iter()
-//RS         .zip(fields)
-//RS         .map(|(values, (_, field_type))| {
-//RS             if matches!(field_type.as_ref(), Type::Tuple(_)) {
-//RS                 tuple_to_ct(values.iter().map(tensor_to_ct).collect(), field_type, span)
-//RS             } else {
-//RS                 let [value] = values.as_slice() else {
-//RS                     return Err(unsupported("checked gradient Tensor result", span));
-//RS                 };
-//RS                 Ok(tensor_to_ct(value))
-//RS             }
-//RS         })
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     tuple_to_ct(values, ty, span)
-//RS }
-//RS 
-//RS /// Marshal checked callables and Tensor values into the shared curried kernel.
-//RS /// The kernel owns tracing, differentiation, target selection, and continuations.
-//RS pub fn autodiff_transform(
-//RS     method: &str,
-//RS     mut args: Vec<CtValue>,
-//RS     function_type: &Type,
-//RS     result_type: &Type,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let kind = match method {
-//RS         "gradient" => JetComputeTransformKind::Gradient,
-//RS         "value_and_gradient" => JetComputeTransformKind::ValueAndGradient,
-//RS         "vjp" => JetComputeTransformKind::Vjp,
-//RS         "jvp" => JetComputeTransformKind::Jvp,
-//RS         _ => return Err(unsupported("checked autodiff transform kind", span)),
-//RS     };
-//RS     let Type::Fn { params, ret: Some(ret), .. } = function_type else {
-//RS         return Err(unsupported("checked autodiff base function type", span));
-//RS     };
-//RS     if args.len() < 2 {
-//RS         return Err(unsupported("checked autodiff arguments", span));
-//RS     }
-//RS     let targets_value = args.pop().unwrap();
-//RS     let targets = as_i64_list(&targets_value, span)?;
-//RS     let function = args.remove(0);
-//RS     let CtValue::Closure(data) = &function else {
-//RS         return Err(unsupported("checked autodiff base callable", span));
-//RS     };
-//RS     let host = data
-//RS         .opaque
-//RS         .as_ref()
-//RS         .and_then(|value| value.downcast_ref::<super::AmbientStandaloneClosure>())
-//RS         .cloned()
-//RS         .ok_or_else(|| unsupported("checked autodiff callable owner", span))?;
-//RS     let (output_type, outcome) = match ret.as_ref() {
-//RS         Type::Result { ok, .. } => (ok.as_ref().clone(), true),
-//RS         ty => (ty.clone(), false),
-//RS     };
-//RS     let shape = match &output_type {
-//RS         Type::Tuple(fields) => JetComputeResultShape::TensorTuple(fields.len()),
-//RS         _ => JetComputeResultShape::Tensor,
-//RS     };
-//RS     let callback_error = std::sync::Arc::new(std::sync::Mutex::new(None));
-//RS     let errors = callback_error.clone();
-//RS     let base = JetComputeBase::new(params.len(), move |inputs| {
-//RS         let invoke = || -> Result<JetComputeBaseResult, Diagnostic> {
-//RS             let value = host.invoke(inputs.iter().map(tensor_to_ct).collect(), span)?;
-//RS             let value = if outcome {
-//RS                 match value {
-//RS                     CtValue::Present(value) => *value,
-//RS                     CtValue::Failed(report) => {
-//RS                         return Err(unsupported(&format!("autodiff base failed: {report:?}"), span));
-//RS                     }
-//RS                     _ => return Err(unsupported("checked autodiff base outcome", span)),
-//RS                 }
-//RS             } else {
-//RS                 value
-//RS             };
-//RS             match &output_type {
-//RS                 Type::Tuple(fields) => {
-//RS                     let CtValue::Struct { fields: values, .. } = &value else {
-//RS                         return Err(unsupported("checked autodiff base tuple", span));
-//RS                     };
-//RS                     let tensors = fields
-//RS                         .iter()
-//RS                         .map(|(name, _)| {
-//RS                             let value = values.iter().find(|(field, _)| field == name)
-//RS                                 .map(|(_, value)| value)
-//RS                                 .ok_or_else(|| unsupported("checked autodiff base tuple field", span))?;
-//RS                             ct_to_tensor(value, span)
-//RS                         })
-//RS                         .collect::<Result<Vec<_>, _>>()?;
-//RS                     Ok(JetComputeBaseResult::TensorTuple(tensors))
-//RS                 }
-//RS                 _ => ct_to_tensor(&value, span).map(JetComputeBaseResult::Tensor),
-//RS             }
-//RS         };
-//RS         invoke().map_err(|error| {
-//RS             let message = error.what.clone();
-//RS             *errors
-//RS                 .lock()
-//RS                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
-//RS             JetComputeError::Unsupported(message)
-//RS         })
-//RS     });
-//RS     let result = match result_type {
-//RS         Type::Fn { ret: Some(ret), .. } => ret.as_ref().clone(),
-//RS         ty => ty.clone(),
-//RS     };
-//RS     let callback = ComputeCallback {
-//RS         handle: JetComputeHandle::new(jet_compute_curried_new(base, kind, &targets, shape)),
-//RS         identity_key: format!("compute.{method}:{}", result.identity_key()),
-//RS         result_type: result,
-//RS         identity_captures: std::sync::Arc::new(vec![function, targets_value]),
-//RS         callback_error,
-//RS     };
-//RS     if matches!(result_type, Type::Fn { .. }) {
-//RS         Ok(callback.into_value())
-//RS     } else {
-//RS         callback.call(args, span)
-//RS     }
-//RS }
-//RS 
-//RS fn autodiff_state(
-//RS     output: &CtValue,
-//RS     anchor: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<JetComputeVjpState, Diagnostic> {
-//RS     let output = ct_to_tensor(output, span)?;
-//RS     let anchor = ct_to_tensor(anchor, span)?;
-//RS     let tape = anchor
-//RS         .trace
-//RS         .as_ref()
-//RS         .and_then(|trace| trace.tape.upgrade())
-//RS         .or_else(|| output.trace.as_ref().and_then(|trace| trace.tape.upgrade()))
-//RS         .unwrap_or_else(jet_compute_empty_tape);
-//RS     Ok(jet_compute_vjp_begin(output, tape))
-//RS }
-//RS 
-//RS fn autodiff_transform_state(
-//RS     method: &str,
-//RS     output: &CtValue,
-//RS     anchor: &CtValue,
-//RS     tangents: &[CtValue],
-//RS     targets: &[i64],
-//RS     span: Span,
-//RS ) -> Result<JetComputeTransformResult, Diagnostic> {
-//RS     let state = autodiff_state(output, anchor, span)?;
-//RS     let tangents = tangents
-//RS         .iter()
-//RS         .map(|value| ct_to_tensor(value, span))
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     jet_compute_transform(method, &state, &tangents, targets).map_err(|error| {
-//RS         unsupported(
-//RS             &format!("compute.{method} autodiff: {}", error.jet_show()),
-//RS             span,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS pub fn autodiff_value(
-//RS     output: &CtValue,
-//RS     anchor: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let state = autodiff_state(output, anchor, span)?;
-//RS     Ok(tensor_to_ct(&jet_compute_remove_trace_level(
-//RS         &state.value,
-//RS         &state.tape,
-//RS     )))
-//RS }
-//RS 
-//RS /// Start one per-call autodiff tape for the Tensor arguments. The returned
-//RS /// values retain the tape through the CtValue boundary; no ambient/global tape
-//RS /// is used.
-//RS pub fn autodiff_trace_inputs(values: &[CtValue], span: Span) -> Result<Vec<CtValue>, Diagnostic> {
-//RS     let inputs = values
-//RS         .iter()
-//RS         .map(|value| ct_to_tensor(value, span))
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     let (tape, tracked) = jet_compute_trace_inputs(inputs);
-//RS     // `tensor_to_ct` places the strong handle in each trace identity.  Keep
-//RS     // this local alive until all tracked arguments have crossed the boundary.
-//RS     let _tape_owner = tape;
-//RS     Ok(tracked.iter().map(tensor_to_ct).collect())
-//RS }
-//RS 
-//RS pub fn autodiff_gradient(
-//RS     output: &CtValue,
-//RS     anchor: &CtValue,
-//RS     targets: &[i64],
-//RS     span: Span,
-//RS ) -> Result<Vec<CtValue>, Diagnostic> {
-//RS     let JetComputeTransformResult::Gradient(values) =
-//RS         autodiff_transform_state("gradient", output, anchor, &[], targets, span)?
-//RS     else {
-//RS         return Err(unsupported("compute.gradient result", span));
-//RS     };
-//RS     Ok(values.iter().map(tensor_to_ct).collect())
-//RS }
-//RS 
-//RS pub fn autodiff_unit_grads(
-//RS     output: &CtValue,
-//RS     anchor: &CtValue,
-//RS     targets: &[i64],
-//RS     span: Span,
-//RS ) -> Result<Vec<CtValue>, Diagnostic> {
-//RS     autodiff_gradient(output, anchor, targets, span)
-//RS }
-//RS 
-//RS pub fn autodiff_nested_gradient(
-//RS     outputs: &[CtValue],
-//RS     anchor: &CtValue,
-//RS     targets: &[i64],
-//RS     span: Span,
-//RS ) -> Result<Vec<Vec<CtValue>>, Diagnostic> {
-//RS     let states = outputs
-//RS         .iter()
-//RS         .map(|output| autodiff_state(output, anchor, span))
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     let gradients = jet_compute_nested_gradient(&states, targets).map_err(|error| {
-//RS         unsupported(
-//RS             &format!("compute.gradient autodiff: {}", error.jet_show()),
-//RS             span,
-//RS         )
-//RS     })?;
-//RS     Ok(gradients
-//RS         .iter()
-//RS         .map(|values| values.iter().map(tensor_to_ct).collect())
-//RS         .collect())
-//RS }
-//RS 
-//RS pub fn autodiff_vjp_pull(
-//RS     output: &CtValue,
-//RS     anchor: &CtValue,
-//RS     seed: &CtValue,
-//RS     targets: &[i64],
-//RS     span: Span,
-//RS ) -> Result<Vec<CtValue>, Diagnostic> {
-//RS     let seed = ct_to_tensor(seed, span)?;
-//RS     let state = match autodiff_transform_state("vjp", output, anchor, &[], targets, span)? {
-//RS         JetComputeTransformResult::Vjp { state, .. } => state,
-//RS         _ => return Err(unsupported("compute.vjp result", span)),
-//RS     };
-//RS     let values = jet_compute_vjp_pull_or_panic(&state, &seed, targets, "compute.vjp.pull");
-//RS     Ok(values.iter().map(tensor_to_ct).collect())
-//RS }
-//RS 
-//RS pub fn autodiff_jvp(
-//RS     output: &CtValue,
-//RS     anchor: &CtValue,
-//RS     tangents: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let JetComputeTransformResult::Jvp { tangent, .. } =
-//RS         autodiff_transform_state("jvp", output, anchor, tangents, &[], span)?
-//RS     else {
-//RS         return Err(unsupported("compute.jvp result", span));
-//RS     };
-//RS     Ok(tensor_to_ct(&tangent))
-//RS }
-//RS 
-//RS fn as_float(value: &CtValue, span: Span) -> Result<f64, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Float(f) => Ok(f.as_f64()),
-//RS         CtValue::Int(n) => Ok(*n as f64),
-//RS         _ => Err(unsupported("Float", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn as_int(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Int(n) => Ok(*n),
-//RS         _ => Err(unsupported("Int", span)),
-//RS     }
-//RS }
-//RS 
-//RS /// Evaluate a `core.compute` call against the shared Prelude (I9).
-//RS pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let one = |i: usize| {
-//RS         args.get(i)
-//RS             .ok_or_else(|| unsupported(&format!("core.compute.{method} arg {i}"), span))
-//RS     };
-//RS     match method {
-//RS         "zeros" => Ok(match jet_compute_zeros(&as_i64_list(one(0)?, span)?) {
-//RS             Ok(t) => ok_tensor(t),
-//RS             Err(e) => err_compute(e),
-//RS         }),
-//RS         "ones" => Ok(match jet_compute_ones(&as_i64_list(one(0)?, span)?) {
-//RS             Ok(t) => ok_tensor(t),
-//RS             Err(e) => err_compute(e),
-//RS         }),
-//RS         "full" => Ok(
-//RS             match jet_compute_full(&as_i64_list(one(0)?, span)?, as_float(one(1)?, span)?) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "from_list" => Ok(match jet_compute_from_list(&as_f64_list(one(0)?, span)?) {
-//RS             Ok(t) => ok_tensor(t),
-//RS             Err(e) => err_compute(e),
-//RS         }),
-//RS         "matrix" => Ok(
-//RS             match jet_compute_matrix(
-//RS                 as_int(one(0)?, span)?,
-//RS                 as_int(one(1)?, span)?,
-//RS                 as_float(one(2)?, span)?,
-//RS             ) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "vec" => Ok(
-//RS             match jet_compute_vec(as_int(one(0)?, span)?, as_float(one(1)?, span)?) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "add" => Ok(
-//RS             match jet_compute_add(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "mul" => Ok(
-//RS             match jet_compute_mul(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "matmul" => Ok(
-//RS             match jet_compute_matmul(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "reshape" => Ok(
-//RS             match jet_compute_reshape(&ct_to_tensor(one(0)?, span)?, &as_i64_list(one(1)?, span)?) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "get" => Ok(
-//RS             match jet_compute_get(&ct_to_tensor(one(0)?, span)?, &as_i64_list(one(1)?, span)?) {
-//RS                 Ok(v) => CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(v)))),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "set" => {
-//RS             let handle = tensor_handle_state(one(0)?, span)?;
-//RS             let mut tensor = handle
-//RS                 .tensor
-//RS                 .lock()
-//RS                 .map_err(|_| unsupported("Tensor handle", span))?;
-//RS             match jet_compute_set(
-//RS                 &mut *tensor,
-//RS                 &as_i64_list(one(1)?, span)?,
-//RS                 as_float(one(2)?, span)?,
-//RS             ) {
-//RS                 Ok(()) => {
-//RS                     let snapshot = (*tensor).clone();
-//RS                     drop(tensor);
-//RS                     Ok(CtValue::Present(Box::new(CtValue::Struct {
-//RS                         type_name: "__JetComputeSet".to_string(),
-//RS                         fields: vec![
-//RS                             (
-//RS                                 "tensor".to_string(),
-//RS                                 tensor_to_ct_with_handle(
-//RS                                     &snapshot,
-//RS                                     std::sync::Arc::clone(&handle.tensor),
-//RS                                     handle.valid,
-//RS                                     true,
-//RS                                 ),
-//RS                             ),
-//RS                             ("unit".to_string(), CtValue::Unit),
-//RS                         ],
-//RS                     })))
-//RS                 }
-//RS                 Err(e) => Ok(err_compute(e)),
-//RS             }
-//RS         }
-//RS         "shape" => Ok(CtValue::List(
-//RS             jet_compute_tensor_shape(&ct_to_tensor(one(0)?, span)?)
-//RS                 .into_iter()
-//RS                 .map(CtValue::Int)
-//RS                 .collect(),
-//RS         )),
-//RS         "rank" => Ok(CtValue::Int(jet_compute_tensor_rank(&ct_to_tensor(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "numel" => Ok(CtValue::Int(jet_compute_tensor_numel(&ct_to_tensor(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "to_list" => Ok(CtValue::List(
-//RS             jet_compute_tensor_to_list(&ct_to_tensor(one(0)?, span)?)
-//RS                 .into_iter()
-//RS                 .map(|v| CtValue::Float(CtFloat::f64(v)))
-//RS                 .collect(),
-//RS         )),
-//RS         "device" => Ok(CtValue::Str(jet_compute_tensor_device(&ct_to_tensor(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "placement" => Ok(CtValue::Str(jet_compute_tensor_placement(&ct_to_tensor(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "device_cpu" => Ok(device_to_ct(jet_compute_device_cpu())),
-//RS         "device_auto" => Ok(device_to_ct(jet_compute_device_auto())),
-//RS         "device_metal" => Ok(device_to_ct(jet_compute_device_metal())),
-//RS         "device_cuda" => Ok(device_to_ct(jet_compute_device_cuda())),
-//RS         "device_vulkan" => Ok(device_to_ct(jet_compute_device_vulkan())),
-//RS         "device_webgpu" => Ok(device_to_ct(jet_compute_device_webgpu())),
-//RS         "on_device" => Ok(
-//RS             match jet_compute_on_device(&ct_to_tensor(one(0)?, span)?, ct_to_device(one(1)?, span)?)
-//RS             {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         // #1136 ndarray slice — broadcast / ufunc / transpose / sum_axis
-//RS         "broadcast_to" => Ok(
-//RS             match jet_compute_broadcast_to(
-//RS                 &ct_to_tensor(one(0)?, span)?,
-//RS                 &as_i64_list(one(1)?, span)?,
-//RS             ) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "transpose" => Ok(match jet_compute_transpose(&ct_to_tensor(one(0)?, span)?) {
-//RS             Ok(t) => ok_tensor(t),
-//RS             Err(e) => err_compute(e),
-//RS         }),
-//RS         "sum_axis" => Ok(
-//RS             match jet_compute_sum_axis(&ct_to_tensor(one(0)?, span)?, as_int(one(1)?, span)?) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "negate" | "abs" | "exp" | "log" | "sqrt" => Ok(
-//RS             match jet_compute_unary(method, &ct_to_tensor(one(0)?, span)?) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "sub" | "div" | "maximum" | "minimum" => Ok(
-//RS             match jet_compute_binary(
-//RS                 method,
-//RS                 &ct_to_tensor(one(0)?, span)?,
-//RS                 &ct_to_tensor(one(1)?, span)?,
-//RS             ) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "eye" => Ok(match jet_compute_eye(as_int(one(0)?, span)?) {
-//RS             Ok(t) => ok_tensor(t),
-//RS             Err(e) => err_compute(e),
-//RS         }),
-//RS         "det" => Ok(match jet_compute_det(&ct_to_tensor(one(0)?, span)?) {
-//RS             Ok(v) => CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(v)))),
-//RS             Err(e) => err_compute(e),
-//RS         }),
-//RS         "inv" | "fft" => {
-//RS             let tensor = ct_to_tensor(one(0)?, span)?;
-//RS             Ok(
-//RS                 match if method == "inv" {
-//RS                     jet_compute_inv(&tensor)
-//RS                 } else {
-//RS                     jet_compute_fft(&tensor)
-//RS                 } {
-//RS                     Ok(t) => ok_tensor(t),
-//RS                     Err(e) => err_compute(e),
-//RS                 },
-//RS             )
-//RS         }
-//RS         "solve" => Ok(
-//RS             match jet_compute_solve(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "stream_new" => Ok(stream_to_ct(&jet_compute_stream_new())),
-//RS         "stream_new_on" => Ok(
-//RS             match jet_compute_stream_new_on_device(ct_to_device(one(0)?, span)?) {
-//RS                 Ok(stream) => stream_to_ct(&stream),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "stream_sync" => Ok(
-//RS             match jet_compute_stream_sync(&ct_to_stream(one(0)?, span)?) {
-//RS                 Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "stream_show" => Ok(CtValue::Str(jet_compute_stream_show(&ct_to_stream(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "transfer" => Ok(
-//RS             match jet_compute_transfer(&ct_to_tensor(one(0)?, span)?, ct_to_device(one(1)?, span)?)
-//RS             {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "transfer_show" => Ok(CtValue::Str(jet_compute_transfer_show(&ct_to_tensor(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "kernel_bounds_ok" => Ok(
-//RS             match jet_compute_kernel_bounds_ok(
-//RS                 &as_i64_list(one(0)?, span)?,
-//RS                 &as_i64_list(one(1)?, span)?,
-//RS             ) {
-//RS                 Ok(b) => CtValue::Present(Box::new(CtValue::Bool(b))),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "mse_loss" => Ok(
-//RS             match jet_compute_mse_loss(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?)
-//RS             {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "sgd_step" => Ok(
-//RS             match jet_compute_sgd_step(
-//RS                 &ct_to_tensor(one(0)?, span)?,
-//RS                 &ct_to_tensor(one(1)?, span)?,
-//RS                 as_float(one(2)?, span)?,
-//RS             ) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "serialize" => Ok(match jet_compute_serialize(&ct_to_tensor(one(0)?, span)?) {
-//RS             Ok(payload) => CtValue::Present(Box::new(CtValue::Str(payload))),
-//RS             Err(e) => err_compute(e),
-//RS         }),
-//RS         "deserialize" => {
-//RS             let payload = match one(0)? {
-//RS                 CtValue::Str(s) => s.clone(),
-//RS                 _ => return Err(unsupported("serialize payload", span)),
-//RS             };
-//RS             Ok(match jet_compute_deserialize(&payload) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             })
-//RS         }
-//RS         "to_sparse" => Ok(match jet_compute_to_sparse(&ct_to_tensor(one(0)?, span)?) {
-//RS             Ok(s) => ok_sparse(s),
-//RS             Err(e) => err_compute(e),
-//RS         }),
-//RS         "sparse_nnz" => Ok(CtValue::Int(jet_compute_sparse_nnz(&ct_to_sparse(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "sparse_mv" => Ok(
-//RS             match jet_compute_sparse_mv(
-//RS                 &ct_to_sparse(one(0)?, span)?,
-//RS                 &ct_to_tensor(one(1)?, span)?,
-//RS             ) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "sparse_show" => Ok(CtValue::Str(jet_compute_sparse_show(&ct_to_sparse(
-//RS             one(0)?,
-//RS             span,
-//RS         )?))),
-//RS         "matmul_f32_tile" => Ok(
-//RS             match jet_compute_matmul_f32_tile(
-//RS                 &ct_to_tensor(one(0)?, span)?,
-//RS                 &ct_to_tensor(one(1)?, span)?,
-//RS             ) {
-//RS                 Ok(t) => ok_tensor(t),
-//RS                 Err(e) => err_compute(e),
-//RS             },
-//RS         ),
-//RS         "profile_f32_strict" | "profile_show" => Ok(CtValue::Str(jet_compute_profile_show())),
-//RS         _ => Err(unsupported(&format!("`core.compute.{method}()`"), span)),
-//RS     }
-//RS }
-//RS 
-//RS /// Unpack only `set`'s success payload. Failed results stay untouched so the
-//RS /// caller can return the canonical Prelude error without mutating its place.
-//RS pub fn take_set_ok(value: &CtValue) -> Option<(CtValue, CtValue)> {
-//RS     let CtValue::Present(inner) = value else {
-//RS         return None;
-//RS     };
-//RS     let CtValue::Struct { type_name, fields } = inner.as_ref() else {
-//RS         return None;
-//RS     };
-//RS     if type_name != "__JetComputeSet" {
-//RS         return None;
-//RS     }
-//RS     let tensor = fields.iter().find(|(n, _)| n == "tensor")?.1.clone();
-//RS     Some((tensor, CtValue::Present(Box::new(CtValue::Unit))))
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod backend_tests {
-//RS     use super::*;
-//RS 
-//RS     fn f32_tensor(shape: Vec<i64>, values: Vec<f32>) -> JetTensor {
-//RS         let mut tensor = jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu).unwrap();
-//RS         tensor.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
-//RS         tensor.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
-//RS         tensor.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
-//RS             .iter()
-//RS             .map(|ability| (*ability).to_string())
-//RS             .collect();
-//RS         jet_compute_validate_tensor(&tensor).unwrap();
-//RS         tensor
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn scalar_access_rejects_invalid_tensor_storage() {
-//RS         let mut tensor = jet_compute_full(&vec![2], 1.0).unwrap();
-//RS         tensor.data = std::sync::Arc::new(vec![1.0, f64::NAN]);
-//RS         assert!(matches!(
-//RS             jet_compute_get(&tensor, &[0]),
-//RS             Err(JetComputeError::Arithmetic(_))
-//RS         ));
-//RS         assert!(matches!(
-//RS             jet_compute_set(&mut tensor, &[0], 2.0),
-//RS             Err(JetComputeError::Arithmetic(_))
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn portable_backend_seams_use_real_vulkan_and_fail_closed_webgpu() {
-//RS         let cpu = f32_tensor(vec![2], vec![2.0, 3.0]);
-//RS         let vulkan = jet_compute_on_device(&cpu, JetComputeDevice::Vulkan);
-//RS         if jet_compute_vulkan::available() {
-//RS             let vulkan = vulkan.expect("available Vulkan must accept placement");
-//RS             let result = jet_compute_binary("add", &vulkan, &vulkan).unwrap();
-//RS             assert_eq!(jet_compute_tensor_values(&result), vec![4.0, 6.0]);
-//RS             assert_eq!(result.last_placement.backend, VULKAN_BACKEND);
-//RS 
-//RS             let unary = jet_compute_unary("sqrt", &result).unwrap();
-//RS             let unary_values = jet_compute_tensor_values(&unary);
-//RS             assert_eq!(unary_values[0], 2.0);
-//RS             assert!((unary_values[1] - 6.0_f32.sqrt() as f64).abs() <= 1e-6);
-//RS 
-//RS             let left = jet_compute_on_device(
-//RS                 &f32_tensor(vec![1, 2], vec![1.0, 2.0]),
-//RS                 JetComputeDevice::Vulkan,
-//RS             )
-//RS             .unwrap();
-//RS             let right = jet_compute_on_device(
-//RS                 &f32_tensor(vec![2, 1], vec![3.0, 4.0]),
-//RS                 JetComputeDevice::Vulkan,
-//RS             )
-//RS             .unwrap();
-//RS             let product = jet_compute_matmul(&left, &right).unwrap();
-//RS             assert_eq!(jet_compute_tensor_values(&product), vec![11.0]);
-//RS             let reduced = jet_compute_sum_axis(&product, 0).unwrap();
-//RS             assert_eq!(jet_compute_tensor_values(&reduced), vec![11.0]);
-//RS 
-//RS             let prediction = jet_compute_on_device(
-//RS                 &f32_tensor(vec![2], vec![3.0, 1.0]),
-//RS                 JetComputeDevice::Vulkan,
-//RS             )
-//RS             .unwrap();
-//RS             let target = jet_compute_on_device(
-//RS                 &f32_tensor(vec![2], vec![1.0, 1.0]),
-//RS                 JetComputeDevice::Vulkan,
-//RS             )
-//RS             .unwrap();
-//RS             let (tape, traced) = jet_compute_trace_inputs(vec![prediction, target]);
-//RS             let loss = jet_compute_mse_loss(&traced[0], &traced[1]).unwrap();
-//RS             assert_eq!(jet_compute_tensor_values(&loss), vec![2.0]);
-//RS             let state = jet_compute_vjp_begin(loss, tape);
-//RS             let seed = jet_compute_gradient_seed(&state).unwrap();
-//RS             let gradients = jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap();
-//RS             assert_eq!(jet_compute_tensor_values(&gradients[0]), vec![2.0, 0.0]);
-//RS             assert_eq!(jet_compute_tensor_values(&gradients[1]), vec![-2.0, 0.0]);
-//RS 
-//RS             let parameter = jet_compute_on_device(
-//RS                 &f32_tensor(vec![2], vec![3.0, 1.0]),
-//RS                 JetComputeDevice::Vulkan,
-//RS             )
-//RS             .unwrap();
-//RS             let gradient = jet_compute_on_device(
-//RS                 &f32_tensor(vec![2], vec![1.0, 2.0]),
-//RS                 JetComputeDevice::Vulkan,
-//RS             )
-//RS             .unwrap();
-//RS             let updated = jet_compute_sgd_step(&parameter, &gradient, 0.5).unwrap();
-//RS             assert_eq!(jet_compute_tensor_values(&updated), vec![2.5, 0.0]);
-//RS 
-//RS             let downloaded = jet_compute_transfer(&result, JetComputeDevice::Cpu).unwrap();
-//RS             assert_eq!(jet_compute_tensor_values(&downloaded), vec![4.0, 6.0]);
-//RS             assert_eq!(downloaded.last_transfer.unwrap().bytes, 8);
-//RS             let stream = jet_compute_stream_new_on_device(JetComputeDevice::Vulkan).unwrap();
-//RS             assert!(stream.vulkan.is_some());
-//RS             jet_compute_stream_sync(&stream).unwrap();
-//RS         } else {
-//RS             assert!(matches!(
-//RS                 vulkan,
-//RS                 Err(JetComputeError::Unsupported(_)) | Err(JetComputeError::Device(_))
-//RS             ));
-//RS         }
-//RS         assert!(matches!(
-//RS             jet_compute_on_device(&cpu, JetComputeDevice::WebGpu),
-//RS             Err(JetComputeError::Unsupported(_)) | Err(JetComputeError::Device(_))
-//RS         ));
-//RS         let f64_tensor = jet_compute_full(&vec![1], 2.0).unwrap();
-//RS         assert!(matches!(
-//RS             jet_compute_on_device(&f64_tensor, JetComputeDevice::Vulkan),
-//RS             Err(JetComputeError::Unsupported(_))
-//RS         ));
-//RS     }
-//RS }
-//RS 
-//RS #[allow(dead_code)]
-//RS fn _type_anchor() -> Type {
-//RS     Type::Named("Tensor".to_string())
-//RS }
-// END-PORT-PENDING 0575 crates/jet-comptime/src/Comptime/ComputeLite.rs:1-2112
-
+// D-COMPUTE1=D / I9: the ambient boundary marshals values; shared compute owns tensor law.
+use jet_comptime.Comptime.CollectionEval.collection_semantics.[jet_simd_reduce_fixed_iter, JetSimdScalar]
+use jet_comptime.Comptime.Diagnostics.unsupported
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.AST.[ClosureData, CtFloat, CtOpaque, CtReport, CtValue, Lambda, LambdaBody, LambdaMeta, Type]
+use jet_foundation.Outcome.*
+use jet_codegen.Prelude.Core.RangeBounds.jet_range_bounds
+use jet_codegen.Prelude.Core.ViewAccess.*
+use jet_codegen.Prelude.Core.ParallelKernel.*
+use jet_codegen.Prelude.CoreLib.Top.Compute.*
+use jet_comptime.Comptime.[AmbientStandaloneClosure, StandaloneClosureHost, history_callback_fingerprint]
+use std.sync.[Arc, Mutex, PoisonError]
+use std.sync.atomic.[AtomicBool, Ordering]
+use jet_compute_cuda
+use jet_compute_vulkan
+// GATE #4494: Arc/Weak, Mutex, AtomicBool and opaque callback identity use real native primitives.
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:16
+trait JetShow { fn jet_show(self) -> String }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:20
+trait JetDisplay { fn jet_display(self) -> String }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:37
+struct JetRange { start: I64, end: I64, exclusive: Bool }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:42
+fn jet_panic(file: String, line: U32, msg: String) -> Never {
+    jet_foundation.ice(None, "{msg} (at {file}:{line})")
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:52
+fn device_to_ct(device: JetComputeDevice) -> CtValue {
+    variant := device == { Auto -> "Auto"; Cpu -> "CPU"; Metal -> "Metal"; Cuda -> "CUDA"; Vulkan -> "Vulkan"; WebGpu -> "WebGPU" }
+    CtValue.Enum { type_name: "ComputeDevice", variant, args: [] }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:67
+fn ct_to_device(value: &CtValue, span: Span) -> JetComputeDevice Diagnostic! {
+    value == {
+        Enum { type_name, variant, .. } if type_name == "ComputeDevice" -> variant == {
+            "Auto" -> JetComputeDevice.Auto; "CPU" | "Cpu" -> JetComputeDevice.Cpu
+            "Metal" | "METAL" -> JetComputeDevice.Metal; "CUDA" | "Cuda" -> JetComputeDevice.Cuda
+            "Vulkan" | "VULKAN" -> JetComputeDevice.Vulkan; "WebGPU" | "WEBGPU" | "Webgpu" -> JetComputeDevice.WebGpu
+            _ -> { fail unsupported("ComputeDevice variant", span) }
+        }
+        Str("Auto") -> JetComputeDevice.Auto; Str("CPU") | Str("Cpu") -> JetComputeDevice.Cpu
+        Str("Metal") | Str("METAL") -> JetComputeDevice.Metal; Str("CUDA") | Str("Cuda") -> JetComputeDevice.Cuda
+        Str("Vulkan") | Str("VULKAN") -> JetComputeDevice.Vulkan
+        Str("WebGPU") | Str("WEBGPU") | Str("Webgpu") -> JetComputeDevice.WebGpu
+        _ -> { fail unsupported("ComputeDevice", span) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:92
+fn receipt_to_ct(receipt: &JetComputePlacementReceipt) -> CtValue {
+    CtValue.Struct { type_name: "ComputePlacement", fields: [
+        ("requested", device_to_ct(receipt.requested)), ("selected", device_to_ct(receipt.selected)),
+        ("backend", CtValue.Str(receipt.backend.clone())), ("version", CtValue.Str(receipt.version.clone())),
+        ("profile", CtValue.Str(receipt.profile.clone())), ("cache", CtValue.Str(receipt.cache.clone())),
+        ("abilities", CtValue.List(receipt.abilities.iter().map(fn(s) { CtValue.Str(s.clone()) }).collect())),
+        ("reason", CtValue.Str(receipt.reason.clone()))
+    ] }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:118
+fn ct_to_receipt(value: &CtValue, span: Span) -> JetComputePlacementReceipt Diagnostic! {
+    (type_name, fields) := value == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("ComputePlacement", span) } }
+    if type_name != "ComputePlacement" && type_name != "JetComputePlacementReceipt" { fail unsupported("ComputePlacement", span) }
+    field := fn(name) { fields.iter().find(fn(e) { e.0 == name }).map(fn(e) { e.1 }).ok_or_else(fn() { unsupported("ComputePlacement field", span) }) }
+    requested := ct_to_device(field("requested")?, span)?
+    selected := ct_to_device(field("selected")?, span)?
+    text := fn(name) { field(name)? == { Str(s) if !s.is_empty() && !s.chars().any(fn(c) { c.is_control() }) -> s.clone(); _ -> { fail unsupported("ComputePlacement text field", span) } } }
+    abilities := field("abilities")? == {
+        List(values) -> values.iter().map(fn(v) { v == { Str(s) if !s.is_empty() && !s.chars().any(fn(c) { c.is_control() }) -> s.clone(); _ -> { fail unsupported("ComputePlacement ability", span) } } }).collect()?
+        _ -> { fail unsupported("ComputePlacement abilities", span) }
+    }
+    reason := field("reason")? == { Str(s) if !s.is_empty() && !s.chars().any(fn(c) { c.is_control() }) -> s.clone(); _ -> { fail unsupported("placement reason", span) } }
+    receipt := JetComputePlacementReceipt { requested, selected, backend: text("backend")?, version: text("version")?, profile: text("profile")?, cache: text("cache")?, abilities, reason }
+    jet_compute_validate_placement(receipt.selected, &receipt).map_err(fn(error) { unsupported("ComputePlacement metadata: {error.jet_show()}", span) })?
+    receipt
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:173
+fn transfer_to_ct(transfer: &JetComputeTransferReceipt) -> CtValue {
+    CtValue.Struct { type_name: "ComputeTransfer", fields: [("from", device_to_ct(transfer.from)), ("to", device_to_ct(transfer.to)), ("bytes", CtValue.Int(transfer.bytes)), ("fallback", CtValue.Str(transfer.fallback.clone()))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:188
+fn ct_to_transfer(value: &CtValue, span: Span) -> JetComputeTransferReceipt Diagnostic! {
+    (type_name, fields) := value == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("ComputeTransfer", span) } }
+    if type_name != "ComputeTransfer" && type_name != "JetComputeTransferReceipt" { fail unsupported("ComputeTransfer", span) }
+    field := fn(name) { fields.iter().find(fn(e) { e.0 == name }).map(fn(e) { e.1 }).ok_or_else(fn() { unsupported("ComputeTransfer field", span) }) }
+    from := ct_to_device(field("from")?, span)?; to := ct_to_device(field("to")?, span)?
+    bytes := field("bytes")? == { Int(n) if n >= 0 -> n; _ -> { fail unsupported("transfer bytes", span) } }
+    fallback := field("fallback")? == { Str(s) if !s.is_empty() && !s.chars().any(fn(c) { c.is_control() }) -> s.clone(); _ -> { fail unsupported("transfer fallback", span) } }
+    JetComputeTransferReceipt { from, to, bytes, fallback }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:220
+fn tape_rule_to_ct(rule: JetComputeTapeRule?) -> CtValue {
+    rule := rule == { Val(r) -> r; None -> { return CtValue.Str("input") } }
+    (kind, source_shape, axis) := rule == {
+        Add -> ("add", None, None); Sub -> ("sub", None, None); Mul -> ("mul", None, None); Div -> ("div", None, None)
+        Maximum -> ("maximum", None, None); Minimum -> ("minimum", None, None); Matmul -> ("matmul", None, None)
+        MatmulF32Tile -> ("matmul_f32_tile", None, None); MseLoss -> ("mse_loss", None, None); SgdStep { .. } -> ("sgd_step", None, None)
+        Unary(op) -> (op, None, None); Reshape { source_shape } -> ("reshape", Val(source_shape), None)
+        Broadcast { source_shape } -> ("broadcast", Val(source_shape), None); ReduceToShape { source_shape } -> ("reduce_to_shape", Val(source_shape), None)
+        Transpose -> ("transpose", None, None); SumAxis { axis, source_shape } -> ("sum_axis", Val(source_shape), Val(axis as I64))
+    }
+    fields := [("kind", CtValue.Str(kind.to_string()))]
+    if source_shape == Val(shape) { fields.push(("source_shape", CtValue.List(shape.iter().map(fn(v) { CtValue.Int(v) }).collect()))) }
+    if axis == Val(axis) { fields.push(("axis", CtValue.Int(axis))) }
+    if rule == SgdStep { learning_rate } { fields.push(("learning_rate", CtValue.Float(CtFloat.f64(learning_rate)))) }
+    CtValue.Struct { type_name: "__JetComputeRule", fields }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:269
+struct JetComputeTapeHandle { tape: Arc<Mutex<JetComputeTape>> }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:273
+const TENSOR_HANDLE_FIELD: String = "__jet_tensor_handle"
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:276
+struct JetComputeTensorHandle { tensor: Arc<Mutex<JetTensor>>, valid: Arc<AtomicBool> }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:282
+struct JetComputeWindowHandle { valid: Arc<AtomicBool>, tensor_valid: Arc<AtomicBool> }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:287
+fn tape_handle_to_ct(tape: Arc<Mutex<JetComputeTape>>) -> CtValue {
+    CtValue.Closure(Arc.new(ClosureData {
+        lambda: Lambda { take_names: [], params: [], result_type: None, error_type: None, effects: None, body: LambdaBody.Block([]), span: Span.new(0, 0), meta: LambdaMeta.default() },
+        captured: [:], return_type: None, opaque: Val(CtOpaque.new(JetComputeTapeHandle { tape }))
+    }))
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:305
+fn tensor_handle_to_ct(tensor: Arc<Mutex<JetTensor>>, valid: Arc<AtomicBool>) -> CtValue {
+    CtValue.Closure(Arc.new(ClosureData {
+        lambda: Lambda { take_names: [], params: [], result_type: None, error_type: None, effects: None, body: LambdaBody.Block([]), span: Span.new(0, 0), meta: LambdaMeta.default() },
+        captured: [:], return_type: None, opaque: Val(CtOpaque.new(JetComputeTensorHandle { tensor, valid }))
+    }))
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:326
+fn opaque_closure<T: std.any.Any + Send + Sync>(opaque: T) -> CtValue {
+    CtValue.Closure(Arc.new(ClosureData {
+        lambda: Lambda { take_names: [], params: [], result_type: None, error_type: None, effects: None, body: LambdaBody.Block([]), span: Span.new(0, 0), meta: LambdaMeta.default() },
+        captured: [:], return_type: None, opaque: Val(CtOpaque.new(opaque))
+    }))
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:344
+const TENSOR_WINDOW_HANDLE_FIELD: String = "__jet_tensor_window_handle"
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:346
+pub fn tensor_window_handle(value: &CtValue, span: Span) -> CtValue Diagnostic! {
+    tensor := tensor_handle_state(value, span)?
+    opaque_closure(JetComputeWindowHandle { valid: Arc.new(AtomicBool.new(true)), tensor_valid: tensor.valid })
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:354
+pub fn tensor_window_is_live(fields: &[(String, CtValue)]) -> Bool {
+    value := fields.iter().find(fn(e) { e.0 == TENSOR_WINDOW_HANDLE_FIELD }).map(fn(e) { e.1 }) == { Val(v) -> v; None -> { return true } }
+    data := value == { Closure(data) -> data; _ -> { return false } }
+    data.opaque.as_ref().and_then(fn(o) { o.downcast_ref<JetComputeWindowHandle>() }).is_some_and(fn(h) { h.valid.load(Ordering.Acquire) && h.tensor_valid.load(Ordering.Acquire) })
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:376
+pub fn tensor_window_drop_value(value: &CtValue, span: Span) -> Unit Diagnostic! {
+    fields := value == { Struct { fields, .. } -> fields; _ -> { fail unsupported("Tensor window", span) } }
+    value := fields.iter().find(fn(e) { e.0 == TENSOR_WINDOW_HANDLE_FIELD }).map(fn(e) { e.1 }) == { Val(v) -> v; None -> { return () } }
+    data := value == { Closure(data) -> data; _ -> { fail unsupported("Tensor window handle", span) } }
+    handle := data.opaque.as_ref().and_then(fn(o) { o.downcast_ref<JetComputeWindowHandle>() }).ok_or_else(fn() { unsupported("Tensor window handle", span) })?
+    handle.valid.store(false, Ordering.Release)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:401
+pub fn tensor_window_values_share_handle(left: &CtValue, right: &CtValue) -> Bool {
+    handle := fn(value) {
+        fields := value == { Struct { fields, .. } -> fields; _ -> { return None } }
+        data := fields.iter().find(fn(e) { e.0 == TENSOR_WINDOW_HANDLE_FIELD }).map(fn(e) { e.1 })? == { Closure(data) -> data; _ -> { return None } }
+        data.opaque.as_ref().and_then(fn(o) { o.downcast_ref<JetComputeWindowHandle>() }).map(fn(h) { Arc.clone(&h.valid) })
+    }
+    handle(left).zip(handle(right)).is_some_and(fn(pair) { Arc.ptr_eq(&pair.0, &pair.1) })
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:423
+fn tensor_handle_from_fields(fields: &[(String, CtValue)], span: Span) -> JetComputeTensorHandle? Diagnostic! {
+    value := fields.iter().find(fn(e) { e.0 == TENSOR_HANDLE_FIELD }).map(fn(e) { e.1 }) == { Val(v) -> v; None -> { return None } }
+    data := value == { Closure(data) -> data; _ -> { fail unsupported("Tensor handle", span) } }
+    handle := data.opaque.as_ref().and_then(fn(o) { o.downcast_ref<JetComputeTensorHandle>() }).filter(fn(h) { h.valid.load(Ordering.Acquire) }).cloned().ok_or_else(fn() { unsupported("Tensor handle", span) })?
+    Val(handle)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:446
+fn tensor_handle_state(value: &CtValue, span: Span) -> JetComputeTensorHandle Diagnostic! {
+    fields := value == { Struct { fields, .. } -> fields; _ -> { fail unsupported("Tensor", span) } }
+    tensor_handle_from_fields(fields, span)?.ok_or_else(fn() { unsupported("Tensor handle", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:453
+fn trace_to_ct(trace: &JetComputeTrace) -> CtValue {
+    tape_handle := trace.tape.upgrade().unwrap_or_else(fn() { jet_panic("ComputeLite::trace_to_ct", 457, "autodiff tape ended before its trace was marshalled") })
+    tape := tape_handle.lock().unwrap_or_else(fn(_) { jet_panic("ComputeLite::trace_to_ct", 464, "autodiff tape is poisoned") })
+    nodes := tape.nodes.iter().map(fn(node) {
+        CtValue.Struct { type_name: "__JetComputeNode", fields: [
+            ("parents", CtValue.List(node.parents.iter().map(fn(p) { CtValue.Int(p.map_or(-1, fn(v) { v as I64 })) }).collect())),
+            ("rule", tape_rule_to_ct(node.rule.as_ref())),
+            ("values", CtValue.List(node.values.iter().map(fn(v) { tensor_to_ct_inner(v, false) }).collect())),
+            ("output", tensor_to_ct_inner(&node.output, false))
+        ] }
+    }).collect()
+    inputs := CtValue.List(tape.inputs.iter().map(fn(v) { tensor_to_ct_inner(v, false) }).collect())
+    drop(tape)
+    fields := [("identity", tape_handle_to_ct(tape_handle)), ("node", CtValue.Int(trace.node as I64)), ("inputs", inputs), ("nodes", CtValue.List(nodes))]
+    if trace.parent == Val(parent) { fields.push(("parent", CtValue.Present(Box.new(trace_to_ct(parent))))) }
+    CtValue.Struct { type_name: "__JetComputeTrace", fields }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:525
+fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
+    handle := Arc.new(Mutex.new(tensor.clone())); valid := Arc.new(AtomicBool.new(true))
+    tensor_to_ct_with_handle(tensor, handle, valid, true)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:531
+fn tensor_to_ct_inner(tensor: &JetTensor, include_trace: Bool) -> CtValue {
+    handle := Arc.new(Mutex.new(tensor.clone())); valid := Arc.new(AtomicBool.new(true))
+    tensor_to_ct_with_handle(tensor, handle, valid, include_trace)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:537
+fn tensor_to_ct_with_handle(tensor: &JetTensor, handle: Arc<Mutex<JetTensor>>, valid: Arc<AtomicBool>, include_trace: Bool) -> CtValue {
+    // The opaque shared handle owns storage; only bounded metadata crosses here.
+    jet_compute_validate_tensor(tensor).unwrap_or_else(fn(error) { jet_panic("ComputeLite::tensor_to_ct", 548, "invalid Tensor result: {error.jet_show()}") })
+    strides := jet_compute_row_major_strides(&tensor.shape).unwrap_or_else(fn(error) { jet_panic("ComputeLite::tensor_to_ct", 557, "invalid Tensor view metadata: {error.jet_show()}") })
+    fields := [
+        ("shape", CtValue.List(tensor.shape.iter().map(fn(d) { CtValue.Int(d) }).collect())),
+        ("strides", CtValue.List(strides.iter().map(fn(d) { CtValue.Int(d) }).collect())),
+        ("device", device_to_ct(tensor.device)), ("last_placement", receipt_to_ct(&tensor.last_placement)),
+        ("last_transfer", tensor.last_transfer.as_ref().map(transfer_to_ct).map(fn(v) { CtValue.Present(Box.new(v)) }).unwrap_or_else(fn() { CtValue.absent(Type.Named("ComputeTransfer")) }))
+    ]
+    if include_trace { if tensor.trace == Val(trace) { fields.push(("autodiff", CtValue.Present(Box.new(trace_to_ct(trace))))) } }
+    fields.push((TENSOR_HANDLE_FIELD.to_string(), tensor_handle_to_ct(handle, valid)))
+    CtValue.Struct { type_name: "Tensor", fields }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:603
+fn as_i64_list(value: &CtValue, span: Span) -> [I64] Diagnostic! {
+    value == { List(xs) -> xs.iter().map(fn(x) { x == { Int(n) -> n; _ -> { fail unsupported("Int list element", span) } } }).collect()?; _ -> { fail unsupported("[Int]", span) } }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:616
+fn as_f64_list(value: &CtValue, span: Span) -> [F64] Diagnostic! {
+    value == { List(xs) -> xs.iter().map(fn(x) { x == { Float(f) -> f.as_f64(); Int(n) -> n as F64; _ -> { fail unsupported("Float list element", span) } } }).collect()?; _ -> { fail unsupported("[Float]", span) } }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:630
+fn tape_rule_from_ct(value: &CtValue, span: Span) -> JetComputeTapeRule? Diagnostic! {
+    kind := value == {
+        Str(kind) -> kind
+        Struct { type_name, fields } if type_name == "__JetComputeRule" -> fields.iter().find_map(fn(e) { if e.0 == "kind" { Val(e.1) } else { None } }).and_then(fn(v) { v == { Str(k) -> Val(k); _ -> None } }).ok_or_else(fn() { unsupported("autodiff tape rule", span) })?
+        _ -> { fail unsupported("autodiff tape rule", span) }
+    }
+    if kind == "input" { return None }
+    fields := value == { Struct { fields, .. } -> fields; _ -> { fail unsupported("autodiff tape rule", span) } }
+    source_shape := fn() { v := fields.iter().find_map(fn(e) { if e.0 == "source_shape" { Val(e.1) } else { None } }).ok_or_else(fn() { unsupported("autodiff source shape", span) })?; as_i64_list(v, span)? }
+    axis := fn() { fields.iter().find_map(fn(e) { if e.0 == "axis" { Val(e.1) } else { None } }).and_then(fn(v) { v == { Int(axis) -> Val(axis); _ -> None } }).ok_or_else(fn() { unsupported("autodiff reduction axis", span) })? }
+    learning_rate := fn() {
+        v := fields.iter().find_map(fn(e) { if e.0 == "learning_rate" { Val(e.1) } else { None } }).ok_or_else(fn() { unsupported("autodiff learning rate", span) })?
+        v == { Float(rate) -> rate.as_f64(); Int(rate) -> rate as F64; _ -> { fail unsupported("autodiff learning rate", span) } }
+    }
+    Val(kind == {
+        "add" -> JetComputeTapeRule.Add; "sub" -> JetComputeTapeRule.Sub; "mul" -> JetComputeTapeRule.Mul; "div" -> JetComputeTapeRule.Div
+        "maximum" -> JetComputeTapeRule.Maximum; "minimum" -> JetComputeTapeRule.Minimum; "matmul" -> JetComputeTapeRule.Matmul
+        "matmul_f32_tile" -> JetComputeTapeRule.MatmulF32Tile; "mse_loss" -> JetComputeTapeRule.MseLoss
+        "sgd_step" -> JetComputeTapeRule.SgdStep { learning_rate: learning_rate()? }
+        "negate" | "abs" | "exp" | "log" | "sqrt" -> JetComputeTapeRule.Unary(kind.to_string())
+        "reshape" -> JetComputeTapeRule.Reshape { source_shape: source_shape()? }; "broadcast" -> JetComputeTapeRule.Broadcast { source_shape: source_shape()? }
+        "reduce_to_shape" -> JetComputeTapeRule.ReduceToShape { source_shape: source_shape()? }; "transpose" -> JetComputeTapeRule.Transpose
+        "sum_axis" -> JetComputeTapeRule.SumAxis { axis: USize.try_from(axis()?).map_err(fn(_) { unsupported("autodiff reduction axis", span) })?, source_shape: source_shape()? }
+        _ -> { fail unsupported("autodiff tape operation", span) }
+    })
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:713
+fn trace_from_ct(value: &CtValue, span: Span) -> JetComputeTrace Diagnostic! {
+    (type_name, fields) := value == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("autodiff trace", span) } }
+    if type_name != "__JetComputeTrace" { fail unsupported("autodiff trace", span) }
+    field := fn(name) { fields.iter().find(fn(e) { e.0 == name }).map(fn(e) { e.1 }).ok_or_else(fn() { unsupported("autodiff trace field", span) }) }
+    tape_handle := field("identity")? == {
+        Closure(data) -> data.opaque.as_ref().and_then(fn(o) { o.downcast_ref<JetComputeTapeHandle>() }).map(fn(h) { h.tape.clone() }).ok_or_else(fn() { unsupported("autodiff trace identity", span) })?
+        _ -> { fail unsupported("autodiff trace identity", span) }
+    }
+    node := field("node")? == { Int(n) if n >= 0 -> USize.try_from(n).map_err(fn(_) { unsupported("autodiff trace node", span) })?; _ -> { fail unsupported("autodiff trace node", span) } }
+    _inputs := field("inputs")? == { List(vs) -> vs.iter().map(fn(v) { ct_to_tensor_inner(v, span, false) }).collect()?; _ -> { fail unsupported("autodiff trace inputs", span) } }
+    nodes := field("nodes")? == {
+        List(vs) -> vs.iter().map(fn(v) {
+            (type_name, fields) := v == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("autodiff tape node", span) } }
+            if type_name != "__JetComputeNode" { fail unsupported("autodiff tape node", span) }
+            node_field := fn(name) { fields.iter().find(fn(e) { e.0 == name }).map(fn(e) { e.1 }).ok_or_else(fn() { unsupported("autodiff tape node field", span) }) }
+            parents := node_field("parents")? == {
+                List(vs) -> vs.iter().map(fn(v) { v == { Int(n) if n < 0 -> None; Int(n) -> Val(USize.try_from(n).map_err(fn(_) { unsupported("autodiff parent", span) })?); _ -> { fail unsupported("autodiff parent", span) } } }).collect()?
+                _ -> { fail unsupported("autodiff parents", span) }
+            }
+            rule := tape_rule_from_ct(node_field("rule")?, span)?
+            values := node_field("values")? == { List(vs) -> vs.iter().map(fn(v) { ct_to_tensor_inner(v, span, false) }).collect()?; _ -> { fail unsupported("autodiff node values", span) } }
+            output := ct_to_tensor_inner(node_field("output")?, span, false)?
+            JetComputeTapeNode { parents, rule, values, output }
+        }).collect()?
+        _ -> { fail unsupported("autodiff trace nodes", span) }
+    }
+    if node >= nodes.len() { fail unsupported("autodiff trace node", span) }
+    parent := fields.iter().find(fn(e) { e.0 == "parent" }).map(fn(e) { e.1 }) == {
+        Val(Present(v)) -> Val(Box.new(trace_from_ct(v, span)?)); Val(Failed(Clean(_))) | None -> None
+        Val(_) -> { fail unsupported("autodiff trace parent", span) }
+    }
+    JetComputeTrace { tape: Arc.downgrade(&tape_handle), node, parent }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:817
+fn ct_to_tensor(value: &CtValue, span: Span) -> JetTensor Diagnostic! { ct_to_tensor_inner(value, span, true)? }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:821
+pub fn autodiff_tensor_to_ct(tensor: &JetTensor) -> CtValue { tensor_to_ct(tensor) }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:825
+pub fn autodiff_tensor_from_ct(value: &CtValue, span: Span) -> JetTensor Diagnostic! { ct_to_tensor(value, span)? }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:829
+pub fn autodiff_error_message(error: &JetComputeError) -> String { error.jet_show() }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:833
+fn ct_to_tensor_inner(value: &CtValue, span: Span, include_trace: Bool) -> JetTensor Diagnostic! {
+    (type_name, fields) := value == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("Tensor", span) } }
+    if type_name != "Tensor" && type_name != "JetTensor" { fail unsupported("Tensor", span) }
+    handle := tensor_handle_from_fields(fields, span)?.ok_or_else(fn() { unsupported("Tensor handle", span) })?
+    tensor := handle.tensor.lock().map_err(fn(_) { unsupported("Tensor handle", span) })?.clone()
+    if !include_trace { tensor.trace = None }
+    jet_compute_validate_tensor(&tensor).map_err(fn(e) { unsupported("Tensor metadata: {e.jet_show()}", span) })?
+    if tensor.last_transfer == Val(receipt) { jet_compute_validate_transfer_receipt(&tensor, receipt).map_err(fn(e) { unsupported("Tensor transfer metadata: {e.jet_show()}", span) })? }
+    tensor
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:867
+fn tensor_window_args(args: &[CtValue], span: Span) -> (I64, I64, Bool) Diagnostic! {
+    args == {
+        [Struct { type_name, fields }] if type_name == jet_foundation.Syntax.TYPE_RANGE -> {
+            field := fn(name) { fields.iter().find(fn(e) { e.0 == name }).map(fn(e) { e.1 }) }
+            start := field("start") == { Val(Int(v)) -> v; _ -> { fail unsupported("Range.start", span) } }
+            end := field("end") == { Val(Int(v)) -> v; _ -> { fail unsupported("Range.end", span) } }
+            (start, end, field("exclusive") == { Val(Bool(true)) -> true; _ -> false })
+        }
+        [Int(start), Int(end)] -> (start, end, false)
+        _ -> { fail unsupported("Tensor view range", span) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:898
+pub fn tensor_view_window(value: &CtValue, args: &[CtValue], span: Span) -> (USize, USize) Diagnostic! {
+    tensor := ct_to_tensor(value, span)?; (start, end, exclusive) := tensor_window_args(args, span)?
+    jet_compute_view_checked(&tensor, start, end, exclusive).map(fn(v) { (0, v.len()) }).map_err(fn(e) { unsupported("Tensor view: {e.jet_show()}", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:913
+pub fn tensor_view_mut_window(value: &CtValue, args: &[CtValue], span: Span) -> (USize, USize) Diagnostic! {
+    handle := tensor_handle_state(value, span)?; tensor := handle.tensor.lock().map_err(fn(_) { unsupported("Tensor handle", span) })?
+    (start, end, exclusive) := tensor_window_args(args, span)?
+    view := jet_compute_view_mut_checked(&tensor, start, end, exclusive).map_err(fn(e) { unsupported("Tensor mutable view: {e.jet_show()}", span) })?
+    len := USize.try_from(view.len()).map_err(fn(_) { unsupported("Tensor mutable view length", span) })?
+    (0, len)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:936
+pub fn tensor_view_get_value(value: &CtValue, args: &[CtValue], index: I64, span: Span) -> CtValue Diagnostic! {
+    tensor := ct_to_tensor(value, span)?; (start, end, exclusive) := tensor_window_args(args, span)?
+    jet_compute_window_get(&tensor, start, end, exclusive, index).map(fn(v) { CtValue.Float(CtFloat.f64(v)) }).map_err(fn(e) { unsupported("Tensor view: {e}", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:949
+pub fn tensor_view_set_value(value: &CtValue, args: &[CtValue], index: I64, replacement: &CtValue, span: Span) -> CtValue Diagnostic! {
+    handle := tensor_handle_state(value, span)?; tensor := handle.tensor.lock().map_err(fn(_) { unsupported("Tensor handle", span) })?
+    (start, end, exclusive) := tensor_window_args(args, span)?; replacement := as_float(replacement, span)?
+    jet_compute_window_set(&tensor, start, end, exclusive, index, replacement).map_err(fn(e) { unsupported("Tensor view: {e}", span) })?
+    snapshot := tensor.clone(); drop(tensor)
+    tensor_to_ct_with_handle(&snapshot, Arc.clone(&handle.tensor), handle.valid, true)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:975
+pub fn tensor_view_list(value: &CtValue, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    tensor := ct_to_tensor(value, span)?; (start, end, exclusive) := tensor_window_args(args, span)?
+    view := jet_compute_view_checked(&tensor, start, end, exclusive).map_err(fn(e) { unsupported("Tensor view: {e.jet_show()}", span) })?
+    CtValue.List(view.iter().map(fn(v) { CtValue.Float(CtFloat.f64(v)) }).collect())
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:991
+pub fn tensor_to_list_value(value: &CtValue, span: Span) -> CtValue Diagnostic! {
+    tensor := ct_to_tensor(value, span)?
+    CtValue.List(jet_compute_tensor_to_list(&tensor).into_iter().map(fn(v) { CtValue.Float(CtFloat.f64(v)) }).collect())
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1001
+pub fn tensor_slice_value(value: &CtValue, start: I64, end: I64, exclusive: Bool, span: Span) -> CtValue Diagnostic! {
+    tensor := ct_to_tensor(value, span)?
+    jet_compute_slice_checked(&tensor, start, end, exclusive).map(fn(v) { tensor_to_ct(&v) }).map_err(fn(e) { unsupported("Tensor slice: {e.jet_show()}", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1014
+pub fn tensor_copy_value(value: &CtValue, span: Span) -> CtValue Diagnostic! {
+    tensor := ct_to_tensor(value, span)?
+    jet_compute_copy_checked(&tensor).map(fn(v) { tensor_to_ct(&v) }).map_err(fn(e) { unsupported("Tensor copy: {e.jet_show()}", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1024
+pub fn tensor_clone_value(value: &CtValue, span: Span) -> CtValue Diagnostic! {
+    tensor := ct_to_tensor(value, span)?; cloned := tensor.clone()
+    tensor_to_ct(&cloned)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1030
+pub fn tensor_drop_value(value: &CtValue, span: Span) -> Unit Diagnostic! {
+    fields := value == { Struct { fields, .. } -> fields; _ -> { fail unsupported("Tensor", span) } }
+    value := fields.iter().find(fn(e) { e.0 == TENSOR_HANDLE_FIELD }).map(fn(e) { e.1 }).ok_or_else(fn() { unsupported("Tensor handle", span) })?
+    data := value == { Closure(data) -> data; _ -> { fail unsupported("Tensor handle", span) } }
+    handle := data.opaque.as_ref().and_then(fn(o) { o.downcast_ref<JetComputeTensorHandle>() }).ok_or_else(fn() { unsupported("Tensor handle", span) })?
+    handle.valid.store(false, Ordering.Release)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1053
+pub fn tensor_values_share_handle(left: &CtValue, right: &CtValue) -> Bool {
+    handle := fn(value) {
+        fields := value == { Struct { fields, .. } -> fields; _ -> { return None } }
+        data := fields.iter().find(fn(e) { e.0 == TENSOR_HANDLE_FIELD }).map(fn(e) { e.1 })? == { Closure(data) -> data; _ -> { return None } }
+        data.opaque.as_ref().and_then(fn(o) { o.downcast_ref<JetComputeTensorHandle>() }).map(fn(h) { Arc.clone(&h.valid) })
+    }
+    handle(left).zip(handle(right)).is_some_and(fn(pair) { Arc.ptr_eq(&pair.0, &pair.1) })
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1075
+pub fn tensor_replace_data(value: &CtValue, items: [CtValue], span: Span) -> CtValue Diagnostic! {
+    handle := tensor_handle_state(value, span)?; tensor := handle.tensor.lock().map_err(fn(_) { unsupported("Tensor handle", span) })?
+    values := as_f64_list(&CtValue.List(items), span)?
+    if values.len() != jet_compute_tensor_values(&tensor).len() { fail unsupported("Tensor write-back length", span) }
+    jet_compute_replace_data_checked(&tensor, values).map_err(fn(e) { unsupported("Tensor write-back: {e.jet_show()}", span) })?
+    snapshot := tensor.clone(); drop(tensor)
+    tensor_to_ct_with_handle(&snapshot, Arc.clone(&handle.tensor), handle.valid, true)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1101
+fn map_err(err: JetComputeError) -> CtValue {
+    (variant, message) := err == { InvalidShape(m) -> ("InvalidShape", m); RankMismatch(m) -> ("RankMismatch", m); OutOfBounds(m) -> ("OutOfBounds", m); Device(m) -> ("Device", m); Unsupported(m) -> ("Unsupported", m); Arithmetic(m) -> ("Arithmetic", m); Serialization(m) -> ("Serialization", m) }
+    CtValue.Enum { type_name: "ComputeError", variant, args: [(None, CtValue.Str(message))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1118
+fn stream_to_ct(s: &JetComputeStream) -> CtValue { CtValue.Struct { type_name: "ComputeStream", fields: [("id", CtValue.Int(s.id)), ("device", device_to_ct(s.device))] } }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1128
+fn ct_to_stream(value: &CtValue, span: Span) -> JetComputeStream Diagnostic! {
+    (type_name, fields) := value == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("ComputeStream", span) } }
+    if type_name != "ComputeStream" && type_name != "JetComputeStream" { fail unsupported("ComputeStream", span) }
+    field := fn(name) { fields.iter().find(fn(e) { e.0 == name }).map(fn(e) { e.1 }).ok_or_else(fn() { unsupported("ComputeStream field", span) }) }
+    device := ct_to_device(field("device")?, span)?
+    // GATE #4494: create actual CUDA/Vulkan provider streams, never a success substitute.
+    cuda := if device == JetComputeDevice.Cuda { Val(Arc.new(jet_compute_cuda.stream_new().map_err(fn(_) { unsupported("CUDA compute stream", span) })?)) } else { None }
+    vulkan := if device == JetComputeDevice.Vulkan { Val(Arc.new(jet_compute_vulkan.stream_new().map_err(fn(_) { unsupported("Vulkan compute stream", span) })?)) } else { None }
+    id := field("id")? == { Int(n) if n > 0 -> n; _ -> { fail unsupported("compute stream id", span) } }
+    JetComputeStream { id, device, cuda, vulkan }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1169
+fn sparse_to_ct(s: &JetSparseCsr) -> CtValue {
+    CtValue.Struct { type_name: "SparseTensor", fields: [("rows", CtValue.Int(s.rows)), ("cols", CtValue.Int(s.cols)),
+        ("row_ptr", CtValue.List(s.row_ptr.iter().map(fn(v) { CtValue.Int(v) }).collect())),
+        ("col_idx", CtValue.List(s.col_idx.iter().map(fn(v) { CtValue.Int(v) }).collect())),
+        ("values", CtValue.List(s.values.iter().map(fn(v) { CtValue.Float(CtFloat.f64(v)) }).collect()))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1196
+fn ct_to_sparse(value: &CtValue, span: Span) -> JetSparseCsr Diagnostic! {
+    (type_name, fields) := value == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("SparseTensor", span) } }
+    if type_name != "SparseTensor" && type_name != "JetSparseCsr" { fail unsupported("SparseTensor", span) }
+    field := fn(name) { fields.iter().find(fn(e) { e.0 == name }).map(fn(e) { e.1 }).ok_or_else(fn() { unsupported("SparseTensor field", span) }) }
+    rows := field("rows")? == { Int(n) -> n; _ -> { fail unsupported("sparse rows", span) } }
+    cols := field("cols")? == { Int(n) -> n; _ -> { fail unsupported("sparse cols", span) } }
+    sparse := JetSparseCsr { rows, cols, row_ptr: as_i64_list(field("row_ptr")?, span)?, col_idx: as_i64_list(field("col_idx")?, span)?, values: as_f64_list(field("values")?, span)? }
+    jet_compute_validate_sparse(&sparse).map_err(fn(e) { unsupported("SparseTensor metadata: {e.jet_show()}", span) })?
+    sparse
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1232
+fn ok_sparse(s: JetSparseCsr) -> CtValue { CtValue.Present(Box.new(sparse_to_ct(&s))) }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1236
+fn ok_tensor(tensor: JetTensor) -> CtValue { CtValue.Present(Box.new(tensor_to_ct(&tensor))) }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1240
+fn err_compute(err: JetComputeError) -> CtValue { CtValue.failed(Box.new(map_err(err))) }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1245
+struct ComputeCallback {
+    handle: JetComputeHandle, result_type: Type, identity_key: String,
+    identity_captures: Arc<[CtValue]>, callback_error: Arc<Mutex<Diagnostic?>>
+}
+impl ComputeCallback {
+    // Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1254
+    fn into_value(self) -> CtValue {
+        result_type := self.result_type.clone()
+        CtValue.Closure(Arc.new(ClosureData {
+            lambda: Lambda { take_names: [], params: [], result_type: Val(result_type.clone()), error_type: None, effects: None, body: LambdaBody.Block([]), span: Span.new(0, 0), meta: LambdaMeta.default() },
+            captured: [:], return_type: Val(result_type), opaque: Val(CtOpaque.new(AmbientStandaloneClosure.new(self)))
+        }))
+    }
+    // Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1273
+    fn call(self, args: [CtValue], span: Span) -> CtValue Diagnostic! {
+        tensors := args.iter().map(fn(v) { ct_to_tensor(v, span) }).collect()?
+        result := jet_compute_call_curried(self.handle.raw(), JetComputeInputPack.from_flat(tensors))
+        if self.callback_error.lock().unwrap_or_else(PoisonError.into_inner).take() == Val(error) { fail error }
+        result := result.map_err(fn(e) { unsupported("autodiff: {e.jet_show()}", span) })?
+        result == {
+            Gradient(gradients) -> gradient_to_ct(gradients, &self.result_type, span)?
+            ValueAndGradient { value, gradients } -> {
+                fields := self.result_type == { Tuple(fields) -> fields; _ -> { fail unsupported("checked value-and-gradient result type", span) } }
+                gradient_type := fields == { [_, (_, gradient_type)] -> gradient_type; _ -> { fail unsupported("checked value-and-gradient result fields", span) } }
+                tuple_to_ct([tensor_to_ct(&value), gradient_to_ct(gradients, gradient_type, span)?], &self.result_type, span)?
+            }
+            Jvp { value, tangent } -> tuple_to_ct([tensor_to_ct(&value), tensor_to_ct(&tangent)], &self.result_type, span)?
+            Vjp { value, pull, grads } -> {
+                pull := JetComputeHandle.new(pull); grads := JetComputeHandle.new(grads)
+                (name, types) := self.result_type == { Apply { name, args } -> (name, args); _ -> { fail unsupported("checked VJPRun result type", span) } }
+                gradient_type := types == { [t] -> t; _ -> { fail unsupported("checked VJPRun gradient type", span) } }
+                captures := Arc.new([self.clone().into_value(), CtValue.List(args)])
+                continuation := fn(handle, role) { ComputeCallback { handle, result_type: gradient_type.clone(), identity_key: "compute.vjp.{role}", identity_captures: captures.clone(), callback_error: self.callback_error.clone() }.into_value() }
+                CtValue.Struct { type_name: name.clone(), fields: [("value", tensor_to_ct(&value)), ("pull", continuation(pull, "pull")), ("grads", continuation(grads, "grads"))] }
+            }
+        }
+    }
+}
+impl StandaloneClosureHost for ComputeCallback {
+    // Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1355
+    fn invoke(self, args: [CtValue], span: Span) -> CtValue Diagnostic! { self.call(args, span)? }
+    // Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1359
+    fn history_callback_identity(self) -> String Err! { history_callback_fingerprint(&self.identity_key, &self.identity_captures)? }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1364
+fn tuple_to_ct(values: [CtValue], ty: &Type, span: Span) -> CtValue Diagnostic! {
+    fields := ty == { Tuple(fields) -> fields; _ -> { fail unsupported("checked autodiff tuple type", span) } }
+    if values.len() != fields.len() { fail unsupported("checked autodiff tuple arity", span) }
+    CtValue.Struct { type_name: "tuple", fields: fields.iter().zip(values).map(fn(pair) { (pair.0.0.clone(), pair.1) }).collect() }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1381
+fn gradient_to_ct(gradients: [[JetTensor]], ty: &Type, span: Span) -> CtValue Diagnostic! {
+    fields := ty == { Tuple(fields) -> fields; _ -> { fail unsupported("checked gradient result type", span) } }
+    if gradients.len() != fields.len() { fail unsupported("checked gradient result arity", span) }
+    values := gradients.into_iter().zip(fields).map(fn(pair) {
+        (values, (_, field_type)) := pair
+        field_type.as_ref() == {
+            Tuple(_) -> tuple_to_ct(values.iter().map(tensor_to_ct).collect(), field_type, span)?
+            _ -> { value := values == { [v] -> v; _ -> { fail unsupported("checked gradient Tensor result", span) } }; tensor_to_ct(value) }
+        }
+    }).collect()?
+    tuple_to_ct(values, ty, span)?
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1411
+pub fn autodiff_transform(method: String, args: [CtValue], function_type: &Type, result_type: &Type, span: Span) -> CtValue Diagnostic! {
+    kind := method == { "gradient" -> JetComputeTransformKind.Gradient; "value_and_gradient" -> JetComputeTransformKind.ValueAndGradient; "vjp" -> JetComputeTransformKind.Vjp; "jvp" -> JetComputeTransformKind.Jvp; _ -> { fail unsupported("checked autodiff transform kind", span) } }
+    (params, ret) := function_type == { Fn { params, ret: Val(ret), .. } -> (params, ret); _ -> { fail unsupported("checked autodiff base function type", span) } }
+    if args.len() < 2 { fail unsupported("checked autodiff arguments", span) }
+    targets_value := args.pop().unwrap(); targets := as_i64_list(&targets_value, span)?; function := args.remove(0)
+    data := function == { Closure(data) -> data; _ -> { fail unsupported("checked autodiff base callable", span) } }
+    host := data.opaque.as_ref().and_then(fn(v) { v.downcast_ref<AmbientStandaloneClosure>() }).cloned().ok_or_else(fn() { unsupported("checked autodiff callable owner", span) })?
+    (output_type, outcome) := ret.as_ref() == { Result { ok, .. } -> (ok.as_ref().clone(), true); ty -> (ty.clone(), false) }
+    shape := output_type == { Tuple(fields) -> JetComputeResultShape.TensorTuple(fields.len()); _ -> JetComputeResultShape.Tensor }
+    callback_error := Arc.new(Mutex.new(None)); errors := callback_error.clone()
+    base := JetComputeBase.new(params.len(), fn(inputs) {
+        invoke := fn() -> JetComputeBaseResult Diagnostic! {
+            value := host.invoke(inputs.iter().map(tensor_to_ct).collect(), span)?
+            value := if outcome { value == { Present(v) -> v; Failed(report) -> { fail unsupported("autodiff base failed: {report:?}", span) }; _ -> { fail unsupported("checked autodiff base outcome", span) } } } else { value }
+            output_type == {
+                Tuple(fields) -> {
+                    values := value == { Struct { fields, .. } -> fields; _ -> { fail unsupported("checked autodiff base tuple", span) } }
+                    tensors := fields.iter().map(fn(e) {
+                        value := values.iter().find(fn(v) { v.0 == e.0 }).map(fn(v) { v.1 }).ok_or_else(fn() { unsupported("checked autodiff base tuple field", span) })?
+                        ct_to_tensor(value, span)?
+                    }).collect()?
+                    JetComputeBaseResult.TensorTuple(tensors)
+                }
+                _ -> JetComputeBaseResult.Tensor(ct_to_tensor(&value, span)?)
+            }
+        }
+        try { invoke()? } catch(error) {
+            message := error.what.clone()
+            slot := errors.lock().unwrap_or_else(PoisonError.into_inner); *slot = Val(error)
+            fail JetComputeError.Unsupported(message)
+        }
+    })
+    result := result_type == { Fn { ret: Val(ret), .. } -> ret.as_ref().clone(); ty -> ty.clone() }
+    callback := ComputeCallback { handle: JetComputeHandle.new(jet_compute_curried_new(base, kind, &targets, shape)), identity_key: "compute.{method}:{result.identity_key()}", result_type: result, identity_captures: Arc.new([function, targets_value]), callback_error }
+    result_type == { Fn { .. } -> callback.into_value(); _ -> callback.call(args, span)? }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1512
+fn autodiff_state(output: &CtValue, anchor: &CtValue, span: Span) -> JetComputeVjpState Diagnostic! {
+    output := ct_to_tensor(output, span)?; anchor := ct_to_tensor(anchor, span)?
+    tape := anchor.trace.as_ref().and_then(fn(t) { t.tape.upgrade() }).or_else(fn() { output.trace.as_ref().and_then(fn(t) { t.tape.upgrade() }) }).unwrap_or_else(jet_compute_empty_tape)
+    jet_compute_vjp_begin(output, tape)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1528
+fn autodiff_transform_state(method: String, output: &CtValue, anchor: &CtValue, tangents: &[CtValue], targets: &[I64], span: Span) -> JetComputeTransformResult Diagnostic! {
+    state := autodiff_state(output, anchor, span)?; tangents := tangents.iter().map(fn(v) { ct_to_tensor(v, span) }).collect()?
+    jet_compute_transform(method, &state, &tangents, targets).map_err(fn(e) { unsupported("compute.{method} autodiff: {e.jet_show()}", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1549
+pub fn autodiff_value(output: &CtValue, anchor: &CtValue, span: Span) -> CtValue Diagnostic! {
+    state := autodiff_state(output, anchor, span)?
+    tensor_to_ct(&jet_compute_remove_trace_level(&state.value, &state.tape))
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1564
+pub fn autodiff_trace_inputs(values: &[CtValue], span: Span) -> [CtValue] Diagnostic! {
+    inputs := values.iter().map(fn(v) { ct_to_tensor(v, span) }).collect()?
+    (tape, tracked) := jet_compute_trace_inputs(inputs)
+    // Keep strong tape ownership until all trace identities have crossed the boundary.
+    _tape_owner := tape
+    tracked.iter().map(tensor_to_ct).collect()
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1576
+pub fn autodiff_gradient(output: &CtValue, anchor: &CtValue, targets: &[I64], span: Span) -> [CtValue] Diagnostic! {
+    values := autodiff_transform_state("gradient", output, anchor, &[], targets, span)? == { Gradient(values) -> values; _ -> { fail unsupported("compute.gradient result", span) } }
+    values.iter().map(tensor_to_ct).collect()
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1590
+pub fn autodiff_unit_grads(output: &CtValue, anchor: &CtValue, targets: &[I64], span: Span) -> [CtValue] Diagnostic! { autodiff_gradient(output, anchor, targets, span)? }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1599
+pub fn autodiff_nested_gradient(outputs: &[CtValue], anchor: &CtValue, targets: &[I64], span: Span) -> [[CtValue]] Diagnostic! {
+    states := outputs.iter().map(fn(v) { autodiff_state(v, anchor, span) }).collect()?
+    gradients := jet_compute_nested_gradient(&states, targets).map_err(fn(e) { unsupported("compute.gradient autodiff: {e.jet_show()}", span) })?
+    gradients.iter().map(fn(vs) { vs.iter().map(tensor_to_ct).collect() }).collect()
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1621
+pub fn autodiff_vjp_pull(output: &CtValue, anchor: &CtValue, seed: &CtValue, targets: &[I64], span: Span) -> [CtValue] Diagnostic! {
+    seed := ct_to_tensor(seed, span)?
+    state := autodiff_transform_state("vjp", output, anchor, &[], targets, span)? == { Vjp { state, .. } -> state; _ -> { fail unsupported("compute.vjp result", span) } }
+    values := jet_compute_vjp_pull_or_panic(&state, &seed, targets, "compute.vjp.pull")
+    values.iter().map(tensor_to_ct).collect()
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1637
+pub fn autodiff_jvp(output: &CtValue, anchor: &CtValue, tangents: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    tangent := autodiff_transform_state("jvp", output, anchor, tangents, &[], span)? == { Jvp { tangent, .. } -> tangent; _ -> { fail unsupported("compute.jvp result", span) } }
+    tensor_to_ct(&tangent)
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1651
+fn as_float(value: &CtValue, span: Span) -> F64 Diagnostic! { value == { Float(f) -> f.as_f64(); Int(n) -> n as F64; _ -> { fail unsupported("Float", span) } } }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1659
+fn as_int(value: &CtValue, span: Span) -> I64 Diagnostic! { value == { Int(n) -> n; _ -> { fail unsupported("Int", span) } } }
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1667
+pub fn apply(method: String, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    one := fn(i: USize) { args.get(i).ok_or_else(fn() { unsupported("core.compute.{method} arg {i}", span) }) }
+    method == {
+        "zeros" -> jet_compute_zeros(&as_i64_list(one(0)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "ones" -> jet_compute_ones(&as_i64_list(one(0)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "full" -> jet_compute_full(&as_i64_list(one(0)?, span)?, as_float(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "from_list" -> jet_compute_from_list(&as_f64_list(one(0)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "matrix" -> jet_compute_matrix(as_int(one(0)?, span)?, as_int(one(1)?, span)?, as_float(one(2)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "vec" -> jet_compute_vec(as_int(one(0)?, span)?, as_float(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "add" -> jet_compute_add(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "mul" -> jet_compute_mul(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "matmul" -> jet_compute_matmul(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "reshape" -> jet_compute_reshape(&ct_to_tensor(one(0)?, span)?, &as_i64_list(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "get" -> jet_compute_get(&ct_to_tensor(one(0)?, span)?, &as_i64_list(one(1)?, span)?) == { Ok(v) -> CtValue.Present(Box.new(CtValue.Float(CtFloat.f64(v)))); Err(e) -> err_compute(e) }
+        "set" -> {
+            handle := tensor_handle_state(one(0)?, span)?; tensor := handle.tensor.lock().map_err(fn(_) { unsupported("Tensor handle", span) })?
+            jet_compute_set(&tensor, &as_i64_list(one(1)?, span)?, as_float(one(2)?, span)?) == {
+                Ok(()) -> {
+                    snapshot := tensor.clone(); drop(tensor)
+                    CtValue.Present(Box.new(CtValue.Struct { type_name: "__JetComputeSet", fields: [("tensor", tensor_to_ct_with_handle(&snapshot, Arc.clone(&handle.tensor), handle.valid, true)), ("unit", CtValue.Unit)] }))
+                }
+                Err(e) -> err_compute(e)
+            }
+        }
+        "shape" -> CtValue.List(jet_compute_tensor_shape(&ct_to_tensor(one(0)?, span)?).into_iter().map(CtValue.Int).collect())
+        "rank" -> CtValue.Int(jet_compute_tensor_rank(&ct_to_tensor(one(0)?, span)?))
+        "numel" -> CtValue.Int(jet_compute_tensor_numel(&ct_to_tensor(one(0)?, span)?))
+        "to_list" -> CtValue.List(jet_compute_tensor_to_list(&ct_to_tensor(one(0)?, span)?).into_iter().map(fn(v) { CtValue.Float(CtFloat.f64(v)) }).collect())
+        "device" -> CtValue.Str(jet_compute_tensor_device(&ct_to_tensor(one(0)?, span)?))
+        "placement" -> CtValue.Str(jet_compute_tensor_placement(&ct_to_tensor(one(0)?, span)?))
+        "device_cpu" -> device_to_ct(jet_compute_device_cpu()); "device_auto" -> device_to_ct(jet_compute_device_auto())
+        "device_metal" -> device_to_ct(jet_compute_device_metal()); "device_cuda" -> device_to_ct(jet_compute_device_cuda())
+        "device_vulkan" -> device_to_ct(jet_compute_device_vulkan()); "device_webgpu" -> device_to_ct(jet_compute_device_webgpu())
+        "on_device" -> jet_compute_on_device(&ct_to_tensor(one(0)?, span)?, ct_to_device(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "broadcast_to" -> jet_compute_broadcast_to(&ct_to_tensor(one(0)?, span)?, &as_i64_list(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "transpose" -> jet_compute_transpose(&ct_to_tensor(one(0)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "sum_axis" -> jet_compute_sum_axis(&ct_to_tensor(one(0)?, span)?, as_int(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "negate" | "abs" | "exp" | "log" | "sqrt" -> jet_compute_unary(method, &ct_to_tensor(one(0)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "sub" | "div" | "maximum" | "minimum" -> jet_compute_binary(method, &ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "eye" -> jet_compute_eye(as_int(one(0)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "det" -> jet_compute_det(&ct_to_tensor(one(0)?, span)?) == { Ok(v) -> CtValue.Present(Box.new(CtValue.Float(CtFloat.f64(v)))); Err(e) -> err_compute(e) }
+        "inv" | "fft" -> {
+            tensor := ct_to_tensor(one(0)?, span)?
+            result := if method == "inv" { jet_compute_inv(&tensor) } else { jet_compute_fft(&tensor) }
+            result == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        }
+        "solve" -> jet_compute_solve(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "stream_new" -> stream_to_ct(&jet_compute_stream_new())
+        "stream_new_on" -> jet_compute_stream_new_on_device(ct_to_device(one(0)?, span)?) == { Ok(s) -> stream_to_ct(&s); Err(e) -> err_compute(e) }
+        "stream_sync" -> jet_compute_stream_sync(&ct_to_stream(one(0)?, span)?) == { Ok(()) -> CtValue.Present(Box.new(CtValue.Unit)); Err(e) -> err_compute(e) }
+        "stream_show" -> CtValue.Str(jet_compute_stream_show(&ct_to_stream(one(0)?, span)?))
+        "transfer" -> jet_compute_transfer(&ct_to_tensor(one(0)?, span)?, ct_to_device(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "transfer_show" -> CtValue.Str(jet_compute_transfer_show(&ct_to_tensor(one(0)?, span)?))
+        "kernel_bounds_ok" -> jet_compute_kernel_bounds_ok(&as_i64_list(one(0)?, span)?, &as_i64_list(one(1)?, span)?) == { Ok(b) -> CtValue.Present(Box.new(CtValue.Bool(b))); Err(e) -> err_compute(e) }
+        "mse_loss" -> jet_compute_mse_loss(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "sgd_step" -> jet_compute_sgd_step(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?, as_float(one(2)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "serialize" -> jet_compute_serialize(&ct_to_tensor(one(0)?, span)?) == { Ok(p) -> CtValue.Present(Box.new(CtValue.Str(p))); Err(e) -> err_compute(e) }
+        "deserialize" -> {
+            payload := one(0)? == { Str(s) -> s.clone(); _ -> { fail unsupported("serialize payload", span) } }
+            jet_compute_deserialize(&payload) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        }
+        "to_sparse" -> jet_compute_to_sparse(&ct_to_tensor(one(0)?, span)?) == { Ok(s) -> ok_sparse(s); Err(e) -> err_compute(e) }
+        "sparse_nnz" -> CtValue.Int(jet_compute_sparse_nnz(&ct_to_sparse(one(0)?, span)?))
+        "sparse_mv" -> jet_compute_sparse_mv(&ct_to_sparse(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "sparse_show" -> CtValue.Str(jet_compute_sparse_show(&ct_to_sparse(one(0)?, span)?))
+        "matmul_f32_tile" -> jet_compute_matmul_f32_tile(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) == { Ok(t) -> ok_tensor(t); Err(e) -> err_compute(e) }
+        "profile_f32_strict" | "profile_show" -> CtValue.Str(jet_compute_profile_show())
+        _ -> { fail unsupported("`core.compute.{method}()`", span) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:1979
+pub fn take_set_ok(value: &CtValue) -> (CtValue, CtValue)? {
+    inner := value == { Present(inner) -> inner; _ -> { return None } }
+    (type_name, fields) := inner.as_ref() == { Struct { type_name, fields } -> (type_name, fields); _ -> { return None } }
+    if type_name != "__JetComputeSet" { return None }
+    tensor := fields.iter().find(fn(e) { e.0 == "tensor" })?.1.clone()
+    Val((tensor, CtValue.Present(Box.new(CtValue.Unit))))
+}
+// Rust: crates/jet-comptime/src/Comptime/ComputeLite.rs:2110
+fn _type_anchor() -> Type { Type.Named("Tensor") }

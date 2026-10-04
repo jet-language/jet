@@ -1,345 +1,159 @@
-// PORT-PENDING 0524 crates-jet-codegen-src-codegen-tir-subset-patterns-module-group: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:1-341
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::AST::{BinOp, Expr, PatSlot, Pattern, StructPatField};
-//RS use crate::Codegen::Cx;
-//RS use crate::Codegen::TIR::expr_in_subset;
-//RS use crate::Syntax;
-//RS use std::collections::HashSet;
-//RS 
-//RS /// c109 Phase 15: an arm head that `emit_switch_arm_cond` would emit as a PLAIN
-//RS /// expression (`_ => emit_expr(cond)`) — NOT a variant/Eq-to-variant pattern (which it
-//RS /// routes through `emit_pattern_matches`) and NOT an arm-head range (shape B). This is
-//RS /// the comparison/Bool arm of the general mixed switch (shape D).
-//RS pub(crate) fn arm_is_plain_cond(cx: &Cx, cond: &Expr, subject: &Expr) -> bool {
-//RS     // A variant or Eq-to-variant arm → `emit_pattern_matches` (excluded here).
-//RS     if arm_variant_pattern(cx, cond, subject).is_some() {
-//RS         return false;
-//RS     }
-//RS     // An arm-head range → shape B / `emit_pattern_matches` Range (excluded here).
-//RS     if arm_head_range(cx, cond, subject).is_some() {
-//RS         return false;
-//RS     }
-//RS     // Any other pattern test (`ok`/`err`/`value`/`null`/`present`/wildcard) → not a
-//RS     // plain comparison; exclude (those are shape C or unsupported).
-//RS     if matches!(cond, Expr::PatternTest { .. }) {
-//RS         return false;
-//RS     }
-//RS     true
-//RS }
-//RS 
-//RS /// D-PARSESTR1: a str-match arm head over the switch subject — an
-//RS /// interpolation literal in pattern position (`subject == "prefix-{id:Int}"`).
-//RS pub(crate) fn arm_str_match_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
-//RS     match cond {
-//RS         Expr::PatternTest {
-//RS             subject: s,
-//RS             pattern: pattern @ Pattern::StrMatch { .. },
-//RS             ..
-//RS         } if pattern_subjects_match(cx, s, subject) => Some(pattern.clone()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-BINPAT1 (card #506): a binary-pattern arm head over the switch subject —
-//RS /// a `[U8]{"…"}` literal in pattern position (`subject == [U8]{"{v:U4}…"}`).
-//RS pub(crate) fn arm_bin_match_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
-//RS     match cond {
-//RS         Expr::PatternTest {
-//RS             subject: s,
-//RS             pattern: pattern @ Pattern::BinMatch { .. },
-//RS             ..
-//RS         } if pattern_subjects_match(cx, s, subject) => Some(pattern.clone()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-DESTRUCT1: a struct-shaped arm head over the switch subject.
-//RS pub(crate) fn arm_struct_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
-//RS     match cond {
-//RS         Expr::PatternTest {
-//RS             subject: s,
-//RS             pattern: Pattern::Struct { .. },
-//RS             ..
-//RS         } if pattern_subjects_match(cx, s, subject) => {
-//RS             if let Expr::PatternTest { pattern, .. } = cond {
-//RS                 Some(pattern.clone())
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Value checks inside a struct arm head are ordinary expressions and must be lowerable.
-//RS pub(crate) fn struct_pattern_values_in_subset(
-//RS     pattern: &Pattern,
-//RS     cx: &Cx,
-//RS     locals: &HashSet<String>,
-//RS ) -> bool {
-//RS     match pattern {
-//RS         Pattern::Struct { fields, .. } => fields.iter().all(|f| match f {
-//RS             StructPatField::Value { value, .. } => expr_in_subset(value, cx, locals),
-//RS             StructPatField::Bind { .. } => true,
-//RS         }),
-//RS         _ => true,
-//RS     }
-//RS }
-//RS 
-//RS /// c109 Phase 8: an arm head that is a fallible/optional pattern test over the
-//RS /// subject — `subject == Ok(b)` / `Err(b)` / `value(b)` / `null`. Returns the
-//RS /// `Pattern::{Ok,Err,Present,Absent}`, else `None` (a variant/range/comparison arm).
-//RS pub(crate) fn arm_fallible_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
-//RS     match cond {
-//RS         Expr::PatternTest {
-//RS             subject: s,
-//RS             pattern,
-//RS             ..
-//RS         } if pattern_subjects_match(cx, s, subject) => match pattern {
-//RS             Pattern::Ok { .. }
-//RS             | Pattern::Err { .. }
-//RS             | Pattern::Present { .. }
-//RS             | Pattern::Absent(_) => Some(pattern.clone()),
-//RS             _ => None,
-//RS         },
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// The single name an `Ok(b)`/`Err(b)`/`value(b)` pattern binds (`null` binds none).
-//RS pub(crate) fn fallible_pattern_binding(pattern: &Pattern) -> Option<String> {
-//RS     match pattern {
-//RS         Pattern::Ok { binding, .. }
-//RS         | Pattern::Err { binding, .. }
-//RS         | Pattern::Present { binding, .. } => Some(binding.clone()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// S31: an arm head whose pattern test (possibly the first term of a guard
-//RS /// chain) nests a payload pattern. These tables lower through the same
-//RS /// short-circuit condition chain as guarded arms.
-//RS pub(crate) fn arm_has_nested_pattern(cond: &Expr) -> bool {
-//RS     match cond {
-//RS         Expr::PatternTest { pattern, .. } => pattern.has_nested_pattern(),
-//RS         Expr::Binary(BinOp::And, left, _, _) => arm_has_nested_pattern(left),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// Mirror codegen's `switch_arm_pattern_owned` (Statement.rs): an arm whose head
-//RS /// is a variant pattern over `subject`. Returns the `Pattern` (Variant or Or of
-//RS /// variants), or `None` for ranges / comparison / Bool arms. The arm head is a
-//RS /// `PatternTest` (`c == Active(id)`) or a bare-value `Binary(Eq, subject, Ident)`
-//RS /// that names a known variant. Range patterns at arm head deliberately return
-//RS /// `None` (they go through the mixed-switch path, shape B).
-//RS pub(crate) fn arm_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
-//RS     match cond {
-//RS         Expr::PatternTest {
-//RS             subject: s,
-//RS             pattern,
-//RS             ..
-//RS         } if pattern_subjects_match(cx, s, subject) => {
-//RS             if matches!(pattern, Pattern::Range { .. }) {
-//RS                 return None;
-//RS             }
-//RS             // The subset covers only variant / or-of-variant patterns (no
-//RS             // optional/`ok`/`err` patterns — those are Phase 8).
-//RS             if pattern_is_variant_or_orvariant(pattern) {
-//RS                 Some(pattern.clone())
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         }
-//RS         Expr::Binary(BinOp::Eq, lhs, rhs, _) if pattern_subjects_match(cx, lhs, subject) => {
-//RS             if let Expr::Ident(variant, rhs_span) = rhs.as_ref() {
-//RS                 if cx.variant_owner.contains_key(variant) {
-//RS                     return Some(Pattern::Variant {
-//RS                         variant: variant.clone(),
-//RS                         bindings: Vec::new(),
-//RS                         leading_dot: false,
-//RS                         span: *rhs_span,
-//RS                     });
-//RS                 }
-//RS             }
-//RS             None
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// A variant-pattern arm with a boolean guard (`.Item(value) && value > 0`).
-//RS /// The pattern must be the first term so its payload bindings are available to
-//RS /// the remaining guard terms. The lowering reuses `lower_if_cond`, which already
-//RS /// preserves that short-circuit binding scope.
-//RS pub(crate) fn arm_guarded_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
-//RS     let Expr::Binary(BinOp::And, left, _, _) = cond else {
-//RS         return None;
-//RS     };
-//RS     let mut first = left.as_ref();
-//RS     while let Expr::Binary(BinOp::And, nested_left, _, _) = first {
-//RS         first = nested_left.as_ref();
-//RS     }
-//RS     arm_variant_pattern(cx, first, subject)
-//RS }
-//RS 
-//RS /// `DataEvent` is a prelude enum whose variants are not entered in the ordinary
-//RS /// user-variant owner table. Keep its surface list here for subset admission;
-//RS /// lowering resolves the concrete enum from the subject's typed TIR expression.
-//RS pub(crate) fn is_data_event_variant(variant: &str) -> bool {
-//RS     matches!(
-//RS         variant,
-//RS         "Null"
-//RS             | "Bool"
-//RS             | "Int"
-//RS             | "Float"
-//RS             | "Text"
-//RS             | "Bytes"
-//RS             | "ArrayStart"
-//RS             | "ArrayEnd"
-//RS             | "ObjectStart"
-//RS             | "Key"
-//RS             | "ObjectEnd"
-//RS     )
-//RS }
-//RS 
-//RS pub(crate) fn is_hook_outcome_variant(variant: &str) -> bool {
-//RS     matches!(variant, "Continue" | "Cancel" | "Fail")
-//RS }
-//RS 
-//RS /// True for a `Variant` pattern or an `Or` whose every alternative is a `Variant`.
-//RS /// Excludes optional/result patterns (Present/Absent/Ok/Err) — out of Phase 4.
-//RS pub(crate) fn pattern_is_variant_or_orvariant(pattern: &Pattern) -> bool {
-//RS     match pattern {
-//RS         Pattern::Variant { bindings, .. } => bindings
-//RS             .iter()
-//RS             // Only plain name-binds, wildcards, and ranges in payload slots are
-//RS             // covered (those are the slot kinds the TIR reproduces).
-//RS             .all(|s| {
-//RS                 matches!(
-//RS                     s,
-//RS                     PatSlot::Bind { .. } | PatSlot::Wildcard | PatSlot::Range { .. }
-//RS                 )
-//RS             }),
-//RS         Pattern::Or(alts, _) => {
-//RS             !alts.is_empty() && alts.iter().all(pattern_is_variant_or_orvariant)
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS /// Whether a variant pattern needs the matched payload to be lowered.
-//RS ///
-//RS /// A tag-only pattern (`State`) and an ignored payload (`State(_)`) only
-//RS /// inspect the enum discriminant; bindings and payload ranges require the
-//RS /// corresponding value type to be covered as well.
-//RS pub(crate) fn variant_pattern_uses_payload(pattern: &Pattern) -> bool {
-//RS     match pattern {
-//RS         Pattern::Variant { bindings, .. } => bindings
-//RS             .iter()
-//RS             .any(|slot| !matches!(slot, PatSlot::Wildcard)),
-//RS         Pattern::Or(alts, _) => alts.iter().any(variant_pattern_uses_payload),
-//RS         _ => true,
-//RS     }
-//RS }
-//RS 
-//RS /// The owning enum of a variant (or or-of-variant) pattern, via `cx.variant_owner`.
-//RS pub(crate) fn variant_pattern_enum(cx: &Cx, pattern: &Pattern) -> Option<String> {
-//RS     match pattern {
-//RS         Pattern::Variant { variant, .. } => cx.variant_owner.get(variant).cloned(),
-//RS         Pattern::Or(alts, _) => alts.iter().find_map(|a| variant_pattern_enum(cx, a)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// An arm-head range pattern (`lo..hi -> …`), as `(lo, hi)`. Mirrors the parser's
-//RS /// arm-head range lowering: a `PatternTest` whose pattern is `Pattern::Range`.
-//RS pub(crate) fn arm_head_range(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<(i64, i64)> {
-//RS     // RangeSwitch re-reads the subject spelling per arm. A call/field/index
-//RS     // subject would evaluate 2n times, so only Ident subjects enter this path.
-//RS     if !matches!(subject, Expr::Ident(..)) {
-//RS         return None;
-//RS     }
-//RS     match cond {
-//RS         Expr::PatternTest {
-//RS             subject: s,
-//RS             pattern: Pattern::Range { lo, hi, .. },
-//RS             ..
-//RS         } if pattern_subjects_match(cx, s, subject) => Some((*lo, *hi)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Mirror codegen's `pattern_subjects_match` (Statement.rs): an arm subject names
-//RS /// the same ident as the switch subject, is the implicit `it`, or (B1) reads
-//RS /// identically in source — a NON-IDENT subject (`h.val`, `pick()`, `xs[0]`) compared
-//RS /// spanlessly via its source slice, matching the AST so a non-ident pattern switch
-//RS /// routes through the SAME `lower_enum_match` / `lower_fallible_match` the AST's
-//RS /// `emit_pattern_match_switch` uses.
-//RS pub(crate) fn pattern_subjects_match(cx: &Cx, a: &Expr, b: &Expr) -> bool {
-//RS     match (a, b) {
-//RS         (Expr::Ident(na, _), Expr::Ident(nb, _)) => na == nb,
-//RS         (Expr::Ident(n, _), _) if n == Syntax::KW_IT => true,
-//RS         _ => {
-//RS             let sa = cx.src.get(a.span().start..a.span().end);
-//RS             let sb = cx.src.get(b.span().start..b.span().end);
-//RS             matches!((sa, sb), (Some(x), Some(y)) if x == y)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Record the names a variant (or or-of-variant) pattern binds, so an arm body's
-//RS /// classification sees them as locals. Wildcard/Range slots bind nothing; an Or
-//RS /// pattern binds its first alt's names (all alts bind the same names — E0317).
-//RS pub(crate) fn add_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
-//RS     match pattern {
-//RS         Pattern::Variant { .. } => {
-//RS             locals.extend(
-//RS                 pattern
-//RS                     .binding_names()
-//RS                     .into_iter()
-//RS                     .map(|binding| binding.local_name().to_owned()),
-//RS             );
-//RS         }
-//RS         Pattern::Or(alts, _) => {
-//RS             if let Some(first) = alts.first() {
-//RS                 add_pattern_binding_names(first, locals);
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS /// Record names bound by a struct-pattern arm head.
-//RS pub(crate) fn add_struct_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
-//RS     if let Pattern::Struct { fields, .. } = pattern {
-//RS         for field in fields {
-//RS             if let StructPatField::Bind { local, .. } = field {
-//RS                 locals.insert(local.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-PARSESTR1: record names bound by a str-match arm head's holes.
-//RS pub(crate) fn add_str_match_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
-//RS     if let Pattern::StrMatch { parts, .. } = pattern {
-//RS         for part in parts {
-//RS             if let crate::AST::StrMatchPart::Hole { name, .. } = part {
-//RS                 locals.insert(name.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-BINPAT1: record names bound by a binary-pattern arm head's holes.
-//RS pub(crate) fn add_bin_match_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
-//RS     if let Pattern::BinMatch { parts, .. } = pattern {
-//RS         for part in parts {
-//RS             if let crate::AST::BinMatchPart::Hole { name, .. } = part {
-//RS                 locals.insert(name.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0524 crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:1-341
+use jet_foundation.AST.[BinOp, Expr, PatSlot, Pattern, StructPatField, StrMatchPart, BinMatchPart]
+use jet_codegen.Codegen.Context.Cx
+use jet_codegen.Codegen.TIR.expr_in_subset
+use jet_foundation.Syntax
+use std.collections.HashSet
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:11
+pub fn arm_is_plain_cond(cx: &Cx, cond: &Expr, subject: &Expr) -> Bool {
+    if arm_variant_pattern(cx, cond, subject).is_some() -> return false
+    if arm_head_range(cx, cond, subject).is_some() -> return false
+    if cond is .PatternTest{..} -> return false
+    true
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:30
+pub fn arm_str_match_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Pattern? {
+    if cond == {
+        .PatternTest{subject: s, pattern, ..} if pattern is .StrMatch{..} && pattern_subjects_match(cx, s, subject) -> Val(pattern.clone())
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:43
+pub fn arm_bin_match_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Pattern? {
+    if cond == {
+        .PatternTest{subject: s, pattern, ..} if pattern is .BinMatch{..} && pattern_subjects_match(cx, s, subject) -> Val(pattern.clone())
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:55
+pub fn arm_struct_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Pattern? {
+    if cond == {
+        .PatternTest{subject: s, pattern, ..} if pattern is .Struct{..} && pattern_subjects_match(cx, s, subject) -> Val(pattern.clone())
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:73
+pub fn struct_pattern_values_in_subset(pattern: &Pattern, cx: &Cx, locals: &HashSet<String>) -> Bool {
+    if pattern == {
+        .Struct{fields, ..} -> fields.iter().all(fn(f) {
+            if f == { .Value{value, ..} -> expr_in_subset(value, cx, locals); .Bind{..} -> true }
+        })
+        else -> true
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:90
+pub fn arm_fallible_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Pattern? {
+    if cond == {
+        .PatternTest{subject: s, pattern, ..} if pattern_subjects_match(cx, s, subject) -> {
+            if pattern == { .Ok{..} | .Err{..} | .Present{..} | .Absent(_) -> Val(pattern.clone()); else -> None }
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:108
+pub fn fallible_pattern_binding(pattern: &Pattern) -> String? {
+    if pattern == { .Ok{binding, ..} | .Err{binding, ..} | .Present{binding, ..} -> Val(binding.clone()); else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:120
+pub fn arm_has_nested_pattern(cond: &Expr) -> Bool {
+    if cond == { .PatternTest{pattern, ..} -> pattern.has_nested_pattern(); .Binary(.And, left, _, _) -> arm_has_nested_pattern(left); else -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:134
+pub fn arm_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Pattern? {
+    if cond == {
+        .PatternTest{subject: s, pattern, ..} if pattern_subjects_match(cx, s, subject) -> {
+            if pattern is .Range{..} -> return None
+            if pattern_is_variant_or_orvariant(pattern) -> Val(pattern.clone()) else -> None
+        }
+        .Binary(.Eq, lhs, rhs, _) if pattern_subjects_match(cx, lhs, subject) -> {
+            if rhs == .Ident(variant, rhs_span) {
+                if cx.variant_owner.contains_key(variant) -> return Val(Pattern.Variant{variant: variant.clone(), bindings: [], leading_dot: false, span: rhs_span})
+            }
+            None
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:173
+pub fn arm_guarded_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Pattern? {
+    if cond != .Binary(.And, left, _, _) -> return None
+    first := left
+    while first == .Binary(.And, nested_left, _, _) { first = nested_left }
+    arm_variant_pattern(cx, first, subject)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:187
+pub fn is_data_event_variant(variant: String) -> Bool {
+    if variant == { "Null" | "Bool" | "Int" | "Float" | "Text" | "Bytes" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "Key" | "ObjectEnd" -> true; else -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:204
+pub fn is_hook_outcome_variant(variant: String) -> Bool {
+    if variant == { "Continue" | "Cancel" | "Fail" -> true; else -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:210
+pub fn pattern_is_variant_or_orvariant(pattern: &Pattern) -> Bool {
+    if pattern == {
+        .Variant{bindings, ..} -> bindings.iter().all(fn(s) { if s == { .Bind{..} | .Wildcard | .Range{..} -> true; else -> false } })
+        .Or(alts, _) -> !alts.is_empty() && alts.iter().all(fn(p) { pattern_is_variant_or_orvariant(p) })
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:233
+pub fn variant_pattern_uses_payload(pattern: &Pattern) -> Bool {
+    if pattern == {
+        .Variant{bindings, ..} -> bindings.iter().any(fn(slot) { !(slot is .Wildcard) })
+        .Or(alts, _) -> alts.iter().any(fn(p) { variant_pattern_uses_payload(p) })
+        else -> true
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:244
+pub fn variant_pattern_enum(cx: &Cx, pattern: &Pattern) -> String? {
+    if pattern == {
+        .Variant{variant, ..} -> cx.variant_owner.get(variant).cloned()
+        .Or(alts, _) -> alts.iter().find_map(fn(a) { variant_pattern_enum(cx, a) })
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:254
+pub fn arm_head_range(cx: &Cx, cond: &Expr, subject: &Expr) -> (I64, I64)? {
+    // RangeSwitch reads the subject per arm: only an ident is side-effect free.
+    if !(subject is .Ident(..)) -> return None
+    if cond == { .PatternTest{subject: s, pattern: .Range{lo, hi, ..}, ..} if pattern_subjects_match(cx, s, subject) -> Val((lo, hi)); else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:276
+pub fn pattern_subjects_match(cx: &Cx, a: &Expr, b: &Expr) -> Bool {
+    if (a, b) == {
+        (.Ident(na, _), .Ident(nb, _)) -> na == nb
+        (.Ident(n, _), _) if n == Syntax.KW_IT -> true
+        else -> {
+            sa := cx.src.get(a.span().start..a.span().end)
+            sb := cx.src.get(b.span().start..b.span().end)
+            if (sa, sb) == { (Val(x), Val(y)) -> x == y; else -> false }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:291
+pub fn add_pattern_binding_names(pattern: &Pattern, locals: &HashSet<String>) {
+    if pattern == {
+        .Variant{..} -> locals.extend(pattern.binding_names().into_iter().map(fn(binding) { binding.local_name().to_owned() }))
+        .Or(alts, _) -> { if alts.first() == Val(first) { add_pattern_binding_names(first, locals) } }
+        else -> {}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:311
+pub fn add_struct_pattern_binding_names(pattern: &Pattern, locals: &HashSet<String>) {
+    if pattern == .Struct{fields, ..} {
+        for field in fields { if field == .Bind{local, ..} { locals.insert(local.clone()) } }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:322
+pub fn add_str_match_pattern_binding_names(pattern: &Pattern, locals: &HashSet<String>) {
+    if pattern == .StrMatch{parts, ..} {
+        for part in parts { if part == .Hole{name, ..} { locals.insert(name.clone()) } }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/patterns.rs:333
+pub fn add_bin_match_pattern_binding_names(pattern: &Pattern, locals: &HashSet<String>) {
+    if pattern == .BinMatch{parts, ..} {
+        for part in parts { if part == .Hole{name, ..} { locals.insert(name.clone()) } }
+    }
+}

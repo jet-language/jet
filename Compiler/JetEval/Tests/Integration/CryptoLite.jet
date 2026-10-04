@@ -1,236 +1,47 @@
-// PORT-PENDING 0607 crates-jet-comptime-tests-crypto-lite-module-group: crates/jet-comptime/tests/crypto_lite.rs:1-64
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #[path = "../src/Comptime/CryptoLite/Aes256Gcm.rs"]
-//RS mod aes256gcm;
-//RS 
-//RS #[path = "../src/Comptime/CryptoLite/Argon2id.rs"]
-//RS mod argon2id;
-//RS 
-//RS const AES_SOURCE: &str = include_str!("../src/Comptime/CryptoLite/Aes256Gcm.rs");
-//RS const ARGON2_SOURCE: &str = include_str!("../src/Comptime/CryptoLite/Argon2id.rs");
-//RS 
-//RS fn hex(text: &str) -> Vec<u8> {
-//RS     text.as_bytes()
-//RS         .chunks_exact(2)
-//RS         .map(|pair| {
-//RS             let digit = |byte: u8| match byte {
-//RS                 b'0'..=b'9' => byte - b'0',
-//RS                 b'a'..=b'f' => byte - b'a' + 10,
-//RS                 _ => panic!("invalid hex test vector"),
-//RS             };
-//RS             digit(pair[0]) * 16 + digit(pair[1])
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS #[test]
-//RS fn aes256gcm_known_answer_has_no_secret_table_or_ghash_branch() {
-//RS     let key = hex("b52c505a37d78eda5dd34f20c22540ea1b58963cf8e5bf8ffa85f9f2492505b4");
-//RS     let nonce = hex("516c33929df5a3284ff463d7");
-//RS     let expected = hex("bdc1ac884d332457a1d2664f168c76f0");
-//RS     let sealed = aes256gcm::seal(&key, &nonce, &[], &[]).unwrap();
-//RS     assert_eq!(sealed, expected);
-//RS     assert_eq!(aes256gcm::open(&key, &nonce, &sealed, &[]).unwrap(), Vec::<u8>::new());
-//RS 
-//RS     assert!(!AES_SOURCE.contains("SBOX["), "secret-indexed AES table was reintroduced");
-//RS     let ghash = AES_SOURCE
-//RS         .split_once("fn ghash_mul")
-//RS         .and_then(|(_, rest)| rest.split_once("fn ghash("))
-//RS         .map(|(body, _)| body)
-//RS         .expect("GHASH implementation must remain present");
-//RS     assert!(!ghash.contains("if "), "GHASH must not branch on secret state");
-//RS }
-//RS 
-//RS #[test]
-//RS fn argon2id_matches_the_canonical_expert_known_answer() {
-//RS     let actual = argon2id::hash(b"password", b"somesalt", 65_536, 2, 1, 32).unwrap();
-//RS     let expected = hex("09316115d5cf24ed5a15a31a3ba326e5cf32edc24702987c02b6566f61913cf7");
-//RS     assert_eq!(actual, expected);
-//RS     assert!(
-//RS         !ARGON2_SOURCE.contains("Simplified independent address generation"),
-//RS         "the non-standard address generator must not return"
-//RS     );
-//RS     assert!(
-//RS         ARGON2_SOURCE.contains("update_address_block")
-//RS             && ARGON2_SOURCE.contains("address_block[address_index]")
-//RS             && ARGON2_SOURCE.contains("area as u64 * x"),
-//RS         "the standard address generator must be wired into the block loop"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn argon2id_parallel_lanes_match_the_expert_known_answer() {
-//RS     let actual = argon2id::hash(b"password", b"somesalt", 8_192, 2, 2, 32).unwrap();
-//RS     let expected = hex("d1e83aa7383f70873a171b453206a00daca5340f3505542e17b41ed62d3b110e");
-//RS     assert_eq!(actual, expected);
-//RS }
-// END-PORT-PENDING 0607 crates/jet-comptime/tests/crypto_lite.rs:1-64
+use jet_comptime.Comptime.CryptoLite.[Aes256Gcm, Argon2id]
 
-// PORT-PENDING 0607 crates-jet-comptime-tests-crypto-lite-module-group: crates/jet-comptime/tests/tls_tier2.rs:1-164
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use std::collections::{HashMap, HashSet};
-//RS use std::path::Path;
-//RS 
-//RS use jet_comptime::Comptime::{
-//RS     evaluate_owned_with_imports_opts, run_repl_step, CtValue, DevSink, ReplAuthorizer,
-//RS     ReplEffectRequest,
-//RS };
-//RS use jet_comptime::Diagnostics::{Diagnostic, Span};
-//RS use jet_comptime::AST::{Expr, Stmt};
-//RS 
-//RS fn tls_call_diag(impure_depth: usize, gates: jet_foundation::Policy::GateSet) -> Diagnostic {
-//RS     let expr = Expr::MethodCall {
-//RS         receiver: Box::new(Expr::Ident("tls".to_string(), Span::new(0, 3))),
-//RS         method: "client".to_string(),
-//RS         method_span: Span::new(4, 10),
-//RS         owner_type_args: Vec::new(),
-//RS         type_args: Vec::new(),
-//RS         args: Vec::new(),
-//RS         recv_type: None,
-//RS         resolved_ret: None,
-//RS         operator_rhs: None,
-//RS         checked_widen: false,
-//RS     };
-//RS     let funcs = HashMap::new();
-//RS     let extern_names = HashSet::new();
-//RS     let globals: HashMap<String, CtValue> = HashMap::new();
-//RS     let mut core_imports = HashMap::new();
-//RS     core_imports.insert("tls".to_string(), "core.net.tls".to_string());
-//RS 
-//RS     evaluate_owned_with_imports_opts(
-//RS         &expr,
-//RS         &funcs,
-//RS         &extern_names,
-//RS         Path::new("."),
-//RS         &globals,
-//RS         &core_imports,
-//RS         gates,
-//RS         impure_depth,
-//RS     )
-//RS     .expect_err("core.net.tls.client must not execute at comptime")
-//RS }
-//RS 
-//RS #[test]
-//RS fn core_tls_follows_the_whole_tier2_comptime_gate() {
-//RS     let pure = tls_call_diag(0, jet_foundation::Policy::GateSet::default());
-//RS     assert_eq!(pure.code, "E3410");
-//RS     assert_ne!(pure.code, "E0956");
-//RS 
-//RS     let gated = tls_call_diag(1, jet_foundation::Policy::GateSet::default());
-//RS     assert_eq!(gated.code, "E3411");
-//RS     assert_ne!(gated.code, "E0956");
-//RS 
-//RS     let allowed = tls_call_diag(
-//RS         1,
-//RS         jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
-//RS     );
-//RS     assert_eq!(allowed.code, "E3412");
-//RS     assert_ne!(allowed.code, "E0956");
-//RS     assert_eq!(
-//RS         allowed.what,
-//RS         "`core.net.tls.client()` is not available at comptime"
-//RS     );
-//RS }
-//RS 
-//RS #[derive(Default)]
-//RS struct RecordingAuthorizer {
-//RS     requests: Vec<ReplEffectRequest>,
-//RS }
-//RS 
-//RS impl ReplAuthorizer for RecordingAuthorizer {
-//RS     fn preflight(&mut self, request: &ReplEffectRequest, span: Span) -> Result<(), Diagnostic> {
-//RS         self.requests.push(request.clone());
-//RS         Err(Diagnostic::error(
-//RS             "E1803",
-//RS             "test stopped after effect classification".to_string(),
-//RS             "the host operation must not run in this test".to_string(),
-//RS             "inspect the recorded request".to_string(),
-//RS             Some(span),
-//RS         ))
-//RS     }
-//RS 
-//RS     fn authorize(&mut self, _: &ReplEffectRequest, _: Span) -> Result<(), Diagnostic> {
-//RS         unreachable!("preflight stops the test")
-//RS     }
-//RS 
-//RS     fn fs_read(&mut self, _: &str) -> std::io::Result<Vec<u8>> {
-//RS         unreachable!("TLS classification performs no filesystem I/O")
-//RS     }
-//RS 
-//RS     fn fs_write(&mut self, _: &str, _: &[u8], _: bool) -> std::io::Result<()> {
-//RS         unreachable!("TLS classification performs no filesystem I/O")
-//RS     }
-//RS 
-//RS     fn fs_exists(&mut self, _: &str) -> std::io::Result<bool> {
-//RS         unreachable!("TLS classification performs no filesystem I/O")
-//RS     }
-//RS 
-//RS     fn fs_is_dir(&mut self, _: &str) -> std::io::Result<bool> {
-//RS         unreachable!("TLS classification performs no filesystem I/O")
-//RS     }
-//RS 
-//RS     fn fs_create_dir(&mut self, _: &str) -> std::io::Result<()> {
-//RS         unreachable!("TLS classification performs no filesystem I/O")
-//RS     }
-//RS 
-//RS     fn fs_remove(&mut self, _: &str) -> std::io::Result<()> {
-//RS         unreachable!("TLS classification performs no filesystem I/O")
-//RS     }
-//RS 
-//RS     fn verified_root(&mut self) -> std::io::Result<std::fs::File> {
-//RS         unreachable!("TLS classification does not verify a process root")
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn core_tls_repl_requests_use_the_net_effect() {
-//RS     let span = Span::new(0, 10);
-//RS     let tls_call = Expr::MethodCall {
-//RS         receiver: Box::new(Expr::Ident("tls".to_string(), Span::new(0, 3))),
-//RS         method: "client".to_string(),
-//RS         method_span: Span::new(4, 10),
-//RS         owner_type_args: Vec::new(),
-//RS         type_args: Vec::new(),
-//RS         args: Vec::new(),
-//RS         recv_type: None,
-//RS         resolved_ret: None,
-//RS         operator_rhs: None,
-//RS         checked_widen: false,
-//RS     };
-//RS     let stmts = vec![Stmt::AuthorityScope {
-//RS         caps: vec![("Net".to_string(), span)],
-//RS         caps_span: span,
-//RS         binding: Some("caps".to_string()),
-//RS         binding_span: Some(span),
-//RS         body: vec![Stmt::Expr(tls_call)],
-//RS         span,
-//RS     }];
-//RS     let funcs = HashMap::new();
-//RS     let mut scope = HashMap::new();
-//RS     let mut sink = DevSink::default();
-//RS     let mut core_imports = HashMap::new();
-//RS     core_imports.insert("tls".to_string(), "core.net.tls".to_string());
-//RS     let mut authorizer = RecordingAuthorizer::default();
-//RS 
-//RS     let error = run_repl_step(
-//RS         &stmts,
-//RS         &funcs,
-//RS         Path::new("."),
-//RS         &mut sink,
-//RS         &mut scope,
-//RS         100,
-//RS         true,
-//RS         &core_imports,
-//RS         &HashMap::new(),
-//RS         &HashMap::new(),
-//RS         &mut authorizer,
-//RS     )
-//RS     .expect_err("recording preflight stops execution");
-//RS     assert_eq!(error.code, "E1803");
-//RS     assert_eq!(authorizer.requests.len(), 1);
-//RS     assert_eq!(authorizer.requests[0].root, "Net");
-//RS     assert_eq!(authorizer.requests[0].operation, "client");
-//RS     assert_eq!(authorizer.requests[0].resource, "<network resource>");
-//RS }
-// END-PORT-PENDING 0607 crates/jet-comptime/tests/tls_tier2.rs:1-164
+// Rust: crates/jet-comptime/tests/crypto_lite.rs:7
+// GATE #4494: compile-time source embedding reads the canonical Jet implementation, never Rust.
+AES_SOURCE :: include_str("../../Source/Comptime/CryptoLite/Aes256Gcm.jet")
+// Rust: crates/jet-comptime/tests/crypto_lite.rs:8
+ARGON2_SOURCE :: include_str("../../Source/Comptime/CryptoLite/Argon2id.jet")
 
+// Rust: crates/jet-comptime/tests/crypto_lite.rs:10
+fn hex(text: String) -> [U8] {
+    bytes := [U8]{}
+    loop pair in text.as_bytes().chunks_exact(2) {
+        digit :: fn(byte: U8) -> U8 {
+            if byte >= b'0' && byte <= b'9' -> byte - b'0'
+            else if byte >= b'a' && byte <= b'f' -> byte - b'a' + 10
+            else -> panic("invalid hex test vector")
+        }
+        bytes.push(digit(pair[0]) * 16 + digit(pair[1]))
+    }
+    ^bytes
+}
+// Rust: crates/jet-comptime/tests/crypto_lite.rs:25
+#Test("aes256gcm_known_answer_has_no_secret_table_or_ghash_branch") {
+    key :: hex("b52c505a37d78eda5dd34f20c22540ea1b58963cf8e5bf8ffa85f9f2492505b4")
+    nonce :: hex("516c33929df5a3284ff463d7")
+    expected :: hex("bdc1ac884d332457a1d2664f168c76f0")
+    sealed :: Aes256Gcm.seal(&key, &nonce, &[U8]{}, &[U8]{})!
+    assert_eq(sealed, expected)
+    assert_eq(Aes256Gcm.open(&key, &nonce, &sealed, &[U8]{})!, [U8]{})
+    assert(!AES_SOURCE.contains("SBOX["), "secret-indexed AES table was reintroduced")
+    ghash :: AES_SOURCE.split_once("fn ghash_mul").and_then(fn((_, rest)) -> rest.split_once("fn ghash(")).map(fn((body, _)) -> body).expect("GHASH implementation must remain present")
+    assert(!ghash.contains("if "), "GHASH must not branch on secret state")
+}
+// Rust: crates/jet-comptime/tests/crypto_lite.rs:43
+#Test("argon2id_matches_the_canonical_expert_known_answer") {
+    actual :: Argon2id.hash(b"password", b"somesalt", 65_536, 2, 1, 32)!
+    expected :: hex("09316115d5cf24ed5a15a31a3ba326e5cf32edc24702987c02b6566f61913cf7")
+    assert_eq(actual, expected)
+    assert(!ARGON2_SOURCE.contains("Simplified independent address generation"), "the non-standard address generator must not return")
+    assert(ARGON2_SOURCE.contains("update_address_block") && ARGON2_SOURCE.contains("address_block[address_index]") && ARGON2_SOURCE.contains("area as U64 * x"), "the standard address generator must be wired into the block loop")
+}
+// Rust: crates/jet-comptime/tests/crypto_lite.rs:60
+#Test("argon2id_parallel_lanes_match_the_expert_known_answer") {
+    actual :: Argon2id.hash(b"password", b"somesalt", 8_192, 2, 2, 32)!
+    expected :: hex("d1e83aa7383f70873a171b453206a00daca5340f3505542e17b41ed62d3b110e")
+    assert_eq(actual, expected)
+}

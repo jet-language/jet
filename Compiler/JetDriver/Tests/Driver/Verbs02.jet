@@ -1,0 +1,14 @@
+use Compiler.JetDriver.Driver.Verbs02.CompileOutput
+use crate.Syntax.RuntimeLayer
+
+// Rust: crates/jet-driver/src/Compile.rs:8
+#Test("compile_output_retains_optional_artifact_absence") {
+    output :: CompileOutput{rust: "generated", lints: [], ffi: None, clinks: [], comptime_inputs: [], web: None, web_partition_report: None, plugin: None, library: None, library_config: None, inferred_layer: RuntimeLayer.Core, layer_ceiling: None}
+    assert(output.rust == "generated")
+    assert(output.ffi.is_none())
+    assert(output.web.is_none())
+    assert(output.plugin.is_none())
+    assert(output.library.is_none())
+    assert(output.library_config.is_none())
+    assert(output.layer_ceiling.is_none())
+}

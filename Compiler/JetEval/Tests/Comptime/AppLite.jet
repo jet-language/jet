@@ -1,0 +1,40 @@
+use jet_codegen.Prelude.Shared.JetShared
+use std.sync.[Arc, atomic.AtomicUsize, atomic.Ordering] // GATE #4494
+
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:85
+#Test("projection_moves_once_and_releases_snapshot_owner") {
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:86
+    struct Projection { drops: Arc<AtomicUsize> }
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:88
+    impl Clone for Projection {
+        fn clone(self: &Projection) -> Projection { panic("consuming a snapshot must move its projection") }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/AppLite.rs:93
+    impl Drop for Projection {
+        fn drop(self: &Projection) { _ :: self.drops.fetch_add(1, Ordering.SeqCst) }
+    }
+    shared := JetShared.new("payload".to_string())
+    drops := Arc.new(AtomicUsize.new(0))
+    snapshot := shared.capture_with(fn(_) { Projection{drops: drops.clone()} })
+    assert(shared.strong_count() == 2)
+    revision := snapshot.revision()
+    (projection, captured_revision) := snapshot.into_value_and_revision()
+    assert(captured_revision == revision)
+    assert(shared.strong_count() == 1)
+    assert(drops.load(Ordering.SeqCst) == 0)
+    drop(^projection)
+    assert(drops.load(Ordering.SeqCst) == 1)
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:112
+#Test("snapshot_keeps_payload_live_until_its_owner_is_released") {
+    shared := JetShared.new("payload".to_string())
+    owner := shared.physical_owner()
+    snapshot := shared.capture()
+    assert(owner.strong_count() == 2)
+    drop(^shared)
+    assert(owner.strong_count() == 1)
+    assert(snapshot.value() == "payload")
+    drop(^snapshot)
+    assert(owner.strong_count() == 0)
+    assert(owner.upgrade().is_none())
+}

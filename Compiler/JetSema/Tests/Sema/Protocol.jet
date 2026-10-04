@@ -1,0 +1,23 @@
+use jet_foundation.[Span, Type, TypedNamedField, ProtocolDecl, ProtocolMessage, ProtocolDirection]
+// Rust: crates/jet-sema/src/Sema/Protocol.rs:82-192 (behavioral control, same private module)
+#Test("protocol_generation_preserves_order_direction_payload_and_terminal_transition") {
+    span :: Span.new(0, 1)
+    declaration :: ProtocolDecl{is_pub: false, is_package_pub: false, name: "Ping", name_span: span, span: span, messages: [ProtocolMessage]{
+        ProtocolMessage{direction: ProtocolDirection.ClientToServer, name: "request", name_span: span, fields: [TypedNamedField]{TypedNamedField{name: "value", ty: Type.Int}}, span: span},
+        ProtocolMessage{direction: ProtocolDirection.ServerToClient, name: "answer", name_span: span, fields: [], span: span},
+    }}
+    source :: generate_protocol_source(declaration)
+    assert(source.contains("state {{ S0, S1, S2 }}"))
+    assert(source.contains("fn request(self: ^Ping.Client, value: Int) -> Ping.Client !Err"))
+    assert(source.contains("fn recv_request(self: ^Ping.Server) -> Ping.Server !Err"))
+    assert(source.contains("fn recv_answer(self: ^Ping.Client) {{\n        return\n"))
+    assert(source.contains("fn answer(self: ^Ping.Server) {{\n        return\n"))
+    assert(format_fields(declaration.messages[0]) == "value: Int")
+    assert(format_fields(declaration.messages[1]) == "")
+}
+// Rust: crates/jet-sema/src/Sema/Protocol.rs:71 (behavioral control)
+#Test("protocol_fragment_rejects_lexical_and_parse_errors") {
+    assert(lex_parse_fragment("\"unterminated").is_err())
+    assert(lex_parse_fragment("fn").is_err())
+    assert(lex_parse_fragment("fn run() {{ }}").is_ok())
+}

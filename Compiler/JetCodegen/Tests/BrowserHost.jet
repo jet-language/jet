@@ -1,0 +1,37 @@
+use jet_codegen.BrowserHost.*
+use jet_comptime.Comptime.[CtValue]
+use jet_foundation.Diagnostics.[Span]
+
+// Rust: crates/jet-codegen/src/BrowserHost.rs:109
+#Test("browser_handle_requires_matching_type_and_integer_id") {
+    span :: Span.default()
+    value :: CtValue.Struct(type_name: "Browser", fields: [("__browser_host_id", CtValue.Int(7))])
+    assert(handle_id(&value, "Browser", span) == Ok(7))
+    assert(handle_id(&value, "BrowserPage", span).is_err())
+    invalid :: CtValue.Struct(type_name: "Browser", fields: [("__browser_host_id", CtValue.Str("7"))])
+    assert(handle_id(&invalid, "Browser", span).is_err())
+    assert(handle_id(&CtValue.Unit, "Browser", span).is_err())
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:129
+#Test("browser_field_preserves_first_matching_field_and_type") {
+    value :: CtValue.Struct(type_name: "BrowserTimeout", fields: [("milliseconds", CtValue.Int(12)), ("milliseconds", CtValue.Int(99))])
+    assert(field(&value, "BrowserTimeout", "milliseconds").cloned() == Val(CtValue.Int(12)))
+    assert(field(&value, "BrowserProfile", "milliseconds") == None)
+    assert(field(&value, "BrowserTimeout", "missing") == None)
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:616
+#Test("browser_summary_skips_nontext_but_counts_all_entries") {
+    value :: CtValue.Struct(type_name: "BrowserTrace", fields: [("entries", CtValue.List([CtValue.Str("one"), CtValue.Int(5), CtValue.Str("two")]))])
+    span :: Span.default()
+    assert(eval_value_method("BrowserTrace", "entry_count", &value, span) == Ok(Val(CtValue.Int(3))))
+    assert(eval_value_method("BrowserTrace", "summary", &value, span) == Ok(Val(CtValue.Str("one,two"))))
+    assert(eval_value_method("BrowserTrace", "redacted", &value, span).is_err())
+    assert(eval_value_method("BrowserTrace", "missing", &value, span).is_err())
+}
+// Rust: crates/jet-codegen/src/BrowserHost.rs:736
+#Test("browser_clear_resets_thread_local_handle_counter") {
+    NEXT_VALUE.with(fn(next) { next.set(33) })
+    clear()
+    assert(NEXT_VALUE.with(fn(next) { next.get() }) == 1)
+    assert(VALUES.with(fn(values) { values.borrow().is_empty() }))
+}

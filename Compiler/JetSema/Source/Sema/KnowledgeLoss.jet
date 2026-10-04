@@ -1,137 +1,67 @@
-// PORT-PENDING 0434 crates-jet-sema-src-sema-hotswap-module-group: crates/jet-sema/src/Sema/KnowledgeLoss.rs:1-133
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-FACT-LAW1=B / D-FACT-WORD1=A: one sema boundary for knowledge facts.
-//RS //!
-//RS //! Tightening is implicit. A loosening boundary is accepted only when the
-//RS //! existing source spelling is recognized as one of the ratified gate words.
-//RS //! The fact is compile-time-only; TIR and every execution adapter receive the
-//RS //! already-erased value.
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS 
-//RS /// A written operation that may move a value away from one knowledge plane.
-//RS ///
-//RS /// This is sema policy only. The source expression and the one `GateLedger`
-//RS /// remain the record of what the user wrote; this enum only answers whether a
-//RS /// boundary is already spelled while the checker is walking it.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(crate) enum KnowledgeGate {
-//RS     BoundedArithmetic,
-//RS     Approximation,
-//RS     RoundedConversion,
-//RS     RawProjection,
-//RS     StateTransition,
-//RS     ClassificationScrub,
-//RS }
-//RS 
-//RS impl KnowledgeGate {
-//RS     pub(crate) const fn spelling(self) -> &'static str {
-//RS         match self {
-//RS             Self::BoundedArithmetic => crate::Syntax::BUILTIN_WRAPPING,
-//RS             Self::Approximation => crate::Syntax::BUILTIN_APPROX,
-//RS             Self::RoundedConversion => "rounded",
-//RS             Self::RawProjection => crate::Syntax::METHOD_DISTINCT_RAW,
-//RS             Self::StateTransition => crate::Syntax::KW_TRANSITION,
-//RS             Self::ClassificationScrub => crate::Syntax::KW_SCRUB,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) const fn permits(self, plane: KnowledgePlane) -> bool {
-//RS         match (plane, self) {
-//RS             (KnowledgePlane::Range, Self::BoundedArithmetic | Self::RawProjection)
-//RS             | (
-//RS                 KnowledgePlane::Exactness,
-//RS                 Self::Approximation | Self::RoundedConversion | Self::RawProjection,
-//RS             )
-//RS             | (KnowledgePlane::Unit, Self::RoundedConversion | Self::RawProjection)
-//RS             | (KnowledgePlane::State, Self::StateTransition | Self::RawProjection)
-//RS             | (KnowledgePlane::Classification, Self::ClassificationScrub | Self::RawProjection) => {
-//RS                 true
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// The value facts named by the one-way law. Existing plane-specific checks
-//RS /// keep their ratified diagnostics; the law decides the boundary once for all
-//RS /// five planes.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(crate) enum KnowledgePlane {
-//RS     Range,
-//RS     Exactness,
-//RS     Unit,
-//RS     State,
-//RS     Classification,
-//RS }
-//RS 
-//RS impl KnowledgePlane {
-//RS     pub(crate) const fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Range => "range",
-//RS             Self::Exactness => "exactness",
-//RS             Self::Unit => "unit",
-//RS             Self::State => "state",
-//RS             Self::Classification => "classification",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// True when this boundary has no written operation that permits the move.
-//RS ///
-//RS /// `None` is the ordinary implicit path. A caller supplies `Some(gate)` only
-//RS /// after it has recognized the existing source spelling in its own AST rule.
-//RS pub(crate) const fn requires_gate(plane: KnowledgePlane, gate: Option<KnowledgeGate>) -> bool {
-//RS     !matches!(gate, Some(gate) if gate.permits(plane))
-//RS }
-//RS 
-//RS pub(crate) const fn allows_gate(plane: KnowledgePlane, gate: KnowledgeGate) -> bool {
-//RS     gate.permits(plane)
-//RS }
-//RS 
-//RS pub(crate) fn diagnostic(plane: KnowledgePlane, gate: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::from_row(
-//RS         "E0156",
-//RS         &[("plane", plane.name()), ("gate", gate)],
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{allows_gate, requires_gate, KnowledgeGate, KnowledgePlane};
-//RS 
-//RS     #[test]
-//RS     fn one_law_covers_all_knowledge_planes() {
-//RS         let cases = [
-//RS             (KnowledgePlane::Range, KnowledgeGate::BoundedArithmetic),
-//RS             (KnowledgePlane::Exactness, KnowledgeGate::Approximation),
-//RS             (KnowledgePlane::Unit, KnowledgeGate::RoundedConversion),
-//RS             (KnowledgePlane::State, KnowledgeGate::StateTransition),
-//RS             (
-//RS                 KnowledgePlane::Classification,
-//RS                 KnowledgeGate::ClassificationScrub,
-//RS             ),
-//RS         ];
-//RS         for (plane, gate) in cases {
-//RS             assert!(requires_gate(plane, None));
-//RS             assert!(!requires_gate(plane, Some(gate)));
-//RS             assert!(allows_gate(plane, gate));
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn raw_projection_is_the_explicit_escape_for_each_plane() {
-//RS         for plane in [
-//RS             KnowledgePlane::Range,
-//RS             KnowledgePlane::Exactness,
-//RS             KnowledgePlane::Unit,
-//RS             KnowledgePlane::State,
-//RS             KnowledgePlane::Classification,
-//RS         ] {
-//RS             assert!(!requires_gate(plane, Some(KnowledgeGate::RawProjection)));
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0434 crates/jet-sema/src/Sema/KnowledgeLoss.rs:1-133
+// D-FACT-LAW1=B / D-FACT-WORD1=A: compile-time-only knowledge boundary.
+use jet_foundation.[Diagnostic, Span]
+use jet_foundation.Syntax
 
+// Rust: crates/jet-sema/src/Sema/KnowledgeLoss.rs:16
+pub enum KnowledgeGate {
+    BoundedArithmetic
+    Approximation
+    RoundedConversion
+    RawProjection
+    StateTransition
+    ClassificationScrub
+}
+impl KnowledgeGate {
+    // Rust: crates/jet-sema/src/Sema/KnowledgeLoss.rs:26
+    pub fn spelling(self: Self) -> String {
+        if self == {
+            .BoundedArithmetic -> Syntax.BUILTIN_WRAPPING
+            .Approximation -> Syntax.BUILTIN_APPROX
+            .RoundedConversion -> "rounded"
+            .RawProjection -> Syntax.METHOD_DISTINCT_RAW
+            .StateTransition -> Syntax.KW_TRANSITION
+            .ClassificationScrub -> Syntax.KW_SCRUB
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/KnowledgeLoss.rs:37
+    pub fn permits(self: Self, plane: KnowledgePlane) -> Bool {
+        if (plane, self) == {
+            (.Range, .BoundedArithmetic | .RawProjection)
+                | (.Exactness, .Approximation | .RoundedConversion | .RawProjection)
+                | (.Unit, .RoundedConversion | .RawProjection)
+                | (.State, .StateTransition | .RawProjection)
+                | (.Classification, .ClassificationScrub | .RawProjection) -> true
+            _ -> false
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/KnowledgeLoss.rs:58
+pub enum KnowledgePlane {
+    Range
+    Exactness
+    Unit
+    State
+    Classification
+}
+impl KnowledgePlane {
+    // Rust: crates/jet-sema/src/Sema/KnowledgeLoss.rs:67
+    pub fn name(self: Self) -> String {
+        if self == {
+            .Range -> "range"
+            .Exactness -> "exactness"
+            .Unit -> "unit"
+            .State -> "state"
+            .Classification -> "classification"
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/KnowledgeLoss.rs:82
+pub fn requires_gate(plane: KnowledgePlane, gate: KnowledgeGate?) -> Bool {
+    if gate == .Val(gate) -> !gate.permits(plane) else -> true
+}
+// Rust: crates/jet-sema/src/Sema/KnowledgeLoss.rs:86
+pub fn allows_gate(plane: KnowledgePlane, gate: KnowledgeGate) -> Bool { gate.permits(plane) }
+// Rust: crates/jet-sema/src/Sema/KnowledgeLoss.rs:90
+pub fn diagnostic(plane: KnowledgePlane, gate: String, span: Span) -> Diagnostic {
+    Diagnostic.from_row("E0156", [("plane", plane.name()), ("gate", gate)], Val(span))
+}

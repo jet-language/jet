@@ -1,0 +1,47 @@
+use jet_foundation.AST.[CtValue, CtReport, Type]
+use jet_foundation.Diagnostics.Span
+
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1793
+#Test("web_measurements_keep_named_fields_and_positional_fallback") {
+    span :: Span{start: 0, end: 0}
+    values :: CtValue.List([
+        CtValue.Struct("WebVirtualMeasurement", [("size", CtValue.Int(40)), ("index", CtValue.Int(2))]),
+        CtValue.Struct("tuple", [("first", CtValue.Int(3)), ("second", CtValue.Int(50))]),
+    ])
+    assert_eq(web_int_pairs(values, "measurements", span).unwrap(), [(2, 40), (3, 50)])
+    assert(web_int_pairs(CtValue.Unit, "measurements", span).is_err())
+    assert(web_int_pairs(CtValue.List([CtValue.Struct("tuple", [("first", CtValue.Int(1))])]), "measurements", span).is_err())
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:1953
+#Test("web_router_enum_types_are_checked") {
+    span :: Span{start: 0, end: 0}
+    assert(web_router_value_type(CtValue.Enum("WebRouterValueType", "JSON", []), span).is_ok())
+    assert(web_router_value_type(CtValue.Enum("Other", "JSON", []), span).is_err())
+    assert(web_router_codec(CtValue.Enum("WebRouterSearchCodec", "Unknown", []), span).is_err())
+    assert(web_query_mode(CtValue.Enum("WebQueryNetworkMode", "OfflineFirst", []), span).is_ok())
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:2469
+#Test("web_optional_results_require_checked_element_type") {
+    span :: Span{start: 0, end: 0}
+    assert_eq(web_optional_value(Val(CtValue.Int(7)), None, span).unwrap(), CtValue.Present(CtValue.Int(7)))
+    assert_eq(web_optional_value(None, Val(Type.Option(Type.String)), span).unwrap(), CtValue.absent(Type.String))
+    assert(web_optional_value(None, None, span).is_err())
+    assert(web_optional_value(None, Val(Type.String), span).is_err())
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:2529
+#Test("web_callback_outcomes_preserve_typed_failures") {
+    span :: Span{start: 0, end: 0}
+    assert_eq(callback_result(CtValue.Present(CtValue.Int(9)), span).unwrap(), CtValue.Int(9))
+    failure :: CtValue.failed(CtValue.Str("callback failure"))
+    assert_eq(callback_result(failure, span).unwrap_err(), CtValue.Str("callback failure"))
+}
+// Rust: crates/jet-comptime/src/Comptime/AppLite.rs:3824
+#Test("web_handle_method_normalization_is_exact") {
+    assert_eq(normalize_web_handle_method("Signal.get"), "get")
+    assert_eq(normalize_web_handle_method("Derived.get"), "get")
+    assert_eq(normalize_web_handle_method("Signal.set"), "set")
+    assert_eq(normalize_web_handle_method("Effect.active"), "active")
+    assert_eq(normalize_web_handle_method("Effect.unsubscribe"), "unsubscribe")
+    assert_eq(normalize_web_handle_method("unknown.get"), "unknown.get")
+    assert_eq(apply_web_handle(CtValue.Unit, "get", [], Span{start: 0, end: 0}, None), None)
+}

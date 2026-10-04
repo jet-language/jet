@@ -1,0 +1,27 @@
+use jet_comptime.Comptime.Methods.Dispatch.EvalMethod.*
+use jet_foundation.[CtValue, CtReport, Type]
+use jet_comptime.Comptime.TypedDecode
+
+// Behavioral controls for Rust eval_method.rs:6 (no inline Rust tests).
+#Test("decode_path_normalizes_root_and_field_prefix") {
+    assert_eq(decode_path("$"), "")
+    assert_eq(decode_path("$.items[2].name"), "items[2].name")
+    assert_eq(decode_path("$[2]"), "[2]")
+    assert_eq(decode_path("plain"), "plain")
+}
+// Behavioral controls for Rust eval_method.rs:16.
+#Test("decode_error_preserves_reason_and_normalizes_path") {
+    error := CtValue.Struct(type_name: "EncodingError", fields: [("path", CtValue.Str("$.item")), ("reason", CtValue.Str("bad value"))])
+    assert_eq(decode_error_value(error, "fallback"), TypedDecode.decode_error_at("item", "bad value"))
+    assert_eq(decode_error_value(CtValue.Unit, "fallback"), TypedDecode.decode_error_at("", "fallback"))
+}
+// Behavioral controls for Rust eval_method.rs:51.
+#Test("option_surface_carriers_share_present_and_absent_views") {
+    assert_eq(option_surface_view(CtValue.Present(CtValue.Int(7))), Some(Some(CtValue.Int(7))))
+    assert_eq(option_surface_view(CtValue.absent(Type.Int)), Some(None))
+    assert_eq(option_surface_view(CtValue.Enum(type_name: "", variant: "Val", args: [(None, CtValue.Int(7))])), Some(Some(CtValue.Int(7))))
+    assert_eq(option_surface_view(CtValue.Enum(type_name: "", variant: "None", args: [])), Some(None))
+    assert_eq(option_surface_view(CtValue.Enum(type_name: "User", variant: "None", args: [])), None)
+    assert_eq(option_surface_view(CtValue.Enum(type_name: "", variant: "Val", args: [])), None)
+    assert_eq(option_surface_view(CtValue.Int(7)), None)
+}

@@ -1,0 +1,24 @@
+use jet_comptime.Comptime.Template.[TemplateBody, TemplateItem, TemplateSource, TemplateHole, TemplateHoleKind, TemplateStatement, format_tir_template_body]
+use jet_foundation.AST.CtValue
+use jet_foundation.Diagnostics.[Span, Diagnostic]
+
+// Rust: crates/jet-comptime/src/Comptime/Template.rs:83-185
+#Test("template_scope_and_splices") {
+    span := Span.new(0, 1)
+    source := TemplateSource { source: "const X = @x", holes: [TemplateHole { start: 10, end: 12, expr: CtValue.Int(7), kind: TemplateHoleKind.Value, span: span }], span: span }
+    body := TemplateBody { items: [TemplateItem.Statement(TemplateStatement.Binding { name: "x", value: CtValue.Int(7), span: span }), TemplateItem.Item(source)], span: span }
+    scope: [String:CtValue] = [("x", CtValue.Int(1))]
+    eval := fn(value: &CtValue, _scope: &[String:CtValue]) -> CtValue Diagnostic! { Ok(value.clone()) }
+    assert_eq(format_tir_template_body(&body, &scope, eval).unwrap(), "const X = 7")
+    assert_eq(scope.get("x"), Val(CtValue.Int(1)))
+    assert(!scope.contains_key("$x"))
+}
+// Rust: crates/jet-comptime/src/Comptime/Template.rs:195-232
+#Test("template_rejects_bad_byte_range") {
+    span := Span.new(0, 1)
+    source := TemplateSource { source: "é", holes: [TemplateHole { start: 1, end: 2, expr: CtValue.Int(1), kind: TemplateHoleKind.Value, span: span }], span: span }
+    body := TemplateBody { items: [TemplateItem.Item(source)], span: span }
+    scope: [String:CtValue] = [:]
+    eval := fn(value: &CtValue, _scope: &[String:CtValue]) -> CtValue Diagnostic! { Ok(value.clone()) }
+    assert(format_tir_template_body(&body, &scope, eval).is_err())
+}

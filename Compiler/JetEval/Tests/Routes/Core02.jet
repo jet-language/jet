@@ -1,0 +1,38 @@
+use jet_comptime.Routes.Core02.*
+use jet_foundation.AST.[CtValue, CtReport, Type]
+
+// Rust: crates/jet-comptime/src/Comptime/CorePureParity.rs:1848
+#Test("io_error_display_rejects_malformed_carriers") {
+    assert_eq(io_error_display(&CtValue.Str("not an error")), None)
+    assert_eq(io_error_display(&CtValue.Enum { type_name: "OtherType", variant: "Other", args: [] }), None)
+    assert_eq(io_error_display(&CtValue.Enum { type_name: "IOError", variant: "Unknown", args: [] }), None)
+    assert_eq(io_error_display(&CtValue.Enum { type_name: "IOError", variant: "ResourceLimit", args: [] }), None)
+}
+// Rust: crates/jet-comptime/src/Comptime/CorePureParity.rs:3071
+#Test("aead_lengths_preserves_validation_precedence") {
+    key := [U8{0};32]
+    nonce := [U8{0};12]
+    assert_eq(crypto_aead_lengths("open", &[], &[], 12, &[], &[], true),
+        Val(CtValue.failed(Box.new(crypto_error("open: key must be exactly 32; got 0")))))
+    assert_eq(crypto_aead_lengths("open", &key, &[], 12, &[], &[], true),
+        Val(CtValue.failed(Box.new(crypto_error("open: nonce must be exactly 12; got 0")))))
+    assert_eq(crypto_aead_lengths("open", &key, &nonce, 12, &[], &[], true),
+        Val(CtValue.failed(Box.new(crypto_error("open: ciphertext must be 16..=1073741840; got 0")))))
+    assert_eq(crypto_aead_lengths("seal", &key, &nonce, 12, &[], &[], false), None)
+    assert_eq(crypto_aead_lengths("open", &key, &nonce, 12, &[U8{0};16], &[], true), None)
+}
+// Rust: crates/jet-comptime/src/Comptime/CorePureParity.rs:2779
+#Test("list_state_clamps_negative_fields") {
+    assert_eq(tui_list_state(-1, -8), structure("TUIListState", [("selected", CtValue.Int(0)), ("offset", CtValue.Int(0))]))
+    assert_eq(tui_list_state(3, 9), structure("TUIListState", [("selected", CtValue.Int(3)), ("offset", CtValue.Int(9))]))
+}
+// Rust: crates/jet-comptime/src/Comptime/CorePureParity.rs:3452
+#Test("civil_date_kernel_leap_and_day_round_trip") {
+    assert(Date.is_leap(2000))
+    assert(!Date.is_leap(1900))
+    assert_eq(Date.days_in_month(2024, 2), 29)
+    assert_eq(Date.days_in_month(2023, 2), 28)
+    date := Date.new(2024, 2, 29)
+    assert_eq(Date.from_day_number(date.day_number()).to_string_fmt(), date.to_string_fmt())
+    assert_eq(date.add_days(1).to_string_fmt(), Date.new(2024, 3, 1).to_string_fmt())
+}

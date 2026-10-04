@@ -1,1275 +1,556 @@
-// PORT-PENDING 0589 crates-jet-comptime-src-comptime-methods-core-calls: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:1-1271
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Curated Core calls shared by comptime and REPL evaluation.
-//RS 
-//RS use std::cell::Cell;
-//RS pub(super) use std::cell::RefCell;
-//RS pub(super) use std::rc::Rc;
-//RS pub(super) use super::super::Builtins::{as_int, exact_big, exact_int_value};
-//RS use super::super::Diagnostics::unsupported;
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::{CtFloat, Type};
-//RS use crate::AST::{CtReport, CtValue};
-//RS pub(super) use jet_foundation::TestingHistory::{
-//RS     EventId, HandleId, HistoryBounds, HistoryCase, HistoryCommand, HistoryDistribution,
-//RS     HistoryOperation, HistoryPrecondition, HistoryProvenance, HistoryRng, HistoryScheduleChoice,
-//RS     HistoryStrategyBehavior, HistoryValue, TaskId, TypedHistoryCase,
-//RS };
-//RS pub(super) use jet_foundation::Prelude::jet_as_bytes as as_bytes;
-//RS 
-//RS pub(super) use super::super::TextLite::IoErrorOperation;
-//RS pub(super) use super::time_deadline_kernel;
-//RS #[path = "../CorePureParity.rs"]
-//RS mod core_pure_parity;
-//RS 
-//RS /// The foundation row decides whether a plain Core call may use the pure
-//RS /// comptime evaluator. Unknown rows remain available for the typed/internal
-//RS /// forms that have not entered the plain-call registry yet.
-//RS fn core_call_allows_pure_parity(row: &jet_foundation::Syntax::CoreCallRecord) -> bool {
-//RS     row.coverage
-//RS         .contains(jet_foundation::Syntax::CoreCallCoverage::COMPTIME)
-//RS         && matches!(
-//RS             row.interpreter_route,
-//RS             jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(_)
-//RS                 | jet_foundation::Syntax::CoreCallInterpreterRoute::Ambient
-//RS         )
-//RS         && row.pure_route != jet_foundation::Syntax::CoreCallPureRoute::None
-//RS         && !row.is_receiver()
-//RS         && row.effect().is_none()
-//RS }
-//RS 
-//RS fn csv_row_value(record: jet_foundation::CsvKernel::CsvRecord) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "CSVRow".to_string(),
-//RS         fields: vec![
-//RS             (
-//RS                 "fields".to_string(),
-//RS                 CtValue::List(record.fields.into_iter().map(CtValue::Str).collect()),
-//RS             ),
-//RS             ("line".to_string(), CtValue::Int(record.line)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn validate_interpreter_route(module: &str, method: &str, span: Span) -> Result<(), Diagnostic> {
-//RS     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-//RS         if row
-//RS             .coverage
-//RS             .contains(jet_foundation::Syntax::CoreCallCoverage::INTERPRETER)
-//RS             && !row.interpreter_route.is_executable()
-//RS         {
-//RS             return Err(unsupported(
-//RS                 &format!("{}.{}(): no interpreter route is declared", module, method),
-//RS                 span,
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_core_call_projection(
-//RS     module: &str,
-//RS     method: &str,
-//RS     actual_arity: usize,
-//RS     projection: u8,
-//RS     span: Span,
-//RS ) -> Result<(), Diagnostic> {
-//RS     if jet_foundation::Syntax::core_call(module, method).is_none() {
-//RS         return Ok(());
-//RS     }
-//RS     match jet_foundation::Syntax::core_call_projection(module, method, projection, actual_arity) {
-//RS         Ok(_) => Ok(()),
-//RS         Err(jet_foundation::Syntax::CoreCallProjectionError::Arity { expected, actual }) => {
-//RS             Err(unsupported(
-//RS                 &format!(
-//RS                     "{}.{}(): expected {} argument(s), got {}",
-//RS                     module, method, expected, actual
-//RS                 ),
-//RS                 span,
-//RS             ))
-//RS         }
-//RS         // I4: the projection bit is spelled COMPTIME in the table, but this
-//RS         // adapter also serves default `jet run`'s evaluator, so the message
-//RS         // names the evaluator that lacks the row instead of a phase the reader
-//RS         // may not be in.
-//RS         Err(jet_foundation::Syntax::CoreCallProjectionError::Uncovered { .. }) => Err(unsupported(
-//RS             &format!(
-//RS                 "{}.{}(): no shared-evaluator projection is declared",
-//RS                 module, method
-//RS             ),
-//RS             span,
-//RS         )),
-//RS         Err(jet_foundation::Syntax::CoreCallProjectionError::Unknown) => Err(unsupported(
-//RS             &format!("{}.{}(): unknown Core-call row", module, method),
-//RS             span,
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS /// Marshal typed Path values at the shared erased Core boundary. Strings stay
-//RS /// strings, so this does not add an implicit conversion to the language.
-//RS pub(super) fn normalize_path_args(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS ) -> Result<Vec<CtValue>, Diagnostic> {
-//RS     let Some(row) = jet_foundation::Syntax::core_call(module, method) else {
-//RS         return Ok(args);
-//RS     };
-//RS     args.into_iter()
-//RS         .enumerate()
-//RS         .map(|(index, value)| {
-//RS             if !row.path_arg(index) {
-//RS                 return Ok(value);
-//RS             }
-//RS             let CtValue::Struct { type_name, fields } = &value else {
-//RS                 return Ok(value);
-//RS             };
-//RS             if type_name != "Path" {
-//RS                 return Ok(value);
-//RS             }
-//RS             let path = fields
-//RS                 .iter()
-//RS                 .find_map(|(name, value)| match (name.as_str(), value) {
-//RS                     ("inner", CtValue::Str(path)) => Some(path.clone()),
-//RS                     _ => None,
-//RS                 });
-//RS             path.map(CtValue::Str)
-//RS                 .ok_or_else(|| unsupported("malformed Path value", span))
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS #[allow(dead_code)]
-//RS mod path_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/Path.rs");
-//RS }
-//RS 
-//RS fn apply_path_call(
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let text = |index: usize| -> Result<&String, Diagnostic> {
-//RS         match args.get(index) {
-//RS             Some(CtValue::Str(value)) => Ok(value),
-//RS             Some(CtValue::Struct { type_name, fields }) if type_name == "Path" => fields
-//RS                 .iter()
-//RS                 .find_map(|(name, value)| match (name.as_str(), value) {
-//RS                     ("inner", CtValue::Str(value)) => Some(value),
-//RS                     _ => None,
-//RS                 })
-//RS                 .ok_or_else(|| unsupported("malformed Path value", span)),
-//RS             _ => Err(unsupported("Path operation requires a checked path or text value", span)),
-//RS         }
-//RS     };
-//RS     let path = |value: String| CtValue::Struct {
-//RS         type_name: "Path".to_string(),
-//RS         fields: vec![("inner".to_string(), CtValue::Str(value))],
-//RS     };
-//RS     Ok(match method {
-//RS         "path.from" => path(text(0)?.clone()),
-//RS         "path.home" => path(path_kernel::jet_std_path_home()),
-//RS         "path.join" => path(path_kernel::jet_std_path_join(text(0)?, text(1)?)),
-//RS         "path.to_string" => CtValue::Str(text(0)?.clone()),
-//RS         "path.normalize" => path(path_kernel::jet_std_path_normalize(text(0)?)),
-//RS         "path.is_within" => CtValue::Bool(path_kernel::jet_std_path_is_within(text(0)?, text(1)?)),
-//RS         "path.parent" => path_kernel::jet_std_path_parent_opt(text(0)?)
-//RS             .map(|value| CtValue::Present(Box::new(path(value))))
-//RS             .unwrap_or_else(|| CtValue::absent(Type::Named("Path".to_string()))),
-//RS         "path.extension" | "path.stem" => {
-//RS             let value = if method == "path.extension" {
-//RS                 path_kernel::jet_std_path_extension_opt(text(0)?)
-//RS             } else {
-//RS                 path_kernel::jet_std_path_stem_opt(text(0)?)
-//RS             };
-//RS             value
-//RS                 .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
-//RS                 .unwrap_or_else(|| CtValue::absent(Type::String))
-//RS         }
-//RS         "path.walk" => CtValue::List(
-//RS             path_kernel::jet_std_path_walk(text(0)?)
-//RS                 .into_iter()
-//RS                 .map(path)
-//RS                 .collect(),
-//RS         ),
-//RS         _ => return Err(unsupported("Path operation has no interpreter binding", span)),
-//RS     })
-//RS }
-//RS #[path = "core_calls/regex.rs"]
-//RS mod regex;
-//RS #[allow(unused_imports)]
-//RS use self::regex::*;
-//RS #[path = "core_calls/random.rs"]
-//RS mod random;
-//RS use self::random::ambient_random_kernel;
-//RS 
-//RS /// Install the active deterministic-world RNG providers for the duration of a
-//RS /// synchronous adapter call. Outside the scope, MathRandomFns keeps its
-//RS /// ordinary thread-local stream.
-//RS pub fn with_world_rng_provider<T>(
-//RS     next: fn() -> Option<u64>,
-//RS     seed: fn(i64) -> bool,
-//RS     callback: impl FnOnce() -> T,
-//RS ) -> T {
-//RS     ambient_random_kernel::with_world_rng_provider(next, seed, callback)
-//RS }
-//RS 
-//RS 
-//RS mod log_state {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/LogState.rs");
-//RS }
-//RS // Keep the interpreter's ambient logging calls on the same Log.rs kernel as
-//RS // the generated native program. The trace carrier stays in `log_state`, so
-//RS // plain/default and impure/interpreter dispatch share one thread-local state.
-//RS #[allow(dead_code)]
-//RS mod log_kernel {
-//RS     pub(super) mod jet_std {
-//RS         #[derive(Clone, Debug, PartialEq)]
-//RS         pub struct LogField {
-//RS             pub(crate) key: String,
-//RS             pub(crate) value: String,
-//RS             pub(crate) kind: String,
-//RS             pub(crate) redacted: bool,
-//RS         }
-//RS 
-//RS         #[derive(Clone, Debug, PartialEq)]
-//RS         pub struct LogSpan {
-//RS             pub(crate) id: i64,
-//RS             pub(crate) name: String,
-//RS         }
-//RS     }
-//RS 
-//RS     use super::log_state::JET_LOG_TRACE_ID;
-//RS     use jet_foundation::Devtools::{jet_devtools_publish_event, JetDevtoolsEvent};
-//RS 
-//RS     fn jet_log_write_line(line: &str) {
-//RS         eprintln!("{}", line);
-//RS     }
-//RS 
-//RS     fn jet_log_process_exit(code: i64) {
-//RS         std::process::exit(code as i32);
-//RS     }
-//RS 
-//RS     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Log.rs");
-//RS 
-//RS     pub(super) fn set_trace_id(id: &str) {
-//RS         super::log_state::jet_ring_log_set_trace_id(id);
-//RS     }
-//RS 
-//RS     pub(super) fn debug(message: &String) {
-//RS         jet_ring_log_debug(message);
-//RS     }
-//RS 
-//RS     pub(super) fn info(message: &String) {
-//RS         jet_ring_log_info(message);
-//RS     }
-//RS 
-//RS     pub(super) fn warn(message: &String) {
-//RS         jet_ring_log_warn(message);
-//RS     }
-//RS 
-//RS     pub(super) fn error(message: &String) {
-//RS         jet_ring_log_error(message);
-//RS     }
-//RS 
-//RS     pub(super) fn critical(message: &String) {
-//RS         jet_ring_log_critical(message);
-//RS     }
-//RS 
-//RS     pub(super) fn fatal(message: &String) {
-//RS         jet_ring_log_fatal(message);
-//RS     }
-//RS 
-//RS     pub(super) fn disable() {
-//RS         jet_ring_log_disable();
-//RS     }
-//RS 
-//RS     pub(super) fn flush() {
-//RS         jet_ring_log_flush();
-//RS     }
-//RS 
-//RS     pub(super) fn enabled(level: &String) -> bool {
-//RS         jet_ring_log_enabled(level)
-//RS     }
-//RS 
-//RS     pub(super) fn field(key: &String, value: &String) -> jet_std::LogField {
-//RS         jet_ring_log_field(key, value)
-//RS     }
-//RS 
-//RS     pub(super) fn int(key: &String, value: i64) -> jet_std::LogField {
-//RS         jet_ring_log_int(key, value)
-//RS     }
-//RS 
-//RS     pub(super) fn float(key: &String, value: f64) -> jet_std::LogField {
-//RS         jet_ring_log_float(key, value)
-//RS     }
-//RS 
-//RS     pub(super) fn bool_field(key: &String, value: bool) -> jet_std::LogField {
-//RS         jet_ring_log_bool(key, value)
-//RS     }
-//RS 
-//RS     pub(super) fn redact(key: &String) -> jet_std::LogField {
-//RS         jet_ring_log_redact(key)
-//RS     }
-//RS 
-//RS     pub(super) fn counter(name: &String, value: i64) -> jet_std::LogField {
-//RS         jet_ring_log_counter(name, value)
-//RS     }
-//RS 
-//RS     pub(super) fn info_fields(message: &String, fields: &Vec<jet_std::LogField>) {
-//RS         jet_ring_log_info_fields(message, fields);
-//RS     }
-//RS 
-//RS     pub(super) fn warn_fields(message: &String, fields: &Vec<jet_std::LogField>) {
-//RS         jet_ring_log_warn_fields(message, fields);
-//RS     }
-//RS 
-//RS     pub(super) fn error_fields(message: &String, fields: &Vec<jet_std::LogField>) {
-//RS         jet_ring_log_error_fields(message, fields);
-//RS     }
-//RS 
-//RS     pub(super) fn debug_fields(message: &String, fields: &Vec<jet_std::LogField>) {
-//RS         jet_ring_log_debug_fields(message, fields);
-//RS     }
-//RS 
-//RS     pub(super) fn span(name: &String) -> jet_std::LogSpan {
-//RS         jet_ring_log_span(name)
-//RS     }
-//RS 
-//RS     pub(super) fn enter(span: &jet_std::LogSpan) {
-//RS         jet_ring_log_enter(span);
-//RS     }
-//RS 
-//RS     pub(super) fn close(span: &jet_std::LogSpan) {
-//RS         jet_ring_log_close(span);
-//RS     }
-//RS 
-//RS     pub(super) fn set_sink(kind: &String, path: &String) {
-//RS         jet_ring_log_set_sink(kind, path);
-//RS     }
-//RS 
-//RS     pub(super) fn sample_every(value: i64) {
-//RS         jet_ring_log_sample_every(value);
-//RS     }
-//RS 
-//RS     pub(super) fn otlp_file(path: &String) {
-//RS         jet_ring_log_otlp_file(path);
-//RS     }
-//RS 
-//RS     pub(super) fn set_level(level: &String) {
-//RS         jet_ring_log_set_level(level);
-//RS     }
-//RS 
-//RS     pub(super) fn setup(format: &String) {
-//RS         jet_ring_log_setup(format);
-//RS     }
-//RS }
-//RS /// Set the shared Prelude log trace context for the MIR evaluator.
-//RS ///
-//RS /// Keep the state mutation behind `log_kernel`, so default/impure dispatch
-//RS /// and direct MIR handling all use the same thread-local carrier.
-//RS pub fn set_trace_id(id: &str) {
-//RS     log_kernel::set_trace_id(id);
-//RS }
-//RS 
-//RS mod term_semantics {
-//RS     include!("../../../../jet-codegen/src/Prelude/Term.rs");
-//RS }
-//RS 
-//RS pub(crate) use term_semantics::jet_term_print_frame;
-//RS 
-//RS mod math_lib_pure {
-//RS     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
-//RS }
-//RS 
-//RS mod encoding_base_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
-//RS }
-//RS 
-//RS mod encoding_error_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/EncodingError.rs");
-//RS }
-//RS 
-//RS mod field_error_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/FieldError.rs");
-//RS }
-//RS 
-//RS mod fmt_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/Fmt.rs");
-//RS }
-//RS 
-//RS mod seeded_random_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
-//RS }
-//RS 
-//RS mod fake_data_kernel {
-//RS     pub(crate) mod jet_std {
-//RS         #[derive(Clone, Debug, PartialEq)]
-//RS         pub(crate) struct Fake {
-//RS             pub(crate) state: u64,
-//RS             pub(crate) locale: u8,
-//RS         }
-//RS     }
-//RS 
-//RS     use super::seeded_random_kernel::jet_seeded_rng_int;
-//RS     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs");
-//RS }
-//RS 
-//RS pub fn apply_fake_method(
-//RS     recv: &mut CtValue,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = recv else {
-//RS         return Err(unsupported("Fake receiver", span));
-//RS     };
-//RS     if type_name != crate::Syntax::FAKE_TYPE {
-//RS         return Err(unsupported("Fake receiver", span));
-//RS     }
-//RS     let state = fields
-//RS         .iter()
-//RS         .find_map(|(name, value)| match (name.as_str(), value) {
-//RS             ("state", CtValue::Int(value)) => Some(*value as u64),
-//RS             _ => None,
-//RS         })
-//RS         .unwrap_or(0);
-//RS     let locale = fields
-//RS         .iter()
-//RS         .find_map(|(name, value)| match (name.as_str(), value) {
-//RS             ("locale", CtValue::Int(value)) => Some(*value as u8),
-//RS             _ => None,
-//RS         })
-//RS         .unwrap_or(0);
-//RS     let mut fake = fake_data_kernel::jet_std::Fake { state, locale };
-//RS     let result = match method {
-//RS         "locale" => {
-//RS             let locale = as_string(
-//RS                 args.first()
-//RS                     .ok_or_else(|| unsupported("Fake.locale argument", span))?,
-//RS                 span,
-//RS             )?
-//RS             .to_string();
-//RS             let next = fake_data_kernel::jet_fake_locale(&fake, &locale);
-//RS             CtValue::Struct {
-//RS                 type_name: crate::Syntax::FAKE_TYPE.to_string(),
-//RS                 fields: vec![
-//RS                     ("state".to_string(), CtValue::Int(next.state as i64)),
-//RS                     ("locale".to_string(), CtValue::Int(next.locale as i64)),
-//RS                 ],
-//RS             }
-//RS         }
-//RS         "name" => CtValue::Str(fake_data_kernel::jet_fake_name(&mut fake)),
-//RS         "email" => CtValue::Str(fake_data_kernel::jet_fake_email(&mut fake)),
-//RS         "host" => CtValue::Str(fake_data_kernel::jet_fake_host(&mut fake)),
-//RS         "address" => CtValue::Str(fake_data_kernel::jet_fake_address(&mut fake)),
-//RS         _ => return Err(unsupported("this Fake method", span)),
-//RS     };
-//RS     if method != "locale" {
-//RS         *recv = CtValue::Struct {
-//RS             type_name: crate::Syntax::FAKE_TYPE.to_string(),
-//RS             fields: vec![
-//RS                 ("state".to_string(), CtValue::Int(fake.state as i64)),
-//RS                 ("locale".to_string(), CtValue::Int(fake.locale as i64)),
-//RS             ],
-//RS         };
-//RS     }
-//RS     Ok(result)
-//RS }
-//RS 
-//RS mod net_pure_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/NetPure.rs");
-//RS }
-//RS 
-//RS mod loadable_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/Loadable.rs");
-//RS }
-//RS 
-//RS fn loadable_variant(state: &str) -> &'static str {
-//RS     let tag = match state {
-//RS         "idle" => loadable_kernel::JET_LOADABLE_IDLE,
-//RS         "loading" => loadable_kernel::JET_LOADABLE_LOADING,
-//RS         "loaded" => loadable_kernel::JET_LOADABLE_LOADED,
-//RS         _ => loadable_kernel::JET_LOADABLE_FAILED,
-//RS     };
-//RS     match tag {
-//RS         loadable_kernel::JET_LOADABLE_IDLE => "Idle",
-//RS         loadable_kernel::JET_LOADABLE_LOADING => "Loading",
-//RS         loadable_kernel::JET_LOADABLE_LOADED => "Loaded",
-//RS         _ => "Failed",
-//RS     }
-//RS }
-//RS 
-//RS mod mime_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs");
-//RS }
-//RS 
-//RS mod solver_kernel {
-//RS     pub(crate) mod jet_std {
-//RS         #[derive(Clone)]
-//RS         pub(crate) struct Solver {
-//RS             pub(crate) seed: i64,
-//RS             pub(crate) checked: i64,
-//RS             pub(crate) failures: i64,
-//RS         }
-//RS     }
-//RS 
-//RS     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Solver.rs");
-//RS }
-//RS 
-//RS mod sketch_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/Sketch.rs");
-//RS }
-//RS 
-//RS mod time_kernel {
-//RS     fn jet_scheduler_world_now_ms() -> Option<i64> {
-//RS         None
-//RS     }
-//RS     pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/Duration.rs");
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
-//RS }
-//RS mod raylib_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/Raylib.rs");
-//RS }
-//RS 
-//RS mod crypto_entropy_kernel {
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
-//RS     use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
-//RS }
-//RS /// D-SHAPE-RESOURCE1=A: the MIR evaluator wipes a `Secret`'s resident bytes
-//RS /// through the same vetted volatile kernel the AOT `Close` uses.
-//RS pub use crypto_entropy_kernel::jet_crypto_zeroize;
-//RS 
-//RS fn runtime_date_value(date: time_kernel::JetDate) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "LocalDate".to_string(),
-//RS         fields: vec![
-//RS             ("year".to_string(), CtValue::Int(date.year())),
-//RS             ("month".to_string(), CtValue::Int(date.month())),
-//RS             ("day".to_string(), CtValue::Int(date.day())),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn runtime_datetime_value(datetime: time_kernel::JetDateTime) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: "DateTime".to_string(),
-//RS         fields: vec![
-//RS             (
-//RS                 "secs".to_string(),
-//RS                 CtValue::Int(datetime.unix_seconds_anchor()),
-//RS             ),
-//RS             ("nanos".to_string(), CtValue::Int(datetime.nanosecond())),
-//RS             (
-//RS                 "leap_second".to_string(),
-//RS                 CtValue::Bool(datetime.is_leap_second()),
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS /// D-BOUND-HEAD1: typed DateTime heads validate against the same pure Prelude
-//RS /// parser used by the runtime `core.time.parse_rfc3339` call.
-//RS pub(crate) fn validate_datetime_literal(value: &str) -> Result<(), String> {
-//RS     time_kernel::JetDateTime::parse_rfc3339(value).map(|_| ())
-//RS }
-//RS 
-//RS /// D-BOUND-HEAD1: typed DateTime heads use the existing pure-parity value
-//RS /// projection without entering the ambient `core.time` effect gate.
-//RS pub(crate) fn evaluate_typed_datetime_literal(
-//RS     value: &str,
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let row = jet_foundation::Syntax::core_call("core.time", "parse_rfc3339")
-//RS         .expect("core.time.parse_rfc3339 row is registered");
-//RS     core_pure_parity::evaluate(row, &[CtValue::Str(value.to_string())], span)
-//RS         .expect("core.time.parse_rfc3339 pure-parity evaluator is registered")
-//RS }
-//RS 
-//RS pub(super) mod duration_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/Duration.rs");
-//RS }
-//RS 
-//RS mod measurement_kernel {
-//RS     include!("../../../../jet-codegen/src/Prelude/Core/Measurement.rs");
-//RS }
-//RS 
-//RS // #1657 / I9: the one `core.data` statistics, bar-plot and bridge-status
-//RS // kernel. This is the exact source AOT embeds and the Cranelift JIT host
-//RS // includes, so comptime and the interpreter run the same compensated
-//RS // arithmetic and report the same `DataError`. Only the `jet_std` value types
-//RS // are declared here; every rule lives in the included file.
-//RS #[allow(dead_code)]
-//RS mod data_kernel {
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS 
-//RS     pub(crate) mod jet_std {
-//RS         #[allow(unused_imports)]
-//RS         pub use jet_foundation::Outcome::*;
-//RS 
-//RS         #[allow(dead_code)]
-//RS         #[derive(Clone, Debug, PartialEq, Eq)]
-//RS         pub(crate) enum DataErrorKind {
-//RS             Decode,
-//RS             Limit,
-//RS             IO,
-//RS             Empty,
-//RS             InvalidArgument,
-//RS             NonFinite,
-//RS             Overflow,
-//RS             State,
-//RS             Bridge,
-//RS         }
-//RS 
-//RS         /// `DataError.cause` only ever carries an absence here: the kernel's
-//RS         /// encoding-backed errors live in `DataFlow.rs`, not in this file.
-//RS         #[derive(Clone, Debug, PartialEq, Eq)]
-//RS         pub(crate) struct EncodingError;
-//RS 
-//RS         #[derive(Clone, Debug)]
-//RS         pub(crate) struct DataError {
-//RS             pub(crate) kind: DataErrorKind,
-//RS             pub(crate) operation: String,
-//RS             pub(crate) row: JetOutcome<i64, JetAbsent>,
-//RS             pub(crate) column: JetOutcome<i64, JetAbsent>,
-//RS             pub(crate) index: JetOutcome<i64, JetAbsent>,
-//RS             pub(crate) reason: String,
-//RS             pub(crate) cause: JetOutcome<EncodingError, JetAbsent>,
-//RS         }
-//RS 
-//RS         /// D-QUERY-RETAIN1=A: grouped results retain the nominal key and
-//RS         /// the reducer's exact value type.
-//RS         #[derive(Clone, Debug, PartialEq)]
-//RS         pub(crate) struct GroupValue<K, V> {
-//RS             pub(crate) key: K,
-//RS             pub(crate) value: V,
-//RS         }
-//RS 
-//RS         #[derive(Clone, Debug)]
-//RS         pub(crate) struct DataSummary {
-//RS             pub(crate) count: i64,
-//RS             pub(crate) sum: f64,
-//RS             pub(crate) mean: f64,
-//RS             pub(crate) min: f64,
-//RS             pub(crate) max: f64,
-//RS             pub(crate) median: f64,
-//RS             pub(crate) variance: f64,
-//RS             pub(crate) stddev: f64,
-//RS         }
-//RS 
-//RS         /// D-DATA-PLOT1=A: shared options for the deterministic line renderers.
-//RS         #[derive(Clone, Debug)]
-//RS         pub(crate) struct DataLineOptions {
-//RS             pub(crate) title: String,
-//RS             pub(crate) x_label: String,
-//RS             pub(crate) y_label: String,
-//RS             pub(crate) markers: bool,
-//RS             pub(crate) reference: JetOutcome<f64, JetAbsent>,
-//RS             pub(crate) style: String,
-//RS             pub(crate) color: String,
-//RS             pub(crate) legend: String,
-//RS         }
-//RS 
-//RS         #[derive(Clone, Debug)]
-//RS         pub(crate) struct DataStatus {
-//RS             pub(crate) step: String,
-//RS             pub(crate) path: String,
-//RS             pub(crate) clone_value: String,
-//RS             pub(crate) ownership: String,
-//RS             pub(crate) trust: String,
-//RS             pub(crate) fallback: String,
-//RS             pub(crate) replacement: String,
-//RS         }
-//RS 
-//RS         #[derive(Clone, Debug, PartialEq, Eq)]
-//RS         pub(crate) struct DataLimits {
-//RS             pub(crate) max_groups: i64,
-//RS             pub(crate) max_sort_rows: i64,
-//RS             pub(crate) max_join_rows: i64,
-//RS             pub(crate) max_output_rows: i64,
-//RS         }
-//RS         impl DataLimits {
-//RS             pub(crate) fn safe() -> Self {
-//RS                 Self {
-//RS                     max_groups: 100_000,
-//RS                     max_sort_rows: 1_000_000,
-//RS                     max_join_rows: 1_000_000,
-//RS                     max_output_rows: 1_000_000,
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS     }
-//RS 
-//RS     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs");
-//RS }
-//RS 
-//RS // #1657: `core.data` line renderers share AOT's `DataPlot.rs` the same way.
-//RS pub(crate) mod data_plot_rt {
-//RS     pub(crate) use super::data_kernel::jet_std;
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs");
-//RS }
-//RS 
-//RS #[path = "core_calls/data.rs"]
-//RS mod data;
-//RS #[path = "core_calls/impure.rs"]
-//RS mod impure;
-//RS #[path = "core_calls/values.rs"]
-//RS mod values;
-//RS pub use data::{apply_data_line_call, data_status_rows};
-//RS pub(crate) use data::eval_data_describe;
-//RS #[allow(unused_imports)]
-//RS use data::{
-//RS     as_data_bar_groups, as_float_list, data_error_value, data_float_value, data_result_value,
-//RS     data_result_value_for_type, data_summary_value,
-//RS };
-//RS pub use impure::{
-//RS     apply_impure_core_call, apply_impure_core_call_with_type,
-//RS     apply_impure_core_call_with_type_args,
-//RS };
-//RS pub(crate) use values::as_string;
-//RS pub(crate) use values::url_parts_to_ct;
-//RS #[allow(unused_imports)]
-//RS use values::{as_string_rows, csv_rows_from_records, named_tuple};
-//RS pub(super) use values::url_parts_from_ct;
-//RS 
-//RS pub(crate) fn eval_data_pivot_sum<F>(
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS     call: F,
-//RS ) -> Result<CtValue, Diagnostic>
-//RS where
-//RS     F: FnMut(&CtValue, Vec<CtValue>, Span) -> Result<CtValue, Diagnostic>,
-//RS {
-//RS     data::data_pivot_sum(args, span, call)
-//RS }
-//RS 
-//RS 
-//RS pub fn apply_core_pure_method(
-//RS     recv: &CtValue,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     core_pure_parity::evaluate_method(recv, method, args, span)
-//RS }
-//RS 
-//RS pub fn sketch_add(
-//RS     recv: &CtValue,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-//RS     core_pure_parity::sketch_add(recv, args, span)
-//RS }
-//RS 
-//RS pub(in super::super) fn solver_require(
-//RS     recv: &CtValue,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-//RS     core_pure_parity::solver_require(recv, args, span)
-//RS }
-//RS 
-//RS pub(in super::super) fn solver_new(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     core_pure_parity::solver_new(args, span)
-//RS }
-//RS 
-//RS pub fn display_core_pure_value(value: &CtValue) -> Option<String> {
-//RS     core_pure_parity::display(value)
-//RS }
-//RS 
-//RS pub(in super::super) use regex::apply_regex_method;
-//RS pub use regex::eval_regex_replace_all_with;
-//RS 
-//RS const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
-//RS // D-FIDELITY-API1=A: this signal must behave like the AOT binary's
-//RS // process-global static (fresh default per program run, persists across
-//RS // reads/writes within one run). This compiler process hosts many concurrent
-//RS // or sequential "runs" on separate threads (parallel test threads, distinct
-//RS // compiles) but a session (REPL turns, a dev watch loop) is always driven
-//RS // from a single thread start to finish — so thread-local scoping gives each
-//RS // concurrent run its own signal (fixing a real cross-thread race a
-//RS // process-wide static had) while preserving the existing single-thread
-//RS // persistence a REPL session or dev run relies on.
-//RS thread_local! {
-//RS     static PERF_FIDELITY: Cell<u32> = const { Cell::new(PERF_DEFAULT_FIDELITY_BITS) };
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // D-META-EFFECT1: this is the implementation dispatch for Core calls that the
-//RS // shared effect facts admit at comptime. Eligibility is decided by
-//RS // `Effects::core_effect`; this table only supplies evaluator implementations.
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS pub(in super::super) fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
-//RS     match v {
-//RS         CtValue::Float(value) => Ok(value.as_f64()),
-//RS         CtValue::Int(n) => Ok(*n as f64),
-//RS         // I4: these adapters run on default `jet run`'s evaluator too, so the
-//RS         // `what` names the argument and never a phase.
-//RS         _ => Err(unsupported(
-//RS             "non-numeric argument to a Core math call",
-//RS             span,
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
-//RS     match v {
-//RS         CtValue::Float(value) => Ok(*value),
-//RS         // Both exact carriers cross into Float at the irrational-result math
-//RS         // functions. The checker and the AOT lowerer admit Fraction and
-//RS         // Decimal alike, so this evaluator must too or default `jet run`
-//RS         // disagrees with the type that was already accepted.
-//RS         CtValue::Struct { type_name, .. } if type_name == crate::Syntax::TYPE_FRACTION => {
-//RS             let fraction = crate::Numeric::CtFraction::from_value(v)
-//RS                 .map_err(|_| unsupported("malformed Fraction", span))?;
-//RS             Ok(CtFloat::F64(fraction.to_float()))
-//RS         }
-//RS         CtValue::Struct { type_name, .. } if type_name == crate::Syntax::TYPE_DECIMAL => {
-//RS             let decimal = crate::Numeric::CtDecimal::from_value(v)
-//RS                 .map_err(|_| unsupported("malformed Decimal", span))?;
-//RS             Ok(CtFloat::F64(decimal.to_f64()))
-//RS         }
-//RS         _ => Err(unsupported("non-float argument to a Core math call", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn core_math_float_min(left: CtFloat, right: CtFloat, span: Span) -> Result<CtFloat, Diagnostic> {
-//RS     match (left, right) {
-//RS         (CtFloat::F32(left), CtFloat::F32(right)) => Ok(CtFloat::F32(
-//RS             math_lib_pure::jet_std_math_min_f32(left, right),
-//RS         )),
-//RS         (CtFloat::F64(left), CtFloat::F64(right)) => Ok(CtFloat::F64(
-//RS             math_lib_pure::jet_std_math_min_f64(left, right),
-//RS         )),
-//RS         _ => Err(unsupported("mixing float widths", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn core_math_float_abs(value: CtFloat) -> CtFloat {
-//RS     match value {
-//RS         CtFloat::F32(value) => CtFloat::F32(math_lib_pure::jet_std_math_abs_f32(value)),
-//RS         CtFloat::F64(value) => CtFloat::F64(math_lib_pure::jet_std_math_abs_f64(value)),
-//RS     }
-//RS }
-//RS 
-//RS fn core_math_float_max(left: CtFloat, right: CtFloat, span: Span) -> Result<CtFloat, Diagnostic> {
-//RS     match (left, right) {
-//RS         (CtFloat::F32(left), CtFloat::F32(right)) => Ok(CtFloat::F32(
-//RS             math_lib_pure::jet_std_math_max_f32(left, right),
-//RS         )),
-//RS         (CtFloat::F64(left), CtFloat::F64(right)) => Ok(CtFloat::F64(
-//RS             math_lib_pure::jet_std_math_max_f64(left, right),
-//RS         )),
-//RS         _ => Err(unsupported("mixing float widths", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn core_math_float_clamp(
-//RS     value: CtFloat,
-//RS     low: CtFloat,
-//RS     high: CtFloat,
-//RS     span: Span,
-//RS ) -> Result<CtFloat, Diagnostic> {
-//RS     match (value, low, high) {
-//RS         (CtFloat::F32(value), CtFloat::F32(low), CtFloat::F32(high)) => Ok(CtFloat::F32(
-//RS             math_lib_pure::jet_std_math_clamp_f32(value, low, high),
-//RS         )),
-//RS         (CtFloat::F64(value), CtFloat::F64(low), CtFloat::F64(high)) => Ok(CtFloat::F64(
-//RS             math_lib_pure::jet_std_math_clamp_f64(value, low, high),
-//RS         )),
-//RS         _ => Err(unsupported("mixing float widths", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn hex_encode(bytes: Vec<u8>) -> String {
-//RS     encoding_base_kernel::jet_std_hex_encode(&bytes)
-//RS }
-//RS 
-//RS fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
-//RS     encoding_base_kernel::jet_std_hex_decode(&s.to_string())
-//RS }
-//RS 
-//RS fn base64_encode(bytes: Vec<u8>) -> String {
-//RS     encoding_base_kernel::jet_std_b64_encode(&bytes)
-//RS }
-//RS 
-//RS fn base32_encode(bytes: &[u8]) -> String {
-//RS     encoding_base_kernel::jet_std_base32_encode(&bytes.to_vec())
-//RS }
-//RS 
-//RS /// Core modules the REPL interpreter cannot run (native FFI / threads / HTTP stack).
-//RS fn repl_native_only_module(module: &str) -> Option<&'static str> {
-//RS     match module {
-//RS         "core.http" | "core.http.client" | "core.http.server" => {
-//RS             Some("the HTTP client/server (`core.http`)")
-//RS         }
-//RS         "core.db" => Some("`core.db` (SQLite)"),
-//RS         "core.net" => Some("network sockets (`core.net`)"),
-//RS         "core.crypto" => Some("`core.crypto`"),
-//RS         "core.auth" => Some("`core.auth` token verification"),
-//RS         "core.tasks" | "core.channels" => Some("tasks/channels (`core.tasks`)"),
-//RS         "core.mem" => Some("`core.mem` (low-level memory tier)"),
-//RS         "core.log" => Some("`core.log`"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn repl_native_module_diag(module: &str, method: &str, span: Span) -> Diagnostic {
-//RS     let feature = repl_native_only_module(module).unwrap_or("a native-only core module");
-//RS     Diagnostic::error(
-//RS         "E1802",
-//RS         format!("the REPL interpreter can't run `{}.{method}()`", module),
-//RS         format!(
-//RS             "the REPL is an interpreter for learning Jet; {feature} needs the real compiler \
-//RS              and native runtime"
-//RS         ),
-//RS         "run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn io_error_value(
-//RS     operation: super::super::TextLite::IoErrorOperation,
-//RS     path: &str,
-//RS     e: std::io::Error,
-//RS ) -> CtValue {
-//RS     super::super::TextLite::io_error_value(operation, path, e)
-//RS }
-//RS 
-//RS /// D-TEXTWIDTH1=B: pull the two policy flags back out of a `TextWidth`
-//RS /// `CtValue::Struct` (`ambiguous: .Wide|.Narrow`, `controls: .Zero|.Reject`).
-//RS /// Missing/malformed fields fall back to the portable default (`Narrow`,
-//RS /// `Zero`) rather than erroring — sema already guarantees the shape.
-//RS fn text_width_policy_flags(policy: &CtValue) -> (bool, bool) {
-//RS     let CtValue::Struct { fields, .. } = policy else {
-//RS         return (false, false);
-//RS     };
-//RS     let is_var = |v: &CtValue, name: &str| match v {
-//RS         CtValue::Enum { variant, .. } => variant == name,
-//RS         // Legacy Struct-shaped enum lit (`Type.Variant`) — accept either.
-//RS         CtValue::Struct { type_name, .. } => {
-//RS             type_name == name || type_name.ends_with(&format!(".{name}"))
-//RS         }
-//RS         _ => false,
-//RS     };
-//RS     let ambiguous_wide = fields
-//RS         .iter()
-//RS         .find(|(n, _)| n == "ambiguous")
-//RS         .is_some_and(|(_, v)| is_var(v, "Wide"));
-//RS     let controls_reject = fields
-//RS         .iter()
-//RS         .find(|(n, _)| n == "controls")
-//RS         .is_some_and(|(_, v)| is_var(v, "Reject"));
-//RS     (ambiguous_wide, controls_reject)
-//RS }
-//RS 
-//RS fn raylib_field<'a>(
-//RS     fields: &'a [(String, CtValue)],
-//RS     name: &str,
-//RS ) -> Option<&'a CtValue> {
-//RS     fields
-//RS         .iter()
-//RS         .find_map(|(field, value)| (field == name).then_some(value))
-//RS }
-//RS 
-//RS fn raylib_atlas_value(spec: raylib_kernel::JetRaylibAtlasSpec) -> CtValue {
-//RS     let regions = spec
-//RS         .regions
-//RS         .into_iter()
-//RS         .map(|region| CtValue::Struct {
-//RS             type_name: "RaylibAtlasRegion".to_string(),
-//RS             fields: vec![
-//RS                 ("name".to_string(), CtValue::Str(region.name)),
-//RS                 ("x".to_string(), CtValue::Int(region.x)),
-//RS                 ("y".to_string(), CtValue::Int(region.y)),
-//RS                 ("width".to_string(), CtValue::Int(region.width)),
-//RS                 ("height".to_string(), CtValue::Int(region.height)),
-//RS             ],
-//RS         })
-//RS         .collect();
-//RS     let texture_path = spec
-//RS         .texture_path
-//RS         .map(|path| CtValue::Present(Box::new(CtValue::Str(path))))
-//RS         .unwrap_or_else(|| CtValue::absent(Type::String));
-//RS     CtValue::Struct {
-//RS         type_name: "RaylibTextureAtlas".to_string(),
-//RS         fields: vec![
-//RS             ("path".to_string(), CtValue::Str(spec.path)),
-//RS             ("name".to_string(), CtValue::Str(spec.name)),
-//RS             ("texture_path".to_string(), texture_path),
-//RS             ("regions".to_string(), CtValue::List(regions)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn raylib_atlas_spec(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<raylib_kernel::JetRaylibAtlasSpec, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("expected a RaylibTextureAtlas", span));
-//RS     };
-//RS     if type_name != "RaylibTextureAtlas" {
-//RS         return Err(unsupported("expected a RaylibTextureAtlas", span));
-//RS     }
-//RS     let path = match raylib_field(fields, "path") {
-//RS         Some(CtValue::Str(path)) => path.clone(),
-//RS         _ => return Err(unsupported("malformed RaylibTextureAtlas path", span)),
-//RS     };
-//RS     let name = match raylib_field(fields, "name") {
-//RS         Some(CtValue::Str(name)) => name.clone(),
-//RS         _ => return Err(unsupported("malformed RaylibTextureAtlas name", span)),
-//RS     };
-//RS     let texture_path = match raylib_field(fields, "texture_path") {
-//RS         Some(CtValue::Present(value)) => match value.as_ref() {
-//RS             CtValue::Str(path) => Some(path.clone()),
-//RS             _ => return Err(unsupported("malformed RaylibTextureAtlas texture", span)),
-//RS         },
-//RS         Some(CtValue::Failed(CtReport::Clean(_))) => None,
-//RS         _ => return Err(unsupported("malformed RaylibTextureAtlas texture", span)),
-//RS     };
-//RS     let Some(CtValue::List(region_values)) = raylib_field(fields, "regions") else {
-//RS         return Err(unsupported("malformed RaylibTextureAtlas regions", span));
-//RS     };
-//RS     let mut regions = Vec::with_capacity(region_values.len());
-//RS     for value in region_values {
-//RS         let CtValue::Struct {
-//RS             type_name,
-//RS             fields,
-//RS         } = value
-//RS         else {
-//RS             return Err(unsupported("malformed RaylibTextureAtlas region", span));
-//RS         };
-//RS         if type_name != "RaylibAtlasRegion" {
-//RS             return Err(unsupported("malformed RaylibTextureAtlas region", span));
-//RS         }
-//RS         let int_field = |name: &str| match raylib_field(fields, name) {
-//RS             Some(CtValue::Int(value)) => Ok(*value),
-//RS             _ => Err(unsupported("malformed RaylibTextureAtlas region", span)),
-//RS         };
-//RS         let name = match raylib_field(fields, "name") {
-//RS             Some(CtValue::Str(name)) => name.clone(),
-//RS             _ => return Err(unsupported("malformed RaylibTextureAtlas region", span)),
-//RS         };
-//RS         regions.push(raylib_kernel::JetRaylibAtlasRegion {
-//RS             name,
-//RS             x: int_field("x")?,
-//RS             y: int_field("y")?,
-//RS             width: int_field("width")?,
-//RS             height: int_field("height")?,
-//RS         });
-//RS     }
-//RS     Ok(raylib_kernel::JetRaylibAtlasSpec {
-//RS         path,
-//RS         name,
-//RS         texture_path,
-//RS         regions,
-//RS     })
-//RS }
-//RS 
-//RS fn apply_raylib_core_call(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     if module != "core.game.raylib" {
-//RS         return None;
-//RS     }
-//RS     let one = |index: usize| {
-//RS         args.get(index).ok_or_else(|| {
-//RS             unsupported(
-//RS                 &format!("`{module}.{method}` (wrong number of arguments)"),
-//RS                 span,
-//RS             )
-//RS         })
-//RS     };
-//RS     Some((|| -> Result<CtValue, Diagnostic> {
-//RS         match method {
-//RS             "window_open" => Ok(CtValue::Struct {
-//RS             type_name: "RaylibWindow".to_string(),
-//RS             fields: vec![
-//RS                 ("width".to_string(), CtValue::Int(as_int(one(0)?, span)?)),
-//RS                 ("height".to_string(), CtValue::Int(as_int(one(1)?, span)?)),
-//RS                 ("title".to_string(), CtValue::Str(as_string(one(2)?, span)?.to_string())),
-//RS                 ("native".to_string(), CtValue::Bool(false)),
-//RS             ],
-//RS         }),
-//RS         "window_should_close" => {
-//RS             let _ = one(0)?;
-//RS             Ok(CtValue::Bool(true))
-//RS         }
-//RS         "window_ready" => {
-//RS             let _ = one(0)?;
-//RS             Ok(CtValue::Bool(false))
-//RS         }
-//RS         "begin_drawing" | "close_window" => {
-//RS             let _ = one(0)?;
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         "clear_background" => {
-//RS             let _ = one(0)?;
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         "draw_rectangle" => {
-//RS             for index in 0..4 {
-//RS                 let _ = as_int(one(index)?, span)?;
-//RS             }
-//RS             let _ = one(4)?;
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         "draw_text" => {
-//RS             let _ = as_string(one(0)?, span)?;
-//RS             for index in 1..4 {
-//RS                 let _ = as_int(one(index)?, span)?;
-//RS             }
-//RS             let _ = one(4)?;
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         "end_drawing" => Ok(CtValue::Unit),
-//RS         "key_down" => {
-//RS             let _ = as_string(one(0)?, span)?;
-//RS             Ok(CtValue::Bool(false))
-//RS         }
-//RS         "set_target_fps" => {
-//RS             let _ = as_int(one(0)?, span)?;
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         "color" => Ok(CtValue::Struct {
-//RS             type_name: "RaylibColor".to_string(),
-//RS             fields: vec![
-//RS                 ("r".to_string(), CtValue::Int(as_int(one(0)?, span)?)),
-//RS                 ("g".to_string(), CtValue::Int(as_int(one(1)?, span)?)),
-//RS                 ("b".to_string(), CtValue::Int(as_int(one(2)?, span)?)),
-//RS                 ("a".to_string(), CtValue::Int(as_int(one(3)?, span)?)),
-//RS             ],
-//RS         }),
-//RS         "gamepad_down" => {
-//RS             let gamepad = as_int(one(0)?, span)?;
-//RS             let button = as_string(one(1)?, span)?;
-//RS             let _ = i32::try_from(gamepad)
-//RS                 .ok()
-//RS                 .filter(|value| *value >= 0)
-//RS                 .and_then(|_| raylib_kernel::jet_raylib_button_code(button));
-//RS             Ok(CtValue::Bool(false))
-//RS         }
-//RS         "gamepad_axis" => {
-//RS             let gamepad = as_int(one(0)?, span)?;
-//RS             let axis = as_string(one(1)?, span)?;
-//RS             let _ = i32::try_from(gamepad)
-//RS                 .ok()
-//RS                 .filter(|value| *value >= 0)
-//RS                 .and_then(|_| raylib_kernel::jet_raylib_axis_code(axis));
-//RS             Ok(CtValue::Float(CtFloat::f64(0.0)))
-//RS         }
-//RS         "load_sound" => Ok(CtValue::Struct {
-//RS             type_name: "RaylibSound".to_string(),
-//RS             fields: vec![(
-//RS                 "path".to_string(),
-//RS                 CtValue::Str(as_string(one(0)?, span)?.to_string()),
-//RS             )],
-//RS         }),
-//RS         "play_sound" => {
-//RS             let CtValue::Struct { type_name, fields } = one(0)? else {
-//RS                 return Err(unsupported("expected a RaylibSound", span));
-//RS             };
-//RS             if type_name != "RaylibSound" {
-//RS                 return Err(unsupported("expected a RaylibSound", span));
-//RS             }
-//RS             let path = match raylib_field(fields, "path") {
-//RS                 Some(CtValue::Str(path)) => path,
-//RS                 _ => return Err(unsupported("malformed RaylibSound", span)),
-//RS             };
-//RS             Ok(CtValue::Bool(!path.is_empty()))
-//RS         }
-//RS         "load_texture_atlas" => Ok(raylib_atlas_value(
-//RS             raylib_kernel::jet_raylib_load_texture_atlas_spec(as_string(one(0)?, span)?),
-//RS         )),
-//RS         "draw_sprite" => {
-//RS             let atlas = raylib_atlas_spec(one(0)?, span)?;
-//RS             let region = as_string(one(1)?, span)?;
-//RS             let x = as_int(one(2)?, span)?;
-//RS             let y = as_int(one(3)?, span)?;
-//RS             if let Some(call) =
-//RS                 raylib_kernel::jet_raylib_sprite_draw_call(&atlas.name, &atlas.regions, region, x, y)
-//RS             {
-//RS                 raylib_kernel::jet_raylib_record_draw_call(call);
-//RS             }
-//RS             Ok(CtValue::Unit)
-//RS         }
-//RS         _ => Err(unsupported(&format!("`{module}.{method}()`"), span)),
-//RS         }
-//RS     })())
-//RS }
-//RS 
-//RS /// Direct ambient adapter for `core.game.raylib`.
-//RS ///
-//RS /// This deliberately bypasses `apply_core_call_with_type` so registering it
-//RS /// in the JIT interpreter ambient context cannot recursively re-enter the
-//RS /// ambient dispatcher.
-//RS pub fn apply_raylib_ambient_core_call(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     _resolved_ret: Option<Type>,
-//RS     _sink: Option<&mut crate::Comptime::DevSink>,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     apply_raylib_core_call(module, method, &args, span)
-//RS }
-//RS 
-//RS fn realtime_stream_fields(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<&Vec<(String, CtValue)>, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("realtime stream method expects a RealtimeStream", span));
-//RS     };
-//RS     if type_name != "RealtimeStream" {
-//RS         return Err(unsupported("realtime stream method expects a RealtimeStream", span));
-//RS     }
-//RS     Ok(fields)
-//RS }
-//RS 
-//RS fn realtime_stream_field<'a>(
-//RS     value: &'a CtValue,
-//RS     name: &str,
-//RS     span: Span,
-//RS ) -> Result<&'a CtValue, Diagnostic> {
-//RS     realtime_stream_fields(value, span)?
-//RS         .iter()
-//RS         .find_map(|(field, value)| (field == name).then_some(value))
-//RS         .ok_or_else(|| unsupported("malformed RealtimeStream value", span))
-//RS }
-//RS 
-//RS #[path = "core_calls/history.rs"]
-//RS mod history;
-//RS #[path = "core_calls/plain_calls.rs"]
-//RS mod plain_calls;
-//RS pub(super) use super::{
-//RS     invoke_standalone_closure, invoke_standalone_closure_mut_args,
-//RS };
-//RS pub(super) use history::apply_testing_histories;
-//RS pub use history::{
-//RS     HistoryCommandSchema, history_command_schema_from_mir,
-//RS     apply_history_rng_method, history_callback_fingerprint,
-//RS };
-//RS pub use plain_calls::{
-//RS     apply_core_call, apply_core_pure_call, apply_core_call_with_type,
-//RS     apply_core_call_without_ambient,
-//RS     apply_core_call_without_ambient_with_type,
-//RS     apply_core_call_without_ambient_with_type_args,
-//RS     apply_core_call_without_ambient_with_type_args_and_history_schema,
-//RS };
-// END-PORT-PENDING 0589 crates/jet-comptime/src/Comptime/Methods/core_calls.rs:1-1271
+// Curated Core calls shared by comptime and REPL evaluation.
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:3
+use std.cell.[Cell, RefCell]
+use std.rc.Rc
+use jet_comptime.Comptime.Builtins.[as_int, exact_big, exact_int_value]
+use jet_comptime.Comptime.Diagnostics.unsupported
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.AST.[CtFloat, Type, CtReport, CtValue]
+use jet_foundation.TestingHistory.[EventId, HandleId, HistoryBounds, HistoryCase, HistoryCommand, HistoryDistribution, HistoryOperation, HistoryPrecondition, HistoryProvenance, HistoryRng, HistoryScheduleChoice, HistoryStrategyBehavior, HistoryValue, TaskId, TypedHistoryCase]
+use jet_foundation.Prelude.jet_as_bytes as as_bytes
+use jet_comptime.Comptime.TextLite
+use jet_comptime.Comptime.TextLite.IoErrorOperation
+use jet_comptime.Comptime.Methods.time_deadline_kernel
+use jet_comptime.Comptime.CorePureParity as core_pure_parity
+use jet_foundation.Syntax
+use jet_foundation.CsvKernel.CsvRecord
 
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:26
+fn core_call_allows_pure_parity(row: &Syntax.CoreCallRecord) -> Bool {
+    row.coverage.contains(Syntax.CoreCallCoverage.COMPTIME)
+        && match row.interpreter_route { .Pure(_) | .Ambient => true; _ => false }
+        && row.pure_route != Syntax.CoreCallPureRoute.None
+        && !row.is_receiver() && row.effect().is_none()
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:39
+fn csv_row_value(record: CsvRecord) -> CtValue {
+    CtValue.Struct { type_name: "CSVRow", fields: [
+        ("fields", CtValue.List(record.fields.into_iter().map(CtValue.Str).collect())),
+        ("line", CtValue.Int(record.line)),
+    ] }
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:52
+fn validate_interpreter_route(module: &String, method: &String, span: Span) -> Result<Unit, Diagnostic> {
+    if row := Syntax.core_call(module, method) {
+        if row.coverage.contains(Syntax.CoreCallCoverage.INTERPRETER) && !row.interpreter_route.is_executable() {
+            return Err(unsupported("{module}.{method}(): no interpreter route is declared", span))
+        }
+    }
+    Ok(())
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:68
+fn validate_core_call_projection(module: &String, method: &String, actual_arity: USize, projection: U8, span: Span) -> Result<Unit, Diagnostic> {
+    if Syntax.core_call(module, method).is_none() { return Ok(()) }
+    match Syntax.core_call_projection(module, method, projection, actual_arity) {
+        Ok(_) => Ok(())
+        Err(.Arity { expected, actual }) => Err(unsupported("{module}.{method}(): expected {expected} argument(s), got {actual}", span))
+        // The adapter also serves default jet run, not just comptime.
+        Err(.Uncovered { .. }) => Err(unsupported("{module}.{method}(): no shared-evaluator projection is declared", span))
+        Err(.Unknown) => Err(unsupported("{module}.{method}(): unknown Core-call row", span))
+    }
+}
+
+// Marshal typed Path values; ordinary strings are not implicitly converted.
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:109
+pub fn normalize_path_args(module: &String, method: &String, args: [CtValue], span: Span) -> Result<[CtValue], Diagnostic> {
+    row := Syntax.core_call(module, method) else { return Ok(^args) }
+    args.into_iter().enumerate().map(fn((index, value)) -> Result<CtValue, Diagnostic> {
+        if !row.path_arg(index) { return Ok(^value) }
+        (type_name, fields) := match &value { .Struct { type_name, fields } => (type_name, fields); _ => return Ok(^value) }
+        if type_name != "Path" { return Ok(^value) }
+        path := fields.iter().find_map(fn((name, value)) {
+            match (name, value) { ("inner", .Str(path)) => Val(path.clone()); _ => None }
+        }) else { return Err(unsupported("malformed Path value", span)) }
+        Ok(CtValue.Str(^path))
+    }).collect()
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:143
+use jet_codegen.Prelude.Core.Path as path_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:147
+fn apply_path_call(method: &String, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    text := fn(index: USize) -> Result<&String, Diagnostic> {
+        match args.get(index) {
+            Val(.Str(value)) => Ok(value)
+            Val(.Struct { type_name, fields }) if type_name == "Path" => fields.iter().find_map(fn((name, value)) {
+                match (name, value) { ("inner", .Str(value)) => Val(value); _ => None }
+            }).ok_or_else(fn() { unsupported("malformed Path value", span) })
+            _ => Err(unsupported("Path operation requires a checked path or text value", span))
+        }
+    }
+    path := fn(value: String) { CtValue.Struct { type_name: "Path", fields: [("inner", CtValue.Str(^value))] } }
+    Ok(match method {
+        "path.from" => path(text(0)?.clone())
+        "path.home" => path(path_kernel.jet_std_path_home())
+        "path.join" => path(path_kernel.jet_std_path_join(text(0)?, text(1)?))
+        "path.to_string" => CtValue.Str(text(0)?.clone())
+        "path.normalize" => path(path_kernel.jet_std_path_normalize(text(0)?))
+        "path.is_within" => CtValue.Bool(path_kernel.jet_std_path_is_within(text(0)?, text(1)?))
+        "path.parent" => path_kernel.jet_std_path_parent_opt(text(0)?).map(fn(value) { CtValue.Present(path(^value)) }).unwrap_or_else(fn() { CtValue.absent(Type.Named("Path")) })
+        "path.extension" | "path.stem" => {
+            value := if method == "path.extension" { path_kernel.jet_std_path_extension_opt(text(0)?) } else { path_kernel.jet_std_path_stem_opt(text(0)?) }
+            value.map(fn(value) { CtValue.Present(CtValue.Str(^value)) }).unwrap_or_else(fn() { CtValue.absent(Type.String) })
+        }
+        "path.walk" => CtValue.List(path_kernel.jet_std_path_walk(text(0)?).into_iter().map(path).collect())
+        _ => return Err(unsupported("Path operation has no interpreter binding", span))
+    })
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:198
+use jet_comptime.Comptime.Methods.core_calls.regex.[apply_regex_method, eval_regex_replace_all_with]
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:204
+use jet_comptime.Comptime.Methods.core_calls.random.ambient_random_kernel
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:209
+pub fn with_world_rng_provider<T>(next: fn() -> U64?, seed: fn(I64) -> Bool, callback: fn() -> T) -> T {
+    ambient_random_kernel.with_world_rng_provider(next, seed, callback)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:218
+use jet_codegen.Prelude.Core.LogState as log_state
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:225
+use jet_codegen.Prelude.CoreLib.Top.Log as log_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:227
+use core.log.LogField
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:235
+struct LogSpan { id: I64, name: String }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:243
+use jet_foundation.Devtools.[jet_devtools_publish_event, JetDevtoolsEvent]
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:245
+fn jet_log_write_line(line: &String) {
+    // GATE #4494: native stderr output.
+    std.io.eprintln("{line}")
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:249
+fn jet_log_process_exit(code: I64) {
+    // GATE #4494: native process termination.
+    std.process.exit(code as I32)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:255
+fn log_set_trace_id(id: &String) { log_state.jet_ring_log_set_trace_id(id) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:259
+fn debug(message: &String) { log_kernel.jet_ring_log_debug(message) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:263
+fn info(message: &String) { log_kernel.jet_ring_log_info(message) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:267
+fn warn(message: &String) { log_kernel.jet_ring_log_warn(message) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:271
+fn error(message: &String) { log_kernel.jet_ring_log_error(message) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:275
+fn critical(message: &String) { log_kernel.jet_ring_log_critical(message) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:279
+fn fatal(message: &String) { log_kernel.jet_ring_log_fatal(message) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:283
+fn disable() { log_kernel.jet_ring_log_disable() }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:287
+fn flush() { log_kernel.jet_ring_log_flush() }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:291
+fn enabled(level: &String) -> Bool { log_kernel.jet_ring_log_enabled(level) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:295
+fn field(key: &String, value: &String) -> LogField { log_kernel.jet_ring_log_field(key, value) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:299
+fn int(key: &String, value: I64) -> LogField { log_kernel.jet_ring_log_int(key, value) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:303
+fn float(key: &String, value: F64) -> LogField { log_kernel.jet_ring_log_float(key, value) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:307
+fn bool_field(key: &String, value: Bool) -> LogField { log_kernel.jet_ring_log_bool(key, value) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:311
+fn redact(key: &String) -> LogField { log_kernel.jet_ring_log_redact(key) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:315
+fn counter(name: &String, value: I64) -> LogField { log_kernel.jet_ring_log_counter(name, value) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:319
+fn info_fields(message: &String, fields: &[LogField]) { log_kernel.jet_ring_log_info_fields(message, fields) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:323
+fn warn_fields(message: &String, fields: &[LogField]) { log_kernel.jet_ring_log_warn_fields(message, fields) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:327
+fn error_fields(message: &String, fields: &[LogField]) { log_kernel.jet_ring_log_error_fields(message, fields) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:331
+fn debug_fields(message: &String, fields: &[LogField]) { log_kernel.jet_ring_log_debug_fields(message, fields) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:335
+fn log_span(name: &String) -> LogSpan { log_kernel.jet_ring_log_span(name) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:339
+fn enter(span: &LogSpan) { log_kernel.jet_ring_log_enter(span) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:343
+fn close(span: &LogSpan) { log_kernel.jet_ring_log_close(span) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:347
+fn set_sink(kind: &String, path: &String) { log_kernel.jet_ring_log_set_sink(kind, path) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:351
+fn sample_every(value: I64) { log_kernel.jet_ring_log_sample_every(value) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:355
+fn otlp_file(path: &String) { log_kernel.jet_ring_log_otlp_file(path) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:359
+fn set_level(level: &String) { log_kernel.jet_ring_log_set_level(level) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:363
+fn setup(format: &String) { log_kernel.jet_ring_log_setup(format) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:371
+pub fn set_trace_id(id: &String) { log_set_trace_id(id) }
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:375
+use jet_codegen.Prelude.Term as term_semantics
+use jet_codegen.Prelude.Term.jet_term_print_frame
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:381
+use jet_codegen.Prelude.CoreLib.Top.MathLibPure as math_lib_pure
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:385
+use jet_codegen.Prelude.Core.EncodingBase as encoding_base_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:389
+use jet_codegen.Prelude.Core.EncodingError as encoding_error_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:393
+use jet_codegen.Prelude.Core.FieldError as field_error_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:397
+use jet_codegen.Prelude.Core.Fmt as fmt_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:401
+use jet_codegen.Prelude.Core.SeededRandom as seeded_random_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:405
+use jet_codegen.Prelude.CoreLib.Top.FakeData as fake_data_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:409
+struct Fake { state: U64, locale: U8 }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:414
+use jet_codegen.Prelude.Core.SeededRandom.jet_seeded_rng_int
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:418
+pub fn apply_fake_method(recv: &CtValue, method: &String, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    (type_name, fields) := match recv { .Struct { type_name, fields } => (type_name, fields); _ => return Err(unsupported("Fake receiver", span)) }
+    if type_name != Syntax.FAKE_TYPE { return Err(unsupported("Fake receiver", span)) }
+    state := fields.iter().find_map(fn((name, value)) { match (name, value) { ("state", .Int(value)) => Val(value as U64); _ => None } }).unwrap_or(0)
+    locale := fields.iter().find_map(fn((name, value)) { match (name, value) { ("locale", .Int(value)) => Val(value as U8); _ => None } }).unwrap_or(0)
+    fake := Fake { state: state, locale: locale }
+    result := match method {
+        "locale" => {
+            locale := as_string(args.first().ok_or_else(fn() { unsupported("Fake.locale argument", span) })?, span)?.to_string()
+            next := fake_data_kernel.jet_fake_locale(&fake, &locale)
+            CtValue.Struct { type_name: Syntax.FAKE_TYPE.to_string(), fields: [("state", CtValue.Int(next.state as I64)), ("locale", CtValue.Int(next.locale as I64))] }
+        }
+        "name" => CtValue.Str(fake_data_kernel.jet_fake_name(&fake))
+        "email" => CtValue.Str(fake_data_kernel.jet_fake_email(&fake))
+        "host" => CtValue.Str(fake_data_kernel.jet_fake_host(&fake))
+        "address" => CtValue.Str(fake_data_kernel.jet_fake_address(&fake))
+        _ => return Err(unsupported("this Fake method", span))
+    }
+    if method != "locale" {
+        *recv = CtValue.Struct { type_name: Syntax.FAKE_TYPE.to_string(), fields: [("state", CtValue.Int(fake.state as I64)), ("locale", CtValue.Int(fake.locale as I64))] }
+    }
+    Ok(^result)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:480
+use jet_codegen.Prelude.Core.NetPure as net_pure_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:484
+use jet_codegen.Prelude.Core.Loadable as loadable_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:488
+fn loadable_variant(state: &String) -> String {
+    tag := match state {
+        "idle" => loadable_kernel.JET_LOADABLE_IDLE
+        "loading" => loadable_kernel.JET_LOADABLE_LOADING
+        "loaded" => loadable_kernel.JET_LOADABLE_LOADED
+        _ => loadable_kernel.JET_LOADABLE_FAILED
+    }
+    match tag {
+        loadable_kernel.JET_LOADABLE_IDLE => "Idle"
+        loadable_kernel.JET_LOADABLE_LOADING => "Loading"
+        loadable_kernel.JET_LOADABLE_LOADED => "Loaded"
+        _ => "Failed"
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:503
+use jet_codegen.Prelude.CoreLib.JetStd.Mime as mime_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:507
+use jet_codegen.Prelude.CoreLib.Top.Solver as solver_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:510
+struct Solver { seed: I64, checked: I64, failures: I64 }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:520
+use jet_codegen.Prelude.Core.Sketch as sketch_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:524
+use jet_codegen.Prelude.Core.Time as time_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:525
+fn jet_scheduler_world_now_ms() -> I64? { None }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:528
+use jet_foundation.Monotonic.jet_time_monotonic_now_ns
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:529
+use jet_codegen.Prelude.Core.Duration as duration_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:532
+use jet_codegen.Prelude.Core.Raylib as raylib_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:536
+use jet_foundation.Outcome.[JetOutcome, JetAbsent]
+use jet_codegen.Prelude.CoreLib.Top.CryptoEntropy as crypto_entropy_kernel
+use jet_crypto_entropy.[jet_crypto_entropy_fill, JetCryptoEntropyError]
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:544
+use jet_codegen.Prelude.CoreLib.Top.CryptoEntropy.jet_crypto_zeroize
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:546
+fn runtime_date_value(date: time_kernel.JetDate) -> CtValue {
+    CtValue.Struct { type_name: "LocalDate", fields: [("year", CtValue.Int(date.year())), ("month", CtValue.Int(date.month())), ("day", CtValue.Int(date.day()))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:557
+fn runtime_datetime_value(datetime: time_kernel.JetDateTime) -> CtValue {
+    CtValue.Struct { type_name: "DateTime", fields: [("secs", CtValue.Int(datetime.unix_seconds_anchor())), ("nanos", CtValue.Int(datetime.nanosecond())), ("leap_second", CtValue.Bool(datetime.is_leap_second()))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:576
+pub fn validate_datetime_literal(value: &String) -> Unit Err! {
+    _ :: time_kernel.JetDateTime.parse_rfc3339(value)?
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:582
+pub fn evaluate_typed_datetime_literal(value: &String, span: Span) -> Result<CtValue, Diagnostic> {
+    row := Syntax.core_call("core.time", "parse_rfc3339").expect("core.time.parse_rfc3339 row is registered")
+    core_pure_parity.evaluate(row, &[CtValue.Str(value.to_string())], span).expect("core.time.parse_rfc3339 pure-parity evaluator is registered")
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:596
+use jet_codegen.Prelude.Core.Measurement as measurement_kernel
+
+// The shared DataStats/DataPlot kernels use the canonical Core nominal values.
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:606
+use jet_codegen.Prelude.CoreLib.Top.DataStats as data_kernel
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:616
+use core.data.DataErrorKind
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:631
+use core.encoding.EncodingError
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:634
+use core.data.DataError
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:647
+struct GroupValue<K, V> { key: K, value: V }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:653
+use core.data.DataSummary
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:666
+use core.data.DataLineOptions
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:679
+use core.data.DataStatus
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:689
+use core.data.DataLimits
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:696
+// DataLimits.safe at core.data supplies these same four limits and encoding limits.
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:712
+use jet_codegen.Prelude.CoreLib.Top.DataPlot as data_plot_rt
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:719
+use jet_comptime.Comptime.Methods.core_calls.data
+use jet_comptime.Comptime.Methods.core_calls.data.[apply_data_line_call, data_status_rows, eval_data_describe, as_data_bar_groups, as_float_list, data_error_value, data_float_value, data_result_value, data_result_value_for_type, data_summary_value]
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:721
+use jet_comptime.Comptime.Methods.core_calls.impure.[apply_impure_core_call, apply_impure_core_call_with_type, apply_impure_core_call_with_type_args]
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:723
+use jet_comptime.Comptime.Methods.core_calls.values.[as_string, url_parts_to_ct, as_string_rows, csv_rows_from_records, named_tuple, url_parts_from_ct]
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:742
+pub fn eval_data_pivot_sum(args: &[CtValue], span: Span, call: fn(&CtValue, [CtValue], Span) -> Result<CtValue, Diagnostic>) -> Result<CtValue, Diagnostic> {
+    data.data_pivot_sum(args, span, call)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:754
+pub fn apply_core_pure_method(recv: &CtValue, method: &String, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic>? {
+    core_pure_parity.evaluate_method(recv, method, args, span)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:763
+pub fn sketch_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<(CtValue, CtValue), Diagnostic>? { core_pure_parity.sketch_add(recv, args, span) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:771
+pub fn solver_require(recv: &CtValue, args: &[CtValue], span: Span) -> Result<(CtValue, CtValue), Diagnostic>? { core_pure_parity.solver_require(recv, args, span) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:779
+pub fn solver_new(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> { core_pure_parity.solver_new(args, span) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:783
+pub fn display_core_pure_value(value: &CtValue) -> String? { core_pure_parity.display(value) }
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:790
+const PERF_DEFAULT_FIDELITY_BITS: U32 = 0x3f800000
+// Per-thread run/session state, not process-global: concurrent compiler runs are isolated.
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:800
+// GATE #4494: retained thread-local Cell storage.
+static PERF_FIDELITY: std.thread.Local<Cell<U32>> = std.thread.Local.new(fn() { Cell.new(PERF_DEFAULT_FIDELITY_BITS) })
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:810
+pub fn as_float(v: &CtValue, span: Span) -> Result<F64, Diagnostic> {
+    match v {
+        .Float(value) => Ok(value.as_f64())
+        .Int(n) => Ok(n as F64)
+        _ => Err(unsupported("non-numeric argument to a Core math call", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:823
+fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
+    match v {
+        .Float(value) => Ok(value)
+        .Struct { type_name, .. } if type_name == Syntax.TYPE_FRACTION => {
+            fraction := jet_comptime.Numeric.CtFraction.from_value(v).map_err(fn(_) { unsupported("malformed Fraction", span) })?
+            Ok(CtFloat.F64(fraction.to_float()))
+        }
+        .Struct { type_name, .. } if type_name == Syntax.TYPE_DECIMAL => {
+            decimal := jet_comptime.Numeric.CtDecimal.from_value(v).map_err(fn(_) { unsupported("malformed Decimal", span) })?
+            Ok(CtFloat.F64(decimal.to_f64()))
+        }
+        _ => Err(unsupported("non-float argument to a Core math call", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:844
+fn core_math_float_min(left: CtFloat, right: CtFloat, span: Span) -> Result<CtFloat, Diagnostic> {
+    match (left, right) {
+        (.F32(left), .F32(right)) => Ok(CtFloat.F32(math_lib_pure.jet_std_math_min_f32(left, right)))
+        (.F64(left), .F64(right)) => Ok(CtFloat.F64(math_lib_pure.jet_std_math_min_f64(left, right)))
+        _ => Err(unsupported("mixing float widths", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:856
+fn core_math_float_abs(value: CtFloat) -> CtFloat {
+    match value {
+        .F32(value) => CtFloat.F32(math_lib_pure.jet_std_math_abs_f32(value))
+        .F64(value) => CtFloat.F64(math_lib_pure.jet_std_math_abs_f64(value))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:863
+fn core_math_float_max(left: CtFloat, right: CtFloat, span: Span) -> Result<CtFloat, Diagnostic> {
+    match (left, right) {
+        (.F32(left), .F32(right)) => Ok(CtFloat.F32(math_lib_pure.jet_std_math_max_f32(left, right)))
+        (.F64(left), .F64(right)) => Ok(CtFloat.F64(math_lib_pure.jet_std_math_max_f64(left, right)))
+        _ => Err(unsupported("mixing float widths", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:875
+fn core_math_float_clamp(value: CtFloat, low: CtFloat, high: CtFloat, span: Span) -> Result<CtFloat, Diagnostic> {
+    match (value, low, high) {
+        (.F32(value), .F32(low), .F32(high)) => Ok(CtFloat.F32(math_lib_pure.jet_std_math_clamp_f32(value, low, high)))
+        (.F64(value), .F64(low), .F64(high)) => Ok(CtFloat.F64(math_lib_pure.jet_std_math_clamp_f64(value, low, high)))
+        _ => Err(unsupported("mixing float widths", span))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:892
+fn hex_encode(bytes: [U8]) -> String { encoding_base_kernel.jet_std_hex_encode(&bytes) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:896
+fn hex_decode(s: &String) -> [U8] Err! { encoding_base_kernel.jet_std_hex_decode(s) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:900
+fn base64_encode(bytes: [U8]) -> String { encoding_base_kernel.jet_std_b64_encode(&bytes) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:904
+fn base32_encode(bytes: &[U8]) -> String { encoding_base_kernel.jet_std_base32_encode(bytes) }
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:909
+fn repl_native_only_module(module: &String) -> String? {
+    match module {
+        "core.http" | "core.http.client" | "core.http.server" => Val("the HTTP client/server (`core.http`)")
+        "core.db" => Val("`core.db` (SQLite)")
+        "core.net" => Val("network sockets (`core.net`)")
+        "core.crypto" => Val("`core.crypto`")
+        "core.auth" => Val("`core.auth` token verification")
+        "core.tasks" | "core.channels" => Val("tasks/channels (`core.tasks`)")
+        "core.mem" => Val("`core.mem` (low-level memory tier)")
+        "core.log" => Val("`core.log`")
+        _ => None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:925
+fn repl_native_module_diag(module: &String, method: &String, span: Span) -> Diagnostic {
+    feature := repl_native_only_module(module).unwrap_or("a native-only core module")
+    Diagnostic.error("E1802", "the REPL interpreter can't run `{module}.{method}()`", "the REPL is an interpreter for learning Jet; {feature} needs the real compiler and native runtime", "run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler", Val(span))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:939
+pub fn io_error_value(operation: IoErrorOperation, path: &String, e: std.io.Error) -> CtValue { TextLite.io_error_value(operation, path, ^e) }
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:951
+fn text_width_policy_flags(policy: &CtValue) -> (Bool, Bool) {
+    fields := match policy { .Struct { fields, .. } => fields; _ => return (false, false) }
+    is_var := fn(v: &CtValue, name: &String) -> Bool {
+        match v {
+            .Enum { variant, .. } => variant == name
+            .Struct { type_name, .. } => type_name == name || type_name.ends_with(".{name}")
+            _ => false
+        }
+    }
+    ambiguous_wide := fields.iter().find(fn((n, _)) { n == "ambiguous" }).is_some_and(fn((_, v)) { is_var(v, "Wide") })
+    controls_reject := fields.iter().find(fn((n, _)) { n == "controls" }).is_some_and(fn((_, v)) { is_var(v, "Reject") })
+    (ambiguous_wide, controls_reject)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:974
+fn raylib_field(fields: &[(String, CtValue)], name: &String) -> &CtValue? {
+    fields.iter().find_map(fn((field, value)) { if field == name { Val(value) } else { None } })
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:983
+fn raylib_atlas_value(spec: raylib_kernel.JetRaylibAtlasSpec) -> CtValue {
+    regions := spec.regions.into_iter().map(fn(region) {
+        CtValue.Struct { type_name: "RaylibAtlasRegion", fields: [("name", CtValue.Str(^region.name)), ("x", CtValue.Int(region.x)), ("y", CtValue.Int(region.y)), ("width", CtValue.Int(region.width)), ("height", CtValue.Int(region.height))] }
+    }).collect()
+    texture_path := spec.texture_path.map(fn(path) { CtValue.Present(CtValue.Str(^path)) }).unwrap_or_else(fn() { CtValue.absent(Type.String) })
+    CtValue.Struct { type_name: "RaylibTextureAtlas", fields: [("path", CtValue.Str(^spec.path)), ("name", CtValue.Str(^spec.name)), ("texture_path", ^texture_path), ("regions", CtValue.List(^regions))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:1013
+fn raylib_atlas_spec(value: &CtValue, span: Span) -> Result<raylib_kernel.JetRaylibAtlasSpec, Diagnostic> {
+    (type_name, fields) := match value { .Struct { type_name, fields } => (type_name, fields); _ => return Err(unsupported("expected a RaylibTextureAtlas", span)) }
+    if type_name != "RaylibTextureAtlas" { return Err(unsupported("expected a RaylibTextureAtlas", span)) }
+    path := match raylib_field(fields, "path") { Val(.Str(path)) => path.clone(); _ => return Err(unsupported("malformed RaylibTextureAtlas path", span)) }
+    name := match raylib_field(fields, "name") { Val(.Str(name)) => name.clone(); _ => return Err(unsupported("malformed RaylibTextureAtlas name", span)) }
+    texture_path := match raylib_field(fields, "texture_path") {
+        Val(.Present(value)) => match value.as_ref() { .Str(path) => Val(path.clone()); _ => return Err(unsupported("malformed RaylibTextureAtlas texture", span)) }
+        Val(.Failed(.Clean(_))) => None
+        _ => return Err(unsupported("malformed RaylibTextureAtlas texture", span))
+    }
+    region_values := match raylib_field(fields, "regions") { Val(.List(region_values)) => region_values; _ => return Err(unsupported("malformed RaylibTextureAtlas regions", span)) }
+    regions := [raylib_kernel.JetRaylibAtlasRegion].with_capacity(region_values.len())
+    for value in region_values {
+        (type_name, fields) := match value { .Struct { type_name, fields } => (type_name, fields); _ => return Err(unsupported("malformed RaylibTextureAtlas region", span)) }
+        if type_name != "RaylibAtlasRegion" { return Err(unsupported("malformed RaylibTextureAtlas region", span)) }
+        int_field := fn(name: &String) -> Result<I64, Diagnostic> { match raylib_field(fields, name) { Val(.Int(value)) => Ok(value); _ => Err(unsupported("malformed RaylibTextureAtlas region", span)) } }
+        name := match raylib_field(fields, "name") { Val(.Str(name)) => name.clone(); _ => return Err(unsupported("malformed RaylibTextureAtlas region", span)) }
+        regions.push(raylib_kernel.JetRaylibAtlasRegion { name: ^name, x: int_field("x")?, y: int_field("y")?, width: int_field("width")?, height: int_field("height")? })
+    }
+    Ok(raylib_kernel.JetRaylibAtlasSpec { path: ^path, name: ^name, texture_path: ^texture_path, regions: ^regions })
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:1078
+fn apply_raylib_core_call(module: &String, method: &String, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic>? {
+    if module != "core.game.raylib" { return None }
+    one := fn(index: USize) -> Result<&CtValue, Diagnostic> { args.get(index).ok_or_else(fn() { unsupported("`{module}.{method}` (wrong number of arguments)", span) }) }
+    // These are the reference interpreter's intentional headless semantics.
+    Val((fn() -> Result<CtValue, Diagnostic> {
+        match method {
+            "window_open" => Ok(CtValue.Struct { type_name: "RaylibWindow", fields: [("width", CtValue.Int(as_int(one(0)?, span)?)), ("height", CtValue.Int(as_int(one(1)?, span)?)), ("title", CtValue.Str(as_string(one(2)?, span)?.to_string())), ("native", CtValue.Bool(false))] })
+            "window_should_close" => { _ :: one(0)?; Ok(CtValue.Bool(true)) }
+            "window_ready" => { _ :: one(0)?; Ok(CtValue.Bool(false)) }
+            "begin_drawing" | "close_window" => { _ :: one(0)?; Ok(CtValue.Unit) }
+            "clear_background" => { _ :: one(0)?; Ok(CtValue.Unit) }
+            "draw_rectangle" => { for index in 0..4 { _ :: as_int(one(index)?, span)? }; _ :: one(4)?; Ok(CtValue.Unit) }
+            "draw_text" => { _ :: as_string(one(0)?, span)?; for index in 1..4 { _ :: as_int(one(index)?, span)? }; _ :: one(4)?; Ok(CtValue.Unit) }
+            "end_drawing" => Ok(CtValue.Unit)
+            "key_down" => { _ :: as_string(one(0)?, span)?; Ok(CtValue.Bool(false)) }
+            "set_target_fps" => { _ :: as_int(one(0)?, span)?; Ok(CtValue.Unit) }
+            "color" => Ok(CtValue.Struct { type_name: "RaylibColor", fields: [("r", CtValue.Int(as_int(one(0)?, span)?)), ("g", CtValue.Int(as_int(one(1)?, span)?)), ("b", CtValue.Int(as_int(one(2)?, span)?)), ("a", CtValue.Int(as_int(one(3)?, span)?))] })
+            "gamepad_down" => {
+                gamepad := as_int(one(0)?, span)?
+                button := as_string(one(1)?, span)?
+                _ :: I32.try_from(gamepad).ok().filter(fn(value) { value >= 0 }).and_then(fn(_) { raylib_kernel.jet_raylib_button_code(button) })
+                Ok(CtValue.Bool(false))
+            }
+            "gamepad_axis" => {
+                gamepad := as_int(one(0)?, span)?
+                axis := as_string(one(1)?, span)?
+                _ :: I32.try_from(gamepad).ok().filter(fn(value) { value >= 0 }).and_then(fn(_) { raylib_kernel.jet_raylib_axis_code(axis) })
+                Ok(CtValue.Float(CtFloat.f64(0.0)))
+            }
+            "load_sound" => Ok(CtValue.Struct { type_name: "RaylibSound", fields: [("path", CtValue.Str(as_string(one(0)?, span)?.to_string()))] })
+            "play_sound" => {
+                (type_name, fields) := match one(0)? { .Struct { type_name, fields } => (type_name, fields); _ => return Err(unsupported("expected a RaylibSound", span)) }
+                if type_name != "RaylibSound" { return Err(unsupported("expected a RaylibSound", span)) }
+                path := match raylib_field(fields, "path") { Val(.Str(path)) => path; _ => return Err(unsupported("malformed RaylibSound", span)) }
+                Ok(CtValue.Bool(!path.is_empty()))
+            }
+            "load_texture_atlas" => Ok(raylib_atlas_value(raylib_kernel.jet_raylib_load_texture_atlas_spec(as_string(one(0)?, span)?)))
+            "draw_sprite" => {
+                atlas := raylib_atlas_spec(one(0)?, span)?
+                region := as_string(one(1)?, span)?
+                x := as_int(one(2)?, span)?
+                y := as_int(one(3)?, span)?
+                if call := raylib_kernel.jet_raylib_sprite_draw_call(&atlas.name, &atlas.regions, region, x, y) { raylib_kernel.jet_raylib_record_draw_call(^call) }
+                Ok(CtValue.Unit)
+            }
+            _ => Err(unsupported("`{module}.{method}()`", span))
+        }
+    })())
+}
+// Direct adapter avoids recursive ambient dispatch.
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:1218
+pub fn apply_raylib_ambient_core_call(module: &String, method: &String, args: [CtValue], span: Span, _resolved_ret: Type?, _sink: &jet_comptime.Comptime.DevSink?) -> Result<CtValue, Diagnostic>? {
+    apply_raylib_core_call(module, method, &args, span)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:1229
+fn realtime_stream_fields(value: &CtValue, span: Span) -> Result<&[(String, CtValue)], Diagnostic> {
+    (type_name, fields) := match value { .Struct { type_name, fields } => (type_name, fields); _ => return Err(unsupported("realtime stream method expects a RealtimeStream", span)) }
+    if type_name != "RealtimeStream" { return Err(unsupported("realtime stream method expects a RealtimeStream", span)) }
+    Ok(fields)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:1242
+fn realtime_stream_field(value: &CtValue, name: &String, span: Span) -> Result<&CtValue, Diagnostic> {
+    realtime_stream_fields(value, span)?.iter().find_map(fn((field, value)) { if field == name { Val(value) } else { None } }).ok_or_else(fn() { unsupported("malformed RealtimeStream value", span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:1253
+use jet_comptime.Comptime.Methods.[invoke_standalone_closure, invoke_standalone_closure_mut_args]
+use jet_comptime.Comptime.Methods.core_calls.history.[apply_testing_histories, HistoryCommandSchema, history_command_schema_from_mir, apply_history_rng_method, history_callback_fingerprint]
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:1265
+use jet_comptime.Comptime.Methods.core_calls.plain_calls.[apply_core_call, apply_core_pure_call, apply_core_call_with_type, apply_core_call_without_ambient, apply_core_call_without_ambient_with_type, apply_core_call_without_ambient_with_type_args, apply_core_call_without_ambient_with_type_args_and_history_schema]

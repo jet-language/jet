@@ -1,0 +1,37 @@
+use jet_codegen.AST.Type
+use jet_codegen.Codegen.Functions02.[lower_foreign_abi, lower_foreign_language, is_plain_call_return, fn_value_carrier_adaptation, inline_constant_fits]
+use jet_foundation.MIR.[MirForeignAbi, MirForeignLanguage, MirConstant]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:1929,1942
+#Test("foreign_spellings_preserve_normalization_and_platform_fallback") {
+    assert_eq(lower_foreign_abi("C-UNWIND"), MirForeignAbi.CUnwind)
+    assert_eq(lower_foreign_abi("VendorABI"), MirForeignAbi.Platform("VendorABI"))
+    assert_eq(lower_foreign_language("C++:header"), MirForeignLanguage.Cpp)
+    assert_eq(lower_foreign_language("ASSEMBLY:att"), MirForeignLanguage.Assembly)
+    assert_eq(lower_foreign_language("unknown"), MirForeignLanguage.Rust)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:2008
+#Test("optional_plain_return_requires_exact_never_success") {
+    returned :: Type.Option(Type.Int)
+    assert(is_plain_call_return(returned, Type.Result{ok: returned.clone(), err: Type.Named("Never")}))
+    assert(!is_plain_call_return(returned, Type.Result{ok: returned.clone(), err: Type.String}))
+    assert(!is_plain_call_return(returned, Type.Result{ok: Type.Option(Type.String), err: Type.Named("Never")}))
+    assert(is_plain_call_return(Type.Int, Type.Result{ok: Type.Int, err: Type.String}))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:2679
+#Test("inline_constant_limits_count_leaves_and_text_bytes") {
+    leaves := 7 as USize
+    assert(inline_constant_fits(MirConstant.Bool(true), &leaves))
+    assert_eq(leaves, 8)
+    assert(!inline_constant_fits(MirConstant.Bool(false), &leaves))
+    assert_eq(leaves, 9)
+    text :: "x".repeat(256)
+    leaves = 0
+    assert(inline_constant_fits(MirConstant.String(text), &leaves))
+    leaves = 0
+    assert(!inline_constant_fits(MirConstant.String("x".repeat(257)), &leaves))
+    assert_eq(leaves, 0)
+    assert(!inline_constant_fits(MirConstant.List([]), &leaves))
+}

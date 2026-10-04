@@ -1,107 +1,59 @@
-// PORT-PENDING 0595 crates-jet-comptime-src-comptime-methods-pool-module-group: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:1-103
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Comptime has no resident scheduler host. These are the host-side scheduler
-//RS // primitives for the shared deadline kernel; the policy itself remains in
-//RS // Prelude/CoreLib/Top/TimeSleep.rs.
-//RS pub(super) mod jet_std {
-//RS     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS     pub(super) enum JetTaskWaitInterrupt<D> {
-//RS         Deadline(D),
-//RS         Cancelled,
-//RS     }
-//RS 
-//RS     pub(super) fn jet_task_deadline_if_expired(
-//RS         remaining_ms: Option<i64>,
-//RS         _wait_kind: &str,
-//RS     ) -> Option<i64> {
-//RS         remaining_ms.filter(|remaining| *remaining <= 0)
-//RS     }
-//RS 
-//RS     pub(super) fn jet_task_wait_policy<D>(
-//RS         deadline: Option<D>,
-//RS         cancelled: bool,
-//RS         shielded: bool,
-//RS     ) -> Result<(), JetTaskWaitInterrupt<D>> {
-//RS         if shielded {
-//RS             return Ok(());
-//RS         }
-//RS         if let Some(deadline) = deadline {
-//RS             return Err(JetTaskWaitInterrupt::Deadline(deadline));
-//RS         }
-//RS         if cancelled {
-//RS             return Err(JetTaskWaitInterrupt::Cancelled);
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn jet_scheduler_sleep_ms(millis: u64) {
-//RS     jet_scheduler_sleep_duration("time sleep", std::time::Duration::from_millis(millis));
-//RS }
-//RS 
-//RS pub(super) fn jet_scheduler_sleep_duration(
-//RS     _wait_kind: &'static str,
-//RS     duration: std::time::Duration,
-//RS ) {
-//RS     std::thread::sleep(duration);
-//RS }
-//RS 
-//RS pub(super) fn jet_task_delay_ms_defaulted(millis: i64) -> u64 {
-//RS     millis.max(0) as u64
-//RS }
-//RS 
-//RS pub(super) fn jet_task_delay_duration_ns_defaulted(nanos: i64) -> std::time::Duration {
-//RS     std::time::Duration::from_nanos(nanos.max(0) as u64)
-//RS }
-//RS 
-//RS pub(super) fn jet_task_sleep_ms_defaulted(millis: i64) {
-//RS     jet_task_sleep_duration_defaulted(std::time::Duration::from_millis(
-//RS         jet_task_delay_ms_defaulted(millis),
-//RS     ));
-//RS }
-//RS 
-//RS pub(super) fn jet_task_sleep_duration_ns_defaulted(nanos: i64) {
-//RS     jet_task_sleep_duration_defaulted(jet_task_delay_duration_ns_defaulted(nanos));
-//RS }
-//RS 
-//RS fn jet_task_sleep_duration_defaulted(duration: std::time::Duration) {
-//RS     if !jet_scheduler_shielded()
-//RS         && jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep")
-//RS             .is_some()
-//RS     {
-//RS         jet_deadline_exceeded("time sleep");
-//RS     }
-//RS     jet_scheduler_sleep_duration("time sleep", duration);
-//RS     if !jet_scheduler_shielded()
-//RS         && jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep")
-//RS             .is_some()
-//RS     {
-//RS         jet_deadline_exceeded("time sleep");
-//RS     }
-//RS }
-//RS 
-//RS fn jet_scheduler_shielded() -> bool {
-//RS     false
-//RS }
-//RS 
-//RS fn jet_deadline_exceeded(_wait_kind: &str) -> ! {
-//RS     unreachable!("comptime has no installed deadline")
-//RS }
-//RS 
-//RS pub(super) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
-//RS // Comptime has no resident Scheduler scope. Keep wall-clock control explicit:
-//RS // the shared deadline kernel sees no provider rather than sampling a host value.
-//RS fn jet_scheduler_world_now_ms() -> Option<i64> {
-//RS     None
-//RS }
-//RS include!("../../../../jet-codegen/src/Prelude/Deadline.rs");
-//RS include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs");
-//RS 
-//RS pub(super) fn jet_time_sleep_until(deadline_ns: i64) {
-//RS     let remaining = deadline_ns
-//RS         .saturating_sub(jet_time_monotonic_now_ns())
-//RS         .max(0);
-//RS     jet_std_time_sleep_duration_ns(remaining);
-//RS }
-// END-PORT-PENDING 0595 crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:1-103
-
+// Comptime has no resident scheduler host; policy stays in the shared kernel.
+use std.time.[Duration]
+use std.thread
+use jet_foundation.Monotonic.[jet_time_monotonic_now_ns]
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:4
+pub mod jet_std {
+    // Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:6
+    #Error
+    pub enum JetTaskWaitInterrupt<D> { Deadline(value: D) Cancelled }
+    // Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:11
+    pub fn jet_task_deadline_if_expired(remaining_ms: Int?, _wait_kind: String) -> Int? Never! {
+        if remaining_ms == { Val(remaining) -> if remaining <= 0 -> Val(remaining) else -> None; None -> None }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:18
+    pub fn jet_task_wait_policy<D>(deadline: D?, cancelled: Bool, shielded: Bool) -> JetTaskWaitInterrupt<D>! {
+        if shielded -> return
+        if deadline == Val(value) -> fail JetTaskWaitInterrupt<D>.Deadline{value: ^value}
+        if cancelled -> fail JetTaskWaitInterrupt<D>.Cancelled
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:36
+pub fn jet_scheduler_sleep_ms(millis: U64) -> Never! {
+    jet_scheduler_sleep_duration("time sleep", Duration.from_millis(millis))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:40
+pub fn jet_scheduler_sleep_duration(_wait_kind: String, duration: Duration) -> Never! {
+    // GATE #4494: native thread sleep, preserving full Duration precision.
+    thread.sleep(duration)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:47
+pub fn jet_task_delay_ms_defaulted(millis: Int) -> U64 Never! { millis.max(0) as U64 }
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:51
+pub fn jet_task_delay_duration_ns_defaulted(nanos: Int) -> Duration Never! { Duration.from_nanos(nanos.max(0) as U64) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:55
+pub fn jet_task_sleep_ms_defaulted(millis: Int) -> Never! { jet_task_sleep_duration_defaulted(Duration.from_millis(jet_task_delay_ms_defaulted(millis))) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:61
+pub fn jet_task_sleep_duration_ns_defaulted(nanos: Int) -> Never! { jet_task_sleep_duration_defaulted(jet_task_delay_duration_ns_defaulted(nanos)) }
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:65
+fn jet_task_sleep_duration_defaulted(duration: Duration) -> Never! {
+    if !jet_scheduler_shielded() && jet_std.jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep") != None -> jet_deadline_exceeded("time sleep")
+    jet_scheduler_sleep_duration("time sleep", duration)
+    if !jet_scheduler_shielded() && jet_std.jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep") != None -> jet_deadline_exceeded("time sleep")
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:81
+fn jet_scheduler_shielded() -> Bool Never! { false }
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:85
+fn jet_deadline_exceeded(_wait_kind: String) -> Never { panic("comptime has no installed deadline") }
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:90
+// Comptime has no Scheduler scope: no provider, not a sampled host wall clock.
+fn jet_scheduler_world_now_ms() -> Int? Never! { None }
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:95
+use jet_codegen.Prelude.Deadline.[jet_deadline_remaining_ms]
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:96
+use jet_codegen.Prelude.CoreLib.Top.TimeSleep.[jet_std_time_sleep_duration_ns]
+// Rust: crates/jet-comptime/src/Comptime/Methods/time_deadline.rs:98
+pub fn jet_time_sleep_until(deadline_ns: Int) -> Never! {
+    remaining :: deadline_ns.saturating_sub(jet_time_monotonic_now_ns()).max(0)
+    jet_std_time_sleep_duration_ns(remaining)
+}

@@ -1,0 +1,71 @@
+use jet_foundation.[Type, TBuiltinOp, TFailureCarrier, Effect]
+use JetCodegen.Codegen.TIR.[TRoutePlan]
+use JetCodegen.Codegen.TIR.Routes.[app_route, plugin_call_route, regex_route, url_mime_route, builtin_collection_route, iterator_builtin_route, map_from_keys_symbol]
+
+// No inline Rust tests in this range; controls assert the original checked route rows.
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4452
+#Test("app_registration_keeps_trailing_checked_input_binding") {
+    plan :: app_route("loader", 3, .Infallible)
+    if plan != .Prelude(row) -> panic("expected loader Prelude row")
+    assert(row.symbol == .Prelude("jet_app_loader_preload"))
+    assert(row.signature.arity == 5 && row.signature.max_arity == 5)
+    assert(row.signature.borrow_mask == [true, false, false, false, false])
+    assert(row.effect.is_none())
+    serving :: app_route("serve", 1, .Infallible)
+    if serving != .Prelude(server) -> panic("expected serve Prelude row")
+    assert(server.effect == Val(.Net) && server.signature.arity == 2)
+    assert(app_route("loader", 4, .Infallible) == .Primitive)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4847
+#Test("plugin_route_keeps_authority_and_ffi_effect") {
+    plan :: plugin_call_route("call", "jet_plugin_call", .Infallible)
+    if plan != .Prelude(row) -> panic("expected plugin Prelude row")
+    assert(row.authority.is_some())
+    assert(row.effect == Val(.FFI))
+    assert(row.signature.arity == 3 && row.signature.borrow_mask == [true, true, true])
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4547
+#Test("regex_route_keeps_callable_and_value_borrows") {
+    plan :: regex_route("Regex", "replace_all_with", .Infallible)!
+    if plan != .Prelude(row) -> panic("expected regex Prelude row")
+    assert(row.symbol == .Prelude("jet_std::JetRegex::replace_all_with"))
+    assert(row.signature.borrow_mask == [true, true, false])
+    error := ""
+    _ :: url_mime_route("URL", "param", .Infallible) catch failure -> { error = failure.message }
+    assert(error == "unknown checked URL/MIME method `URL.param`")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:4874
+#Test("collection_route_distinguishes_consuming_iterator_from_borrowed_list") {
+    iterator :: Type.Apply{name: "Iter", args: [.Int]}
+    list :: Type.List(.Int)
+    consuming :: builtin_collection_route(.LenList, iterator, .Infallible)!
+    borrowed :: builtin_collection_route(.LenList, list, .Infallible)!
+    if consuming != .Prelude(iter_row) -> panic("expected iterator row")
+    if borrowed != .Prelude(list_row) -> panic("expected list row")
+    assert(iter_row.symbol == .Prelude("jet_iter_len") && iter_row.signature.borrow_mask == [false])
+    assert(list_row.symbol == .Prelude("jet_list_len") && list_row.signature.borrow_mask == [true])
+    flattened :: iterator_builtin_route(.Flatten, iterator, .Infallible).expect("iterator flatten route")
+    if flattened != .Prelude(flatten_row) -> panic("expected flatten row")
+    assert(flatten_row.symbol == .Prelude("jet_iter_flatten"))
+    assert(iterator_builtin_route(.Take, list, .Infallible).is_none())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:5135
+#Test("map_from_keys_keeps_checked_key_family") {
+    assert(map_from_keys_symbol(.List(.String)) == "jet_map_from_keys_kernel")
+    assert(map_from_keys_symbol(.List(.IntN{signed: false, bits: 8})) == "jet_map_from_keys_int")
+    assert(map_from_keys_symbol(.List(.Tuple([]))) == "jet_map_from_keys_composite")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:5589
+#Test("builtin_bytes_keeps_owning_destination_fact") {
+    owned :: TBuiltinOp.Bytes{owned: true}.route_plan(.List(.IntN{signed: false, bits: 8}), .Infallible)!
+    borrowed :: TBuiltinOp.Bytes{owned: false}.route_plan(.List(.IntN{signed: false, bits: 8}), .Infallible)!
+    if owned != .Prelude(owned_row) -> panic("expected owned bytes row")
+    if borrowed != .Prelude(borrowed_row) -> panic("expected borrowed bytes row")
+    assert(owned_row.signature.borrow_mask == [false])
+    assert(borrowed_row.signature.borrow_mask == [true])
+}

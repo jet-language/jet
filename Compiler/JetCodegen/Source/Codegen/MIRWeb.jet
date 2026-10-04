@@ -1,1753 +1,670 @@
-// PORT-PENDING 0461 crates-jet-codegen-src-codegen-mirweb-slice-1: crates/jet-codegen/src/Codegen/MIRWeb.rs:1-1749
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! MIR-only WebAssembly/JavaScript emission.
-//RS //!
-//RS //! This adapter consumes the optimized semantic MIR and checked Web facts
-//RS //! carried by that model. It never accepts a bundle, reads AST/TIR/checker
-//RS //! state, or reconstructs route/partition/Core policy.
-//RS 
-//RS use jet_foundation::SHA256::sha256_hex;
-//RS use jet_foundation::Layout::TargetLayout;
-//RS use jet_foundation::MIR::{
-//RS     mir_view_copy_kind, MirAccess, MirArtifactKind, MirArtifactPlan, MirArtifactTarget, MirBasicBlock, MirBinaryDispatch,
-//RS     MirBinaryOp, MirBinaryPatternPart, MirCallee, MirCaptureOperand, MirConstant, MirConstKey,
-//RS     MirConstReport, MirCoreClosureKind, MirCliDefault, MirCliEntry, MirCliInputShape, MirEntrySpec, MirFunction, MirFunctionForm, MirFunctionKind, MirGcEditKind,
-//RS     MirConversion, MirJob, MirLayoutCompareOp, MirOperation, MirPlaceBase, MirPreludeAbi, MirPreludeCallId,
-//RS     MirPreludeFamily, MirProgram, MirProjection, MirRequireKind, MirSemanticOp, MirSelectKind,
-//RS     MirStringPart, MirSymbol, MirTaskGroupKind, MirTerminator, MirTextHoleKind, MirTextPatternPart,
-//RS     MirTraitMethodId, MirTraitRef, MirType, MirTypeDef, MirTypeDefKind, MirTypeKind, MirUnaryOp,
-//RS     MirVariantPayload, MirVisibility, MirForeignAbi, MirSerdeCodec,
-//RS     MirHttpMethod, MirOwnershipMode,
-//RS };
-//RS use jet_foundation::TestingHistory::{HistoryProvenance, HISTORY_ENGINE};
-//RS use jet_foundation::WebPartition::{WebBucket, WebPartitionMarker};
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::fmt::Write as _;
-//RS 
-//RS use super::MIRRust::{
-//RS     emit_mir_program, MirRustConfig, MirRustExecutionConfig, MirRustTarget,
-//RS };
-//RS use super::Web::{dom_runtime_source, shared_js_prelude};
-//RS 
-//RS fn foreign_abi_name(abi: &MirForeignAbi) -> String {
-//RS     match abi {
-//RS         MirForeignAbi::C => "C".to_string(),
-//RS         MirForeignAbi::CUnwind => "C-unwind".to_string(),
-//RS         MirForeignAbi::System => "system".to_string(),
-//RS         MirForeignAbi::Stdcall => "stdcall".to_string(),
-//RS         MirForeignAbi::Fastcall => "fastcall".to_string(),
-//RS         MirForeignAbi::Vectorcall => "vectorcall".to_string(),
-//RS         MirForeignAbi::Rust => "Rust".to_string(),
-//RS         MirForeignAbi::Platform(name) => name.clone(),
-//RS     }
-//RS }
-//RS 
-//RS /// Files emitted by the Web backend.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct WebArtifacts {
-//RS     pub manifest_json: String,
-//RS     pub wasm_rust: String,
-//RS     /// Stable compilation-context identity for rustc's incremental cache.
-//RS     ///
-//RS     /// This deliberately excludes the edited MIR body. Rustc uses the
-//RS     /// persistent context directory to retain unchanged generated items while
-//RS     /// its own item hashes decide which function bodies need recompilation.
-//RS     pub rustc_incremental_identity: String,
-//RS     pub js_app: String,
-//RS     pub js_source_map: String,
-//RS     pub source_names: Vec<String>,
-//RS     pub source_contents: Vec<String>,
-//RS     pub dom_runtime: String,
-//RS     pub index_html: String,
-//RS     pub explicit_html_path: Option<String>,
-//RS     pub command_record: Vec<u8>,
-//RS }
-//RS 
-//RS /// Explicit publication assets supplied to Web emission.
-//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
-//RS pub struct MirWebAssets {
-//RS     pub dom_runtime: String,
-//RS     pub index_html: String,
-//RS     pub explicit_html_path: Option<String>,
-//RS     pub source_names: Vec<String>,
-//RS     pub source_contents: Vec<String>,
-//RS }
-//RS 
-//RS impl MirWebAssets {
-//RS     /// Build the standard browser shell without reading a bundle or source
-//RS     /// files. Callers may replace any asset before emission.
-//RS     pub fn with_default_shell() -> Self {
-//RS         Self {
-//RS             dom_runtime: dom_runtime_source().to_string(),
-//RS             index_html: default_index_html(),
-//RS             explicit_html_path: None,
-//RS             source_names: Vec::new(),
-//RS             source_contents: Vec::new(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Target facts needed by Web representation.
-//RS ///
-//RS /// Applicability and partition are checked facts on MIR functions. This target
-//RS /// also carries the one folded release-devtools policy used by the canonical
-//RS /// MIR Rust printer; Web emission never reconstructs it from source or host
-//RS /// environment.
-//RS pub struct MirWebTarget {
-//RS     pub layout: TargetLayout,
-//RS     pub assets: MirWebAssets,
-//RS     pub semantic_digest: [u8; 32],
-//RS 
-//RS 
-//RS     /// The checked artifact plan selected by the caller. Web emission never
-//RS     /// guesses an application from the program's artifact table.
-//RS     pub artifact: jet_foundation::MIR::MirArtifactId,
-//RS     /// D-DX-PROD1: the same typed policy used by native MIR Rust emission.
-//RS     pub release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS }
-//RS /// Return the stable rustc incremental context for one Web artifact.
-//RS ///
-//RS /// The source/MIR digest is intentionally absent: that is the input rustc
-//RS /// should compare at item granularity. This key changes only when the target
-//RS /// ABI, compiler/runtime identity, artifact kind, or folded devtools policy
-//RS /// changes, preventing incompatible generated crates from sharing state.
-//RS pub fn web_rustc_incremental_identity(
-//RS     program: &MirProgram,
-//RS     target: &MirWebTarget,
-//RS ) -> String {
-//RS     let artifact_kind = program
-//RS         .artifacts
-//RS         .iter()
-//RS         .find(|artifact| artifact.id == target.artifact)
-//RS         .map(|artifact| format!("{:?}", artifact.kind))
-//RS         .unwrap_or_else(|| "missing".to_string());
-//RS     let context = format!(
-//RS         "jet-web-rustc-incremental-v1\
-//RS          |target={}\
-//RS          |pointer-size={}\
-//RS          |pointer-align={}\
-//RS          |layout={:?}\
-//RS          |artifact={}\
-//RS          |artifact-kind={}\
-//RS          |compiler={}\
-//RS          |environment={}\
-//RS          |tier={}\
-//RS          |edition={}\
-//RS          |policy={:?}",
-//RS         target.layout.triple,
-//RS         target.layout.pointer_size,
-//RS         target.layout.pointer_alignment,
-//RS         target.layout.layout_facts,
-//RS         target.artifact.0,
-//RS         artifact_kind,
-//RS         program.facts.target_dossier.compiler_identity,
-//RS         program.facts.target_dossier.environment_identity,
-//RS         program.facts.target_dossier.tier_identity,
-//RS         program.facts.edition,
-//RS         target.release_devtools_policy,
-//RS     );
-//RS     sha256_hex(context.as_bytes())
-//RS }
-//RS 
-//RS 
-//RS /// Errors reserved for malformed/inconsistent MIR or publication assembly.
-//RS /// Web emission never re-decides target applicability; leaked target-specific
-//RS /// facts are malformed MIR.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum MirWebError {
-//RS     InvalidMir { message: String },
-//RS     InvalidLayout { ty: String },
-//RS     InvalidAssets { message: String },
-//RS     MissingCoreCall { call: u64 },
-//RS     MissingPreludeCall { call: u64 },
-//RS     MissingUserFunction { function: u64 },
-//RS     MissingEntryFunction { function: u64 },
-//RS }
-//RS 
-//RS impl std::fmt::Display for MirWebError {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         match self {
-//RS             Self::InvalidMir { message } => write!(f, "invalid MIR for Web emission: {message}"),
-//RS             Self::InvalidLayout { ty } => write!(f, "MIR type has an invalid layout: {ty}"),
-//RS             Self::InvalidAssets { message } => write!(f, "invalid Web publication assets: {message}"),
-//RS             Self::MissingCoreCall { call } => write!(f, "MIR CoreCallId {call} is not in the Core table"),
-//RS             Self::MissingPreludeCall { call } => write!(f, "MIR PreludeCallId {call} is not in the Prelude table"),
-//RS             Self::MissingUserFunction { function } => write!(f, "MIR function id {function} is not in the function table"),
-//RS             Self::MissingEntryFunction { function } => write!(f, "MIR entry function {function} is not Web-applicable"),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for MirWebError {}
-//RS 
-//RS /// Emit WebAssembly Rust, browser JavaScript, a manifest, and publication
-//RS pub fn emit_web(program: &MirProgram, target: &MirWebTarget) -> Result<WebArtifacts, MirWebError> {
-//RS     program
-//RS         .cffi
-//RS         .validate_boundaries()
-//RS         .map_err(|error| MirWebError::InvalidMir {
-//RS             message: format!("invalid foreign boundary facts: {error}"),
-//RS         })?;
-//RS     jet_foundation::MIROptimization::require_canonical_mir_optimization(program)
-//RS         .map_err(|error| MirWebError::InvalidMir { message: error.to_string() })?;
-//RS     validate_assets(&target.assets)?;
-//RS     validate_layouts(program)?;
-//RS     validate_web_facts(program)?;
-//RS 
-//RS     let artifact = select_web_artifact(program, target.artifact)?;
-//RS     let artifact_identity = program
-//RS         .artifact_identity(artifact.id)
-//RS         .map_err(|error| MirWebError::InvalidMir {
-//RS             message: format!("MIR Web artifact identity unavailable: {error}"),
-//RS         })?;
-//RS     let history_provenance = HistoryProvenance {
-//RS         source: artifact_identity.identity_digest(),
-//RS         tool: format!("{}:{}", HISTORY_ENGINE, program.facts.target_dossier.compiler_identity),
-//RS         target: sha256_hex(
-//RS             &program
-//RS                 .facts
-//RS                 .target_dossier
-//RS                 .cache_bytes(&target.layout.triple),
-//RS         ),
-//RS     };
-//RS     let artifact_identity_text = artifact_identity.canonical_text();
-//RS     let rustc_incremental_identity = web_rustc_incremental_identity(program, target);
-//RS     let entry = selected_web_entry(artifact)?;
-//RS     let functions = program
-//RS         .functions
-//RS         .iter()
-//RS         .filter(|function| {
-//RS             function.target_applicability.web
-//RS                 && artifact.modules.iter().any(|module| *module == function.module_id)
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let Some(function) = functions.iter().find(|function| function.id == entry) else {
-//RS         return Err(MirWebError::MissingEntryFunction { function: entry.0 });
-//RS     };
-//RS     if !function_in_bucket(function, WebBucket::JS)
-//RS         && !function_in_bucket(function, WebBucket::Wasm)
-//RS     {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "MIR WebApplication entry {} has no checked Web partition",
-//RS                 entry.0
-//RS             ),
-//RS         });
-//RS     }
-//RS     let wasm_rust = emit_wasm_rust(program, target, &functions)?;
-//RS     let js_app = emit_js_app(
-//RS         program,
-//RS         target,
-//RS         artifact,
-//RS         &functions,
-//RS         Some(entry),
-//RS         &artifact_identity_text,
-//RS         &history_provenance,
-//RS     )?;
-//RS     let js_source_map = emit_source_map(&target.assets);
-//RS     let manifest_json = emit_manifest(program, target, &functions, artifact, entry, &artifact_identity_text)?;
-//RS     let command_record = emit_command_record(program, functions.as_slice(), artifact, entry)?;
-//RS     Ok(WebArtifacts {
-//RS         manifest_json,
-//RS         wasm_rust,
-//RS         rustc_incremental_identity,
-//RS         js_app,
-//RS         js_source_map,
-//RS         source_names: target.assets.source_names.clone(),
-//RS         source_contents: target.assets.source_contents.clone(),
-//RS         dom_runtime: target.assets.dom_runtime.clone(),
-//RS         index_html: target.assets.index_html.clone(),
-//RS         explicit_html_path: target.assets.explicit_html_path.clone(),
-//RS         command_record,
-//RS     })
-//RS }
-//RS 
-//RS fn select_web_artifact(
-//RS     program: &MirProgram,
-//RS     artifact_id: jet_foundation::MIR::MirArtifactId,
-//RS ) -> Result<&MirArtifactPlan, MirWebError> {
-//RS     let Some(artifact) = program.artifacts.iter().find(|artifact| artifact.id == artifact_id) else {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!("MIR artifact {} is missing", artifact_id.0),
-//RS         });
-//RS     };
-//RS     if artifact.kind != MirArtifactKind::WebApplication {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "MIR artifact {} has kind {:?}, expected WebApplication",
-//RS                 artifact_id.0, artifact.kind
-//RS             ),
-//RS         });
-//RS     }
-//RS     if artifact.target != MirArtifactTarget::Web {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "MIR WebApplication artifact {} targets {:?}, not Web",
-//RS                 artifact.id.0, artifact.target
-//RS             ),
-//RS         });
-//RS     }
-//RS     if artifact.modules.is_empty() {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!("MIR WebApplication artifact {} has no selected modules", artifact.id.0),
-//RS         });
-//RS     }
-//RS     for module in &artifact.modules {
-//RS         if !program.modules.iter().any(|row| row.id == *module) {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "MIR WebApplication artifact {} references missing module {}",
-//RS                     artifact.id.0, module.0
-//RS                 ),
-//RS             });
-//RS         }
-//RS     }
-//RS     for link in &artifact.links {
-//RS         if !program.links.iter().any(|row| row.id == *link) {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "MIR WebApplication artifact {} references missing link unit {}",
-//RS                     artifact.id.0, link.0
-//RS                 ),
-//RS             });
-//RS         }
-//RS     }
-//RS     for job in &artifact.jobs {
-//RS         if !program.jobs.iter().any(|row| row.id == *job) {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "MIR WebApplication artifact {} references missing job {}",
-//RS                     artifact.id.0, job.0
-//RS                 ),
-//RS             });
-//RS         }
-//RS     }
-//RS     let Some(entry) = &artifact.entry else {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!("MIR WebApplication artifact {} has no entry", artifact.id.0),
-//RS         });
-//RS     };
-//RS     if let Some(function) = entry.function {
-//RS         if !program.functions.iter().any(|row| row.id == function) {
-//RS             return Err(MirWebError::MissingEntryFunction { function: function.0 });
-//RS         }
-//RS     } else {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!("MIR WebApplication artifact {} has no entry function", artifact.id.0),
-//RS         });
-//RS     }
-//RS     if let Some(harness) = artifact.harness {
-//RS         if !program.harnesses.iter().any(|row| row.id == harness) {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "MIR WebApplication artifact {} references missing harness {}",
-//RS                     artifact.id.0, harness.0
-//RS                 ),
-//RS             });
-//RS         }
-//RS     }
-//RS     for export in &artifact.exports {
-//RS         if export.symbol.is_empty() {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!("MIR WebApplication artifact {} has an unnamed export", artifact.id.0),
-//RS             });
-//RS         }
-//RS         let Some(function) = program.functions.iter().find(|row| row.id == export.function) else {
-//RS             return Err(MirWebError::MissingUserFunction { function: export.function.0 });
-//RS         };
-//RS         if !artifact.modules.iter().any(|module| *module == function.module_id) {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "MIR WebApplication artifact {} export {} belongs to unselected module {}",
-//RS                     artifact.id.0, export.function.0, function.module_id.0
-//RS                 ),
-//RS             });
-//RS         }
-//RS         if !function.target_applicability.web {
-//RS             return Err(MirWebError::MissingUserFunction { function: export.function.0 });
-//RS         }
-//RS     }
-//RS     Ok(artifact)
-//RS }
-//RS 
-//RS fn selected_web_entry(artifact: &MirArtifactPlan) -> Result<jet_foundation::MIR::MirFunctionId, MirWebError> {
-//RS     artifact
-//RS         .entry
-//RS         .as_ref()
-//RS         .and_then(|entry| entry.function)
-//RS         .ok_or_else(|| MirWebError::InvalidMir {
-//RS             message: format!("MIR WebApplication artifact {} has no entry function", artifact.id.0),
-//RS         })
-//RS }
-//RS 
-//RS fn validate_assets(assets: &MirWebAssets) -> Result<(), MirWebError> {
-//RS     if assets.source_names.len() != assets.source_contents.len() {
-//RS         return Err(MirWebError::InvalidAssets {
-//RS             message: format!(
-//RS                 "source_names has {} rows but source_contents has {} rows",
-//RS                 assets.source_names.len(),
-//RS                 assets.source_contents.len()
-//RS             ),
-//RS         });
-//RS     }
-//RS     if assets.dom_runtime.is_empty() {
-//RS         return Err(MirWebError::InvalidAssets { message: "dom_runtime is empty".to_string() });
-//RS     }
-//RS     if assets.index_html.is_empty() {
-//RS         return Err(MirWebError::InvalidAssets { message: "index_html is empty".to_string() });
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_layouts(program: &MirProgram) -> Result<(), MirWebError> {
-//RS     let check = |ty: &MirType| {
-//RS         if ty.has_valid_layout() {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(MirWebError::InvalidLayout { ty: ty.name() })
-//RS         }
-//RS     };
-//RS     for type_def in &program.types {
-//RS         check_type_def(type_def, &check)?;
-//RS     }
-//RS     for function in &program.functions {
-//RS         if let Some(generator) = &function.generator {
-//RS             check(&generator.item)?;
-//RS         }
-//RS         for parameter in &function.params {
-//RS             check(&parameter.ty)?;
-//RS         }
-//RS         if let Some(return_type) = &function.declared_return {
-//RS             check(return_type)?;
-//RS         }
-//RS         check(&function.return_type)?;
-//RS         for local in &function.locals {
-//RS             check(&local.ty)?;
-//RS         }
-//RS         for (_, ty, _, _) in &function.values {
-//RS             check(ty)?;
-//RS         }
-//RS         for place in &function.places {
-//RS             check(&place.ty)?;
-//RS         }
-//RS         for reconstruction in &function.web_param_reconstructions {
-//RS             check(&reconstruction.ty)?;
-//RS             for field in &reconstruction.fields {
-//RS                 check(&field.ty)?;
-//RS             }
-//RS         }
-//RS         for block in &function.blocks {
-//RS             for instruction in &block.instructions {
-//RS                 if let Some(ty) = &instruction.ty {
-//RS                     check(ty)?;
-//RS                 }
-//RS                 check_operation_types(&instruction.operation, &check)?;
-//RS             }
-//RS         }
-//RS     }
-//RS     for foreign in &program.foreign {
-//RS         for parameter in &foreign.params {
-//RS             check(&parameter.ty)?;
-//RS         }
-//RS         if let Some(return_type) = &foreign.return_type {
-//RS             check(return_type)?;
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn check_type_def(
-//RS     type_def: &MirTypeDef,
-//RS     check: &impl Fn(&MirType) -> Result<(), MirWebError>,
-//RS ) -> Result<(), MirWebError> {
-//RS     match &type_def.kind {
-//RS         MirTypeDefKind::Struct { fields, .. } => {
-//RS             for field in fields {
-//RS                 check(&field.ty)?;
-//RS             }
-//RS         }
-//RS         MirTypeDefKind::Enum { variants, .. } => {
-//RS             for variant in variants {
-//RS                 match &variant.payload {
-//RS                     MirVariantPayload::Unit => {}
-//RS                     MirVariantPayload::Single(ty) => check(ty)?,
-//RS                     MirVariantPayload::Named(fields) => {
-//RS                         for field in fields {
-//RS                             check(&field.ty)?;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         MirTypeDefKind::Distinct { base, .. } => check(base)?,
-//RS         MirTypeDefKind::Alias { target } => check(target)?,
-//RS         MirTypeDefKind::UnitFamily { .. } => {}
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn check_operation_types(
-//RS     operation: &MirOperation,
-//RS     check: &impl Fn(&MirType) -> Result<(), MirWebError>,
-//RS ) -> Result<(), MirWebError> {
-//RS     match operation {
-//RS         MirOperation::Convert { target, .. }
-//RS         | MirOperation::PtrFromAddr { element: target, .. } => check(target)?,
-//RS         MirOperation::Present { .. } | MirOperation::ResultOk { .. } => {}
-//RS         MirOperation::Semantic(semantic) => match semantic {
-//RS             MirSemanticOp::MathBuiltin { .. }
-//RS             | MirSemanticOp::PreciseBuiltin { .. }
-//RS             | MirSemanticOp::Print { .. }
-//RS             | MirSemanticOp::AmbientInput { .. }
-//RS             | MirSemanticOp::RequireStop { .. }
-//RS             | MirSemanticOp::LayoutCompare { .. }
-//RS             | MirSemanticOp::LayoutLiteral { .. }
-//RS             | MirSemanticOp::StructLiteral { .. }
-//RS             | MirSemanticOp::ReflectOf { .. }
-//RS             | MirSemanticOp::CellGuardProject { .. }
-//RS             | MirSemanticOp::SharedGuardMap { .. }
-//RS             | MirSemanticOp::SharedGuardSplit { .. }
-//RS             | MirSemanticOp::SharedGuardWait { .. }
-//RS             | MirSemanticOp::ConditionNotify { .. }
-//RS             | MirSemanticOp::AllocNew { .. }
-//RS             | MirSemanticOp::ColumnarRead { .. }
-//RS             | MirSemanticOp::StaticPreludeCall { .. }
-//RS             | MirSemanticOp::DecodeUnder { .. }
-//RS             | MirSemanticOp::HardwareCall { .. }
-//RS             | MirSemanticOp::BuiltinMethod { .. }
-//RS             | MirSemanticOp::OptionLift2 { .. }
-//RS             | MirSemanticOp::ClosureMethod { .. }
-//RS             | MirSemanticOp::HostBorrowCallback { .. }
-//RS             | MirSemanticOp::NumericMethod { .. }
-//RS             | MirSemanticOp::NumericBinaryMethod { .. }
-//RS             | MirSemanticOp::OverflowOption { .. }
-//RS             | MirSemanticOp::HandleMethod { .. }
-//RS             | MirSemanticOp::PluginInvoke { .. }
-//RS             | MirSemanticOp::CoreClosureCall { .. }
-//RS             | MirSemanticOp::TaskGroup { .. }
-//RS             | MirSemanticOp::Select { .. }
-//RS             | MirSemanticOp::PolicyFunction { .. }
-//RS             | MirSemanticOp::InterruptFunction { .. }
-//RS             | MirSemanticOp::CarrierFact { .. }
-//RS             | MirSemanticOp::GcEdit { .. }
-//RS             | MirSemanticOp::TypedTextInterp { .. }
-//RS             | MirSemanticOp::HostCall { .. }
-//RS             | MirSemanticOp::DataEntriesToMap { .. }
-//RS             | MirSemanticOp::TextPatternMatch { .. }
-//RS             | MirSemanticOp::BinaryPatternMatch { .. }
-//RS             | MirSemanticOp::CursorTakePattern { .. }
-//RS             | MirSemanticOp::ReaderTakePattern { .. }
-//RS             | MirSemanticOp::HttpRouterRegister { .. } => {}
-//RS             MirSemanticOp::CCallback { .. } => {}
-//RS         },
-//RS         MirOperation::Parameter { .. }
-//RS         | MirOperation::Capture { .. }
-//RS         | MirOperation::Global { .. }
-//RS         | MirOperation::Phi { .. }
-//RS         | MirOperation::ReadPlace(_)
-//RS         | MirOperation::MovePlace { .. }
-//RS         | MirOperation::WritePlace { .. }
-//RS         | MirOperation::ReplacePlace { .. }
-//RS         | MirOperation::InitializeUninit { .. }
-//RS         | MirOperation::Copy { .. }
-//RS         | MirOperation::Move { .. }
-//RS         | MirOperation::TraitBox { .. }
-//RS         | MirOperation::Constant(_)
-//RS         | MirOperation::Unary { .. }
-//RS         | MirOperation::Binary { .. }
-//RS         | MirOperation::BuildString { .. }
-//RS         | MirOperation::BuildList { .. }
-//RS         | MirOperation::BuildMap { .. }
-//RS         | MirOperation::EnumIs { .. }
-//RS         | MirOperation::EnumPayload { .. }
-//RS         | MirOperation::OptionIsSome { .. }
-//RS         | MirOperation::OptionValue { .. }
-//RS         | MirOperation::ResultIsOk { .. }
-//RS         | MirOperation::ResultValue { .. }
-//RS         | MirOperation::PatternCapture { .. }
-//RS         | MirOperation::PatternMatched { .. }
-//RS         | MirOperation::ProjectMembers { .. }
-//RS         | MirOperation::Index { .. }
-//RS         | MirOperation::Slice { .. }
-//RS         | MirOperation::Range { .. }
-//RS         | MirOperation::Field { .. }
-//RS         | MirOperation::Struct { .. }
-//RS         | MirOperation::Enum { .. }
-//RS         | MirOperation::Tuple { .. }
-//RS         | MirOperation::Absent
-//RS         | MirOperation::ResultErr { .. }
-//RS         | MirOperation::Call { .. }
-//RS         | MirOperation::CoreCall { .. }
-//RS         | MirOperation::IndirectCall { .. }
-//RS         | MirOperation::Closure { .. }
-//RS         | MirOperation::Deref { .. }
-//RS         | MirOperation::RawAddressOf { .. }
-//RS         | MirOperation::AddressOf { .. }
-//RS         | MirOperation::AttachTag { .. }
-//RS         | MirOperation::Todo { .. }
-//RS         | MirOperation::Never { .. }
-//RS         | MirOperation::LoopRangeInit { .. }
-//RS         | MirOperation::LoopRangeHasNext { .. }
-//RS         | MirOperation::LoopRangeValue { .. }
-//RS         | MirOperation::LoopRangeAdvance { .. }
-//RS         | MirOperation::LoopIterInit { .. }
-//RS         | MirOperation::LoopIterHasNext { .. }
-//RS         | MirOperation::LoopIterValue { .. }
-//RS         | MirOperation::LoopIterAdvance { .. }
-//RS         | MirOperation::ScopeEnter { .. }
-//RS         | MirOperation::ScopeExit { .. }
-//RS         | MirOperation::Drop { .. } => {}
-//RS     }
-//RS     Ok(())
-//RS }
-//RS /// `Target.Hardware` is the canonical capability spelling in the target
-//RS /// validation diagnostic. Target validation owns user-facing E3311; Web only
-//RS /// reports malformed MIR if a checked hardware fact leaks past that gate.
-//RS const WEB_TARGET_HARDWARE_CAPABILITY: &str = "Target.Hardware";
-//RS 
-//RS fn web_hardware_leak(detail: &str) -> MirWebError {
-//RS     MirWebError::InvalidMir {
-//RS         message: format!(
-//RS             "E3311: Target `Web` lacks the required `{WEB_TARGET_HARDWARE_CAPABILITY}` \
-//RS              capability; target validation must reject this hardware use before Web emission ({detail})"
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn reject_leaked_web_hardware(program: &MirProgram) -> Result<(), MirWebError> {
-//RS     if program.facts.hardware_setups.first().is_some() {
-//RS         return Err(web_hardware_leak(
-//RS             "a package hardware setup reached the Web adapter",
-//RS         ));
-//RS     }
-//RS     for function in &program.functions {
-//RS         for block in &function.blocks {
-//RS             for instruction in &block.instructions {
-//RS                 if !matches!(
-//RS                     &instruction.operation,
-//RS                     MirOperation::Semantic(MirSemanticOp::HardwareCall { .. })
-//RS                 ) {
-//RS                     continue;
-//RS                 }
-//RS                 return Err(web_hardware_leak(&format!(
-//RS                     "function {} at {:?} reached the Web adapter",
-//RS                     function.id.0, instruction.span
-//RS                 )));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Validate checked Web partition facts. Target applicability is owned by
-//RS /// sema; the hardware check above is only a defensive leak detector.
-//RS fn validate_web_facts(program: &MirProgram) -> Result<(), MirWebError> {
-//RS     reject_leaked_web_hardware(program)?;
-//RS     for function in &program.functions {
-//RS         if function.target_applicability.web && function.web_bucket.is_none() {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "function {} is Web-applicable but has no checked Web bucket",
-//RS                     function.id.0
-//RS                 ),
-//RS             });
-//RS         }
-//RS         match (function.web_bucket, function.web_marker) {
-//RS             (Some(WebBucket::JS), Some(WebPartitionMarker::Wasm | WebPartitionMarker::WasmExport))
-//RS             | (Some(WebBucket::Wasm), Some(WebPartitionMarker::JS)) => {
-//RS                 return Err(MirWebError::InvalidMir {
-//RS                     message: format!("function {} has contradictory Web bucket and marker", function.id.0),
-//RS                 });
-//RS             }
-//RS             (Some(WebBucket::JS), Some(WebPartitionMarker::JS))
-//RS             | (Some(WebBucket::Wasm), Some(WebPartitionMarker::Wasm))
-//RS             | (Some(WebBucket::Wasm), Some(WebPartitionMarker::WasmExport))
-//RS             | (Some(WebBucket::JS), None)
-//RS             | (Some(WebBucket::Wasm), None)
-//RS             | (None, Some(WebPartitionMarker::JS))
-//RS             | (None, Some(WebPartitionMarker::Wasm))
-//RS             | (None, Some(WebPartitionMarker::WasmExport))
-//RS             | (None, None) => {}
-//RS         }
-//RS         if function.target_applicability.web && function_in_bucket(function, WebBucket::JS) {
-//RS             for block in &function.blocks {
-//RS                 for instruction in &block.instructions {
-//RS                     let MirOperation::Call {
-//RS                         callee: MirCallee::Foreign(foreign_id),
-//RS                         ..
-//RS                     } = &instruction.operation
-//RS                     else {
-//RS                         continue;
-//RS                     };
-//RS                     let Some(foreign) = program.foreign.iter().find(|foreign| foreign.id == *foreign_id) else {
-//RS                         return Err(MirWebError::InvalidMir {
-//RS                             message: format!(
-//RS                                 "function {} at {:?} references missing foreign row {}",
-//RS                                 function.id.0, instruction.span, foreign_id.0
-//RS                             ),
-//RS                         });
-//RS                     };
-//RS                     let abi = foreign_abi_name(&foreign.foreign_abi);
-//RS                     return Err(MirWebError::InvalidMir {
-//RS                         message: format!(
-//RS                             "function {} at {:?} contains JS-partition foreign row {} declared at {:?} \
-//RS                              (symbol `{}` path `{}` ABI `{}` language {:?} applicability \
-//RS                              rust_aot={} cranelift={} interpreter={} web={}); no checked JavaScript linkage exists",
-//RS                             function.id.0,
-//RS                             instruction.span,
-//RS                             foreign.id.0,
-//RS                             foreign.span,
-//RS                             foreign.symbol,
-//RS                             foreign.path,
-//RS                             abi,
-//RS                             foreign.foreign_language,
-//RS                             foreign.target_applicability.rust_aot,
-//RS                             foreign.target_applicability.cranelift,
-//RS                             foreign.target_applicability.interpreter,
-//RS                             foreign.target_applicability.web,
-//RS                         ),
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS         for reconstruction in &function.web_param_reconstructions {
-//RS             for field in &reconstruction.fields {
-//RS                 if field.parameter.is_empty() || field.field.is_empty() {
-//RS                     return Err(MirWebError::InvalidMir {
-//RS                         message: format!("function {} has an empty Web reconstruction name", function.id.0),
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn emit_wasm_rust(
-//RS     program: &MirProgram,
-//RS     target: &MirWebTarget,
-//RS     _functions: &[&MirFunction],
-//RS ) -> Result<String, MirWebError> {
-//RS     // Rust emission is the canonical MIR Rust printer.  This adapter supplies
-//RS     // only the Web/Wasm target facts; it does not lower a second copy of CFG,
-//RS     // ownership, failure, or Core/Prelude semantics.
-//RS     let config = MirRustConfig {
-//RS         target: target.layout.clone(),
-//RS         target_kind: MirRustTarget::WebWasm,
-//RS         root_prefix: String::new(),
-//RS         execution: MirRustExecutionConfig {
-//RS             artifact: target.artifact,
-//RS             ffi: None,
-//RS             emit_types: true,
-//RS             emit_foreign: true,
-//RS             emit_metadata: true,
-//RS             emit_debug_linemap: false,
-//RS             emit_runtime: true,
-//RS             semantic_digest: Some(target.semantic_digest),
-//RS             release_devtools_policy: target.release_devtools_policy.clone(),
-//RS             prune_unreachable_codecs: false,
-//RS         },
-//RS     };
-//RS     let mut out = String::from("// Generated by jet from optimized MIR; Web/Wasm target.\n");
-//RS     out.push_str(&emit_mir_program(program, &config));
-//RS     Ok(out)
-//RS }
-//RS fn web_font_shape_core_call(program: &MirProgram, id: jet_foundation::MIR::MirCoreCallId) -> bool {
-//RS     program
-//RS         .core_calls
-//RS         .iter()
-//RS         .find(|call| call.id == id)
-//RS         .is_some_and(|call| call.module == "core.font" && call.member == "shape")
-//RS }
-//RS 
-//RS fn web_uses_font_shaping(program: &MirProgram, functions: &[&MirFunction]) -> bool {
-//RS     functions.iter().any(|function| {
-//RS         function.blocks.iter().any(|block| {
-//RS             block.instructions.iter().any(|instruction| match &instruction.operation {
-//RS                 MirOperation::CoreCall { call, .. } => web_font_shape_core_call(program, *call),
-//RS                 MirOperation::Call { callee, .. } => match callee {
-//RS                     MirCallee::Core(id) => web_font_shape_core_call(program, *id),
-//RS                     _ => false,
-//RS                 },
-//RS                 _ => false,
-//RS             })
-//RS         })
-//RS     })
-//RS }
-//RS 
-//RS 
-//RS fn web_task_join_call(program: &MirProgram, id: MirPreludeCallId) -> bool {
-//RS     program.prelude_calls.iter().find(|call| call.id == id).is_some_and(|call| {
-//RS         call.family == MirPreludeFamily::HandleMethod
-//RS             && call.module == "core.tasks"
-//RS             && call.member == "join"
-//RS     })
-//RS }
-//RS fn web_channel_handle_call(program: &MirProgram, id: MirPreludeCallId) -> bool {
-//RS     program.prelude_calls.iter().find(|call| call.id == id).is_some_and(|call| {
-//RS         let expected_symbol = match call.member.as_str() {
-//RS             "receiver.receive" => "jet_std::JetReceiver::receive",
-//RS             "receiver.try_receive" => "jet_std::JetReceiver::try_receive",
-//RS             "receiver.is_timer" => "jet_std::JetReceiver::is_timer",
-//RS             "receiver.is_interval" => "jet_std::JetReceiver::is_interval",
-//RS             "receiver.is_cancelled" => "jet_std::JetReceiver::is_cancelled",
-//RS             "receiver.is_ready" => "jet_std::JetReceiver::is_ready",
-//RS             "receiver.delay_ms" => "jet_std::JetReceiver::delay_ms",
-//RS             "receiver.close" => "jet_std::JetReceiver::close",
-//RS             "sender.send" => "jet_std::JetSender::send",
-//RS             "sender.close" => "jet_std::JetSender::close",
-//RS             _ => return false,
-//RS         };
-//RS         call.family == MirPreludeFamily::HandleMethod
-//RS             && call.module == "core.channels"
-//RS             && call.abi == MirPreludeAbi::Value
-//RS             && call.symbol.name() == expected_symbol
-//RS     })
-//RS }
-//RS 
-//RS fn web_channel_select_call(program: &MirProgram, id: MirPreludeCallId) -> bool {
-//RS     program.prelude_calls.iter().find(|call| call.id == id).is_some_and(|call| {
-//RS         let expected_symbol = match call.member.as_str() {
-//RS             "select_wait_tagged" => "jet_std::jet_select_wait_tagged",
-//RS             "select_try_wait_tagged" => "jet_std::jet_select_try_wait_tagged",
-//RS             _ => return false,
-//RS         };
-//RS         call.family == MirPreludeFamily::StaticPrelude
-//RS             && call.module == "core.tasks"
-//RS             && call.abi == MirPreludeAbi::Value
-//RS             && call.symbol.name() == expected_symbol
-//RS     })
-//RS }
-//RS 
-//RS fn web_channel_async_call(program: &MirProgram, id: MirPreludeCallId) -> bool {
-//RS     if web_channel_select_call(program, id) {
-//RS         return program
-//RS             .prelude_calls
-//RS             .iter()
-//RS             .find(|call| call.id == id)
-//RS             .is_some_and(|call| call.member == "select_wait_tagged");
-//RS     }
-//RS     program.prelude_calls.iter().find(|call| call.id == id).is_some_and(|call| {
-//RS         web_channel_handle_call(program, id)
-//RS             && matches!(call.member.as_str(), "receiver.receive" | "sender.send")
-//RS     })
-//RS }
-//RS 
-//RS fn web_channel_select_wait_call(program: &MirProgram, id: MirPreludeCallId) -> bool {
-//RS     program
-//RS         .prelude_calls
-//RS         .iter()
-//RS         .find(|call| call.id == id)
-//RS         .is_some_and(|call| {
-//RS             web_channel_select_call(program, id) && call.member == "select_wait_tagged"
-//RS         })
-//RS }
-//RS 
-//RS 
-//RS fn web_transaction_function(function: &MirFunction) -> bool {
-//RS     function.blocks.iter().any(|block| {
-//RS         block.instructions.iter().any(|instruction| {
-//RS             matches!(
-//RS                 &instruction.operation,
-//RS                 MirOperation::Global { name } if name == "transaction"
-//RS             )
-//RS         })
-//RS     })
-//RS }
-//RS 
-//RS fn web_async_function_ids(program: &MirProgram) -> BTreeSet<jet_foundation::MIR::MirFunctionId> {
-//RS     let mut async_functions = BTreeSet::new();
-//RS     loop {
-//RS         let mut changed = false;
-//RS         for function in &program.functions {
-//RS             if function.generator.is_some() || async_functions.contains(&function.id) {
-//RS                 continue;
-//RS             }
-//RS             let needs_async = function.blocks.iter().any(|block| {
-//RS                 block.instructions.iter().any(|instruction| match &instruction.operation {
-//RS                     MirOperation::Call { callee, .. } => match callee {
-//RS                         MirCallee::Core(_) => false,
-//RS                         MirCallee::Prelude(id) => {
-//RS                             web_task_join_call(program, *id) || web_channel_async_call(program, *id)
-//RS                         }
-//RS                         MirCallee::Foreign(_) | MirCallee::Indirect(_) => false,
-//RS                         MirCallee::User(id)
-//RS                         | MirCallee::Associated { function: id, .. }
-//RS                         | MirCallee::Method { function: id, .. } => {
-//RS                             let wasm_export = program
-//RS                                 .functions
-//RS                                 .iter()
-//RS                                 .find(|function| function.id == *id)
-//RS                                 .is_some_and(|function| is_wasm_export(function));
-//RS                             wasm_export
-//RS                                 || async_functions.contains(id)
-//RS                         }
-//RS                         MirCallee::TraitMethod { method, trait_ref, .. } => {
-//RS                             match web_trait_method_targets(program, *method, trait_ref) {
-//RS                                 Ok((targets, default)) => {
-//RS                                     targets.iter().any(|(_, id)| {
-//RS                                         program
-//RS                                             .functions
-//RS                                             .iter()
-//RS                                             .find(|function| function.id == *id)
-//RS                                             .is_some_and(|function| {
-//RS                                                 function.generator.is_none()
-//RS                                                     && (web_function_is_async(program, *id)
-//RS                                                         || async_functions.contains(id))
-//RS                                             })
-//RS                                     }) || default.is_some_and(|id| {
-//RS                                         program
-//RS                                             .functions
-//RS                                             .iter()
-//RS                                             .find(|function| function.id == id)
-//RS                                             .is_some_and(|function| {
-//RS                                                 function.generator.is_none()
-//RS                                                     && (web_function_is_async(program, id)
-//RS                                                         || async_functions.contains(&id))
-//RS                                             })
-//RS                                     })
-//RS                                 }
-//RS                                 Err(_) => false,
-//RS                             }
-//RS                         }
-//RS                     },
-//RS                     MirOperation::Semantic(MirSemanticOp::HandleMethod { call, .. }) => {
-//RS                         web_task_join_call(program, *call) || web_channel_async_call(program, *call)
-//RS                     }
-//RS                     MirOperation::Semantic(MirSemanticOp::Select { call, .. }) => {
-//RS                         web_channel_async_call(program, *call)
-//RS                     }
-//RS                     MirOperation::Global { name } => name == "transaction",
-//RS                     _ => false,
-//RS                 })
-//RS             });
-//RS             if needs_async {
-//RS                 async_functions.insert(function.id);
-//RS                 changed = true;
-//RS             }
-//RS         }
-//RS         if !changed {
-//RS             break;
-//RS         }
-//RS     }
-//RS     async_functions
-//RS }
-//RS 
-//RS fn web_function_is_async(program: &MirProgram, id: jet_foundation::MIR::MirFunctionId) -> bool {
-//RS     web_async_function_ids(program).contains(&id)
-//RS }
-//RS 
-//RS fn wasm_export_symbol(function: &MirFunction) -> String {
-//RS     format!("jet_export_{}", function.name)
-//RS }
-//RS 
-//RS fn wasm_bridge_name(function: &MirFunction) -> String {
-//RS     format!("bridge_{}", function.name)
-//RS }
-//RS 
-//RS fn wasm_abi_list_kind(inner: &MirType) -> Option<&'static str> {
-//RS     match &inner.kind {
-//RS         MirTypeKind::Int => Some("list-int"),
-//RS         MirTypeKind::String => Some("list-string"),
-//RS         MirTypeKind::IntN {
-//RS             signed: true,
-//RS             bits: 64,
-//RS         } => Some("list-i64"),
-//RS         MirTypeKind::InlineRange { base, .. }
-//RS         | MirTypeKind::Tagged { inner: base, .. } => wasm_abi_list_kind(base),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn wasm_abi_kind(ty: &MirType) -> Result<Option<&'static str>, MirWebError> {
-//RS     if ty.is_unit() {
-//RS         return Ok(None);
-//RS     }
-//RS     match &ty.kind {
-//RS         MirTypeKind::Int => Ok(Some("int")),
-//RS         MirTypeKind::String => Ok(Some("string")),
-//RS         MirTypeKind::List(inner) => wasm_abi_list_kind(inner)
-//RS             .map(Some)
-//RS             .ok_or_else(|| MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "unsupported Web Wasm export collection type `{}`",
-//RS                     ty.display_name()
-//RS                 ),
-//RS             }),
-//RS         MirTypeKind::Map { key, value }
-//RS             if matches!(&key.kind, MirTypeKind::String)
-//RS                 && matches!(&value.kind, MirTypeKind::Int) =>
-//RS         {
-//RS             Ok(Some("map-string-int"))
-//RS         }
-//RS         MirTypeKind::InlineRange { base, .. }
-//RS         | MirTypeKind::Tagged { inner: base, .. }
-//RS         | MirTypeKind::Quantity { base, .. } => wasm_abi_kind(base),
-//RS         MirTypeKind::Float
-//RS         | MirTypeKind::Bool
-//RS         | MirTypeKind::Char
-//RS         | MirTypeKind::IntN { .. }
-//RS         | MirTypeKind::Float32 => Ok(None),
-//RS         MirTypeKind::Apply { .. }
-//RS         | MirTypeKind::Map { .. }
-//RS         | MirTypeKind::FixedList { .. }
-//RS         | MirTypeKind::Shared(_)
-//RS         | MirTypeKind::Option(_)
-//RS         | MirTypeKind::Result { .. }
-//RS         | MirTypeKind::Fn(_)
-//RS         | MirTypeKind::SendFn { .. }
-//RS         | MirTypeKind::TraitObject(_)
-//RS         | MirTypeKind::Tuple(_)
-//RS         | MirTypeKind::Union(_)
-//RS         | MirTypeKind::Measure(_) => Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "unsupported Web Wasm export boundary type `{}`",
-//RS                 ty.display_name()
-//RS             ),
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS fn wasm_direct_argument(value: &str, ty: &MirType) -> Result<String, MirWebError> {
-//RS     match &ty.kind {
-//RS         MirTypeKind::Float | MirTypeKind::Float32 => Ok(format!("Number({value})")),
-//RS         MirTypeKind::Bool => Ok(format!("Number(Boolean({value}))")),
-//RS         MirTypeKind::Char => Ok(format!("Number(String({value}).codePointAt(0))")),
-//RS         MirTypeKind::IntN { bits, .. } => {
-//RS             if *bits <= 32 {
-//RS                 Ok(format!("Number({value})"))
-//RS             } else {
-//RS                 Ok(format!("BigInt({value})"))
-//RS             }
-//RS         }
-//RS         MirTypeKind::InlineRange { base, .. }
-//RS         | MirTypeKind::Tagged { inner: base, .. }
-//RS         | MirTypeKind::Quantity { base, .. } => wasm_direct_argument(value, base),
-//RS         _ => Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "unsupported direct Web Wasm export argument type `{}`",
-//RS                 ty.display_name()
-//RS             ),
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS fn wasm_direct_return(raw: &str, ty: &MirType) -> Result<String, MirWebError> {
-//RS     match &ty.kind {
-//RS         MirTypeKind::Float | MirTypeKind::Float32 => Ok(format!("Number({raw})")),
-//RS         MirTypeKind::Bool => Ok(format!("Boolean(Number({raw}))")),
-//RS         MirTypeKind::Char => Ok(format!("String.fromCodePoint(Number({raw}))")),
-//RS         MirTypeKind::IntN { signed, bits } => Ok(format!(
-//RS             "BigInt.as{}N({bits}, BigInt({raw}))",
-//RS             if *signed { "Int" } else { "Uint" }
-//RS         )),
-//RS         MirTypeKind::InlineRange { base, .. }
-//RS         | MirTypeKind::Tagged { inner: base, .. }
-//RS         | MirTypeKind::Quantity { base, .. } => wasm_direct_return(raw, base),
-//RS         _ => Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "unsupported direct Web Wasm export return type `{}`",
-//RS                 ty.display_name()
-//RS             ),
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS fn wasm_abi_argument(value: &str, ty: &MirType) -> Result<String, MirWebError> {
-//RS     match wasm_abi_kind(ty)? {
-//RS         Some(kind) => Ok(format!(
-//RS             "jetDom.marshalAbi({}, {}, wasm)",
-//RS             value,
-//RS             js_string(kind)
-//RS         )),
-//RS         None => wasm_direct_argument(value, ty),
-//RS     }
-//RS }
-//RS 
-//RS fn wasm_abi_return(raw: &str, ty: &MirType) -> Result<String, MirWebError> {
-//RS     match wasm_abi_kind(ty)? {
-//RS         Some(kind) => Ok(format!(
-//RS             "jetDom.unmarshalAbi({}, {}, wasm)",
-//RS             raw,
-//RS             js_string(kind)
-//RS         )),
-//RS         None if ty.is_unit() => Ok("undefined".to_string()),
-//RS         None => wasm_direct_return(raw, ty),
-//RS     }
-//RS }
-//RS 
-//RS fn wasm_bridge_arguments(
-//RS     function: &MirFunction,
-//RS     values: &[String],
-//RS ) -> Result<Vec<String>, MirWebError> {
-//RS     if values.len() != function.params.len() {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "Web Wasm export `{}` received {} arguments but declares {}",
-//RS                 function.name,
-//RS                 values.len(),
-//RS                 function.params.len()
-//RS             ),
-//RS         });
-//RS     }
-//RS     let mut rendered = Vec::new();
-//RS     for (param, value) in function.params.iter().zip(values) {
-//RS         if let Some(reconstruction) = function
-//RS             .web_param_reconstructions
-//RS             .iter()
-//RS             .find(|row| row.local == param.name)
-//RS         {
-//RS             for field in &reconstruction.fields {
-//RS                 let field_value = format!("({value})[{}]", js_string(&field.field));
-//RS                 rendered.push(wasm_abi_argument(&field_value, &field.ty)?);
-//RS             }
-//RS         } else {
-//RS             rendered.push(wasm_abi_argument(value, &param.ty)?);
-//RS         }
-//RS     }
-//RS     Ok(rendered)
-//RS }
-//RS 
-//RS fn emit_wasm_export_bridges(
-//RS     out: &mut String,
-//RS     functions: &[&MirFunction],
-//RS ) -> Result<(), MirWebError> {
-//RS     let mut exports = functions
-//RS         .iter()
-//RS         .copied()
-//RS         .filter(|function| {
-//RS             is_wasm_export(function) && function_in_bucket(function, WebBucket::Wasm)
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     exports.sort_by_key(|function| function.id);
-//RS     let mut names = BTreeSet::new();
-//RS     for function in exports {
-//RS         if !matches!(function.form, MirFunctionForm::TopLevel)
-//RS             || !function.capture_params.is_empty()
-//RS         {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "Web Wasm export `{}` is not a top-level capture-free function",
-//RS                     function.name
-//RS                 ),
-//RS             });
-//RS         }
-//RS         if function.generator.is_some() {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "Web Wasm export `{}` cannot be a generator",
-//RS                     function.name
-//RS                 ),
-//RS             });
-//RS         }
-//RS         if !names.insert(function.name.clone()) {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "Web Wasm export `{}` has a duplicate JavaScript bridge name",
-//RS                     function.name
-//RS                 ),
-//RS             });
-//RS         }
-//RS         let values = (0..function.params.len())
-//RS             .map(|index| format!("args[{index}]"))
-//RS             .collect::<Vec<_>>();
-//RS         let arguments = wasm_bridge_arguments(function, &values)?;
-//RS         let success = match &function.failure {
-//RS             jet_foundation::MIR::MirFailureCarrier::Result { success, .. } => success,
-//RS             jet_foundation::MIR::MirFailureCarrier::Optional { value } => value,
-//RS             jet_foundation::MIR::MirFailureCarrier::Infallible
-//RS             | jet_foundation::MIR::MirFailureCarrier::Diverges { .. } => &function.return_type,
-//RS         };
-//RS         let result = wasm_abi_return("raw", success)?;
-//RS         let bridge = wasm_bridge_name(function);
-//RS         let symbol = wasm_export_symbol(function);
-//RS         writeln!(out, "async function {bridge}(...args) {{").unwrap();
-//RS         writeln!(
-//RS             out,
-//RS             "  if (args.length !== {}) throw new TypeError({});",
-//RS             function.params.len(),
-//RS             js_string(&format!(
-//RS                 "Web Wasm export `{}` expects {} arguments",
-//RS                 function.name,
-//RS                 function.params.len()
-//RS             ))
-//RS         )
-//RS         .unwrap();
-//RS         out.push_str("  const wasm = __jetPreludeWasm;\n");
-//RS         writeln!(out, "  let raw = wasm.{symbol}({});", arguments.join(", ")).unwrap();
-//RS         out.push_str("  const outcome = jetDom.takeWasmError(wasm);\n");
-//RS         out.push_str(
-//RS             "  if (outcome?.tag === \"Host\") throw jet_web_wasm_host_error(outcome, null, Number(outcome.status ?? 101));\n",
-//RS         );
-//RS         match &function.failure {
-//RS             jet_foundation::MIR::MirFailureCarrier::Result { .. }
-//RS             | jet_foundation::MIR::MirFailureCarrier::Optional { .. } => {
-//RS                 out.push_str("  if (outcome?.tag === \"Err\") return { tag: \"Err\", values: [outcome.error] };\n");
-//RS                 writeln!(out, "  return {{ tag: \"Ok\", values: [{result}] }};").unwrap();
-//RS             }
-//RS             jet_foundation::MIR::MirFailureCarrier::Infallible
-//RS             | jet_foundation::MIR::MirFailureCarrier::Diverges { .. } => {
-//RS                 out.push_str("  if (outcome) return jet_web_edge_result(outcome);\n");
-//RS                 writeln!(out, "  return {result};").unwrap();
-//RS             }
-//RS         }
-//RS         out.push_str("}\n\n");
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn js_wasm_export_call(
-//RS     function: &MirFunction,
-//RS     caller: &MirFunction,
-//RS     args: &[jet_foundation::MIR::MirCallArg],
-//RS     values: &[String],
-//RS ) -> Result<String, MirWebError> {
-//RS     if !function.target_applicability.web || !function_in_bucket(function, WebBucket::Wasm) {
-//RS         return Err(MirWebError::MissingUserFunction { function: function.id.0 });
-//RS     }
-//RS     if !matches!(function.form, MirFunctionForm::TopLevel)
-//RS         || !function.capture_params.is_empty()
-//RS     {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "Web Wasm export `{}` is not a top-level capture-free function",
-//RS                 function.name
-//RS             ),
-//RS         });
-//RS     }
-//RS     if caller.generator.is_some() {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "generator function {} cannot await Web Wasm export `{}`",
-//RS                 caller.id.0, function.name
-//RS             ),
-//RS         });
-//RS     }
-//RS     if args.iter().any(|arg| arg.spread) {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "Web Wasm export `{}` cannot receive a spread argument",
-//RS                 function.name
-//RS             ),
-//RS         });
-//RS     }
-//RS     Ok(format!(
-//RS         "await {}({})",
-//RS         wasm_bridge_name(function),
-//RS         values.join(", ")
-//RS     ))
-//RS }
-//RS 
-//RS fn web_source_name(name: &str) -> &str {
-//RS     name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-//RS         .unwrap_or(name)
-//RS }
-//RS 
-//RS fn emit_js_print_type_facts(out: &mut String, program: &MirProgram) {
-//RS     out.push_str("const __jet_print_type_facts = Object.freeze({\n");
-//RS     for type_def in &program.types {
-//RS         write!(
-//RS             out,
-//RS             "  {}: {{ name: {}, auto_printable: {}, ",
-//RS             js_string(&type_def.id.0.to_string()),
-//RS             js_string(web_source_name(&type_def.name)),
-//RS             type_def.auto_printable,
-//RS         )
-//RS         .unwrap();
-//RS         match &type_def.kind {
-//RS             MirTypeDefKind::Struct { fields, .. } => {
-//RS                 out.push_str("kind: \"struct\", fields: [");
-//RS                 for (index, field) in fields.iter().enumerate() {
-//RS                     if index != 0 {
-//RS                         out.push_str(", ");
-//RS                     }
-//RS                     write!(
-//RS                         out,
-//RS                         "{{ key: {}, name: {}, computed: {}, redacted: {} }}",
-//RS                         js_string(&field.name),
-//RS                         js_string(web_source_name(&field.name)),
-//RS                         field.computed,
-//RS                         field.redact,
-//RS                     )
-//RS                     .unwrap();
-//RS                 }
-//RS                 out.push_str("]");
-//RS             }
-//RS             MirTypeDefKind::Enum { variants, .. } => {
-//RS                 out.push_str("kind: \"enum\", variants: [");
-//RS                 for (index, variant) in variants.iter().enumerate() {
-//RS                     if index != 0 {
-//RS                         out.push_str(", ");
-//RS                     }
-//RS                     write!(
-//RS                         out,
-//RS                         "{{ tag: {}, name: {}, ",
-//RS                         js_string(&variant.name),
-//RS                         js_string(web_source_name(&variant.name)),
-//RS                     )
-//RS                     .unwrap();
-//RS                     match &variant.payload {
-//RS                         MirVariantPayload::Unit => out.push_str("kind: \"unit\", fields: []"),
-//RS                         MirVariantPayload::Single(_) => {
-//RS                             out.push_str("kind: \"single\", fields: []")
-//RS                         }
-//RS                         MirVariantPayload::Named(fields) => {
-//RS                             out.push_str("kind: \"named\", fields: [");
-//RS                             for (field_index, field) in fields.iter().enumerate() {
-//RS                                 if field_index != 0 {
-//RS                                     out.push_str(", ");
-//RS                                 }
-//RS                                 write!(
-//RS                                     out,
-//RS                                     "{{ key: {}, name: {}, computed: {}, redacted: {} }}",
-//RS                                     js_string(&field.name),
-//RS                                     js_string(web_source_name(&field.name)),
-//RS                                     field.computed,
-//RS                                     field.redact,
-//RS                                 )
-//RS                                 .unwrap();
-//RS                             }
-//RS                             out.push(']');
-//RS                         }
-//RS                     }
-//RS                     out.push('}');
-//RS                 }
-//RS                 out.push(']');
-//RS             }
-//RS             MirTypeDefKind::Distinct { .. } => out.push_str("kind: \"transparent\""),
-//RS             MirTypeDefKind::Alias { .. } => out.push_str("kind: \"transparent\""),
-//RS             MirTypeDefKind::UnitFamily { members } => {
-//RS                 out.push_str("kind: \"unit_family\", members: [");
-//RS                 for (index, member) in members.iter().enumerate() {
-//RS                     if index != 0 {
-//RS                         out.push_str(", ");
-//RS                     }
-//RS                     out.push_str(&js_string(web_source_name(member)));
-//RS                 }
-//RS                 out.push(']');
-//RS             }
-//RS         }
-//RS         out.push_str("},\n");
-//RS     }
-//RS     out.push_str("});\n");
-//RS }
-//RS 
-//RS fn js_cli_type_default(program: &MirProgram, ty: &MirType) -> Result<String, MirWebError> {
-//RS     let constant = match ty.kind() {
-//RS         MirTypeKind::Int => MirConstant::Int {
-//RS             value: 0,
-//RS             width: None,
-//RS             spelling: None,
-//RS         },
-//RS         MirTypeKind::IntN { signed, bits } => MirConstant::Int {
-//RS             value: 0,
-//RS             width: Some((*signed, *bits)),
-//RS             spelling: None,
-//RS         },
-//RS         MirTypeKind::Float => MirConstant::Float {
-//RS             value: 0.0,
-//RS             f32: false,
-//RS             spelling: None,
-//RS         },
-//RS         MirTypeKind::Float32 => MirConstant::Float {
-//RS             value: 0.0,
-//RS             f32: true,
-//RS             spelling: None,
-//RS         },
-//RS         MirTypeKind::Bool => MirConstant::Bool(false),
-//RS         MirTypeKind::String => MirConstant::String(String::new()),
-//RS         MirTypeKind::Char => MirConstant::Char('\0'),
-//RS         MirTypeKind::InlineRange { base, .. } | MirTypeKind::Tagged { inner: base, .. } => {
-//RS             return js_cli_type_default(program, base);
-//RS         }
-//RS         MirTypeKind::Option(_) => MirConstant::Unit,
-//RS         _ => return Ok("undefined".to_string()),
-//RS     };
-//RS     js_constant_expression(program, &constant)
-//RS }
-//RS 
-//RS fn js_web_cli_entry_argument(
-//RS     program: &MirProgram,
-//RS     function: &MirFunction,
-//RS     cli: Option<&MirCliEntry>,
-//RS ) -> Result<Option<String>, MirWebError> {
-//RS     let Some(cli) = cli.filter(|cli| cli.record_inputs) else {
-//RS         return Ok(None);
-//RS     };
-//RS     if function.params.len() != 1 {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "Web CLI record entry {} expects one parameter, found {}",
-//RS                 function.id.0,
-//RS                 function.params.len()
-//RS             ),
-//RS         });
-//RS     }
-//RS     let mut fields = Vec::with_capacity(cli.inputs.len());
-//RS     for input in &cli.inputs {
-//RS         let default = match &input.shape {
-//RS             MirCliInputShape::Flag => "false".to_string(),
-//RS             MirCliInputShape::Value { default, .. } => match default {
-//RS                 Some(MirCliDefault::Value(value)) => js_constant_expression(program, value)?,
-//RS                 Some(MirCliDefault::TypeDefault) => js_cli_type_default(program, &input.ty)?,
-//RS                 None => "undefined".to_string(),
-//RS             },
-//RS         };
-//RS         fields.push(format!("{}: {}", js_string(&input.name), default));
-//RS     }
-//RS     let defaults = format!("{{ {} }}", fields.join(", "));
-//RS     let defaults = function.params[0].ty.identity.map_or(defaults.clone(), |type_id| {
-//RS         format!(
-//RS             "Object.defineProperty({}, \"__jet_type\", {{ value: {}, enumerable: false }})",
-//RS             defaults,
-//RS             js_string(&type_id.0.to_string())
-//RS         )
-//RS     });
-//RS     Ok(Some(format!(
-//RS         "[Object.assign({}, (args.length === 1 && args[0] !== null && typeof args[0] === \"object\" && !Array.isArray(args[0])) ? args[0] : {{}})]",
-//RS         defaults
-//RS     )))
-//RS }
-//RS 
-//RS fn emit_js_app(
-//RS     program: &MirProgram,
-//RS     target: &MirWebTarget,
-//RS     artifact: &MirArtifactPlan,
-//RS     functions: &[&MirFunction],
-//RS     entry: Option<jet_foundation::MIR::MirFunctionId>,
-//RS     artifact_identity: &str,
-//RS     history_provenance: &HistoryProvenance,
-//RS ) -> Result<String, MirWebError> {
-//RS     let has_game_runtime = artifact
-//RS         .runtime_parts
-//RS         .iter()
-//RS         .any(|part| matches!(part, jet_foundation::MIR::MirRuntimePartId::Game));
-//RS     let has_data_runtime = artifact
-//RS         .runtime_parts
-//RS         .contains(&jet_foundation::MIR::MirRuntimePartId::Data);
-//RS     // The Wasm prelude always exports the history ABI, including for programs
-//RS     // with no authored history call. Keep the canonical JS callback import
-//RS     // present so WebAssembly instantiation never receives a missing import.
-//RS     let include_history = true;
-//RS     // HarfBuzz is needed only when an emitted MIR function retains the
-//RS     // semantic `core.font.shape` call; UI itself must not bind it eagerly.
-//RS     let needs_font_shaping = web_uses_font_shaping(program, functions);
-//RS     let mut out = String::new();
-//RS     out.push_str("import * as jetDom from \"./jet_dom_runtime.js\";\n");
-//RS     let shared_prelude = shared_js_prelude(
-//RS         needs_font_shaping,
-//RS         &artifact.runtime_parts,
-//RS         include_history,
-//RS     )
-//RS     .map_err(|error| MirWebError::InvalidAssets {
-//RS         message: error.to_string(),
-//RS     })?;
-//RS     out.push_str(&shared_prelude);
-//RS     out.push('\n');
-//RS     emit_js_print_type_facts(&mut out, program);
-//RS     emit_js_copy_type_facts(&mut out, program);
-//RS     out.push('\n');
-//RS     out.push_str(if needs_font_shaping {
-//RS         "const __jetFontImports = await jet_ui_web_harfbuzz_imports();\n"
-//RS     } else {
-//RS         "const __jetFontImports = jet_ui_web_unreachable_harfbuzz_imports();\n"
-//RS     });
-//RS     if has_data_runtime {
-//RS         out.push_str("const __jetDataImports = jet_data_web_imports();\n");
-//RS     }
-//RS     if include_history {
-//RS         out.push_str("const __jetTestingHistoryImports = jet_testing_history_web_imports();\n");
-//RS     }
-//RS     out.push_str(
-//RS         "const __jetPreludeWasm = (await jetDom.instantiateWasm(new URL(\"./app.wasm\", import.meta.url).href, { ...__jetFontImports",
-//RS     );
-//RS     if has_data_runtime {
-//RS         out.push_str(", ...__jetDataImports");
-//RS     }
-//RS     if include_history {
-//RS         out.push_str(", ...__jetTestingHistoryImports");
-//RS     }
-//RS     out.push_str(" })).exports;\n");
-//RS     for constant in &program.constants {
-//RS         if !artifact.modules.contains(&constant.module) {
-//RS             continue;
-//RS         }
-//RS         let value = js_constant_expression(program, &constant.value)?;
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "globalThis[{}] = {};",
-//RS             js_string(&constant.key),
-//RS             value
-//RS         );
-//RS     }
-//RS     if has_data_runtime {
-//RS         out.push_str(
-//RS             "jet_data_web_bind_wasm(__jetPreludeWasm);\n\
-//RS              if (typeof __jetPreludeWasm.jet_data_web_register_types === \"function\") __jetPreludeWasm.jet_data_web_register_types();\n",
-//RS         );
-//RS     }
-//RS     if include_history {
-//RS         out.push_str("jet_testing_history_web_bind_wasm(__jetPreludeWasm);\n");
-//RS     }
-//RS     if needs_font_shaping {
-//RS         out.push_str("jet_ui_web_harfbuzz_bind_app(__jetPreludeWasm);\n");
-//RS     }
-//RS     if has_game_runtime {
-//RS         out.push_str(
-//RS             "  if (typeof fetch === \"function\") {\n\
-//RS              \
-//RS              try {\n\
-//RS              \
-//RS              const __jetProjection = await fetch(\"/__jet_devtools/state\").then((response) => response.ok ? response.json() : null);\n\
-//RS              \
-//RS              if (__jetProjection?.session_id) {\n\
-//RS              \
-//RS              globalThis.__jetDevtoolsGameIdentity = {\n\
-//RS              \
-//RS              session_id: __jetProjection.session_id,\n\
-//RS              \
-//RS              source_id: __jetProjection.source_id || \"game\",\n\
-//RS              \
-//RS              build_id: __jetProjection.build_id || \"runtime\",\n\
-//RS              \
-//RS              revision: __jetProjection.revision || \"runtime\",\n\
-//RS              \
-//RS              };\n\
-//RS              \
-//RS              }\n\
-//RS              \
-//RS              } catch (_) {}\n\
-//RS              \
-//RS              }\n",
-//RS         );
-//RS     }
-//RS     emit_wasm_export_bridges(&mut out, functions)?;
-//RS     emit_web_module_registry(&mut out, program, artifact, artifact_identity)?;
-//RS     let mut js_functions = functions
-//RS         .iter()
-//RS         .copied()
-//RS         .filter(|function| {
-//RS             function_in_bucket(function, WebBucket::JS)
-//RS                 && artifact.modules.iter().any(|module| *module == function.module_id)
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     js_functions.sort_by_key(|function| function.id);
-//RS     for function in js_functions {
-//RS         emit_js_function(
-//RS             &mut out,
-//RS             program,
-//RS             function,
-//RS             target.release_devtools_policy.local_rail,
-//RS             history_provenance,
-//RS         )?;
-//RS     }
-//RS     let entry_row = if let Some(entry) = entry {
-//RS         Some(
-//RS             functions
-//RS                 .iter()
-//RS                 .find(|function| function.id == entry)
-//RS                 .copied()
-//RS                 .ok_or(MirWebError::MissingEntryFunction { function: entry.0 })?,
-//RS         )
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let entry_function = entry_row.filter(|function| function_in_bucket(function, WebBucket::JS));
-//RS     let entry_cli_argument = entry_function
-//RS         .map(|function| {
-//RS             js_web_cli_entry_argument(
-//RS                 program,
-//RS                 function,
-//RS                 artifact.entry.as_ref().and_then(|entry| entry.cli.as_ref()),
-//RS             )
-//RS         })
-//RS         .transpose()?
-//RS         .flatten();
-//RS     let entry_wasm = entry_row.filter(|function| function_in_bucket(function, WebBucket::Wasm));
-//RS     let main_keyword = if entry_function.is_some_and(|function| function.generator.is_some()) {
-//RS         "export function*"
-//RS     } else {
-//RS         "export async function"
-//RS     };
-//RS     writeln!(out, "\n{} jet_main(...args) {{", main_keyword).unwrap();
-//RS     out.push_str("  try {\n");
-//RS     if let Some(function) = entry_function {
-//RS         if let Some(argument) = &entry_cli_argument {
-//RS             writeln!(out, "    const __jet_entry_args = {argument};").unwrap();
-//RS         }
-//RS         let entry_arguments = if entry_cli_argument.is_some() {
-//RS             "__jet_entry_args"
-//RS         } else {
-//RS             "args"
-//RS         };
-//RS         if function.generator.is_some() {
-//RS             writeln!(
-//RS                 out,
-//RS                 "    const __jet_edge_result = yield* jet_fn_{}([], {});",
-//RS                 function.id.0,
-//RS                 entry_arguments
-//RS             )
-//RS             .unwrap();
-//RS         } else {
-//RS             writeln!(
-//RS                 out,
-//RS                 "    const __jet_edge_result = await jet_fn_{}([], {});",
-//RS                 function.id.0,
-//RS                 entry_arguments
-//RS             )
-//RS             .unwrap();
-//RS         }
-//RS         out.push_str("    return jet_web_edge_result(__jet_edge_result);\n");
-//RS     } else if let Some(function) = entry_wasm {
-//RS         if function.generator.is_some() {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "Web Wasm entry {} cannot be a generator",
-//RS                     function.id.0
-//RS                 ),
-//RS             });
-//RS         }
-//RS         writeln!(
-//RS             out,
-//RS             "    __jetPreludeWasm.jet_entry_{}();",
-//RS             function.id.0
-//RS         )
-//RS         .unwrap();
-//RS         out.push_str("    const outcome = jetDom.takeWasmError(__jetPreludeWasm);\n");
-//RS         out.push_str(
-//RS             "    if (outcome?.tag === \"Host\") throw jet_web_wasm_host_error(outcome, null, Number(outcome.status ?? 101));\n    if (outcome) return jet_web_edge_result(outcome);\n",
-//RS         );
-//RS         out.push_str("    return undefined;\n");
-//RS     } else {
-//RS         out.push_str("    return undefined;\n");
-//RS     }
-//RS     out.push_str(
-//RS         "  } catch (__jet_error) {\n\
-//RS          \
-//RS          if (__jet_error instanceof JetWebPropagation) {\n\
-//RS          \
-//RS          return jet_web_edge_result({ tag: \"Err\", error: __jet_error.wire });\n\
-//RS          \
-//RS          }\n\
-//RS          \
-//RS          throw __jet_error;\n\
-//RS          \
-//RS          }\n",
-//RS     );
-//RS     out.push_str("}\n\n");
-//RS     emit_js_routes(&mut out, program);
-//RS     let _ = target;
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn emit_web_module_registry(
-//RS     out: &mut String,
-//RS     program: &MirProgram,
-//RS     artifact: &MirArtifactPlan,
-//RS     artifact_identity: &str,
-//RS ) -> Result<(), MirWebError> {
-//RS     let mut module_ids = artifact.modules.clone();
-//RS     module_ids.sort_by_key(|id| id.0);
-//RS     for module_id in module_ids {
-//RS         let module = program
-//RS             .modules
-//RS             .iter()
-//RS             .find(|module| module.id == module_id)
-//RS             .ok_or_else(|| MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "Web artifact {} references missing module {}",
-//RS                     artifact.id.0, module_id.0
-//RS                 ),
-//RS             })?;
-//RS         if module.key.is_empty() || module.path.is_empty() {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "Web artifact {} module {} has no stable key/path",
-//RS                     artifact.id.0, module_id.0
-//RS                 ),
-//RS             });
-//RS         }
-//RS         let imports = module
-//RS             .imports
-//RS             .iter()
-//RS             .map(|id| id.0.to_string())
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let item_order = module
-//RS             .item_order
-//RS             .iter()
-//RS             .map(|item| item_ref_descriptor(*item))
-//RS             .collect::<Vec<_>>()
-//RS             .join("\0");
-//RS         let interface_seed = format!(
-//RS             "{}\0{}\0{}\0{}",
-//RS             module.key, module.path, imports, item_order
-//RS         );
-//RS         let body_seed = format!(
-//RS             "{}\0{}\0{}",
-//RS             artifact_identity, module_id.0, module.path
-//RS         );
-//RS         let interface_fingerprint = format!("sha256-{}", sha256_hex(interface_seed.as_bytes()));
-//RS         let body_fingerprint = format!("sha256-{}", sha256_hex(body_seed.as_bytes()));
-//RS         writeln!(
-//RS 
-//RS             out,
-//RS             "jetDom.registerWebModule({}, {}, {});",
-//RS             json_string(&module.key),
-//RS             json_string(&interface_fingerprint),
-//RS             json_string(&body_fingerprint),
-//RS         )
-//RS         .unwrap();
-//RS     }
-//RS     out.push('\n');
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_function_blocks(function: &MirFunction) -> Result<(), MirWebError> {
-//RS     let has_block = |id: jet_foundation::MIR::MirBlockId| {
-//RS         function.blocks.iter().any(|block| block.id == id)
-//RS     };
-//RS     if !has_block(function.entry) {
-//RS         return Err(MirWebError::InvalidMir {
-//RS             message: format!(
-//RS                 "Web MIR function {} has a missing entry block {}",
-//RS                 function.id.0, function.entry.0
-//RS             ),
-//RS         });
-//RS     }
-//RS     for block in &function.blocks {
-//RS         for target in block.terminator.targets() {
-//RS             if !has_block(target) {
-//RS                 return Err(MirWebError::InvalidMir {
-//RS                     message: format!(
-//RS                         "Web MIR function {} block {} targets missing block {}",
-//RS                         function.id.0, block.id.0, target.0
-//RS                     ),
-//RS                 });
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_capture_params(
-//RS     program: &MirProgram,
-//RS     function: &MirFunction,
-//RS ) -> Result<(), MirWebError> {
-//RS     for (slot, capture) in function.capture_params.iter().enumerate() {
-//RS         if capture.slot != slot {
-//RS             return Err(MirWebError::InvalidMir {
-//RS                 message: format!(
-//RS                     "MIR function {} capture slot {} is out of order",
-//RS                     function.id.0, capture.slot
-//RS                 ),
-//RS             });
-//RS         }
-//RS         if let Some(type_id) = capture.ty.identity {
-//RS             ensure_type_instance(program, type_id)?;
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-// END-PORT-PENDING 0461 crates/jet-codegen/src/Codegen/MIRWeb.rs:1-1749
+// MIR-only WebAssembly/JavaScript emission. No bundle, AST, TIR or checker policy.
+use jet_foundation.[HistoryProvenance, HISTORY_ENGINE, TargetLayout, TEXT_NUL, sha256_hex, require_canonical_mir_optimization, GENERATED_NAME_PREFIX]
+use jet_foundation.MIR.[MirArtifactId, MirArtifactKind, MirArtifactPlan, MirArtifactTarget, MirBasicBlock, MirBlockId, MirCallArg, MirCallee, MirCliDefault, MirCliEntry, MirCliInputShape, MirConstant, MirCoreCallId, MirFailureCarrier, MirForeignAbi, MirFunction, MirFunctionForm, MirFunctionId, MirOperation, MirPreludeAbi, MirPreludeCallId, MirPreludeFamily, MirProgram, MirRuntimePartId, MirSemanticOp, MirType, MirTypeDef, MirTypeDefKind, MirTypeKind, MirVariantPayload]
+use jet_foundation.WebPartition.[WebBucket, WebPartitionMarker]
+use jet_pkg_model.[ReleaseDevtoolsPolicy]
+use jet_codegen.[emit_mir_program, MirRustConfig, MirRustExecutionConfig, MirRustTarget, dom_runtime_source, shared_js_prelude, default_index_html, function_in_bucket, is_wasm_export, emit_source_map, emit_manifest, emit_command_record, web_trait_method_targets, js_string, json_string, js_constant_expression, emit_js_copy_type_facts, emit_js_function, emit_js_routes, item_ref_descriptor, ensure_type_instance]
 
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:30
+fn foreign_abi_name(abi: &MirForeignAbi) -> String {
+    if abi == { .C -> "C"; .CUnwind -> "C-unwind"; .System -> "system"; .Stdcall -> "stdcall"; .Fastcall -> "fastcall"; .Vectorcall -> "vectorcall"; .Rust -> "Rust"; .Platform(name) -> ~name }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:45
+pub struct WebArtifacts {
+    pub manifest_json: String
+    pub wasm_rust: String
+    // Compilation context excludes edited MIR bodies: item hashes select rebuilds.
+    pub rustc_incremental_identity: String
+    pub js_app: String
+    pub js_source_map: String
+    pub source_names: [String]
+    pub source_contents: [String]
+    pub dom_runtime: String
+    pub index_html: String
+    pub explicit_html_path: String?
+    pub command_record: [U8]
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:66
+pub struct MirWebAssets {
+    pub dom_runtime: String
+    pub index_html: String
+    pub explicit_html_path: String?
+    pub source_names: [String]
+    pub source_contents: [String]
+}
+impl MirWebAssets {
+    // Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:77
+    pub fn with_default_shell() -> Self {
+        Self{dom_runtime: dom_runtime_source().to_string(), index_html: default_index_html(), explicit_html_path: None, source_names: [], source_contents: []}
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:94
+pub struct MirWebTarget {
+    pub layout: TargetLayout
+    pub assets: MirWebAssets
+    pub semantic_digest: [U8; 32]
+    pub artifact: MirArtifactId
+    pub release_devtools_policy: ReleaseDevtoolsPolicy
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:112
+pub fn web_rustc_incremental_identity(program: &MirProgram, target: &MirWebTarget) -> String {
+    artifact_kind :: program.artifacts.find(artifact -> artifact.id == target.artifact).map(artifact -> artifact.kind.debug()).unwrap_or_else(fn() { "missing" })
+    // GATE #4483: caller's selected target facts; #4500 canonical debug encoding.
+    context :: "jet-web-rustc-incremental-v1|target={target.layout.triple}|pointer-size={target.layout.pointer_size}|pointer-align={target.layout.pointer_alignment}|layout={target.layout.layout_facts.debug()}|artifact={target.artifact.0}|artifact-kind={artifact_kind}|compiler={program.facts.target_dossier.compiler_identity}|environment={program.facts.target_dossier.environment_identity}|tier={program.facts.target_dossier.tier_identity}|edition={program.facts.edition}|policy={target.release_devtools_policy.debug()}"
+    sha256_hex(context.as_bytes())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:155
+#Error
+pub enum MirWebError {
+    InvalidMir(message: String)
+    InvalidLayout(ty: String)
+    InvalidAssets(message: String)
+    MissingCoreCall(call: U64)
+    MissingPreludeCall(call: U64)
+    MissingUserFunction(function: U64)
+    MissingEntryFunction(function: U64)
+}
+impl MirWebError {
+    // Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:166
+    pub fn fmt(self: &Self) -> String {
+        if self == {
+            .InvalidMir(message) -> "invalid MIR for Web emission: {message}"
+            .InvalidLayout(ty) -> "MIR type has an invalid layout: {ty}"
+            .InvalidAssets(message) -> "invalid Web publication assets: {message}"
+            .MissingCoreCall(call) -> "MIR CoreCallId {call} is not in the Core table"
+            .MissingPreludeCall(call) -> "MIR PreludeCallId {call} is not in the Prelude table"
+            .MissingUserFunction(function) -> "MIR function id {function} is not in the function table"
+            .MissingEntryFunction(function) -> "MIR entry function {function} is not Web-applicable"
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:182
+pub fn emit_web(program: &MirProgram, target: &MirWebTarget) -> WebArtifacts MirWebError! {
+    try { program.cffi.validate_boundaries() } catch error { throw MirWebError.InvalidMir(message: "invalid foreign boundary facts: {error}") }
+    try { require_canonical_mir_optimization(program) } catch error { throw MirWebError.InvalidMir(message: error.to_string()) }
+    validate_assets(target.assets)
+    validate_layouts(program)
+    validate_web_facts(program)
+    artifact :: select_web_artifact(program, target.artifact)
+    artifact_identity :: try { program.artifact_identity(artifact.id) } catch error { throw MirWebError.InvalidMir(message: "MIR Web artifact identity unavailable: {error}") }
+    history_provenance :: HistoryProvenance{source: artifact_identity.identity_digest(), tool: "{HISTORY_ENGINE}:{program.facts.target_dossier.compiler_identity}", target: sha256_hex(program.facts.target_dossier.cache_bytes(target.layout.triple))}
+    artifact_identity_text :: artifact_identity.canonical_text()
+    rustc_incremental_identity :: web_rustc_incremental_identity(program, target)
+    entry :: selected_web_entry(artifact)
+    functions :: program.functions.iter().filter(function -> function.target_applicability.web && artifact.modules.any(module -> module == function.module_id)).collect()
+    function :: functions.find(function -> function.id == entry) ?? throw MirWebError.MissingEntryFunction(function: entry.0)
+    if !function_in_bucket(function, WebBucket.JS) && !function_in_bucket(function, WebBucket.Wasm) -> throw MirWebError.InvalidMir(message: "MIR WebApplication entry {entry.0} has no checked Web partition")
+    wasm_rust :: emit_wasm_rust(program, target, functions)
+    js_app :: emit_js_app(program, target, artifact, functions, Val(entry), artifact_identity_text, history_provenance)
+    js_source_map :: emit_source_map(target.assets)
+    manifest_json :: emit_manifest(program, target, functions, artifact, entry, artifact_identity_text)
+    command_record :: emit_command_record(program, functions, artifact, entry)
+    WebArtifacts{manifest_json: ^manifest_json, wasm_rust: ^wasm_rust, rustc_incremental_identity: ^rustc_incremental_identity, js_app: ^js_app, js_source_map: ^js_source_map, source_names: ~target.assets.source_names, source_contents: ~target.assets.source_contents, dom_runtime: ~target.assets.dom_runtime, index_html: ~target.assets.index_html, explicit_html_path: ~target.assets.explicit_html_path, command_record: ^command_record}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:263
+fn select_web_artifact(program: &MirProgram, artifact_id: MirArtifactId) -> &MirArtifactPlan MirWebError! {
+    artifact :: program.artifacts.find(artifact -> artifact.id == artifact_id) ?? throw MirWebError.InvalidMir(message: "MIR artifact {artifact_id.0} is missing")
+    if artifact.kind != MirArtifactKind.WebApplication -> throw MirWebError.InvalidMir(message: "MIR artifact {artifact_id.0} has kind {artifact.kind.debug()}, expected WebApplication")
+    if artifact.target != MirArtifactTarget.Web -> throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} targets {artifact.target.debug()}, not Web")
+    if artifact.modules.is_empty() -> throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} has no selected modules")
+    loop module in artifact.modules {
+        if !program.modules.any(row -> row.id == module) -> throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} references missing module {module.0}")
+    }
+    loop link in artifact.links {
+        if !program.links.any(row -> row.id == link) -> throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} references missing link unit {link.0}")
+    }
+    loop job in artifact.jobs {
+        if !program.jobs.any(row -> row.id == job) -> throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} references missing job {job.0}")
+    }
+    entry :: artifact.entry ?? throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} has no entry")
+    function :: entry.function ?? throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} has no entry function")
+    if !program.functions.any(row -> row.id == function) -> throw MirWebError.MissingEntryFunction(function: function.0)
+    if artifact.harness == .Val(harness) {
+        if !program.harnesses.any(row -> row.id == harness) -> throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} references missing harness {harness.0}")
+    }
+    loop export in artifact.exports {
+        if export.symbol.is_empty() -> throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} has an unnamed export")
+        function :: program.functions.find(row -> row.id == export.function) ?? throw MirWebError.MissingUserFunction(function: export.function.0)
+        if !artifact.modules.any(module -> module == function.module_id) -> throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} export {export.function.0} belongs to unselected module {function.module_id.0}")
+        if !function.target_applicability.web -> throw MirWebError.MissingUserFunction(function: export.function.0)
+    }
+    artifact
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:371
+fn selected_web_entry(artifact: &MirArtifactPlan) -> MirFunctionId MirWebError! {
+    artifact.entry.and_then(entry -> entry.function) ?? throw MirWebError.InvalidMir(message: "MIR WebApplication artifact {artifact.id.0} has no entry function")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:381
+fn validate_assets(assets: &MirWebAssets) MirWebError! {
+    if assets.source_names.len() != assets.source_contents.len() -> throw MirWebError.InvalidAssets(message: "source_names has {assets.source_names.len()} rows but source_contents has {assets.source_contents.len()} rows")
+    if assets.dom_runtime.is_empty() -> throw MirWebError.InvalidAssets(message: "dom_runtime is empty")
+    if assets.index_html.is_empty() -> throw MirWebError.InvalidAssets(message: "index_html is empty")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:400
+fn validate_layouts(program: &MirProgram) MirWebError! {
+    check :: fn(ty: &MirType) MirWebError! { if !ty.has_valid_layout() -> throw MirWebError.InvalidLayout(ty: ty.name()) }
+    loop type_def in program.types -> check_type_def(type_def, check)
+    loop function in program.functions {
+        if function.generator == .Val(generator) -> check(generator.item)
+        loop parameter in function.params -> check(parameter.ty)
+        if function.declared_return == .Val(return_type) -> check(return_type)
+        check(function.return_type)
+        loop local in function.locals -> check(local.ty)
+        loop (_, ty, _, _) in function.values -> check(ty)
+        loop place in function.places -> check(place.ty)
+        loop reconstruction in function.web_param_reconstructions {
+            check(reconstruction.ty)
+            loop field in reconstruction.fields -> check(field.ty)
+        }
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.ty == .Val(ty) -> check(ty)
+                check_operation_types(instruction.operation, check)
+            }
+        }
+    }
+    loop foreign in program.foreign {
+        loop parameter in foreign.params -> check(parameter.ty)
+        if foreign.return_type == .Val(return_type) -> check(return_type)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:457
+fn check_type_def(type_def: &MirTypeDef, check: fn(&MirType) MirWebError!) MirWebError! {
+    if type_def.kind == {
+        .Struct(fields: fields, ..) -> { loop field in fields -> check(field.ty) }
+        .Enum(variants: variants, ..) -> {
+            loop variant in variants {
+                if variant.payload == { .Unit -> {}; .Single(ty) -> check(ty); .Named(fields) -> { loop field in fields -> check(field.ty) } }
+            }
+        }
+        .Distinct(base: base, ..) -> check(base)
+        .Alias(target: target) -> check(target)
+        .UnitFamily(..) -> {}
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:487
+fn check_operation_types(operation: &MirOperation, check: fn(&MirType) MirWebError!) MirWebError! {
+    if operation == {
+        .Convert(target: target, ..) | .PtrFromAddr(element: target, ..) -> check(target)
+        .Present(..) | .ResultOk(..) -> {}
+        .Semantic(semantic) -> if semantic == {
+            .MathBuiltin(..) | .PreciseBuiltin(..) | .Print(..) | .AmbientInput(..) | .RequireStop(..) | .LayoutCompare(..) | .LayoutLiteral(..) | .StructLiteral(..) | .ReflectOf(..) | .CellGuardProject(..) | .SharedGuardMap(..) | .SharedGuardSplit(..) | .SharedGuardWait(..) | .ConditionNotify(..) | .AllocNew(..) | .ColumnarRead(..) | .StaticPreludeCall(..) | .DecodeUnder(..) | .HardwareCall(..) | .BuiltinMethod(..) | .OptionLift2(..) | .ClosureMethod(..) | .HostBorrowCallback(..) | .NumericMethod(..) | .NumericBinaryMethod(..) | .OverflowOption(..) | .HandleMethod(..) | .PluginInvoke(..) | .CoreClosureCall(..) | .TaskGroup(..) | .Select(..) | .PolicyFunction(..) | .InterruptFunction(..) | .CarrierFact(..) | .GcEdit(..) | .TypedTextInterp(..) | .HostCall(..) | .DataEntriesToMap(..) | .TextPatternMatch(..) | .BinaryPatternMatch(..) | .CursorTakePattern(..) | .ReaderTakePattern(..) | .HttpRouterRegister(..) | .CCallback(..) -> {}
+        }
+        .Parameter(..) | .Capture(..) | .Global(..) | .Phi(..) | .ReadPlace(_) | .MovePlace(..) | .WritePlace(..) | .ReplacePlace(..) | .InitializeUninit(..) | .Copy(..) | .Move(..) | .TraitBox(..) | .Constant(_) | .Unary(..) | .Binary(..) | .BuildString(..) | .BuildList(..) | .BuildMap(..) | .EnumIs(..) | .EnumPayload(..) | .OptionIsSome(..) | .OptionValue(..) | .ResultIsOk(..) | .ResultValue(..) | .PatternCapture(..) | .PatternMatched(..) | .ProjectMembers(..) | .Index(..) | .Slice(..) | .Range(..) | .Field(..) | .Struct(..) | .Enum(..) | .Tuple(..) | .Absent | .ResultErr(..) | .Call(..) | .CoreCall(..) | .IndirectCall(..) | .Closure(..) | .Deref(..) | .RawAddressOf(..) | .AddressOf(..) | .AttachTag(..) | .Todo(..) | .Never(..) | .LoopRangeInit(..) | .LoopRangeHasNext(..) | .LoopRangeValue(..) | .LoopRangeAdvance(..) | .LoopIterInit(..) | .LoopIterHasNext(..) | .LoopIterValue(..) | .LoopIterAdvance(..) | .ScopeEnter(..) | .ScopeExit(..) | .Drop(..) -> {}
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:604
+const WEB_TARGET_HARDWARE_CAPABILITY :: "Target.Hardware"
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:606
+fn web_hardware_leak(detail: String) -> MirWebError {
+    MirWebError.InvalidMir(message: "E3311: Target `Web` lacks the required `{WEB_TARGET_HARDWARE_CAPABILITY}` capability; target validation must reject this hardware use before Web emission ({detail})")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:615
+fn reject_leaked_web_hardware(program: &MirProgram) MirWebError! {
+    if !program.facts.hardware_setups.is_empty() -> throw web_hardware_leak("a package hardware setup reached the Web adapter")
+    loop function in program.functions {
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.operation == .Semantic(.HardwareCall(..)) -> throw web_hardware_leak("function {function.id.0} at {instruction.span.debug()} reached the Web adapter")
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:642
+fn validate_web_facts(program: &MirProgram) MirWebError! {
+    reject_leaked_web_hardware(program)
+    loop function in program.functions {
+        if function.target_applicability.web && function.web_bucket == None -> throw MirWebError.InvalidMir(message: "function {function.id.0} is Web-applicable but has no checked Web bucket")
+        if (function.web_bucket, function.web_marker) == {
+            (.Val(WebBucket.JS), .Val(WebPartitionMarker.Wasm)) | (.Val(WebBucket.JS), .Val(WebPartitionMarker.WasmExport)) | (.Val(WebBucket.Wasm), .Val(WebPartitionMarker.JS)) -> throw MirWebError.InvalidMir(message: "function {function.id.0} has contradictory Web bucket and marker")
+            (.Val(WebBucket.JS), .Val(WebPartitionMarker.JS)) | (.Val(WebBucket.Wasm), .Val(WebPartitionMarker.Wasm)) | (.Val(WebBucket.Wasm), .Val(WebPartitionMarker.WasmExport)) | (.Val(WebBucket.JS), .None) | (.Val(WebBucket.Wasm), .None) | (.None, .Val(WebPartitionMarker.JS)) | (.None, .Val(WebPartitionMarker.Wasm)) | (.None, .Val(WebPartitionMarker.WasmExport)) | (.None, .None) -> {}
+        }
+        if function.target_applicability.web && function_in_bucket(function, WebBucket.JS) {
+            loop block in function.blocks {
+                loop instruction in block.instructions {
+                    if instruction.operation != .Call(callee: .Foreign(foreign_id), ..) -> continue
+                    foreign :: program.foreign.find(foreign -> foreign.id == foreign_id) ?? throw MirWebError.InvalidMir(message: "function {function.id.0} at {instruction.span.debug()} references missing foreign row {foreign_id.0}")
+                    abi :: foreign_abi_name(foreign.foreign_abi)
+                    throw MirWebError.InvalidMir(message: "function {function.id.0} at {instruction.span.debug()} contains JS-partition foreign row {foreign.id.0} declared at {foreign.span.debug()} (symbol `{foreign.symbol}` path `{foreign.path}` ABI `{abi}` language {foreign.foreign_language.debug()} applicability rust_aot={foreign.target_applicability.rust_aot} cranelift={foreign.target_applicability.cranelift} interpreter={foreign.target_applicability.interpreter} web={foreign.target_applicability.web}); no checked JavaScript linkage exists")
+                }
+            }
+        }
+        loop reconstruction in function.web_param_reconstructions {
+            loop field in reconstruction.fields {
+                if field.parameter.is_empty() || field.field.is_empty() -> throw MirWebError.InvalidMir(message: "function {function.id.0} has an empty Web reconstruction name")
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:724
+fn emit_wasm_rust(program: &MirProgram, target: &MirWebTarget, _functions: &[&MirFunction]) -> String MirWebError! {
+    // The canonical printer owns CFG, ownership, failure and Core/Prelude lowering.
+    config :: MirRustConfig{target: ~target.layout, target_kind: MirRustTarget.WebWasm, root_prefix: "", execution: MirRustExecutionConfig{artifact: target.artifact, ffi: None, emit_types: true, emit_foreign: true, emit_metadata: true, emit_debug_linemap: false, emit_runtime: true, semantic_digest: Val(target.semantic_digest), release_devtools_policy: ~target.release_devtools_policy, prune_unreachable_codecs: false}}
+    out := "// Generated by jet from optimized MIR; Web/Wasm target.\n"
+    out.push_str(emit_mir_program(program, config))
+    ^out
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:753
+fn web_font_shape_core_call(program: &MirProgram, id: MirCoreCallId) -> Bool {
+    program.core_calls.find(call -> call.id == id).is_some_and(call -> call.module == "core.font" && call.member == "shape")
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:761
+fn web_uses_font_shaping(program: &MirProgram, functions: &[&MirFunction]) -> Bool {
+    functions.any(function -> function.blocks.any(block -> block.instructions.any(instruction -> if instruction.operation == {
+        .CoreCall(call: call, ..) -> web_font_shape_core_call(program, call)
+        .Call(callee: .Core(id), ..) -> web_font_shape_core_call(program, id)
+        _ -> false
+    })))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:777
+fn web_task_join_call(program: &MirProgram, id: MirPreludeCallId) -> Bool {
+    program.prelude_calls.find(call -> call.id == id).is_some_and(call -> call.family == MirPreludeFamily.HandleMethod && call.module == "core.tasks" && call.member == "join")
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:784
+fn web_channel_handle_call(program: &MirProgram, id: MirPreludeCallId) -> Bool {
+    program.prelude_calls.find(call -> call.id == id).is_some_and(fn(call) {
+        expected_symbol :: if call.member == {
+            "receiver.receive" -> "jet_std::JetReceiver::receive"
+            "receiver.try_receive" -> "jet_std::JetReceiver::try_receive"
+            "receiver.is_timer" -> "jet_std::JetReceiver::is_timer"
+            "receiver.is_interval" -> "jet_std::JetReceiver::is_interval"
+            "receiver.is_cancelled" -> "jet_std::JetReceiver::is_cancelled"
+            "receiver.is_ready" -> "jet_std::JetReceiver::is_ready"
+            "receiver.delay_ms" -> "jet_std::JetReceiver::delay_ms"
+            "receiver.close" -> "jet_std::JetReceiver::close"
+            "sender.send" -> "jet_std::JetSender::send"
+            "sender.close" -> "jet_std::JetSender::close"
+            _ -> return false
+        }
+        call.family == MirPreludeFamily.HandleMethod && call.module == "core.channels" && call.abi == MirPreludeAbi.Value && call.symbol.name() == expected_symbol
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:806
+fn web_channel_select_call(program: &MirProgram, id: MirPreludeCallId) -> Bool {
+    program.prelude_calls.find(call -> call.id == id).is_some_and(fn(call) {
+        expected_symbol :: if call.member == { "select_wait_tagged" -> "jet_std::jet_select_wait_tagged"; "select_try_wait_tagged" -> "jet_std::jet_select_try_wait_tagged"; _ -> return false }
+        call.family == MirPreludeFamily.StaticPrelude && call.module == "core.tasks" && call.abi == MirPreludeAbi.Value && call.symbol.name() == expected_symbol
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:820
+fn web_channel_async_call(program: &MirProgram, id: MirPreludeCallId) -> Bool {
+    if web_channel_select_call(program, id) -> return program.prelude_calls.find(call -> call.id == id).is_some_and(call -> call.member == "select_wait_tagged")
+    program.prelude_calls.find(call -> call.id == id).is_some_and(call -> web_channel_handle_call(program, id) && (call.member == "receiver.receive" || call.member == "sender.send"))
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:834
+fn web_channel_select_wait_call(program: &MirProgram, id: MirPreludeCallId) -> Bool {
+    program.prelude_calls.find(call -> call.id == id).is_some_and(call -> web_channel_select_call(program, id) && call.member == "select_wait_tagged")
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:845
+fn web_transaction_function(function: &MirFunction) -> Bool {
+    function.blocks.any(block -> block.instructions.any(instruction -> if instruction.operation == { .Global(name: name) -> name == "transaction"; _ -> false }))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:856
+fn web_async_function_ids(program: &MirProgram) -> [MirFunctionId:Bool] {
+    // GATE #4499: canonical function-id key equality/hashing.
+    async_functions := [MirFunctionId:Bool]{}
+    loop {
+        changed := false
+        loop function in program.functions {
+            if function.generator != None || async_functions.contains_key(function.id) -> continue
+            needs_async :: function.blocks.any(block -> block.instructions.any(instruction -> if instruction.operation == {
+                .Call(callee: callee, ..) -> if callee == {
+                    .Core(_) | .Foreign(_) | .Indirect(_) -> false
+                    .Prelude(id) -> web_task_join_call(program, id) || web_channel_async_call(program, id)
+                    .User(id) | .Associated(function: id, ..) | .Method(function: id, ..) -> program.functions.find(function -> function.id == id).is_some_and(is_wasm_export) || async_functions.contains_key(id)
+                    .TraitMethod(method: method, trait_ref: trait_ref, ..) -> try {
+                        (targets, default) :: web_trait_method_targets(program, method, trait_ref)
+                        targets.any(target -> program.functions.find(function -> function.id == target.1).is_some_and(function -> function.generator == None && (web_function_is_async(program, target.1) || async_functions.contains_key(target.1)))) || default.is_some_and(id -> program.functions.find(function -> function.id == id).is_some_and(function -> function.generator == None && (web_function_is_async(program, id) || async_functions.contains_key(id))))
+                    } catch _ { false }
+                }
+                .Semantic(.HandleMethod(call: call, ..)) -> web_task_join_call(program, call) || web_channel_async_call(program, call)
+                .Semantic(.Select(call: call, ..)) -> web_channel_async_call(program, call)
+                .Global(name: name) -> name == "transaction"
+                _ -> false
+            }))
+            if needs_async {
+                async_functions.insert(function.id, true)
+                changed = true
+            }
+        }
+        if !changed -> break
+    }
+    ^async_functions
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:934
+fn web_function_is_async(program: &MirProgram, id: MirFunctionId) -> Bool { web_async_function_ids(program).contains_key(id) }
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:938
+fn wasm_export_symbol(function: &MirFunction) -> String { "jet_export_{function.name}" }
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:942
+fn wasm_bridge_name(function: &MirFunction) -> String { "bridge_{function.name}" }
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:946
+fn wasm_abi_list_kind(inner: &MirType) -> String? {
+    if inner.kind == {
+        .Int -> Val("list-int")
+        .String -> Val("list-string")
+        .IntN(signed: true, bits: 64) -> Val("list-i64")
+        .InlineRange(base: base, ..) | .Tagged(inner: base, ..) -> wasm_abi_list_kind(base)
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:960
+fn wasm_abi_kind(ty: &MirType) -> String? MirWebError! {
+    if ty.is_unit() -> return None
+    if ty.kind == {
+        .Int -> Val("int")
+        .String -> Val("string")
+        .List(inner) -> Val(wasm_abi_list_kind(inner) ?? throw MirWebError.InvalidMir(message: "unsupported Web Wasm export collection type `{ty.display_name()}`"))
+        .Map(key: key, value: value) && key.kind == MirTypeKind.String && value.kind == MirTypeKind.Int -> Val("map-string-int")
+        .InlineRange(base: base, ..) | .Tagged(inner: base, ..) | .Quantity(base: base, ..) -> wasm_abi_kind(base)
+        .Float | .Bool | .Char | .IntN(..) | .Float32 -> None
+        .Apply(..) | .Map(..) | .FixedList(..) | .Shared(_) | .Option(_) | .Result(..) | .Fn(_) | .SendFn(..) | .TraitObject(_) | .Tuple(_) | .Union(_) | .Measure(_) -> throw MirWebError.InvalidMir(message: "unsupported Web Wasm export boundary type `{ty.display_name()}`")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1009
+fn wasm_direct_argument(value: String, ty: &MirType) -> String MirWebError! {
+    if ty.kind == {
+        .Float | .Float32 -> "Number({value})"
+        .Bool -> "Number(Boolean({value}))"
+        .Char -> "Number(String({value}).codePointAt(0))"
+        .IntN(bits: bits, ..) -> if bits <= 32 { "Number({value})" } else { "BigInt({value})" }
+        .InlineRange(base: base, ..) | .Tagged(inner: base, ..) | .Quantity(base: base, ..) -> wasm_direct_argument(value, base)
+        _ -> throw MirWebError.InvalidMir(message: "unsupported direct Web Wasm export argument type `{ty.display_name()}`")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1033
+fn wasm_direct_return(raw: String, ty: &MirType) -> String MirWebError! {
+    if ty.kind == {
+        .Float | .Float32 -> "Number({raw})"
+        .Bool -> "Boolean(Number({raw}))"
+        .Char -> "String.fromCodePoint(Number({raw}))"
+        .IntN(signed: signed, bits: bits) -> {
+            kind :: if signed { "Int" } else { "Uint" }
+            "BigInt.as{kind}N({bits}, BigInt({raw}))"
+        }
+        .InlineRange(base: base, ..) | .Tagged(inner: base, ..) | .Quantity(base: base, ..) -> wasm_direct_return(raw, base)
+        _ -> throw MirWebError.InvalidMir(message: "unsupported direct Web Wasm export return type `{ty.display_name()}`")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1054
+fn wasm_abi_argument(value: String, ty: &MirType) -> String MirWebError! {
+    if wasm_abi_kind(ty) == { .Val(kind) -> "jetDom.marshalAbi({value}, {js_string(kind)}, wasm)"; .None -> wasm_direct_argument(value, ty) }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1065
+fn wasm_abi_return(raw: String, ty: &MirType) -> String MirWebError! {
+    if wasm_abi_kind(ty) == { .Val(kind) -> "jetDom.unmarshalAbi({raw}, {js_string(kind)}, wasm)"; .None && ty.is_unit() -> "undefined"; .None -> wasm_direct_return(raw, ty) }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1077
+fn wasm_bridge_arguments(function: &MirFunction, values: &[String]) -> [String] MirWebError! {
+    if values.len() != function.params.len() -> throw MirWebError.InvalidMir(message: "Web Wasm export `{function.name}` received {values.len()} arguments but declares {function.params.len()}")
+    rendered := [String]{}
+    loop index in 0..<function.params.len() {
+        param :: function.params[index]
+        value :: values[index]
+        if function.web_param_reconstructions.find(row -> row.local == param.name) == .Val(reconstruction) {
+            loop field in reconstruction.fields {
+                field_value :: "({value})[{js_string(field.field)}]"
+                rendered.push(wasm_abi_argument(field_value, field.ty))
+            }
+        } else { rendered.push(wasm_abi_argument(value, param.ty)) }
+    }
+    ^rendered
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1109
+fn emit_wasm_export_bridges(out: &String, functions: &[&MirFunction]) MirWebError! {
+    exports := functions.filter(function -> is_wasm_export(function) && function_in_bucket(function, WebBucket.Wasm)).collect()
+    exports.sort_by_key(function -> function.id)
+    names := [String:Bool]{}
+    loop function in exports {
+        if function.form != MirFunctionForm.TopLevel || !function.capture_params.is_empty() -> throw MirWebError.InvalidMir(message: "Web Wasm export `{function.name}` is not a top-level capture-free function")
+        if function.generator != None -> throw MirWebError.InvalidMir(message: "Web Wasm export `{function.name}` cannot be a generator")
+        if names.contains_key(function.name) -> throw MirWebError.InvalidMir(message: "Web Wasm export `{function.name}` has a duplicate JavaScript bridge name")
+        names.insert(~function.name, true)
+        values :: (0..<function.params.len()).map(index -> "args[{index}]").collect()
+        arguments :: wasm_bridge_arguments(function, values)
+        success :: if function.failure == { .Result(success: success, ..) -> success; .Optional(value: value) -> value; .Infallible | .Diverges(..) -> function.return_type }
+        result :: wasm_abi_return("raw", success)
+        bridge :: wasm_bridge_name(function)
+        symbol :: wasm_export_symbol(function)
+        out.push_str("async function {bridge}(...args) {{\n")
+        error_message :: js_string("Web Wasm export `{function.name}` expects {function.params.len()} arguments")
+        out.push_str("  if (args.length !== {function.params.len()}) throw new TypeError({error_message});\n")
+        out.push_str("  const wasm = __jetPreludeWasm;\n")
+        out.push_str("  let raw = wasm.{symbol}({arguments.join(", ")});\n")
+        out.push_str("  const outcome = jetDom.takeWasmError(wasm);\n")
+        out.push_str("  if (outcome?.tag === \"Host\") throw jet_web_wasm_host_error(outcome, null, Number(outcome.status ?? 101));\n")
+        if function.failure == {
+            .Result(..) | .Optional(..) -> {
+                out.push_str("  if (outcome?.tag === \"Err\") return {{ tag: \"Err\", values: [outcome.error] }};\n")
+                out.push_str("  return {{ tag: \"Ok\", values: [{result}] }};\n")
+            }
+            .Infallible | .Diverges(..) -> {
+                out.push_str("  if (outcome) return jet_web_edge_result(outcome);\n")
+                out.push_str("  return {result};\n")
+            }
+        }
+        out.push_str("}}\n\n")
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1197
+fn js_wasm_export_call(function: &MirFunction, caller: &MirFunction, args: &[MirCallArg], values: &[String]) -> String MirWebError! {
+    if !function.target_applicability.web || !function_in_bucket(function, WebBucket.Wasm) -> throw MirWebError.MissingUserFunction(function: function.id.0)
+    if function.form != MirFunctionForm.TopLevel || !function.capture_params.is_empty() -> throw MirWebError.InvalidMir(message: "Web Wasm export `{function.name}` is not a top-level capture-free function")
+    if caller.generator != None -> throw MirWebError.InvalidMir(message: "generator function {caller.id.0} cannot await Web Wasm export `{function.name}`")
+    if args.any(arg -> arg.spread) -> throw MirWebError.InvalidMir(message: "Web Wasm export `{function.name}` cannot receive a spread argument")
+    "await {wasm_bridge_name(function)}({values.join(", ")})"
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1239
+fn web_source_name(name: String) -> String { name.strip_prefix(GENERATED_NAME_PREFIX) ?? name }
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1244
+fn emit_js_print_type_facts(out: &String, program: &MirProgram) {
+    out.push_str("const __jet_print_type_facts = Object.freeze({{\n")
+    loop type_def in program.types {
+        out.push_str("  {js_string(type_def.id.0.to_string())}: {{ name: {js_string(web_source_name(type_def.name))}, auto_printable: {type_def.auto_printable}, ")
+        if type_def.kind == {
+            .Struct(fields: fields, ..) -> {
+                out.push_str("kind: \"struct\", fields: [")
+                loop index in 0..<fields.len() {
+                    if index != 0 -> out.push_str(", ")
+                    field :: fields[index]
+                    out.push_str("{{ key: {js_string(field.name)}, name: {js_string(web_source_name(field.name))}, computed: {field.computed}, redacted: {field.redact} }}")
+                }
+                out.push_str("]")
+            }
+            .Enum(variants: variants, ..) -> {
+                out.push_str("kind: \"enum\", variants: [")
+                loop index in 0..<variants.len() {
+                    if index != 0 -> out.push_str(", ")
+                    variant :: variants[index]
+                    out.push_str("{{ tag: {js_string(variant.name)}, name: {js_string(web_source_name(variant.name))}, ")
+                    if variant.payload == {
+                        .Unit -> out.push_str("kind: \"unit\", fields: []")
+                        .Single(_) -> out.push_str("kind: \"single\", fields: []")
+                        .Named(fields) -> {
+                            out.push_str("kind: \"named\", fields: [")
+                            loop field_index in 0..<fields.len() {
+                                if field_index != 0 -> out.push_str(", ")
+                                field :: fields[field_index]
+                                out.push_str("{{ key: {js_string(field.name)}, name: {js_string(web_source_name(field.name))}, computed: {field.computed}, redacted: {field.redact} }}")
+                            }
+                            out.push_str("]")
+                        }
+                    }
+                    out.push_str("}}")
+                }
+                out.push_str("]")
+            }
+            .Distinct(..) | .Alias(..) -> out.push_str("kind: \"transparent\"")
+            .UnitFamily(members: members) -> {
+                out.push_str("kind: \"unit_family\", members: [")
+                loop index in 0..<members.len() {
+                    if index != 0 -> out.push_str(", ")
+                    out.push_str(js_string(web_source_name(members[index])))
+                }
+                out.push_str("]")
+            }
+        }
+        out.push_str("}},\n")
+    }
+    out.push_str("}});\n")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1333
+fn js_cli_type_default(program: &MirProgram, ty: &MirType) -> String MirWebError! {
+    constant :: if ty.kind == {
+        .Int -> MirConstant.Int(value: 0, width: None, spelling: None)
+        .IntN(signed: signed, bits: bits) -> MirConstant.Int(value: 0, width: Val((signed, bits)), spelling: None)
+        .Float -> MirConstant.Float(value: 0.0, f32: false, spelling: None)
+        .Float32 -> MirConstant.Float(value: 0.0, f32: true, spelling: None)
+        .Bool -> MirConstant.Bool(false)
+        .String -> MirConstant.String("")
+        .Char -> MirConstant.Char(Char.from_code_point(0))
+        .InlineRange(base: base, ..) | .Tagged(inner: base, ..) -> return js_cli_type_default(program, base)
+        .Option(_) -> MirConstant.Unit
+        _ -> return "undefined"
+    }
+    js_constant_expression(program, constant)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1367
+fn js_web_cli_entry_argument(program: &MirProgram, function: &MirFunction, cli: &MirCliEntry?) -> String? MirWebError! {
+    cli :: cli.filter(cli -> cli.record_inputs) ?? return None
+    if function.params.len() != 1 -> throw MirWebError.InvalidMir(message: "Web CLI record entry {function.id.0} expects one parameter, found {function.params.len()}")
+    fields := [String]{}.with_capacity(cli.inputs.len())
+    loop input in cli.inputs {
+        default :: if input.shape == {
+            .Flag -> "false"
+            .Value(default: default, ..) -> if default == { .Val(.Value(value)) -> js_constant_expression(program, value); .Val(.TypeDefault) -> js_cli_type_default(program, input.ty); .None -> "undefined" }
+        }
+        fields.push("{js_string(input.name)}: {default}")
+    }
+    defaults := "{{ {fields.join(", ")} }}"
+    if function.params[0].ty.identity == .Val(type_id) -> defaults = "Object.defineProperty({defaults}, \"__jet_type\", {{ value: {js_string(type_id.0.to_string())}, enumerable: false }})"
+    Val("[Object.assign({defaults}, (args.length === 1 && args[0] !== null && typeof args[0] === \"object\" && !Array.isArray(args[0])) ? args[0] : {{}})]")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1410
+fn emit_js_app(program: &MirProgram, target: &MirWebTarget, artifact: &MirArtifactPlan, functions: &[&MirFunction], entry: MirFunctionId?, artifact_identity: String, history_provenance: &HistoryProvenance) -> String MirWebError! {
+    has_game_runtime :: artifact.runtime_parts.any(part -> part == MirRuntimePartId.Game)
+    has_data_runtime :: artifact.runtime_parts.contains(MirRuntimePartId.Data)
+    // Wasm always exports the history ABI, even without authored history calls.
+    include_history :: true
+    needs_font_shaping :: web_uses_font_shaping(program, functions)
+    out := "import * as jetDom from \"./jet_dom_runtime.js\";\n"
+    shared_prelude :: try { shared_js_prelude(needs_font_shaping, artifact.runtime_parts, include_history) } catch error { throw MirWebError.InvalidAssets(message: error.to_string()) }
+    out.push_str(shared_prelude)
+    out.push_str("\n")
+    emit_js_print_type_facts(&out, program)
+    emit_js_copy_type_facts(&out, program)
+    out.push_str("\n")
+    out.push_str(if needs_font_shaping { "const __jetFontImports = await jet_ui_web_harfbuzz_imports();\n" } else { "const __jetFontImports = jet_ui_web_unreachable_harfbuzz_imports();\n" })
+    if has_data_runtime -> out.push_str("const __jetDataImports = jet_data_web_imports();\n")
+    if include_history -> out.push_str("const __jetTestingHistoryImports = jet_testing_history_web_imports();\n")
+    out.push_str("const __jetPreludeWasm = (await jetDom.instantiateWasm(new URL(\"./app.wasm\", import.meta.url).href, {{ ...__jetFontImports")
+    if has_data_runtime -> out.push_str(", ...__jetDataImports")
+    if include_history -> out.push_str(", ...__jetTestingHistoryImports")
+    out.push_str(" }})).exports;\n")
+    loop constant in program.constants {
+        if !artifact.modules.contains(constant.module) -> continue
+        value :: js_constant_expression(program, constant.value)
+        out.push_str("globalThis[{js_string(constant.key)}] = {value};\n")
+    }
+    if has_data_runtime -> out.push_str("jet_data_web_bind_wasm(__jetPreludeWasm);\nif (typeof __jetPreludeWasm.jet_data_web_register_types === \"function\") __jetPreludeWasm.jet_data_web_register_types();\n")
+    if include_history -> out.push_str("jet_testing_history_web_bind_wasm(__jetPreludeWasm);\n")
+    if needs_font_shaping -> out.push_str("jet_ui_web_harfbuzz_bind_app(__jetPreludeWasm);\n")
+    if has_game_runtime -> out.push_str("  if (typeof fetch === \"function\") {{\ntry {{\nconst __jetProjection = await fetch(\"/__jet_devtools/state\").then((response) => response.ok ? response.json() : null);\nif (__jetProjection?.session_id) {{\nglobalThis.__jetDevtoolsGameIdentity = {{\nsession_id: __jetProjection.session_id,\nsource_id: __jetProjection.source_id || \"game\",\nbuild_id: __jetProjection.build_id || \"runtime\",\nrevision: __jetProjection.revision || \"runtime\",\n}};\n}}\n}} catch (_) {{}}\n}}\n")
+    emit_wasm_export_bridges(&out, functions)
+    emit_web_module_registry(&out, program, artifact, artifact_identity)
+    js_functions := functions.filter(function -> function_in_bucket(function, WebBucket.JS) && artifact.modules.any(module -> module == function.module_id)).collect()
+    js_functions.sort_by_key(function -> function.id)
+    loop function in js_functions -> emit_js_function(&out, program, function, target.release_devtools_policy.local_rail, history_provenance)
+    entry_row :: if entry == .Val(entry) { Val(functions.find(function -> function.id == entry) ?? throw MirWebError.MissingEntryFunction(function: entry.0)) } else { None }
+    entry_function :: entry_row.filter(function -> function_in_bucket(function, WebBucket.JS))
+    entry_cli_argument :: if entry_function == .Val(function) { js_web_cli_entry_argument(program, function, artifact.entry.and_then(entry -> entry.cli)) } else { None }
+    entry_wasm :: entry_row.filter(function -> function_in_bucket(function, WebBucket.Wasm))
+    main_keyword :: if entry_function.is_some_and(function -> function.generator != None) { "export function*" } else { "export async function" }
+    out.push_str("\n{main_keyword} jet_main(...args) {{\n")
+    out.push_str("  try {{\n")
+    if entry_function == .Val(function) {
+        if entry_cli_argument == .Val(argument) -> out.push_str("    const __jet_entry_args = {argument};\n")
+        entry_arguments :: if entry_cli_argument != None { "__jet_entry_args" } else { "args" }
+        if function.generator != None {
+            out.push_str("    const __jet_edge_result = yield* jet_fn_{function.id.0}([], {entry_arguments});\n")
+        } else {
+            out.push_str("    const __jet_edge_result = await jet_fn_{function.id.0}([], {entry_arguments});\n")
+        }
+        out.push_str("    return jet_web_edge_result(__jet_edge_result);\n")
+    } else if entry_wasm == .Val(function) {
+        if function.generator != None -> throw MirWebError.InvalidMir(message: "Web Wasm entry {function.id.0} cannot be a generator")
+        out.push_str("    __jetPreludeWasm.jet_entry_{function.id.0}();\n")
+        out.push_str("    const outcome = jetDom.takeWasmError(__jetPreludeWasm);\n")
+        out.push_str("    if (outcome?.tag === \"Host\") throw jet_web_wasm_host_error(outcome, null, Number(outcome.status ?? 101));\n    if (outcome) return jet_web_edge_result(outcome);\n")
+        out.push_str("    return undefined;\n")
+    } else { out.push_str("    return undefined;\n") }
+    out.push_str("  }} catch (__jet_error) {{\nif (__jet_error instanceof JetWebPropagation) {{\nreturn jet_web_edge_result({{ tag: \"Err\", error: __jet_error.wire }});\n}}\nthrow __jet_error;\n}}\n")
+    out.push_str("}}\n\n")
+    emit_js_routes(&out, program)
+    ^out
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1641
+fn emit_web_module_registry(out: &String, program: &MirProgram, artifact: &MirArtifactPlan, artifact_identity: String) MirWebError! {
+    module_ids := ~artifact.modules
+    module_ids.sort_by_key(id -> id.0)
+    loop module_id in module_ids {
+        module :: program.modules.find(module -> module.id == module_id) ?? throw MirWebError.InvalidMir(message: "Web artifact {artifact.id.0} references missing module {module_id.0}")
+        if module.key.is_empty() || module.path.is_empty() -> throw MirWebError.InvalidMir(message: "Web artifact {artifact.id.0} module {module_id.0} has no stable key/path")
+        imports :: module.imports.map(id -> id.0.to_string()).collect().join(",")
+        item_order :: module.item_order.map(item_ref_descriptor).collect().join(TEXT_NUL)
+        interface_seed :: "{module.key}{TEXT_NUL}{module.path}{TEXT_NUL}{imports}{TEXT_NUL}{item_order}"
+        body_seed :: "{artifact_identity}{TEXT_NUL}{module_id.0}{TEXT_NUL}{module.path}"
+        interface_fingerprint :: "sha256-{sha256_hex(interface_seed.as_bytes())}"
+        body_fingerprint :: "sha256-{sha256_hex(body_seed.as_bytes())}"
+        out.push_str("jetDom.registerWebModule({json_string(module.key)}, {json_string(interface_fingerprint)}, {json_string(body_fingerprint)});\n")
+    }
+    out.push_str("\n")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1704
+fn validate_function_blocks(function: &MirFunction) MirWebError! {
+    has_block :: fn(id: MirBlockId) { function.blocks.any(block -> block.id == id) }
+    if !has_block(function.entry) -> throw MirWebError.InvalidMir(message: "Web MIR function {function.id.0} has a missing entry block {function.entry.0}")
+    loop block in function.blocks {
+        loop target in block.terminator.targets() {
+            if !has_block(target) -> throw MirWebError.InvalidMir(message: "Web MIR function {function.id.0} block {block.id.0} targets missing block {target.0}")
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:1731
+fn validate_capture_params(program: &MirProgram, function: &MirFunction) MirWebError! {
+    loop slot in 0..<function.capture_params.len() {
+        capture :: function.capture_params[slot]
+        if capture.slot != slot -> throw MirWebError.InvalidMir(message: "MIR function {function.id.0} capture slot {capture.slot} is out of order")
+        if capture.ty.identity == .Val(type_id) -> ensure_type_instance(program, type_id)
+    }
+}

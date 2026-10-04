@@ -1,1809 +1,247 @@
-// PORT-PENDING 0514 crates-jet-codegen-src-codegen-tir-routes-slice-1349: crates/jet-codegen/src/Codegen/TIR/routes.rs:1349-3153
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(super) fn route_plan(
-//RS         &self,
-//RS         receiver: &Type,
-//RS         carrier: &TFailureCarrier,
-//RS     ) -> Result<TRoutePlan, LowerError> {
-//RS         use THandleOp::*;
-//RS         let plan = match self {
-//RS             Hardware(op) => hardware_route(op, carrier),
-//RS             ReceiptAttach => prelude(
-//RS                 MirPreludeFamily::HandleMethod,
-//RS                 "receipt",
-//RS                 "attach",
-//RS                 "jet_receipt_attach",
-//RS                 4,
-//RS                 4,
-//RS                 &[true, false, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             DurationNew { float, .. } => prelude(
-//RS                 MirPreludeFamily::HandleMethod,
-//RS                 "core.time",
-//RS                 "duration_new",
-//RS                 if *float {
-//RS                     "jet_duration_from_float"
-//RS                 } else {
-//RS                     "jet_duration_from_int"
-//RS                 },
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             FileReaderReadLine => h(
-//RS                 "file_reader.read_line",
-//RS                 "jet_std_file_reader_read_line",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::FS),
-//RS                 carrier,
-//RS             ),
-//RS             FileReaderPath => h(
-//RS                 "file_reader.path",
-//RS                 "jet_std_file_reader_path",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MappedFileWindow => h(
-//RS                 "mapped_file.window",
-//RS                 "jet_std_fs_map_window_view",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::FS),
-//RS                 carrier,
-//RS             ),
-//RS             MappedFileWindowLen => h(
-//RS                 "mapped_file.window_len",
-//RS                 "jet_std_fs_map_window_len_view",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::FS),
-//RS                 carrier,
-//RS             ),
-//RS             MappedFileLines => h(
-//RS                 "mapped_file.lines",
-//RS                 "jet_std_fs_map_lines_view",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::FS),
-//RS                 carrier,
-//RS             ),
-//RS             MappedFileLen => h(
-//RS                 "mapped_file.len",
-//RS                 "jet_std_fs_map_len",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             MappedFileIsEmpty => h(
-//RS                 "mapped_file.is_empty",
-//RS                 "jet_std_fs_map_is_empty",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             FileWriterWriteLine => h(
-//RS                 "file_writer.write_line",
-//RS                 "jet_std_file_writer_write_line",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::FS),
-//RS                 carrier,
-//RS             ),
-//RS             FileWriterFlush => h(
-//RS                 "file_writer.flush",
-//RS                 "jet_std_file_writer_flush",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::FS),
-//RS                 carrier,
-//RS             ),
-//RS             FileWriterPath => h(
-//RS                 "file_writer.path",
-//RS                 "jet_std_file_writer_path",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             JSONReaderNext => h(
-//RS                 "json_reader.next",
-//RS                 "jet_enc_json_reader_next",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             JSONWriterWrite => h(
-//RS                 "json_writer.write",
-//RS                 "jet_enc_json_writer_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             JSONWriterFlush => h(
-//RS                 "json_writer.flush",
-//RS                 "jet_enc_json_writer_flush",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             JSONWriterFinish => h(
-//RS                 "json_writer.finish",
-//RS                 "jet_enc_json_writer_finish",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             JSONLReaderNext => h(
-//RS                 "jsonl_reader.next",
-//RS                 "jet_enc_jsonl_reader_next",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             JSONLWriterWrite => h(
-//RS                 "jsonl_writer.write",
-//RS                 "jet_enc_jsonl_writer_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             JSONLWriterFlush => h(
-//RS                 "jsonl_writer.flush",
-//RS                 "jet_enc_jsonl_writer_flush",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             JSONLWriterFinish => h(
-//RS                 "jsonl_writer.finish",
-//RS                 "jet_enc_jsonl_writer_finish",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             CSVReaderNext => h(
-//RS                 "csv_reader.next",
-//RS                 "jet_enc_csv_reader_next",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             DataStreamNext => h(
-//RS                 "data_stream.next",
-//RS                 "jet_data_stream_next",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StreamWithEventTime => h(
-//RS                 "stream.with_event_time",
-//RS                 "jet_stream_with_event_time",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StreamWithEventTimeNs => h(
-//RS                 "stream.with_event_time.datetime",
-//RS                 "jet_stream_with_event_time_ns",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StreamKeyBy => h(
-//RS                 "stream.key_by",
-//RS                 "jet_stream_key_by",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StreamWindow => h(
-//RS                 "stream.window",
-//RS                 "jet_keyed_stream_window",
-//RS                 4,
-//RS                 4,
-//RS                 &[false, false, false, false],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             XMLReaderNext => h(
-//RS                 "xml_reader.next",
-//RS                 "jet_enc_xml_reader_next",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             XMLWriterWrite => h(
-//RS                 "xml_writer.write",
-//RS                 "jet_enc_xml_writer_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             XMLWriterFlush => h(
-//RS                 "xml_writer.flush",
-//RS                 "jet_enc_xml_writer_flush",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             XMLWriterFinish => h(
-//RS                 "xml_writer.finish",
-//RS                 "jet_enc_xml_writer_finish",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             CSVWriterWrite => h(
-//RS                 "csv_writer.write",
-//RS                 "jet_enc_csv_writer_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             CSVWriterFlush => h(
-//RS                 "csv_writer.flush",
-//RS                 "jet_enc_csv_writer_flush",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             CSVWriterFinish => h(
-//RS                 "csv_writer.finish",
-//RS                 "jet_enc_csv_writer_finish",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             CBORReaderNext => h(
-//RS                 "cbor_reader.next",
-//RS                 "jet_enc_cbor_reader_next",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             CBORWriterWrite => h(
-//RS                 "cbor_writer.write",
-//RS                 "jet_enc_cbor_writer_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             CBORWriterFlush => h(
-//RS                 "cbor_writer.flush",
-//RS                 "jet_enc_cbor_writer_flush",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             CBORWriterFinish => h(
-//RS                 "cbor_writer.finish",
-//RS                 "jet_enc_cbor_writer_finish",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StdinReadLine => h(
-//RS                 "stdin.read_line",
-//RS                 "jet_std_io_stdin_read_line",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StdoutWrite => h(
-//RS                 "stdout.write",
-//RS                 "jet_std_io_stdout_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StdoutWriteLine => h(
-//RS                 "stdout.write_line",
-//RS                 "jet_std_io_stdout_write_line",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StdoutWriteBytes => h(
-//RS                 "stdout.write_bytes",
-//RS                 "jet_std_io_stdout_write_bytes",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StdoutFlush => h(
-//RS                 "stdout.flush",
-//RS                 "jet_std_io_stdout_flush",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StdoutIsTty => h(
-//RS                 "stdout.is_tty",
-//RS                 "jet_std_io_stdout_is_tty",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StderrWrite => h(
-//RS                 "stderr.write",
-//RS                 "jet_std_io_stderr_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StderrWriteLine => h(
-//RS                 "stderr.write_line",
-//RS                 "jet_std_io_stderr_write_line",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StderrWriteBytes => h(
-//RS                 "stderr.write_bytes",
-//RS                 "jet_std_io_stderr_write_bytes",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StderrFlush => h(
-//RS                 "stderr.flush",
-//RS                 "jet_std_io_stderr_flush",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             StderrIsTty => h(
-//RS                 "stderr.is_tty",
-//RS                 "jet_std_io_stderr_is_tty",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             TestSuiteRun => h(
-//RS                 "test_suite.run",
-//RS                 "jet_test_suite_run",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             ClockNow => h(
-//RS                 "clock.now",
-//RS                 "jet_clock_now",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Time),
-//RS                 carrier,
-//RS             ),
-//RS             ClockTick => h(
-//RS                 "clock.tick",
-//RS                 "jet_clock_tick",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Time),
-//RS                 carrier,
-//RS             ),
-//RS             ClockAdvance => h(
-//RS                 "clock.advance",
-//RS                 "jet_clock_advance",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Time),
-//RS                 carrier,
-//RS             ),
-//RS             ClockWait => h(
-//RS                 "clock.wait",
-//RS                 "jet_clock_wait",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Time),
-//RS                 carrier,
-//RS             ),
-//RS             WorldNow => h(
-//RS                 "deterministic_world.now",
-//RS                 "jet_world_now",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Time),
-//RS                 carrier,
-//RS             ),
-//RS             WorldAdvance => h(
-//RS                 "deterministic_world.advance",
-//RS                 "jet_world_advance",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Time),
-//RS                 carrier,
-//RS             ),
-//RS             WorldWaitIdle => h(
-//RS                 "deterministic_world.wait_idle",
-//RS                 "jet_world_wait_idle",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Time),
-//RS                 carrier,
-//RS             ),
-//RS             WorldHistory => h(
-//RS                 "deterministic_world.history",
-//RS                 "jet_world_history",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             RealtimeNextDeadline => h(
-//RS                 "realtime.next_deadline",
-//RS                 "jet_rt_next_deadline",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             RealtimeReceipt => h(
-//RS                 "realtime.receipt",
-//RS                 "jet_rt_receipt",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             RealtimeCancel => h(
-//RS                 "realtime.cancel",
-//RS                 "jet_rt_cancel",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 Some(Effect::Time),
-//RS                 carrier,
-//RS             ),
-//RS             RealtimeIsCancelled => h(
-//RS                 "realtime.is_cancelled",
-//RS                 "jet_rt_is_cancelled",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             RngInt => h(
-//RS                 "rng.int",
-//RS                 "jet_rng_int",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngFloat => h(
-//RS                 "rng.float",
-//RS                 "jet_rng_float",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngFloatRange => h(
-//RS                 "rng.float_range",
-//RS                 "jet_rng_float_range",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngBool => h(
-//RS                 "rng.bool",
-//RS                 "jet_rng_bool",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngBoolP => h(
-//RS                 "rng.bool_p",
-//RS                 "jet_rng_bool_p",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngNormal => h(
-//RS                 "rng.normal",
-//RS                 "jet_rng_normal",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngExponential => h(
-//RS                 "rng.exponential",
-//RS                 "jet_rng_exponential",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngBytes => h(
-//RS                 "rng.bytes",
-//RS                 "jet_rng_bytes",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngSplit => h(
-//RS                 "rng.split",
-//RS                 "jet_rng_split",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngPick => h(
-//RS                 "rng.pick",
-//RS                 "jet_rng_pick",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngWeightedPick => h(
-//RS                 "rng.weighted_pick",
-//RS                 "jet_rng_weighted_pick",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, true, true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngSample => h(
-//RS                 "rng.sample",
-//RS                 "jet_rng_sample",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, true, false],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             RngShuffle => h(
-//RS                 "rng.shuffle",
-//RS                 "jet_rng_shuffle",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             HistoryRngNextU64 => h(
-//RS                 "history_rng.next_u64",
-//RS                 "jet_testing_history_rng_next_u64",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             HistoryRngBelow => h(
-//RS                 "history_rng.below",
-//RS                 "jet_testing_history_rng_below",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             FakeLocale => h(
-//RS                 "fake.locale",
-//RS                 "jet_fake_locale",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             FakeName => h(
-//RS                 "fake.name",
-//RS                 "jet_fake_name",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             FakeEmail => h(
-//RS                 "fake.email",
-//RS                 "jet_fake_email",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             FakeHost => h(
-//RS                 "fake.host",
-//RS                 "jet_fake_host",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             FakeAddress => h(
-//RS                 "fake.address",
-//RS                 "jet_fake_address",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Rand),
-//RS                 carrier,
-//RS             ),
-//RS             SolverNew => h(
-//RS                 "solver.new",
-//RS                 "jet_solver_new",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SolverRequire => h(
-//RS                 "solver.require",
-//RS                 "jet_solver_require",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SolverFailureCount => h(
-//RS                 "solver.failure_count",
-//RS                 "jet_solver_failure_count",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             SolverStatus => h(
-//RS                 "solver.status",
-//RS                 "jet_solver_status",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             GameSceneNew => h(
-//RS                 "game.scene_new",
-//RS                 "jet_game_scene_new",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             GameReplayRecord => h(
-//RS                 "game.replay_record",
-//RS                 "jet_game_replay_record",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             GameBackendHeadless => prelude(
-//RS                 MirPreludeFamily::HandleMethod,
-//RS                 "core.game",
-//RS                 "backend_headless",
-//RS                 "jet_game_backend_headless",
-//RS                 0,
-//RS                 0,
-//RS                 &[],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             GameBackendShouldContinue => h(
-//RS                 "game.backend_should_continue",
-//RS                 "jet_game_backend_should_continue",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             GameBackendPresent => h(
-//RS                 "game.backend_present",
-//RS                 "jet_game_backend_present",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             GameSceneOnFrame { .. } => h(
-//RS                 "game.scene_on_frame",
-//RS                 "jet_game_scene_on_frame",
-//RS                 4,
-//RS                 4,
-//RS                 &[true, false, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             GameSceneComponent => h(
-//RS                 "game.scene_component",
-//RS                 "jet_game_scene_component",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             GameSceneQuery => h(
-//RS                 "game.scene_query",
-//RS                 "jet_game_scene_query",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             GameAssetsImage => h(
-//RS                 "game.assets_image",
-//RS                 "jet_game_assets_image",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::FS),
-//RS                 carrier,
-//RS             ),
-//RS             GameAssetsSound => h(
-//RS                 "game.assets_sound",
-//RS                 "jet_game_assets_sound",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::FS),
-//RS                 carrier,
-//RS             ),
-//RS             GameInputBind => h(
-//RS                 "game.input_bind",
-//RS                 "jet_game_input_bind",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             GameInputPressed => h(
-//RS                 "game.input_pressed",
-//RS                 "jet_game_input_pressed",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationIn { .. } => h(
-//RS                 "duration.in",
-//RS                 "jet_duration_in",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationIsZero => h(
-//RS                 "duration.is_zero",
-//RS                 "jet_duration_is_zero",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationTotalSeconds => h(
-//RS                 "duration.total_seconds",
-//RS                 "jet_duration_total_seconds",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationDifference => h(
-//RS                 "duration.difference",
-//RS                 "jet_duration_difference",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationAbs => h(
-//RS                 "duration.abs",
-//RS                 "jet_duration_abs",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationNegated => h(
-//RS                 "duration.negated",
-//RS                 "jet_duration_negated",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationSign => h(
-//RS                 "duration.sign",
-//RS                 "jet_duration_sign",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationTotalIn => h(
-//RS                 "duration.total_in",
-//RS                 "jet_duration_total_in",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationRound => h(
-//RS                 "duration.round",
-//RS                 "jet_duration_round",
-//RS                 4,
-//RS                 4,
-//RS                 &[true, true, true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationSecondsValue => h(
-//RS                 "duration.seconds_value",
-//RS                 "jet_duration_seconds_value",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationNsValue => h(
-//RS                 "duration.ns_value",
-//RS                 "jet_duration_ns_value",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationScale => h(
-//RS                 "duration.scale",
-//RS                 "jet_duration_scale",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             DurationDivide => h(
-//RS                 "duration.divide",
-//RS                 "jet_duration_divide",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             TcpListenerAccept => h(
-//RS                 "tcp_listener.accept",
-//RS                 "jet_net_tcp_accept",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpListenerAcceptDeadline => h(
-//RS                 "tcp_listener.accept_deadline",
-//RS                 "jet_net_tcp_accept_deadline",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpListenerLocalAddr => h(
-//RS                 "tcp_listener.local_addr",
-//RS                 "jet_net_listener_local_addr",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamRead => h(
-//RS                 "tcp_stream.read",
-//RS                 "jet_net_tcp_read",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamWrite => h(
-//RS                 "tcp_stream.write",
-//RS                 "jet_net_tcp_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamPeerAddr => h(
-//RS                 "tcp_stream.peer_addr",
-//RS                 "jet_net_tcp_peer_addr",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamLocalAddr => h(
-//RS                 "tcp_stream.local_addr",
-//RS                 "jet_net_tcp_local_addr",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamClose => h(
-//RS                 "tcp_stream.close",
-//RS                 "jet_net_tcp_close",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamReadBytes => h(
-//RS                 "tcp_stream.read_bytes",
-//RS                 "jet_net_tcp_read_bytes",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamReadBytesDeadline => h(
-//RS                 "tcp_stream.read_bytes_deadline",
-//RS                 "jet_net_tcp_read_bytes_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamReadText => h(
-//RS                 "tcp_stream.read_text",
-//RS                 "jet_net_tcp_read_text",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamReadTextDeadline => h(
-//RS                 "tcp_stream.read_text_deadline",
-//RS                 "jet_net_tcp_read_text_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamWriteBytes => h(
-//RS                 "tcp_stream.write_bytes",
-//RS                 "jet_net_tcp_write_bytes",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamWriteBytesDeadline => h(
-//RS                 "tcp_stream.write_bytes_deadline",
-//RS                 "jet_net_tcp_write_bytes_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamWriteAllBytes => h(
-//RS                 "tcp_stream.write_all_bytes",
-//RS                 "jet_net_tcp_write_all_bytes",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamWriteAllBytesDeadline => h(
-//RS                 "tcp_stream.write_all_bytes_deadline",
-//RS                 "jet_net_tcp_write_all_bytes_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamWriteText => h(
-//RS                 "tcp_stream.write_text",
-//RS                 "jet_net_tcp_write_text",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamWriteTextDeadline => h(
-//RS                 "tcp_stream.write_text_deadline",
-//RS                 "jet_net_tcp_write_text_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamShutdown => h(
-//RS                 "tcp_stream.shutdown",
-//RS                 "jet_net_tcp_shutdown",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TcpStreamReady => h(
-//RS                 "tcp_stream.ready",
-//RS                 "jet_net_tcp_ready_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             UdpSocketReady => h(
-//RS                 "udp_socket.ready",
-//RS                 "jet_net_udp_ready",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             UdpSocketClose => h(
-//RS                 "udp_socket.close",
-//RS                 "jet_net_udp_close",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             UdpSocketReceiveDeadline => h(
-//RS                 "udp_socket.receive_deadline",
-//RS                 "jet_net_udp_receive_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             UdpSocketSendToDeadline => h(
-//RS                 "udp_socket.send_to_deadline",
-//RS                 "jet_net_udp_send_bytes_to_deadline",
-//RS                 4,
-//RS                 4,
-//RS                 &[true, true, true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             UnixListenerAcceptDeadline => h(
-//RS                 "unix_listener.accept_deadline",
-//RS                 "jet_net_unix_accept_deadline",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             UnixStreamReadDeadline => h(
-//RS                 "unix_stream.read_deadline",
-//RS                 "jet_net_unix_read_bytes_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             UnixStreamWriteAllDeadline => h(
-//RS                 "unix_stream.write_all_deadline",
-//RS                 "jet_net_unix_write_all_bytes_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             UnixStreamReady => h(
-//RS                 "unix_stream.ready",
-//RS                 "jet_net_unix_ready",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             UnixStreamClose => h(
-//RS                 "unix_stream.close",
-//RS                 "jet_net_unix_close",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             UnixStreamSetTimeout => h(
-//RS                 "unix_stream.set_timeout",
-//RS                 "jet_net_unix_set_timeout",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSStreamReadDeadline => h(
-//RS                 "tls_stream.read_deadline",
-//RS                 "jet_net_tls_read_bytes_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSStreamWriteAllDeadline => h(
-//RS                 "tls_stream.write_all_deadline",
-//RS                 "jet_net_tls_write_all_bytes_deadline",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSStreamReady => h(
-//RS                 "tls_stream.ready",
-//RS                 "jet_net_tls_ready",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSStreamClose => h(
-//RS                 "tls_stream.close",
-//RS                 "jet_net_tls_close",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSStreamCloseWrite => h(
-//RS                 "tls_stream.close_write",
-//RS                 "jet_net_tls_close_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSStreamPeerIdentity => h(
-//RS                 "tls_stream.peer_identity",
-//RS                 "jet_net_tls_peer_identity",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSClientConfigDefault => h(
-//RS                 "tls.config_default",
-//RS                 "jet_tls_client_config_default",
-//RS                 0,
-//RS                 0,
-//RS                 &[],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSClientConfigWithAlpn => h(
-//RS                 "tls.config_with_alpn",
-//RS                 "jet_tls_client_config_with_alpn",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSRootCertificatesFromPem => h(
-//RS                 "tls.root_certificates_from_pem",
-//RS                 "jet_tls_root_certificates_from_pem",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSClientIdentityFromPem => h(
-//RS                 "tls.client_identity_from_pem",
-//RS                 "jet_tls_client_identity_from_pem",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSClientConfigWithTrust => h(
-//RS                 "tls.config_with_trust",
-//RS                 "jet_tls_client_config_with_trust",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSClientConfigWithIdentity => h(
-//RS                 "tls.config_with_identity",
-//RS                 "jet_tls_client_config_with_client_identity",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             HTTPClientNew => h(
-//RS                 "http.client_new",
-//RS                 "jet_http_client_new_impl",
-//RS                 0,
-//RS                 0,
-//RS                 &[],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             TLSClientConfigWithVersionBounds => h(
-//RS                 "tls.config_with_version_bounds",
-//RS                 "jet_tls_client_config_with_version_bounds",
-//RS                 3,
-//RS                 3,
-//RS                 &[false, false, false],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             HTTPReqParam => h(
-//RS                 "http.request_param",
-//RS                 "jet_http_srv_req_param",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             HTTPReqHeader => h(
-//RS                 "http.request_header",
-//RS                 "jet_http_srv_req_header",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 None,
-//RS                 carrier,
-//RS             ),
-//RS             HTTPReqTrailers => h(
-//RS                 "http.request_trailers",
-//RS                 "jet_http_srv_req_trailers",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Net),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecFlag => h(
-//RS                 "args.flag",
-//RS                 "jet_args_flag",
-//RS                 3,
-//RS                 3,
-//RS                 &[false, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecFlagShort => h(
-//RS                 "args.flag_short",
-//RS                 "jet_args_flag_short",
-//RS                 4,
-//RS                 4,
-//RS                 &[false, true, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecOption => h(
-//RS                 "args.option",
-//RS                 "jet_args_option",
-//RS                 4,
-//RS                 4,
-//RS                 &[false, true, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecOptionShort => h(
-//RS                 "args.option_short",
-//RS                 "jet_args_option_short",
-//RS                 5,
-//RS                 5,
-//RS                 &[false, true, true, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecOptionDefault => h(
-//RS                 "args.option_default",
-//RS                 "jet_args_option_default",
-//RS                 5,
-//RS                 5,
-//RS                 &[false, true, true, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecOptionEnv => h(
-//RS                 "args.option_env",
-//RS                 "jet_args_option_env",
-//RS                 5,
-//RS                 5,
-//RS                 &[false, true, true, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecOptionInt => h(
-//RS                 "args.option_int",
-//RS                 "jet_args_option_int",
-//RS                 4,
-//RS                 4,
-//RS                 &[false, true, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecOptionFloat => h(
-//RS                 "args.option_float",
-//RS                 "jet_args_option_float",
-//RS                 4,
-//RS                 4,
-//RS                 &[false, true, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecOptionChoice => h(
-//RS                 "args.option_choice",
-//RS                 "jet_args_option_choice",
-//RS                 5,
-//RS                 5,
-//RS                 &[false, true, true, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecRepeat => h(
-//RS                 "args.repeat",
-//RS                 "jet_args_repeat",
-//RS                 4,
-//RS                 4,
-//RS                 &[false, true, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecRequiredOption => h(
-//RS                 "args.required_option",
-//RS                 "jet_args_required_option",
-//RS                 4,
-//RS                 4,
-//RS                 &[false, true, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecPositional => h(
-//RS                 "args.positional",
-//RS                 "jet_args_positional",
-//RS                 3,
-//RS                 3,
-//RS                 &[false, true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecDescription => h(
-//RS                 "args.description",
-//RS                 "jet_args_description",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecSubcommand => h(
-//RS                 "args.subcommand",
-//RS                 "jet_args_subcommand",
-//RS                 4,
-//RS                 4,
-//RS                 &[false, true, true, false],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecVersion => h(
-//RS                 "args.version",
-//RS                 "jet_args_version",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecCompletion => h(
-//RS                 "args.completion",
-//RS                 "jet_args_completion",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecParse => h(
-//RS                 "args.parse",
-//RS                 "jet_args_parse",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ArgsSpecParseOrExit => h(
-//RS                 "args.parse_or_exit",
-//RS                 "jet_args_parse_or_exit",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ParsedArgsFlag => h(
-//RS                 "parsed.flag",
-//RS                 "jet_parsed_flag",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ParsedArgsOption => h(
-//RS                 "parsed.option",
-//RS                 "jet_parsed_option",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ParsedArgsOptionInt => h(
-//RS                 "parsed.option_int",
-//RS                 "jet_parsed_option_int",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ParsedArgsOptionFloat => h(
-//RS                 "parsed.option_float",
-//RS                 "jet_parsed_option_float",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ParsedArgsOptions => h(
-//RS                 "parsed.options",
-//RS                 "jet_parsed_options",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ParsedArgsPositional => h(
-//RS                 "parsed.positional",
-//RS                 "jet_parsed_positional",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             ParsedArgsSubcommand => h(
-//RS                 "parsed.subcommand",
-//RS                 "jet_parsed_subcommand",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Env),
-//RS                 carrier,
-//RS             ),
-//RS             TerminalSessionResize => h(
-//RS                 "terminal.resize",
-//RS                 "jet_terminal_session_resize",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::IO),
-//RS                 carrier,
-//RS             ),
-//RS             ProcessStdinWrite => h(
-//RS                 "process.stdin_write",
-//RS                 "jet_process_stdin_write",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, true],
-//RS                 Some(Effect::Exec),
-//RS                 carrier,
-//RS             ),
-//RS             ProcessStdinClose => h(
-//RS                 "process.stdin_close",
-//RS                 "jet_process_stdin_close",
-//RS                 1,
-//RS                 1,
-//RS                 &[true],
-//RS                 Some(Effect::Exec),
-//RS                 carrier,
-//RS             ),
-//RS             ExpiringMethod { method } => match method.as_str() {
-//RS                 "get" => h(
-//RS                     "expiring.get",
-//RS                     "jet_expiring_get",
-//RS                     2,
-//RS                     2,
-//RS                     &[true, true],
-//RS                     Some(Effect::Time),
-//RS                     carrier,
-//RS                 ),
-//RS                 "is_valid" => primitive(),
-//RS                 _ => {
-//RS                     return Err(route_error(format!(
-//RS                         "unknown checked ExpiringValue method `{method}`"
-//RS                     )));
-//RS                 }
-//RS             },
-//RS             HTTPServerMethod { kind, method } if kind == "WsConn" => match method.as_str() {
-//RS                 "send_text" => h(
-//RS                     "ws.send_text",
-//RS                     "jet_ws_send_text",
-//RS                     2,
-//RS                     2,
-//RS                     &[true, true],
-//RS                     Some(Effect::Net),
-//RS                     carrier,
-//RS                 ),
-//RS                 "recv" => h(
-//RS                     "ws.recv",
-//RS                     "jet_ws_recv",
-//RS                     1,
-//RS                     1,
-//RS                     &[true],
-//RS                     Some(Effect::Net),
-//RS                     carrier,
-//RS                 ),
-//RS                 "close" => h(
-//RS                     "ws.close",
-//RS                     "jet_ws_close",
-//RS                     3,
-//RS                     3,
-//RS                     &[true, false, true],
-//RS                     Some(Effect::Net),
-//RS                     carrier,
-//RS                 ),
-//RS                 _ => primitive(),
-//RS             },
-//RS             HTTPServerMethod { kind, method } if kind == "WsMessage" => match method.as_str() {
-//RS                 "is_text" => h(
-//RS                     "ws.message_is_text",
-//RS                     "jet_ws_message_is_text",
-//RS                     1,
-//RS                     1,
-//RS                     &[true],
-//RS                     None,
-//RS                     carrier,
-//RS                 ),
-//RS                 "text" => h(
-//RS                     "ws.message_text",
-//RS                     "jet_ws_message_text",
-//RS                     1,
-//RS                     1,
-//RS                     &[true],
-//RS                     None,
-//RS                     carrier,
-//RS                 ),
-//RS                 _ => primitive(),
-//RS             },
-//RS             HTTPServerMethod { kind, method } if kind == "HTTPMux" => match method.as_str() {
-//RS                 "middleware" => h(
-//RS                     "http_mux.middleware",
-//RS                     "jet_http_mux_middleware",
-//RS                     2,
-//RS                     2,
-//RS                     &[true, false],
-//RS                     Some(Effect::Net),
-//RS                     carrier,
-//RS                 ),
-//RS                 _ => primitive(),
-//RS             },
-//RS             HTTPServerMethod { kind, method } if kind == "HTTPServer" => match method.as_str() {
-//RS                 "local_addr" => h(
-//RS                     "http_server.local_addr",
-//RS                     "jet_http_server_local_addr",
-//RS                     1,
-//RS                     1,
-//RS                     &[true],
-//RS                     Some(Effect::Net),
-//RS                     carrier,
-//RS                 ),
-//RS                 "serve" => h(
-//RS                     "http_server.serve",
-//RS                     "jet_http_server_serve",
-//RS                     1,
-//RS                     1,
-//RS                     &[true],
-//RS                     Some(Effect::Net),
-//RS                     carrier,
-//RS                 ),
-//RS                 "wait" => h(
-//RS                     "http_server.wait",
-//RS                     "jet_http_server_wait",
-//RS                     1,
-//RS                     1,
-//RS                     &[true],
-//RS                     Some(Effect::Net),
-//RS                     carrier,
-//RS                 ),
-//RS                 "shutdown" => h(
-//RS                     "http_server.shutdown",
-//RS                     "jet_http_server_shutdown",
-//RS                     2,
-//RS                     2,
-//RS                     &[true, true],
-//RS                     Some(Effect::Net),
-//RS                     carrier,
-//RS                 ),
-//RS                 _ => primitive(),
-//RS             },
-// END-PORT-PENDING 0514 crates/jet-codegen/src/Codegen/TIR/routes.rs:1349-3153
+use jet_foundation.AST.Type
+use jet_foundation.Effects.Effect
+use jet_foundation.MIR.[MirPreludeFamily, MirPreludeAbi]
+use jet_codegen.Codegen.TIR.[THandleOp, TFailureCarrier, TRoutePlan, LowerError]
+use jet_codegen.Codegen.TIR.Routes.[hardware_route, prelude, h, primitive, route_error, handle_route_plan_3154]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1349
+extend THandleOp {
+    fn route_plan(self, receiver: &Type, carrier: &TFailureCarrier) -> TRoutePlan LowerError! {
+        if self == {
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1356
+            .Hardware(op) -> hardware_route(op, carrier)
+            .ReceiptAttach -> prelude(MirPreludeFamily.HandleMethod, "receipt", "attach", "jet_receipt_attach", 4, 4, [true, false, false, false], None, carrier, MirPreludeAbi.Value)
+            .DurationNew{float: float, ..} -> prelude(MirPreludeFamily.HandleMethod, "core.time", "duration_new", if float -> "jet_duration_from_float" else -> "jet_duration_from_int", 2, 2, [false, false], None, carrier, MirPreludeAbi.Value)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1385
+            .FileReaderReadLine -> h("file_reader.read_line", "jet_std_file_reader_read_line", 1, 1, [true], Val(Effect.FS), carrier)
+            .FileReaderPath -> h("file_reader.path", "jet_std_file_reader_path", 1, 1, [true], None, carrier)
+            .MappedFileWindow -> h("mapped_file.window", "jet_std_fs_map_window_view", 3, 3, [true, false, false], Val(Effect.FS), carrier)
+            .MappedFileWindowLen -> h("mapped_file.window_len", "jet_std_fs_map_window_len_view", 3, 3, [true, false, false], Val(Effect.FS), carrier)
+            .MappedFileLines -> h("mapped_file.lines", "jet_std_fs_map_lines_view", 1, 1, [true], Val(Effect.FS), carrier)
+            .MappedFileLen -> h("mapped_file.len", "jet_std_fs_map_len", 1, 1, [true], None, carrier)
+            .MappedFileIsEmpty -> h("mapped_file.is_empty", "jet_std_fs_map_is_empty", 1, 1, [true], None, carrier)
+            .FileWriterWriteLine -> h("file_writer.write_line", "jet_std_file_writer_write_line", 2, 2, [true, true], Val(Effect.FS), carrier)
+            .FileWriterFlush -> h("file_writer.flush", "jet_std_file_writer_flush", 1, 1, [true], Val(Effect.FS), carrier)
+            .FileWriterPath -> h("file_writer.path", "jet_std_file_writer_path", 1, 1, [true], None, carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1475
+            .JSONReaderNext -> h("json_reader.next", "jet_enc_json_reader_next", 1, 1, [true], Val(Effect.IO), carrier)
+            .JSONWriterWrite -> h("json_writer.write", "jet_enc_json_writer_write", 2, 2, [true, false], Val(Effect.IO), carrier)
+            .JSONWriterFlush -> h("json_writer.flush", "jet_enc_json_writer_flush", 1, 1, [true], Val(Effect.IO), carrier)
+            .JSONWriterFinish -> h("json_writer.finish", "jet_enc_json_writer_finish", 1, 1, [true], Val(Effect.IO), carrier)
+            .JSONLReaderNext -> h("jsonl_reader.next", "jet_enc_jsonl_reader_next", 1, 1, [true], Val(Effect.IO), carrier)
+            .JSONLWriterWrite -> h("jsonl_writer.write", "jet_enc_jsonl_writer_write", 2, 2, [true, false], Val(Effect.IO), carrier)
+            .JSONLWriterFlush -> h("jsonl_writer.flush", "jet_enc_jsonl_writer_flush", 1, 1, [true], Val(Effect.IO), carrier)
+            .JSONLWriterFinish -> h("jsonl_writer.finish", "jet_enc_jsonl_writer_finish", 1, 1, [true], Val(Effect.IO), carrier)
+            .CSVReaderNext -> h("csv_reader.next", "jet_enc_csv_reader_next", 1, 1, [true], Val(Effect.IO), carrier)
+            .DataStreamNext -> h("data_stream.next", "jet_data_stream_next", 1, 1, [true], Val(Effect.IO), carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1565
+            .StreamWithEventTime -> h("stream.with_event_time", "jet_stream_with_event_time", 2, 2, [false, false], Val(Effect.IO), carrier)
+            .StreamWithEventTimeNs -> h("stream.with_event_time.datetime", "jet_stream_with_event_time_ns", 2, 2, [false, false], Val(Effect.IO), carrier)
+            .StreamKeyBy -> h("stream.key_by", "jet_stream_key_by", 2, 2, [false, false], Val(Effect.IO), carrier)
+            .StreamWindow -> h("stream.window", "jet_keyed_stream_window", 4, 4, [false, false, false, false], Val(Effect.IO), carrier)
+            .XMLReaderNext -> h("xml_reader.next", "jet_enc_xml_reader_next", 1, 1, [true], Val(Effect.IO), carrier)
+            .XMLWriterWrite -> h("xml_writer.write", "jet_enc_xml_writer_write", 2, 2, [true, false], Val(Effect.IO), carrier)
+            .XMLWriterFlush -> h("xml_writer.flush", "jet_enc_xml_writer_flush", 1, 1, [true], Val(Effect.IO), carrier)
+            .XMLWriterFinish -> h("xml_writer.finish", "jet_enc_xml_writer_finish", 1, 1, [true], Val(Effect.IO), carrier)
+            .CSVWriterWrite -> h("csv_writer.write", "jet_enc_csv_writer_write", 2, 2, [true, false], Val(Effect.IO), carrier)
+            .CSVWriterFlush -> h("csv_writer.flush", "jet_enc_csv_writer_flush", 1, 1, [true], Val(Effect.IO), carrier)
+            .CSVWriterFinish -> h("csv_writer.finish", "jet_enc_csv_writer_finish", 1, 1, [true], Val(Effect.IO), carrier)
+            .CBORReaderNext -> h("cbor_reader.next", "jet_enc_cbor_reader_next", 1, 1, [true], Val(Effect.IO), carrier)
+            .CBORWriterWrite -> h("cbor_writer.write", "jet_enc_cbor_writer_write", 2, 2, [true, false], Val(Effect.IO), carrier)
+            .CBORWriterFlush -> h("cbor_writer.flush", "jet_enc_cbor_writer_flush", 1, 1, [true], Val(Effect.IO), carrier)
+            .CBORWriterFinish -> h("cbor_writer.finish", "jet_enc_cbor_writer_finish", 1, 1, [true], Val(Effect.IO), carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1700
+            .StdinReadLine -> h("stdin.read_line", "jet_std_io_stdin_read_line", 1, 1, [true], Val(Effect.IO), carrier)
+            .StdoutWrite -> h("stdout.write", "jet_std_io_stdout_write", 2, 2, [true, true], Val(Effect.IO), carrier)
+            .StdoutWriteLine -> h("stdout.write_line", "jet_std_io_stdout_write_line", 2, 2, [true, true], Val(Effect.IO), carrier)
+            .StdoutWriteBytes -> h("stdout.write_bytes", "jet_std_io_stdout_write_bytes", 2, 2, [true, true], Val(Effect.IO), carrier)
+            .StdoutFlush -> h("stdout.flush", "jet_std_io_stdout_flush", 1, 1, [true], Val(Effect.IO), carrier)
+            .StdoutIsTty -> h("stdout.is_tty", "jet_std_io_stdout_is_tty", 1, 1, [true], Val(Effect.IO), carrier)
+            .StderrWrite -> h("stderr.write", "jet_std_io_stderr_write", 2, 2, [true, true], Val(Effect.IO), carrier)
+            .StderrWriteLine -> h("stderr.write_line", "jet_std_io_stderr_write_line", 2, 2, [true, true], Val(Effect.IO), carrier)
+            .StderrWriteBytes -> h("stderr.write_bytes", "jet_std_io_stderr_write_bytes", 2, 2, [true, true], Val(Effect.IO), carrier)
+            .StderrFlush -> h("stderr.flush", "jet_std_io_stderr_flush", 1, 1, [true], Val(Effect.IO), carrier)
+            .StderrIsTty -> h("stderr.is_tty", "jet_std_io_stderr_is_tty", 1, 1, [true], Val(Effect.IO), carrier)
+            .TestSuiteRun -> h("test_suite.run", "jet_test_suite_run", 1, 1, [true], None, carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1808
+            .ClockNow -> h("clock.now", "jet_clock_now", 1, 1, [true], Val(Effect.Time), carrier)
+            .ClockTick -> h("clock.tick", "jet_clock_tick", 2, 2, [true, false], Val(Effect.Time), carrier)
+            .ClockAdvance -> h("clock.advance", "jet_clock_advance", 2, 2, [true, false], Val(Effect.Time), carrier)
+            .ClockWait -> h("clock.wait", "jet_clock_wait", 2, 2, [true, true], Val(Effect.Time), carrier)
+            .WorldNow -> h("deterministic_world.now", "jet_world_now", 1, 1, [true], Val(Effect.Time), carrier)
+            .WorldAdvance -> h("deterministic_world.advance", "jet_world_advance", 2, 2, [true, true], Val(Effect.Time), carrier)
+            .WorldWaitIdle -> h("deterministic_world.wait_idle", "jet_world_wait_idle", 1, 1, [true], Val(Effect.Time), carrier)
+            .WorldHistory -> h("deterministic_world.history", "jet_world_history", 1, 1, [true], None, carrier)
+            .RealtimeNextDeadline -> h("realtime.next_deadline", "jet_rt_next_deadline", 1, 1, [true], None, carrier)
+            .RealtimeReceipt -> h("realtime.receipt", "jet_rt_receipt", 1, 1, [true], None, carrier)
+            .RealtimeCancel -> h("realtime.cancel", "jet_rt_cancel", 1, 1, [false], Val(Effect.Time), carrier)
+            .RealtimeIsCancelled -> h("realtime.is_cancelled", "jet_rt_is_cancelled", 1, 1, [true], None, carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1916
+            .RngInt -> h("rng.int", "jet_rng_int", 3, 3, [true, false, false], Val(Effect.Rand), carrier)
+            .RngFloat -> h("rng.float", "jet_rng_float", 1, 1, [true], Val(Effect.Rand), carrier)
+            .RngFloatRange -> h("rng.float_range", "jet_rng_float_range", 3, 3, [true, false, false], Val(Effect.Rand), carrier)
+            .RngBool -> h("rng.bool", "jet_rng_bool", 1, 1, [true], Val(Effect.Rand), carrier)
+            .RngBoolP -> h("rng.bool_p", "jet_rng_bool_p", 2, 2, [true, false], Val(Effect.Rand), carrier)
+            .RngNormal -> h("rng.normal", "jet_rng_normal", 3, 3, [true, false, false], Val(Effect.Rand), carrier)
+            .RngExponential -> h("rng.exponential", "jet_rng_exponential", 2, 2, [true, false], Val(Effect.Rand), carrier)
+            .RngBytes -> h("rng.bytes", "jet_rng_bytes", 2, 2, [true, false], Val(Effect.Rand), carrier)
+            .RngSplit -> h("rng.split", "jet_rng_split", 1, 1, [true], Val(Effect.Rand), carrier)
+            .RngPick -> h("rng.pick", "jet_rng_pick", 2, 2, [true, true], Val(Effect.Rand), carrier)
+            .RngWeightedPick -> h("rng.weighted_pick", "jet_rng_weighted_pick", 3, 3, [true, true, true], Val(Effect.Rand), carrier)
+            .RngSample -> h("rng.sample", "jet_rng_sample", 3, 3, [true, true, false], Val(Effect.Rand), carrier)
+            .RngShuffle -> h("rng.shuffle", "jet_rng_shuffle", 2, 2, [true, true], Val(Effect.Rand), carrier)
+            .HistoryRngNextU64 -> h("history_rng.next_u64", "jet_testing_history_rng_next_u64", 1, 1, [true], Val(Effect.Rand), carrier)
+            .HistoryRngBelow -> h("history_rng.below", "jet_testing_history_rng_below", 2, 2, [true, false], Val(Effect.Rand), carrier)
+            .FakeLocale -> h("fake.locale", "jet_fake_locale", 2, 2, [true, true], Val(Effect.Rand), carrier)
+            .FakeName -> h("fake.name", "jet_fake_name", 1, 1, [true], Val(Effect.Rand), carrier)
+            .FakeEmail -> h("fake.email", "jet_fake_email", 1, 1, [true], Val(Effect.Rand), carrier)
+            .FakeHost -> h("fake.host", "jet_fake_host", 1, 1, [true], Val(Effect.Rand), carrier)
+            .FakeAddress -> h("fake.address", "jet_fake_address", 1, 1, [true], Val(Effect.Rand), carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:2096
+            .SolverNew -> h("solver.new", "jet_solver_new", 1, 1, [false], None, carrier)
+            .SolverRequire -> h("solver.require", "jet_solver_require", 2, 2, [true, false], None, carrier)
+            .SolverFailureCount -> h("solver.failure_count", "jet_solver_failure_count", 1, 1, [true], None, carrier)
+            .SolverStatus -> h("solver.status", "jet_solver_status", 1, 1, [true], None, carrier)
+            .GameSceneNew -> h("game.scene_new", "jet_game_scene_new", 1, 1, [true], None, carrier)
+            .GameReplayRecord -> h("game.replay_record", "jet_game_replay_record", 1, 1, [true], None, carrier)
+            .GameBackendHeadless -> prelude(MirPreludeFamily.HandleMethod, "core.game", "backend_headless", "jet_game_backend_headless", 0, 0, [], None, carrier, MirPreludeAbi.Value)
+            .GameBackendShouldContinue -> h("game.backend_should_continue", "jet_game_backend_should_continue", 1, 1, [true], None, carrier)
+            .GameBackendPresent -> h("game.backend_present", "jet_game_backend_present", 1, 1, [true], None, carrier)
+            .GameSceneOnFrame{..} -> h("game.scene_on_frame", "jet_game_scene_on_frame", 4, 4, [true, false, false, false], None, carrier)
+            .GameSceneComponent -> h("game.scene_component", "jet_game_scene_component", 2, 2, [true, true], None, carrier)
+            .GameSceneQuery -> h("game.scene_query", "jet_game_scene_query", 2, 2, [true, true], None, carrier)
+            .GameAssetsImage -> h("game.assets_image", "jet_game_assets_image", 2, 2, [true, true], Val(Effect.FS), carrier)
+            .GameAssetsSound -> h("game.assets_sound", "jet_game_assets_sound", 2, 2, [true, true], Val(Effect.FS), carrier)
+            .GameInputBind -> h("game.input_bind", "jet_game_input_bind", 3, 3, [true, true, true], None, carrier)
+            .GameInputPressed -> h("game.input_pressed", "jet_game_input_pressed", 2, 2, [true, true], None, carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:2243
+            .DurationIn{..} -> h("duration.in", "jet_duration_in", 2, 2, [true, true], None, carrier)
+            .DurationIsZero -> h("duration.is_zero", "jet_duration_is_zero", 1, 1, [true], None, carrier)
+            .DurationTotalSeconds -> h("duration.total_seconds", "jet_duration_total_seconds", 1, 1, [true], None, carrier)
+            .DurationDifference -> h("duration.difference", "jet_duration_difference", 2, 2, [true, true], None, carrier)
+            .DurationAbs -> h("duration.abs", "jet_duration_abs", 1, 1, [true], None, carrier)
+            .DurationNegated -> h("duration.negated", "jet_duration_negated", 1, 1, [true], None, carrier)
+            .DurationSign -> h("duration.sign", "jet_duration_sign", 1, 1, [true], None, carrier)
+            .DurationTotalIn -> h("duration.total_in", "jet_duration_total_in", 2, 2, [true, true], None, carrier)
+            .DurationRound -> h("duration.round", "jet_duration_round", 4, 4, [true, true, true, true], None, carrier)
+            .DurationSecondsValue -> h("duration.seconds_value", "jet_duration_seconds_value", 1, 1, [true], None, carrier)
+            .DurationNsValue -> h("duration.ns_value", "jet_duration_ns_value", 1, 1, [true], None, carrier)
+            .DurationScale -> h("duration.scale", "jet_duration_scale", 2, 2, [true, true], None, carrier)
+            .DurationDivide -> h("duration.divide", "jet_duration_divide", 2, 2, [true, true], None, carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:2360
+            .TcpListenerAccept -> h("tcp_listener.accept", "jet_net_tcp_accept", 1, 1, [true], Val(Effect.Net), carrier)
+            .TcpListenerAcceptDeadline -> h("tcp_listener.accept_deadline", "jet_net_tcp_accept_deadline", 2, 2, [true, true], Val(Effect.Net), carrier)
+            .TcpListenerLocalAddr -> h("tcp_listener.local_addr", "jet_net_listener_local_addr", 1, 1, [true], Val(Effect.Net), carrier)
+            .TcpStreamRead -> h("tcp_stream.read", "jet_net_tcp_read", 1, 1, [true], Val(Effect.Net), carrier)
+            .TcpStreamWrite -> h("tcp_stream.write", "jet_net_tcp_write", 2, 2, [true, true], Val(Effect.Net), carrier)
+            .TcpStreamPeerAddr -> h("tcp_stream.peer_addr", "jet_net_tcp_peer_addr", 1, 1, [true], Val(Effect.Net), carrier)
+            .TcpStreamLocalAddr -> h("tcp_stream.local_addr", "jet_net_tcp_local_addr", 1, 1, [true], Val(Effect.Net), carrier)
+            .TcpStreamClose -> h("tcp_stream.close", "jet_net_tcp_close", 1, 1, [true], Val(Effect.Net), carrier)
+            .TcpStreamReadBytes -> h("tcp_stream.read_bytes", "jet_net_tcp_read_bytes", 2, 2, [true, false], Val(Effect.Net), carrier)
+            .TcpStreamReadBytesDeadline -> h("tcp_stream.read_bytes_deadline", "jet_net_tcp_read_bytes_deadline", 3, 3, [true, false, true], Val(Effect.Net), carrier)
+            .TcpStreamReadText -> h("tcp_stream.read_text", "jet_net_tcp_read_text", 2, 2, [true, false], Val(Effect.Net), carrier)
+            .TcpStreamReadTextDeadline -> h("tcp_stream.read_text_deadline", "jet_net_tcp_read_text_deadline", 3, 3, [true, false, true], Val(Effect.Net), carrier)
+            .TcpStreamWriteBytes -> h("tcp_stream.write_bytes", "jet_net_tcp_write_bytes", 2, 2, [true, true], Val(Effect.Net), carrier)
+            .TcpStreamWriteBytesDeadline -> h("tcp_stream.write_bytes_deadline", "jet_net_tcp_write_bytes_deadline", 3, 3, [true, true, true], Val(Effect.Net), carrier)
+            .TcpStreamWriteAllBytes -> h("tcp_stream.write_all_bytes", "jet_net_tcp_write_all_bytes", 2, 2, [true, true], Val(Effect.Net), carrier)
+            .TcpStreamWriteAllBytesDeadline -> h("tcp_stream.write_all_bytes_deadline", "jet_net_tcp_write_all_bytes_deadline", 3, 3, [true, true, true], Val(Effect.Net), carrier)
+            .TcpStreamWriteText -> h("tcp_stream.write_text", "jet_net_tcp_write_text", 2, 2, [true, true], Val(Effect.Net), carrier)
+            .TcpStreamWriteTextDeadline -> h("tcp_stream.write_text_deadline", "jet_net_tcp_write_text_deadline", 3, 3, [true, true, true], Val(Effect.Net), carrier)
+            .TcpStreamShutdown -> h("tcp_stream.shutdown", "jet_net_tcp_shutdown", 2, 2, [true, false], Val(Effect.Net), carrier)
+            .TcpStreamReady -> h("tcp_stream.ready", "jet_net_tcp_ready_deadline", 3, 3, [true, false, true], Val(Effect.Net), carrier)
+            .UdpSocketReady -> h("udp_socket.ready", "jet_net_udp_ready", 3, 3, [true, false, true], Val(Effect.Net), carrier)
+            .UdpSocketClose -> h("udp_socket.close", "jet_net_udp_close", 1, 1, [true], Val(Effect.Net), carrier)
+            .UdpSocketReceiveDeadline -> h("udp_socket.receive_deadline", "jet_net_udp_receive_deadline", 3, 3, [true, false, true], Val(Effect.Net), carrier)
+            .UdpSocketSendToDeadline -> h("udp_socket.send_to_deadline", "jet_net_udp_send_bytes_to_deadline", 4, 4, [true, true, true, true], Val(Effect.Net), carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:2576
+            .UnixListenerAcceptDeadline -> h("unix_listener.accept_deadline", "jet_net_unix_accept_deadline", 2, 2, [true, true], Val(Effect.Net), carrier)
+            .UnixStreamReadDeadline -> h("unix_stream.read_deadline", "jet_net_unix_read_bytes_deadline", 3, 3, [true, false, true], Val(Effect.Net), carrier)
+            .UnixStreamWriteAllDeadline -> h("unix_stream.write_all_deadline", "jet_net_unix_write_all_bytes_deadline", 3, 3, [true, true, true], Val(Effect.Net), carrier)
+            .UnixStreamReady -> h("unix_stream.ready", "jet_net_unix_ready", 3, 3, [true, false, true], Val(Effect.Net), carrier)
+            .UnixStreamClose -> h("unix_stream.close", "jet_net_unix_close", 1, 1, [true], Val(Effect.Net), carrier)
+            .UnixStreamSetTimeout -> h("unix_stream.set_timeout", "jet_net_unix_set_timeout", 2, 2, [true, true], Val(Effect.Net), carrier)
+            .TLSStreamReadDeadline -> h("tls_stream.read_deadline", "jet_net_tls_read_bytes_deadline", 3, 3, [true, false, true], Val(Effect.Net), carrier)
+            .TLSStreamWriteAllDeadline -> h("tls_stream.write_all_deadline", "jet_net_tls_write_all_bytes_deadline", 3, 3, [true, true, true], Val(Effect.Net), carrier)
+            .TLSStreamReady -> h("tls_stream.ready", "jet_net_tls_ready", 3, 3, [true, false, true], Val(Effect.Net), carrier)
+            .TLSStreamClose -> h("tls_stream.close", "jet_net_tls_close", 1, 1, [true], Val(Effect.Net), carrier)
+            .TLSStreamCloseWrite -> h("tls_stream.close_write", "jet_net_tls_close_write", 2, 2, [true, true], Val(Effect.Net), carrier)
+            .TLSStreamPeerIdentity -> h("tls_stream.peer_identity", "jet_net_tls_peer_identity", 1, 1, [true], Val(Effect.Net), carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:2684
+            .TLSClientConfigDefault -> h("tls.config_default", "jet_tls_client_config_default", 0, 0, [], Val(Effect.Net), carrier)
+            .TLSClientConfigWithAlpn -> h("tls.config_with_alpn", "jet_tls_client_config_with_alpn", 2, 2, [false, true], Val(Effect.Net), carrier)
+            .TLSRootCertificatesFromPem -> h("tls.root_certificates_from_pem", "jet_tls_root_certificates_from_pem", 1, 1, [true], Val(Effect.Net), carrier)
+            .TLSClientIdentityFromPem -> h("tls.client_identity_from_pem", "jet_tls_client_identity_from_pem", 2, 2, [true, true], Val(Effect.Net), carrier)
+            .TLSClientConfigWithTrust -> h("tls.config_with_trust", "jet_tls_client_config_with_trust", 2, 2, [false, false], Val(Effect.Net), carrier)
+            .TLSClientConfigWithIdentity -> h("tls.config_with_identity", "jet_tls_client_config_with_client_identity", 2, 2, [false, true], Val(Effect.Net), carrier)
+            .HTTPClientNew -> h("http.client_new", "jet_http_client_new_impl", 0, 0, [], Val(Effect.Net), carrier)
+            .TLSClientConfigWithVersionBounds -> h("tls.config_with_version_bounds", "jet_tls_client_config_with_version_bounds", 3, 3, [false, false, false], Val(Effect.Net), carrier)
+            .HTTPReqParam -> h("http.request_param", "jet_http_srv_req_param", 2, 2, [true, true], Val(Effect.Net), carrier)
+            .HTTPReqHeader -> h("http.request_header", "jet_http_srv_req_header", 2, 2, [true, true], None, carrier)
+            .HTTPReqTrailers -> h("http.request_trailers", "jet_http_srv_req_trailers", 1, 1, [true], Val(Effect.Net), carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:2783
+            .ArgsSpecFlag -> h("args.flag", "jet_args_flag", 3, 3, [false, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecFlagShort -> h("args.flag_short", "jet_args_flag_short", 4, 4, [false, true, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecOption -> h("args.option", "jet_args_option", 4, 4, [false, true, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecOptionShort -> h("args.option_short", "jet_args_option_short", 5, 5, [false, true, true, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecOptionDefault -> h("args.option_default", "jet_args_option_default", 5, 5, [false, true, true, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecOptionEnv -> h("args.option_env", "jet_args_option_env", 5, 5, [false, true, true, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecOptionInt -> h("args.option_int", "jet_args_option_int", 4, 4, [false, true, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecOptionFloat -> h("args.option_float", "jet_args_option_float", 4, 4, [false, true, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecOptionChoice -> h("args.option_choice", "jet_args_option_choice", 5, 5, [false, true, true, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecRepeat -> h("args.repeat", "jet_args_repeat", 4, 4, [false, true, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecRequiredOption -> h("args.required_option", "jet_args_required_option", 4, 4, [false, true, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecPositional -> h("args.positional", "jet_args_positional", 3, 3, [false, true, true], Val(Effect.Env), carrier)
+            .ArgsSpecDescription -> h("args.description", "jet_args_description", 2, 2, [false, true], Val(Effect.Env), carrier)
+            .ArgsSpecSubcommand -> h("args.subcommand", "jet_args_subcommand", 4, 4, [false, true, true, false], Val(Effect.Env), carrier)
+            .ArgsSpecVersion -> h("args.version", "jet_args_version", 2, 2, [false, true], Val(Effect.Env), carrier)
+            .ArgsSpecCompletion -> h("args.completion", "jet_args_completion", 2, 2, [true, true], Val(Effect.Env), carrier)
+            .ArgsSpecParse -> h("args.parse", "jet_args_parse", 2, 2, [true, true], Val(Effect.Env), carrier)
+            .ArgsSpecParseOrExit -> h("args.parse_or_exit", "jet_args_parse_or_exit", 2, 2, [true, true], Val(Effect.Env), carrier)
+            .ParsedArgsFlag -> h("parsed.flag", "jet_parsed_flag", 2, 2, [true, true], Val(Effect.Env), carrier)
+            .ParsedArgsOption -> h("parsed.option", "jet_parsed_option", 2, 2, [true, true], Val(Effect.Env), carrier)
+            .ParsedArgsOptionInt -> h("parsed.option_int", "jet_parsed_option_int", 2, 2, [true, true], Val(Effect.Env), carrier)
+            .ParsedArgsOptionFloat -> h("parsed.option_float", "jet_parsed_option_float", 2, 2, [true, true], Val(Effect.Env), carrier)
+            .ParsedArgsOptions -> h("parsed.options", "jet_parsed_options", 2, 2, [true, true], Val(Effect.Env), carrier)
+            .ParsedArgsPositional -> h("parsed.positional", "jet_parsed_positional", 2, 2, [true, false], Val(Effect.Env), carrier)
+            .ParsedArgsSubcommand -> h("parsed.subcommand", "jet_parsed_subcommand", 1, 1, [true], Val(Effect.Env), carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:3008
+            .TerminalSessionResize -> h("terminal.resize", "jet_terminal_session_resize", 2, 2, [true, true], Val(Effect.IO), carrier)
+            .ProcessStdinWrite -> h("process.stdin_write", "jet_process_stdin_write", 2, 2, [true, true], Val(Effect.Exec), carrier)
+            .ProcessStdinClose -> h("process.stdin_close", "jet_process_stdin_close", 1, 1, [true], Val(Effect.Exec), carrier)
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:3035
+            .ExpiringMethod{method: method} -> if method == {
+                "get" -> h("expiring.get", "jet_expiring_get", 2, 2, [true, true], Val(Effect.Time), carrier)
+                "is_valid" -> primitive()
+                else -> fail route_error("unknown checked ExpiringValue method `{method}`")
+            }
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:3052
+            .HTTPServerMethod{kind: "WsConn", method: method} -> if method == {
+                "send_text" -> h("ws.send_text", "jet_ws_send_text", 2, 2, [true, true], Val(Effect.Net), carrier)
+                "recv" -> h("ws.recv", "jet_ws_recv", 1, 1, [true], Val(Effect.Net), carrier)
+                "close" -> h("ws.close", "jet_ws_close", 3, 3, [true, false, true], Val(Effect.Net), carrier)
+                else -> primitive()
+            }
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:3082
+            .HTTPServerMethod{kind: "WsMessage", method: method} -> if method == {
+                "is_text" -> h("ws.message_is_text", "jet_ws_message_is_text", 1, 1, [true], None, carrier)
+                "text" -> h("ws.message_text", "jet_ws_message_text", 1, 1, [true], None, carrier)
+                else -> primitive()
+            }
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:3103
+            .HTTPServerMethod{kind: "HTTPMux", method: method} -> if method == {
+                "middleware" -> h("http_mux.middleware", "jet_http_mux_middleware", 2, 2, [true, false], Val(Effect.Net), carrier)
+                else -> primitive()
+            }
+            // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:3115
+            .HTTPServerMethod{kind: "HTTPServer", method: method} -> if method == {
+                "local_addr" -> h("http_server.local_addr", "jet_http_server_local_addr", 1, 1, [true], Val(Effect.Net), carrier)
+                "serve" -> h("http_server.serve", "jet_http_server_serve", 1, 1, [true], Val(Effect.Net), carrier)
+                "wait" -> h("http_server.wait", "jet_http_server_wait", 1, 1, [true], Val(Effect.Net), carrier)
+                "shutdown" -> h("http_server.shutdown", "jet_http_server_shutdown", 2, 2, [true, true], Val(Effect.Net), carrier)
+                else -> primitive()
+            }
+            // Remaining checked variants are the following slice's exhaustive dispatch.
+            else -> handle_route_plan_3154(self, receiver, carrier)!
+        }
+    }
+}

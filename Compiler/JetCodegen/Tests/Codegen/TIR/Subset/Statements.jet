@@ -1,0 +1,25 @@
+use JetCodegen.Codegen.TIR.Subset.Statements.*
+use JetCodegen.Codegen.TIR.build_cx
+use JetFoundation.CompilerStack
+use JetLexer.Lexer.lex
+use JetParser.Parser.parse
+use core.collections.Set
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:35
+#Test("statement_bindings_respect_lexical_scope") {
+    CompilerStack.run_on_compiler_stack(fn() {
+        source := "fn sample() { bound :: 1\n }\n"
+        (tokens, diagnostics) := lex(source)
+        assert(diagnostics.is_empty())
+        program := parse(tokens).expect("parse failed")
+        cx := build_cx(program, source, "subset-statements.jet")
+        function := program.items.iter().find_map(fn(item) {
+            if item == { .Func(f) -> Val(f); else -> None }
+        }).expect("function missing")
+        locals: Set<String> := Set.new()
+        assert(scoped_stmts_in_subset(function.body, cx, locals))
+        assert(!locals.contains("bound"))
+        assert(stmt_in_subset(function.body[0], cx, &locals))
+        assert(locals.contains("bound"))
+    })
+}

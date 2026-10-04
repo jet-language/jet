@@ -1,0 +1,11 @@
+use jet_comptime.Comptime.Build.Handles.[TargetId, ActionId, ExecutableTarget, TargetRef, ActionHandle]
+// Rust: crates/jet-comptime/src/Comptime/Build/handles.rs:31-75
+#Test("build_handle_identity_and_conversion") {
+    target := ExecutableTarget { id: TargetId(7), context: 99 }
+    reference := TargetRef.from(target)
+    assert_eq(reference.id(), TargetId(7))
+    assert_eq(target.id(), reference.id())
+    assert_eq(reference.context, 99)
+    action := ActionHandle { id: ActionId(3), context: 99 }
+    assert_eq(action.id(), ActionId(3))
+}

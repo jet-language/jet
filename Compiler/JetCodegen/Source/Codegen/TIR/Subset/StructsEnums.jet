@@ -1,516 +1,151 @@
-// PORT-PENDING 0524 crates-jet-codegen-src-codegen-tir-subset-patterns-module-group: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:1-512
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::AST::{Type, VariantPayload};
-//RS use crate::Codegen::Cx;
-//RS use crate::Codegen::TIR::is_covered_cell_ty;
-//RS use crate::Codegen::TIR::is_covered_compute_ty;
-//RS use crate::Codegen::TIR::is_covered_distinct_ty;
-//RS use crate::Codegen::TIR::is_covered_fallible_ty;
-//RS use crate::Codegen::TIR::is_covered_foreign_value_ty;
-//RS use crate::Codegen::TIR::is_covered_pool_ty;
-//RS use crate::Codegen::TIR::is_covered_shared_guard_ty;
-//RS use crate::Codegen::TIR::is_covered_shared_ty;
-//RS use crate::Codegen::TIR::is_covered_shared_weak_ty;
-//RS use crate::Codegen::TIR::is_type_var_param_ty;
-//RS use crate::Codegen::alloc_handle_rust_type;
-//RS use crate::Codegen::is_db_value_type_name;
-//RS use crate::Codegen::is_json_type_name;
-//RS use crate::Codegen::net_handle_rust_type;
-//RS use std::collections::HashSet;
-//RS 
-//RS /// c109 Phase 4: `ty` is a plain user enum the subset can lower. It must be a
-//RS /// bare `Type::Named(E)` that:
-//RS ///  - is a known enum (`cx.enum_variants` has it), not a struct/trait/foreign/core
-//RS ///    type (JSON, prelude, imported enums use different Rust heads/spellings);
-//RS ///  - is NOT generic and has NO boxed (recursive) edge — a `Box<…>` payload needs
-//RS ///    box/deref handling the subset deliberately avoids (recursive enums → later);
-//RS ///  - is derivable `Clone` (`cx.cloneable`) — the exhaustive-match lowering clones a
-//RS ///    by-reference subject (`(subj).clone()`), so the enum must be Clone in Rust;
-//RS ///  - has every variant payload restricted to scalar/Char fields. A String/struct/
-//RS ///    list/option payload would need clone/box decisions at the literal site and in
-//RS ///    pattern bindings (`emit_boxed_enum_arg`, borrowed-payload clone) that the
-//RS ///    subset cannot reproduce from total facts — exclude the whole enum on any.
-//RS pub(crate) fn is_covered_enum_ty(ty: &Type, cx: &Cx) -> bool {
-//RS     let Type::Named(name) = ty else {
-//RS         return false;
-//RS     };
-//RS     enum_is_covered(name, cx)
-//RS }
-//RS 
-//RS pub(crate) fn enum_is_covered(name: &str, cx: &Cx) -> bool {
-//RS     enum_is_covered_inner(name, cx, &mut HashSet::new())
-//RS }
-//RS /// Match coverage for a discriminant-only enum pattern.
-//RS ///
-//RS /// Unlike `enum_is_covered`, this does not inspect payload types: a wildcard
-//RS /// or tag-only arm never lowers or binds the payload. The enum still needs a
-//RS /// registered layout and a cloneable Rust representation because a borrowed
-//RS /// scrutinee may be cloned before matching.
-//RS pub(crate) fn enum_tag_is_covered(name: &str, cx: &Cx) -> bool {
-//RS     let canonical_name = cx
-//RS         .foreign_type_identity("", name)
-//RS         .unwrap_or_else(|| name.to_string());
-//RS     let is_foreign = super::types::foreign_type_module(&canonical_name, cx).is_some();
-//RS     cx.enum_variants.contains_key(&canonical_name)
-//RS         && (is_foreign || cx.cloneable.contains(name) || cx.cloneable.contains(&canonical_name))
-//RS }
-//RS 
-//RS /// Core enum values with a concrete `PartialEq` representation in the shared
-//RS /// Prelude. Sema resolves `==` on these values to the ordinary `Equatable`
-//RS /// method shape, but they are not user enum items in `cx.enum_variants`.
-//RS pub(crate) fn core_enum_equal_type(name: &str) -> bool {
-//RS     matches!(
-//RS         name,
-//RS         "ProcessStreamMode"
-//RS             | "ProcessResourceLimit"
-//RS             | "TerminalMode"
-//RS             | "EncodingFormat"
-//RS             | "EncodingErrorKind"
-//RS             | "DataEvent"
-//RS             | "CBORErrorKind"
-//RS             | "XMLReason"
-//RS             | "XMLEntityPolicy"
-//RS             | "XMLEncoding"
-//RS             | "XMLLexicalPolicy"
-//RS             | "XMLCanonicalMode"
-//RS             | "DataErrorKind"
-//RS             | "DurationUnit"
-//RS             | "LocalDate"
-//RS             // D-RANGE-VALUE1=A puts Range in auto_equatable, so sema rewrites
-//RS             // `a == b` on two Ranges into the Equatable.equal method shape. Every
-//RS             // other link already exists: lowering turns an admitted `.equal` into
-//RS             // TExprKind::Binary{Eq}, the interpreter evaluates that node for a
-//RS             // Range lhs through jet_range_equal, and the Cranelift host has
-//RS             // jet_jit_range_equal wired. This predicate was the only gate left
-//RS             // refusing it, which took the whole enclosing function off the
-//RS             // resident tier.
-//RS             | "Range"
-//RS             // D-CORESURF-SMALL1 puts TLSVersion in `auto_equatable`
-//RS             // (jet-foundation `Traits.rs`), so sema rewrites
-//RS             // `peer.tls_version != .Tls13` into the same `Equatable.equal`
-//RS             // method shape (CheckerInfer `binary.rs`) — and TLSVersion is a
-//RS             // shared Prelude enum, not a user item with a registered method
-//RS             // signature, so only this predicate can admit it. Every other link
-//RS             // already exists: this same predicate gates the lowering arm that
-//RS             // builds `TExprKind::Binary{Eq}` (`lower/method_calls.rs`), AOT
-//RS             // emits `==` on `JetTLSVersion`, which derives `Eq`/`PartialEq`
-//RS             // (`Prelude/CoreLib/Top/NetHTTP.rs`), the interpreter compares the
-//RS             // `CtValue::Enum` whose variant spelling comes from that same
-//RS             // Prelude renderer (`net_http_hosts.rs`
-//RS             // `tls_peer_identity_value`), and the Cranelift host encodes the
-//RS             // tag in registry order (`tls_version_bits`: Tls12, Tls13 — the
-//RS             // order `register_core_net_tls_enums` publishes). Without this row
-//RS             // the whole enclosing function missed the TIR subset, and
-//RS             // `emit_func` raised the I2 coverage ICE instead of compiling.
-//RS             | "TLSVersion"
-//RS     )
-//RS }
-//RS 
-//RS /// c109 Phase 16: an enum is covered when every variant payload field is a covered
-//RS /// VALUE type — scalar/Char/String, a covered struct, a covered collection, or
-//RS /// (recursively) another covered enum (the recursion may go through a `boxed_edge`,
-//RS /// reproduced as a `Box::new(…)` at the literal site via `TEnumArg.boxed`). The
-//RS /// `seen` set terminates on a recursive (boxed) edge: a self-reference admits the
-//RS /// enum (it's already being checked), so a linked-list / expr-AST enum is covered.
-//RS /// String/struct/collection payloads route through `emit_boxed_enum_arg`'s borrowed
-//RS /// `.clone()` (reproduced at lowering), so they are byte-parity safe.
-//RS pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
-//RS     if name == "DataEvent" {
-//RS         return true;
-//RS     }
-//RS     // D-CONC-FAIL1=A: TaskFailure is the shared Prelude enum published by
-//RS     // every task join/combinator. Its variants are registered in the TIR
-//RS     // context even though no user `enum` item owns them, so variant matches
-//RS     // must stay on the same typed-IR path as ordinary covered enums.
-//RS     if name == crate::Syntax::TYPE_TASK_FAILURE {
-//RS         return true;
-//RS     }
-//RS     if (crate::Generics::is_type_var_name(name) && !cx.enum_variants.contains_key(name))
-//RS         || is_json_type_name(name)
-//RS         || is_db_value_type_name(name)
-//RS         || core_enum_or_prelude(name)
-//RS     {
-//RS         return false;
-//RS     }
-//RS     // c109 Phase 24: a FOREIGN (imported) enum (`NoteType`/`ParseError`, matched in
-//RS     // search.jet/index.jet). Its variants ARE registered in `cx.enum_variants` /
-//RS     // `cx.variant_owner` (`register_foreign_enum_variants`, Imports.rs), so matching it
-//RS     // resolves the owning enum + variant prefix (`emit_match_pattern` emits the foreign
-//RS     // `{root}{mod}::__jet_<T>::__jet_<V>` head via `cx.foreign_types`). A foreign enum is
-//RS     // NOT in `cx.cloneable` (that set tracks only local types), so we DON'T require it
-//RS     // here; instead we require every variant payload to be a covered VALUE type — a
-//RS     // covered payload (scalar/String/covered struct/enum/collection) is itself always
-//RS     // `Clone` in Rust, so the foreign enum's generated `#[derive(Clone)]` holds and the
-//RS     // match scrutinee's unconditional `(subj).clone()` (the AST `emit_pattern_match_switch`
-//RS     // clones a by-ref subject regardless of `cx.cloneable`) is valid. The construction
-//RS     // side has no reachable cross-module literal syntax (`note.NoteType.User` is E0107),
-//RS     // so a foreign enum is only ever MATCHED / passed, never constructed in another module.
-//RS     let canonical_name = cx
-//RS         .foreign_type_identity("", name)
-//RS         .unwrap_or_else(|| name.to_string());
-//RS     let is_foreign = super::types::foreign_type_module(&canonical_name, cx).is_some();
-//RS     let Some(variants) = cx.enum_variants.get(&canonical_name) else {
-//RS         return false;
-//RS     };
-//RS     let carries_mutable_view = cx.type_contains_mutable_view(&Type::Named(name.to_string()));
-//RS     // A recursive edge back to this enum admits it (already under check) — the box
-//RS     // decision is total. Insert before recursing so a self-reference terminates here.
-//RS     if !seen.insert(canonical_name.clone()) {
-//RS         return true;
-//RS     }
-//RS     let payloads_covered = variants.iter().all(|(_vname, payload)| {
-//RS         let payload_tys: Vec<&Type> = match payload {
-//RS             VariantPayload::Unit => Vec::new(),
-//RS             VariantPayload::Single(t, _) => vec![t],
-//RS             VariantPayload::Named(fs) => fs.iter().map(|f| &f.ty).collect(),
-//RS         };
-//RS         payload_tys
-//RS             .iter()
-//RS             .all(|t| enum_payload_ty_covered(t, cx, seen))
-//RS     });
-//RS     // A local enum carrying an imported value may be absent from the precomputed
-//RS     // cloneability set because the source type is still the visible leaf while
-//RS     // the codegen registry stores its canonical identity. A covered payload is
-//RS     // itself the stronger Clone fact needed by the generated enum.
-//RS     let ok =
-//RS         payloads_covered && (is_foreign || cx.cloneable.contains(name) || carries_mutable_view);
-//RS     seen.remove(&canonical_name);
-//RS     ok
-//RS }
-//RS 
-//RS /// c109 Phase 16: an enum-variant payload field type the subset can lower —
-//RS /// scalar/Char/String, a sema-proved View/ViewMut, a covered struct, a covered
-//RS /// collection, or another covered enum (recursion permitted; the boxed edge is
-//RS /// reproduced at the literal site).
-//RS /// The `seen` set is threaded through every enum reference (including ones reached
-//RS /// via a nested collection element) so a `[Self]` / recursive-through-collection
-//RS /// payload terminates instead of looping.
-//RS pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
-//RS     if ty.is_scalar() || matches!(ty, Type::Char | Type::String) {
-//RS         return true;
-//RS     }
-//RS     // D-MEMPROVENANCE2=A: sema already proved every stored view's bounded owner
-//RS     // set. TIR carries the slice value unchanged; the hidden Rust lifetime is
-//RS     // rendered on the enum declaration and containing signatures.
-//RS     if matches!(ty, Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | crate::Syntax::TYPE_PIN) && args.len() == 1)
-//RS     {
-//RS         return true;
-//RS     }
-//RS     // c109 Phase 24: a FOREIGN (imported) struct/enum payload (`Query.Kind(NoteType)`
-//RS     // where `NoteType` lives in another module). It renders via `cx.rust_type` to
-//RS     // `{root}{mod}::__jet_<Name>`; a payload arg is moved/cloned by `lower_enum_arg`
-//RS     // (the borrowed-`.clone()` decision is total), so a foreign payload is byte-parity
-//RS     // safe. (A foreign METHOD is still out of subset — the recurring value-type seam.)
-//RS     if is_covered_foreign_value_ty(ty, cx) {
-//RS         return true;
-//RS     }
-//RS     // D-STYLEUNIT1 (Tower c134): a DISTINCT-typed enum payload (`Length(Px)`
-//RS     // where `Px` is a `#UnitFamily` member). Same rationale as the struct-field
-//RS     // case in `field_ty_covered`: the distinct newtype is a covered value type,
-//RS     // moved/cloned by `lower_enum_arg` with no new decision.
-//RS     if is_covered_distinct_ty(ty, cx) {
-//RS         return true;
-//RS     }
-//RS     match ty {
-//RS         Type::Union(members) => {
-//RS             !members.is_empty()
-//RS                 && members
-//RS                     .iter()
-//RS                     .all(|member| enum_payload_ty_covered(member, cx, seen))
-//RS         }
-//RS         Type::Named(n) => {
-//RS             if cx.enum_variants.contains_key(n) {
-//RS                 enum_is_covered_inner(n, cx, seen)
-//RS             } else {
-//RS                 is_covered_struct_ty(ty, cx)
-//RS             }
-//RS         }
-//RS         // A collection payload: its element/key/value types must each be a covered
-//RS         // value type, with enum references re-checked under the SAME `seen` guard.
-//RS         Type::List(inner) => enum_payload_ty_covered(inner, cx, seen),
-//RS         Type::Option(inner) => enum_payload_ty_covered(inner, cx, seen),
-//RS         Type::Map { key, value, .. } => {
-//RS             enum_payload_ty_covered(key, cx, seen) && enum_payload_ty_covered(value, cx, seen)
-//RS         }
-//RS         // D-MEM1 S6: a `Pool<T>`/`Id<T>`/`Shared<T>` enum payload.
-//RS         Type::Apply { .. } => {
-//RS             is_covered_pool_ty(ty, cx)
-//RS                 || is_covered_shared_guard_ty(ty, cx)
-//RS                 || is_covered_shared_weak_ty(ty, cx)
-//RS         }
-//RS         Type::Shared(_) => is_covered_shared_ty(ty, cx),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// A name that resolves to a compiler/core/prelude enum or opaque type rather
-//RS /// than a plain user enum — those are excluded from the enum subset.
-//RS pub(crate) fn core_enum_or_prelude(name: &str) -> bool {
-//RS     net_handle_rust_type(name).is_some() || alloc_handle_rust_type(name).is_some()
-//RS }
-//RS 
-//RS /// c109 Phase 3: `ty` is a plain user struct the subset can lower. A qualified
-//RS /// foreign `Type::Named(alias.S)` uses the foreign-value gate below; local user
-//RS /// structs must be bare and:
-//RS ///  - is a known struct (`cx.struct_fields` has it), not an enum/trait/generic;
-//RS ///  - is NOT a compiler/prelude/foreign/core type (those use different Rust
-//RS ///    heads and field spellings the subset does not emit);
-//RS ///  - is NOT generic and has NO boxed (recursive) edge — a `Box<…>` field read
-//RS ///    needs deref handling the subset deliberately avoids.
-//RS /// Field types may themselves be scalars/String/Char or another covered struct
-//RS /// (checked recursively, with a visited set to terminate); a non-covered field
-//RS /// type (list/map/option/enum/fn/boxed) excludes the owning struct.
-//RS pub(crate) fn is_covered_struct_ty(ty: &Type, cx: &Cx) -> bool {
-//RS     let Type::Named(name) = ty else {
-//RS         return false;
-//RS     };
-//RS     if super::types::foreign_type_module(name, cx).is_some() {
-//RS         return is_covered_foreign_value_ty(ty, cx);
-//RS     }
-//RS     struct_is_covered(name, cx, &mut HashSet::new())
-//RS }
-//RS 
-//RS /// c109: is `name` a user struct the subset can CONSTRUCT (a struct literal)? Admits
-//RS /// self-referential (boxed) fields — a recursive struct such as
-//RS /// `Tree { value: Int, child: Tree? }`. Construction is byte-identical to the AST path once
-//RS /// the `Box::new(…)` field wrap is reproduced at lowering (a total `boxed` flag from
-//RS /// `cx.boxed_edges`); a boxed field READ derefs the `Box` (`TExprKind::Field { boxed }`).
-//RS /// A boxed-edge field's value is checked separately by `expr_in_subset` at the gate site;
-//RS /// here we only verify the struct's field TYPES are admissible. Generic/foreign/prelude
-//RS /// structs are out. The visited set terminates the recursion at a boxed cycle.
-//RS pub(crate) fn struct_lit_constructible(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
-//RS     // A name that is a genuinely-declared user struct (in `cx.struct_fields`) is a
-//RS     // concrete type, never a type variable — even a single-uppercase-letter name like
-//RS     // `P`. The `is_type_var_name` heuristic only excludes *undeclared* single-letter
-//RS     // names (true generic type vars `T`/`U`), so guard it on non-declaration.
-//RS     let is_type_var =
-//RS         crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
-//RS     if cx.trait_names.contains(name)
-//RS         || cx.enum_variants.contains_key(name)
-//RS         || super::types::foreign_type_module(name, cx).is_some()
-//RS         || net_handle_rust_type(name).is_some()
-//RS         || is_type_var
-//RS         || struct_is_generic(name, cx)
-//RS     {
-//RS         return false;
-//RS     }
-//RS     let Some(fields) = cx.struct_fields.get(name) else {
-//RS         return false;
-//RS     };
-//RS     if !seen.insert(name.to_string()) {
-//RS         // A cycle through a boxed edge — admitted (the field below proved boxed).
-//RS         return true;
-//RS     }
-//RS     let ok = fields.iter().all(|(fname, fty)| {
-//RS         // A boxed (recursive) edge: its payload struct must itself be constructible.
-//RS         // The boxed-payload type unwraps Option/the bare Named to the struct name.
-//RS         if cx.boxed_edges.contains(&(name.to_string(), fname.clone())) {
-//RS             return boxed_field_payload_constructible(fty, cx, seen);
-//RS         }
-//RS         // A non-boxed field: the ordinary covered-field rule.
-//RS         field_ty_covered(fty, cx, seen)
-//RS     });
-//RS     seen.remove(name);
-//RS     ok
-//RS }
-//RS 
-//RS /// The payload of a boxed (recursive) struct field — `Tree` in `child: Tree?`
-//RS /// (`Option<Tree>`) or a bare `Tree`. The payload struct must be constructible.
-//RS pub(crate) fn boxed_field_payload_constructible(
-//RS     ty: &Type,
-//RS     cx: &Cx,
-//RS     seen: &mut HashSet<String>,
-//RS ) -> bool {
-//RS     match ty {
-//RS         Type::Option(inner) => boxed_field_payload_constructible(inner, cx, seen),
-//RS         Type::Named(n) => struct_lit_constructible(n, cx, seen),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// c109 Phase 19: is `name` a GENERIC user struct (one with declared type params)? A generic
-//RS /// struct's fields reference type vars (`first: T`); `struct_is_covered` admits those
-//RS /// so turbofish construction, `Type::Apply` params, and inherent methods all lower
-//RS /// through TIR. Imported struct shapes use the same registered field table after
-//RS /// qualification, so a generic foreign application follows the same value path.
-//RS /// Trait methods keep their separate trait-specific admission rules.
-//RS ///
-//RS /// c148: uses `cx.struct_type_params` (populated from `StructDef.type_params`) rather
-//RS /// than `ty_mentions_type_var`, so multi-char type params (`Kind`, `Elem`) are recognized.
-//RS pub(crate) fn struct_is_generic(name: &str, cx: &Cx) -> bool {
-//RS     cx.struct_type_params
-//RS         .get(name)
-//RS         .map(|params| !params.is_empty())
-//RS         .unwrap_or(false)
-//RS }
-//RS 
-//RS pub(crate) fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
-//RS     // A struct that is a trait/enum or a non-user core/prelude type is out.
-//RS     // Imported user structs are registered in `cx.struct_fields` under their
-//RS     // canonical qualified name, so they share this field-coverage path.
-//RS     // A declared struct is a concrete type, never a type var (see
-//RS     // `struct_lit_constructible`): a single-uppercase-letter struct name (`P`) is real.
-//RS     let is_type_var =
-//RS         crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
-//RS     if cx.trait_names.contains(name)
-//RS         || cx.enum_variants.contains_key(name)
-//RS         || net_handle_rust_type(name).is_some()
-//RS         || is_type_var
-//RS     {
-//RS         return false;
-//RS     }
-//RS     let Some(fields) = cx.struct_fields.get(name) else {
-//RS         return false;
-//RS     };
-//RS     if !seen.insert(name.to_string()) {
-//RS         // A cycle through a boxed edge — admitted (the edge below proved boxed and the
-//RS         // payload struct is itself covered). The boxed field READ derefs the `Box`
-//RS         // (`TExprKind::Field { boxed: true }`); construction wraps `Box::new(…)`.
-//RS         return true;
-//RS     }
-//RS     let declared_params = cx.struct_type_params.get(name);
-//RS     let ok = fields.iter().all(|(fname, fty)| {
-//RS         // A boxed (recursive) edge: its payload struct must itself be covered. The read
-//RS         // derefs the `Box` (total fact), so the edge is now in-subset.
-//RS         if cx.boxed_edges.contains(&(name.to_string(), fname.clone())) {
-//RS             return boxed_field_payload_covered(fty, cx, seen);
-//RS         }
-//RS         if matches!(fty, Type::Named(param)
-//RS             if declared_params.is_some_and(|params| params.contains(param)))
-//RS         {
-//RS             return true;
-//RS         }
-//RS         field_ty_covered(fty, cx, seen)
-//RS     });
-//RS     seen.remove(name);
-//RS     ok
-//RS }
-//RS 
-//RS /// The payload type of a boxed (recursive) struct edge — `Tree` in `child: Tree?`
-//RS /// (`Option<Tree>`) or a bare `Tree`. The payload struct must itself be a covered
-//RS /// value type (so its own reads/construction lower). Mirrors
-//RS /// `boxed_field_payload_constructible` but uses the value-coverage rule.
-//RS pub(crate) fn boxed_field_payload_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
-//RS     match ty {
-//RS         Type::Option(inner) => boxed_field_payload_covered(inner, cx, seen),
-//RS         Type::Named(n) => struct_is_covered(n, cx, seen),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// A struct *field* type the subset can lower: scalar/String/Char, or another
-//RS /// covered struct. Compound/optional/enum/fn field types exclude the struct.
-//RS pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
-//RS     if ty.is_scalar() || matches!(ty, Type::Char | Type::String) {
-//RS         return true;
-//RS     }
-//RS     // D-COMPUTE-TENSOR-FIELD1: Tensor and its typed compute-family handles are
-//RS     // ordinary value fields. Their shared Prelude representation already
-//RS     // carries shape/device/data, so struct construction and field projection
-//RS     // need no struct-recursion or collection-specific lowering.
-//RS     if is_covered_compute_ty(ty) {
-//RS         return true;
-//RS     }
-//RS     // D-MEM-VIEWRET1=B: sema is the sole authority for whether a stored view
-//RS     // has a stable owner. Once admitted, a View field is an ordinary borrowed
-//RS     // slice value for TIR; codegen only threads the hidden Rust lifetime.
-//RS     if matches!(ty, Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | crate::Syntax::TYPE_PIN) && args.len() == 1)
-//RS     {
-//RS         return true;
-//RS     }
-//RS     // c109 Phase 19: a generic struct's field may be a bare type VARIABLE (`first: T`
-//RS     // in `Pair<T>`). It renders to the bare `T` via `cx.rust_type` and a struct-lit
-//RS     // field value is the type-var value itself (by value), so a type-var field needs no
-//RS     // clone/deref decision — admit it. (A struct with a type-var field is only ever
-//RS     // *used* as a `Type::Apply` — `Pair<Int>` — which `is_covered_generic_struct_ty`
-//RS     // gates; a bare `Pair` never type-checks in sema.)
-//RS     // c148: pass cx for multi-char type param recognition.
-//RS     if is_type_var_param_ty(ty, cx) {
-//RS         return true;
-//RS     }
-//RS     // c109 Phase 24: a FOREIGN value-type field/element — a cross-module imported user
-//RS     // struct/enum or the prelude JSON enum. It renders via `cx.rust_type` to its own
-//RS     // Rust head; a struct-lit field value / collection element is the value itself (by
-//RS     // value), so a foreign-typed field needs no clone/deref decision at the field site.
-//RS     // (Reading a foreign field is in-subset; a foreign METHOD still excludes the fn.)
-//RS     if is_covered_foreign_value_ty(ty, cx) {
-//RS         return true;
-//RS     }
-//RS     // D-UNIONTYPE1=A: anonymous unions are structural enum sugar (`Int | String` →
-//RS     // `user___JetUnion_Int_String`). A union field is covered when every member is;
-//RS     // codegen emits the generated enum + Encode/Decode, and field reads/writes are
-//RS     // ordinary places (member→union widen injects at binding/arg/return/field sites).
-//RS     // Checked before `is_covered_enum_ty` so we do not recurse through Named-only
-//RS     // enum coverage for a non-Named `Type::Union`.
-//RS     if let Type::Union(members) = ty {
-//RS         return !members.is_empty() && members.iter().all(|m| field_ty_covered(m, cx, seen));
-//RS     }
-//RS     // c109 Phase 24: a covered ENUM field (`note_type: NoteType` on a `Note` struct). An
-//RS     // enum field renders to `__jet_<Enum>` and a field read is a plain place / sema-cloned
-//RS     // `.clone()` (the Phase-3/6 owning-field rewrite) — byte-identical, no new decision.
-//RS     // (Previously `field_ty_covered` admitted only scalar/String/struct/collection fields,
-//RS     // so any struct with an enum field stayed on the AST path.)
-//RS     if is_covered_enum_ty(ty, cx) {
-//RS         return true;
-//RS     }
-//RS     // D-STYLEUNIT1 (Tower c134): a DISTINCT-typed field (`m: Meters` where
-//RS     // `Meters :: distinct Float`, or a `#UnitFamily` member like `width: Px`).
-//RS     // A distinct type renders via `cx.rust_type` to its generated newtype
-//RS     // (`struct __jet_Meters(f64)`); a struct-lit field value is a distinct
-//RS     // constructor call (`Meters(10.0)` → the newtype, a covered expr) and a
-//RS     // field read is a plain by-value place — byte-identical to a scalar field,
-//RS     // no clone/deref decision. (Previously a distinct field routed to
-//RS     // `struct_is_covered`, which only knows plain user structs and returned
-//RS     // false, so any struct/enum carrying a unit-family field ICEd once TIR
-//RS     // became the sole codegen path — the standing bug this decision fixes.)
-//RS     if is_covered_distinct_ty(ty, cx) {
-//RS         return true;
-//RS     }
-//RS     // c109 Phase 24: an OPTIONAL / FALLIBLE field (`note: Note?`, `error_msg: String?` on
-//RS     // a `ParsedResult` struct) whose payload is a covered value type. It renders via
-//RS     // `cx.rust_type` to `Option<…>`/`Result<…,…>`; a struct-lit field value (`value(n)` →
-//RS     // `Some(n)`, `null` → `None`) is in-subset and emitted as-is, and a field read is a
-//RS     // plain place / sema-cloned `.clone()` — byte-identical, no new field-site decision.
-//RS     if is_covered_fallible_ty(ty, cx) {
-//RS         return true;
-//RS     }
-//RS     // A function field uses the ordinary checked field projection and
-//RS     // function-value invocation, including its effective failure carrier.
-//RS     if matches!(ty, Type::Fn { .. }) {
-//RS         return true;
-//RS     }
-//RS     match ty {
-//RS         Type::Named(n) => struct_is_covered(n, cx, seen),
-//RS         // c109 Phase 16: a collection field (`[E]` / `[K:V]`) whose element/key/value
-//RS         // types are covered value types. The struct-literal emit is plain
-//RS         // (`field: vec![…]`), byte-identical to the AST path. A list/map *element*
-//RS         // that is itself a covered struct/enum/collection is admitted (the Phase-5
-//RS         // collection coverage), so no clone/box decision arises at the field site.
-//RS         Type::List(inner) => field_ty_covered(inner, cx, seen),
-//RS         // c109 (B2): a fixed-size-list field (`row: [Int#3]`). It renders to `Vec<E>`
-//RS         // like a list field (`cx.rust_type`), so a struct-lit field value / field read
-//RS         // is byte-identical to the list case once its element type is covered.
-//RS         Type::FixedList { elem, .. } => field_ty_covered(elem, cx, seen),
-//RS         Type::Map { key, value, .. } => {
-//RS             field_ty_covered(key, cx, seen) && field_ty_covered(value, cx, seen)
-//RS         }
-//RS         Type::Tuple(fields) => fields.iter().all(|(_, ty)| field_ty_covered(ty, cx, seen)),
-//RS         Type::Tagged { inner, .. } => field_ty_covered(inner, cx, seen),
-//RS         // D-PLACE1: Atomic fields are compiler-owned inline scalar carriers;
-//RS         // their literal payload is wrapped by TIR after this coverage gate.
-//RS         Type::Apply { name, args } if name == "Atomic" => {
-//RS             args.len() == 1 && jet_foundation::Layout::atomic_scalar_type(&args[0])
-//RS         }
-//RS         // D-MEM1 S6 / D-LOCALCELL1=A: a bare core memory-handle field.
-//RS         Type::Apply { .. } => {
-//RS             is_covered_pool_ty(ty, cx)
-//RS                 || is_covered_shared_guard_ty(ty, cx)
-//RS                 || is_covered_shared_weak_ty(ty, cx)
-//RS                 || is_covered_cell_ty(ty, cx)
-//RS         }
-//RS         Type::Shared(_) => is_covered_shared_ty(ty, cx),
-//RS         _ => false,
-//RS     }
-//RS }
-// END-PORT-PENDING 0524 crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:1-512
+use jet_foundation.AST.[Type, VariantPayload]
+use jet_foundation.[Syntax, Layout]
+use jet_codegen.Codegen.Context.Cx
+use jet_codegen.Codegen.TIR.[is_covered_cell_ty, is_covered_compute_ty, is_covered_distinct_ty, is_covered_fallible_ty, is_covered_foreign_value_ty, is_covered_pool_ty, is_covered_shared_guard_ty, is_covered_shared_ty, is_covered_shared_weak_ty, is_type_var_param_ty]
+use jet_codegen.Codegen.[alloc_handle_rust_type, is_db_value_type_name, is_json_type_name, net_handle_rust_type]
+use jet_codegen.Codegen.TIR.Subset.Types.foreign_type_module
+use jet_sema.Generics.is_type_var_name
+use std.collections.HashSet
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:31
+pub fn is_covered_enum_ty(ty: &Type, cx: &Cx) -> Bool {
+    if ty == .Named(name) -> enum_is_covered(name, cx) else -> false
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:38
+pub fn enum_is_covered(name: String, cx: &Cx) -> Bool {
+    seen := HashSet<String>.new()
+    enum_is_covered_inner(name, cx, &seen)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:47
+pub fn enum_tag_is_covered(name: String, cx: &Cx) -> Bool {
+    canonical_name := cx.foreign_type_identity("", name).unwrap_or_else(fn() { name.to_string() })
+    is_foreign := foreign_type_module(canonical_name, cx).is_some()
+    cx.enum_variants.contains_key(canonical_name) && (is_foreign || cx.cloneable.contains(name) || cx.cloneable.contains(canonical_name))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:59
+pub fn core_enum_equal_type(name: String) -> Bool {
+    if name == {
+        "ProcessStreamMode" | "ProcessResourceLimit" | "TerminalMode" | "EncodingFormat" | "EncodingErrorKind" | "DataEvent" | "CBORErrorKind" | "XMLReason" | "XMLEntityPolicy" | "XMLEncoding" | "XMLLexicalPolicy" | "XMLCanonicalMode" | "DataErrorKind" | "DurationUnit" | "LocalDate" | "Range" | "TLSVersion" -> true
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:115
+pub fn enum_is_covered_inner(name: String, cx: &Cx, seen: &HashSet<String>) -> Bool {
+    if name == "DataEvent" || name == Syntax.TYPE_TASK_FAILURE -> return true
+    if (is_type_var_name(name) && !cx.enum_variants.contains_key(name)) || is_json_type_name(name) || is_db_value_type_name(name) || core_enum_or_prelude(name) -> return false
+    canonical_name := cx.foreign_type_identity("", name).unwrap_or_else(fn() { name.to_string() })
+    is_foreign := foreign_type_module(canonical_name, cx).is_some()
+    variants := cx.enum_variants.get(canonical_name) ?? return false
+    carries_mutable_view := cx.type_contains_mutable_view(Type.Named(name.to_string()))
+    if !seen.insert(canonical_name.clone()) -> return true
+    // Recursive boxed edges are admitted under this same seen set.
+    payloads_covered := variants.iter().all(fn(entry) {
+        (_, payload) := entry
+        if payload == {
+            .Unit -> true
+            .Single(t, _) -> enum_payload_ty_covered(t, cx, seen)
+            .Named(fs) -> fs.iter().all(fn(f) { enum_payload_ty_covered(f.ty, cx, seen) })
+        }
+    })
+    ok := payloads_covered && (is_foreign || cx.cloneable.contains(name) || carries_mutable_view)
+    seen.remove(canonical_name)
+    ok
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:186
+pub fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &HashSet<String>) -> Bool {
+    if ty.is_scalar() || ty is .Char || ty is .String -> return true
+    if ty == .Apply{name, args} {
+        if (name == "View" || name == "ViewMut" || name == "ComputeViewMut" || name == Syntax.TYPE_PIN) && args.len() == 1 -> return true
+    }
+    if is_covered_foreign_value_ty(ty, cx) || is_covered_distinct_ty(ty, cx) -> return true
+    if ty == {
+        .Union(members) -> !members.is_empty() && members.iter().all(fn(member) { enum_payload_ty_covered(member, cx, seen) })
+        .Named(n) -> { if cx.enum_variants.contains_key(n) -> enum_is_covered_inner(n, cx, seen) else -> is_covered_struct_ty(ty, cx) }
+        .List(inner) | .Option(inner) -> enum_payload_ty_covered(inner, cx, seen)
+        .Map{key, value, ..} -> enum_payload_ty_covered(key, cx, seen) && enum_payload_ty_covered(value, cx, seen)
+        .Apply{..} -> is_covered_pool_ty(ty, cx) || is_covered_shared_guard_ty(ty, cx) || is_covered_shared_weak_ty(ty, cx)
+        .Shared(_) -> is_covered_shared_ty(ty, cx)
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:246
+pub fn core_enum_or_prelude(name: String) -> Bool {
+    net_handle_rust_type(name).is_some() || alloc_handle_rust_type(name).is_some()
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:261
+pub fn is_covered_struct_ty(ty: &Type, cx: &Cx) -> Bool {
+    if ty != .Named(name) -> return false
+    if foreign_type_module(name, cx).is_some() -> return is_covered_foreign_value_ty(ty, cx)
+    seen := HashSet<String>.new()
+    struct_is_covered(name, cx, &seen)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:279
+pub fn struct_lit_constructible(name: String, cx: &Cx, seen: &HashSet<String>) -> Bool {
+    is_type_var := is_type_var_name(name) && !cx.struct_fields.contains_key(name)
+    if cx.trait_names.contains(name) || cx.enum_variants.contains_key(name) || foreign_type_module(name, cx).is_some() || net_handle_rust_type(name).is_some() || is_type_var || struct_is_generic(name, cx) -> return false
+    fields := cx.struct_fields.get(name) ?? return false
+    if !seen.insert(name.to_string()) -> return true
+    ok := fields.iter().all(fn(entry) {
+        (fname, fty) := entry
+        // GATE #4499: exact tuple-key equality for boxed-edge identity.
+        if cx.boxed_edges.contains((name.to_string(), fname.clone())) -> boxed_field_payload_constructible(fty, cx, seen)
+        else -> field_ty_covered(fty, cx, seen)
+    })
+    seen.remove(name)
+    ok
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:317
+pub fn boxed_field_payload_constructible(ty: &Type, cx: &Cx, seen: &HashSet<String>) -> Bool {
+    if ty == { .Option(inner) -> boxed_field_payload_constructible(inner, cx, seen); .Named(n) -> struct_lit_constructible(n, cx, seen); else -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:338
+pub fn struct_is_generic(name: String, cx: &Cx) -> Bool {
+    cx.struct_type_params.get(name).map(fn(params) { !params.is_empty() }).unwrap_or(false)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:345
+pub fn struct_is_covered(name: String, cx: &Cx, seen: &HashSet<String>) -> Bool {
+    is_type_var := is_type_var_name(name) && !cx.struct_fields.contains_key(name)
+    if cx.trait_names.contains(name) || cx.enum_variants.contains_key(name) || net_handle_rust_type(name).is_some() || is_type_var -> return false
+    fields := cx.struct_fields.get(name) ?? return false
+    if !seen.insert(name.to_string()) -> return true
+    declared_params := cx.struct_type_params.get(name)
+    ok := fields.iter().all(fn(entry) {
+        (fname, fty) := entry
+        // GATE #4499: preserve tuple-key equality, not string encoding.
+        if cx.boxed_edges.contains((name.to_string(), fname.clone())) -> return boxed_field_payload_covered(fty, cx, seen)
+        if fty == .Named(param) {
+            if declared_params.is_some_and(fn(params) { params.contains(param) }) -> return true
+        }
+        field_ty_covered(fty, cx, seen)
+    })
+    seen.remove(name)
+    ok
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:391
+pub fn boxed_field_payload_covered(ty: &Type, cx: &Cx, seen: &HashSet<String>) -> Bool {
+    if ty == { .Option(inner) -> boxed_field_payload_covered(inner, cx, seen); .Named(n) -> struct_is_covered(n, cx, seen); else -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/structs_enums.rs:401
+pub fn field_ty_covered(ty: &Type, cx: &Cx, seen: &HashSet<String>) -> Bool {
+    if ty.is_scalar() || ty is .Char || ty is .String -> return true
+    if is_covered_compute_ty(ty) -> return true
+    if ty == .Apply{name, args} {
+        if (name == "View" || name == "ViewMut" || name == "ComputeViewMut" || name == Syntax.TYPE_PIN) && args.len() == 1 -> return true
+    }
+    if is_type_var_param_ty(ty, cx) || is_covered_foreign_value_ty(ty, cx) -> return true
+    if ty == .Union(members) -> return !members.is_empty() && members.iter().all(fn(m) { field_ty_covered(m, cx, seen) })
+    if is_covered_enum_ty(ty, cx) || is_covered_distinct_ty(ty, cx) || is_covered_fallible_ty(ty, cx) -> return true
+    if ty is .Fn{..} -> return true
+    if ty == {
+        .Named(n) -> struct_is_covered(n, cx, seen)
+        .List(inner) -> field_ty_covered(inner, cx, seen)
+        .FixedList{elem, ..} -> field_ty_covered(elem, cx, seen)
+        .Map{key, value, ..} -> field_ty_covered(key, cx, seen) && field_ty_covered(value, cx, seen)
+        .Tuple(fields) -> fields.iter().all(fn(entry) { (_, field_ty) := entry; field_ty_covered(field_ty, cx, seen) })
+        .Tagged{inner, ..} -> field_ty_covered(inner, cx, seen)
+        .Apply{name, args} if name == "Atomic" -> args.len() == 1 && Layout.atomic_scalar_type(args[0])
+        .Apply{..} -> is_covered_pool_ty(ty, cx) || is_covered_shared_guard_ty(ty, cx) || is_covered_shared_weak_ty(ty, cx) || is_covered_cell_ty(ty, cx)
+        .Shared(_) -> is_covered_shared_ty(ty, cx)
+        else -> false
+    }
+}

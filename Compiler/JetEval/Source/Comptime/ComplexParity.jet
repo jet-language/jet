@@ -1,73 +1,37 @@
-// PORT-PENDING 0574 crates-jet-comptime-src-comptime-complexparity-module-group: crates/jet-comptime/src/Comptime/ComplexParity.rs:1-69
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Comptime/REPL marshalling for the shared Complex Prelude value.
-//RS 
-//RS mod math_lib_pure {
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
-//RS }
-//RS 
-//RS use crate::AST::{CtFloat, CtValue};
-//RS 
-//RS pub fn part(value: &CtValue) -> Option<f64> {
-//RS     match value {
-//RS         CtValue::Int(value) => Some(*value as f64),
-//RS         CtValue::Float(value) => Some(value.as_f64()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub fn from_parts(real: f64, imaginary: f64) -> CtValue {
-//RS     let value = math_lib_pure::JetComplex::from_parts(real, imaginary);
-//RS     CtValue::Struct {
-//RS         type_name: crate::Syntax::TYPE_COMPLEX.to_string(),
-//RS         fields: vec![
-//RS             ("real".to_string(), CtValue::Float(CtFloat::f64(value.real))),
-//RS             (
-//RS                 "imaginary".to_string(),
-//RS                 CtValue::Float(CtFloat::f64(value.imaginary)),
-//RS             ),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn value(value: &CtValue) -> Option<math_lib_pure::JetComplex> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return None;
-//RS     };
-//RS     if type_name != crate::Syntax::TYPE_COMPLEX {
-//RS         return None;
-//RS     }
-//RS     let field = |wanted: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find(|(name, _)| name == wanted)
-//RS             .and_then(|(_, value)| part(value))
-//RS     };
-//RS     Some(math_lib_pure::JetComplex::from_parts(
-//RS         field("real")?,
-//RS         field("imaginary")?,
-//RS     ))
-//RS }
-//RS 
-//RS pub fn binary(method: &str, left: &CtValue, right: &CtValue) -> Option<CtValue> {
-//RS     let left = value(left)?;
-//RS     let right = value(right)?;
-//RS     let result = match method {
-//RS         "add" => left.add(&right),
-//RS         "sub" => left.sub(&right),
-//RS         "mul" => left.mul(&right),
-//RS         "div" => left.div(&right),
-//RS         _ => return None,
-//RS     };
-//RS     Some(from_parts(result.real, result.imaginary))
-//RS }
-//RS 
-//RS pub fn abs(input: &CtValue) -> Option<f64> {
-//RS     Some(value(input)?.abs())
-//RS }
-//RS 
-//RS pub fn to_string(input: &CtValue) -> Option<String> {
-//RS     Some(value(input)?.to_string_rep())
-//RS }
-// END-PORT-PENDING 0574 crates/jet-comptime/src/Comptime/ComplexParity.rs:1-69
+// Comptime/REPL marshalling reuses the canonical shared Complex value.
+use jet_codegen.Prelude.CoreLib.Top.MathLibPure.JetComplex
+use jet_foundation.AST.[CtFloat, CtValue]
+use jet_foundation.Syntax.TYPE_COMPLEX
 
+// Rust: crates/jet-comptime/src/Comptime/ComplexParity.rs:9
+pub fn part(value: &CtValue) -> F64? {
+    value == { Int(v) -> Val(v as F64); Float(v) -> Val(v.as_f64()); _ -> None }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComplexParity.rs:17
+pub fn from_parts(real: F64, imaginary: F64) -> CtValue {
+    v := JetComplex.from_parts(real, imaginary)
+    CtValue.Struct { type_name: TYPE_COMPLEX.to_string(), fields: [
+        ("real", CtValue.Float(CtFloat.f64(v.real))), ("imaginary", CtValue.Float(CtFloat.f64(v.imaginary)))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComplexParity.rs:31
+fn value(input: &CtValue) -> JetComplex? {
+    input == {
+        Struct { type_name, fields } -> {
+            if type_name != TYPE_COMPLEX { return None }
+            field := fn(wanted) { fields.iter().find(fn(entry) { entry.0 == wanted }).and_then(fn(entry) { part(&entry.1) }) }
+            Val(JetComplex.from_parts(field("real")?, field("imaginary")?))
+        }
+        _ -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ComplexParity.rs:50
+pub fn binary(method: &String, left: &CtValue, right: &CtValue) -> CtValue? {
+    a := value(left)?
+    b := value(right)?
+    result := method == { "add" -> a.add(&b); "sub" -> a.sub(&b); "mul" -> a.mul(&b); "div" -> a.div(&b); _ -> { return None } }
+    Val(from_parts(result.real, result.imaginary))
+}
+// Rust: crates/jet-comptime/src/Comptime/ComplexParity.rs:63
+pub fn abs(input: &CtValue) -> F64? { Val(value(input)?.abs()) }
+// Rust: crates/jet-comptime/src/Comptime/ComplexParity.rs:67
+pub fn to_string(input: &CtValue) -> String? { Val(value(input)?.to_string_rep()) }

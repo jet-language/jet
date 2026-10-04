@@ -1,0 +1,27 @@
+use jet_foundation.[MirAccess, MirConstant, MirJobSchedule, MirRuntimePartId, Effect]
+use JetCodegen.Codegen.MIRWeb.[json_string, js_string, constant_descriptor, mir_bytes_descriptor, optional_access, job_limits_descriptor, job_schedule_descriptor, runtime_part_descriptor, effect_descriptor]
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:7884-7908 (behavioral control; no inline tests)
+#Test("web_json_and_js_escaping_preserve_control_characters") {
+    assert(json_string("a\n\t\"\\") == "\"a\\n\\t\\\"\\\\\"")
+    assert(js_string("a\r\u{08}\u{0c}") == "\"a\\r\\b\\f\"")
+    assert(json_string("é") == "\"é\"")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:7861-7866,7872-7874,7914-7972 (behavioral control)
+#Test("web_constant_descriptors_keep_width_and_raw_spelling") {
+    assert(constant_descriptor(MirConstant.Int{value: 7, width: Val((false, U8{64})), spelling: Val("007")}) == "int:7:unsigned-64:007")
+    assert(constant_descriptor(MirConstant.Unit) == "unit")
+    assert(mir_bytes_descriptor([U8]{0, 15, 255}) == "000fff")
+    assert(optional_access(None) == "null")
+    assert(optional_access(Val(MirAccess.Write)) == "\"write\"")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRWeb.rs:8123-8141,8239-8248,8289-8295,8305-8339 (behavioral control)
+#Test("web_job_and_runtime_descriptors_are_ordered_and_complete") {
+    limits := [String:String]{"z": "9", "a": "1"}
+    assert(job_limits_descriptor(limits) == "a=1,z=9")
+    assert(job_schedule_descriptor(MirJobSchedule.WallClockTime{hour: 3, minute: 5}) == "wall-clock-time:03:05")
+    assert(runtime_part_descriptor(MirRuntimePartId.WebSocket) == "web-socket")
+    assert(effect_descriptor(Effect.Exec) == "exec")
+}

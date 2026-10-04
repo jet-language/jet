@@ -1,302 +1,190 @@
-// PORT-PENDING 0579 crates-jet-comptime-src-comptime-cryptolite-aes256gcm-module-group: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:1-298
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Std-only AES-256-GCM matching RustCrypto / NIST CAVS.
-//RS 
-//RS const RCON: [u8; 10] = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
-//RS 
-//RS // AES's lookup table is indexed by secret state/key bytes. Use fixed-round
-//RS // GF(2^8) arithmetic instead so the comptime/interpreter path has no
-//RS // secret-dependent memory access.
-//RS fn gf_mul(mut left: u8, mut right: u8) -> u8 {
-//RS     let mut product = 0u8;
-//RS     for _ in 0..8 {
-//RS         let right_mask = 0u8.wrapping_sub(right & 1);
-//RS         product ^= left & right_mask;
-//RS         let high_mask = 0u8.wrapping_sub(left >> 7);
-//RS         left = (left << 1) ^ (0x1b & high_mask);
-//RS         right >>= 1;
-//RS     }
-//RS     product
-//RS }
-//RS 
-//RS fn aes_sbox(value: u8) -> u8 {
-//RS     // The AES S-box is the multiplicative inverse followed by a fixed affine
-//RS     // transform. Every operation below has a public, fixed iteration count.
-//RS     let x2 = gf_mul(value, value);
-//RS     let x4 = gf_mul(x2, x2);
-//RS     let x8 = gf_mul(x4, x4);
-//RS     let x16 = gf_mul(x8, x8);
-//RS     let x32 = gf_mul(x16, x16);
-//RS     let x64 = gf_mul(x32, x32);
-//RS     let x128 = gf_mul(x64, x64);
-//RS     let inverse = gf_mul(
-//RS         gf_mul(gf_mul(x2, x4), gf_mul(x8, x16)),
-//RS         gf_mul(x32, gf_mul(x64, x128)),
-//RS     );
-//RS     inverse
-//RS         ^ inverse.rotate_left(1)
-//RS         ^ inverse.rotate_left(2)
-//RS         ^ inverse.rotate_left(3)
-//RS         ^ inverse.rotate_left(4)
-//RS         ^ 0x63
-//RS }
-//RS 
-//RS fn mul(mut left: u8, mut right: u8) -> u8 {
-//RS     let mut product = 0u8;
-//RS     for _ in 0..8 {
-//RS         let right_mask = 0u8.wrapping_sub(right & 1);
-//RS         product ^= left & right_mask;
-//RS         let high_mask = 0u8.wrapping_sub(left >> 7);
-//RS         left = (left << 1) ^ (0x1b & high_mask);
-//RS         right >>= 1;
-//RS     }
-//RS     product
-//RS }
-//RS 
-//RS fn expand_key(key: &[u8; 32]) -> [[u8; 16]; 15] {
-//RS     let mut w = [0u8; 240];
-//RS     w[..32].copy_from_slice(key);
-//RS     let mut i = 8;
-//RS     while i < 60 {
-//RS         let mut temp = [
-//RS             w[(i - 1) * 4],
-//RS             w[(i - 1) * 4 + 1],
-//RS             w[(i - 1) * 4 + 2],
-//RS             w[(i - 1) * 4 + 3],
-//RS         ];
-//RS         if i % 8 == 0 {
-//RS             temp = [temp[1], temp[2], temp[3], temp[0]];
-//RS             for byte in &mut temp {
-//RS                 *byte = aes_sbox(*byte);
-//RS             }
-//RS             temp[0] ^= RCON[i / 8 - 1];
-//RS         } else if i % 8 == 4 {
-//RS             for byte in &mut temp {
-//RS                 *byte = aes_sbox(*byte);
-//RS             }
-//RS         }
-//RS         for j in 0..4 {
-//RS             w[i * 4 + j] = w[(i - 8) * 4 + j] ^ temp[j];
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS     let mut rounds = [[0u8; 16]; 15];
-//RS     for (round, slot) in rounds.iter_mut().enumerate() {
-//RS         slot.copy_from_slice(&w[round * 16..(round + 1) * 16]);
-//RS     }
-//RS     rounds
-//RS }
-//RS 
-//RS fn add_round_key(state: &mut [u8; 16], key: &[u8; 16]) {
-//RS     for index in 0..16 {
-//RS         state[index] ^= key[index];
-//RS     }
-//RS }
-//RS 
-//RS fn sub_bytes(state: &mut [u8; 16]) {
-//RS     for byte in state.iter_mut() {
-//RS         *byte = aes_sbox(*byte);
-//RS     }
-//RS }
-//RS 
-//RS fn shift_rows(state: &mut [u8; 16]) {
-//RS     let tmp = *state;
-//RS     state[1] = tmp[5];
-//RS     state[5] = tmp[9];
-//RS     state[9] = tmp[13];
-//RS     state[13] = tmp[1];
-//RS     state[2] = tmp[10];
-//RS     state[6] = tmp[14];
-//RS     state[10] = tmp[2];
-//RS     state[14] = tmp[6];
-//RS     state[3] = tmp[15];
-//RS     state[7] = tmp[3];
-//RS     state[11] = tmp[7];
-//RS     state[15] = tmp[11];
-//RS }
-//RS 
-//RS fn mix_columns(state: &mut [u8; 16]) {
-//RS     for col in 0..4 {
-//RS         let i = col * 4;
-//RS         let a = state[i];
-//RS         let b = state[i + 1];
-//RS         let c = state[i + 2];
-//RS         let d = state[i + 3];
-//RS         state[i] = mul(a, 2) ^ mul(b, 3) ^ c ^ d;
-//RS         state[i + 1] = a ^ mul(b, 2) ^ mul(c, 3) ^ d;
-//RS         state[i + 2] = a ^ b ^ mul(c, 2) ^ mul(d, 3);
-//RS         state[i + 3] = mul(a, 3) ^ b ^ c ^ mul(d, 2);
-//RS     }
-//RS }
-//RS 
-//RS fn aes_encrypt_block(round_keys: &[[u8; 16]; 15], input: &[u8; 16]) -> [u8; 16] {
-//RS     let mut state = *input;
-//RS     add_round_key(&mut state, &round_keys[0]);
-//RS     for round in 1..14 {
-//RS         sub_bytes(&mut state);
-//RS         shift_rows(&mut state);
-//RS         mix_columns(&mut state);
-//RS         add_round_key(&mut state, &round_keys[round]);
-//RS     }
-//RS     sub_bytes(&mut state);
-//RS     shift_rows(&mut state);
-//RS     add_round_key(&mut state, &round_keys[14]);
-//RS     state
-//RS }
-//RS 
-//RS fn ghash_mul(x: &mut [u8; 16], y: &[u8; 16]) {
-//RS     let mut z = [0u8; 16];
-//RS     let mut v = *y;
-//RS     for byte in x.iter() {
-//RS         for bit in (0..8).rev() {
-//RS             let bit_mask = 0u8.wrapping_sub((byte >> bit) & 1);
-//RS             for i in 0..16 {
-//RS                 z[i] ^= v[i] & bit_mask;
-//RS             }
-//RS             let lsb = v[15] & 1;
-//RS             for i in (1..16).rev() {
-//RS                 v[i] = (v[i] >> 1) | (v[i - 1] << 7);
-//RS             }
-//RS             v[0] >>= 1;
-//RS             v[0] ^= 0xe1 & 0u8.wrapping_sub(lsb);
-//RS         }
-//RS     }
-//RS     *x = z;
-//RS }
-//RS 
-//RS fn ghash(h: &[u8; 16], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
-//RS     let mut y = [0u8; 16];
-//RS     for chunk in aad.chunks(16) {
-//RS         let mut block = [0u8; 16];
-//RS         block[..chunk.len()].copy_from_slice(chunk);
-//RS         for i in 0..16 {
-//RS             y[i] ^= block[i];
-//RS         }
-//RS         ghash_mul(&mut y, h);
-//RS     }
-//RS     for chunk in ciphertext.chunks(16) {
-//RS         let mut block = [0u8; 16];
-//RS         block[..chunk.len()].copy_from_slice(chunk);
-//RS         for i in 0..16 {
-//RS             y[i] ^= block[i];
-//RS         }
-//RS         ghash_mul(&mut y, h);
-//RS     }
-//RS     let mut len_block = [0u8; 16];
-//RS     let aad_bits = (aad.len() as u64).wrapping_mul(8);
-//RS     let ct_bits = (ciphertext.len() as u64).wrapping_mul(8);
-//RS     len_block[0..8].copy_from_slice(&aad_bits.to_be_bytes());
-//RS     len_block[8..16].copy_from_slice(&ct_bits.to_be_bytes());
-//RS     for i in 0..16 {
-//RS         y[i] ^= len_block[i];
-//RS     }
-//RS     ghash_mul(&mut y, h);
-//RS     y
-//RS }
-//RS 
-//RS fn inc32(counter: &mut [u8; 16]) {
-//RS     for byte in counter[12..].iter_mut().rev() {
-//RS         *byte = byte.wrapping_add(1);
-//RS         if *byte != 0 {
-//RS             break;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn gctr(round_keys: &[[u8; 16]; 15], icb: &[u8; 16], input: &[u8]) -> Vec<u8> {
-//RS     let mut out = Vec::with_capacity(input.len());
-//RS     let mut counter = *icb;
-//RS     for chunk in input.chunks(16) {
-//RS         let keystream = aes_encrypt_block(round_keys, &counter);
-//RS         for (byte, mask) in chunk.iter().zip(keystream.iter()) {
-//RS             out.push(byte ^ mask);
-//RS         }
-//RS         inc32(&mut counter);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub(super) fn seal(key: &[u8], nonce: &[u8], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, ()> {
-//RS     let key: [u8; 32] = key.try_into().map_err(|_| ())?;
-//RS     let nonce: [u8; 12] = nonce.try_into().map_err(|_| ())?;
-//RS     let round_keys = expand_key(&key);
-//RS     let h = aes_encrypt_block(&round_keys, &[0u8; 16]);
-//RS     let mut j0 = [0u8; 16];
-//RS     j0[..12].copy_from_slice(&nonce);
-//RS     j0[15] = 1;
-//RS     let mut counter = j0;
-//RS     inc32(&mut counter);
-//RS     let ciphertext = gctr(&round_keys, &counter, plaintext);
-//RS     let s = ghash(&h, aad, &ciphertext);
-//RS     let tag_mask = aes_encrypt_block(&round_keys, &j0);
-//RS     let mut tag = [0u8; 16];
-//RS     for i in 0..16 {
-//RS         tag[i] = s[i] ^ tag_mask[i];
-//RS     }
-//RS     let mut out = ciphertext;
-//RS     out.extend_from_slice(&tag);
-//RS     Ok(out)
-//RS }
-//RS 
-//RS pub(super) fn open(key: &[u8], nonce: &[u8], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, ()> {
-//RS     if ciphertext.len() < 16 {
-//RS         return Err(());
-//RS     }
-//RS     let key: [u8; 32] = key.try_into().map_err(|_| ())?;
-//RS     let nonce: [u8; 12] = nonce.try_into().map_err(|_| ())?;
-//RS     let (body, tag) = ciphertext.split_at(ciphertext.len() - 16);
-//RS     let round_keys = expand_key(&key);
-//RS     let h = aes_encrypt_block(&round_keys, &[0u8; 16]);
-//RS     let mut j0 = [0u8; 16];
-//RS     j0[..12].copy_from_slice(&nonce);
-//RS     j0[15] = 1;
-//RS     let s = ghash(&h, aad, body);
-//RS     let tag_mask = aes_encrypt_block(&round_keys, &j0);
-//RS     let mut expected = [0u8; 16];
-//RS     for i in 0..16 {
-//RS         expected[i] = s[i] ^ tag_mask[i];
-//RS     }
-//RS     let mut diff = 0u8;
-//RS     for (left, right) in expected.iter().zip(tag.iter()) {
-//RS         diff |= left ^ right;
-//RS     }
-//RS     if diff != 0 {
-//RS         return Err(());
-//RS     }
-//RS     let mut counter = j0;
-//RS     inc32(&mut counter);
-//RS     Ok(gctr(&round_keys, &counter, body))
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn hex(text: &str) -> Vec<u8> {
-//RS         text.as_bytes()
-//RS             .chunks_exact(2)
-//RS             .map(|pair| {
-//RS                 let digit = |byte: u8| {
-//RS                     if byte <= b'9' {
-//RS                         byte - b'0'
-//RS                     } else {
-//RS                         byte - b'a' + 10
-//RS                     }
-//RS                 };
-//RS                 digit(pair[0]) * 16 + digit(pair[1])
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn nist_cavs_empty_payload() {
-//RS         let key = hex("b52c505a37d78eda5dd34f20c22540ea1b58963cf8e5bf8ffa85f9f2492505b4");
-//RS         let nonce = hex("516c33929df5a3284ff463d7");
-//RS         let expected = hex("bdc1ac884d332457a1d2664f168c76f0");
-//RS         let sealed = seal(&key, &nonce, &[], &[]).unwrap();
-//RS         assert_eq!(sealed, expected);
-//RS         assert_eq!(open(&key, &nonce, &sealed, &[]).unwrap(), Vec::<u8>::new());
-//RS     }
-//RS }
-// END-PORT-PENDING 0579 crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:1-298
-
+// Std-only AES-256-GCM matching RustCrypto / NIST CAVS.
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:3
+const RCON: [U8#10] = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:8
+// Fixed-round GF arithmetic avoids secret-indexed lookup tables.
+fn gf_mul(left: U8, right: U8) -> U8 {
+    product := U8{0}
+    for _ in 0..8 {
+        right_mask := U8{0}.wrapping_sub(right & 1)
+        product ^= left & right_mask
+        high_mask := U8{0}.wrapping_sub(left >> 7)
+        left = (left << 1) ~| (0x1b & high_mask)
+        right >>= 1
+    }
+    product
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:20
+fn aes_sbox(value: U8) -> U8 {
+    x2 := gf_mul(value, value)
+    x4 := gf_mul(x2, x2)
+    x8 := gf_mul(x4, x4)
+    x16 := gf_mul(x8, x8)
+    x32 := gf_mul(x16, x16)
+    x64 := gf_mul(x32, x32)
+    x128 := gf_mul(x64, x64)
+    inverse := gf_mul(gf_mul(gf_mul(x2, x4), gf_mul(x8, x16)), gf_mul(x32, gf_mul(x64, x128)))
+    inverse ~| inverse.rotate_left(1) ~| inverse.rotate_left(2) ~| inverse.rotate_left(3) ~| inverse.rotate_left(4) ~| 0x63
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:42
+fn mul(left: U8, right: U8) -> U8 {
+    product := U8{0}
+    for _ in 0..8 {
+        right_mask := U8{0}.wrapping_sub(right & 1)
+        product ^= left & right_mask
+        high_mask := U8{0}.wrapping_sub(left >> 7)
+        left = (left << 1) ~| (0x1b & high_mask)
+        right >>= 1
+    }
+    product
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:54
+fn expand_key(key: &[U8#32]) -> [[U8#16]#15] {
+    w := [U8#240]{uninit}
+    w.fill(0)
+    w[..32].copy_from_slice(key)
+    i := 8
+    while i < 60 {
+        temp: [U8#4] = [w[(i - 1) * 4], w[(i - 1) * 4 + 1], w[(i - 1) * 4 + 2], w[(i - 1) * 4 + 3]]
+        if i % 8 == 0 {
+            temp = [temp[1], temp[2], temp[3], temp[0]]
+            for j in 0..4 { temp[j] = aes_sbox(temp[j]) }
+            temp[0] ^= RCON[i / 8 - 1]
+        } else if i % 8 == 4 { for j in 0..4 { temp[j] = aes_sbox(temp[j]) } }
+        for j in 0..4 { w[i * 4 + j] = w[(i - 8) * 4 + j] ~| temp[j] }
+        i += 1
+    }
+    rounds := [[U8#16]#15]{uninit}
+    for round in 0..15 { rounds[round].copy_from_slice(&w[round * 16..(round + 1) * 16]) }
+    rounds
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:88
+fn add_round_key(state: &[U8#16], key: &[U8#16]) { for index in 0..16 { state[index] ^= key[index] } }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:94
+fn sub_bytes(state: &[U8#16]) { for i in 0..16 { state[i] = aes_sbox(state[i]) } }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:100
+fn shift_rows(state: &[U8#16]) {
+    tmp := state.clone()
+    state[1] = tmp[5]; state[5] = tmp[9]; state[9] = tmp[13]; state[13] = tmp[1]
+    state[2] = tmp[10]; state[6] = tmp[14]; state[10] = tmp[2]; state[14] = tmp[6]
+    state[3] = tmp[15]; state[7] = tmp[3]; state[11] = tmp[7]; state[15] = tmp[11]
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:116
+fn mix_columns(state: &[U8#16]) {
+    for col in 0..4 {
+        i := col * 4
+        a := state[i]; b := state[i + 1]; c := state[i + 2]; d := state[i + 3]
+        state[i] = mul(a, 2) ~| mul(b, 3) ~| c ~| d
+        state[i + 1] = a ~| mul(b, 2) ~| mul(c, 3) ~| d
+        state[i + 2] = a ~| b ~| mul(c, 2) ~| mul(d, 3)
+        state[i + 3] = mul(a, 3) ~| b ~| c ~| mul(d, 2)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:130
+fn aes_encrypt_block(round_keys: &[[U8#16]#15], input: &[U8#16]) -> [U8#16] {
+    state := input.clone()
+    add_round_key(&state, &round_keys[0])
+    for round in 1..14 {
+        sub_bytes(&state); shift_rows(&state); mix_columns(&state); add_round_key(&state, &round_keys[round])
+    }
+    sub_bytes(&state); shift_rows(&state); add_round_key(&state, &round_keys[14])
+    state
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:145
+fn ghash_mul(x: &[U8#16], y: &[U8#16]) {
+    z := [U8#16]{uninit}; z.fill(0)
+    v := y.clone()
+    for byte in x.iter() {
+        for bit in (0..8).rev() {
+            bit_mask := U8{0}.wrapping_sub((byte >> bit) & 1)
+            for i in 0..16 { z[i] ^= v[i] & bit_mask }
+            lsb := v[15] & 1
+            for i in (1..16).rev() { v[i] = (v[i] >> 1) | (v[i - 1] << 7) }
+            v[0] >>= 1
+            v[0] ^= 0xe1 & U8{0}.wrapping_sub(lsb)
+        }
+    }
+    x.copy_from_slice(&z)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:165
+fn ghash(h: &[U8#16], aad: &[U8], ciphertext: &[U8]) -> [U8#16] {
+    y := [U8#16]{uninit}; y.fill(0)
+    for chunk in aad.chunks(16) {
+        block := [U8#16]{uninit}; block.fill(0)
+        block[..chunk.len()].copy_from_slice(chunk)
+        for i in 0..16 { y[i] ^= block[i] }
+        ghash_mul(&y, h)
+    }
+    for chunk in ciphertext.chunks(16) {
+        block := [U8#16]{uninit}; block.fill(0)
+        block[..chunk.len()].copy_from_slice(chunk)
+        for i in 0..16 { y[i] ^= block[i] }
+        ghash_mul(&y, h)
+    }
+    len_block := [U8#16]{uninit}
+    aad_bits := (aad.len() as U64).wrapping_mul(8)
+    ct_bits := (ciphertext.len() as U64).wrapping_mul(8)
+    len_block[0..8].copy_from_slice(&aad_bits.to_be_bytes())
+    len_block[8..16].copy_from_slice(&ct_bits.to_be_bytes())
+    for i in 0..16 { y[i] ^= len_block[i] }
+    ghash_mul(&y, h)
+    y
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:195
+fn inc32(counter: &[U8#16]) {
+    for i in (12..16).rev() {
+        counter[i] = counter[i].wrapping_add(1)
+        if counter[i] != 0 -> break
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:204
+fn gctr(round_keys: &[[U8#16]#15], icb: &[U8#16], input: &[U8]) -> [U8] {
+    out := [U8].with_capacity(input.len())
+    counter := icb.clone()
+    for chunk in input.chunks(16) {
+        keystream := aes_encrypt_block(round_keys, &counter)
+        for (byte, mask) in chunk.iter().zip(keystream.iter()) { out.push(byte ~| mask) }
+        inc32(&counter)
+    }
+    ^out
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:217
+fn seal(key: &[U8], nonce: &[U8], plaintext: &[U8], aad: &[U8]) -> [U8] Unit! {
+    key := key.try_into::<[U8#32]>().map_err(fn(_) { () })?
+    nonce := nonce.try_into::<[U8#12]>().map_err(fn(_) { () })?
+    round_keys := expand_key(&key)
+    zero := [U8#16]{uninit}; zero.fill(0)
+    h := aes_encrypt_block(&round_keys, &zero)
+    j0 := [U8#16]{uninit}; j0.fill(0)
+    j0[..12].copy_from_slice(&nonce); j0[15] = 1
+    counter := j0.clone(); inc32(&counter)
+    ciphertext := gctr(&round_keys, &counter, plaintext)
+    s := ghash(&h, aad, &ciphertext)
+    tag_mask := aes_encrypt_block(&round_keys, &j0)
+    tag := [U8#16]{uninit}
+    for i in 0..16 { tag[i] = s[i] ~| tag_mask[i] }
+    out := ^ciphertext
+    out.extend_from_slice(&tag)
+    Ok(^out)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:239
+fn open(key: &[U8], nonce: &[U8], ciphertext: &[U8], aad: &[U8]) -> [U8] Unit! {
+    if ciphertext.len() < 16 -> return Err(())
+    key := key.try_into::<[U8#32]>().map_err(fn(_) { () })?
+    nonce := nonce.try_into::<[U8#12]>().map_err(fn(_) { () })?
+    (body, tag) := ciphertext.split_at(ciphertext.len() - 16)
+    round_keys := expand_key(&key)
+    zero := [U8#16]{uninit}; zero.fill(0)
+    h := aes_encrypt_block(&round_keys, &zero)
+    j0 := [U8#16]{uninit}; j0.fill(0)
+    j0[..12].copy_from_slice(&nonce); j0[15] = 1
+    s := ghash(&h, aad, body)
+    tag_mask := aes_encrypt_block(&round_keys, &j0)
+    expected := [U8#16]{uninit}
+    for i in 0..16 { expected[i] = s[i] ~| tag_mask[i] }
+    diff := U8{0}
+    for (left, right) in expected.iter().zip(tag.iter()) { diff |= left ~| right }
+    if diff != 0 -> return Err(())
+    counter := j0.clone(); inc32(&counter)
+    Ok(gctr(&round_keys, &counter, body))
+}

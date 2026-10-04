@@ -1,103 +1,32 @@
-// PORT-PENDING 0410 crates-jet-sema-src-sema-checkerinfer-expr-module-group-slice-5079: crates/jet-sema/src/Sema/CheckerCoreLib/server_functions.rs:1-99
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-DX-SERVERFN1=A: front-end checks for the one server-function wire
-//RS //! boundary. App discovery supplies the function identity; serde_diags owns
-//RS //! the serializability truth so this module never creates a second type table.
-//RS 
-//RS use crate::AST::{FailureContract, Func, Type};
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::Traits::TraitRegistry;
-//RS 
-//RS fn wire_type_ok(ty: &Type, reg: &TraitRegistry) -> bool {
-//RS     match ty {
-//RS         Type::Result { ok, err } => {
-//RS             super::is_encodable_ty(ok, reg)
-//RS                 && super::is_decodable_ty(ok, reg)
-//RS                 && super::is_encodable_ty(err, reg)
-//RS                 && super::is_decodable_ty(err, reg)
-//RS         }
-//RS         _ => super::is_encodable_ty(ty, reg) && super::is_decodable_ty(ty, reg),
-//RS     }
-//RS }
-//RS 
-//RS fn wire_error(
-//RS     function: &Func,
-//RS     direction: &str,
-//RS     ty: &Type,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E2411",
-//RS         format!(
-//RS             "server function `{}` {} type `{}` is not serializable",
-//RS             function.name,
-//RS             direction,
-//RS             ty.show()
-//RS         ),
-//RS         "server functions cross a checked JSON boundary for both scripted calls and native forms".to_string(),
-//RS         "derive Encode and Decode for the type, or use a supported wire type".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// Validate every user-visible side of a server-function signature.
-//RS ///
-//RS /// A parameter is both encoded by the client and decoded by the server. The
-//RS /// success and declared failure values are both encoded by the server and
-//RS /// decoded by the client. The shared serde helpers remain authoritative for
-//RS /// the recursive type rules and local derive requirements.
-//RS pub(crate) fn validate_server_function_boundary(
-//RS     function: &Func,
-//RS     reg: &TraitRegistry,
-//RS ) -> Vec<Diagnostic> {
-//RS     let mut diagnostics = Vec::new();
-//RS     for parameter in function
-//RS         .params
-//RS         .iter()
-//RS         .filter(|parameter| parameter.name != crate::Syntax::KW_SELF)
-//RS     {
-//RS         if !wire_type_ok(&parameter.ty, reg) {
-//RS             diagnostics.push(wire_error(function, "input", &parameter.ty, parameter.ty_span));
-//RS         }
-//RS     }
-//RS 
-//RS     match function.failure_contract() {
-//RS         FailureContract::Default { success, error }
-//RS         | FailureContract::Explicit { success, error }
-//RS         | FailureContract::Inferred { success, error } => {
-//RS             if !wire_type_ok(&success, reg) {
-//RS                 diagnostics.push(wire_error(
-//RS                     function,
-//RS                     "output",
-//RS                     &success,
-//RS                     function.return_type_span.unwrap_or(function.name_span),
-//RS                 ));
-//RS             }
-//RS             if !wire_type_ok(&error, reg) {
-//RS                 diagnostics.push(wire_error(
-//RS                     function,
-//RS                     "error",
-//RS                     &error,
-//RS                     function.return_type_span.unwrap_or(function.name_span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         FailureContract::Optional { success }
-//RS         | FailureContract::ProvenUnreachable { success }
-//RS         | FailureContract::InferredNever { success }
-//RS         | FailureContract::Converted { success, .. } => {
-//RS             if !wire_type_ok(&success, reg) {
-//RS                 diagnostics.push(wire_error(
-//RS                     function,
-//RS                     "output",
-//RS                     &success,
-//RS                     function.return_type_span.unwrap_or(function.name_span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         FailureContract::DeclaredNever => {}
-//RS     }
-//RS     diagnostics
-//RS }
-// END-PORT-PENDING 0410 crates/jet-sema/src/Sema/CheckerCoreLib/server_functions.rs:1-99
-
+use jet_foundation.[FailureContract, Func, Type, Diagnostic, Span, Syntax]
+use jet_sema.[TraitRegistry]
+use jet_sema.CheckerCoreLib.[is_encodable_ty, is_decodable_ty]
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/server_functions.rs:9
+fn wire_type_ok(ty: Type, reg: TraitRegistry) -> Bool Never! {
+    if ty == {
+        .Result(ok, err) -> is_encodable_ty(ok, reg) && is_decodable_ty(ok, reg) && is_encodable_ty(err, reg) && is_decodable_ty(err, reg)
+        else -> is_encodable_ty(ty, reg) && is_decodable_ty(ty, reg)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/server_functions.rs:21
+fn wire_error(function: Func, direction: String, ty: Type, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E2411", "server function `{function.name}` {direction} type `{ty.show()}` is not serializable", "server functions cross a checked JSON boundary for both scripted calls and native forms", "derive Encode and Decode for the type, or use a supported wire type", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerCoreLib/server_functions.rs:47
+pub fn validate_server_function_boundary(function: Func, reg: TraitRegistry) -> [Diagnostic] Never! {
+    diagnostics := [Diagnostic]{}
+    loop parameter in function.params {
+        if parameter.name != Syntax.KW_SELF && !wire_type_ok(parameter.ty, reg) -> &diagnostics.push(wire_error(function, "input", parameter.ty, parameter.ty_span))
+    }
+    if function.failure_contract() == {
+        .Default(success, error) | .Explicit(success, error) | .Inferred(success, error) -> {
+            if !wire_type_ok(success, reg) -> &diagnostics.push(wire_error(function, "output", success, function.return_type_span ?? function.name_span))
+            if !wire_type_ok(error, reg) -> &diagnostics.push(wire_error(function, "error", error, function.return_type_span ?? function.name_span))
+        }
+        .Optional(success) | .ProvenUnreachable(success) | .InferredNever(success) | .Converted(success, ..) -> {
+            if !wire_type_ok(success, reg) -> &diagnostics.push(wire_error(function, "output", success, function.return_type_span ?? function.name_span))
+        }
+        .DeclaredNever -> {}
+    }
+    ^diagnostics
+}

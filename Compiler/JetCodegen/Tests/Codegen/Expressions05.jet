@@ -1,0 +1,64 @@
+use jet_foundation.[Type, TypeTupleField, TExpr, TExprKind, TStmt, TLocal, Span, TFailureCarrier, MIRTaskGroupKind, MIRGCEditKind, TGCEditKind, MIRSymbol, MIRPreludeFamily, MIRPreludeABI]
+use jet_codegen.[select_payload_type, task_group_route, direct_prelude_route, inline_block_diverges, jet_codegen_gc_edit_kind]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7126
+#Test("select_payload_peels_only_the_tagged_readiness_tuple") {
+    tuple :: Type.Tuple([TypeTupleField{name: "arm", ty: Type.Int}, TypeTupleField{name: "value", ty: Type.Option(Type.String)}])
+    assert(select_payload_type(@tuple) == Type.String)
+    raw_tuple :: Type.Tuple([TypeTupleField{name: "arm", ty: Type.Int}, TypeTupleField{name: "value", ty: Type.Bool}])
+    assert(select_payload_type(@raw_tuple) == Type.Bool)
+    ordinary_option :: Type.Option(Type.Int)
+    assert(select_payload_type(@ordinary_option) == ordinary_option)
+    short :: Type.Tuple([TypeTupleField{name: "only", ty: Type.Option(Type.Int)}])
+    assert(select_payload_type(@short) == short)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7023
+#Test("direct_prelude_route_retains_the_entire_checked_row") {
+    carrier :: TFailureCarrier.Infallible
+    route :: direct_prelude_route("core.tasks", "select_wait_tagged", "jet_std::jet_select_wait_tagged", 2, @[true, false], @carrier)
+    assert(route.family == MIRPreludeFamily.StaticPrelude)
+    assert(route.module == "core.tasks")
+    assert(route.member == "select_wait_tagged")
+    assert(route.symbol == MIRSymbol.Prelude("jet_std::jet_select_wait_tagged"))
+    assert(route.signature.arity == 2 && route.signature.max_arity == 2)
+    assert(route.signature.borrow_mask == [true, false])
+    assert(route.fallibility == carrier)
+    assert(route.abi == MIRPreludeABI.Value)
+    assert(route.effect == None && route.authority == None && route.db_metadata == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7049
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7066
+#Test("task_group_routes_distinguish_all_six_result_protocols") {
+    plain :: Type.List(Type.Apply("Task", [Type.Int]))
+    fallible :: Type.List(Type.Apply("Task", [Type.Result(Type.Int, Type.Named("Err"))]))
+    carrier :: TFailureCarrier.Infallible
+    loop (kind, member, result_member) in [(MIRTaskGroupKind.All, "all", "all_result"), (MIRTaskGroupKind.Race, "race", "race_result"), (MIRTaskGroupKind.Any, "any", "any_result")] {
+        plain_route :: task_group_route(kind, @plain, @carrier)
+        result_route :: task_group_route(kind, @fallible, @carrier)
+        assert(plain_route.member == member)
+        assert(plain_route.symbol == MIRSymbol.Prelude("jet_std::jet_task_{member}"))
+        assert(result_route.member == result_member)
+        assert(result_route.symbol == MIRSymbol.Prelude("jet_std::jet_task_{result_member}"))
+        assert(result_route.signature.arity == 1 && result_route.signature.borrow_mask == [false])
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:6749
+#Test("fallback_divergence_depends_on_the_final_inline_statement") {
+    span :: Span.new(0, 1)
+    returned :: TExpr{ty: Type.Int, kind: TExprKind.InlineBlock([TStmt.Return{value: None, span: span}]), span: span, integer_bounds: None, cost: None}
+    empty :: TExpr{ty: Type.Int, kind: TExprKind.InlineBlock([]), span: span, integer_bounds: None, cost: None}
+    scalar :: TExpr{ty: Type.Int, kind: TExprKind.IntLit(1, None), span: span, integer_bounds: None, cost: None}
+    assert(inline_block_diverges(@returned))
+    assert(!inline_block_diverges(@empty))
+    assert(!inline_block_diverges(@scalar))
+    trailing :: TExpr{ty: Type.Int, kind: TExprKind.InlineBlock([TStmt.Return{value: None, span: span}, TStmt.SourceSpan(span)]), span: span, integer_bounds: None, cost: None}
+    assert(!inline_block_diverges(@trailing))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:7455
+#Test("gc_edit_kind_preserves_each_checked_operation") {
+    loop (input, expected) in [(TGCEditKind.Clear, MIRGCEditKind.Clear), (TGCEditKind.Pop, MIRGCEditKind.Pop), (TGCEditKind.RemoveIndex, MIRGCEditKind.RemoveIndex), (TGCEditKind.InsertIndex, MIRGCEditKind.InsertIndex), (TGCEditKind.Prepend, MIRGCEditKind.Prepend), (TGCEditKind.Additive, MIRGCEditKind.Additive), (TGCEditKind.Plain, MIRGCEditKind.Plain), (TGCEditKind.EdgeSlot, MIRGCEditKind.EdgeSlot)] -> assert(jet_codegen_gc_edit_kind(input) == expected)
+}

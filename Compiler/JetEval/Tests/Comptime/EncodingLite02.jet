@@ -1,0 +1,177 @@
+use jet_foundation.[XmlPull, XmlKernel]
+use jet_foundation.AST.[CtValue, Type]
+use jet_comptime.Comptime.EncodingLite02.*
+
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2266
+fn field_mut(value: &XmlPull.Value, key: String) -> &XmlPull.Value {
+    match value {
+        XmlPull.Value.Object(entries) => &entries.iter_mut().find(fn(pair) { pair.0 == key }).unwrap_or_else(fn() { panic("missing {key}") }).1,
+        _ => panic("expected object")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2280
+fn first(value: &XmlPull.Value) -> &XmlPull.Value {
+    match value { XmlPull.Value.Array(values) => &values[0], _ => panic("expected array") }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2288
+#Test("parse_render_preserves_element_open_lexical_snapshot") {
+    source := "<r xmlns='urn:\tfoo\r\nbar' a='x\t y\r\nz\ru\nv' b='&#xD;&#xA;&#x9;'/>"
+    tree := xml_parse(source).expect("parse XML")
+    assert_eq(xml_render(&tree), source)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2295
+#Test("round_trip_restores_every_nested_xml_schema_order") {
+    source := "<?xml version='1.0'?>\n<!DOCTYPE r [<!ENTITY e 'v'>]>\n<r xmlns='urn:r' xmlns:p='urn:p' a='x&amp;y'>t&amp;<![CDATA[c]]><!--m--><?go now?><p:c/></r>\n"
+    expected := XmlPull.parse_document(source).expect("parse XML")
+    actual := xml_from_ct(&xml_to_ct(expected.clone())).expect("reconstruct XML")
+    assert_eq(actual, expected)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2303
+#Test("byte_round_trip_preserves_detected_encoding_bom_and_lexical_evidence") {
+    utf8_source := "<?xml version='1.0' encoding='UTF-8'?><r>é🙂</r>"
+    utf8: [U8] = [0xef, 0xbb, 0xbf]
+    utf8.extend_from_slice(utf8_source.as_bytes())
+    utf16_source := "<?xml version='1.0' encoding='UTF-16'?><r>é🙂</r>"
+    utf16: [U8] = [0xff, 0xfe]
+    utf16.extend(utf16_source.encode_utf16().flat_map(U16.to_le_bytes))
+    for (variant, bytes) in [("UTF8BOM", ^utf8), ("UTF16LE", ^utf16)] {
+        expected := XmlPull.parse_document_bytes(&bytes).expect("parse XML bytes")
+        comptime := xml_to_ct(expected.clone())
+        actual := xml_from_ct(&comptime).expect("reconstruct XML bytes")
+        assert_eq(actual, expected, "{variant} metadata and evidence")
+        options := CtValue.Struct{type_name: "XMLRenderOptions", fields: [
+            ("encoding", CtValue.Enum{type_name: "XMLEncoding", variant: variant, args: []}),
+            ("lexical", CtValue.Enum{type_name: "XMLLexicalPolicy", variant: "PreserveValid", args: []})
+        ]}
+        assert_eq(xml_to_bytes(&comptime, Some(&options)).expect("render XML bytes"), bytes, "{variant} byte identity")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2349
+#Test("round_trip_restores_every_xml_event_schema_order") {
+    source := "<?xml version='1.0'?>\n<!DOCTYPE r [<!ENTITY e 'v'>]>\n<r xmlns='urn:r' xmlns:p='urn:p' a='x&amp;y'>t&amp;<![CDATA[c]]><!--m--><?go now?><p:c/></r>\n".as_bytes()
+    scanner := XmlPull.StreamScanner.new(source.len(), XmlPull.ParseOptions.safe()).expect("stream scanner")
+    scanner.push(source).expect("stream input")
+    scanner.finish_input().expect("finish stream input")
+    tags: [String:Bool] = [String:Bool].new()
+    loop {
+        event := match scanner.next().expect("stream event") { Some(event) => event, None => break }
+        expected := XmlPull.stream_event_value(event)
+        match &expected {
+            XmlPull.Value.Object(entries) => {
+                if entries.iter().find(fn(pair) { pair.0 == "$xml_event" }) is Some((_, XmlPull.Value.Text(tag))) { _ :: tags.insert(tag.clone(), true) }
+            },
+            _ => {}
+        }
+        actual := xml_from_ct(&xml_to_ct(expected.clone())).expect("reconstruct event")
+        assert_eq(actual, expected)
+    }
+    expected_tags := ["cdata", "comment", "declaration", "doctype", "document_end", "document_start", "document_whitespace", "element_end", "element_start", "entity_ref", "processing_instruction", "text"]
+    actual_tags := tags.keys().cloned().collect()
+    actual_tags.sort()
+    assert_eq(actual_tags, expected_tags)
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2396
+#Test("hostile_deep_snapshots_match_runtime_rejection") {
+    source := "<r xmlns='urn:\troot' xmlns:p='urn:p' a='x\t y' b='z'><?go   now?></r>"
+    parsed := fn() { XmlPull.parse_document(source).expect("parse XML") }
+    assert_parity := fn(value: XmlPull.Value, source: String, label: String) {
+        runtime := XmlPull.render_document(&value).expect("runtime render")
+        comptime := xml_render(&xml_to_ct(^value))
+        assert_eq(comptime, runtime, label)
+        assert_ne(runtime, source, "{label} trusted stale raw")
+    }
+    reordered_name := parsed()
+    root := first(field_mut(&reordered_name, "children"))
+    semantic := field_mut(field_mut(root, "open_lexical"), "semantic")
+    match field_mut(semantic, "name") { XmlPull.Value.Object(name) => name.reverse(), _ => panic("name object") }
+    assert_parity(^reordered_name, source, "reordered XMLName snapshot")
+    reordered_attributes := parsed()
+    root := first(field_mut(&reordered_attributes, "children"))
+    semantic := field_mut(field_mut(root, "open_lexical"), "semantic")
+    match field_mut(semantic, "attributes") { XmlPull.Value.Array(attributes) => attributes.reverse(), _ => panic("attribute array") }
+    assert_parity(^reordered_attributes, source, "reordered attribute snapshot")
+    stale_namespace := parsed()
+    root := first(field_mut(&stale_namespace, "children"))
+    semantic := field_mut(field_mut(root, "open_lexical"), "semantic")
+    namespace := first(field_mut(semantic, "namespaces"))
+    field_mut(namespace, "namespace_uri").* = XmlPull.Value.Text("urn:stale")
+    assert_parity(^stale_namespace, source, "stale namespace snapshot")
+    stale_leaf := parsed()
+    root := first(field_mut(&stale_leaf, "children"))
+    processing_instruction := first(field_mut(root, "children"))
+    semantic := field_mut(field_mut(processing_instruction, "lexical"), "semantic")
+    field_mut(semantic, "value").* = XmlPull.Value.Text("stale")
+    assert_parity(^stale_leaf, source, "stale leaf snapshot")
+    simple_source := "<r  a='x'/>"
+    simple := fn() { XmlPull.parse_document(simple_source).expect("parse XML") }
+    reordered_live_name := simple()
+    root := first(field_mut(&reordered_live_name, "children"))
+    match field_mut(root, "name") { XmlPull.Value.Object(name) => name.reverse(), _ => panic("name object") }
+    assert_parity(^reordered_live_name, simple_source, "reordered live XMLName")
+    extra_lexical_key := simple()
+    root := first(field_mut(&extra_lexical_key, "children"))
+    match field_mut(root, "open_lexical") { XmlPull.Value.Object(lexical) => lexical.push(("extra", XmlPull.Value.Null)), _ => panic("lexical object") }
+    assert_parity(^extra_lexical_key, simple_source, "extra lexical key")
+    both_raw_forms := simple()
+    root := first(field_mut(&both_raw_forms, "children"))
+    field_mut(field_mut(root, "open_lexical"), "raw_bytes").* = XmlPull.Value.Array([XmlPull.Value.Int(60)])
+    assert_parity(^both_raw_forms, simple_source, "both lexical raw forms")
+    wrong_raw_type := simple()
+    root := first(field_mut(&wrong_raw_type, "children"))
+    field_mut(field_mut(root, "open_lexical"), "raw_text").* = XmlPull.Value.Int(1)
+    assert_parity(^wrong_raw_type, simple_source, "wrong lexical raw type")
+}
+
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2837
+fn safe() -> jet_foundation.CborKernel.Options { cbor_options(None).unwrap() }
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:2842
+#Test("hostile_errors_keep_owned_kind_offset_path_and_reason") {
+    cases: [([U8],Bool,String,USize,String,String)] = [
+        ([0xff], false, "Syntax", 0, "$", "CBOR break outside an indefinite container"),
+        ([0x81], false, "Truncated", 1, "$[0]", "CBOR value is missing"),
+        ([0xc0, 1], false, "Unsupported", 0, "$", "CBOR tags are unsupported"),
+        ([1, 2], false, "TrailingData", 1, "$", "trailing CBOR data after root value")
+    ]
+    for (wire, allow_bytes, kind, offset, path, reason) in cases {
+        error := cbor_decode(&wire, &safe(), allow_bytes).unwrap_err()
+        assert_eq((error.kind, error.byte_offset, error.path, error.reason), (kind, offset, path, reason))
+    }
+    strict := safe()
+    strict.require_canonical = true
+    error := cbor_decode(&[0x18, 1], &strict, false).unwrap_err()
+    assert_eq((error.kind, error.byte_offset, error.path, error.reason), ("NonCanonical", 0, "$", "CBOR argument does not use its shortest form"))
+}
+
+use jet_comptime.Comptime.EncodingLite.[MAX_TOML_DEPTH, MAX_YAML_DEPTH, MAX_YAML_NODES, toml_parse, yaml_parse]
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3559
+#Test("hostile_toml_and_yaml_nesting_is_rejected") {
+    toml_depth := MAX_TOML_DEPTH + 1
+    toml := "value = {\"[\".repeat(toml_depth)}0{\"]\".repeat(toml_depth)}"
+    assert(toml_parse(&toml).is_err())
+    yaml_depth := MAX_YAML_DEPTH + 1
+    yaml := String.new()
+    for depth in 0..yaml_depth {
+        yaml.push_str(&"  ".repeat(depth))
+        yaml.push_str("value:\n")
+    }
+    yaml.push_str(&"  ".repeat(yaml_depth))
+    yaml.push_str("0\n")
+    assert(yaml_parse(&yaml).is_err())
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3580
+#Test("hostile_yaml_alias_clones_are_rejected_by_the_shared_budget") {
+    yaml := "base: &a\n  value: x\nitems:\n".to_string()
+    for _ in 0..=(MAX_YAML_NODES / 2) { yaml.push_str("  - *a\n") }
+    assert(yaml_parse(&yaml).is_err())
+}
+// Rust: crates/jet-comptime/src/Comptime/EncodingLite.rs:3589
+#Test("dotted_toml_key_depth_is_bounded_before_assembly") {
+    dotted := (0..MAX_TOML_DEPTH).map(fn(index) { "key{index}" }).collect<[String]>().join(".")
+    assert(toml_parse(&"{dotted} = 0").is_ok())
+    too_deep := (0..=MAX_TOML_DEPTH).map(fn(index) { "key{index}" }).collect<[String]>().join(".")
+    assert(toml_parse(&"{too_deep} = 0").is_err())
+    header := (0..(MAX_TOML_DEPTH - 1)).map(fn(index) { "table{index}" }).collect<[String]>().join(".")
+    assert(toml_parse(&"[{header}]\nleaf = 0").is_ok())
+    too_deep_header := (0..MAX_TOML_DEPTH).map(fn(index) { "table{index}" }).collect<[String]>().join(".")
+    assert(toml_parse(&"[{too_deep_header}]\nleaf = 0").is_err())
+}

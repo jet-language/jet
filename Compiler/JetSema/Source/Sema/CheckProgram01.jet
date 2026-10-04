@@ -1,765 +1,366 @@
-// PORT-PENDING 0423 crates-jet-sema-src-sema-checkerpatchable-module-group: crates/jet-sema/src/Sema/CheckerReferences.rs:1-761
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Reference identities emitted only after checker lookup succeeds.
-//RS 
-//RS use super::*;
-//RS 
-//RS impl<'a> Checker<'a> {
-//RS     fn unused_name_is_intentional(name: &str) -> bool {
-//RS         name.is_empty()
-//RS             || name.starts_with('_')
-//RS             || name == crate::Syntax::KW_SELF
-//RS             || name == "result"
-//RS             || name == crate::Syntax::AMBIENT_ERR
-//RS             || name == crate::Syntax::KW_IT
-//RS     }
-//RS 
-//RS     pub(crate) fn note_unused_binding(&mut self, name: &str, span: Span, parameter: bool) {
-//RS         if Self::unused_name_is_intentional(name)
-//RS             || span.start >= span.end
-//RS             || self
-//RS                 .unused_bindings
-//RS                 .iter()
-//RS                 .any(|binding| binding.span == span)
-//RS         {
-//RS             return;
-//RS         }
-//RS         self.unused_bindings.push(UnusedBinding {
-//RS             name: name.to_string(),
-//RS             span,
-//RS             parameter,
-//RS         });
-//RS     }
-//RS 
-//RS     pub(crate) fn mark_local_write(&mut self, name: &str) {
-//RS         if let Some(def_span) = self.lookup(name).map(|info| info.def_span) {
-//RS             self.unused_binding_refs.insert(def_span);
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn mark_local_name_reference(&mut self, name: &str) {
-//RS         if let Some(def_span) = self.lookup(name).map(|info| info.def_span) {
-//RS             self.unused_binding_refs.insert(def_span);
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn mark_default_parameter_references(&mut self, params: &[crate::AST::Param]) {
-//RS         for param in params {
-//RS             let Some(default) = &param.default else {
-//RS                 continue;
-//RS             };
-//RS             let mut copy = default.clone();
-//RS             copy.for_each_expr_mut(|node| match node {
-//RS                 Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
-//RS                     self.mark_local_name_reference(name);
-//RS                 }
-//RS                 Expr::Call(call) => self.mark_local_name_reference(&call.name),
-//RS                 _ => {}
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn emit_unused_binding_lints(&mut self) {
-//RS         for binding in std::mem::take(&mut self.unused_bindings) {
-//RS             if self.unused_binding_refs.contains(&binding.span) {
-//RS                 continue;
-//RS             }
-//RS             self.name_ledger
-//RS                 .record_structure_fact(jet_foundation::Names::StructureFact::new(
-//RS                     jet_foundation::Names::StructureFactKind::Liveness,
-//RS                     binding.name.clone(),
-//RS                     self.module_path.to_string(),
-//RS                     binding.span,
-//RS                     "unused",
-//RS                     if binding.parameter {
-//RS                         "parameter is never read"
-//RS                     } else {
-//RS                         "binding is never read"
-//RS                     },
-//RS                     Some("_name".to_string()),
-//RS                 ));
-//RS             let code = if binding.parameter { "L0102" } else { "L0101" };
-//RS             let name = binding.name.as_str();
-//RS             let diagnostic = Diagnostic::from_row(code, &[("name", name)], Some(binding.span))
-//RS                 .with_edit(self.unused_binding_edit(&binding, name));
-//RS             self.diags.push(diagnostic);
-//RS         }
-//RS     }
-//RS 
-//RS     fn unused_binding_edit(
-//RS         &self,
-//RS         binding: &UnusedBinding,
-//RS         name: &str,
-//RS     ) -> crate::Diagnostics::TextEdit {
-//RS         if !binding.parameter {
-//RS             if let Some(span) = self.side_effect_free_binding_span(binding.span) {
-//RS                 return crate::Diagnostics::TextEdit {
-//RS                     span,
-//RS                     new_text: String::new(),
-//RS                 };
-//RS             }
-//RS         }
-//RS         crate::Diagnostics::TextEdit {
-//RS             span: binding.span,
-//RS             new_text: format!("_{name}"),
-//RS         }
-//RS     }
-//RS 
-//RS     fn side_effect_free_binding_span(&self, name_span: Span) -> Option<Span> {
-//RS         let function = find_function_by_span(&self.items, self.current_function_span)?;
-//RS         let binding = binding_by_span(&function.body, name_span)?;
-//RS         if binding.pattern.is_some()
-//RS             || binding.is_comptime
-//RS             || binding.ct.is_some()
-//RS             || binding.uninit
-//RS             || binding.meta.is_some()
-//RS             || !binding.markers.is_empty()
-//RS             || binding.arena_view
-//RS             || binding.string_view
-//RS             || binding.gc_promotion.is_some()
-//RS             || binding.gc_transferred
-//RS             || !literal_without_effects(&binding.init)
-//RS         {
-//RS             return None;
-//RS         }
-//RS         Some(Span::new(binding.name_span.start, binding.init.span().end))
-//RS     }
-//RS 
-//RS     pub(crate) fn record_reference_anchor(
-//RS         &mut self,
-//RS         span: Span,
-//RS         module_path: &str,
-//RS         kind: &str,
-//RS         def_span: Span,
-//RS     ) {
-//RS         self.record_reference_anchor_with_identity(span, module_path, kind, def_span, None);
-//RS     }
-//RS 
-//RS     fn record_reference_anchor_with_identity(
-//RS         &mut self,
-//RS         span: Span,
-//RS         module_path: &str,
-//RS         kind: &str,
-//RS         def_span: Span,
-//RS         semantic_identity: Option<String>,
-//RS     ) {
-//RS         self.name_ledger.record_reference(
-//RS             self.module_path.to_string(),
-//RS             span.start,
-//RS             span.end,
-//RS             jet_foundation::Names::NameReference {
-//RS                 module_path: module_path.to_string(),
-//RS                 kind: kind.to_string(),
-//RS                 def_span,
-//RS                 semantic_identity,
-//RS             },
-//RS         );
-//RS     }
-//RS 
-//RS     pub(crate) fn record_semantic_reference(&mut self, span: Span, semantic_identity: String) {
-//RS         self.name_ledger.record_reference(
-//RS             self.module_path.to_string(),
-//RS             span.start,
-//RS             span.end,
-//RS             jet_foundation::Names::NameReference {
-//RS                 module_path: self.module_path.to_string(),
-//RS                 kind: "semantic".to_string(),
-//RS                 def_span: span,
-//RS                 semantic_identity: Some(semantic_identity),
-//RS             },
-//RS         );
-//RS     }
-//RS 
-//RS     pub(crate) fn record_local_reference(&mut self, span: Span, info: &LocalInfo) {
-//RS         self.unused_binding_refs.insert(info.def_span);
-//RS         let kind = if info.param_conv.is_some() {
-//RS             "param"
-//RS         } else {
-//RS             "local"
-//RS         };
-//RS         let module_path = self.module_path.to_string();
-//RS         self.record_reference_anchor(span, &module_path, kind, info.def_span);
-//RS     }
-//RS 
-//RS     pub(crate) fn record_function_reference(&mut self, module_idx: usize, name: &str, span: Span) {
-//RS         let target = self
-//RS             .name_ledger
-//RS             .declaration(module_idx, name)
-//RS             .map(|declaration| {
-//RS                 (
-//RS                     self.name_ledger
-//RS                         .module_path(module_idx)
-//RS                         .unwrap_or(self.module_path)
-//RS                         .to_string(),
-//RS                     declaration.span,
-//RS                 )
-//RS             });
-//RS         if let Some((module_path, def_span)) = target {
-//RS             let identity = self.name_ledger.semantic_identity(module_idx, name);
-//RS             self.record_reference_anchor_with_identity(
-//RS                 span,
-//RS                 &module_path,
-//RS                 "function",
-//RS                 def_span,
-//RS                 identity,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn record_current_function_reference(&mut self, name: &str, span: Span) {
-//RS         self.record_function_reference(self.module_idx, name, span);
-//RS     }
-//RS     /// Resolve a named callback through the same declaration maps sema uses for
-//RS     /// direct and unqualified imported names. The returned key is the canonical
-//RS     /// module-qualified identity consumed by TIR/MIR and artifact publication.
-//RS     fn callback_function_target(&self, name: &str) -> Option<(usize, String)> {
-//RS         if self.funcs.contains_key(name) {
-//RS             return Some((self.module_idx, name.to_string()));
-//RS         }
-//RS         if let Some(scope) = self.inline_module.as_ref() {
-//RS             if let Some(mangled) = self
-//RS                 .inline_unqualified
-//RS                 .get(&(scope.clone(), name.to_string()))
-//RS             {
-//RS                 return Some((self.module_idx, mangled.clone()));
-//RS             }
-//RS             if let Some((function, module)) = self
-//RS                 .inline_unqualified_file
-//RS                 .get(&(scope.clone(), name.to_string()))
-//RS             {
-//RS                 return Some((*module, function.clone()));
-//RS             }
-//RS         }
-//RS         if let Some(mangled) = self.unqualified.get(name) {
-//RS             return Some((self.module_idx, mangled.clone()));
-//RS         }
-//RS         self.unqualified_file
-//RS             .get(name)
-//RS             .map(|(function, module)| (*module, function.clone()))
-//RS     }
-//RS 
-//RS     pub(crate) fn callback_function_key(&self, name: &str) -> Option<String> {
-//RS         let (module, function) = self.callback_function_target(name)?;
-//RS         self.name_ledger.semantic_identity(module, &function)
-//RS     }
-//RS 
-//RS     pub(crate) fn callback_function_is_safe(&self, name: &str) -> bool {
-//RS         let Some((module, function)) = self.callback_function_target(name) else {
-//RS             return false;
-//RS         };
-//RS         let signature = if module == self.module_idx {
-//RS             self.funcs.get(&function)
-//RS         } else {
-//RS             self.modules
-//RS                 .and_then(|modules| modules.get(module))
-//RS                 .and_then(|module| module.funcs.get(&function))
-//RS         };
-//RS         signature.is_some_and(|signature| {
-//RS             !signature.is_extern && signature.is_foreign_thread_safe
-//RS         })
-//RS     }
-//RS 
-//RS 
-//RS     pub(crate) fn record_const_reference(&mut self, name: &str, span: Span) {
-//RS         let target = self
-//RS             .name_ledger
-//RS             .declaration(self.module_idx, name)
-//RS             .map(|declaration| {
-//RS                 (
-//RS                     self.name_ledger
-//RS                         .module_path(self.module_idx)
-//RS                         .unwrap_or(self.module_path)
-//RS                         .to_string(),
-//RS                     declaration.span,
-//RS                 )
-//RS             });
-//RS         if let Some((module_path, def_span)) = target {
-//RS             let identity = self.name_ledger.semantic_identity(self.module_idx, name);
-//RS             self.record_reference_anchor_with_identity(
-//RS                 span,
-//RS                 &module_path,
-//RS                 "const",
-//RS                 def_span,
-//RS                 identity,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn record_import_alias_use(&mut self, alias: &str) -> Option<Span> {
-//RS         if self.lookup(alias).is_some() {
-//RS             return None;
-//RS         }
-//RS         record_import_alias_use_in_ledger(self.name_ledger, self.module_idx, alias)
-//RS     }
-//RS 
-//RS     pub(crate) fn record_import_alias_reference(&mut self, alias: &str, span: Span) {
-//RS         let def_span = self.record_import_alias_use(alias);
-//RS         if let Some(def_span) = def_span {
-//RS             let module_path = self.module_path.to_string();
-//RS             let identity = self.name_ledger.alias_identity(self.module_idx, def_span);
-//RS             self.record_reference_anchor_with_identity(
-//RS                 span,
-//RS                 &module_path,
-//RS                 "import_alias",
-//RS                 def_span,
-//RS                 identity,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn record_method_reference(&mut self, type_name: &str, method: &str, span: Span) {
-//RS         let (import_ns, leaf) = Self::split_type_name(type_name);
-//RS         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
-//RS             return;
-//RS         };
-//RS         let name = format!("{leaf}.{method}");
-//RS         let target = self
-//RS             .name_ledger
-//RS             .declaration(owner, &name)
-//RS             .or_else(|| self.name_ledger.declaration(self.module_idx, &name))
-//RS             .map(|declaration| {
-//RS                 (
-//RS                     self.name_ledger
-//RS                         .module_path(declaration.module)
-//RS                         .unwrap_or(self.module_path)
-//RS                         .to_string(),
-//RS                     declaration.span,
-//RS                 )
-//RS             });
-//RS         if let Some((module_path, def_span)) = target {
-//RS             let identity = self
-//RS                 .name_ledger
-//RS                 .declaration(owner, &name)
-//RS                 .or_else(|| self.name_ledger.declaration(self.module_idx, &name))
-//RS                 .and_then(|declaration| {
-//RS                     self.name_ledger
-//RS                         .semantic_identity(declaration.module, &name)
-//RS                 });
-//RS             self.record_reference_anchor_with_identity(
-//RS                 span,
-//RS                 &module_path,
-//RS                 "function",
-//RS                 def_span,
-//RS                 identity,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn record_field_reference(
-//RS         &mut self,
-//RS         owner: usize,
-//RS         type_name: &str,
-//RS         member: &str,
-//RS         span: Span,
-//RS     ) {
-//RS         let (_, leaf) = Self::split_type_name(type_name);
-//RS         let name = format!("{leaf}.{member}");
-//RS         let target = self
-//RS             .name_ledger
-//RS             .declaration(owner, &name)
-//RS             .map(|declaration| {
-//RS                 (
-//RS                     self.name_ledger
-//RS                         .module_path(declaration.module)
-//RS                         .unwrap_or(self.module_path)
-//RS                         .to_string(),
-//RS                     declaration.span,
-//RS                 )
-//RS             });
-//RS         if let Some((module_path, def_span)) = target {
-//RS             let identity = self.name_ledger.semantic_identity(owner, &name);
-//RS             self.record_reference_anchor_with_identity(
-//RS                 span,
-//RS                 &module_path,
-//RS                 "field",
-//RS                 def_span,
-//RS                 identity,
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn record_import_alias_use_in_ledger(
-//RS     ledger: &mut jet_foundation::Names::NameLedger,
-//RS     module_idx: usize,
-//RS     alias: &str,
-//RS ) -> Option<Span> {
-//RS     let def_span = ledger
-//RS         .effective_alias(module_idx, alias)
-//RS         .map(|alias| alias.span);
-//RS     if let Some(def_span) = def_span {
-//RS         ledger.record_alias_use(module_idx, def_span);
-//RS     }
-//RS     def_span
-//RS }
-//RS pub(crate) fn record_comptime_import_alias_uses(
-//RS     ledger: &mut jet_foundation::Names::NameLedger,
-//RS     module_idx: usize,
-//RS     expression: &Expr,
-//RS     imports: &HashMap<String, String>,
-//RS     globals: &HashMap<String, crate::Comptime::CtValue>,
-//RS ) {
-//RS     let global_aliases: HashSet<String> = imports
-//RS         .keys()
-//RS         .filter(|alias| globals.contains_key(*alias))
-//RS         .cloned()
-//RS         .collect();
-//RS     let mut shadowed = HashSet::new();
-//RS     expression.for_each_expr(|node| match node {
-//RS         Expr::Lambda(lambda) => {
-//RS             let mut lambda_aliases = HashSet::new();
-//RS             for parameter in &lambda.params {
-//RS                 if imports.contains_key(&parameter.name) {
-//RS                     lambda_aliases.insert(parameter.name.clone());
-//RS                 }
-//RS             }
-//RS             for (name, _) in &lambda.take_names {
-//RS                 if imports.contains_key(name) {
-//RS                     lambda_aliases.insert(name.clone());
-//RS                 }
-//RS             }
-//RS             match &lambda.body {
-//RS                 crate::AST::LambdaBody::Expr(body) => {
-//RS                     mark_shadowed_expr(body, &lambda_aliases, &mut shadowed);
-//RS                 }
-//RS                 crate::AST::LambdaBody::Block(body) => {
-//RS                     mark_shadowed_stmts(body, &lambda_aliases, &mut shadowed);
-//RS                     collect_shadowed_stmts(body, imports, &mut shadowed);
-//RS                 }
-//RS             }
-//RS         }
-//RS         Expr::If {
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS             ..
-//RS         } => {
-//RS             let then_aliases = collect_shadowed_stmts(then_body, imports, &mut shadowed);
-//RS             mark_shadowed_expr(then_value, &then_aliases, &mut shadowed);
-//RS             let else_aliases = collect_shadowed_stmts(else_body, imports, &mut shadowed);
-//RS             mark_shadowed_expr(else_value, &else_aliases, &mut shadowed);
-//RS         }
-//RS         Expr::OrFallback {
-//RS             fallback: crate::AST::OrFallback::Block { body, value, .. },
-//RS             ..
-//RS         } => {
-//RS             let mut fallback_aliases = HashSet::new();
-//RS             if imports.contains_key(crate::Syntax::AMBIENT_ERR) {
-//RS                 fallback_aliases.insert(crate::Syntax::AMBIENT_ERR.to_string());
-//RS             }
-//RS             mark_shadowed_stmts(body, &fallback_aliases, &mut shadowed);
-//RS             fallback_aliases.extend(collect_shadowed_stmts(body, imports, &mut shadowed));
-//RS             if let Some(value) = value {
-//RS                 mark_shadowed_expr(value, &fallback_aliases, &mut shadowed);
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     });
-//RS 
-//RS     expression.for_each_expr(|node| {
-//RS         let alias = match node {
-//RS             // `alias.f(…)`, or a member-imported `f(…)` whose local name is
-//RS             // itself the import binding.
-//RS             Expr::Call(call) => Some(
-//RS                 call.name
-//RS                     .split_once('.')
-//RS                     .map_or(call.name.as_str(), |(alias, _)| alias),
-//RS             ),
-//RS             Expr::Field(base, ..)
-//RS             | Expr::Index { base, .. }
-//RS             | Expr::Slice { base, .. }
-//RS             | Expr::MethodCall { receiver: base, .. }
-//RS             | Expr::OptField { base, .. } => import_alias_root(base),
-//RS             Expr::CallValue { callee, .. } => import_alias_root(callee),
-//RS             Expr::PtrFromAddr { alias, .. } => Some(alias.as_str()),
-//RS             Expr::StructLit {
-//RS                 import_ns: Some(alias),
-//RS                 ..
-//RS             } => Some(alias.as_str()),
-//RS             _ => None,
-//RS         };
-//RS         let Some(alias) = alias else {
-//RS             return;
-//RS         };
-//RS         if !imports.contains_key(alias)
-//RS             || global_aliases.contains(alias)
-//RS             || shadowed.contains(&(node.span(), alias.to_string()))
-//RS         {
-//RS             return;
-//RS         }
-//RS         record_import_alias_use_in_ledger(ledger, module_idx, alias);
-//RS     });
-//RS }
-//RS 
-//RS fn mark_shadowed_expr(
-//RS     expression: &Expr,
-//RS     aliases: &HashSet<String>,
-//RS     shadowed: &mut HashSet<(Span, String)>,
-//RS ) {
-//RS     if aliases.is_empty() {
-//RS         return;
-//RS     }
-//RS     expression.for_each_expr(|node| {
-//RS         for alias in aliases {
-//RS             shadowed.insert((node.span(), alias.clone()));
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS fn mark_shadowed_stmt(
-//RS     statement: &Stmt,
-//RS     aliases: &HashSet<String>,
-//RS     shadowed: &mut HashSet<(Span, String)>,
-//RS ) {
-//RS     if aliases.is_empty() {
-//RS         return;
-//RS     }
-//RS     statement.for_each_expr(|node| {
-//RS         for alias in aliases {
-//RS             shadowed.insert((node.span(), alias.clone()));
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS fn mark_shadowed_stmts(
-//RS     statements: &[Stmt],
-//RS     aliases: &HashSet<String>,
-//RS     shadowed: &mut HashSet<(Span, String)>,
-//RS ) {
-//RS     for statement in statements {
-//RS         mark_shadowed_stmt(statement, aliases, shadowed);
-//RS     }
-//RS }
-//RS 
-//RS fn binding_import_aliases(
-//RS     binding: &crate::AST::Binding,
-//RS     imports: &HashMap<String, String>,
-//RS ) -> HashSet<String> {
-//RS     let mut aliases = HashSet::new();
-//RS     if !binding.name.is_empty() && imports.contains_key(&binding.name) {
-//RS         aliases.insert(binding.name.clone());
-//RS     }
-//RS     if let Some(pattern) = &binding.pattern {
-//RS         for name in pattern.names() {
-//RS             if imports.contains_key(&name.name) {
-//RS                 aliases.insert(name.name.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     aliases
-//RS }
-//RS 
-//RS fn collect_shadowed_stmts(
-//RS     statements: &[Stmt],
-//RS     imports: &HashMap<String, String>,
-//RS     shadowed: &mut HashSet<(Span, String)>,
-//RS ) -> HashSet<String> {
-//RS     let mut bound = HashSet::new();
-//RS     for statement in statements {
-//RS         mark_shadowed_stmt(statement, &bound, shadowed);
-//RS         collect_shadowed_stmt_scopes(statement, imports, shadowed);
-//RS         if let Stmt::Val(binding) = statement {
-//RS             bound.extend(binding_import_aliases(binding, imports));
-//RS         }
-//RS     }
-//RS     bound
-//RS }
-//RS 
-//RS fn collect_shadowed_stmt_scopes(
-//RS     statement: &Stmt,
-//RS     imports: &HashMap<String, String>,
-//RS     shadowed: &mut HashSet<(Span, String)>,
-//RS ) {
-//RS     match statement {
-//RS         Stmt::While { body, .. }
-//RS         | Stmt::Loop { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::Layout { body, .. } => {
-//RS             collect_shadowed_stmts(body, imports, shadowed);
-//RS         }
-//RS         Stmt::For {
-//RS             var, var2, body, ..
-//RS         } => {
-//RS             let mut aliases = HashSet::new();
-//RS             if imports.contains_key(var) {
-//RS                 aliases.insert(var.clone());
-//RS             }
-//RS             if let Some((var2, _)) = var2 {
-//RS                 if imports.contains_key(var2) {
-//RS                     aliases.insert(var2.clone());
-//RS                 }
-//RS             }
-//RS             mark_shadowed_stmts(body, &aliases, shadowed);
-//RS             collect_shadowed_stmts(body, imports, shadowed);
-//RS         }
-//RS         Stmt::Switch {
-//RS             arms, else_body, ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             arms, else_body, ..
-//RS         } => {
-//RS             for arm in arms {
-//RS                 collect_shadowed_stmts(&arm.body, imports, shadowed);
-//RS             }
-//RS             if let Some(body) = else_body {
-//RS                 collect_shadowed_stmts(body, imports, shadowed);
-//RS             }
-//RS         }
-//RS         Stmt::CountedLoop {
-//RS             init,
-//RS             cond,
-//RS             step,
-//RS             body,
-//RS             ..
-//RS         } => {
-//RS             let aliases = binding_import_aliases(init, imports);
-//RS             mark_shadowed_expr(cond, &aliases, shadowed);
-//RS             if let Some(step) = step {
-//RS                 mark_shadowed_stmt(step, &aliases, shadowed);
-//RS                 collect_shadowed_stmt_scopes(step, imports, shadowed);
-//RS             }
-//RS             mark_shadowed_stmts(body, &aliases, shadowed);
-//RS             collect_shadowed_stmts(body, imports, shadowed);
-//RS         }
-//RS         Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } => {
-//RS             collect_shadowed_stmts(body, imports, shadowed);
-//RS         }
-//RS         Stmt::TaskGroup { body, .. } => {
-//RS             collect_shadowed_stmts(body, imports, shadowed);
-//RS         }
-//RS         Stmt::ContextBlock { body, .. } => {
-//RS             collect_shadowed_stmts(body, imports, shadowed);
-//RS         }
-//RS         Stmt::AssumeDet { body, .. } => {
-//RS             collect_shadowed_stmts(body, imports, shadowed);
-//RS         }
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             collect_shadowed_stmts(then_body, imports, shadowed);
-//RS             if let Some(body) = else_body {
-//RS                 collect_shadowed_stmts(body, imports, shadowed);
-//RS             }
-//RS         }
-//RS         Stmt::ScopeMember { body, .. } => {
-//RS             collect_shadowed_stmts(body, imports, shadowed);
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn import_alias_root(expr: &Expr) -> Option<&str> {
-//RS     match expr {
-//RS         Expr::Ident(name, _) => Some(name),
-//RS         Expr::Paren(inner, _)
-//RS         | Expr::Copy(inner, _)
-//RS         | Expr::Place(inner, _, _)
-//RS         | Expr::Deref(inner, _)
-//RS         | Expr::RawOf(inner, _)
-//RS         | Expr::Tainted(inner, _, _)
-//RS         | Expr::Present(inner, _)
-//RS         | Expr::Ok(inner, _)
-//RS         | Expr::Err(inner, _)
-//RS         | Expr::Try(inner, _, _, _) => import_alias_root(inner),
-//RS         Expr::OrFallback { value, .. } => import_alias_root(value),
-//RS         Expr::Index { base, .. }
-//RS         | Expr::Slice { base, .. }
-//RS         | Expr::Field(base, ..)
-//RS         | Expr::OptField { base, .. } => import_alias_root(base),
-//RS         Expr::MethodCall { receiver, .. } => import_alias_root(receiver),
-//RS         Expr::CallValue { callee, .. } => import_alias_root(callee),
-//RS         Expr::PtrFromAddr { alias, .. } => Some(alias.as_str()),
-//RS         Expr::StructLit {
-//RS             import_ns: Some(alias),
-//RS             ..
-//RS         } => Some(alias.as_str()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn find_function_by_span<'a>(
-//RS     items: &'a [crate::AST::Item],
-//RS     span: Span,
-//RS ) -> Option<&'a crate::AST::Func> {
-//RS     for item in items {
-//RS         let function = match item {
-//RS             crate::AST::Item::Func(function) if function.span == span => Some(function),
-//RS             crate::AST::Item::Struct(definition) => definition
-//RS                 .methods
-//RS                 .iter()
-//RS                 .find(|function| function.span == span)
-//RS                 .or_else(|| {
-//RS                     definition
-//RS                         .trait_impls
-//RS                         .iter()
-//RS                         .flat_map(|implementation| implementation.methods.iter())
-//RS                         .find(|function| function.span == span)
-//RS                 }),
-//RS             crate::AST::Item::Enum(definition) => definition
-//RS                 .methods
-//RS                 .iter()
-//RS                 .find(|function| function.span == span)
-//RS                 .or_else(|| {
-//RS                     definition
-//RS                         .trait_impls
-//RS                         .iter()
-//RS                         .flat_map(|implementation| implementation.methods.iter())
-//RS                         .find(|function| function.span == span)
-//RS                 }),
-//RS             crate::AST::Item::Impl(implementation) => implementation
-//RS                 .methods
-//RS                 .iter()
-//RS                 .find(|function| function.span == span),
-//RS             crate::AST::Item::CodeModule(module) => module
-//RS                 .body
-//RS                 .as_deref()
-//RS                 .and_then(|body| find_function_by_span(body, span)),
-//RS             _ => None,
-//RS         };
-//RS         if function.is_some() {
-//RS             return function;
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn binding_by_span<'a>(body: &'a [Stmt], span: Span) -> Option<&'a crate::AST::Binding> {
-//RS     for statement in body {
-//RS         let binding = match statement {
-//RS             Stmt::Val(binding) => Some(binding),
-//RS             _ => None,
-//RS         };
-//RS         if binding.is_some_and(|binding| binding.name_span == span) {
-//RS             return binding;
-//RS         }
-//RS         for nested in crate::Sema::UnsafeObligations::nested_bodies(statement) {
-//RS             if let Some(binding) = binding_by_span(nested, span) {
-//RS                 return Some(binding);
-//RS             }
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn literal_without_effects(expr: &Expr) -> bool {
-//RS     match expr.without_parens() {
-//RS         Expr::Str(parts, _) => parts.iter().all(|part| matches!(part, StrPart::Lit(_))),
-//RS         Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) | Expr::Absent(..) => {
-//RS             true
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-// END-PORT-PENDING 0423 crates/jet-sema/src/Sema/CheckerReferences.rs:1-761
+// Reference identities emitted only after checker lookup succeeds.
+use jet_foundation.[Span, Expr, Stmt, StrPart, Item, Func, Binding, Param, Diagnostic, TextEdit, NameLedger, NameReference, StructureFact, StructureFactKind]
+use jet_foundation.Syntax
+use jet_sema.[Checker, LocalInfo, UnusedBinding]
+use jet_sema.Comptime.CtValue
+use jet_sema.UnsafeObligations.nested_bodies
+use std.collections.HashSet
 
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:6
+    fn unused_name_is_intentional(name: String) -> Bool {
+        name.is_empty() || name.starts_with('_') || name == Syntax.KW_SELF || name == "result"
+            || name == Syntax.AMBIENT_ERR || name == Syntax.KW_IT
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:15
+    pub fn note_unused_binding(self: &Self, name: String, span: Span, parameter: Bool) {
+        if Self.unused_name_is_intentional(name) || span.start >= span.end
+            || self.unused_bindings.iter().any(fn(binding) { binding.span == span }) -> return
+        self.unused_bindings.push(UnusedBinding{name: name.to_string(), span: span, parameter: parameter})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:32
+    pub fn mark_local_write(self: &Self, name: String) {
+        if self.lookup(name) == .Val(info) { _ :: self.unused_binding_refs.insert(info.def_span) }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:38
+    pub fn mark_local_name_reference(self: &Self, name: String) {
+        if self.lookup(name) == .Val(info) { _ :: self.unused_binding_refs.insert(info.def_span) }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:44
+    pub fn mark_default_parameter_references(self: &Self, params: [Param]) {
+        loop param in params {
+            if param.default != .Val(default) -> continue
+            copy := default.clone()
+            &copy.for_each_expr_mut(fn(node) {
+                if node == {
+                    .Ident(name, _) | .ComptimeName(name: name, ..) -> &self.mark_local_name_reference(name)
+                    .Call(call) -> &self.mark_local_name_reference(call.name)
+                    _ -> {}
+                }
+            })
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:60
+    pub fn emit_unused_binding_lints(self: &Self) {
+        bindings :: ^self.unused_bindings
+        self.unused_bindings = []
+        loop binding in bindings {
+            if self.unused_binding_refs.contains(binding.span) -> continue
+            self.name_ledger.record_structure_fact(StructureFact.new(.Liveness,
+                binding.name.clone(), self.module_path.to_string(), binding.span, "unused",
+                if binding.parameter -> "parameter is never read" else -> "binding is never read", Val("_name")))
+            code :: if binding.parameter -> "L0102" else -> "L0101"
+            diagnostic :: Diagnostic.from_row(code, [("name", binding.name)], Val(binding.span))
+                .with_edit(self.unused_binding_edit(binding, binding.name))
+            self.diags.push(diagnostic)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:87
+    fn unused_binding_edit(self: Self, binding: UnusedBinding, name: String) -> TextEdit {
+        if !binding.parameter {
+            if self.side_effect_free_binding_span(binding.span) == .Val(span) {
+                return TextEdit{span: span, new_text: String.new()}
+            }
+        }
+        TextEdit{span: binding.span, new_text: "_{name}"}
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:106
+    fn side_effect_free_binding_span(self: Self, name_span: Span) -> Span? {
+        if find_function_by_span(self.items, self.current_function_span) != .Val(function) -> return None
+        if binding_by_span(function.body, name_span) != .Val(binding) -> return None
+        if binding.pattern.is_some() || binding.is_comptime || binding.ct.is_some() || binding.uninit
+            || binding.meta.is_some() || !binding.markers.is_empty() || binding.arena_view || binding.string_view
+            || binding.gc_promotion.is_some() || binding.gc_transferred || !literal_without_effects(binding.init) -> return None
+        Val(Span.new(binding.name_span.start, binding.init.span().end))
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:126
+    pub fn record_reference_anchor(self: &Self, span: Span, module_path: String, kind: String, def_span: Span) {
+        &self.record_reference_anchor_with_identity(span, module_path, kind, def_span, None)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:136
+    fn record_reference_anchor_with_identity(self: &Self, span: Span, module_path: String, kind: String, def_span: Span, semantic_identity: String?) {
+        self.name_ledger.record_reference(self.module_path.to_string(), span.start, span.end,
+            NameReference{module_path: module_path.to_string(), kind: kind.to_string(), def_span: def_span, semantic_identity: semantic_identity})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:157
+    pub fn record_semantic_reference(self: &Self, span: Span, semantic_identity: String) {
+        self.name_ledger.record_reference(self.module_path.to_string(), span.start, span.end,
+            NameReference{module_path: self.module_path.to_string(), kind: "semantic", def_span: span, semantic_identity: Val(semantic_identity)})
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:171
+    pub fn record_local_reference(self: &Self, span: Span, info: LocalInfo) {
+        _ :: self.unused_binding_refs.insert(info.def_span)
+        kind :: if info.param_conv.is_some() -> "param" else -> "local"
+        module_path :: self.module_path.to_string()
+        &self.record_reference_anchor(span, module_path, kind, info.def_span)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:182
+    pub fn record_function_reference(self: &Self, module_idx: USize, name: String, span: Span) {
+        if self.name_ledger.declaration(module_idx, name) == .Val(declaration) {
+            module_path :: (self.name_ledger.module_path(module_idx) ?? self.module_path).to_string()
+            def_span :: declaration.span
+            identity :: self.name_ledger.semantic_identity(module_idx, name)
+            &self.record_reference_anchor_with_identity(span, module_path, "function", def_span, identity)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:207
+    pub fn record_current_function_reference(self: &Self, name: String, span: Span) {
+        &self.record_function_reference(self.module_idx, name, span)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:213
+    fn callback_function_target(self: Self, name: String) -> (USize, String)? {
+        if self.funcs.contains_key(name) -> return Val((self.module_idx, name.to_string()))
+        if self.inline_module == .Val(scope) {
+            if self.inline_unqualified.get((scope.clone(), name.to_string())) == .Val(mangled) {
+                return Val((self.module_idx, mangled.clone()))
+            }
+            if self.inline_unqualified_file.get((scope.clone(), name.to_string())) == .Val((function, module)) {
+                return Val((module, function.clone()))
+            }
+        }
+        if self.unqualified.get(name) == .Val(mangled) -> return Val((self.module_idx, mangled.clone()))
+        if self.unqualified_file.get(name) == .Val((function, module)) -> return Val((module, function.clone()))
+        None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:239
+    pub fn callback_function_key(self: Self, name: String) -> String? {
+        if self.callback_function_target(name) != .Val((module, function)) -> return None
+        self.name_ledger.semantic_identity(module, function)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:244
+    pub fn callback_function_is_safe(self: Self, name: String) -> Bool {
+        if self.callback_function_target(name) != .Val((module, function)) -> return false
+        signature :: if module == self.module_idx -> self.funcs.get(function)
+            else -> self.modules.and_then(fn(modules) { modules.get(module) }).and_then(fn(owner) { owner.funcs.get(function) })
+        signature.is_some_and(fn(sig) { !sig.is_extern && sig.is_foreign_thread_safe })
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:261
+    pub fn record_const_reference(self: &Self, name: String, span: Span) {
+        if self.name_ledger.declaration(self.module_idx, name) == .Val(declaration) {
+            module_path :: (self.name_ledger.module_path(self.module_idx) ?? self.module_path).to_string()
+            def_span :: declaration.span
+            identity :: self.name_ledger.semantic_identity(self.module_idx, name)
+            &self.record_reference_anchor_with_identity(span, module_path, "const", def_span, identity)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:286
+    pub fn record_import_alias_use(self: &Self, alias: String) -> Span? {
+        if self.lookup(alias).is_some() -> return None
+        record_import_alias_use_in_ledger(&self.name_ledger, self.module_idx, alias)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:293
+    pub fn record_import_alias_reference(self: &Self, alias: String, span: Span) {
+        if &self.record_import_alias_use(alias) == .Val(def_span) {
+            module_path :: self.module_path.to_string()
+            identity :: self.name_ledger.alias_identity(self.module_idx, def_span)
+            &self.record_reference_anchor_with_identity(span, module_path, "import_alias", def_span, identity)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:308
+    pub fn record_method_reference(self: &Self, type_name: String, method: String, span: Span) {
+        (import_ns, leaf) :: Self.split_type_name(type_name)
+        if self.struct_owner_module(leaf, import_ns) != .Val(owner) -> return
+        name :: "{leaf}.{method}"
+        declaration :: self.name_ledger.declaration(owner, name) or_else fn() { self.name_ledger.declaration(self.module_idx, name) }
+        if declaration == .Val(decl) {
+            module_path :: (self.name_ledger.module_path(decl.module) ?? self.module_path).to_string()
+            def_span :: decl.span
+            identity :: self.name_ledger.semantic_identity(decl.module, name)
+            &self.record_reference_anchor_with_identity(span, module_path, "function", def_span, identity)
+        }
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:346
+    pub fn record_field_reference(self: &Self, owner: USize, type_name: String, member: String, span: Span) {
+        (_, leaf) :: Self.split_type_name(type_name)
+        name :: "{leaf}.{member}"
+        if self.name_ledger.declaration(owner, name) == .Val(decl) {
+            module_path :: (self.name_ledger.module_path(decl.module) ?? self.module_path).to_string()
+            def_span :: decl.span
+            identity :: self.name_ledger.semantic_identity(owner, name)
+            &self.record_reference_anchor_with_identity(span, module_path, "field", def_span, identity)
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:380
+fn record_import_alias_use_in_ledger(ledger: &NameLedger, module_idx: USize, alias: String) -> Span? {
+    def_span :: ledger.effective_alias(module_idx, alias).map(fn(alias) { alias.span })
+    if def_span == .Val(span) { ledger.record_alias_use(module_idx, span) }
+    def_span
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:393
+pub fn record_comptime_import_alias_uses(ledger: &NameLedger, module_idx: USize, expression: Expr, imports: [String:String], globals: [String:CtValue]) {
+    global_aliases := HashSet[String].new()
+    loop alias in imports.keys() { if globals.contains_key(alias) { _ :: global_aliases.insert(alias.clone()) } }
+    shadowed := HashSet[(Span, String)].new()
+    expression.for_each_expr(fn(node) {
+        if node == {
+            .Lambda(lambda) -> {
+                lambda_aliases := HashSet[String].new()
+                loop parameter in lambda.params {
+                    if imports.contains_key(parameter.name) { _ :: lambda_aliases.insert(parameter.name.clone()) }
+                }
+                loop (name, _) in lambda.take_names {
+                    if imports.contains_key(name) { _ :: lambda_aliases.insert(name.clone()) }
+                }
+                if lambda.body == {
+                    .Expr(body) -> mark_shadowed_expr(body, lambda_aliases, &shadowed)
+                    .Block(body) -> {
+                        mark_shadowed_stmts(body, lambda_aliases, &shadowed)
+                        _ :: collect_shadowed_stmts(body, imports, &shadowed)
+                    }
+                }
+            }
+            .If(then_body: then_body, then_value: then_value, else_body: else_body, else_value: else_value, ..) -> {
+                then_aliases :: collect_shadowed_stmts(then_body, imports, &shadowed)
+                mark_shadowed_expr(then_value, then_aliases, &shadowed)
+                else_aliases :: collect_shadowed_stmts(else_body, imports, &shadowed)
+                mark_shadowed_expr(else_value, else_aliases, &shadowed)
+            }
+            .OrFallback(fallback: .Block(body: body, value: value, ..), ..) -> {
+                fallback_aliases := HashSet[String].new()
+                if imports.contains_key(Syntax.AMBIENT_ERR) { _ :: fallback_aliases.insert(Syntax.AMBIENT_ERR.to_string()) }
+                mark_shadowed_stmts(body, fallback_aliases, &shadowed)
+                fallback_aliases.extend(collect_shadowed_stmts(body, imports, &shadowed))
+                if value == .Val(value) { mark_shadowed_expr(value, fallback_aliases, &shadowed) }
+            }
+            _ -> {}
+        }
+    })
+    expression.for_each_expr(fn(node) {
+        alias :: if node == {
+            .Call(call) -> Val(call.name.split_once('.').map_or(call.name, fn(alias, _) { alias }))
+            .Field(base, ..) | .Index(base: base, ..) | .Slice(base: base, ..)
+                | .MethodCall(receiver: base, ..) | .OptField(base: base, ..) -> import_alias_root(base)
+            .CallValue(callee: callee, ..) -> import_alias_root(callee)
+            .PtrFromAddr(alias: alias, ..) -> Val(alias)
+            .StructLit(import_ns: .Val(alias), ..) -> Val(alias)
+            _ -> None
+        }
+        if alias != .Val(alias) -> return
+        if !imports.contains_key(alias) || global_aliases.contains(alias) || shadowed.contains((node.span(), alias.to_string())) -> return
+        _ :: record_import_alias_use_in_ledger(&ledger, module_idx, alias)
+    })
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:493
+fn mark_shadowed_expr(expression: Expr, aliases: HashSet[String], shadowed: &HashSet[(Span, String)]) {
+    if aliases.is_empty() -> return
+    expression.for_each_expr(fn(node) { loop alias in aliases { _ :: shadowed.insert((node.span(), alias.clone())) } })
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:508
+fn mark_shadowed_stmt(statement: Stmt, aliases: HashSet[String], shadowed: &HashSet[(Span, String)]) {
+    if aliases.is_empty() -> return
+    statement.for_each_expr(fn(node) { loop alias in aliases { _ :: shadowed.insert((node.span(), alias.clone())) } })
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:523
+fn mark_shadowed_stmts(statements: [Stmt], aliases: HashSet[String], shadowed: &HashSet[(Span, String)]) {
+    loop statement in statements { mark_shadowed_stmt(statement, aliases, &shadowed) }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:533
+fn binding_import_aliases(binding: Binding, imports: [String:String]) -> HashSet[String] {
+    aliases := HashSet[String].new()
+    if !binding.name.is_empty() && imports.contains_key(binding.name) { _ :: aliases.insert(binding.name.clone()) }
+    if binding.pattern == .Val(pattern) {
+        loop name in pattern.names() { if imports.contains_key(name.name) { _ :: aliases.insert(name.name.clone()) } }
+    }
+    ^aliases
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:551
+fn collect_shadowed_stmts(statements: [Stmt], imports: [String:String], shadowed: &HashSet[(Span, String)]) -> HashSet[String] {
+    bound := HashSet[String].new()
+    loop statement in statements {
+        mark_shadowed_stmt(statement, bound, &shadowed)
+        collect_shadowed_stmt_scopes(statement, imports, &shadowed)
+        if statement == .Val(binding) { bound.extend(binding_import_aliases(binding, imports)) }
+    }
+    ^bound
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:567
+fn collect_shadowed_stmt_scopes(statement: Stmt, imports: [String:String], shadowed: &HashSet[(Span, String)]) {
+    if statement == {
+        .While(body: body, ..) | .Loop(body: body, ..) | .Reactive(body: body, ..) | .Shield(body: body, ..)
+            | .Switched(body: body, ..) | .Region(body: body, ..) | .Policy(body: body, ..)
+            | .AuthorityScope(body: body, ..) | .ComptimeBlock(body: body, ..) | .Live(body: body, ..)
+            | .Transact(body: body, ..) | .Layout(body: body, ..) -> { _ :: collect_shadowed_stmts(body, imports, &shadowed) }
+        .For(var: var, var2: var2, body: body, ..) -> {
+            aliases := HashSet[String].new()
+            if imports.contains_key(var) { _ :: aliases.insert(var.clone()) }
+            if var2 == .Val((var2, _)) { if imports.contains_key(var2) { _ :: aliases.insert(var2.clone()) } }
+            mark_shadowed_stmts(body, aliases, &shadowed)
+            _ :: collect_shadowed_stmts(body, imports, &shadowed)
+        }
+        .Switch(arms: arms, else_body: else_body, ..) | .ComptimeSwitch(arms: arms, else_body: else_body, ..) -> {
+            loop arm in arms { _ :: collect_shadowed_stmts(arm.body, imports, &shadowed) }
+            if else_body == .Val(body) { _ :: collect_shadowed_stmts(body, imports, &shadowed) }
+        }
+        .CountedLoop(init: init, cond: cond, step: step, body: body, ..) -> {
+            aliases :: binding_import_aliases(init, imports)
+            mark_shadowed_expr(cond, aliases, &shadowed)
+            if step == .Val(step) {
+                mark_shadowed_stmt(step, aliases, &shadowed)
+                collect_shadowed_stmt_scopes(step, imports, &shadowed)
+            }
+            mark_shadowed_stmts(body, aliases, &shadowed)
+            _ :: collect_shadowed_stmts(body, imports, &shadowed)
+        }
+        .Unsafe(body: body, ..) | .Impure(body: body, ..) | .TaskGroup(body: body, ..)
+            | .ContextBlock(body: body, ..) | .AssumeDet(body: body, ..) | .ScopeMember(body: body, ..) -> {
+            _ :: collect_shadowed_stmts(body, imports, &shadowed)
+        }
+        .ComptimeIf(then_body: then_body, else_body: else_body, ..) -> {
+            _ :: collect_shadowed_stmts(then_body, imports, &shadowed)
+            if else_body == .Val(body) { _ :: collect_shadowed_stmts(body, imports, &shadowed) }
+        }
+        _ -> {}
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:660
+fn import_alias_root(expr: Expr) -> String? from expr {
+    if expr == {
+        .Ident(name, _) -> Val(name)
+        .Paren(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Deref(inner, _) | .RawOf(inner, _)
+            | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Try(inner, _, _, _) -> import_alias_root(inner)
+        .OrFallback(value: value, ..) -> import_alias_root(value)
+        .Index(base: base, ..) | .Slice(base: base, ..) | .Field(base, ..) | .OptField(base: base, ..) -> import_alias_root(base)
+        .MethodCall(receiver: receiver, ..) -> import_alias_root(receiver)
+        .CallValue(callee: callee, ..) -> import_alias_root(callee)
+        .PtrFromAddr(alias: alias, ..) | .StructLit(import_ns: .Val(alias), ..) -> Val(alias)
+        _ -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:689
+fn find_function_by_span(items: [Item], span: Span) -> Func? from items {
+    loop item in items {
+        function :: if item == {
+            .Func(function) -> if function.span == span -> Val(function) else -> None
+            .Struct(definition) -> definition.methods.iter().find(fn(function) { function.span == span }).or_else(fn() {
+                definition.trait_impls.iter().flat_map(fn(implementation) { implementation.methods.iter() }).find(fn(function) { function.span == span })
+            })
+            .Enum(definition) -> definition.methods.iter().find(fn(function) { function.span == span }).or_else(fn() {
+                definition.trait_impls.iter().flat_map(fn(implementation) { implementation.methods.iter() }).find(fn(function) { function.span == span })
+            })
+            .Impl(implementation) -> implementation.methods.iter().find(fn(function) { function.span == span })
+            .CodeModule(module) -> module.body.and_then(fn(body) { find_function_by_span(body, span) })
+            _ -> None
+        }
+        if function.is_some() -> return function
+    }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:735
+fn binding_by_span(body: [Stmt], span: Span) -> Binding? from body {
+    loop statement in body {
+        if statement == .Val(binding) { if binding.name_span == span -> return Val(binding) }
+        loop nested in nested_bodies(statement) {
+            if binding_by_span(nested, span) == .Val(binding) -> return Val(binding)
+        }
+    }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/CheckerReferences.rs:753
+fn literal_without_effects(expr: Expr) -> Bool {
+    if expr.without_parens() == {
+        .Str(parts, _) -> parts.iter().all(fn(part) { if part == .Lit(_) -> true else -> false })
+        .Int(..) | .Float(..) | .Bool(..) | .Char(..) | .Absent(..) -> true
+        _ -> false
+    }
+}

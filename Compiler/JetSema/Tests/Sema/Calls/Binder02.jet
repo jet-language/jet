@@ -1,0 +1,15 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/variadic.rs:68-99 (behavioral control; no inline Rust tests)
+#Test("variadic_call_still_requires_every_fixed_argument") {
+    diagnostics :: statements05_diagnostics("fn collect(first: Int, rest: ...Int) {{ _ :: first }}\nfn run() {{ collect() }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0104" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/variadic.rs:107-200 (behavioral control)
+#Test("spread_and_single_concrete_variadic_values_keep_list_types") {
+    diagnostics :: statements05_diagnostics("fn collect(rest: ...Int) Int {{ rest.len() }}\nfn run() {{ _ :: collect(1)\n _ :: collect(...[1, 2])\n _ :: collect() }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+    rejected :: statements05_diagnostics("fn collect(rest: ...Int) {{ }}\nfn run() {{ collect(...[\"wrong\"]) }}\n")
+    assert(rejected.any(fn(d: Diagnostic) { d.code == "E1311" }))
+}

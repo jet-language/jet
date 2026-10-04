@@ -1,0 +1,477 @@
+use jet_codegen.Entry.scheduler.*
+use jet_codegen.Entry.task_group as jet_std
+use std.sync.[Arc, Mutex, OnceLock, mpsc]
+use std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
+use std.time.[Duration, Instant]
+use std.[thread, fs, panic]
+// GATE #4494: tests exercise real threads, atomics, native unwind and Drop cleanup.
+
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:140
+#Test("the_jit_scheduler_is_the_prelude_scheduler") {
+    // The retired JIT host's anti-refork guard now checks the shared Jet seam.
+    root :: OSPath.new("Compiler/JetCodegen/Source")
+    assert(!root.join("scheduler.jet").exists(), "a second scheduler must not shadow Prelude.Scheduler")
+    assert(!root.join("scheduler").exists(), "a second scheduler directory must not shadow Prelude.Scheduler")
+    entry :: fs.read_to_string(root.join("Entry.jet")).unwrap()
+    assert(entry.matches("pub use jet_codegen.Prelude.Scheduler.*").count() == 1)
+    assert(entry.matches("pub use jet_codegen.Prelude.Stream.*").count() == 1)
+    assert(!root.join("stream.jet").exists(), "use the one Prelude Stream runtime")
+    stream :: fs.read_to_string(OSPath.new("crates/jet-codegen/src/Prelude/Stream.rs")).unwrap()
+    assert(!stream.contains("StreamControl"), "the producer child's JetTaskControl is the one cancel fact")
+    evaluator :: fs.read_to_string(OSPath.new("crates/jet-codegen/src/Codegen/MIREval.rs")).unwrap()
+    assert(!evaluator.contains("stream_wait_check") && !evaluator.contains("stream_cancel"), "yield must reach task_wait_check, not a stream-only twin")
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:195
+#Test("stream_pull_releases_exactly_one_yield_at_a_time") {
+    events :: Arc.new(Mutex.new([String]{}))
+    (sender, consumer) := jet_stream<I64>()
+    producer_events :: Arc.clone(&events)
+    producer :: thread.spawn(fn() {
+        producer_events.lock().unwrap().push("before-1")
+        assert(sender.send_stream(1))
+        producer_events.lock().unwrap().push("after-1")
+        assert(!sender.send_stream(2))
+        producer_events.lock().unwrap().push("after-2")
+    })
+    assert(consumer.pull() == Val(1))
+    assert(*events.lock().unwrap() == ["before-1"])
+    assert(consumer.pull() == Val(2))
+    assert(*events.lock().unwrap() == ["before-1", "after-1"])
+    drop(^consumer)
+    producer.join().unwrap()
+    assert(*events.lock().unwrap() == ["before-1", "after-1", "after-2"])
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:221
+#Test("stream_sender_observes_explicit_consumer_close") {
+    (sender, consumer) := jet_stream<I64>()
+    (done_tx, done_rx) :: mpsc.sync_channel<Unit>(1)
+    producer :: thread.spawn(fn() {
+        assert(!sender.send_stream(1))
+        done_tx.send(()).unwrap()
+    })
+    assert(consumer.pull() == Val(1))
+    drop(^consumer)
+    done_rx.recv_timeout(Duration.from_secs(1)).expect("closed Stream did not release its producer")
+    producer.join().unwrap()
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:239
+struct CleanupMark { flag: Arc<AtomicBool> }
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:242
+impl Drop for CleanupMark {
+    fn drop(self: &CleanupMark) -> Unit Never! { self.flag.store(true, Ordering.Release) }
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:238
+#Test("stream_drop_uses_the_shared_task_cancel_cleanup_path") {
+    cleaned :: Arc.new(AtomicBool.new(false))
+    continued :: Arc.new(AtomicBool.new(false))
+    producer_cleaned :: Arc.clone(&cleaned)
+    producer_continued :: Arc.clone(&continued)
+    stream :: jet_stream_task(fn(sender) {
+        _cleanup :: CleanupMark(flag: producer_cleaned)
+        assert(sender.send_stream(1))
+        producer_continued.store(true, Ordering.Release)
+    })
+    iterator := stream.into_iter()
+    assert(iterator.next() == Val(1))
+    drop(^iterator)
+    assert(cleaned.load(Ordering.Acquire))
+    assert(!continued.load(Ordering.Acquire))
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:276
+// The second Rust-local CleanupMark/drop (279) has the identical body above.
+#Test("one_cancel_law_stops_a_stream_producer_and_a_task_child_alike") {
+    stream_cleaned :: Arc.new(AtomicBool.new(false))
+    stream_continued :: Arc.new(AtomicBool.new(false))
+    cleaned :: Arc.clone(&stream_cleaned)
+    continued :: Arc.clone(&stream_continued)
+    stream :: jet_stream_task(fn(sender) {
+        _cleanup :: CleanupMark(flag: cleaned)
+        assert(sender.send_stream(1))
+        continued.store(true, Ordering.Release)
+    })
+    iterator := stream.into_iter()
+    assert(iterator.next() == Val(1))
+    drop(^iterator)
+    task_cleaned :: Arc.new(AtomicBool.new(false))
+    task_continued :: Arc.new(AtomicBool.new(false))
+    cleaned_task :: Arc.clone(&task_cleaned)
+    continued_task :: Arc.clone(&task_continued)
+    channel :: JetSchedulerChannel<I64>.new()
+    parked :: channel.clone()
+    control :: JetTaskControl.new()
+    join :: jet_scheduler_spawn_with_control(fn() {
+        _cleanup :: CleanupMark(flag: cleaned_task)
+        _ :: parked.receive()
+        continued_task.store(true, Ordering.Release)
+    }, control.clone())
+    control.cancel()
+    if join.rx.recv_timeout(Duration.from_secs(5)) == {
+        .Ok(.Cancelled) -> {}
+        _ -> panic.panic_any("a cancelled task child must report Cancelled")
+    }
+    assert((stream_cleaned.load(Ordering.Acquire), stream_continued.load(Ordering.Acquire)) == (task_cleaned.load(Ordering.Acquire), task_continued.load(Ordering.Acquire)), "a stream producer and a task child must be freed by one law")
+    assert(stream_cleaned.load(Ordering.Acquire))
+    assert(!stream_continued.load(Ordering.Acquire))
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:344
+struct SendFromCleanup { sender: JetSchedulerSender<I64>, delivered: Arc<AtomicBool> }
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:346
+impl Drop for SendFromCleanup {
+    fn drop(self: &SendFromCleanup) -> Unit Never! { self.delivered.store(self.sender.send(7), Ordering.Release) }
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:337
+#Test("a_cancel_reached_from_cleanup_defers_instead_of_aborting") {
+    channel :: JetSchedulerChannel<I64>.new()
+    delivered :: Arc.new(AtomicBool.new(false))
+    control :: JetTaskControl.new()
+    control.cancel()
+    jet_scheduler_set_task_control(Val(control))
+    jet_scheduler_task_panic_enter()
+    cleanup_delivered :: Arc.clone(&delivered)
+    sender :: channel.sender()
+    payload :: panic.catch_unwind(panic.AssertUnwindSafe(fn() {
+        _cleanup :: SendFromCleanup(sender: sender, delivered: cleanup_delivered)
+        panic.panic_any("producer failure")
+    })).expect_err("the original unwind must reach the task frame")
+    assert(payload.downcast_ref<String>().copied() == Val("producer failure"), "a cancel observed during cleanup must not replace the in-flight failure")
+    assert(delivered.load(Ordering.Acquire), "a wait point reached from drop glue must complete instead of raising")
+    assert(channel.try_receive() == Val(7))
+    assert(!jet_scheduler_shielded(), "the cleanup deferral lasts exactly as long as the unwind")
+    raised :: panic.catch_unwind(panic.AssertUnwindSafe(fn() { channel.sender().send(8) })).expect_err("a cancelled wait point must still unwind outside cleanup")
+    assert(jet_scheduler_is_cancel_unwind(raised.as_ref()), "deferral must preserve the live wait point payload")
+    assert(channel.try_receive() == None)
+    jet_scheduler_task_panic_leave()
+    jet_scheduler_set_task_control(None)
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:397
+#Test("stream_producer_failure_still_completes_consumer") {
+    (sender, consumer) := jet_stream<I64>()
+    producer :: thread.spawn(fn() {
+        result :: panic.catch_unwind(panic.AssertUnwindSafe(fn() {
+            assert(sender.send_stream(1))
+            panic.panic_any("producer failure")
+        }))
+        if result.is_err() -> sender.fail()
+    })
+    assert(consumer.pull() == Val(1))
+    assert(consumer.pull() == None)
+    assert(consumer.failed())
+    drop(^consumer)
+    producer.join().unwrap()
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:417
+#Test("spawned_deadline_keeps_its_rendered_diagnostic") {
+    join :: jet_scheduler_spawn(fn() -> I64 Never! { panic.panic_any(JetDeadlineUnwind(rendered: "deadline detail")) })
+    if join.rx.recv_timeout(Duration.from_secs(1)).unwrap() == {
+        .Deadline(rendered) -> assert(rendered == "deadline detail")
+        _ -> panic.panic_any("spawned deadline must stay distinct from a task panic")
+    }
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:432
+#Test("zero_capacity_channel_clamps_to_a_buffer_of_one") {
+    channel :: JetSchedulerChannel<I64>.bounded(0)
+    sender :: channel.sender()
+    (done_tx, done_rx) :: mpsc.sync_channel<Unit>(1)
+    worker :: thread.spawn(fn() { assert(sender.send(7)); done_tx.send(()).unwrap() })
+    done_rx.recv_timeout(Duration.from_secs(1)).unwrap()
+    assert(channel.receive() == Val(7))
+    worker.join().unwrap()
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:452
+fn ready_entries_in_reverse_completion_order() -> [(JetSchedulerJoin<I64>, Arc<JetTaskControl>)] Never! {
+    (slow_tx, slow_rx) :: mpsc.sync_channel<JetSchedulerResult<I64>>(1)
+    (fast_tx, fast_rx) :: mpsc.sync_channel<JetSchedulerResult<I64>>(1)
+    fast_tx.send(JetSchedulerResult.Value(42)).unwrap()
+    slow_tx.send(JetSchedulerResult.Value(7)).unwrap()
+    fast_order :: Arc.new(OnceLock.new())
+    fast_order.set(0).unwrap()
+    slow_order :: Arc.new(OnceLock.new())
+    slow_order.set(1).unwrap()
+    [
+        (JetSchedulerJoin(rx: slow_rx, pending: Mutex.new(None), completion_order: slow_order, completion_wait: ParkSlot.new(), identity: "scheduler-host-slow"), JetTaskControl.new()),
+        (JetSchedulerJoin(rx: fast_rx, pending: Mutex.new(None), completion_order: fast_order, completion_wait: ParkSlot.new(), identity: "scheduler-host-fast"), JetTaskControl.new())
+    ]
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:489
+#Test("race_uses_completion_order_when_results_are_already_ready") {
+    assert(jet_scheduler_race(ready_entries_in_reverse_completion_order()).unwrap() == 42)
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:497
+#Test("any_uses_completion_order_when_results_are_already_ready") {
+    assert(jet_scheduler_any(ready_entries_in_reverse_completion_order()).unwrap() == 42)
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:505
+#Test("timed_select_returns_the_timer_arm_value") {
+    channel :: JetSchedulerChannel<I64>.new()
+    assert(jet_scheduler_select_int_channels_timed(&[channel], [(0, 99)]) == 99)
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:514
+#Test("timed_select_preserves_a_non_int_payload") {
+    channel :: JetSchedulerChannel<String>.new()
+    assert(jet_scheduler_select_int_channels_timed(&[channel], [(0, "generic")]) == "generic")
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:529
+fn run_backpressure_scale(n: I64) -> Unit Never! {
+    handle :: thread.spawn(fn() {
+        before :: jet_scheduler_metric_park_blocks()
+        channel :: JetSchedulerChannel<I64>.bounded(1)
+        for _ in 0..n {
+            sender :: channel.sender()
+            _ :: jet_scheduler_spawn(fn() { sender.send(1) })
+        }
+        total := 0
+        for _ in 0..n -> total += channel.receive().expect("channel closed before all sends drained")
+        jet_scheduler_drain()
+        blocks :: jet_scheduler_metric_park_blocks().saturating_sub(before)
+        inner :: channel.select_inner()
+        st :: inner.state.lock().unwrap()
+        (total, blocks, st.send_waiters.len(), st.recv_waiters.len())
+    })
+    start :: Instant.now()
+    budget :: Duration.from_secs(120)
+    while !handle.is_finished() {
+        assert(start.elapsed() < budget, "scale workload hung: a park never woke (lost-wake / deadlock)")
+        thread.sleep(Duration.from_millis(20))
+    }
+    (total, blocks, send_leak, recv_leak) :: handle.join().expect("scale worker panicked")
+    assert(total == n, "every task's message must be delivered exactly once")
+    assert(blocks > 0, "no task ever blocked on a park condvar under capacity-1 backpressure — the scheduler is busy-waiting, not parking")
+    assert(send_leak == 0, "send waiters leaked after drain (unbounded growth)")
+    assert(recv_leak == 0, "recv waiters leaked after drain (unbounded growth)")
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:580
+#Test("scale_10k_tasks_park_under_backpressure") { run_backpressure_scale(10_000) }
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:586
+#Ignore("local 100k parked-task scale proof; run with --ignored")
+#Test("scale_100k_tasks_park_under_backpressure") { run_backpressure_scale(100_000) }
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:595
+#Test("pause_holds_a_running_task_at_its_wait_point_until_resume") {
+    control :: JetTaskControl.new()
+    ready :: JetSchedulerChannel<I64>.new()
+    ready_tx :: ready.sender()
+    work :: JetSchedulerChannel<I64>.new()
+    work_tx :: work.sender()
+    progressed :: Arc.new(AtomicUsize.new(0))
+    task_progressed :: progressed.clone()
+    _join :: jet_scheduler_spawn_with_control(fn() {
+        ready_tx.send(1)
+        _ :: work.receive()
+        task_progressed.fetch_add(1, Ordering.SeqCst)
+    }, control.clone())
+    assert(ready.receive() == Val(1))
+    control.pause()
+    work_tx.send(42)
+    thread.sleep(Duration.from_millis(60))
+    assert(progressed.load(Ordering.SeqCst) == 0, "paused task consumed the value and ran past its wait point — pause is not real")
+    control.resume()
+    start :: Instant.now()
+    while progressed.load(Ordering.SeqCst) == 0 {
+        assert(start.elapsed() < Duration.from_secs(5), "resumed task never progressed")
+        thread.yield_now()
+    }
+    jet_scheduler_drain()
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:649
+struct DropMark { outcome: Arc<AtomicUsize> }
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:651
+impl Drop for DropMark {
+    fn drop(self: &DropMark) -> Unit Never! {
+        _ :: self.outcome.compare_exchange(0, 2, Ordering.SeqCst, Ordering.SeqCst)
+    }
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:645
+#Test("cancel_unwinds_a_parked_task_runs_drop_and_reports_cancelled") {
+    control :: JetTaskControl.new()
+    ready :: JetSchedulerChannel<I64>.new()
+    ready_tx :: ready.sender()
+    work :: JetSchedulerChannel<I64>.new()
+    outcome :: Arc.new(AtomicUsize.new(0))
+    task_outcome :: outcome.clone()
+    join :: jet_scheduler_spawn_with_control(fn() {
+        _mark :: DropMark(outcome: task_outcome.clone())
+        ready_tx.send(1)
+        _got :: work.receive()
+        task_outcome.store(1, Ordering.SeqCst)
+        0
+    }, control.clone())
+    assert(ready.receive() == Val(1))
+    control.cancel()
+    start :: Instant.now()
+    loop {
+        if join.try_recv() == {
+            .Val(.Cancelled) -> break
+            .Val(other) -> {
+                name :: if other == {
+                    .Value(_) -> "Value"
+                    .Panicked(_) -> "Panicked"
+                    .Cancelled -> panic.panic_any("unreachable")
+                    .Deadline(_) -> "Deadline"
+                }
+                panic.panic_any("cancelled task must report Cancelled, got {name}")
+            }
+            .None -> {
+                assert(start.elapsed() < Duration.from_secs(5), "cancel did not unwind the parked task")
+                thread.yield_now()
+            }
+        }
+    }
+    assert(outcome.load(Ordering.SeqCst) == 2, "unwind must run Drop cleanup and skip the code after the wait point")
+    jet_scheduler_drain()
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:718
+#Test("shielded_region_defers_cancel_until_it_exits") {
+    control :: JetTaskControl.new()
+    ready :: JetSchedulerChannel<I64>.new()
+    ready_tx :: ready.sender()
+    work :: JetSchedulerChannel<I64>.new()
+    work_tx :: work.sender()
+    stage :: Arc.new(AtomicUsize.new(0))
+    task_stage :: stage.clone()
+    join :: jet_scheduler_spawn_with_control(fn() {
+        ready_tx.send(1)
+        jet_scheduler_shield_enter()
+        got :: work.receive()
+        if got == Val(42) -> task_stage.store(1, Ordering.SeqCst)
+        jet_scheduler_shield_leave()
+        task_stage.store(9, Ordering.SeqCst)
+        0
+    }, control.clone())
+    assert(ready.receive() == Val(1))
+    control.cancel()
+    thread.sleep(Duration.from_millis(30))
+    assert(stage.load(Ordering.SeqCst) == 0, "shielded recv completed or unwound before its value arrived")
+    work_tx.send(42)
+    start :: Instant.now()
+    loop {
+        if join.try_recv() == {
+            .Val(.Cancelled) -> break
+            .Val(_) -> panic.panic_any("shielded task must end Cancelled after the region")
+            .None -> {
+                assert(start.elapsed() < Duration.from_secs(5), "deferred cancel never landed at shield exit")
+                thread.yield_now()
+            }
+        }
+    }
+    assert(stage.load(Ordering.SeqCst) == 1, "shielded recv must complete (stage 1) and the post-shield code must not run")
+    jet_scheduler_drain()
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:785
+#Test("shield_defers_deadline_until_it_exits") {
+    jet_scheduler_set_task_control(Val(JetTaskControl.new()))
+    jet_scheduler_task_panic_enter()
+    result :: panic.catch_unwind(panic.AssertUnwindSafe(fn() {
+        jet_scheduler_shield_enter()
+        TEST_DEADLINE_EXCEEDED.with(fn(d) { d.set(true) })
+        slot :: ParkSlot.new()
+        slot.wake()
+        jet_scheduler_yield("shielded wait", &slot, Val(Duration.from_millis(1)))
+        jet_scheduler_shield_leave()
+        "no-unwind"
+    }))
+    TEST_DEADLINE_EXCEEDED.with(fn(d) { d.set(false) })
+    jet_scheduler_set_task_control(None)
+    jet_scheduler_task_panic_leave()
+    assert(result.is_err(), "deadline deferred by the shield must unwind when the region exits")
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:809
+#Test("non_unwind_wait_boundary_returns_typed_deadline_for_yield") {
+    jet_scheduler_set_task_control(Val(JetTaskControl.new()))
+    jet_scheduler_task_panic_enter()
+    TEST_DEADLINE_EXCEEDED.with(fn(deadline) { deadline.set(true) })
+    result :: jet_scheduler_wait_without_unwind(jet_scheduler_yield_now)
+    TEST_DEADLINE_EXCEEDED.with(fn(deadline) { deadline.set(false) })
+    jet_scheduler_set_task_control(None)
+    jet_scheduler_task_panic_leave()
+    if result == {
+        .Deadline(rendered) -> assert(rendered == jet_std.jet_task_deadline("task yield").render())
+        _ -> panic.panic_any("yield deadline must cross native boundary as typed status")
+    }
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:828
+struct EmittedShieldGuard<F> { callback: F? }
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:830
+impl<F: FnOnce> Drop for EmittedShieldGuard<F> {
+    fn drop(self: &EmittedShieldGuard<F>) -> Unit Never! {
+        if self.callback.take() == { .Val(f) -> f(); .None -> {} }
+    }
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:837
+// The macro's lexical guard is expanded at each control-flow site below.
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:845
+fn emitted_early_return() -> I64 Never! {
+    jet_scheduler_shield_enter()
+    _shield_guard :: EmittedShieldGuard(callback: Val(fn() { jet_scheduler_shield_leave() }))
+    return 17
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:849
+fn emitted_try_exit() -> I64 Err! {
+    jet_scheduler_shield_enter()
+    _shield_guard :: EmittedShieldGuard(callback: Val(fn() { jet_scheduler_shield_leave() }))
+    _ :: Err("stop")?
+    return 1
+}
+// Rust: crates/jet-codegen/src/SchedulerHost.rs:855
+#Test("emitted_shield_guard_covers_control_flow_unwind_and_reset_matrix") {
+    TEST_DEADLINE_EXCEEDED.with(fn(d) { d.set(true) })
+    {
+        jet_scheduler_shield_enter()
+        _shield_guard :: EmittedShieldGuard(callback: Val(fn() { jet_scheduler_shield_leave() }))
+        assert(!jet_scheduler_shielded())
+    }
+    TEST_DEADLINE_EXCEEDED.with(fn(d) { d.set(false) })
+    jet_scheduler_task_panic_enter()
+    jet_scheduler_set_task_control(Val(JetTaskControl.new()))
+    {
+        jet_scheduler_shield_enter()
+        _shield_guard :: EmittedShieldGuard(callback: Val(fn() { jet_scheduler_shield_leave() }))
+        assert(jet_scheduler_shielded())
+        {
+            jet_scheduler_shield_enter()
+            _inner_guard :: EmittedShieldGuard(callback: Val(fn() { jet_scheduler_shield_leave() }))
+            assert(jet_scheduler_shielded())
+        }
+        assert(jet_scheduler_shielded())
+    }
+    assert(!jet_scheduler_shielded(), "nested guards must balance depth")
+    assert(emitted_early_return() == 17)
+    assert(!jet_scheduler_shielded(), "return must drop the guard")
+    assert(emitted_try_exit() == Err("stop"))
+    assert(!jet_scheduler_shielded(), "? must drop the guard")
+    for pending_deadline in [false, true] {
+        control :: JetTaskControl.new()
+        control.cancel()
+        jet_scheduler_set_task_control(Val(control))
+        TEST_DEADLINE_EXCEEDED.with(fn(d) { d.set(pending_deadline) })
+        raised :: panic.catch_unwind(panic.AssertUnwindSafe(fn() {
+            jet_scheduler_shield_enter()
+            _shield_guard :: EmittedShieldGuard(callback: Val(fn() { jet_scheduler_shield_leave() }))
+            panic.panic_any("body panic")
+        }))
+        text :: raised.expect_err("body must panic").downcast<String>().map(fn(s) { *s }).unwrap_or("")
+        assert(text == "body panic")
+        assert(!jet_scheduler_shielded(), "panic must reset shield depth")
+        TEST_DEADLINE_EXCEEDED.with(fn(d) { d.set(false) })
+    }
+    control :: JetTaskControl.new()
+    control.cancel()
+    jet_scheduler_set_task_control(Val(control))
+    both :: panic.catch_unwind(panic.AssertUnwindSafe(fn() {
+        jet_scheduler_shield_enter()
+        _shield_guard :: EmittedShieldGuard(callback: Val(fn() { jet_scheduler_shield_leave() }))
+        TEST_DEADLINE_EXCEEDED.with(fn(d) { d.set(true) })
+    }))
+    payload :: both.expect_err("pending deadline must land at guard drop")
+    text :: payload.downcast_ref<JetDeadlineUnwind>().map(fn(deadline) { deadline.rendered.as_str() }).unwrap_or("")
+    assert(text == jet_std.jet_task_deadline("shield exit").render())
+    assert(!jet_scheduler_shielded())
+    TEST_DEADLINE_EXCEEDED.with(fn(d) { d.set(false) })
+    jet_scheduler_set_task_control(Val(JetTaskControl.new()))
+    {
+        jet_scheduler_shield_enter()
+        _shield_guard :: EmittedShieldGuard(callback: Val(fn() { jet_scheduler_shield_leave() }))
+        assert(jet_scheduler_shielded())
+    }
+    assert(!jet_scheduler_shielded(), "subsequent task must start clean")
+    jet_scheduler_set_task_control(None)
+    jet_scheduler_task_panic_leave()
+}

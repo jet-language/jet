@@ -1,0 +1,32 @@
+use Compiler.JetDriver.Driver.ForeignProviders01.*
+use jet_foundation.AST.ForeignLanguage
+
+// Rust: crates/jet-driver/src/Foreign.rs:116
+#Test("foreign_host_routing_preserves_native_web_split") {
+    assert(host_for(ForeignLanguage.JS, ForeignTarget.Native) == ForeignHost.NativeJsWasmComponent)
+    assert(host_for(ForeignLanguage.JS, ForeignTarget.Web) == ForeignHost.BrowserJsEngine)
+    assert(host_for(ForeignLanguage.Cpp, ForeignTarget.Native) == ForeignHost.ClangCppShim)
+    assert(host_for(ForeignLanguage.Py, ForeignTarget.Web) == ForeignHost.SupervisedPythonSidecar)
+    assert(host_for(ForeignLanguage.Com, ForeignTarget.Native) == ForeignHost.WindowsComAutomation)
+}
+// Rust: crates/jet-driver/src/Foreign.rs:262
+#Test("foreign_json_quote_escapes_reference_characters") {
+    assert(json_quote("a\"b\\c\nd\re\tf") == "\"a\\\"b\\\\c\\nd\\re\\tf\"")
+    assert(json_quote("é") == "\"é\"")
+}
+// Rust: crates/jet-driver/src/Foreign.rs:520
+#Test("foreign_descriptor_stamp_uses_first_exact_line_prefix") {
+    assert(descriptor_stamp("// other\n// jet-ffi-descriptor=v1\n// jet-ffi-descriptor=v2") == Val("v1"))
+    assert(descriptor_stamp(" // jet-ffi-descriptor=v1") == None)
+    assert(descriptor_stamp("// jet-ffi-descriptor=") == Val(""))
+}
+// Rust: crates/jet-driver/src/Foreign.rs:82
+#Test("foreign_route_uses_canonical_descriptor_cache_extension") {
+    root :: OSPath.new("project")
+    language :: ForeignLanguage.Cpp
+    descriptor :: binder_for(language) ?? fail "missing C++ descriptor"
+    cache :: binding_cache_file(root, language, "library")
+    assert(cache == binding_cache_dir(root, language).join("library.{descriptor.cache_extension}"))
+    assert(provenance_file(root, language, "library") == binding_cache_dir(root, language).join("library.provenance"))
+    assert(synthetic_alias(language, "library") == "__{language.root()}_library")
+}

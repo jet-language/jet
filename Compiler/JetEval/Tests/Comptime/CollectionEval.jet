@@ -1,0 +1,23 @@
+use jet_foundation.AST.[CtValue, Type]
+use jet_foundation.Diagnostics.Span
+use jet_foundation.Syntax
+use jet_comptime.Comptime.CollectionEval.[from_list, prelude_new, apply_method, apply_mutating]
+
+// Rust: crates/jet-comptime/src/Comptime/CollectionEval.rs:617
+#Test("set_from_deduplicates_values") {
+    span := Span.default()
+    value := from_list(Syntax.TYPE_SET, &CtValue.List([CtValue.Int(2), CtValue.Int(1), CtValue.Int(2)]), span).unwrap()
+    assert_eq(apply_method(&value, "to_list", &[], span).unwrap().unwrap(), CtValue.List([CtValue.Int(2), CtValue.Int(1)]))
+}
+// Rust: crates/jet-comptime/src/Comptime/CollectionEval.rs:646
+#Test("prelude_new_declines_unknown_type") {
+    assert(prelude_new("UnknownCollection", [], Span.default()).is_none())
+}
+// Rust: crates/jet-comptime/src/Comptime/CollectionEval.rs:1394
+#Test("queue_pop_rewrites_receiver") {
+    span := Span.default()
+    value := from_list(Syntax.TYPE_QUEUE, &CtValue.List([CtValue.Int(7), CtValue.Int(8)]), span).unwrap()
+    result := apply_mutating(&value, "pop_front", [], span).unwrap().unwrap()
+    assert_eq(result, CtValue.Present(Box.new(CtValue.Int(7))))
+    assert_eq(apply_method(&value, "to_list", &[], span).unwrap().unwrap(), CtValue.List([CtValue.Int(8)]))
+}

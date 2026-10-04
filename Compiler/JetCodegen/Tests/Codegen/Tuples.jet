@@ -1,0 +1,16 @@
+use JetCodegen.Codegen.Tuples.[CollectedTypeShapes, collect_tuple_shapes_from_type, tuple_struct_name, with_type_params]
+use JetFoundation.AST.Type
+
+// Rust: crates/jet-codegen/src/Codegen/Tuples.rs:13-85
+#Test("tuple_collection_nested_map_shape_and_scope_restore") {
+    out := CollectedTypeShapes { tuples: [:], abstract_params: ["Outer"] }
+    ty := Type.Map { key: Type.String, key_span: None, value: Type.Tuple([("item", Type.Int)]) }
+    with_type_params(&out, ["Inner"], fn(shapes) {
+        assert(shapes.abstract_params == ["Inner"])
+        collect_tuple_shapes_from_type(&ty, shapes)
+    })
+    assert(out.abstract_params == ["Outer"])
+    assert(out.tuples.len() == 2)
+    assert(out.tuples.contains_key(tuple_struct_name([("item", Type.Int)])))
+    assert(out.tuples.contains_key(tuple_struct_name([("key", Type.String), ("value", Type.Tuple([("item", Type.Int)]))])))
+}

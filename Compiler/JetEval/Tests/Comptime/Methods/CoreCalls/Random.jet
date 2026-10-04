@@ -1,0 +1,20 @@
+use jet_comptime.Comptime.Methods.CoreCalls.Random.*
+// Behavioral controls for Rust random.rs:34/48/52; provider callback is the active world seam.
+fn outer_next() -> U64? { Val(41) }
+fn inner_next() -> U64? { Val(73) }
+fn accept_seed(value: I64) -> Bool { value == 9 }
+#Test("world_rng_scope_restores_nested_provider") {
+    before := WORLD_RNG_NEXT.with(fn(p) { p.get() })
+    with_world_rng_provider(outer_next, accept_seed, fn() {
+        assert_eq(world_rng_next(), Val(41))
+        assert(world_rng_seed(9)); assert(!world_rng_seed(10))
+        with_world_rng_provider(inner_next, accept_seed, fn() { assert_eq(world_rng_next(), Val(73)) })
+        assert_eq(world_rng_next(), Val(41))
+    })
+    assert_eq(WORLD_RNG_NEXT.with(fn(p) { p.get() }), before)
+}
+// Behavioral control for Rust random.rs:68/72, using actual shared seeded kernel.
+#Test("seeded_random_sequence_repeats") {
+    seed(123); first := getrandbits(32); second := getrandbits(32)
+    seed(123); assert_eq(getrandbits(32), first); assert_eq(getrandbits(32), second)
+}

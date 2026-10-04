@@ -1,0 +1,27 @@
+use jet_foundation.AST.[CtValue, CtFloat, Type]
+use jet_foundation.Diagnostics.Span
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:951
+#Test("text_width_policy_flags_preserve_portable_defaults_and_typed_variants") {
+    assert_eq(text_width_policy_flags(&CtValue.Unit), (false, false))
+    policy := CtValue.Struct { type_name: "TextWidth", fields: [
+        ("ambiguous", CtValue.Enum { type_name: "AmbiguousWidth", variant: "Wide", args: [] }),
+        ("controls", CtValue.Enum { type_name: "ControlWidth", variant: "Reject", args: [] }),
+    ] }
+    assert_eq(text_width_policy_flags(&policy), (true, true))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:844
+#Test("core_math_float_min_keeps_width_and_rejects_mixed_widths") {
+    span := Span.new(0, 0)
+    assert_eq(core_math_float_min(CtFloat.F32(4.0), CtFloat.F32(2.0), span).unwrap(), CtFloat.F32(2.0))
+    assert(core_math_float_min(CtFloat.F32(4.0), CtFloat.F64(2.0), span).is_err())
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls.rs:418
+#Test("fake_locale_does_not_mutate_receiver") {
+    recv := CtValue.Struct { type_name: "Fake", fields: [("state", CtValue.Int(17)), ("locale", CtValue.Int(0))] }
+    before := recv.clone()
+    _ :: apply_fake_method(&recv, "locale", &[CtValue.Str("en")], Span.new(0, 0)).unwrap()
+    assert_eq(recv, before)
+}

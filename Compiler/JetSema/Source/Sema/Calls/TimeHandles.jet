@@ -1,3 +1,6 @@
+use jet_sema.[Checker, expr_root_ident, type_fix_hint]
+use jet_syntax as Syntax
+use jet_collections as Collections
 // Checked deterministic time/random handles and civil-time methods.
 use jet_foundation.[
     AccessConvention,
@@ -596,4 +599,119 @@ pub fn sema_call_try_time_handle_method(receiver: Expr, receiver_value: TExpr, m
         return sema_time_civil_method(receiver, receiver_value, receiver_name, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/options_rng.rs:19
+    fn check_option_lift2(&self, &args: [CallArg], span: Span, &resolved_ret_out: Type?) -> Type? Never! {
+        if args.len() != 3 {
+            self.diags.push(Diagnostic.error("E0104", "`Option.lift2` takes 3 arguments (f, a, b), got {args.len()}", "`Option.lift2(f, a, b)` applies a two-argument function only when both optionals are present", "call `Option.lift2((x, y) -> ..., a, b)`", Val(span)))
+            loop &arg in args { _ :: self.infer(&arg.expr) }
+            return None
+        }
+        a_ty :: self.infer(&args[1].expr)
+        b_ty :: self.infer(&args[2].expr)
+        if (a_ty, b_ty) != (.Val(Type.Option(a_inner)), .Val(Type.Option(b_inner))) {
+            if a_ty != .Val(Type.Option) {
+                shown :: if a_ty == .Val(ty) -> ty.show() else -> "an unknown type"
+                self.diags.push(Diagnostic.error("E0108", "`Option.lift2`'s second argument must be optional, got {shown}", "`Option.lift2(f, a, b)` needs `a: T?`", "pass a `T?` value", Val(args[1].expr.span())))
+            }
+            if b_ty != .Val(Type.Option) {
+                shown :: if b_ty == .Val(ty) -> ty.show() else -> "an unknown type"
+                self.diags.push(Diagnostic.error("E0108", "`Option.lift2`'s third argument must be optional, got {shown}", "`Option.lift2(f, a, b)` needs `b: U?`", "pass a `T?` value", Val(args[2].expr.span())))
+            }
+            _ :: self.infer(&args[0].expr)
+            return None
+        }
+        expected_fn :: Type.Fn{params: [Type]{a_inner, b_inner}, ret: None, effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None}
+        saved_esc :: self.lambda_escapes
+        self.lambda_escapes = false
+        saved_exp :: ^self.expected_type
+        self.expected_type = Val(expected_fn)
+        f_ty :: self.infer(&args[0].expr)
+        self.expected_type = ^saved_exp
+        self.lambda_escapes = saved_esc
+        if f_ty == .Val(Type.Fn) {
+            func :: f_ty.unwrap()
+            if func.params.len() == 2 && func.ret == .Val(r) {
+                actual_fn :: Type.Fn{params: func.params, ret: None, effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None}
+                if Type.obligations_satisfy(expected_fn, actual_fn) {
+                    ret :: Type.Option{inner: r}
+                    resolved_ret_out = Val(ret)
+                    return Val(ret)
+                }
+            }
+        }
+        if f_ty == .Val(other) {
+            self.diags.push(Diagnostic.error("E0108", "`Option.lift2`'s first argument must be a function, got {other.show()}", "`Option.lift2(f, a, b)` needs `f: fn(T, U) R`", "pass a two-argument function or lambda", Val(args[0].expr.span())))
+        }
+        None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/options_rng.rs:140
+    fn finish_option_zip(&self, a_inner: Type, &args: [CallArg], span: Span, &resolved_ret_out: Type?) -> Type? Never! {
+        if args.len() != 1 {
+            self.diags.push(Diagnostic.error("E0104", "`.zip()` takes one optional argument, got {args.len()}", "`.zip(other)` pairs this optional with another: present only when both are", "call `a.zip(b)` with exactly one `T?` argument", Val(span)))
+            loop &arg in args { _ :: self.infer(&arg.expr) }
+            return None
+        }
+        got :: self.infer(&args[0].expr)
+        if got != .Val(Type.Option(b_inner)) {
+            shown :: if got == .Val(ty) -> ty.show() else -> "that"
+            self.diags.push(Diagnostic.error("E0108", "`.zip()` needs an optional argument, got {shown}", "`.zip(other)` combines two optionals into one paired optional", "pass a `T?` value", Val(args[0].expr.span())))
+            return None
+        }
+        ret :: Type.Option{inner: Collections.zip_elem_ty(a_inner, b_inner)}
+        resolved_ret_out = Val(ret)
+        Val(ret)
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/options_rng.rs:179
+    fn finish_rng_generic(&self, receiver: Expr, method: String, &args: [CallArg], span: Span) -> Type? Never! {
+        if expr_root_ident(receiver) == .Val(root) && self.lookup(root) == .Val(info) {
+            if !info.mutable {
+                self.diags.push(Diagnostic.error("E0202", "cannot draw from `{root}` — it does not have the write-access marker `&`; required before calling `.{method}()`", "every `RNG` draw advances the stream, so the receiver needs the write-access marker `&`", "declare `{root} {Syntax.SIGIL_BIND_MUT} ...`, or pass the rng with the write-access marker `&`: `&{root}`", Val(receiver.span())))
+            }
+        }
+        expected :: if method == "weighted_pick" || method == "sample" -> 2 else -> 1
+        if args.len() != expected {
+            fix :: if method == "weighted_pick" -> "call `rng.weighted_pick(items, weights)`" else if method == "sample" -> "call `rng.sample(items, k)`" else -> "call `rng.{method}(items)`"
+            self.diags.push(Diagnostic.error("E0104", "`.{method}()` takes {expected} argument(s), got {args.len()}", "this `RNG` draw operates on a list and optional draw parameter", fix, Val(span)))
+            loop &arg in args { _ :: self.infer(&arg.expr) }
+            return if method == "pick" || method == "weighted_pick" -> Val(Type.Option{inner: Type.Int}) else if method == "sample" -> Val(Type.List{element: Type.Int}) else -> None
+        }
+        if method == "shuffle" && args[0].convention != AccessConvention.Write {
+            self.diags.push(Diagnostic.error("E0202", "`shuffle` edits its list in place", "the write-access marker `&` is required; pass the list with that marker", "write `rng.shuffle(&items)` with the write-access marker `&`", Val(args[0].span)))
+        }
+        ty :: self.infer(&args[0].expr) ?? return None
+        if method == "sample" && self.infer(&args[1].expr) == .Val(k) {
+            if k != Type.Int && k != .InlineRange { self.diags.push(Diagnostic.error("E0112", "`sample` count must be Int, not {k.show()}", "rng.sample chooses up to k items without replacement", "pass an Int count", Val(args[1].expr.span()))) }
+        }
+        if method == "weighted_pick" && self.infer(&args[1].expr) == .Val(weights_ty) {
+            if weights_ty != (Type.List{element: Type.Float}) {
+                self.diags.push(Diagnostic.error("E0112", "`weighted_pick` weights must be [Float], not {weights_ty.show()}", "rng.weighted_pick pairs each item with a non-negative Float weight", "pass a `[Float]` weights list", Val(args[1].expr.span())))
+            }
+        }
+        if ty != .List(inner) {
+            self.diags.push(Diagnostic.error("E0112", "`{method}` needs a list, not {ty.show()}", "rng.{method} operates on a `[T]`", "pass a `[T]` value", Val(args[0].expr.span())))
+            return if method == "pick" || method == "weighted_pick" -> Val(Type.Option{inner: Type.Int}) else if method == "sample" -> Val(Type.List{element: Type.Int}) else -> None
+        }
+        if method == "pick" || method == "weighted_pick" -> Val(Type.Option{inner: inner}) else if method == "sample" -> Val(Type.List{element: inner}) else -> None
+    }
+    // Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/options_rng.rs:316
+    fn check_shift_arg(&self, label: String, want: Type, &arg: CallArg) Never! {
+        saved :: ^self.expected_type
+        self.expected_type = Val(want)
+        inferred :: self.infer(&arg.expr)
+        self.expected_type = ^saved
+        source :: inferred ?? return
+        target :: self.resolve_type(want)
+        resolved :: self.resolve_type(source)
+        widened :: self.widen_numeric_argument(&arg.expr, resolved, target, AccessConvention.Read)
+        got :: self.lift_optional_argument(&arg.expr, widened, target, AccessConvention.Read)
+        reported :: self.check_type_assignable(target, got, arg.expr.span())
+        fixed_widens :: if (target, got) == (.List(pe), .FixedList(ae, _)) -> pe == ae else -> false
+        union_widens :: if target == .Union(members) -> members.any(member -> member == got) else -> false
+        if !reported && got != target && !fixed_widens && !union_widens {
+            self.diags.push(Diagnostic.error("E0112", "`{label}` wants {target.show()}, but this is {got.show()}", "every argument must match its parameter's type", type_fix_hint(target, got), Val(arg.expr.span())))
+        }
+    }
 }

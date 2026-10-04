@@ -1,0 +1,35 @@
+use jet_driver.BuildPluginHook.[read_bounded, run_host_process]
+use jet_comptime.Comptime.Build.BUILD_PLUGIN_MAX_REQUEST_BYTES
+use std.io.Cursor
+use std.process.Command
+
+// Rust: crates/jet-driver/src/BuildPluginHook.rs:154-164
+#Test("build_plugin_bounded_reads") {
+    (bytes, overflow) := read_bounded(Cursor.new([1, 2, 3]), 3).unwrap()
+    assert_eq(bytes, [1, 2, 3])
+    assert(!overflow)
+    (bytes, overflow) := read_bounded(Cursor.new([1, 2, 3, 4]), 3).unwrap()
+    assert_eq(bytes, [1, 2, 3])
+    assert(overflow)
+    (bytes, overflow) := read_bounded(Cursor.new([1]), 0).unwrap()
+    assert(bytes.is_empty())
+    assert(overflow)
+}
+// Rust: crates/jet-driver/src/BuildPluginHook.rs:62-153
+#Test("build_plugin_host_request_limit_precedes_spawn") {
+    request := [U8].filled(0, BUILD_PLUGIN_MAX_REQUEST_BYTES + 1)
+    result := run_host_process(Command.new("missing-build-plugin-host"), request)
+    assert_eq(result.unwrap_err(), "build-plugin request exceeds {BUILD_PLUGIN_MAX_REQUEST_BYTES} bytes")
+}
+// Rust: crates/jet-driver/src/BuildPluginHook.rs:62-153
+#Test("build_plugin_host_real_pipe_roundtrip") {
+    if core.sys.target.selected_family() == "unix" {
+        // GATE #4494: real process, concurrent pipe IO and joining; #4483 Unix control.
+        command := Command.new("sh")
+        command.arg("-c").arg("cat")
+        assert_eq(run_host_process(command, [0, 1, 255, 10]).unwrap(), [0, 1, 255, 10])
+        failure := Command.new("sh")
+        failure.arg("-c").arg("printf 'rejected\\n' >&2; exit 1")
+        assert_eq(run_host_process(failure, []).unwrap_err(), "rejected")
+    }
+}

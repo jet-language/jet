@@ -1,1300 +1,612 @@
-// PORT-PENDING 0471 crates-jet-codegen-src-codegen-tir-lower-builtins: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:1-1296
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::AST::{Expr, IndexKind, Type};
-//RS use crate::Codegen::Cx;
-//RS use crate::Codegen::TIR::ListRemoveMode;
-//RS use crate::Codegen::TIR::LowerEnv;
-//RS use crate::Codegen::TIR::TBuiltinOp;
-//RS use crate::Codegen::TIR::TClosureOp;
-//RS use crate::Codegen::TIR::TExpr;
-//RS use crate::Codegen::TIR::TExprKind;
-//RS use crate::Codegen::TIR::lower_expr;
-//RS use crate::Codegen::TIR::struct_field_type;
-//RS use crate::Codegen::TIR::tir_recv_jet_ty;
-//RS use crate::Diagnostics::Span;
-//RS 
-//RS fn invariant_expr(span: Span, construct: impl Into<String>) -> TExpr {
-//RS     TExpr {
-//RS         ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-//RS         kind: TExprKind::InvariantViolation {
-//RS             construct: construct.into(),
-//RS             span,
-//RS         },
-//RS     }
-//RS }
-//RS fn base_receiver_ty(ty: &Type) -> &Type {
-//RS     match ty {
-//RS         Type::Tagged { inner, .. } => base_receiver_ty(inner),
-//RS         _ => ty,
-//RS     }
-//RS }
-//RS 
-//RS fn sequence_elem_ty(ty: &Type) -> Option<Type> {
-//RS     match ty {
-//RS         Type::Tagged { inner, .. } => sequence_elem_ty(inner),
-//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
-//RS         Type::Apply { name, args }
-//RS             if args.len() == 1
-//RS                 && matches!(
-//RS                     name.as_str(),
-//RS                     crate::Syntax::TYPE_ITER
-//RS                         | crate::Syntax::TYPE_VIEW_ITER
-//RS                         | "View"
-//RS                         | "ViewMut"
-//RS                         | "ComputeViewMut"
-//RS                 ) =>
-//RS         {
-//RS             Some(args[0].clone())
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn list_receiver(ty: &Type) -> bool {
-//RS     match ty {
-//RS         Type::Tagged { inner, .. } => list_receiver(inner),
-//RS         Type::List(_) | Type::FixedList { .. } => true,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn view_receiver(ty: &Type) -> bool {
-//RS     matches!(
-//RS         base_receiver_ty(ty),
-//RS         Type::Apply { name, args }
-//RS             if args.len() == 1
-//RS                 && matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
-//RS     )
-//RS }
-//RS fn remove_mode_variant(variant: &str) -> Option<ListRemoveMode> {
-//RS     let variant = match variant {
-//RS         "Val" | "Slot" => variant,
-//RS         other => match other.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) {
-//RS             Some(short) => short,
-//RS             None => return None,
-//RS         },
-//RS     };
-//RS     match variant {
-//RS         "Val" => Some(ListRemoveMode::Value),
-//RS         "Slot" => Some(ListRemoveMode::Slot),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// #1478: Set/Rank delegate their iterator-family surface (filter, map,
-//RS /// each, all, fold, flat_map, min, max) to the same List/Iter machinery every
-//RS /// other container already uses — insert the exact `.to_list()` conversion a
-//RS /// user would write by hand. AOT and JIT then never see a raw `HashSet`/
-//RS /// `BTreeSet` where they expect a `Vec`-backed list (I9: no second mechanism;
-//RS /// I8: one canonical iteration path). Not for `values` or collection removal,
-//RS /// which stay on the native Set API and must NOT be wrapped.
-//RS pub(crate) fn wrap_set_receiver_as_list(recv: TExpr, span: Span) -> TExpr {
-//RS     let (op, elem) = match &recv.ty {
-//RS         Type::Apply { name, args } if name == "Set" || name == crate::Syntax::TYPE_RANK => {
-//RS             let Some(elem) = args.as_slice().first() else {
-//RS                 return invariant_expr(span, "set receiver missing element type");
-//RS             };
-//RS             if args.len() != 1 {
-//RS                 return invariant_expr(span, "set receiver has invalid generic arity");
-//RS             }
-//RS             (
-//RS                 if name == "Set" {
-//RS                     TBuiltinOp::SetToList
-//RS                 } else {
-//RS                     TBuiltinOp::SortedSetToList
-//RS                 },
-//RS                 elem.clone(),
-//RS             )
-//RS         }
-//RS         _ => return recv,
-//RS     };
-//RS     TExpr {
-//RS         ty: Type::List(Box::new(elem)),
-//RS         kind: TExprKind::BuiltinMethod {
-//RS             recv: Box::new(recv),
-//RS             op,
-//RS             args: vec![],
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
-//RS     match ty {
-//RS         Some(Type::Tagged { inner, .. }) => tuple_fields(Some(inner.as_ref())),
-//RS         Some(Type::Tuple(fields)) => Some(
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|(name, ty)| (name.clone(), (**ty).clone()))
-//RS                 .collect(),
-//RS         ),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn tuple_list_elem_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
-//RS     let ty = ty?;
-//RS     let inner = sequence_elem_ty(ty)?;
-//RS     tuple_fields(Some(&inner))
-//RS }
-//RS 
-//RS fn option_tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
-//RS     match ty {
-//RS         Some(Type::Tagged { inner, .. }) => option_tuple_fields(Some(inner.as_ref())),
-//RS         Some(Type::Option(inner)) => tuple_fields(Some(inner.as_ref())),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn result_tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
-//RS     match ty {
-//RS         Some(Type::Tagged { inner, .. }) => result_tuple_fields(Some(inner.as_ref())),
-//RS         Some(Type::Result { ok, .. }) => tuple_fields(Some(ok.as_ref())),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-MEM1 S6: `pool[id].field`'s type — needed so a MUTATING method call on it
-//RS /// (`tree[root].children.push(child)`) is recognized as needing a real mutable
-//RS /// place (`builtin_needs_mut_receiver`), not the ordinary `jet_pool_get` value
-//RS /// clone. `tir_recv_jet_ty` has no `cx` to look up a struct field type, so this
-//RS /// is a separate small helper rather than a new arm there.
-//RS pub(crate) fn pool_field_ty_hint(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Type> {
-//RS     let Expr::Field(base, field, _) = e else {
-//RS         return None;
-//RS     };
-//RS     let Expr::Index {
-//RS         base: pool_expr,
-//RS         kind: IndexKind::Pool,
-//RS         ..
-//RS     } = base.as_ref()
-//RS     else {
-//RS         return None;
-//RS     };
-//RS     let pool_ty = tir_recv_jet_ty(pool_expr, env)?;
-//RS     let elem_ty = match &pool_ty {
-//RS         Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
-//RS         _ => return None,
-//RS     };
-//RS     struct_field_type(cx, &elem_ty, field)
-//RS }
-//RS 
-//RS /// The declared type of a struct-FIELD receiver (`file.relative`,
-//RS /// `self.cfg.name`) — the one receiver shape `tir_recv_jet_ty` leaves
-//RS /// unresolved. Field reads nest, so a base that is itself a field resolves
-//RS /// through the same two steps. Sibling of `pool_field_ty_hint` above and for the
-//RS /// same reason: `tir_recv_jet_ty` has no `cx` with which to read a field's
-//RS /// declared type.
-//RS pub(crate) fn declared_field_ty(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Type> {
-//RS     match e {
-//RS         Expr::Paren(inner, _) | Expr::Copy(inner, _) => declared_field_ty(inner, cx, env),
-//RS         Expr::Index { base, .. } => {
-//RS             let base_ty =
-//RS                 tir_recv_jet_ty(base, env).or_else(|| declared_field_ty(base, cx, env))?;
-//RS             match base_ty {
-//RS                 Type::List(inner) | Type::FixedList { elem: inner, .. } => Some(*inner),
-//RS                 _ => None,
-//RS             }
-//RS         }
-//RS         Expr::Field(base, field, _) => {
-//RS             let base_ty =
-//RS                 tir_recv_jet_ty(base, env).or_else(|| declared_field_ty(base, cx, env))?;
-//RS             struct_field_type(cx, &base_ty, field)
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// The receiver type the built-in table dispatches on.
-//RS ///
-//RS /// `tir_recv_jet_ty` answers `None` for a struct field read, so this helper
-//RS /// recovers the declaring field type before dispatch. A recovered type is
-//RS /// accepted only when the canonical collection table has the same method row;
-//RS /// an unrecoverable or mismatched type returns `None` rather than selecting a
-//RS /// guessed List operation. This closes the old String-field/List-surface hole
-//RS /// at the dispatch boundary, once for every shared method name.
-//RS ///
-//RS /// Sema already resolved this receiver — it type-checked the call against
-//RS /// `Collections::builtin_method_arg_types(String, "replace")` — it just does not
-//RS /// persist the type: a builtin's `recv_type` stays `None`. So the field type is
-//RS /// re-read from the DECLARING tables (`struct_field_type`: user structs, then
-//RS /// every core record), and is trusted ONLY when the same builtin table sema used
-//RS /// has a row for `(that type, method, arity)`. If the exact field type cannot be
-//RS /// recovered, this resolver returns `None`; it never selects the legacy List arm.
-//RS ///
-//RS /// Deliberately NOT folded into `tir_recv_jet_ty`: its other callers read that
-//RS /// partiality as a fact (the for-in `lines` split recognizes `child.stdout` by
-//RS /// its BASE, the mutable-place hint, the view-owner peeks), and this is the one
-//RS /// place a receiver type becomes an op.
-//RS fn builtin_recv_ty(
-//RS     receiver: &Expr,
-//RS     method: &str,
-//RS     nargs: usize,
-//RS     cx: &Cx,
-//RS     env: &LowerEnv,
-//RS ) -> Option<Type> {
-//RS     let mut receiver = receiver;
-//RS     let mut unwrap_carrier = false;
-//RS     loop {
-//RS         match receiver {
-//RS             Expr::Paren(inner, _) | Expr::Copy(inner, _) => receiver = inner,
-//RS             Expr::Try(inner, ..) => {
-//RS                 unwrap_carrier = true;
-//RS                 receiver = inner;
-//RS             }
-//RS             _ => break,
-//RS         }
-//RS     }
-//RS     if let Some(ty) = tir_recv_jet_ty(receiver, env) {
-//RS         return Some(if unwrap_carrier {
-//RS             match ty {
-//RS                 Type::Result { ok, .. } | Type::Option(ok) => {
-//RS                     crate::Codegen::TIR::builtin_dispatch_ty(*ok)
-//RS                 }
-//RS                 other => other,
-//RS             }
-//RS         } else {
-//RS             ty
-//RS         });
-//RS     }
-//RS     if let Expr::MethodCall {
-//RS         receiver: call_receiver,
-//RS         method: call_method,
-//RS         resolved_ret,
-//RS         ..
-//RS     } = receiver
-//RS     {
-//RS         // Fixed Core aliases (for example `files.read(path)`) are represented
-//RS         // as MethodCall nodes. Sema intentionally leaves monomorphic fixed
-//RS         // returns off that node because lowering reads the authoritative
-//RS         // signature table. Recover the carrier here so a following builtin
-//RS         // method sees its actual success type instead of the legacy List
-//RS         // fallback.
-//RS         if let Expr::Ident(alias, _) = call_receiver.as_ref() {
-//RS             if !env.locals.contains_key(alias) {
-//RS                 if let Some(module) = cx.core_import_module_for_function(&env.fn_name, alias) {
-//RS                     let ty = resolved_ret.clone().or_else(|| {
-//RS                         crate::Sema::core_fixed_sig(module, call_method).and_then(|(_, ret)| ret)
-//RS                     });
-//RS                     if let Some(ty) = ty {
-//RS                         return Some(if unwrap_carrier {
-//RS                             match ty {
-//RS                                 Type::Result { ok, .. } | Type::Option(ok) => {
-//RS                                     crate::Codegen::TIR::builtin_dispatch_ty(*ok)
-//RS                                 }
-//RS                                 other => other,
-//RS                             }
-//RS                         } else {
-//RS                             ty
-//RS                         });
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     let ty = crate::Codegen::TIR::builtin_dispatch_ty(declared_field_ty(receiver, cx, env)?);
-//RS     if crate::Collections::builtin_method_return(&ty, method, nargs, false).is_some() {
-//RS         return Some(ty);
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS /// D-MEM1 stage S5: lower a `Binding.string_view` init (`s.trim()` /
-//RS /// `s.after(sep)` / `s.before(sep)`) to the borrowed `&str`-returning
-//RS /// `TBuiltinOp::{TrimView,AfterView,BeforeView}` — the zero-copy sibling of
-//RS /// whatever `resolve_builtin_op` would pick for the same call written
-//RS /// somewhere the result isn't scope-tracked. The source return type is still
-//RS /// the canonical String method result; the TIR value carries the existing
-//RS /// borrowed `View<str>` carrier so MIR preserves the Rust lifetime/ABI shape.
-//RS pub(super) fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-//RS     let Expr::MethodCall {
-//RS         receiver,
-//RS         method,
-//RS         method_span,
-//RS         args,
-//RS         resolved_ret,
-//RS         ..
-//RS     } = init
-//RS     else {
-//RS         return invariant_expr(init.span(), "string-view initializer shape");
-//RS     };
-//RS     let op = match method.as_str() {
-//RS         "trim" => TBuiltinOp::TrimView,
-//RS         "after" => TBuiltinOp::AfterView,
-//RS         "before" => TBuiltinOp::BeforeView,
-//RS         _ => return invariant_expr(*method_span, "string-view method"),
-//RS     };
-//RS     let Some(table_ret) =
-//RS         crate::Collections::builtin_method_return(&Type::String, method, args.len(), false)
-//RS             .flatten()
-//RS     else {
-//RS         return invariant_expr(*method_span, "string-view signature");
-//RS     };
-//RS     if let Some(ret) = resolved_ret {
-//RS         if ret != &table_ret {
-//RS             return invariant_expr(*method_span, "string-view return type");
-//RS         }
-//RS     }
-//RS     let ty = Type::Apply {
-//RS         name: "View".to_string(),
-//RS         args: vec![Type::Named("str".to_string())],
-//RS     };
-//RS     let recv = lower_expr(receiver, cx, env);
-//RS     if !matches!(recv.ty, Type::String) {
-//RS         return invariant_expr(*method_span, "string-view receiver type");
-//RS     }
-//RS     let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-//RS     TExpr {
-//RS         ty,
-//RS         kind: TExprKind::BuiltinMethod {
-//RS             recv: Box::new(recv),
-//RS             op,
-//RS             args: targs,
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS /// c109 Phase 9: resolve the built-in method op from the method name, arg count, and
-//RS /// the receiver's resolved type. The Map-vs-List branch (`insert`/`remove`/`get`)
-//RS /// and the String-vs-List branch (`len`/`replace`/…) both come from `rty`, so the
-//RS /// receiver type has to be the real one: see `builtin_recv_ty` above for why a
-//RS /// struct-field receiver used to arrive here untyped and take the List surface.
-//RS /// `receiver_ty` is the already-lowered receiver type when the AST shape (notably
-//RS /// a list literal) does not retain one. Returns `None` until another analytical
-//RS /// lowerer handles an alternate shape, or when a checked shape is inconsistent.
-//RS pub(crate) fn resolve_builtin_op(
-//RS     receiver: &Expr,
-//RS     method: &str,
-//RS     method_span: Span,
-//RS     args: &[crate::AST::CallArg],
-//RS     resolved_ret: Option<&Type>,
-//RS     receiver_ty: Option<&Type>,
-//RS     env: &LowerEnv,
-//RS     cx: &Cx,
-//RS ) -> Option<TBuiltinOp> {
-//RS     let rty = receiver_ty
-//RS         .cloned()
-//RS         .map(crate::Codegen::TIR::builtin_dispatch_ty)
-//RS         .or_else(|| builtin_recv_ty(receiver, method, args.len(), cx, env));
-//RS     if rty.is_none() {
-//RS         return None;
-//RS     }
-//RS     if rty.as_ref().is_some_and(|ty| {
-//RS         matches!(
-//RS             ty,
-//RS             Type::Apply {
-//RS                 name,
-//RS                 args: generic_args
-//RS             } if name == "Atomic"
-//RS                 && generic_args.len() == 1
-//RS                 && crate::Collections::builtin_method_return(ty, method, args.len(), false)
-//RS                     .is_some()
-//RS         )
-//RS     }) {
-//RS         return Some(TBuiltinOp::AtomicMethod {
-//RS             method: method.to_string(),
-//RS         });
-//RS     }
-//RS     if matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_ORDERING) {
-//RS         return match (method, args.len()) {
-//RS             ("then", 1) => Some(TBuiltinOp::OrderingThen),
-//RS             ("reverse", 0) => Some(TBuiltinOp::OrderingReverse),
-//RS             _ => None,
-//RS         };
-//RS     }
-//RS     let is_byte_buffer =
-//RS         matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BYTES);
-//RS     // Bytes.position() is a 0-arg cursor read — must win before the
-//RS     // Iter.position(pred) closure-method early-out.
-//RS     if is_byte_buffer {
-//RS         let op = match (method, args.len()) {
-//RS             (
-//RS                 "write_u8" | "write_byte" | "write_i8" | "write_u16_le" | "write_u16_be"
-//RS                 | "write_i16_le" | "write_i16_be" | "write_u32_le" | "write_u32_be"
-//RS                 | "write_i32_le" | "write_i32_be" | "write_u64_le" | "write_u64_be"
-//RS                 | "write_i64_le" | "write_i64_be" | "write_f32_le" | "write_f32_be"
-//RS                 | "write_f64_le" | "write_f64_be" | "write_bytes" | "write",
-//RS                 1,
-//RS             ) => TBuiltinOp::ByteBufferWrite {
-//RS                 method: method.to_string(),
-//RS             },
-//RS             ("to_bytes", 0) => TBuiltinOp::ByteBufferToBytes,
-//RS             (
-//RS                 "len" | "is_empty" | "clear" | "capacity" | "position" | "eof" | "rewind" | "flush"
-//RS                 | "close" | "shutdown" | "get_buffer" | "buffer" | "to_string" | "string" | "trim"
-//RS                 | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title"
-//RS                 | "clone" | "copy" | "lines" | "first" | "next" | "read_byte" | "read" | "is_ascii"
-//RS                 | "parse",
-//RS                 0,
-//RS             )
-//RS             | (
-//RS                 "get" | "seek" | "read_bytes" | "read_string" | "contains" | "starts_with"
-//RS                 | "ends_with" | "index_of" | "last_index_of" | "split" | "partition" | "join"
-//RS                 | "equal" | "compare" | "copy_to" | "write_to",
-//RS                 1,
-//RS             )
-//RS             | ("replace", 2) => TBuiltinOp::ByteBufferMethod {
-//RS                 method: method.to_string(),
-//RS             },
-//RS             _ => return None,
-//RS         };
-//RS         let emitted_borrow = match &op {
-//RS             TBuiltinOp::ByteBufferWrite { .. } => {
-//RS                 crate::Collections::BuiltinReceiverBorrow::TwoPhaseWrite
-//RS             }
-//RS             TBuiltinOp::ByteBufferMethod { method }
-//RS                 if matches!(
-//RS                     method.as_str(),
-//RS                     "clear"
-//RS                         | "seek"
-//RS                         | "rewind"
-//RS                         | "next"
-//RS                         | "read"
-//RS                         | "read_byte"
-//RS                         | "read_bytes"
-//RS                         | "read_string"
-//RS                         | "flush"
-//RS                         | "close"
-//RS                         | "shutdown"
-//RS                         | "copy_to"
-//RS                         | "write_to"
-//RS                 ) =>
-//RS             {
-//RS                 crate::Collections::BuiltinReceiverBorrow::TwoPhaseWrite
-//RS             }
-//RS             TBuiltinOp::ByteBufferToBytes => crate::Collections::BuiltinReceiverBorrow::Read,
-//RS             TBuiltinOp::ByteBufferMethod { .. } => crate::Collections::BuiltinReceiverBorrow::Read,
-//RS             _ => return None,
-//RS         };
-//RS         if let Some(receiver_borrow) = rty
-//RS             .as_ref()
-//RS             .map(|ty| crate::Collections::builtin_receiver_borrow(ty, method))
-//RS         {
-//RS             if receiver_borrow != emitted_borrow {
-//RS                 return None;
-//RS             }
-//RS         }
-//RS         return Some(op);
-//RS     }
-//RS     let is_option = matches!(rty, Some(Type::Option(_)));
-//RS     if rty.as_ref().is_some_and(|ty| {
-//RS         crate::Collections::builtin_method_return(ty, method, args.len(), false).is_none()
-//RS     }) && !(is_option && method == "zip" && args.len() == 1)
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let is_string = matches!(rty, Some(Type::String));
-//RS     if crate::Collections::is_closure_method(method) && !is_string {
-//RS         return None;
-//RS     }
-//RS     let is_list = rty.as_ref().is_some_and(list_receiver);
-//RS     let is_map = matches!(rty, Some(Type::Map { .. }));
-//RS     let is_set = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Set");
-//RS     let is_sorted_set =
-//RS         matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_RANK);
-//RS     let is_priority_queue = matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_PRIORITY_QUEUE);
-//RS     let is_lru = matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU);
-//RS     let is_bag =
-//RS         matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_TALLY);
-//RS     let is_bit_set = matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BITS);
-//RS     let is_deque =
-//RS         matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_QUEUE);
-//RS     let is_iter = matches!(
-//RS         &rty,
-//RS         Some(ty) if crate::Collections::is_iter_type(ty)
-//RS     );
-//RS     let is_float_sequence = matches!(
-//RS         &rty,
-//RS         Some(Type::List(elem) | Type::FixedList { elem, .. })
-//RS             if matches!(elem.as_ref(), Type::Float | Type::Float32)
-//RS     ) || matches!(
-//RS         &rty,
-//RS         Some(Type::Apply { name, args })
-//RS             if name == crate::Syntax::TYPE_ITER
-//RS                 && args.len() == 1
-//RS                 && matches!(args[0], Type::Float | Type::Float32)
-//RS     ) || matches!(
-//RS         resolved_ret,
-//RS         Some(Type::Option(elem)) if matches!(elem.as_ref(), Type::Float | Type::Float32)
-//RS     );
-//RS     // D-HOLE1: `.zip` on `T?` (vs. `[T].zip`).
-//RS     let receiver_borrow = rty
-//RS         .as_ref()
-//RS         .map(|ty| crate::Collections::builtin_receiver_borrow(ty, method));
-//RS     let list_remove_mode = match (method, args.len()) {
-//RS         ("remove", 1) => Some(ListRemoveMode::Value),
-//RS         ("remove", 2) => match args.get(1).map(|arg| &arg.expr) {
-//RS             Some(Expr::EnumLit { variant, .. }) => remove_mode_variant(variant),
-//RS             Some(Expr::Ident(name, _)) => match cx.const_values.get(name) {
-//RS                 Some(crate::AST::CtValue::Enum {
-//RS                     type_name, variant, ..
-//RS                 }) if type_name == crate::Syntax::TYPE_REMOVE_BY => remove_mode_variant(variant),
-//RS                 _ => match &rty {
-//RS                     Some(Type::List(inner)) if **inner == Type::Int => {
-//RS                         Some(ListRemoveMode::Dynamic)
-//RS                     }
-//RS                     _ => None,
-//RS                 },
-//RS             },
-//RS             _ => match &rty {
-//RS                 Some(Type::List(inner)) if **inner == Type::Int => Some(ListRemoveMode::Dynamic),
-//RS                 _ => None,
-//RS             },
-//RS         },
-//RS         _ => None,
-//RS     };
-//RS     let op = match (method, args.len()) {
-//RS         ("len", 0) => {
-//RS             if is_string {
-//RS                 TBuiltinOp::LenString
-//RS             } else if is_bag {
-//RS                 TBuiltinOp::BagLen
-//RS             } else {
-//RS                 TBuiltinOp::LenList
-//RS             }
-//RS         }
-//RS         ("is_empty", 0) => TBuiltinOp::IsEmpty,
-//RS         ("try_push", 1) if is_string => TBuiltinOp::TryStringPush,
-//RS         ("try_push", 1) if is_list => TBuiltinOp::TryPush,
-//RS         ("try_reserve", 1) if is_list => TBuiltinOp::TryReserve,
-//RS         ("try_insert", 2) if is_map => TBuiltinOp::TryInsertMap,
-//RS         ("push" | "append", 1) => TBuiltinOp::Push,
-//RS         ("pop", 0) if is_priority_queue => TBuiltinOp::PriorityQueuePop,
-//RS         ("pop", 0) => TBuiltinOp::Pop,
-//RS         ("insert", 2) => TBuiltinOp::InsertList,
-//RS         ("add", 2) if is_map => TBuiltinOp::InsertMap,
-//RS         ("add_new", 2) if is_map => TBuiltinOp::AddNewMap,
-//RS         ("setdefault", 2) if is_map => TBuiltinOp::MapSetDefault,
-//RS         ("update", 1) if is_map => TBuiltinOp::MapUpdate,
-//RS         ("merge", 1) if is_map => TBuiltinOp::MapMerge,
-//RS         ("merge", 2) if is_map => TBuiltinOp::MapMergeWith,
-//RS         ("take", 1) if is_set => TBuiltinOp::SetPop,
-//RS         ("pop", 1) if is_set => TBuiltinOp::SetPop,
-//RS         ("pop", 1) if is_map || is_lru => TBuiltinOp::RemoveMap,
-//RS         ("pop_first", 0) if is_map => TBuiltinOp::MapPopFirst,
-//RS         ("contains_value", 1) if is_map => TBuiltinOp::MapContainsValue,
-//RS         ("remove" | "discard", 1 | 2) => {
-//RS             if is_set {
-//RS                 TBuiltinOp::SetRemove
-//RS             } else if is_sorted_set {
-//RS                 TBuiltinOp::SortedSetRemove
-//RS             } else if is_bit_set {
-//RS                 TBuiltinOp::BitSetRemove
-//RS             } else if is_bag {
-//RS                 TBuiltinOp::BagRemove
-//RS             } else if is_map {
-//RS                 TBuiltinOp::RemoveMap
-//RS             } else if is_lru {
-//RS                 TBuiltinOp::RemoveMap
-//RS             } else if is_priority_queue {
-//RS                 let Some(mode) = list_remove_mode else {
-//RS                     return None;
-//RS                 };
-//RS                 // D-LISTREMOVE1/F: PriorityQueue reuses List's exact selector
-//RS                 // shape and panic-line convention (criterion c6 on #1481).
-//RS                 let line = cx.src_line_col(method_span.start).0;
-//RS                 TBuiltinOp::PriorityQueueRemove { line, mode }
-//RS             } else if is_list {
-//RS                 let Some(mode) = list_remove_mode else {
-//RS                     return None;
-//RS                 };
-//RS                 // The list form embeds the *method-span* line for its bounds panic,
-//RS                 // exactly as `emit_builtin_method` reads `span_line_col(method_span.start)`.
-//RS                 let line = cx.src_line_col(method_span.start).0;
-//RS                 TBuiltinOp::RemoveList { line, mode }
-//RS             } else {
-//RS                 return None;
-//RS             }
-//RS         }
-//RS         ("get", 1) => {
-//RS             if is_deque {
-//RS                 TBuiltinOp::DequeGet
-//RS             } else if is_lru {
-//RS                 TBuiltinOp::LruGet
-//RS             } else if is_map {
-//RS                 TBuiltinOp::GetMap
-//RS             } else {
-//RS                 TBuiltinOp::GetList
-//RS             }
-//RS         }
-//RS         ("first", 0) if is_map => TBuiltinOp::MapFirst,
-//RS         ("first", 0) if is_set => TBuiltinOp::SetFirst,
-//RS         ("first", 0) if is_sorted_set => TBuiltinOp::First,
-//RS         ("last", 0) if is_sorted_set => TBuiltinOp::Last,
-//RS         ("first", 0) => TBuiltinOp::First,
-//RS         ("last", 0) => TBuiltinOp::Last,
-//RS         ("contains", 1) if is_deque => TBuiltinOp::DequeContains,
-//RS         ("contains", 1) => TBuiltinOp::Contains,
-//RS         ("has", 1) if is_set || is_sorted_set || is_bit_set => TBuiltinOp::Contains,
-//RS         ("index_of" | "index", 1) if is_string => TBuiltinOp::StringIndexOf,
-//RS         ("index_of" | "index", 1) => TBuiltinOp::IndexOf,
-//RS         ("reverse", 0) if is_deque => TBuiltinOp::DequeReverse,
-//RS         ("reverse", 0) if is_string => TBuiltinOp::StringMethod {
-//RS             method: "reverse".to_string(),
-//RS         },
-//RS         ("reverse", 0) => TBuiltinOp::Reverse,
-//RS         // D-SET-DECLINE1=C: guard ahead of the unconditional List `sort` arm
-//RS         // below — Set.sort() returns a fresh List instead of mutating in place.
-//RS         ("sort", 0) if is_set => TBuiltinOp::SetSort,
-//RS         ("sort", 0) => TBuiltinOp::Sort,
-//RS         ("sort_desc", 0) => TBuiltinOp::SortDesc,
-//RS         ("join", 1) if is_deque => TBuiltinOp::DequeJoin,
-//RS         ("join", 1) => TBuiltinOp::JoinSep,
-//RS         ("split", 1) if is_deque => TBuiltinOp::DequeSplit,
-//RS         ("split", 1) if is_string => TBuiltinOp::Split,
-//RS         ("split", 1) => {
-//RS             let fields = match resolved_ret {
-//RS                 Some(ret) => tuple_fields(Some(ret))?,
-//RS                 None => {
-//RS                     let elem = sequence_elem_ty(rty.as_ref()?)?;
-//RS                     let list_ty = Type::List(Box::new(elem));
-//RS                     vec![
-//RS                         ("left".to_string(), list_ty.clone()),
-//RS                         ("right".to_string(), list_ty),
-//RS                     ]
-//RS                 }
-//RS             };
-//RS             TBuiltinOp::IterSplit {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
-//RS             }
-//RS         }
-//RS         ("repeat", 1) if is_string => TBuiltinOp::Repeat,
-//RS         // List literals leave `rty` None — same pattern as Take/Dedup.
-//RS         ("repeat", 1) => TBuiltinOp::IterRepeat,
-//RS         ("cycle", 1) => TBuiltinOp::IterCycle,
-//RS         ("drop_last", 1) => TBuiltinOp::IterDropLast,
-//RS         // D-ITER-RESUME1=A: one exclusive pull from the same source.
-//RS         ("next", 0) if is_iter => TBuiltinOp::IterNext,
-//RS         // D-SET-DECLINE1=C: guard ahead of the unconditional Iter `shuffle`
-//RS         // arm below — Set.shuffle() returns a fresh List, same as Set.sort().
-//RS         ("shuffle", 0) if is_set => TBuiltinOp::SetShuffle,
-//RS         ("rindex", 1) if is_string => TBuiltinOp::StringMethod {
-//RS             method: "last_index_of".to_string(),
-//RS         },
-//RS         ("last_index_of", 1) if is_string => TBuiltinOp::StringMethod {
-//RS             method: "last_index_of".to_string(),
-//RS         },
-//RS         // D-ITERTOOLS1: List methods cross into the canonical iterator
-//RS         // kernel; method lowering wraps the receiver as `Iter<T>`.
-//RS         ("last_index_of", 1) => TBuiltinOp::IterLastIndexOf,
-//RS         ("average", 0) => TBuiltinOp::IterAverage {
-//RS             float: is_float_sequence,
-//RS         },
-//RS         ("compare", 1) if is_string => TBuiltinOp::StringMethod {
-//RS             method: "compare".to_string(),
-//RS         },
-//RS         ("compare", 1) => TBuiltinOp::IterCompare,
-//RS         ("is_sorted", 0) => TBuiltinOp::IterIsSorted,
-//RS         ("shuffle", 0) => TBuiltinOp::IterShuffle,
-//RS         ("to_set", 0) if is_set => TBuiltinOp::SetCopy,
-//RS         ("to_set", 0) => TBuiltinOp::SetFrom,
-//RS         ("sum", 0) => TBuiltinOp::Sum {
-//RS             float: matches!(resolved_ret, Some(Type::Float | Type::Float32)),
-//RS             f32: matches!(resolved_ret, Some(Type::Float32)),
-//RS         },
-//RS         ("product", 0) => TBuiltinOp::Product {
-//RS             float: matches!(resolved_ret, Some(Type::Float | Type::Float32)),
-//RS         },
-//RS         ("min", 0) if is_map => TBuiltinOp::MapMin,
-//RS         ("max", 0) if is_map => TBuiltinOp::MapMax,
-//RS         ("min", 0) => TBuiltinOp::Min {
-//RS             float: is_float_sequence,
-//RS         },
-//RS         ("max", 0) => TBuiltinOp::Max {
-//RS             float: is_float_sequence,
-//RS         },
-//RS         // D-CORE-EAGER2=A: emit/eval split this op by List vs Iter receiver.
-//RS         ("flatten", 0) => TBuiltinOp::Flatten,
-//RS         ("intersperse", 1) => TBuiltinOp::Intersperse,
-//RS         ("clear", 0) => TBuiltinOp::Clear,
-//RS         ("chars", 0) => TBuiltinOp::Chars,
-//RS         ("bytes" | "encode", 0) if is_string => TBuiltinOp::Bytes { owned: false },
-//RS         ("strip" | "lstrip" | "rstrip", 0) if is_string => TBuiltinOp::StringMethod {
-//RS             method: method.to_string(),
-//RS         },
-//RS         ("trim", 0) => TBuiltinOp::Trim,
-//RS         ("trim_start", 0) => TBuiltinOp::TrimStart,
-//RS         ("trim_end", 0) => TBuiltinOp::TrimEnd,
-//RS         // c97/D-STRPARSE1: String-only `lines`; parsing stays `Type.parse`.
-//RS         ("lines" | "splitlines", 0) => TBuiltinOp::Lines,
-//RS         ("starts_with" | "startswith", 1) => TBuiltinOp::StartsWith,
-//RS         ("ends_with" | "endswith", 1) => TBuiltinOp::EndsWith,
-//RS         ("expandtabs", 1) if is_string => TBuiltinOp::StringMethod {
-//RS             method: method.to_string(),
-//RS         },
-//RS         ("find" | "rfind" | "partition" | "rpartition", 1) if is_string => {
-//RS             TBuiltinOp::StringMethod {
-//RS                 method: method.to_string(),
-//RS             }
-//RS         }
-//RS         ("center" | "ljust" | "rjust", 2) if is_string => TBuiltinOp::StringMethod {
-//RS             method: method.to_string(),
-//RS         },
-//RS         ("zfill", 1) if is_string => TBuiltinOp::StringMethod {
-//RS             method: method.to_string(),
-//RS         },
-//RS         ("replace", 2) if is_string => TBuiltinOp::StringMethod {
-//RS             method: "replace".to_string(),
-//RS         },
-//RS         ("replace", 1) if is_set => TBuiltinOp::SetReplace,
-//RS         ("replace", 2) if is_map => TBuiltinOp::InsertMap,
-//RS         ("replace", 2) if is_list || rty.is_none() => TBuiltinOp::ListReplace,
-//RS         ("replace", 2) => TBuiltinOp::Replace,
-//RS         ("pad_start", 2) => TBuiltinOp::PadStart,
-//RS         ("pad_end", 2) => TBuiltinOp::PadEnd,
-//RS         ("count", 1) if is_list => TBuiltinOp::CountList,
-//RS         ("count", 1) if is_string => TBuiltinOp::StringCount,
-//RS         ("counts", 0) if is_list || matches!(&rty, Some(Type::FixedList { .. })) || is_iter => {
-//RS             TBuiltinOp::Counts
-//RS         }
-//RS         ("extend", 1) if is_list => TBuiltinOp::ExtendList,
-//RS         // D-TYPE2-MEASURE1=A: fixed lists join through the same builtin; emit
-//RS         // picks the const-generic fixed shape from the FixedList types.
-//RS         ("concat", 1) if is_list || matches!(&rty, Some(Type::FixedList { .. })) => {
-//RS             TBuiltinOp::ConcatList
-//RS         }
-//RS         ("is_alphabetic", 0) if is_string => TBuiltinOp::StringIsAlphabetic,
-//RS         ("is_numeric", 0) if is_string => TBuiltinOp::StringIsNumeric,
-//RS         ("is_whitespace", 0) if is_string => TBuiltinOp::StringIsWhitespace,
-//RS         ("is_ascii", 0) if is_string => TBuiltinOp::StringIsAscii,
-//RS         ("to_title", 0) if is_string => TBuiltinOp::StringToTitle,
-//RS         (
-//RS             "count_bytes" | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "copy"
-//RS             | "normalize" | "isalnum" | "isalpha" | "isascii" | "isdecimal" | "isdigit"
-//RS             | "isidentifier" | "isnumeric" | "isprintable" | "isspace" | "istitle" | "islower"
-//RS             | "isupper" | "lower" | "upper" | "title" | "casefold",
-//RS             0,
-//RS         ) if is_string => TBuiltinOp::StringMethod {
-//RS             method: method.to_string(),
-//RS         },
-//RS         (
-//RS             "remove_prefix" | "remove_suffix" | "removeprefix" | "removesuffix" | "equal"
-//RS             | "rsplit" | "matches" | "match",
-//RS             1,
-//RS         ) if is_string => TBuiltinOp::StringMethod {
-//RS             method: method.to_string(),
-//RS         },
-//RS         // D-STR-DECLINE1=C: `s.parse()`/`s.to_int()` share the canonical
-//RS         // integer parser; `to_float()` keeps the corresponding float route.
-//RS         ("parse" | "to_int", 0) if is_string => TBuiltinOp::ParseInt,
-//RS         ("to_float", 0) if is_string => TBuiltinOp::ParseFloat,
-//RS         ("split_once", 1) if is_string => {
-//RS             let fields = if let Some(ret) = resolved_ret {
-//RS                 option_tuple_fields(Some(ret))?
-//RS             } else {
-//RS                 let ret = crate::Collections::builtin_method_return(
-//RS                     &Type::String,
-//RS                     method,
-//RS                     args.len(),
-//RS                     false,
-//RS                 )
-//RS                 .flatten()?;
-//RS                 option_tuple_fields(Some(&ret))?
-//RS             };
-//RS             TBuiltinOp::StringSplitOnce {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
-//RS             }
-//RS         }
-//RS         ("cut_last", 1) if is_string => {
-//RS             let fields = if let Some(ret) = resolved_ret {
-//RS                 option_tuple_fields(Some(ret))?
-//RS             } else {
-//RS                 let ret = crate::Collections::builtin_method_return(
-//RS                     &Type::String,
-//RS                     method,
-//RS                     args.len(),
-//RS                     false,
-//RS                 )
-//RS                 .flatten()?;
-//RS                 option_tuple_fields(Some(&ret))?
-//RS             };
-//RS             TBuiltinOp::StringCutLast {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
-//RS             }
-//RS         }
-//RS         // D-STR-AFTER1: `.after(sep)`/`.before(sep)` — first-occurrence substring split.
-//RS         ("after", 1) => TBuiltinOp::After,
-//RS         ("before", 1) => TBuiltinOp::Before,
-//RS         ("to_upper", 0) => TBuiltinOp::ToUpper,
-//RS         ("to_lower", 0) => TBuiltinOp::ToLower,
-//RS         ("to_ascii_upper", 0) if is_string => TBuiltinOp::ToAsciiUpper,
-//RS         ("to_ascii_lower", 0) if is_string => TBuiltinOp::ToAsciiLower,
-//RS         ("slice", 2) if is_string => {
-//RS             let line = cx.src_line_col(receiver.span().start).0;
-//RS             TBuiltinOp::Slice { line }
-//RS         }
-//RS         ("slice", 2) => TBuiltinOp::ListSlice,
-//RS         ("slice", 1) if is_map => TBuiltinOp::MapSliceKeys,
-//RS         ("copy", 0) if is_map => TBuiltinOp::MapCopy,
-//RS         ("copy", 0) if is_set => TBuiltinOp::SetCopy,
-//RS         ("copy", 0) if is_bit_set => TBuiltinOp::BitSetCopy,
-//RS         ("copy", 0) => TBuiltinOp::ListCopy,
-//RS         ("equal", 1) if is_map => TBuiltinOp::MapEqual,
-//RS         ("equal", 1) if is_set => TBuiltinOp::SetEqual,
-//RS         ("equal", 1) => TBuiltinOp::ListEqual,
-//RS         ("binary_search", 1) => TBuiltinOp::ListBinarySearch,
-//RS         ("union", 1) if is_sorted_set => TBuiltinOp::SortedSetUnion,
-//RS         ("union", 1) if is_set => TBuiltinOp::SetUnion,
-//RS         ("union", 1) => TBuiltinOp::ListUnion,
-//RS         ("intersection", 1) if is_sorted_set => TBuiltinOp::SortedSetIntersection,
-//RS         ("intersection", 1) if is_set => TBuiltinOp::SetIntersection,
-//RS         ("intersection", 1) if is_map => TBuiltinOp::MapIntersection,
-//RS         ("intersection", 1) => TBuiltinOp::ListIntersection,
-//RS         ("difference", 1) if is_sorted_set => TBuiltinOp::SortedSetDifference,
-//RS         ("difference", 1) if is_set => TBuiltinOp::SetDifference,
-//RS         ("difference", 1) => TBuiltinOp::ListDifference,
-//RS         ("random", 0) => TBuiltinOp::ListRandom,
-//RS         ("min_max", 0) => {
-//RS             let fields = match resolved_ret {
-//RS                 Some(ret) => option_tuple_fields(Some(ret))?,
-//RS                 None => {
-//RS                     let elem = sequence_elem_ty(rty.as_ref()?)?;
-//RS                     vec![("min".to_string(), elem.clone()), ("max".to_string(), elem)]
-//RS                 }
-//RS             };
-//RS             TBuiltinOp::ListMinMax {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
-//RS             }
-//RS         }
-//RS         ("to_list" | "items", 0) if is_map => {
-//RS             let fields = match resolved_ret {
-//RS                 Some(ret) => tuple_list_elem_fields(Some(ret))?,
-//RS                 None => {
-//RS                     let Some(Type::Map { key, value, .. }) = rty.as_ref() else {
-//RS                         return None;
-//RS                     };
-//RS                     vec![
-//RS                         ("key".to_string(), (**key).clone()),
-//RS                         ("value".to_string(), (**value).clone()),
-//RS                     ]
-//RS                 }
-//RS             };
-//RS             TBuiltinOp::MapToList {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
-//RS             }
-//RS         }
-//RS         ("top_n", 1) if is_map => {
-//RS             let fields = match resolved_ret {
-//RS                 Some(ret) => tuple_list_elem_fields(Some(ret))?,
-//RS                 None => {
-//RS                     let Some(Type::Map { key, value, .. }) = rty.as_ref() else {
-//RS                         return None;
-//RS                     };
-//RS                     vec![
-//RS                         ("key".to_string(), (**key).clone()),
-//RS                         ("value".to_string(), (**value).clone()),
-//RS                     ]
-//RS                 }
-//RS             };
-//RS             TBuiltinOp::MapTopN {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
-//RS             }
-//RS         }
-//RS         // D-DYNARRAY1: `list.view(a..b)`
-//RS         ("view", 2) => {
-//RS             let line = cx.src_line_col(receiver.span().start).0;
-//RS             TBuiltinOp::ViewNew { line }
-//RS         }
-//RS         ("split_write", 1) => {
-//RS             let fields = match resolved_ret {
-//RS                 Some(ret) => result_tuple_fields(Some(ret))?,
-//RS                 None => {
-//RS                     let elem = sequence_elem_ty(rty.as_ref()?)?;
-//RS                     let view = Type::Apply {
-//RS                         name: "ViewMut".to_string(),
-//RS                         args: vec![elem],
-//RS                     };
-//RS                     vec![
-//RS                         ("left".to_string(), view.clone()),
-//RS                         ("right".to_string(), view),
-//RS                     ]
-//RS                 }
-//RS             };
-//RS             TBuiltinOp::SplitWrite {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
-//RS             }
-//RS         }
-//RS         ("get_disjoint_write", 1) => TBuiltinOp::GetDisjointWrite,
-//RS         ("keys", 0) if is_lru => TBuiltinOp::LruKeys,
-//RS         ("keys", 0) => TBuiltinOp::Keys,
-//RS         // #1478: `Set.values()` is the lazy Set-native alias of `to_list`;
-//RS         // must precede the Map-generic `Values` fallback below.
-//RS         ("values", 0) if is_set => TBuiltinOp::SetValues,
-//RS         ("values", 0) => TBuiltinOp::Values,
-//RS         ("has_key", 1) => TBuiltinOp::ContainsKey,
-//RS         ("to_string", 0) => TBuiltinOp::ToString,
-//RS         // D-ITER1: non-closure list adapters.
-//RS         ("take", 1) => TBuiltinOp::Take,
-//RS         ("skip", 1) => TBuiltinOp::Skip,
-//RS         ("step_by", 1) => TBuiltinOp::StepBy,
-//RS         ("dedup", 0) => TBuiltinOp::Dedup,
-//RS         ("chunks", 1) => TBuiltinOp::Chunks,
-//RS         ("windows", 1) => TBuiltinOp::Windows,
-//RS         ("indexed", 0) => {
-//RS             let fields = match resolved_ret {
-//RS                 Some(ret) => tuple_list_elem_fields(Some(ret))?,
-//RS                 None => {
-//RS                     let elem_ty = sequence_elem_ty(rty.as_ref()?)?;
-//RS                     vec![
-//RS                         ("idx".to_string(), Type::Int),
-//RS                         ("item".to_string(), elem_ty),
-//RS                     ]
-//RS                 }
-//RS             };
-//RS             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
-//RS             TBuiltinOp::Indexed { tuple_struct: ts }
-//RS         }
-//RS         ("indexes", 0) => TBuiltinOp::Indexes,
-//RS         ("zip", 1) if is_option => {
-//RS             // D-HOLE1: `a: T?`.zip(`b: U?`) -> `(a: T, b: U)?`.
-//RS             let fields = option_tuple_fields(resolved_ret)?;
-//RS             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
-//RS             let elem_ty = Type::Tuple(
-//RS                 fields
-//RS                     .iter()
-//RS                     .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
-//RS                     .collect(),
-//RS             );
-//RS             TBuiltinOp::OptionZip {
-//RS                 tuple_struct: ts,
-//RS                 elem_ty,
-//RS             }
-//RS         }
-//RS         ("zip", 1) => {
-//RS             // Build the tuple struct name for `(a: T, b: U)`. Sema has already
-//RS             // refined both element types in the resolved return.
-//RS             let fields = tuple_list_elem_fields(resolved_ret)?;
-//RS             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
-//RS             let field_types = fields.iter().map(|(_, ty)| ty.clone()).collect();
-//RS             TBuiltinOp::Zip {
-//RS                 tuple_struct: ts,
-//RS                 mode: crate::Codegen::TIR::TZipMode::Strict,
-//RS                 fields: fields.into_iter().map(|(name, _)| name).collect(),
-//RS                 flatten: false,
-//RS                 input_count: 2,
-//RS                 fill_mode: crate::Codegen::TIR::TZipFillMode::DefaultNone,
-//RS                 field_types,
-//RS             }
-//RS         }
-//RS         ("unzip", 0) => {
-//RS             let fields = match resolved_ret {
-//RS                 Some(ret) => tuple_fields(Some(ret))?,
-//RS                 None => {
-//RS                     let pair = sequence_elem_ty(rty.as_ref()?)?;
-//RS                     let pair_fields = tuple_fields(Some(&pair))?;
-//RS                     let a_ty = pair_fields
-//RS                         .iter()
-//RS                         .find(|(name, _)| name == "a")
-//RS                         .map(|(_, ty)| ty.clone())?;
-//RS                     let b_ty = pair_fields
-//RS                         .iter()
-//RS                         .find(|(name, _)| name == "b")
-//RS                         .map(|(_, ty)| ty.clone())?;
-//RS                     vec![
-//RS                         ("a".to_string(), Type::List(Box::new(a_ty))),
-//RS                         ("b".to_string(), Type::List(Box::new(b_ty))),
-//RS                     ]
-//RS                 }
-//RS             };
-//RS             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
-//RS             TBuiltinOp::Unzip { tuple_struct: ts }
-//RS         }
-//RS         // D-FAILCOMP1: try_collect on [Result<T,E>] → Result<[T],E>.
-//RS         ("try_collect", 0) => TBuiltinOp::TryCollect,
-//RS         // D-COLLBREADTH1=A: Set<T> instance methods.
-//RS         ("add", 1) if is_set => TBuiltinOp::SetInsert,
-//RS         ("update", 1) if is_set => TBuiltinOp::SetUpdate,
-//RS         ("difference_update", 1) if is_set => TBuiltinOp::SetDifferenceUpdate,
-//RS         ("intersection_update", 1) if is_set => TBuiltinOp::SetIntersectionUpdate,
-//RS         ("symmetric_difference_update", 1) if is_set => TBuiltinOp::SetSymmetricDifferenceUpdate,
-//RS         ("add", 1) if is_sorted_set => TBuiltinOp::SortedSetInsert,
-//RS         ("add", 1) if is_bit_set => TBuiltinOp::BitSetAdd,
-//RS         ("add", 1) if is_bag => TBuiltinOp::BagAdd,
-//RS         ("peek", 0) if is_priority_queue => TBuiltinOp::PriorityQueuePeek,
-//RS         ("to_sorted_list", 0) if is_priority_queue => TBuiltinOp::PriorityQueueToSortedList,
-//RS         ("to_list", 0) if is_iter => TBuiltinOp::IterToList,
-//RS         ("collect", 0) if is_iter => TBuiltinOp::IterCollect,
-//RS         ("lazy", 0) if is_list || matches!(rty, Some(Type::FixedList { .. })) => {
-//RS             TBuiltinOp::ListLazy
-//RS         }
-//RS         ("to_list", 0) if is_deque => TBuiltinOp::DequeToList,
-//RS         ("to_list", 0) if is_sorted_set => TBuiltinOp::SortedSetToList,
-//RS         ("to_list", 0) if is_bit_set => TBuiltinOp::BitSetToList,
-//RS         ("to_list", 0) => TBuiltinOp::SetToList,
-//RS         // removed duplicate #1477
-//RS         ("symmetric_difference", 1) if is_sorted_set => TBuiltinOp::SortedSetSymmetricDifference,
-//RS         ("is_subset", 1) if is_sorted_set => TBuiltinOp::SortedSetIsSubset,
-//RS         ("is_superset", 1) if is_sorted_set => TBuiltinOp::SortedSetIsSuperset,
-//RS         ("is_disjoint", 1) if is_sorted_set => TBuiltinOp::SortedSetIsDisjoint,
-//RS         // removed duplicate #1477
-//RS         ("symmetric_difference", 1) if is_set => TBuiltinOp::SetSymmetricDifference,
-//RS         ("is_subset" | "issubset", 1) if is_set => TBuiltinOp::SetIsSubset,
-//RS         ("is_superset" | "issuperset", 1) if is_set => TBuiltinOp::SetIsSuperset,
-//RS         ("is_disjoint" | "isdisjoint", 1) if is_set => TBuiltinOp::SetIsDisjoint,
-//RS         // removed duplicate #1477
-//RS         ("capacity", 0) if is_set => TBuiltinOp::SetCapacity,
-//RS         // D-ONCE-VERB1=A: Set has one remove-and-return spelling.
-//RS         ("add", 2) if is_lru => TBuiltinOp::LruPut,
-//RS         ("add_new", 2) if is_lru => TBuiltinOp::LruAddNew,
-//RS         ("capacity", 0) if is_lru => TBuiltinOp::LruCapacity,
-//RS         ("count", 0) if is_bit_set => TBuiltinOp::BitSetCount,
-//RS         (
-//RS             "write_u8" | "write_i8" | "write_u16_le" | "write_u16_be" | "write_i16_le"
-//RS             | "write_i16_be" | "write_u32_le" | "write_u32_be" | "write_i32_le" | "write_i32_be"
-//RS             | "write_u64_le" | "write_u64_be" | "write_i64_le" | "write_i64_be" | "write_f32_le"
-//RS             | "write_f32_be" | "write_f64_le" | "write_f64_be" | "write_bytes",
-//RS             1,
-//RS         ) if is_byte_buffer => TBuiltinOp::ByteBufferWrite {
-//RS             method: method.to_string(),
-//RS         },
-//RS         ("to_bytes", 0) if is_byte_buffer => TBuiltinOp::ByteBufferToBytes,
-//RS         ("has", 1) if is_bag => TBuiltinOp::BagHas,
-//RS         ("count", 1) if is_bag => TBuiltinOp::BagCount,
-//RS         // D-COLLBREADTH1=A: Queue<T> instance methods.
-//RS         ("push_front", 1) if is_deque => TBuiltinOp::DequePushFront,
-//RS         ("push_back", 1) if is_deque => TBuiltinOp::DequePushBack,
-//RS         ("pop_front", 0) if is_deque => TBuiltinOp::DequePopFront,
-//RS         ("pop_back", 0) if is_deque => TBuiltinOp::DequePopBack,
-//RS         ("peek_front", 0) if is_deque => TBuiltinOp::DequePeekFront,
-//RS         ("peek_back", 0) if is_deque => TBuiltinOp::DequePeekBack,
-//RS         ("capacity", 0) if is_deque => TBuiltinOp::DequeCapacity,
-//RS         ("delete", 1) if is_deque => TBuiltinOp::DequeDelete,
-//RS         _ => return None,
-//RS     };
-//RS     let emitted_borrow = if matches!(op, TBuiltinOp::IterNext) {
-//RS         // Explicit helper call: `jet_iter_next(&mut receiver)`.
-//RS         crate::Collections::BuiltinReceiverBorrow::EagerWrite
-//RS     } else if is_iter {
-//RS         crate::Collections::BuiltinReceiverBorrow::Move
-//RS     } else {
-//RS         match &op {
-//RS             // Explicit helper call: `jet_list_remove(&mut receiver, ...)`.
-//RS             TBuiltinOp::RemoveList { .. } => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
-//RS             TBuiltinOp::SortDesc => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
-//RS             // Native method syntax receives Rust's two-phase `&mut self`.
-//RS             TBuiltinOp::Push
-//RS             | TBuiltinOp::TryPush
-//RS             | TBuiltinOp::TryReserve
-//RS             | TBuiltinOp::TryInsertMap
-//RS             | TBuiltinOp::TryStringPush
-//RS             | TBuiltinOp::Pop
-//RS             | TBuiltinOp::InsertMap
-//RS             | TBuiltinOp::InsertList
-//RS             | TBuiltinOp::AddNewMap
-//RS             | TBuiltinOp::MapSetDefault
-//RS             | TBuiltinOp::MapUpdate
-//RS             | TBuiltinOp::RemoveMap
-//RS             | TBuiltinOp::MapPopFirst
-//RS             | TBuiltinOp::ExtendList
-//RS             | TBuiltinOp::Reverse
-//RS             | TBuiltinOp::Sort
-//RS             | TBuiltinOp::Clear
-//RS             | TBuiltinOp::SetInsert
-//RS             | TBuiltinOp::SetUpdate
-//RS             | TBuiltinOp::SetDifferenceUpdate
-//RS             | TBuiltinOp::SetIntersectionUpdate
-//RS             | TBuiltinOp::SetSymmetricDifferenceUpdate
-//RS             | TBuiltinOp::SetPop
-//RS             | TBuiltinOp::SetRemove
-//RS             | TBuiltinOp::SetReplace
-//RS             | TBuiltinOp::PriorityQueuePop
-//RS             | TBuiltinOp::SortedSetInsert
-//RS             | TBuiltinOp::SortedSetRemove
-//RS             | TBuiltinOp::BitSetAdd
-//RS             | TBuiltinOp::BitSetRemove
-//RS             | TBuiltinOp::BagAdd
-//RS             | TBuiltinOp::BagRemove
-//RS             | TBuiltinOp::LruPut
-//RS             | TBuiltinOp::LruAddNew
-//RS             | TBuiltinOp::LruGet
-//RS             | TBuiltinOp::ByteBufferWrite { .. }
-//RS             | TBuiltinOp::DequePushFront
-//RS             | TBuiltinOp::DequePushBack
-//RS             | TBuiltinOp::DequePopFront
-//RS             | TBuiltinOp::DequePopBack
-//RS             | TBuiltinOp::DequeDelete
-//RS             | TBuiltinOp::DequeReverse
-//RS             | TBuiltinOp::DequeSplit
-//RS             | TBuiltinOp::SplitWrite { .. }
-//RS             | TBuiltinOp::GetDisjointWrite => {
-//RS                 crate::Collections::BuiltinReceiverBorrow::TwoPhaseWrite
-//RS             }
-//RS             _ => crate::Collections::BuiltinReceiverBorrow::Read,
-//RS         }
-//RS     };
-//RS     if let Some(receiver_borrow) = receiver_borrow {
-//RS         if receiver_borrow != emitted_borrow {
-//RS             return None;
-//RS         }
-//RS     }
-//RS     Some(op)
-//RS }
-//RS 
-//RS /// c109 Phase 9: the resolved return type of a built-in collection/string method,
-//RS /// from `Collections::builtin_method_return` (the sema table). `Some(Unit)` means
-//RS /// the canonical row is a genuinely void method; `None` means no canonical row.
-//RS 
-//RS /// c109 Phase 11: resolve a closure-taking collection method into a total
-//RS /// `TClosureOp`. Every receiver and callback-dispatch fact is explicit; a missing
-//RS /// fact returns `None` so the caller can emit an invariant violation for a checked
-//RS /// call or try another analytical lowering form.
-//RS pub(crate) fn resolve_closure_op(
-//RS     recv_ty: &Type,
-//RS     method: &str,
-//RS     args: &[crate::AST::CallArg],
-//RS     cx: &Cx,
-//RS     fallible_callback: bool,
-//RS     callback_needs_fn_mut: Option<bool>,
-//RS     callback_param_count: Option<usize>,
-//RS ) -> Option<TClosureOp> {
-//RS     let recv_ty = base_receiver_ty(recv_ty);
-//RS     let elem_ty = sequence_elem_ty(recv_ty);
-//RS     let is_sequence = elem_ty.is_some();
-//RS     let is_list = list_receiver(recv_ty);
-//RS     let is_iter = matches!(
-//RS         recv_ty,
-//RS         Type::Apply { name, args }
-//RS             if args.len() == 1
-//RS                 && matches!(
-//RS                     name.as_str(),
-//RS                     crate::Syntax::TYPE_ITER | crate::Syntax::TYPE_VIEW_ITER
-//RS                 )
-//RS     );
-//RS     let is_map = matches!(recv_ty, Type::Map { .. });
-//RS     let is_option = matches!(recv_ty, Type::Option(_));
-//RS     let is_bag = matches!(recv_ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_TALLY);
-//RS     let is_view = view_receiver(recv_ty);
-//RS     let has_args = |count: usize| args.len() == count;
-//RS     let op = match method {
-//RS         "edit_disjoint" if is_list && has_args(2) => TClosureOp::EditDisjoint,
-//RS         "map" if is_option && has_args(1) => TClosureOp::OptionMap,
-//RS         "map" if is_map && has_args(1) => TClosureOp::MapMap,
-//RS         "map" if !is_sequence || !has_args(1) => return None,
-//RS         "map" if fallible_callback => TClosureOp::TryMap,
-//RS         "map" if is_view => TClosureOp::ViewMap,
-//RS         "map" => match callback_needs_fn_mut {
-//RS             Some(true) => TClosureOp::MapMut,
-//RS             Some(false) => TClosureOp::Map,
-//RS             None => return None,
-//RS         },
-//RS         "filter" if is_map && has_args(1) => TClosureOp::MapFilter,
-//RS         "filter" if !is_sequence || !has_args(1) => return None,
-//RS         "filter" if fallible_callback => TClosureOp::TryFilter,
-//RS         "filter" => TClosureOp::Filter,
-//RS         "each" if is_map && has_args(1) => TClosureOp::EachMap,
-//RS         "each" if !is_sequence || !has_args(1) => return None,
-//RS         "each"
-//RS             if is_list
-//RS                 && elem_ty
-//RS                     .as_ref()
-//RS                     .is_some_and(|elem| list_carries_trait(cx, elem)) =>
-//RS         {
-//RS             TClosureOp::EachRef
-//RS         }
-//RS         "each" => match callback_needs_fn_mut {
-//RS             Some(true) => TClosureOp::EachMut,
-//RS             Some(false) => TClosureOp::Each,
-//RS             None => return None,
-//RS         },
-//RS         "find" if is_sequence && has_args(1) => TClosureOp::Find,
-//RS         "any" if is_bag && has_args(1) => TClosureOp::BagAny,
-//RS         "any" if is_map && has_args(1) => TClosureOp::MapAny,
-//RS         "any" if is_sequence && has_args(1) => TClosureOp::Any,
-//RS         "all" if is_map && has_args(1) => TClosureOp::MapAll,
-//RS         "all" if is_sequence && has_args(1) => TClosureOp::All,
-//RS         "count_where" if is_sequence && has_args(1) => TClosureOp::CountWhere,
-//RS         "sort_by" if !is_list || !has_args(1) => return None,
-//RS         "sort_by" => match (callback_param_count, fallible_callback) {
-//RS             (Some(1), true) => TClosureOp::TrySortBy,
-//RS             (Some(1), false) => TClosureOp::SortBy,
-//RS             (Some(2), false) => TClosureOp::SortByCompare,
-//RS             _ => return None,
-//RS         },
-//RS         "sort_by_desc" if !is_list || !has_args(1) => return None,
-//RS         "sort_by_desc" => match (callback_param_count, fallible_callback) {
-//RS             (Some(1), true) => TClosureOp::TrySortByDesc,
-//RS             (Some(1), false) => TClosureOp::SortByDesc,
-//RS             _ => return None,
-//RS         },
-//RS         "reduce" if (is_list || is_iter) && has_args(2) => TClosureOp::Reduce,
-//RS         "take_while" if is_sequence && has_args(1) => TClosureOp::TakeWhile,
-//RS         "skip_while" if is_sequence && has_args(1) => TClosureOp::SkipWhile,
-//RS         "flat_map" if is_map && has_args(1) => TClosureOp::MapFlatMap,
-//RS         "flat_map" if is_sequence && has_args(1) => TClosureOp::FlatMap,
-//RS         "binary_search_by" if is_list && has_args(1) => TClosureOp::ListBinarySearchBy,
-//RS         "min_max_by" if is_list && has_args(1) => {
-//RS             let elem = elem_ty.as_ref()?;
-//RS             let fields = vec![
-//RS                 ("min".to_string(), elem.clone()),
-//RS                 ("max".to_string(), elem.clone()),
-//RS             ];
-//RS             TClosureOp::ListMinMaxBy {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
-//RS             }
-//RS         }
-//RS         "filter_map" if is_sequence && has_args(1) => TClosureOp::FilterMap,
-//RS         "para_map" if is_list && matches!(args.len(), 1 | 2) => TClosureOp::ParaMap,
-//RS         "para_filter" if is_list && has_args(1) => TClosureOp::ParaFilter,
-//RS         "para_fold" if is_list && has_args(3) => TClosureOp::ParaFold,
-//RS         "para_partition" if is_list && has_args(1) => {
-//RS             let elem = elem_ty.as_ref()?;
-//RS             let list_ty = Type::List(Box::new(elem.clone()));
-//RS             let fields = vec![
-//RS                 ("false_".to_string(), list_ty.clone()),
-//RS                 ("true_".to_string(), list_ty),
-//RS             ];
-//RS             TClosureOp::ParaPartition {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
-//RS             }
-//RS         }
-//RS         "scan" if is_sequence && has_args(2) => TClosureOp::Scan,
-//RS         "fold" if is_map && has_args(2) => TClosureOp::MapFold,
-//RS         "fold" if is_view && has_args(2) => TClosureOp::ViewFold,
-//RS         "fold" if (is_list || is_iter) && has_args(2) => TClosureOp::Fold,
-//RS         "position" if is_sequence && has_args(1) => TClosureOp::Position,
-//RS         "min_by" if is_sequence && has_args(1) => TClosureOp::MinBy,
-//RS         "max_by" if is_sequence && has_args(1) => TClosureOp::MaxBy,
-//RS         "group_by" if is_sequence && has_args(1) => TClosureOp::GroupBy,
-//RS         "count_by" if is_sequence && has_args(1) => TClosureOp::CountBy,
-//RS         "update_first" if is_list && has_args(2) => TClosureOp::UpdateFirst,
-//RS         "dedup_by" if is_sequence && has_args(1) => TClosureOp::DedupBy,
-//RS         "is_sorted_by" if is_sequence && has_args(1) => TClosureOp::IsSortedBy,
-//RS         "chunk_while" if is_sequence && has_args(1) => TClosureOp::ChunkWhile,
-//RS         "partition" if is_sequence && has_args(1) => {
-//RS             let elem = elem_ty.as_ref()?;
-//RS             let list_ty = Type::List(Box::new(elem.clone()));
-//RS             let fields = vec![
-//RS                 ("false_".to_string(), list_ty.clone()),
-//RS                 ("true_".to_string(), list_ty),
-//RS             ];
-//RS             TClosureOp::Partition {
-//RS                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
-//RS             }
-//RS         }
-//RS         _ => return None,
-//RS     };
-//RS     if matches!(
-//RS         op,
-//RS         TClosureOp::SortBy
-//RS             | TClosureOp::SortByDesc
-//RS             | TClosureOp::TrySortBy
-//RS             | TClosureOp::TrySortByDesc
-//RS             | TClosureOp::SortByCompare
-//RS     ) && crate::Collections::builtin_receiver_borrow(recv_ty, method)
-//RS         != crate::Collections::BuiltinReceiverBorrow::EagerWrite
-//RS     {
-//RS         return None;
-//RS     }
-//RS     Some(op)
-//RS }
-//RS 
-//RS /// c109 Phase 11: TIR-local reproduction of codegen's `list_carries_trait` — a list
-//RS /// element type that is a trait object or a
-//RS /// named trait. Used by the `each`-on-trait-object-list emit branch (`jet_list_each_ref`).
-//RS /// In the covered collection subset a trait-object element type is excluded, so this
-//RS /// is always false for a covered receiver; reproduced for exactness regardless.
-//RS pub(crate) fn list_carries_trait(cx: &Cx, inner: &Type) -> bool {
-//RS     matches!(inner, Type::TraitObject(_))
-//RS         || matches!(inner, Type::Named(n) if cx.trait_names.contains(n))
-//RS }
-// END-PORT-PENDING 0471 crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:1-1296
+use jet_foundation.[Expr, IndexKind, Type, Span, CallArg, CtValue, NamedType]
+use jet_codegen.Codegen.Context.[Cx]
+use jet_codegen.TIR.[ListRemoveMode, LowerEnv, TBuiltinOp, TClosureOp, TExpr, TExprKind, TZipMode, TZipFillMode, lower_expr, struct_field_type, tir_recv_jet_ty, builtin_dispatch_ty]
+use jet_codegen.Tuples.[tuple_struct_name]
+use jet_collections.[builtin_method_return, builtin_receiver_borrow, BuiltinReceiverBorrow, is_closure_method, is_iter_type]
+use jet_sema.[core_fixed_sig]
+use jet_syntax as Syntax
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:14
+fn invariant_expr(span: Span, construct: String) -> TExpr {
+    TExpr{ty: Type.Named(Syntax.TYPE_NEVER), kind: TExprKind.InvariantViolation{construct: construct, span: span}}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:23
+fn base_receiver_ty(ty: Type) -> Type {
+    if ty == .Tagged(_, inner) -> base_receiver_ty(inner) else -> ty
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:30
+fn sequence_elem_ty(ty: Type) -> Type? {
+    if ty == {
+        .Tagged(_, inner) -> sequence_elem_ty(inner)
+        .List(inner) | .FixedList(inner, _) -> Val(~inner)
+        .Apply(name, args) if args.len() == 1 && (name == Syntax.TYPE_ITER || name == Syntax.TYPE_VIEW_ITER || name == "View" || name == "ViewMut" || name == "ComputeViewMut") -> Val(~args[0])
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:51
+fn list_receiver(ty: Type) -> Bool {
+    if ty == { .Tagged(_, inner) -> list_receiver(inner); .List(_) | .FixedList(_, _) -> true; else -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:59
+fn view_receiver(ty: Type) -> Bool {
+    if base_receiver_ty(ty) == .Apply(name, args) -> args.len() == 1 && (name == "View" || name == "ViewMut" || name == "ComputeViewMut")
+    else -> false
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:67
+fn remove_mode_variant(variant: String) -> ListRemoveMode? {
+    short :: if variant == "Val" || variant == "Slot" -> variant else -> variant.strip_prefix(Syntax.GENERATED_NAME_PREFIX) ?? return None
+    if short == { "Val" -> Val(ListRemoveMode.Value); "Slot" -> Val(ListRemoveMode.Slot); else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:89
+pub fn wrap_set_receiver_as_list(recv: TExpr, span: Span) -> TExpr {
+    if recv.ty != .Apply(name, args) -> return ^recv
+    if name != "Set" && name != Syntax.TYPE_RANK -> return ^recv
+    if args.is_empty() -> return invariant_expr(span, "set receiver missing element type")
+    if args.len() != 1 -> return invariant_expr(span, "set receiver has invalid generic arity")
+    op :: if name == "Set" -> TBuiltinOp.SetToList else -> TBuiltinOp.SortedSetToList
+    TExpr{ty: Type.List(~args[0]), kind: TExprKind.BuiltinMethod{recv: ^recv, op: op, args: []}}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:119
+fn tuple_fields(ty: Type?) -> [(String, Type)]? {
+    value :: ty ?? return None
+    if value == {
+        .Tagged(_, inner) -> tuple_fields(Val(inner))
+        .Tuple(fields) -> {
+            out := [(String, Type)]{}
+            loop field in fields -> &out.push((field.name, ~field.ty))
+            Val(^out)
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:132
+fn tuple_list_elem_fields(ty: Type?) -> [(String, Type)]? {
+    value :: ty ?? return None
+    inner :: sequence_elem_ty(value) ?? return None
+    tuple_fields(Val(inner))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:138
+fn option_tuple_fields(ty: Type?) -> [(String, Type)]? {
+    value :: ty ?? return None
+    if value == { .Tagged(_, inner) -> option_tuple_fields(Val(inner)); .Option(inner) -> tuple_fields(Val(inner)); else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:146
+fn result_tuple_fields(ty: Type?) -> [(String, Type)]? {
+    value :: ty ?? return None
+    if value == { .Tagged(_, inner) -> result_tuple_fields(Val(inner)); .Result(ok, _) -> tuple_fields(Val(ok)); else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:159
+pub fn pool_field_ty_hint(e: Expr, cx: Cx, env: LowerEnv) -> Type? {
+    if e != .Field(base, field, _) -> return None
+    if base != .Index(pool_expr, _, _, IndexKind.Pool) -> return None
+    pool_ty :: tir_recv_jet_ty(pool_expr, env) ?? return None
+    if pool_ty != .Apply(_, args) || args.is_empty() -> return None
+    struct_field_type(cx, args[0], field)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:185
+pub fn declared_field_ty(e: Expr, cx: Cx, env: LowerEnv) -> Type? {
+    if e == {
+        .Paren(inner, _) | .Copy(inner, _) -> declared_field_ty(inner, cx, env)
+        .Index(base, _, _, _) -> {
+            base_ty :: tir_recv_jet_ty(base, env) ?? declared_field_ty(base, cx, env) ?? return None
+            if base_ty == { .List(inner) | .FixedList(inner, _) -> Val(inner); else -> None }
+        }
+        .Field(base, field, _) -> {
+            base_ty :: tir_recv_jet_ty(base, env) ?? declared_field_ty(base, cx, env) ?? return None
+            struct_field_type(cx, base_ty, field)
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:226
+fn builtin_recv_ty(receiver: Expr, method: String, nargs: USize, cx: Cx, env: LowerEnv) -> Type? {
+    current := receiver
+    unwrap_carrier := false
+    loop {
+        if current == {
+            .Paren(inner, _) | .Copy(inner, _) -> current = inner
+            .Try(inner, _, _, _) -> { unwrap_carrier = true; current = inner }
+            else -> break
+        }
+    }
+    if tir_recv_jet_ty(current, env) == .Val(ty) {
+        if unwrap_carrier {
+            if ty == .Result(ok, _) | .Option(ok) -> return Val(builtin_dispatch_ty(ok))
+        }
+        return Val(ty)
+    }
+    if current == .MethodCall(call_receiver, call_method, _, _, _, _, _, resolved_ret, _, _) {
+        if call_receiver == .Ident(alias, _) && !env.locals.contains_key(alias) {
+            if cx.core_import_module_for_function(env.fn_name, alias) == .Val(module) {
+                ty := resolved_ret
+                if ty == None {
+                    if core_fixed_sig(module, call_method) == .Val((_, ret)) -> ty = ret
+                }
+                if ty == .Val(value) {
+                    if unwrap_carrier {
+                        if value == .Result(ok, _) | .Option(ok) -> return Val(builtin_dispatch_ty(ok))
+                    }
+                    return Val(value)
+                }
+            }
+        }
+    }
+    field_ty :: declared_field_ty(current, cx, env) ?? return None
+    ty :: builtin_dispatch_ty(field_ty)
+    if builtin_method_return(ty, method, nargs, false) != None -> Val(ty) else -> None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:306
+pub fn lower_string_view_init(init: Expr, cx: Cx, env: &LowerEnv) -> TExpr {
+    if init != .MethodCall(receiver, method, method_span, _, _, args, _, resolved_ret, _, _) -> return invariant_expr(init.span(), "string-view initializer shape")
+    op :: if method == {
+        "trim" -> TBuiltinOp.TrimView
+        "after" -> TBuiltinOp.AfterView
+        "before" -> TBuiltinOp.BeforeView
+        else -> return invariant_expr(method_span, "string-view method")
+    }
+    row :: builtin_method_return(Type.String, method, args.len(), false) ?? return invariant_expr(method_span, "string-view signature")
+    table_ret :: row ?? return invariant_expr(method_span, "string-view signature")
+    if resolved_ret == .Val(ret) && ret != table_ret -> return invariant_expr(method_span, "string-view return type")
+    recv :: lower_expr(receiver, cx, env)
+    if recv.ty != Type.String -> return invariant_expr(method_span, "string-view receiver type")
+    targs := [TExpr]{}
+    loop arg in args -> &targs.push(lower_expr(arg.expr, cx, env))
+    TExpr{ty: Type.Apply("View", [Type.Named("str")]), kind: TExprKind.BuiltinMethod{recv: ^recv, op: op, args: ^targs}}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:362
+pub fn resolve_builtin_op(receiver: Expr, method: String, method_span: Span, args: [CallArg], resolved_ret: Type?, receiver_ty: Type?, env: LowerEnv, cx: Cx) -> TBuiltinOp? {
+    rty :: if receiver_ty == .Val(ty) -> builtin_dispatch_ty(~ty) else -> builtin_recv_ty(receiver, method, args.len(), cx, env) ?? return None
+    if rty == .Apply(name, generic_args) && name == "Atomic" && generic_args.len() == 1 && builtin_method_return(rty, method, args.len(), false) != None -> return Val(TBuiltinOp.AtomicMethod{method: method})
+    if rty == .Named(name) && name == Syntax.TYPE_ORDERING {
+        return if (method, args.len()) == { ("then", 1) -> Val(TBuiltinOp.OrderingThen); ("reverse", 0) -> Val(TBuiltinOp.OrderingReverse); else -> None }
+    }
+    is_byte_buffer :: if rty == .Named(name) -> name == Syntax.TYPE_BYTES else -> false
+    // Cursor read must precede the iterator closure-method early-out.
+    if is_byte_buffer {
+        op :: if (method, args.len()) == {
+            ("write_u8" | "write_byte" | "write_i8" | "write_u16_le" | "write_u16_be" | "write_i16_le" | "write_i16_be" | "write_u32_le" | "write_u32_be" | "write_i32_le" | "write_i32_be" | "write_u64_le" | "write_u64_be" | "write_i64_le" | "write_i64_be" | "write_f32_le" | "write_f32_be" | "write_f64_le" | "write_f64_be" | "write_bytes" | "write", 1) -> TBuiltinOp.ByteBufferWrite{method: method}
+            ("to_bytes", 0) -> TBuiltinOp.ByteBufferToBytes
+            ("len" | "is_empty" | "clear" | "capacity" | "position" | "eof" | "rewind" | "flush" | "close" | "shutdown" | "get_buffer" | "buffer" | "to_string" | "string" | "trim" | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title" | "clone" | "copy" | "lines" | "first" | "next" | "read_byte" | "read" | "is_ascii" | "parse", 0) |
+            ("get" | "seek" | "read_bytes" | "read_string" | "contains" | "starts_with" | "ends_with" | "index_of" | "last_index_of" | "split" | "partition" | "join" | "equal" | "compare" | "copy_to" | "write_to", 1) | ("replace", 2) -> TBuiltinOp.ByteBufferMethod{method: method}
+            else -> return None
+        }
+        emitted_borrow :: if op == {
+            .ByteBufferWrite(_) -> BuiltinReceiverBorrow.TwoPhaseWrite
+            .ByteBufferMethod("clear" | "seek" | "rewind" | "next" | "read" | "read_byte" | "read_bytes" | "read_string" | "flush" | "close" | "shutdown" | "copy_to" | "write_to") -> BuiltinReceiverBorrow.TwoPhaseWrite
+            .ByteBufferToBytes | .ByteBufferMethod(_) -> BuiltinReceiverBorrow.Read
+            else -> return None
+        }
+        if builtin_receiver_borrow(rty, method) != emitted_borrow -> return None
+        return Val(^op)
+    }
+    is_option :: if rty == .Option(_) -> true else -> false
+    if builtin_method_return(rty, method, args.len(), false) == None && !(is_option && method == "zip" && args.len() == 1) -> return None
+    is_string :: rty == Type.String
+    if is_closure_method(method) && !is_string -> return None
+    is_list :: list_receiver(rty)
+    is_map :: if rty == .Map(_, _, _) -> true else -> false
+    is_set :: if rty == .Apply(name, _) -> name == "Set" else -> false
+    is_sorted_set :: if rty == .Apply(name, _) -> name == Syntax.TYPE_RANK else -> false
+    is_priority_queue :: if rty == .Apply(name, _) -> name == Syntax.TYPE_PRIORITY_QUEUE else -> false
+    is_lru :: if rty == .Apply(name, _) -> name == Syntax.TYPE_LRU else -> false
+    is_bag :: if rty == .Apply(name, _) -> name == Syntax.TYPE_TALLY else -> false
+    is_bit_set :: if rty == .Named(name) -> name == Syntax.TYPE_BITS else -> false
+    is_deque :: if rty == .Apply(name, _) -> name == Syntax.TYPE_QUEUE else -> false
+    is_iter :: is_iter_type(rty)
+    is_float_sequence := false
+    if rty == .List(elem) | .FixedList(elem, _) -> is_float_sequence = elem == Type.Float || elem == Type.Float32
+    if rty == .Apply(name, generic_args) && name == Syntax.TYPE_ITER && generic_args.len() == 1 -> is_float_sequence = generic_args[0] == Type.Float || generic_args[0] == Type.Float32
+    if resolved_ret == .Val(Type.Option(elem)) && (elem == Type.Float || elem == Type.Float32) -> is_float_sequence = true
+    receiver_borrow :: builtin_receiver_borrow(rty, method)
+    list_remove_mode := None as ListRemoveMode?
+    if method == "remove" && args.len() == 1 -> list_remove_mode = Val(ListRemoveMode.Value)
+    else if method == "remove" && args.len() == 2 {
+        if args[1].expr == .EnumLit(_, variant, _, _, _, _) -> list_remove_mode = remove_mode_variant(variant)
+        else if args[1].expr == .Ident(name, _) {
+            if cx.const_values.get(name) == .Val(CtValue.Enum(type_name, variant, _)) && type_name == Syntax.TYPE_REMOVE_BY -> list_remove_mode = remove_mode_variant(variant)
+            else if rty == .List(Type.Int) -> list_remove_mode = Val(ListRemoveMode.Dynamic)
+        } else if rty == .List(Type.Int) -> list_remove_mode = Val(ListRemoveMode.Dynamic)
+    }
+    op :: if (method, args.len()) == {
+        ("len", 0) -> if is_string -> TBuiltinOp.LenString else if is_bag -> TBuiltinOp.BagLen else -> TBuiltinOp.LenList
+        ("is_empty", 0) -> TBuiltinOp.IsEmpty
+        ("try_push", 1) if is_string -> TBuiltinOp.TryStringPush
+        ("try_push", 1) if is_list -> TBuiltinOp.TryPush
+        ("try_reserve", 1) if is_list -> TBuiltinOp.TryReserve
+        ("try_insert", 2) if is_map -> TBuiltinOp.TryInsertMap
+        ("push" | "append", 1) -> TBuiltinOp.Push
+        ("pop", 0) if is_priority_queue -> TBuiltinOp.PriorityQueuePop
+        ("pop", 0) -> TBuiltinOp.Pop
+        ("insert", 2) -> TBuiltinOp.InsertList
+        ("add", 2) if is_map -> TBuiltinOp.InsertMap
+        ("add_new", 2) if is_map -> TBuiltinOp.AddNewMap
+        ("setdefault", 2) if is_map -> TBuiltinOp.MapSetDefault
+        ("update", 1) if is_map -> TBuiltinOp.MapUpdate
+        ("merge", 1) if is_map -> TBuiltinOp.MapMerge
+        ("merge", 2) if is_map -> TBuiltinOp.MapMergeWith
+        ("take", 1) if is_set -> TBuiltinOp.SetPop
+        ("pop", 1) if is_set -> TBuiltinOp.SetPop
+        ("pop", 1) if is_map || is_lru -> TBuiltinOp.RemoveMap
+        ("pop_first", 0) if is_map -> TBuiltinOp.MapPopFirst
+        ("contains_value", 1) if is_map -> TBuiltinOp.MapContainsValue
+        ("remove" | "discard", 1 | 2) -> {
+            if is_set -> TBuiltinOp.SetRemove
+            else if is_sorted_set -> TBuiltinOp.SortedSetRemove
+            else if is_bit_set -> TBuiltinOp.BitSetRemove
+            else if is_bag -> TBuiltinOp.BagRemove
+            else if is_map || is_lru -> TBuiltinOp.RemoveMap
+            else if is_priority_queue {
+                mode :: list_remove_mode ?? return None
+                TBuiltinOp.PriorityQueueRemove{line: cx.src_line_col(method_span.start).0, mode: mode}
+            } else if is_list {
+                mode :: list_remove_mode ?? return None
+                TBuiltinOp.RemoveList{line: cx.src_line_col(method_span.start).0, mode: mode}
+            } else -> return None
+        }
+        ("get", 1) -> if is_deque -> TBuiltinOp.DequeGet else if is_lru -> TBuiltinOp.LruGet else if is_map -> TBuiltinOp.GetMap else -> TBuiltinOp.GetList
+        ("first", 0) if is_map -> TBuiltinOp.MapFirst
+        ("first", 0) if is_set -> TBuiltinOp.SetFirst
+        ("first", 0) if is_sorted_set -> TBuiltinOp.First
+        ("last", 0) if is_sorted_set -> TBuiltinOp.Last
+        ("first", 0) -> TBuiltinOp.First
+        ("last", 0) -> TBuiltinOp.Last
+        ("contains", 1) if is_deque -> TBuiltinOp.DequeContains
+        ("contains", 1) -> TBuiltinOp.Contains
+        ("has", 1) if is_set || is_sorted_set || is_bit_set -> TBuiltinOp.Contains
+        ("index_of" | "index", 1) if is_string -> TBuiltinOp.StringIndexOf
+        ("index_of" | "index", 1) -> TBuiltinOp.IndexOf
+        ("reverse", 0) if is_deque -> TBuiltinOp.DequeReverse
+        ("reverse", 0) if is_string -> TBuiltinOp.StringMethod{method: "reverse"}
+        ("reverse", 0) -> TBuiltinOp.Reverse
+        ("sort", 0) if is_set -> TBuiltinOp.SetSort
+        ("sort", 0) -> TBuiltinOp.Sort
+        ("sort_desc", 0) -> TBuiltinOp.SortDesc
+        ("join", 1) if is_deque -> TBuiltinOp.DequeJoin
+        ("join", 1) -> TBuiltinOp.JoinSep
+        ("split", 1) if is_deque -> TBuiltinOp.DequeSplit
+        ("split", 1) if is_string -> TBuiltinOp.Split
+        ("split", 1) -> {
+            fields := [(String, Type)]{}
+            if resolved_ret == .Val(ret) -> fields = tuple_fields(Val(ret)) ?? return None
+            else {
+                elem :: sequence_elem_ty(rty) ?? return None
+                list_ty :: Type.List(^elem)
+                fields = [("left", ~list_ty), ("right", ^list_ty)]
+            }
+            TBuiltinOp.IterSplit{tuple_struct: tuple_struct_name(fields)}
+        }
+        ("repeat", 1) if is_string -> TBuiltinOp.Repeat
+        ("repeat", 1) -> TBuiltinOp.IterRepeat
+        ("cycle", 1) -> TBuiltinOp.IterCycle
+        ("drop_last", 1) -> TBuiltinOp.IterDropLast
+        ("next", 0) if is_iter -> TBuiltinOp.IterNext
+        ("shuffle", 0) if is_set -> TBuiltinOp.SetShuffle
+        ("rindex", 1) if is_string -> TBuiltinOp.StringMethod{method: "last_index_of"}
+        ("last_index_of", 1) if is_string -> TBuiltinOp.StringMethod{method: "last_index_of"}
+        ("last_index_of", 1) -> TBuiltinOp.IterLastIndexOf
+        ("average", 0) -> TBuiltinOp.IterAverage{float: is_float_sequence}
+        ("compare", 1) if is_string -> TBuiltinOp.StringMethod{method: "compare"}
+        ("compare", 1) -> TBuiltinOp.IterCompare
+        ("is_sorted", 0) -> TBuiltinOp.IterIsSorted
+        ("shuffle", 0) -> TBuiltinOp.IterShuffle
+        ("to_set", 0) if is_set -> TBuiltinOp.SetCopy
+        ("to_set", 0) -> TBuiltinOp.SetFrom
+        ("sum", 0) -> TBuiltinOp.Sum{float: resolved_ret == Val(Type.Float) || resolved_ret == Val(Type.Float32), f32: resolved_ret == Val(Type.Float32)}
+        ("product", 0) -> TBuiltinOp.Product{float: resolved_ret == Val(Type.Float) || resolved_ret == Val(Type.Float32)}
+        ("min", 0) if is_map -> TBuiltinOp.MapMin
+        ("max", 0) if is_map -> TBuiltinOp.MapMax
+        ("min", 0) -> TBuiltinOp.Min{float: is_float_sequence}
+        ("max", 0) -> TBuiltinOp.Max{float: is_float_sequence}
+        ("flatten", 0) -> TBuiltinOp.Flatten
+        ("intersperse", 1) -> TBuiltinOp.Intersperse
+        ("clear", 0) -> TBuiltinOp.Clear
+        ("chars", 0) -> TBuiltinOp.Chars
+        ("bytes" | "encode", 0) if is_string -> TBuiltinOp.Bytes{owned: false}
+        ("strip" | "lstrip" | "rstrip", 0) if is_string -> TBuiltinOp.StringMethod{method: method}
+        ("trim", 0) -> TBuiltinOp.Trim
+        ("trim_start", 0) -> TBuiltinOp.TrimStart
+        ("trim_end", 0) -> TBuiltinOp.TrimEnd
+        ("lines" | "splitlines", 0) -> TBuiltinOp.Lines
+        ("starts_with" | "startswith", 1) -> TBuiltinOp.StartsWith
+        ("ends_with" | "endswith", 1) -> TBuiltinOp.EndsWith
+        ("expandtabs", 1) if is_string -> TBuiltinOp.StringMethod{method: method}
+        ("find" | "rfind" | "partition" | "rpartition", 1) if is_string -> TBuiltinOp.StringMethod{method: method}
+        ("center" | "ljust" | "rjust", 2) if is_string -> TBuiltinOp.StringMethod{method: method}
+        ("zfill", 1) if is_string -> TBuiltinOp.StringMethod{method: method}
+        ("replace", 2) if is_string -> TBuiltinOp.StringMethod{method: "replace"}
+        ("replace", 1) if is_set -> TBuiltinOp.SetReplace
+        ("replace", 2) if is_map -> TBuiltinOp.InsertMap
+        ("replace", 2) if is_list -> TBuiltinOp.ListReplace
+        ("replace", 2) -> TBuiltinOp.Replace
+        ("pad_start", 2) -> TBuiltinOp.PadStart
+        ("pad_end", 2) -> TBuiltinOp.PadEnd
+        ("count", 1) if is_list -> TBuiltinOp.CountList
+        ("count", 1) if is_string -> TBuiltinOp.StringCount
+        ("counts", 0) if is_list || is_iter -> TBuiltinOp.Counts
+        ("extend", 1) if is_list -> TBuiltinOp.ExtendList
+        ("concat", 1) if is_list -> TBuiltinOp.ConcatList
+        ("is_alphabetic", 0) if is_string -> TBuiltinOp.StringIsAlphabetic
+        ("is_numeric", 0) if is_string -> TBuiltinOp.StringIsNumeric
+        ("is_whitespace", 0) if is_string -> TBuiltinOp.StringIsWhitespace
+        ("is_ascii", 0) if is_string -> TBuiltinOp.StringIsAscii
+        ("to_title", 0) if is_string -> TBuiltinOp.StringToTitle
+        ("count_bytes" | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "copy" | "normalize" | "isalnum" | "isalpha" | "isascii" | "isdecimal" | "isdigit" | "isidentifier" | "isnumeric" | "isprintable" | "isspace" | "istitle" | "islower" | "isupper" | "lower" | "upper" | "title" | "casefold", 0) if is_string -> TBuiltinOp.StringMethod{method: method}
+        ("remove_prefix" | "remove_suffix" | "removeprefix" | "removesuffix" | "equal" | "rsplit" | "matches" | "match", 1) if is_string -> TBuiltinOp.StringMethod{method: method}
+        ("parse" | "to_int", 0) if is_string -> TBuiltinOp.ParseInt
+        ("to_float", 0) if is_string -> TBuiltinOp.ParseFloat
+        ("split_once", 1) if is_string -> {
+            ret := resolved_ret
+            if ret == None { row :: builtin_method_return(Type.String, method, args.len(), false) ?? return None; ret = row }
+            fields :: option_tuple_fields(ret) ?? return None
+            TBuiltinOp.StringSplitOnce{tuple_struct: tuple_struct_name(fields)}
+        }
+        ("cut_last", 1) if is_string -> {
+            ret := resolved_ret
+            if ret == None { row :: builtin_method_return(Type.String, method, args.len(), false) ?? return None; ret = row }
+            fields :: option_tuple_fields(ret) ?? return None
+            TBuiltinOp.StringCutLast{tuple_struct: tuple_struct_name(fields)}
+        }
+        ("after", 1) -> TBuiltinOp.After
+        ("before", 1) -> TBuiltinOp.Before
+        ("to_upper", 0) -> TBuiltinOp.ToUpper
+        ("to_lower", 0) -> TBuiltinOp.ToLower
+        ("to_ascii_upper", 0) if is_string -> TBuiltinOp.ToAsciiUpper
+        ("to_ascii_lower", 0) if is_string -> TBuiltinOp.ToAsciiLower
+        ("slice", 2) if is_string -> TBuiltinOp.Slice{line: cx.src_line_col(receiver.span().start).0}
+        ("slice", 2) -> TBuiltinOp.ListSlice
+        ("slice", 1) if is_map -> TBuiltinOp.MapSliceKeys
+        ("copy", 0) if is_map -> TBuiltinOp.MapCopy
+        ("copy", 0) if is_set -> TBuiltinOp.SetCopy
+        ("copy", 0) if is_bit_set -> TBuiltinOp.BitSetCopy
+        ("copy", 0) -> TBuiltinOp.ListCopy
+        ("equal", 1) if is_map -> TBuiltinOp.MapEqual
+        ("equal", 1) if is_set -> TBuiltinOp.SetEqual
+        ("equal", 1) -> TBuiltinOp.ListEqual
+        ("binary_search", 1) -> TBuiltinOp.ListBinarySearch
+        ("union", 1) if is_sorted_set -> TBuiltinOp.SortedSetUnion
+        ("union", 1) if is_set -> TBuiltinOp.SetUnion
+        ("union", 1) -> TBuiltinOp.ListUnion
+        ("intersection", 1) if is_sorted_set -> TBuiltinOp.SortedSetIntersection
+        ("intersection", 1) if is_set -> TBuiltinOp.SetIntersection
+        ("intersection", 1) if is_map -> TBuiltinOp.MapIntersection
+        ("intersection", 1) -> TBuiltinOp.ListIntersection
+        ("difference", 1) if is_sorted_set -> TBuiltinOp.SortedSetDifference
+        ("difference", 1) if is_set -> TBuiltinOp.SetDifference
+        ("difference", 1) -> TBuiltinOp.ListDifference
+        ("random", 0) -> TBuiltinOp.ListRandom
+        ("min_max", 0) -> {
+            fields := [(String, Type)]{}
+            if resolved_ret == .Val(ret) -> fields = option_tuple_fields(Val(ret)) ?? return None
+            else { elem :: sequence_elem_ty(rty) ?? return None; fields = [("min", ~elem), ("max", ^elem)] }
+            TBuiltinOp.ListMinMax{tuple_struct: tuple_struct_name(fields)}
+        }
+        ("to_list" | "items", 0) if is_map -> {
+            fields := [(String, Type)]{}
+            if resolved_ret == .Val(ret) -> fields = tuple_list_elem_fields(Val(ret)) ?? return None
+            else { if rty != .Map(key, _, value) -> return None; fields = [("key", ~key), ("value", ~value)] }
+            TBuiltinOp.MapToList{tuple_struct: tuple_struct_name(fields)}
+        }
+        ("top_n", 1) if is_map -> {
+            fields := [(String, Type)]{}
+            if resolved_ret == .Val(ret) -> fields = tuple_list_elem_fields(Val(ret)) ?? return None
+            else { if rty != .Map(key, _, value) -> return None; fields = [("key", ~key), ("value", ~value)] }
+            TBuiltinOp.MapTopN{tuple_struct: tuple_struct_name(fields)}
+        }
+        ("view", 2) -> TBuiltinOp.ViewNew{line: cx.src_line_col(receiver.span().start).0}
+        ("split_write", 1) -> {
+            fields := [(String, Type)]{}
+            if resolved_ret == .Val(ret) -> fields = result_tuple_fields(Val(ret)) ?? return None
+            else {
+                elem :: sequence_elem_ty(rty) ?? return None
+                view :: Type.Apply("ViewMut", [^elem])
+                fields = [("left", ~view), ("right", ^view)]
+            }
+            TBuiltinOp.SplitWrite{tuple_struct: tuple_struct_name(fields)}
+        }
+        ("get_disjoint_write", 1) -> TBuiltinOp.GetDisjointWrite
+        ("keys", 0) if is_lru -> TBuiltinOp.LruKeys
+        ("keys", 0) -> TBuiltinOp.Keys
+        ("values", 0) if is_set -> TBuiltinOp.SetValues
+        ("values", 0) -> TBuiltinOp.Values
+        ("has_key", 1) -> TBuiltinOp.ContainsKey
+        ("to_string", 0) -> TBuiltinOp.ToString
+        ("take", 1) -> TBuiltinOp.Take
+        ("skip", 1) -> TBuiltinOp.Skip
+        ("step_by", 1) -> TBuiltinOp.StepBy
+        ("dedup", 0) -> TBuiltinOp.Dedup
+        ("chunks", 1) -> TBuiltinOp.Chunks
+        ("windows", 1) -> TBuiltinOp.Windows
+        ("indexed", 0) -> {
+            fields := [(String, Type)]{}
+            if resolved_ret == .Val(ret) -> fields = tuple_list_elem_fields(Val(ret)) ?? return None
+            else { elem :: sequence_elem_ty(rty) ?? return None; fields = [("idx", Type.Int), ("item", ^elem)] }
+            TBuiltinOp.Indexed{tuple_struct: tuple_struct_name(fields)}
+        }
+        ("indexes", 0) -> TBuiltinOp.Indexes
+        ("zip", 1) if is_option -> {
+            fields :: option_tuple_fields(resolved_ret) ?? return None
+            rows := [NamedType]{}
+            loop (name, ty) in fields -> &rows.push(NamedType{name: name, ty: ~ty})
+            TBuiltinOp.OptionZip{tuple_struct: tuple_struct_name(fields), elem_ty: Type.Tuple(^rows)}
+        }
+        ("zip", 1) -> {
+            fields :: tuple_list_elem_fields(resolved_ret) ?? return None
+            field_types := [Type]{}
+            names := [String]{}
+            loop (name, ty) in fields { &field_types.push(~ty); &names.push(name) }
+            TBuiltinOp.Zip{tuple_struct: tuple_struct_name(fields), mode: TZipMode.Strict, fields: ^names, flatten: false, input_count: 2, fill_mode: TZipFillMode.DefaultNone, field_types: ^field_types}
+        }
+        ("unzip", 0) -> {
+            fields := [(String, Type)]{}
+            if resolved_ret == .Val(ret) -> fields = tuple_fields(Val(ret)) ?? return None
+            else {
+                pair :: sequence_elem_ty(rty) ?? return None
+                pair_fields :: tuple_fields(Val(pair)) ?? return None
+                a_ty := None as Type?
+                b_ty := None as Type?
+                loop (name, ty) in pair_fields {
+                    if name == "a" && a_ty == None -> a_ty = Val(~ty)
+                    if name == "b" && b_ty == None -> b_ty = Val(~ty)
+                }
+                a :: a_ty ?? return None
+                b :: b_ty ?? return None
+                fields = [("a", Type.List(^a)), ("b", Type.List(^b))]
+            }
+            TBuiltinOp.Unzip{tuple_struct: tuple_struct_name(fields)}
+        }
+        ("try_collect", 0) -> TBuiltinOp.TryCollect
+        ("add", 1) if is_set -> TBuiltinOp.SetInsert
+        ("update", 1) if is_set -> TBuiltinOp.SetUpdate
+        ("difference_update", 1) if is_set -> TBuiltinOp.SetDifferenceUpdate
+        ("intersection_update", 1) if is_set -> TBuiltinOp.SetIntersectionUpdate
+        ("symmetric_difference_update", 1) if is_set -> TBuiltinOp.SetSymmetricDifferenceUpdate
+        ("add", 1) if is_sorted_set -> TBuiltinOp.SortedSetInsert
+        ("add", 1) if is_bit_set -> TBuiltinOp.BitSetAdd
+        ("add", 1) if is_bag -> TBuiltinOp.BagAdd
+        ("peek", 0) if is_priority_queue -> TBuiltinOp.PriorityQueuePeek
+        ("to_sorted_list", 0) if is_priority_queue -> TBuiltinOp.PriorityQueueToSortedList
+        ("to_list", 0) if is_iter -> TBuiltinOp.IterToList
+        ("collect", 0) if is_iter -> TBuiltinOp.IterCollect
+        ("lazy", 0) if is_list -> TBuiltinOp.ListLazy
+        ("to_list", 0) if is_deque -> TBuiltinOp.DequeToList
+        ("to_list", 0) if is_sorted_set -> TBuiltinOp.SortedSetToList
+        ("to_list", 0) if is_bit_set -> TBuiltinOp.BitSetToList
+        ("to_list", 0) -> TBuiltinOp.SetToList
+        ("symmetric_difference", 1) if is_sorted_set -> TBuiltinOp.SortedSetSymmetricDifference
+        ("is_subset", 1) if is_sorted_set -> TBuiltinOp.SortedSetIsSubset
+        ("is_superset", 1) if is_sorted_set -> TBuiltinOp.SortedSetIsSuperset
+        ("is_disjoint", 1) if is_sorted_set -> TBuiltinOp.SortedSetIsDisjoint
+        ("symmetric_difference", 1) if is_set -> TBuiltinOp.SetSymmetricDifference
+        ("is_subset" | "issubset", 1) if is_set -> TBuiltinOp.SetIsSubset
+        ("is_superset" | "issuperset", 1) if is_set -> TBuiltinOp.SetIsSuperset
+        ("is_disjoint" | "isdisjoint", 1) if is_set -> TBuiltinOp.SetIsDisjoint
+        ("capacity", 0) if is_set -> TBuiltinOp.SetCapacity
+        ("add", 2) if is_lru -> TBuiltinOp.LruPut
+        ("add_new", 2) if is_lru -> TBuiltinOp.LruAddNew
+        ("capacity", 0) if is_lru -> TBuiltinOp.LruCapacity
+        ("count", 0) if is_bit_set -> TBuiltinOp.BitSetCount
+        ("write_u8" | "write_i8" | "write_u16_le" | "write_u16_be" | "write_i16_le" | "write_i16_be" | "write_u32_le" | "write_u32_be" | "write_i32_le" | "write_i32_be" | "write_u64_le" | "write_u64_be" | "write_i64_le" | "write_i64_be" | "write_f32_le" | "write_f32_be" | "write_f64_le" | "write_f64_be" | "write_bytes", 1) if is_byte_buffer -> TBuiltinOp.ByteBufferWrite{method: method}
+        ("to_bytes", 0) if is_byte_buffer -> TBuiltinOp.ByteBufferToBytes
+        ("has", 1) if is_bag -> TBuiltinOp.BagHas
+        ("count", 1) if is_bag -> TBuiltinOp.BagCount
+        ("push_front", 1) if is_deque -> TBuiltinOp.DequePushFront
+        ("push_back", 1) if is_deque -> TBuiltinOp.DequePushBack
+        ("pop_front", 0) if is_deque -> TBuiltinOp.DequePopFront
+        ("pop_back", 0) if is_deque -> TBuiltinOp.DequePopBack
+        ("peek_front", 0) if is_deque -> TBuiltinOp.DequePeekFront
+        ("peek_back", 0) if is_deque -> TBuiltinOp.DequePeekBack
+        ("capacity", 0) if is_deque -> TBuiltinOp.DequeCapacity
+        ("delete", 1) if is_deque -> TBuiltinOp.DequeDelete
+        else -> return None
+    }
+    emitted_borrow :: if op == .IterNext -> BuiltinReceiverBorrow.EagerWrite
+    else if is_iter -> BuiltinReceiverBorrow.Move
+    else if op == {
+        .RemoveList(_, _) | .SortDesc -> BuiltinReceiverBorrow.EagerWrite
+        .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop | .InsertMap | .InsertList | .AddNewMap | .MapSetDefault | .MapUpdate | .RemoveMap | .MapPopFirst | .ExtendList | .Reverse | .Sort | .Clear | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetPop | .SetRemove | .SetReplace | .PriorityQueuePop | .SortedSetInsert | .SortedSetRemove | .BitSetAdd | .BitSetRemove | .BagAdd | .BagRemove | .LruPut | .LruAddNew | .LruGet | .ByteBufferWrite(_) | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite(_) | .GetDisjointWrite -> BuiltinReceiverBorrow.TwoPhaseWrite
+        else -> BuiltinReceiverBorrow.Read
+    }
+    if receiver_borrow != emitted_borrow -> return None
+    Val(^op)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:1138
+pub fn resolve_closure_op(recv_ty: Type, method: String, args: [CallArg], cx: Cx, fallible_callback: Bool, callback_needs_fn_mut: Bool?, callback_param_count: USize?) -> TClosureOp? {
+    base :: base_receiver_ty(recv_ty)
+    elem_ty :: sequence_elem_ty(base)
+    is_sequence :: elem_ty != None
+    is_list :: list_receiver(base)
+    is_iter :: if base == .Apply(name, generic_args) -> generic_args.len() == 1 && (name == Syntax.TYPE_ITER || name == Syntax.TYPE_VIEW_ITER) else -> false
+    is_map :: if base == .Map(_, _, _) -> true else -> false
+    is_option :: if base == .Option(_) -> true else -> false
+    is_bag :: if base == .Apply(name, _) -> name == Syntax.TYPE_TALLY else -> false
+    is_view :: view_receiver(base)
+    has_args :: |count: USize| -> Bool { args.len() == count }
+    op :: if method == {
+        "edit_disjoint" if is_list && has_args(2) -> TClosureOp.EditDisjoint
+        "map" if is_option && has_args(1) -> TClosureOp.OptionMap
+        "map" if is_map && has_args(1) -> TClosureOp.MapMap
+        "map" if !is_sequence || !has_args(1) -> return None
+        "map" if fallible_callback -> TClosureOp.TryMap
+        "map" if is_view -> TClosureOp.ViewMap
+        "map" -> if callback_needs_fn_mut == { .Val(true) -> TClosureOp.MapMut; .Val(false) -> TClosureOp.Map; else -> return None }
+        "filter" if is_map && has_args(1) -> TClosureOp.MapFilter
+        "filter" if !is_sequence || !has_args(1) -> return None
+        "filter" if fallible_callback -> TClosureOp.TryFilter
+        "filter" -> TClosureOp.Filter
+        "each" if is_map && has_args(1) -> TClosureOp.EachMap
+        "each" if !is_sequence || !has_args(1) -> return None
+        "each" if is_list && elem_ty == .Val(elem) && list_carries_trait(cx, elem) -> TClosureOp.EachRef
+        "each" -> if callback_needs_fn_mut == { .Val(true) -> TClosureOp.EachMut; .Val(false) -> TClosureOp.Each; else -> return None }
+        "find" if is_sequence && has_args(1) -> TClosureOp.Find
+        "any" if is_bag && has_args(1) -> TClosureOp.BagAny
+        "any" if is_map && has_args(1) -> TClosureOp.MapAny
+        "any" if is_sequence && has_args(1) -> TClosureOp.Any
+        "all" if is_map && has_args(1) -> TClosureOp.MapAll
+        "all" if is_sequence && has_args(1) -> TClosureOp.All
+        "count_where" if is_sequence && has_args(1) -> TClosureOp.CountWhere
+        "sort_by" if !is_list || !has_args(1) -> return None
+        "sort_by" -> if (callback_param_count, fallible_callback) == {
+            (.Val(1), true) -> TClosureOp.TrySortBy
+            (.Val(1), false) -> TClosureOp.SortBy
+            (.Val(2), false) -> TClosureOp.SortByCompare
+            else -> return None
+        }
+        "sort_by_desc" if !is_list || !has_args(1) -> return None
+        "sort_by_desc" -> if (callback_param_count, fallible_callback) == {
+            (.Val(1), true) -> TClosureOp.TrySortByDesc
+            (.Val(1), false) -> TClosureOp.SortByDesc
+            else -> return None
+        }
+        "reduce" if (is_list || is_iter) && has_args(2) -> TClosureOp.Reduce
+        "take_while" if is_sequence && has_args(1) -> TClosureOp.TakeWhile
+        "skip_while" if is_sequence && has_args(1) -> TClosureOp.SkipWhile
+        "flat_map" if is_map && has_args(1) -> TClosureOp.MapFlatMap
+        "flat_map" if is_sequence && has_args(1) -> TClosureOp.FlatMap
+        "binary_search_by" if is_list && has_args(1) -> TClosureOp.ListBinarySearchBy
+        "min_max_by" if is_list && has_args(1) -> {
+            elem :: elem_ty ?? return None
+            fields :: [("min", ~elem), ("max", ~elem)]
+            TClosureOp.ListMinMaxBy{tuple_struct: tuple_struct_name(fields)}
+        }
+        "filter_map" if is_sequence && has_args(1) -> TClosureOp.FilterMap
+        "para_map" if is_list && (args.len() == 1 || args.len() == 2) -> TClosureOp.ParaMap
+        "para_filter" if is_list && has_args(1) -> TClosureOp.ParaFilter
+        "para_fold" if is_list && has_args(3) -> TClosureOp.ParaFold
+        "para_partition" if is_list && has_args(1) -> {
+            elem :: elem_ty ?? return None
+            list_ty :: Type.List(~elem)
+            fields :: [("false_", ~list_ty), ("true_", ^list_ty)]
+            TClosureOp.ParaPartition{tuple_struct: tuple_struct_name(fields)}
+        }
+        "scan" if is_sequence && has_args(2) -> TClosureOp.Scan
+        "fold" if is_map && has_args(2) -> TClosureOp.MapFold
+        "fold" if is_view && has_args(2) -> TClosureOp.ViewFold
+        "fold" if (is_list || is_iter) && has_args(2) -> TClosureOp.Fold
+        "position" if is_sequence && has_args(1) -> TClosureOp.Position
+        "min_by" if is_sequence && has_args(1) -> TClosureOp.MinBy
+        "max_by" if is_sequence && has_args(1) -> TClosureOp.MaxBy
+        "group_by" if is_sequence && has_args(1) -> TClosureOp.GroupBy
+        "count_by" if is_sequence && has_args(1) -> TClosureOp.CountBy
+        "update_first" if is_list && has_args(2) -> TClosureOp.UpdateFirst
+        "dedup_by" if is_sequence && has_args(1) -> TClosureOp.DedupBy
+        "is_sorted_by" if is_sequence && has_args(1) -> TClosureOp.IsSortedBy
+        "chunk_while" if is_sequence && has_args(1) -> TClosureOp.ChunkWhile
+        "partition" if is_sequence && has_args(1) -> {
+            elem :: elem_ty ?? return None
+            list_ty :: Type.List(~elem)
+            fields :: [("false_", ~list_ty), ("true_", ^list_ty)]
+            TClosureOp.Partition{tuple_struct: tuple_struct_name(fields)}
+        }
+        else -> return None
+    }
+    if op == .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare {
+        if builtin_receiver_borrow(base, method) != BuiltinReceiverBorrow.EagerWrite -> return None
+    }
+    Val(^op)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:1293
+pub fn list_carries_trait(cx: Cx, inner: Type) -> Bool {
+    if inner == { .TraitObject(_) -> true; .Named(n) -> cx.trait_names.contains(n); else -> false }
+}

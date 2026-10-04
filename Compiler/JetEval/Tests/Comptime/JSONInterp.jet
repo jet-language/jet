@@ -1,0 +1,40 @@
+use jet_comptime.Comptime.JSONInterp.[parse_json, parse_json_ordered, parse_json_typed_ordered]
+use jet_foundation.[CtValue, EncodingJson]
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:484
+fn nested_json(depth: Int) -> String Never! { "[".repeat(depth) + "]".repeat(depth) }
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:489
+#Test("comptime_json_routes_share_the_depth_boundary") {
+    routes :: [(String, fn(String) -> CtValue EncodingJson.Error!)]{
+        ("parse_json", parse_json), ("parse_json_ordered", parse_json_ordered), ("parse_json_typed_ordered", parse_json_typed_ordered)
+    }
+    loop (name, parse) in routes {
+        boundary :: nested_json(EncodingJson.MAX_JSON_DEPTH)
+        assert(parse(boundary).is_ok(), "{name} must accept the maximum JSON nesting depth")
+        too_deep :: nested_json(EncodingJson.MAX_JSON_DEPTH + 1)
+        error :: parse(too_deep).expect_err("{name} must reject excessive nesting")
+        assert(error.line == 1, "{name} reported the wrong error line")
+        assert(error.message == "JSON value is nested too deeply", "{name} changed the shared depth-limit error")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods.rs:72
+#Test("method_modules_stay_below_the_split_threshold") {
+    // GATE #4494: compile-time source inclusion, no interpreter delegation.
+    // Rust include_str fixtures migrate to their paired Jet ownership files.
+    modules :: [(String, String)]{
+        ("dispatch", include_str("Compiler/JetEval/Source/Comptime/Methods/Dispatch.jet")),
+        ("eval_method", include_str("Compiler/JetEval/Source/Comptime/Methods/Dispatch/EvalMethod.jet")),
+        ("repl_process", include_str("Compiler/JetEval/Source/Comptime/Methods/ReplProcess.jet")),
+        ("core_calls", include_str("Compiler/JetEval/Source/Routes/Core04.jet")),
+        ("core_calls/regex", include_str("Compiler/JetEval/Source/Comptime/Methods/CoreCalls/Regex.jet")),
+        ("core_calls/data", include_str("Compiler/JetEval/Source/Comptime/Methods/CoreCalls/Data.jet")),
+        ("core_calls/impure", include_str("Compiler/JetEval/Source/Comptime/Methods/CoreCalls/Impure.jet")),
+        ("core_calls/random", include_str("Compiler/JetEval/Source/Comptime/Methods/CoreCalls/Random.jet")),
+        ("core_calls/history", include_str("Compiler/JetEval/Source/Comptime/Methods/CoreCalls/History.jet")),
+        ("core_calls/plain_calls", include_str("Compiler/JetEval/Source/Routes/Core05.jet")),
+        ("pool", include_str("Compiler/JetEval/Source/Comptime/Methods/Pool.jet"))
+    }
+    loop (name, source) in modules {
+        lines :: source.lines().count()
+        assert(lines < 2500, "{name}.jet regrew to {lines} lines; split it along semantic ownership without changing the 2,500-line module cap")
+    }
+}

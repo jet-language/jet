@@ -1,0 +1,53 @@
+use Compiler.JetEval.Comptime.ServicesLite.*
+use Compiler.JetEval.Comptime.ServicesLite02.*
+use crate.MIR.MirRuntimeValue
+use crate.AST.[CtValue, CtFloat]
+use crate.Diagnostics.Span
+
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:1998
+#Test("service_error_roundtrip_preserves_all_variants") {
+    span :: Span.new(0, 0)
+    loop error in [JetServiceError.Full("full"), JetServiceError.Ambiguous("ambiguous"), JetServiceError.Unknown("unknown"), JetServiceError.NotStarted("not started"), JetServiceError.Policy("policy"), JetServiceError.Unavailable("unavailable"), JetServiceError.Partitioned("partitioned"), JetServiceError.Revoked("revoked"), JetServiceError.Stale("stale"), JetServiceError.Expired("expired")] {
+        restored :: runtime_to_service_error(map_err(error), span)?
+        assert(restored.jet_show() == error.jet_show())
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2166
+#Test("delivery_state_roundtrip_and_payload_rejection") {
+    span :: Span.new(0, 0)
+    loop state in [JetDeliveryState.Pending, JetDeliveryState.Accepted, JetDeliveryState.Delivering, JetDeliveryState.Delivered, JetDeliveryState.DeadLettered, JetDeliveryState.Cancelled] {
+        assert(runtime_to_delivery_state(delivery_state_to_runtime(state), span)? == state)
+    }
+    assert(runtime_to_delivery_state(MirRuntimeValue.Enum{type_name: "DeliveryState", variant: "Pending", args: [(None, MirRuntimeValue.Unit)]}, span).is_err())
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2189
+#Test("delivery_receipt_roundtrip_retains_authority_and_signature") {
+    receipt :: JetDeliveryReceipt{id: "id", state: JetDeliveryState.Delivered, attempts: 3, retention_until: 120, deadline: 100, idempotency_key: "key", duplicate: true, authority: "authority", generation: 7, signature: "signed"}
+    restored :: runtime_to_delivery_receipt(delivery_receipt_to_runtime(receipt), Span.new(0, 0))?
+    assert(restored.id == receipt.id)
+    assert(restored.state == receipt.state)
+    assert(restored.attempts == receipt.attempts)
+    assert(restored.retention_until == receipt.retention_until)
+    assert(restored.deadline == receipt.deadline)
+    assert(restored.idempotency_key == receipt.idempotency_key)
+    assert(restored.duplicate == receipt.duplicate)
+    assert(restored.authority == receipt.authority)
+    assert(restored.generation == receipt.generation)
+    assert(restored.signature == receipt.signature)
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:2466
+#Test("service_mutation_error_retains_writeback") {
+    tree :: MirRuntimeValue.String("tree")
+    error :: MirRuntimeValue.String("failure")
+    wrapped :: MirRuntimeValue.FailedTold(MirRuntimeValue.Struct{type_name: "__JetServiceMutErr", fields: [("tree", tree), ("error", error)]})
+    assert(take_mut_runtime(wrapped) == Ok((tree, MirRuntimeValue.FailedTold(error))))
+    malformed :: MirRuntimeValue.Present(MirRuntimeValue.Struct{type_name: "__JetServiceMut", fields: [("tree", tree)]})
+    assert(take_mut_runtime(malformed) == Err(MirRuntimeValue.FailedTold(MirRuntimeValue.String("core.service: missing value write-back"))))
+}
+// Rust: crates/jet-comptime/src/Comptime/ServicesLite.rs:3104
+#Test("service_runtime_conversion_preserves_float_width_and_bytes") {
+    loop value in [CtValue.Float(CtFloat.F32(1.5)), CtValue.Float(CtFloat.F64(1.5)), CtValue.Bytes([0, 255]), CtValue.Enum{type_name: "Command", variant: "Put", args: [(Val("value"), CtValue.Int(2))]} {
+        assert(runtime_to_ct_value(ct_to_runtime_value(value)?)? == value)
+    }
+    assert(runtime_to_ct_value(MirRuntimeValue.Moved).is_err())
+}

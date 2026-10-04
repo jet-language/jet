@@ -1,1814 +1,825 @@
-// PORT-PENDING 0421 crates-jet-sema-src-sema-checkerownership-slice-3537: crates/jet-sema/src/Sema/CheckerOwnership.rs:3537-5346
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub(crate) fn view_leaf_paths(&self, ty: &Type) -> Vec<(Vec<String>, ViewAccess)> {
-//RS         struct ViewWalk {
-//RS             active: HashSet<String>,
-//RS             reaches: HashMap<String, bool>,
-//RS         }
-//RS 
-//RS         fn is_window(ty: &Type) -> Option<ViewAccess> {
-//RS             match ty {
-//RS                 // D-PIN1=A: a pin is a write window, so it is a view leaf too.
-//RS                 Type::Apply { name, .. }
-//RS                     if name == "View" || name == Syntax::TYPE_VIEW_ITER =>
-//RS                 {
-//RS                     Some(ViewAccess::Read)
-//RS                 }
-//RS                 Type::Apply { name, .. } if name == "ViewMut" || name == Syntax::TYPE_PIN => {
-//RS                     Some(ViewAccess::Write)
-//RS                 }
-//RS                 Type::Tagged { marker, .. }
-//RS                     if matches!(
-//RS                         marker,
-//RS                         crate::AST::TagMarker::Internal(crate::AST::InternalTag::AllocatorView)
-//RS                     ) =>
-//RS                 {
-//RS                     Some(ViewAccess::Write)
-//RS                 }
-//RS                 _ => None,
-//RS             }
-//RS         }
-//RS 
-//RS         /// Whether any value of `ty` holds a window, over the same edges the
-//RS         /// path walk follows. Each nominal is visited once per query.
-//RS         fn type_reaches_window(checker: &Checker<'_>, ty: &Type, visited: &mut HashSet<String>) -> bool {
-//RS             if is_window(ty).is_some() {
-//RS                 return true;
-//RS             }
-//RS             match ty {
-//RS                 Type::List(inner)
-//RS                 | Type::FixedList { elem: inner, .. }
-//RS                 | Type::Option(inner)
-//RS                 | Type::Tagged { inner, .. } => type_reaches_window(checker, inner, visited),
-//RS                 Type::Tuple(fields) => fields
-//RS                     .iter()
-//RS                     .any(|(_, field_ty)| type_reaches_window(checker, field_ty, visited)),
-//RS                 Type::Result { ok, err } => {
-//RS                     type_reaches_window(checker, ok, visited)
-//RS                         || type_reaches_window(checker, err, visited)
-//RS                 }
-//RS                 Type::Named(name) | Type::Apply { name, .. } => {
-//RS                     if !visited.insert(name.clone()) {
-//RS                         return false;
-//RS                     }
-//RS                     if let Some(fields) = checker.registry.struct_fields(name) {
-//RS                         fields
-//RS                             .iter()
-//RS                             .any(|(_, _, field_ty)| type_reaches_window(checker, field_ty, visited))
-//RS                     } else if let Some(variants) = checker.resolve_enum_variants_cloned(name) {
-//RS                         variants.values().any(|(_, payload)| match payload {
-//RS                             VariantPayload::Unit => false,
-//RS                             VariantPayload::Single(inner, _) => {
-//RS                                 type_reaches_window(checker, inner, visited)
-//RS                             }
-//RS                             VariantPayload::Named(fields) => fields
-//RS                                 .iter()
-//RS                                 .any(|field| type_reaches_window(checker, &field.ty, visited)),
-//RS                         })
-//RS                     } else {
-//RS                         false
-//RS                     }
-//RS                 }
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS 
-//RS         fn nominal_reaches_window(checker: &Checker<'_>, ty: &Type, name: &str, state: &mut ViewWalk) -> bool {
-//RS             if let Some(&reaches) = state.reaches.get(name) {
-//RS                 return reaches;
-//RS             }
-//RS             let reaches = type_reaches_window(checker, ty, &mut HashSet::new());
-//RS             state.reaches.insert(name.to_string(), reaches);
-//RS             reaches
-//RS         }
-//RS 
-//RS         fn walk(
-//RS             checker: &Checker<'_>,
-//RS             ty: &Type,
-//RS             path: &mut Vec<String>,
-//RS             seen: &mut ViewWalk,
-//RS             out: &mut Vec<(Vec<String>, ViewAccess)>,
-//RS         ) {
-//RS             if let Some(access) = is_window(ty) {
-//RS                 out.push((path.clone(), access));
-//RS                 return;
-//RS             }
-//RS             match ty {
-//RS                 Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-//RS                     path.push("[]".to_string());
-//RS                     walk(checker, inner, path, seen, out);
-//RS                     path.pop();
-//RS                 }
-//RS                 Type::Tuple(fields) => {
-//RS                     for (field, field_ty) in fields {
-//RS                         path.push(field.clone());
-//RS                         walk(checker, field_ty, path, seen, out);
-//RS                         path.pop();
-//RS                     }
-//RS                 }
-//RS                 Type::Option(inner) | Type::Tagged { inner, .. } => {
-//RS                     walk(checker, inner, path, seen, out);
-//RS                 }
-//RS                 Type::Result { ok, err } => {
-//RS                     walk(checker, ok, path, seen, out);
-//RS                     walk(checker, err, path, seen, out);
-//RS                 }
-//RS                 Type::Named(name) | Type::Apply { name, .. }
-//RS                     if nominal_reaches_window(checker, ty, name, seen)
-//RS                         && seen.active.insert(name.clone()) =>
-//RS                 {
-//RS                     if let Some(fields) = checker.registry.struct_fields(name) {
-//RS                         for (field, _, field_ty) in fields {
-//RS                             path.push(field.clone());
-//RS                             walk(checker, field_ty, path, seen, out);
-//RS                             path.pop();
-//RS                         }
-//RS                     } else if let Some(variants) = checker.resolve_enum_variants_cloned(name) {
-//RS                         for (variant, (_, payload)) in variants {
-//RS                             match payload {
-//RS                                 VariantPayload::Unit => {}
-//RS                                 VariantPayload::Single(inner, _) => {
-//RS                                     path.push(variant);
-//RS                                     path.push("0".to_string());
-//RS                                     walk(checker, &inner, path, seen, out);
-//RS                                     path.pop();
-//RS                                     path.pop();
-//RS                                 }
-//RS                                 VariantPayload::Named(fields) => {
-//RS                                     for field in fields {
-//RS                                         path.push(variant.clone());
-//RS                                         path.push(field.name);
-//RS                                         walk(checker, &field.ty, path, seen, out);
-//RS                                         path.pop();
-//RS                                         path.pop();
-//RS                                     }
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     seen.active.remove(name);
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS 
-//RS         let mut out = Vec::new();
-//RS         let mut seen = ViewWalk {
-//RS             active: HashSet::new(),
-//RS             reaches: HashMap::new(),
-//RS         };
-//RS         walk(self, ty, &mut Vec::new(), &mut seen, &mut out);
-//RS         out
-//RS     }
-//RS 
-//RS     fn conservative_callback_view_provenance(
-//RS         &self,
-//RS         params: &[Type],
-//RS         ret: &Type,
-//RS     ) -> crate::AST::ViewProvenanceMap {
-//RS         let sources = params
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter(|(_, ty)| !ty.is_scalar())
-//RS             .map(|(index, _)| crate::AST::ViewSourcePath {
-//RS                 source: crate::AST::ViewSource::Parameter(index),
-//RS                 projections: Vec::new(),
-//RS             })
-//RS             .collect::<std::collections::BTreeSet<_>>();
-//RS         self.view_leaf_paths(ret)
-//RS             .into_iter()
-//RS             .map(|(output_path, access)| {
-//RS                 (
-//RS                     output_path,
-//RS                     crate::AST::ViewProvenance {
-//RS                         sources: sources.clone(),
-//RS                         mutable: access == ViewAccess::Write,
-//RS                     },
-//RS                 )
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn pattern_variant_slot_names(
-//RS         &self,
-//RS         subject: &Expr,
-//RS         variant: &str,
-//RS         slot_count: usize,
-//RS     ) -> Vec<String> {
-//RS         fn subject_type(checker: &Checker<'_>, subject: &Expr) -> Option<Type> {
-//RS             match subject {
-//RS                 Expr::Ident(name, _) => checker.lookup(name).map(|info| info.ty.clone()),
-//RS                 Expr::Copy(inner, _) | Expr::Paren(inner, _) => subject_type(checker, inner),
-//RS                 _ => None,
-//RS             }
-//RS         }
-//RS 
-//RS         let named = subject_type(self, subject)
-//RS             .and_then(|ty| match ty {
-//RS                 Type::Named(name) | Type::Apply { name, .. } => Some(name),
-//RS                 _ => None,
-//RS             })
-//RS             .and_then(|name| self.resolve_enum_variants_cloned(&name))
-//RS             .and_then(|variants| variants.get(variant).cloned())
-//RS             .and_then(|(_, payload)| match payload {
-//RS                 VariantPayload::Named(fields) => {
-//RS                     Some(fields.into_iter().map(|field| field.name).collect())
-//RS                 }
-//RS                 _ => None,
-//RS             });
-//RS 
-//RS         named.unwrap_or_else(|| (0..slot_count).map(|index| index.to_string()).collect())
-//RS     }
-//RS 
-//RS     pub(crate) fn transfer_named_view(&mut self, target: &str, source: &str, span: Span) -> bool {
-//RS         let facts: Vec<_> = self.view_facts(source).into_iter().cloned().collect();
-//RS         if facts.is_empty() {
-//RS             return false;
-//RS         }
-//RS         for fact in facts {
-//RS             self.record_view(
-//RS                 target,
-//RS                 fact.output_path,
-//RS                 fact.place,
-//RS                 fact.kind,
-//RS                 fact.access,
-//RS                 span,
-//RS             );
-//RS         }
-//RS         true
-//RS     }
-//RS 
-//RS     /// Moving a mutable view out of a view-bearing aggregate transfers the
-//RS     /// exclusive loan. Retire the carrier name without treating that transfer
-//RS     /// as a mutation of the underlying owner.
-//RS     pub(crate) fn mutable_view_aggregate_root(&self, expr: &Expr) -> Option<String> {
-//RS         let expr = match expr {
-//RS             Expr::Place(inner, _, _) | Expr::Paren(inner, _) => inner.as_ref(),
-//RS             _ => expr,
-//RS         };
-//RS         let (Expr::Field(..) | Expr::Index { .. }) = expr else {
-//RS             return None;
-//RS         };
-//RS         let root = expr_root_ident(expr)?;
-//RS         self.view_facts(root)
-//RS             .iter()
-//RS             .any(|fact| fact.access == ViewAccess::Write)
-//RS             .then(|| root.to_string())
-//RS     }
-//RS 
-//RS     pub(crate) fn finish_mutable_view_aggregate_transfer(
-//RS         &mut self,
-//RS         root: Option<&str>,
-//RS         span: Span,
-//RS         consumer: String,
-//RS     ) {
-//RS         if let Some(root) = root {
-//RS             self.flow
-//RS                 .moved
-//RS                 .set(root, crate::Sema::FlowFacts::MoveOrigin::new(span, consumer));
-//RS             self.clear_origin(root);
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn transfer_mutable_pattern_subject(&mut self, subject: &Expr) -> bool {
-//RS         let Expr::Ident(name, span) = subject else {
-//RS             return false;
-//RS         };
-//RS         if self
-//RS             .view_facts(name)
-//RS             .iter()
-//RS             .all(|fact| fact.access == ViewAccess::Read)
-//RS         {
-//RS             return false;
-//RS         }
-//RS         self.flow.moved.set(
-//RS             name,
-//RS             crate::Sema::FlowFacts::MoveOrigin::new(*span, "the pattern match".to_string()),
-//RS         );
-//RS         self.clear_origin(name);
-//RS         true
-//RS     }
-//RS 
-//RS     /// True if `name` is currently a live `View<T>` binding.
-//RS     pub(crate) fn is_list_view(&self, name: &str) -> bool {
-//RS         self.view_kind(name).is_some_and(ViewKind::is_named_window)
-//RS     }
-//RS 
-//RS     pub(crate) fn type_contains_view_boundary(&self, ty: &Type) -> bool {
-//RS         fn payload_contains(
-//RS             registry: &TypeRegistry,
-//RS             payload: &VariantPayload,
-//RS             seen: &mut NominalWalk<'_>,
-//RS         ) -> bool {
-//RS             match payload {
-//RS                 VariantPayload::Unit => false,
-//RS                 VariantPayload::Single(ty, _) => contains(registry, ty, seen),
-//RS                 VariantPayload::Named(fields) => fields
-//RS                     .iter()
-//RS                     .any(|field| contains(registry, &field.ty, seen)),
-//RS             }
-//RS         }
-//RS 
-//RS         fn named_contains(registry: &TypeRegistry, name: &str, seen: &mut NominalWalk<'_>) -> bool {
-//RS             let Some(key) = seen.enter(name, &[]) else {
-//RS                 return false;
-//RS             };
-//RS             let found = registry.struct_fields(name).is_some_and(|fields| {
-//RS                 fields
-//RS                     .iter()
-//RS                     .any(|(_, _, field_ty)| contains(registry, field_ty, seen))
-//RS             }) || registry.enum_variants(name).is_some_and(|variants| {
-//RS                 variants
-//RS                     .values()
-//RS                     .any(|(_, payload)| payload_contains(registry, payload, seen))
-//RS             });
-//RS             seen.leave(name, key);
-//RS             found
-//RS         }
-//RS 
-//RS         fn contains(registry: &TypeRegistry, ty: &Type, seen: &mut NominalWalk<'_>) -> bool {
-//RS             match ty {
-//RS                 Type::Apply { name, args }
-//RS                     if matches!(
-//RS                         name.as_str(),
-//RS                         "View" | "ViewMut" | Syntax::TYPE_PIN | Syntax::TYPE_VIEW_ITER
-//RS                     ) && args.len() == 1 =>
-//RS                 {
-//RS                     true
-//RS                 }
-//RS                 Type::Tagged { marker, .. }
-//RS                     if matches!(
-//RS                         marker,
-//RS                         crate::AST::TagMarker::Internal(crate::AST::InternalTag::AllocatorView)
-//RS                     ) =>
-//RS                 {
-//RS                     true
-//RS                 }
-//RS                 Type::Named(name) => named_contains(registry, name, seen),
-//RS                 Type::Apply { name, args } => {
-//RS                     args.iter().any(|arg| contains(registry, arg, seen))
-//RS                         || named_contains(registry, name, seen)
-//RS                 }
-//RS                 Type::Option(inner)
-//RS                 | Type::List(inner)
-//RS                 | Type::Shared(inner)
-//RS                 | Type::Tagged { inner, .. } => contains(registry, inner, seen),
-//RS                 Type::Result { ok, err } => {
-//RS                     contains(registry, ok, seen) || contains(registry, err, seen)
-//RS                 }
-//RS                 Type::Map { key, value, .. } => {
-//RS                     contains(registry, key, seen) || contains(registry, value, seen)
-//RS                 }
-//RS                 Type::Tuple(fields) => fields
-//RS                     .iter()
-//RS                     .any(|(_, field_ty)| contains(registry, field_ty, seen)),
-//RS                 Type::FixedList { elem, .. } => contains(registry, elem, seen),
-//RS                 Type::Fn { params, ret, .. } => {
-//RS                     params.iter().any(|param| contains(registry, param, seen))
-//RS                         || ret
-//RS                             .as_deref()
-//RS                             .is_some_and(|ret| contains(registry, ret, seen))
-//RS                 }
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS         let mut seen = NominalWalk::new(NominalQuery::ViewBoundary, self.registry);
-//RS         let found = contains(self.registry, ty, &mut seen);
-//RS         seen.finish(!found);
-//RS         found
-//RS     }
-//RS 
-//RS     pub(crate) fn named_view_has_stable_owner(&self, name: &str) -> bool {
-//RS         self.view_fact(name).is_some_and(|fact| {
-//RS             matches!(
-//RS                 fact.place.owner.origin,
-//RS                 ViewOwnerOrigin::Receiver | ViewOwnerOrigin::Parameter(_) | ViewOwnerOrigin::Static
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     /// E2305: `return list[a..b]` made fresh right in the `return` — `owner`
-//RS     /// (`list`) is made in this function and freed when it returns. Mirrors
-//RS     /// E2301's exact wording (`this view points into X, which this function
-//RS     /// owns`) for the "fresh call in return" shape; `report_list_view_escape`
-//RS     /// above covers the "already-bound name" shape.
-//RS     pub(crate) fn report_view_owns_return(&mut self, place: &ViewPlace, span: Span) {
-//RS         let owner = &place.owner.name;
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E2305",
-//RS             format!(
-//RS                 "this view points into `{}`, which this function owns",
-//RS                 owner
-//RS             ),
-//RS             format!(
-//RS                 "`{}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at",
-//RS                 owner
-//RS             ),
-//RS             "return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it".to_string(),
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     /// D-MEM-VIEWRET1=B: accept a returned named view only when its source is
-//RS     /// stable at the public boundary. Parameter position, never spelling, is
-//RS     /// the canonical identity. Compatible return paths form a source union.
-//RS     pub(crate) fn check_named_view_return(
-//RS         &mut self,
-//RS         place: &ViewPlace,
-//RS         access: ViewAccess,
-//RS         output_path: Vec<String>,
-//RS         span: Span,
-//RS     ) {
-//RS         let source = match place.owner.origin {
-//RS             ViewOwnerOrigin::Receiver => crate::AST::ViewSource::Receiver,
-//RS             ViewOwnerOrigin::Parameter(index) => crate::AST::ViewSource::Parameter(index),
-//RS             _ => {
-//RS                 self.report_view_owns_return(place, span);
-//RS                 return;
-//RS             }
-//RS         };
-//RS         let mut projections = Vec::new();
-//RS         for projection in &place.projections {
-//RS             projections.push(match projection {
-//RS                 ViewProjection::Field(name) => {
-//RS                     crate::AST::ViewSourceProjection::Field(name.clone())
-//RS                 }
-//RS                 ViewProjection::Index { .. } => crate::AST::ViewSourceProjection::Index,
-//RS                 ViewProjection::Range { .. } => crate::AST::ViewSourceProjection::Range,
-//RS                 ViewProjection::Fresh(_) => {
-//RS                     self.report_view_return_boundary(span);
-//RS                     return;
-//RS                 }
-//RS             });
-//RS         }
-//RS         let source = crate::AST::ViewSourcePath {
-//RS             source,
-//RS             projections,
-//RS         };
-//RS         let map = self
-//RS             .return_view_provenance
-//RS             .get_or_insert_with(Default::default);
-//RS         let provenance = map
-//RS             .entry(output_path)
-//RS             .or_insert_with(|| crate::AST::ViewProvenance {
-//RS                 sources: Default::default(),
-//RS                 mutable: access == ViewAccess::Write,
-//RS             });
-//RS         if provenance.mutable != (access == ViewAccess::Write) {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E2305",
-//RS                 "returned view paths disagree about read or write access".to_string(),
-//RS                 "one public output slot cannot sometimes be a read view and sometimes be an exclusive write view".to_string(),
-//RS                 "return the same view access on every path".to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS             return;
-//RS         }
-//RS         provenance.sources.insert(source);
-//RS     }
-//RS 
-//RS     pub(crate) fn check_named_view_binding_return(&mut self, name: &str, span: Span) {
-//RS         let facts: Vec<_> = self.view_facts(name).into_iter().cloned().collect();
-//RS         if facts.is_empty() {
-//RS             self.report_view_return_boundary(span);
-//RS             return;
-//RS         }
-//RS         for fact in facts {
-//RS             self.check_named_view_return(&fact.place, fact.access, fact.output_path, span);
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn check_named_string_view_binding_return(&mut self, name: &str, span: Span) {
-//RS         let facts: Vec<_> = self.view_facts(name).into_iter().cloned().collect();
-//RS         if facts.is_empty() {
-//RS             self.report_string_view_boundary(span);
-//RS             return;
-//RS         }
-//RS         for fact in facts {
-//RS             if !matches!(
-//RS                 fact.place.owner.origin,
-//RS                 ViewOwnerOrigin::Receiver | ViewOwnerOrigin::Parameter(_)
-//RS             ) {
-//RS                 self.report_string_view_unsupported_use(name, "be returned", span);
-//RS                 return;
-//RS             }
-//RS             self.check_named_view_return(&fact.place, fact.access, fact.output_path, span);
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn check_aggregate_view_return(&mut self, expr: &Expr) {
-//RS         fn walk(checker: &mut Checker<'_>, expr: &Expr, path: &mut Vec<String>) {
-//RS             match expr {
-//RS                 Expr::StructLit { fields, .. } => {
-//RS                     for (field, _, value) in fields {
-//RS                         path.push(field.clone());
-//RS                         walk(checker, value, path);
-//RS                         path.pop();
-//RS                     }
-//RS                 }
-//RS                 Expr::TypedLit { body, .. } => {
-//RS                     body.for_each_expr(|value| walk(checker, value, path));
-//RS                 }
-//RS                 Expr::TupleLit(fields, ..) => {
-//RS                     for (field, value) in fields {
-//RS                         path.push(field.clone());
-//RS                         walk(checker, value, path);
-//RS                         path.pop();
-//RS                     }
-//RS                 }
-//RS                 Expr::ListLit(elements, _) => {
-//RS                     path.push("[]".to_string());
-//RS                     for value in elements {
-//RS                         walk(checker, value, path);
-//RS                     }
-//RS                     path.pop();
-//RS                 }
-//RS                 Expr::EnumLit { variant, args, .. } => {
-//RS                     path.push(variant.clone());
-//RS                     for (index, arg) in args.iter().enumerate() {
-//RS                         let (slot, value) = match arg {
-//RS                             crate::AST::EnumLitArg::Positional(value) => (index.to_string(), value),
-//RS                             crate::AST::EnumLitArg::Named { label, expr } => (label.clone(), expr),
-//RS                         };
-//RS                         path.push(slot);
-//RS                         walk(checker, value, path);
-//RS                         path.pop();
-//RS                     }
-//RS                     path.pop();
-//RS                 }
-//RS                 Expr::Present(inner, _)
-//RS                 | Expr::Ok(inner, _)
-//RS                 | Expr::Err(inner, _)
-//RS                 | Expr::Paren(inner, _) => walk(checker, inner, path),
-//RS                 Expr::Ident(name, span) => {
-//RS                     let facts: Vec<_> = checker.view_facts(name).into_iter().cloned().collect();
-//RS                     for fact in facts {
-//RS                         let mut output_path = path.clone();
-//RS                         output_path.extend(fact.output_path);
-//RS                         checker.check_named_view_return(
-//RS                             &fact.place,
-//RS                             fact.access,
-//RS                             output_path,
-//RS                             *span,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 _ => {
-//RS                     for (suffix, place, _, access) in checker.view_call_sources(expr) {
-//RS                         let mut output_path = path.clone();
-//RS                         output_path.extend(suffix);
-//RS                         checker.check_named_view_return(&place, access, output_path, expr.span());
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         walk(self, expr, &mut Vec::new());
-//RS     }
-//RS 
-//RS     pub(crate) fn report_view_return_boundary(&mut self, span: Span) {
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E2305",
-//RS             "returned views need a stable owner relationship".to_string(),
-//RS             "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources"
-//RS                 .to_string(),
-//RS             "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `~`"
-//RS                 .to_string(),
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     pub(crate) fn report_string_view_boundary(&mut self, span: Span) {
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E2307",
-//RS             "returned string views need a stable owner relationship".to_string(),
-//RS             "each public `View<str>` slot must name a bounded set of receiver, parameter, or static `String` sources that stay live; this return did not prove those sources"
-//RS                 .to_string(),
-//RS             "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `~`"
-//RS                 .to_string(),
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     /// #1164 / #1163 teaching: a plain owned `String` place is not a `View<str>`.
-//RS     /// Only tracked string-view bindings / `.trim()`/`.after()`/`.before()` fill
-//RS     /// that slot under today's string-view rules.
-//RS     pub(crate) fn report_owned_string_as_view_str(&mut self, span: Span) {
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E2307",
-//RS             "an owned `String` cannot fill a `View<str>` slot".to_string(),
-//RS             "`View<str>` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead"
-//RS                 .to_string(),
-//RS             "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `~`"
-//RS                 .to_string(),
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     // ──────────────────────────────────────────────────────────────────────
-//RS     // D-MEM1 stage S5 (2026-07-04): string `view`s — `s.trim()` / `s.after(sep)`
-//RS     // / `s.before(sep)` bound to a local name return a zero-copy `&str` window
-//RS     // into `s` instead of an owned `String`. Unlike `View<T>` (a distinct Jet
-//RS     // type), `String` stays ONE type end to end (D-MEM1 gallery: "one String
-//RS     // type") — so the view-ness lives on the *binding* (`Binding::string_view`,
-//RS     // set below), not on the value's static type. A read-only view crossing an
-//RS     // owning destination is materialized by D-MEM-COPYSEM1; the shared fact
-//RS     // graph still reports E2307 for a declared view boundary or when
-//RS     // `copies: .Explicit` restores the refusal. Crossing a task boundary is
-//RS     // caught separately at the capture-check site (`CheckerInfer/calls.rs`)
-//RS     // since a plain `Type::String` carries no view marker for the general
-//RS     // sendability check to key off.
-//RS     // ──────────────────────────────────────────────────────────────────────
-//RS 
-//RS     /// If `init` is `s.trim()` / `s.after(sep)` / `s.before(sep)` on a plain
-//RS     /// local `String` name, return `s`'s name — but only when `s` is a genuine
-//RS     /// local or parameter. Parameters must remain tracked so a `View<str>`
-//RS     /// return can publish their stable source provenance.
-//RS     pub(crate) fn string_view_call_source(&self, init: &Expr) -> Option<ViewPlace> {
-//RS         let Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } = init
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         let arity_ok = match method.as_str() {
-//RS             "trim" => args.is_empty(),
-//RS             "after" | "before" => args.len() == 1,
-//RS             _ => return None,
-//RS         };
-//RS         if !arity_ok {
-//RS             return None;
-//RS         }
-//RS         let Expr::Ident(name, _) = receiver.as_ref() else {
-//RS             return None;
-//RS         };
-//RS         if self.consts.contains_key(name) {
-//RS             return None;
-//RS         }
-//RS         let Some(info) = self.lookup(name) else {
-//RS             return None;
-//RS         };
-//RS         if !matches!(info.ty, Type::String) {
-//RS             return None;
-//RS         }
-//RS         self.place_from_expr(receiver)
-//RS     }
-//RS 
-//RS     /// Record `name` as a string view into `owner`, declared at the current
-//RS     /// scope depth.
-//RS     pub(crate) fn record_string_view(&mut self, name: &str, place: ViewPlace, span: Span) {
-//RS         self.record_view(
-//RS             name,
-//RS             Vec::new(),
-//RS             place,
-//RS             ViewKind::String,
-//RS             ViewAccess::Read,
-//RS             span,
-//RS         );
-//RS     }
-//RS 
-//RS     /// True if `name` is currently a live string-view binding.
-//RS     pub(crate) fn is_string_view(&self, name: &str) -> bool {
-//RS         self.view_kind(name) == Some(ViewKind::String)
-//RS     }
-//RS 
-//RS     /// E2307: a string view named `name` was used at an owning destination while
-//RS     /// `copies: .Explicit` is active. This is the ONE call site for the whole
-//RS     /// class of explicit-policy refusals (return, rebind, struct field, call
-//RS     /// argument, list/tuple literal element, arbitrary builtin/user method,
-//RS     /// …): the general `Expr::Ident` inference arm calls this whenever it reads
-//RS     /// a live string-view name outside the direct `&str` positions. `what`
-//RS     /// describes the use site.
-//RS     pub(crate) fn report_string_view_unsupported_use(
-//RS         &mut self,
-//RS         name: &str,
-//RS         what: &str,
-//RS         span: Span,
-//RS     ) {
-//RS         let owner = crate::Sema::current_view_fact(&self.flow.views, name)
-//RS             .map(|fact| fact.place.owner.name.clone())
-//RS             .unwrap_or_else(|| "its owner".to_string());
-//RS         let source_ty = Type::String;
-//RS         let diagnostic = Diagnostic::error(
-//RS             "E2307",
-//RS             format!("`{}` cannot {} without an owning copy", name, what),
-//RS             format!(
-//RS                 "`{}` is a zero-copy view into `{}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled",
-//RS                 name, owner
-//RS             ),
-//RS             format!("write `{}{}` first, or remove `copies: .Explicit` to use the default owning copy", Syntax::SIGIL_COPY, name),
-//RS             Some(span),
-//RS         );
-//RS         self.diags
-//RS             .push(self.with_ownership_copy_edit(diagnostic, span, Some(&source_ty)));
-//RS     }
-//RS 
-//RS     // No "fresh call made right in the return" shape exists for string views
-//RS     // (unlike `View<T>`, which is type-driven everywhere `.view()` appears):
-//RS     // view-ness here lives on the *binding*, set only for `Stmt::Val`, so
-//RS     // `return s.after(sep)` written directly (no intermediate binding) always
-//RS     // lowers as an ordinary owned `String` — safe, nothing to catch.
-//RS 
-//RS     /// D-LIN1 / D-CONC-JOIN1: true when `ty` is a `#SingleUse` value, a Task
-//RS     /// handle, or one of the task-list forms D-CONC-JOIN1 extends the duty to
-//RS     /// (syntax-decisions.md:2177-2182 covers the handle AND the task-list forms
-//RS     /// from D-VERDICT-1323-1). Narrowing this to `is_task_type` alone let a
-//RS     /// `[Task<Int>]` be dropped with its tasks never joined and no diagnostic at
-//RS     /// all, and it also split this rule from the E0120 loop rule, which demands
-//RS     /// the list be moved with `^` and so requires the list to carry the duty.
-//RS     pub(crate) fn type_is_single_use(&self, ty: &Type) -> bool {
-//RS         if type_requires_owned_iteration(ty) {
-//RS             return true;
-//RS         }
-//RS         let Some(name) = ty.base_name() else {
-//RS             return false;
-//RS         };
-//RS         if super::CheckerCoreLib::core_single_use_type(name) {
-//RS             return true;
-//RS         }
-//RS         if self.registry.is_single_use(name) {
-//RS             return true;
-//RS         }
-//RS         if let Some(mods) = self.modules {
-//RS             for &idx in self.imports.values() {
-//RS                 if self.type_is_pub_in(idx, name) && mods[idx].registry.is_single_use(name) {
-//RS                     return true;
-//RS                 }
-//RS             }
-//RS         }
-//RS         false
-//RS     }
-//RS 
-//RS     /// D-MUSTUSE1 (c18iwxqx): true when `ty` is a `#MustUse` struct/enum or a
-//RS     /// built-in guard/handle type whose result must not be silently ignored.
-//RS     pub(crate) fn type_is_must_use(&self, ty: &Type) -> bool {
-//RS         let Some(name) = ty.base_name() else {
-//RS             return false;
-//RS         };
-//RS         if super::CheckerCoreLib::core_must_use_type(name) {
-//RS             return true;
-//RS         }
-//RS         if self.registry.is_must_use(name) {
-//RS             return true;
-//RS         }
-//RS         if let Some(mods) = self.modules {
-//RS             for &idx in self.imports.values() {
-//RS                 if self.type_is_pub_in(idx, name) && mods[idx].registry.is_must_use(name) {
-//RS                     return true;
-//RS                 }
-//RS             }
-//RS         }
-//RS         false
-//RS     }
-//RS 
-//RS     /// D-MUSTUSE1 (c18iwxqx): name of a `#MustUse` fn/method call when `expr` is
-//RS     /// that call, else `None`.
-//RS     pub(crate) fn ignored_must_use_call_target(&self, expr: &Expr) -> Option<String> {
-//RS         if let Expr::Call(call) = expr {
-//RS             if self.funcs.get(&call.name).is_some_and(|s| s.is_must_use) {
-//RS                 return Some(call.name.clone());
-//RS             }
-//RS         }
-//RS         if let Expr::MethodCall {
-//RS             receiver, method, ..
-//RS         } = expr
-//RS         {
-//RS             if let Some(type_name) = self.receiver_type_name(receiver) {
-//RS                 if self.method_is_must_use(&type_name, method) {
-//RS                     return Some(format!("{type_name}.{method}"));
-//RS                 }
-//RS             }
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS     fn receiver_type_name(&self, receiver: &Expr) -> Option<String> {
-//RS         match receiver {
-//RS             Expr::Ident(name, _) => self
-//RS                 .lookup(name)
-//RS                 .and_then(|info| info.ty.base_name().map(str::to_string)),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn method_is_must_use(&self, type_name: &str, method: &str) -> bool {
-//RS         if self
-//RS             .registry
-//RS             .method(type_name, method)
-//RS             .is_some_and(|m| m.must_use)
-//RS         {
-//RS             return true;
-//RS         }
-//RS         if let Some(mods) = self.modules {
-//RS             for &idx in self.imports.values() {
-//RS                 if self.type_is_pub_in(idx, type_name) {
-//RS                     if let Some(m) = mods[idx].registry.method(type_name, method) {
-//RS                         if m.must_use {
-//RS                             return true;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         false
-//RS     }
-//RS 
-//RS     /// D-MUSTUSE1 (c18iwxqx): emit E0419 when a must-use result is dropped as a
-//RS     /// bare expression statement.
-//RS     pub(crate) fn check_ignored_must_use(
-//RS         &mut self,
-//RS         expr: &Expr,
-//RS         ty: &Type,
-//RS         span: Span,
-//RS         call_target: Option<String>,
-//RS     ) {
-//RS         if self.suppress_must_use || is_task_type(ty) {
-//RS             return;
-//RS         }
-//RS         let target =
-//RS             if let Some(name) = call_target.or_else(|| self.ignored_must_use_call_target(expr)) {
-//RS                 name
-//RS             } else if matches!(ty, Type::Named(n) if n == "Unit") {
-//RS                 return;
-//RS             } else if self.type_is_must_use(ty) {
-//RS                 ty.name()
-//RS             } else {
-//RS                 return;
-//RS             };
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0419",
-//RS             format!("`{target}` must be used — it was dropped as a bare statement"),
-//RS             "a `#MustUse` result carries work or a resource that is lost when nothing checks it"
-//RS                 .to_string(),
-//RS             format!(
-//RS                 "bind it (`x := …`), use `{}`, `{} …`, or `.drop(\"reason\")` to discard intentionally",
-//RS                 Syntax::OP_TRY_SUFFIX,
-//RS                 Syntax::BUILTIN_PANIC
-//RS             ),
-//RS             Some(span),
-//RS         ));
-//RS     }
-//RS 
-//RS     pub(crate) fn has_core_mem_import(&self) -> bool {
-//RS         self.core_imports
-//RS             .values()
-//RS             .any(|m| m == Syntax::CORE_MEM_MODULE)
-//RS     }
-//RS 
-//RS     /// c26 / arena-inference lint: heap growth in a loop after `use core.mem`.
-//RS     /// c26 / allocation-boundary lint: growable calls inside `#Context` without allocator.
-//RS     pub(crate) fn lint_allocation_hints(&mut self, method: &str, span: Span) {
-//RS         let grows_heap = matches!(method, "push" | "append" | "insert" | "add" | "add_new");
-//RS         if !grows_heap {
-//RS             return;
-//RS         }
-//RS         if self.loop_depth > 0 && self.has_core_mem_import() {
-//RS             self.diags.push(Diagnostic::lint(
-//RS                 "L0505",
-//RS                 "heap growth inside a loop — consider an arena".to_string(),
-//RS                 "each `push` may allocate on the global heap; in a hot loop that adds up".to_string(),
-//RS                 "bind `arena :: mem.Arena.new()` outside the loop and use `arena.alloc(…)` for scratch data".to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS         }
-//RS         if self.context_depth > 0 && !self.context_allocator_active {
-//RS             self.diags.push(Diagnostic::lint(
-//RS                 "L0506",
-//RS                 "hidden allocation inside `#Context` without an allocator".to_string(),
-//RS                 "this call may allocate on the global heap while a scoped context is active".to_string(),
-//RS                 "add `allocator: …` to the `#Context(…)` fields, or move the allocation outside the block".to_string(),
-//RS                 Some(span),
-//RS             ));
-//RS         }
-//RS     }
-//RS 
-//RS     fn place_reads_untagged_or_read_shared_guard(&self, expr: &Expr) -> bool {
-//RS         if expr_root_ident(expr).is_some_and(|name| {
-//RS             self.lookup(name)
-//RS                 .is_some_and(|info| info.param_conv == Some(AccessConvention::Write))
-//RS         }) {
-//RS             return false;
-//RS         }
-//RS         match expr {
-//RS             Expr::Field(base, field, _) => {
-//RS                 if field == "value" {
-//RS                     if let Some(ty) = self.place_expr_type(base) {
-//RS                         if matches!(
-//RS                             &ty,
-//RS                             Type::Apply { name, .. }
-//RS                                 if name == crate::Syntax::TYPE_SHARED_GUARD
-//RS                         ) || matches!(
-//RS                             &ty,
-//RS                             Type::Tagged { marker, .. }
-//RS                                 if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardRead))
-//RS                         ) {
-//RS                             return true;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 self.place_reads_untagged_or_read_shared_guard(base)
-//RS             }
-//RS             Expr::Index { base, .. } | Expr::Paren(base, _) | Expr::Place(base, _, _) => {
-//RS                 self.place_reads_untagged_or_read_shared_guard(base)
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn reject_read_shared_guard_write(&mut self, expr: &Expr, span: Span) -> bool {
-//RS         if !self.place_reads_untagged_or_read_shared_guard(expr) {
-//RS             return false;
-//RS         }
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0205",
-//RS             "cannot edit through this read-only `SharedGuard` view".to_string(),
-//RS             "a public guard type outside its acquisition site preserves read access unless a helper explicitly receives it with write access".to_string(),
-//RS             "keep the edit at the acquisition site, or pass the guard to a helper with the write-access marker `&`, such as `&guard: SharedGuard<T>`".to_string(),
-//RS             Some(span),
-//RS         ));
-//RS         true
-//RS     }
-//RS 
-//RS     fn move_keys_overlap(left: &str, right: &str) -> bool {
-//RS         Self::contains_place(left, right) || Self::contains_place(right, left)
-//RS     }
-//RS 
-//RS     fn contains_place(parent: &str, child: &str) -> bool {
-//RS         child.strip_prefix(parent).is_some_and(|suffix| {
-//RS             suffix.is_empty() || suffix.starts_with('.') || suffix.starts_with('[')
-//RS         })
-//RS     }
-//RS 
-//RS     pub(crate) fn clear_moved_binding(&mut self, name: &str) {
-//RS         self.flow
-//RS             .moved
-//RS             .retain(|place, _| !Self::contains_place(name, place));
-//RS     }
-//RS 
-//RS     pub(crate) fn clear_moved_expr(&mut self, expr: &Expr) {
-//RS         let Some(place) = self.capture_place_from_expr(expr) else {
-//RS             return;
-//RS         };
-//RS         let place = Self::place_name(&place);
-//RS         self.flow
-//RS             .moved
-//RS             .retain(|moved, _| !Self::contains_place(&place, moved));
-//RS     }
-//RS 
-//RS     /// Drop moves whose origin sits inside `span`. A unit callback body is
-//RS     /// statement-checked first, then its tail may be inferred again as a
-//RS     /// value; the first walk already consumed those places.
-//RS     pub(crate) fn rewind_moves_in_span(&mut self, span: Span) {
-//RS         self.flow.moved.retain(|_, origin| {
-//RS             origin.span.start < span.start || origin.span.end > span.end
-//RS         });
-//RS     }
-//RS 
-//RS     fn moved_use_diagnostic(
-//RS         &self,
-//RS         moved_place: &str,
-//RS         moved_at: &crate::Sema::FlowFacts::MoveOrigin,
-//RS         reuse_span: Span,
-//RS         moved_ty: Option<&Type>,
-//RS     ) -> Diagnostic {
-//RS         let consumer = moved_at.consumer.as_str();
-//RS         let note = if moved_ty.is_some_and(|ty| self.is_resource_type(ty)) {
-//RS             Some(format!(
-//RS                 "acquire a new `{}` resource; closed resources cannot be copied or reused",
-//RS                 moved_ty.map(Type::show).unwrap_or_default()
-//RS             ))
-//RS         } else if moved_ty.is_some_and(is_one_pass_source) {
-//RS             Some(match moved_ty.and_then(one_pass_materializer) {
-//RS                 Some(method) => format!(
-//RS                     "`{moved_place}` is one-pass — materialize it first with `{moved_place}{method}`, or create a fresh source for the second drive"
-//RS                 ),
-//RS                 None => format!(
-//RS                     "`{moved_place}` is one-pass and cannot be copied — create a fresh source for the second drive"
-//RS                 ),
-//RS             })
-//RS         } else {
-//RS             None
-//RS         };
-//RS         let diagnostic = Diagnostic::from_row(
-//RS             "E0121",
-//RS             &[("name", moved_place), ("consumer", consumer)],
-//RS             Some(reuse_span),
-//RS         )
-//RS         .with_label(
-//RS             moved_at.span,
-//RS             if moved_at.span == reuse_span {
-//RS                 format!("`{moved_place}` moved to {consumer} here on an earlier loop iteration")
-//RS             } else {
-//RS                 format!("`{moved_place}` moved to {consumer} here")
-//RS             },
-//RS         );
-//RS         match note {
-//RS             Some(note) => diagnostic.with_detail(format!(" Note: {note}")),
-//RS             None => diagnostic,
-//RS         }
-//RS     }
-//RS 
-//RS     fn push_moved_use_diagnostic(&mut self, diagnostic: Diagnostic) {
-//RS         let duplicate = self.diags.iter().any(|previous| {
-//RS             previous.code == "E0121"
-//RS                 && previous.span == diagnostic.span
-//RS                 && previous.what == diagnostic.what
-//RS         });
-//RS         if !duplicate {
-//RS             self.diags.push(diagnostic);
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn reject_moved_expr_use(&mut self, expr: &Expr, span: Span) -> bool {
-//RS         let Some(place) = self.capture_place_from_expr(expr) else {
-//RS             return false;
-//RS         };
-//RS         let place_name = Self::place_name(&place);
-//RS         let moved: Vec<(String, crate::Sema::FlowFacts::MoveOrigin)> =
-//RS             if matches!(expr, Expr::Ident(..)) && self.suppress_partial_move_root_read {
-//RS                 self.flow
-//RS                     .moved
-//RS                     .get(&place_name)
-//RS                     .cloned()
-//RS                     .map(|at| (place_name.clone(), at))
-//RS                     .into_iter()
-//RS                     .collect()
-//RS             } else {
-//RS                 self.flow
-//RS                     .moved
-//RS                     .iter()
-//RS                     .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
-//RS                     .map(|(moved, at)| (moved.to_string(), at.clone()))
-//RS                     .collect()
-//RS             };
-//RS         if moved.is_empty() {
-//RS             return false;
-//RS         }
-//RS         let root = place.owner.name;
-//RS         let moved_ty = self.lookup(&root).map(|info| info.ty.clone());
-//RS         // D-COPY-DEFAULT1=A: an unmarked move is the last use only when no
-//RS         // use follows. This use follows, so every site that gave the value
-//RS         // away becomes a share and the source stays usable.
-//RS         if moved.iter().all(|(_, at)| at.is_shareable()) {
-//RS             for (moved_place, moved_at) in moved {
-//RS                 let diagnostic =
-//RS                     self.moved_use_diagnostic(&moved_place, &moved_at, span, moved_ty.as_ref());
-//RS                 self.flow.moved.retain(|key, _| key != moved_place);
-//RS                 for site in moved_at.share_sites {
-//RS                     self.record_share_site(site, diagnostic.clone());
-//RS                 }
-//RS             }
-//RS             return false;
-//RS         }
-//RS         let Some((moved_place, moved_at)) = moved
-//RS             .into_iter()
-//RS             .min_by_key(|(moved, _)| moved.len())
-//RS         else {
-//RS             return false;
-//RS         };
-//RS         self.push_moved_use_diagnostic(self.moved_use_diagnostic(
-//RS             &moved_place,
-//RS             &moved_at,
-//RS             span,
-//RS             moved_ty.as_ref(),
-//RS         ));
-//RS         true
-//RS     }
-//RS 
-//RS     fn record_share_site(&mut self, site: Span, diagnostic: Diagnostic) {
-//RS         if !self.share_sites.iter().any(|(known, _)| *known == site) {
-//RS             self.share_sites.push((site, diagnostic));
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-COPY-DEFAULT1=A: an unmarked move of a whole binding, written as
-//RS     /// the plain name, may later turn into a share. The value must copy
-//RS     /// with ordinary value semantics: resources, one-pass sources, consume
-//RS     /// duties, tasks, view-bearing values and type parameters keep exact
-//RS     /// moves, and `copies: .Explicit` forbids the hidden copy.
-//RS     fn move_is_shareable(&self, place: &ViewPlace, span: Span) -> bool {
-//RS         let name = place.owner.name.as_str();
-//RS         if !place.projections.is_empty()
-//RS             || span.end.saturating_sub(span.start) != name.len()
-//RS             || self.copies_explicit()
-//RS         {
-//RS             return false;
-//RS         }
-//RS         let Some(info) = self.lookup(name) else {
-//RS             return false;
-//RS         };
-//RS         let ty = &info.ty;
-//RS         let type_param = matches!(
-//RS             ty,
-//RS             Type::Named(n) if self.type_param_scope.iter().any(|param| &param.name == n)
-//RS         );
-//RS         info.single_use_span.is_none()
-//RS             && !type_param
-//RS             && !type_is_copy(ty)
-//RS             && self.is_cloneable_type(ty)
-//RS             && !self.is_resource_type(ty)
-//RS             && !is_one_pass_source(ty)
-//RS             && !is_task_type(ty)
-//RS             && !self.type_is_single_use(ty)
-//RS             && !self.type_contains_view_boundary(ty)
-//RS     }
-//RS 
-//RS     /// D-COPY-DEFAULT1=A: rewrite each shared move site in `body` to the
-//RS     /// same `~name` node an authored copy uses, so every tier materializes
-//RS     /// the value semantics at that site. A site the body no longer holds as
-//RS     /// a plain name keeps its E0121 instead of moving silently.
-//RS     pub(crate) fn materialize_share_sites(&mut self, body: &mut [Stmt]) {
-//RS         if self.share_sites.is_empty() {
-//RS             return;
-//RS         }
-//RS         let mut pending: HashMap<Span, Diagnostic> =
-//RS             std::mem::take(&mut self.share_sites).into_iter().collect();
-//RS         let mut found: HashSet<Span> = HashSet::new();
-//RS         for stmt in body.iter_mut() {
-//RS             // The walk visits a node before its children, so the name just
-//RS             // wrapped is visited once more as the copy's operand; skip it.
-//RS             let mut wrapped: Option<Span> = None;
-//RS             stmt.for_each_expr_mut(|expr| {
-//RS                 let Expr::Ident(_, span) = expr else {
-//RS                     return;
-//RS                 };
-//RS                 let span = *span;
-//RS                 if wrapped.take() == Some(span) || !pending.contains_key(&span) {
-//RS                     return;
-//RS                 }
-//RS                 let name = std::mem::replace(expr, Expr::Absent(span));
-//RS                 *expr = Expr::Copy(Box::new(name), span);
-//RS                 wrapped = Some(span);
-//RS                 found.insert(span);
-//RS             });
-//RS         }
-//RS         pending.retain(|span, _| !found.contains(span));
-//RS         let mut unmaterialized: Vec<(Span, Diagnostic)> = pending.into_iter().collect();
-//RS         unmaterialized.sort_by_key(|(span, _)| (span.start, span.end));
-//RS         for (_, diagnostic) in unmaterialized {
-//RS             self.push_moved_use_diagnostic(diagnostic);
-//RS         }
-//RS     }
-//RS     /// Record an unmarked move whose consumer is described in reader-facing
-//RS     /// prose, such as "the binding `ys`". D-COPY-DEFAULT1=A: when the name is
-//RS     /// used again, this site becomes a share instead.
-//RS     pub(crate) fn mark_moved_place(
-//RS         &mut self,
-//RS         place: ViewPlace,
-//RS         span: Span,
-//RS         consumer: impl Into<String>,
-//RS     ) {
-//RS         self.mark_moved_place_with_consumer(place, span, consumer.into(), true);
-//RS     }
-//RS 
-//RS     /// Record an exact move (a `^` mark, a lambda or task capture) whose
-//RS     /// consumer is described in prose. A later use stays E0121.
-//RS     pub(crate) fn mark_moved_place_exact(
-//RS         &mut self,
-//RS         place: ViewPlace,
-//RS         span: Span,
-//RS         consumer: impl Into<String>,
-//RS     ) {
-//RS         self.mark_moved_place_with_consumer(place, span, consumer.into(), false);
-//RS     }
-//RS 
-//RS     /// Record a move into a named callee; the name renders as code. A
-//RS     /// consuming call or receiver takes the value exactly: its argument is
-//RS     /// marked `^`, or the value cannot be copied, so a later use stays E0121.
-//RS     pub(crate) fn mark_moved_place_by(
-//RS         &mut self,
-//RS         place: ViewPlace,
-//RS         span: Span,
-//RS         callee: impl Into<String>,
-//RS     ) {
-//RS         self.mark_moved_place_with_consumer(
-//RS             place,
-//RS             span,
-//RS             format!("`{}`", callee.into()),
-//RS             false,
-//RS         );
-//RS     }
-//RS 
-//RS     fn mark_moved_place_with_consumer(
-//RS         &mut self,
-//RS         place: ViewPlace,
-//RS         span: Span,
-//RS         consumer: String,
-//RS         unmarked: bool,
-//RS     ) {
-//RS         let name = place.owner.name.clone();
-//RS         let place_name = Self::place_name(&place);
-//RS         if !tracks_named_move(&name) {
-//RS             return;
-//RS         }
-//RS         if self.reject_expiring_secret_loan_change(&name, "be moved", span) {
-//RS             return;
-//RS         }
-//RS         self.check_owner_change(&name, "be moved", span);
-//RS         // An exact move already recorded for this place (the `^` mark, seen
-//RS         // before its owning position) stays the move; the position does
-//RS         // not turn it back into an unmarked one.
-//RS         if self
-//RS             .flow
-//RS             .moved
-//RS             .get(&place_name)
-//RS             .is_some_and(|origin| !origin.is_shareable())
-//RS         {
-//RS             return;
-//RS         }
-//RS         let shareable = unmarked && self.move_is_shareable(&place, span);
-//RS         if let Some(info) = self.lookup(&name) {
-//RS             // D-COPY-DEFAULT1=A: a `return` or `break` value leaves the loops
-//RS             // it exits, so a move there is not repeated on a later iteration.
-//RS             // A loop nested inside that value (in a lambda) is not left.
-//RS             let exit_depth = match self.loop_exit_depth {
-//RS                 Some((exit, at)) if at == self.loop_depth => exit,
-//RS                 _ => self.loop_depth,
-//RS             };
-//RS             if info.decl_loop_depth < exit_depth {
-//RS                 // A second visit to a loop is a reuse of the first move. Keep
-//RS                 // that original provenance so E0121 can name both the first
-//RS                 // consuming call and the later re-move site. The fallback is
-//RS                 // needed when this is the first move seen on a loop path.
-//RS                 let moved = self
-//RS                     .flow
-//RS                     .moved
-//RS                     .iter()
-//RS                     .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
-//RS                     .min_by_key(|(moved, _)| moved.len())
-//RS                     .map(|(moved, origin)| (moved.to_string(), origin.clone()))
-//RS                     .unwrap_or_else(|| {
-//RS                         (
-//RS                             place_name.clone(),
-//RS                             crate::Sema::FlowFacts::MoveOrigin::new(span, consumer),
-//RS                         )
-//RS                     });
-//RS                 let diagnostic =
-//RS                     self.moved_use_diagnostic(&moved.0, &moved.1, span, Some(&info.ty));
-//RS                 if shareable {
-//RS                     // The next iteration uses the name again, so this
-//RS                     // unmarked move shares and the source stays usable.
-//RS                     self.record_share_site(span, diagnostic);
-//RS                 } else {
-//RS                     self.push_moved_use_diagnostic(diagnostic);
-//RS                 }
-//RS                 return;
-//RS             }
-//RS         }
-//RS         self.flow.moved.set(
-//RS             &place_name,
-//RS             if shareable {
-//RS                 crate::Sema::FlowFacts::MoveOrigin::shareable(span, consumer)
-//RS             } else {
-//RS                 crate::Sema::FlowFacts::MoveOrigin::new(span, consumer)
-//RS             },
-//RS         );
-//RS         if place.projections.is_empty() {
-//RS             // D-TRACK-ORIGIN1=A: moving a whole binding ends access to its
-//RS             // origin fact; no stale metadata survives a move.
-//RS             self.clear_origin(&name);
-//RS         }
-//RS     }
-//RS 
-//RS     /// Record an unmarked whole-binding move whose consumer is described in
-//RS     /// prose.
-//RS     pub(crate) fn mark_moved(&mut self, name: String, span: Span, consumer: impl Into<String>) {
-//RS         self.mark_moved_place(
-//RS             ViewPlace {
-//RS                 owner: self.owner_id(&name),
-//RS                 projections: Vec::new(),
-//RS             },
-//RS             span,
-//RS             consumer,
-//RS         );
-//RS     }
-//RS 
-//RS     /// Record an exact whole-binding move (a `^` capture or a task handle)
-//RS     /// whose consumer is described in prose.
-//RS     pub(crate) fn mark_moved_exact(
-//RS         &mut self,
-//RS         name: String,
-//RS         span: Span,
-//RS         consumer: impl Into<String>,
-//RS     ) {
-//RS         self.mark_moved_place_exact(
-//RS             ViewPlace {
-//RS                 owner: self.owner_id(&name),
-//RS                 projections: Vec::new(),
-//RS             },
-//RS             span,
-//RS             consumer,
-//RS         );
-//RS     }
-//RS 
-//RS     /// D-COPY-DEFAULT1=A (#3714): `^place` in a value position is the
-//RS     /// programmer's exact move. An owned name (or a field of one) gives its
-//RS     /// value away here even when it is read later, so any later use is E0121
-//RS     /// naming the mark. A borrowed parameter owns nothing to move (E0201 with
-//RS     /// a `~` edit), an element stays in its collection (E0225), and a `Copy`
-//RS     /// value simply copies.
-//RS     pub(crate) fn note_exact_move(&mut self, place: &Expr, ty: Option<&Type>, mark_span: Span) {
-//RS         if ty.is_some_and(type_is_copy) {
-//RS             return;
-//RS         }
-//RS         let sigil_span = Span::new(mark_span.start, mark_span.start + Syntax::SIGIL_MOVE.len());
-//RS         let Some(root) = expr_root_ident(place).map(|root| root.to_string()) else {
-//RS             return;
-//RS         };
-//RS         fn place_text(expr: &Expr) -> Option<String> {
-//RS             match expr {
-//RS                 Expr::Ident(name, _) => Some(name.clone()),
-//RS                 Expr::Field(base, member, _) => Some(format!("{}.{member}", place_text(base)?)),
-//RS                 _ => None,
-//RS             }
-//RS         }
-//RS         let consumer = format!(
-//RS             "the move `{}{}`",
-//RS             Syntax::SIGIL_MOVE,
-//RS             place_text(place).unwrap_or_else(|| root.clone())
-//RS         );
-//RS         if matches!(place, Expr::Index { .. }) {
-//RS             self.diags.push(
-//RS                 Diagnostic::error(
-//RS                     "E0225",
-//RS                     "the move marker `^` cannot take an element out of its collection".to_string(),
-//RS                     "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind".to_string(),
-//RS                     format!("remove `{}` to copy the element", Syntax::SIGIL_MOVE),
-//RS                     Some(sigil_span),
-//RS                 )
-//RS                 .with_edit(TextEdit {
-//RS                     span: sigil_span,
-//RS                     new_text: String::new(),
-//RS                 }),
-//RS             );
-//RS             return;
-//RS         }
-//RS         let Some(info) = self.lookup(&root) else {
-//RS             return;
-//RS         };
-//RS         if matches!(
-//RS             info.param_conv,
-//RS             Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS         ) {
-//RS             // E0201's row has no source-edit channel (its fix is a design
-//RS             // choice between copying and taking ownership), so the raise site
-//RS             // carries the fix as text only.
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0201",
-//RS                 format!("`{root}` cannot be moved from borrowed storage"),
-//RS                 "read and write parameters and named windows keep ownership with their source"
-//RS                     .to_string(),
-//RS                 format!(
-//RS                     "copy the value with `{}`, or accept it with the move marker `{}`",
-//RS                     Syntax::SIGIL_COPY,
-//RS                     Syntax::SIGIL_MOVE
-//RS                 ),
-//RS                 Some(sigil_span),
-//RS             ));
-//RS             return;
-//RS         }
-//RS         match self.place_from_expr(place) {
-//RS             Some(view_place) => self.mark_moved_place_exact(view_place, mark_span, consumer),
-//RS             None => self.mark_moved_exact(root, mark_span, consumer),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Record a whole-binding move into a named callee.
-//RS     pub(crate) fn mark_moved_by(&mut self, name: String, span: Span, callee: impl Into<String>) {
-//RS         self.mark_moved_place_by(
-//RS             ViewPlace {
-//RS                 owner: self.owner_id(&name),
-//RS                 projections: Vec::new(),
-//RS             },
-//RS             span,
-//RS             callee,
-//RS         );
-//RS     }
-//RS 
-//RS     /// Attach the canonical `~` copy edit to an ownership diagnostic. The
-//RS     /// edit is offered only when the checker has proved a cloneable,
-//RS     /// non-resource type: `~` on anything else is itself an error (E0211).
-//RS     /// `anchor` must start at the whole place (see [`copy_edit_anchor`]).
-//RS     pub(crate) fn with_ownership_copy_edit(
-//RS         &self,
-//RS         diagnostic: Diagnostic,
-//RS         anchor: Span,
-//RS         ty: Option<&Type>,
-//RS     ) -> Diagnostic {
-//RS         if !ty.is_some_and(|ty| !self.is_resource_type(ty) && self.is_cloneable_type(ty)) {
-//RS             return diagnostic;
-//RS         }
-//RS         diagnostic.with_edit_grade(
-//RS             TextEdit {
-//RS                 span: Span::new(anchor.start, anchor.start),
-//RS                 new_text: Syntax::SIGIL_COPY.to_string(),
-//RS             },
-//RS             FixApplicability::Safe,
-//RS             FixSafety::BehaviorPreserving,
-//RS         )
-//RS     }
-//RS 
-//RS     fn reject_expiring_secret_loan_change(&mut self, name: &str, action: &str, span: Span) -> bool {
-//RS         if !self
-//RS             .lookup(name)
-//RS             .is_some_and(|info| crate::Sema::Diagnostics::contains_expiring_secret_loan(&info.ty))
-//RS         {
-//RS             return false;
-//RS         }
-//RS         self.diags.push(Diagnostic::error(
-//RS             "E0201",
-//RS             format!("ExpiringSecret loan `{name}` cannot {action}"),
-//RS             "the callback receives temporary read access; moving, changing, or dropping it could let the credential escape its expiry boundary".to_string(),
-//RS             "use the loan only for read-only operations inside this callback".to_string(),
-//RS             Some(span),
-//RS         ));
-//RS         true
-//RS     }
-//RS 
-//RS     /// Finish one typed Core argument after its ordinary inference.  Core rows
-//RS     /// and user functions share the same ownership fact: a `Move` parameter
-//RS     /// must receive `^`, and a successful move invalidates the source binding.
-//RS     /// Keeping this at the ownership boundary avoids per-API move tracking.
-//RS     pub(crate) fn finish_core_call_ownership(
-//RS         &mut self,
-//RS         call_name: &str,
-//RS         index: usize,
-//RS         arg: &crate::AST::CallArg,
-//RS         param_conv: AccessConvention,
-//RS         param_ty: &Type,
-//RS     ) {
-//RS         if param_conv != AccessConvention::Move {
-//RS             return;
-//RS         }
-//RS         if arg.convention != AccessConvention::Move {
-//RS             self.diags.push(Diagnostic::error(
-//RS                 "E0201",
-//RS                 format!(
-//RS                     "argument {} to `{call_name}` transfers ownership through the move marker `^`",
-//RS                     index + 1
-//RS                 ),
-//RS                 "this Core operation retains the value's ownership until its work is complete"
-//RS                     .to_string(),
-//RS                 format!(
-//RS                     "write the move marker `^`: `{}value` for this argument",
-//RS                     Syntax::SIGIL_MOVE
-//RS                 ),
-//RS                 Some(arg.span),
-//RS             ));
-//RS             return;
-//RS         }
-//RS         if type_is_copy(param_ty) {
-//RS             return;
-//RS         }
-//RS         if let Expr::Ident(name, span) = &arg.expr {
-//RS             self.mark_moved_by(name.clone(), *span, call_name.to_string());
-//RS         }
-//RS     }
-//RS 
-//RS     /// `x = y` / `a :: y` / `return y` where `y` is a plain name of a
-//RS     /// non-`Copy` type gives the value away (assignment moves, see C1).
-//RS     /// Constructor wrappers (`Val(y)`, `Ok(y)`, and `Err(y)`) are owning
-//RS     /// boundaries too, so their direct payload follows the same move rule.
-//RS     pub(crate) fn note_move_if_direct_ident(&mut self, e: &Expr, consumer: &str) {
-//RS         match e {
-//RS             Expr::Ident(n, span) => {
-//RS                 if let Some(info) = self.lookup(n) {
-//RS                     if !type_is_copy(&info.ty) && info.param_conv.is_none() {
-//RS                         self.mark_moved(n.clone(), *span, consumer);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Expr::Paren(inner, _)
-//RS             | Expr::Present(inner, _)
-//RS             | Expr::Ok(inner, _)
-//RS             | Expr::Err(inner, _)
-//RS             | Expr::Tainted(inner, _, _) => self.note_move_if_direct_ident(inner, consumer),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value that owns the
-//RS     /// consume duty (`single_use_span` set) but is not in `moved` when its scope
-//RS     /// ends was dropped without being used. It looks only at the innermost
-//RS     /// (just-closing) scope. The branch-divergence
-//RS     /// case (consumed on one path, dropped on the other) is E0141, raised in
-//RS     /// `check_if`.
-//RS     pub(crate) fn check_single_use_consumed_in_current_scope(&mut self) {
-//RS         let pending: Vec<(String, Span, bool)> = self
-//RS             .flow
-//RS             .bindings
-//RS             .iter_at(self.scope_depth())
-//RS             .filter_map(|(name, info)| {
-//RS                 let span = info.single_use_span?;
-//RS                 if self.flow.moved.contains(name) {
-//RS                     None
-//RS                 } else {
-//RS                     Some((name.to_string(), span, is_task_type(&info.ty)))
-//RS                 }
-//RS             })
-//RS             .collect();
-//RS         // Deterministic order (HashMap iteration is unordered): by span, then name.
-//RS         let mut pending = pending;
-//RS         pending.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
-//RS         for (name, span, is_task) in pending {
-//RS             if is_task {
-//RS                 self.diags.push(l1101_unjoined_task(
-//RS                     &format!("`{name}`"),
-//RS                     "the program may end before this task finishes",
-//RS                     span,
-//RS                 ));
-//RS             } else {
-//RS                 self.diags.push(e0140_unconsumed(&name, span));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn lambda_value_sendable(&self, lam: &Lambda, fn_ty: &Type) -> bool {
-//RS         let param_names: HashSet<String> = lam.params.iter().map(|p| p.name.clone()).collect();
-//RS         let take_set: HashSet<String> = lam.take_names.iter().map(|(n, _)| n.clone()).collect();
-//RS         let mut read_caps = HashSet::new();
-//RS         let mut mut_caps = HashSet::new();
-//RS         lambda_collect_captures(&lam.body, &param_names, &mut read_caps, &mut mut_caps);
-//RS         read_caps.extend(lam.take_names.iter().map(|(name, _)| name.clone()));
-//RS         for name in read_caps.iter().chain(mut_caps.iter()) {
-//RS             if param_names.contains(name) {
-//RS                 continue;
-//RS             }
-//RS             let cap = self
-//RS                 .lookup(name)
-//RS                 .map(|i| (i.ty.clone(), self.sendability_for(name)))
-//RS                 .or_else(|| self.consts.get(name).map(|t| (t.clone(), true)));
-//RS             let Some((cap_ty, cap_sendable)) = cap else {
-//RS                 continue;
-//RS             };
-//RS             let moves_capture = take_set.contains(name) || !self.is_cloneable_type(&cap_ty);
-//RS             if !cap_sendable || self.sendability_problem(&cap_ty, moves_capture).is_some() {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         if let Type::Fn { ret: Some(ret), .. } = fn_ty {
-//RS             self.sendability_problem(ret, false).is_none()
-//RS         } else {
-//RS             true
-//RS         }
-//RS     }
-//RS 
-//RS     /// A callback retained by `core.sys.on_interrupt` needs a stronger fact than
-//RS     /// an ordinary escaping closure. In particular, `Type::Fn` normally lowers
-//RS     /// to `Rc`, and moving that value is not enough for the native `Arc<dyn
-//RS     /// Fn() + Send + Sync>` boundary. Named functions and aliases that were
-//RS     /// already proven to contain such a representation carry the dedicated
-//RS     /// local fact; every other function capture is rejected here.
-//RS     pub(crate) fn lambda_interrupt_sendable(&self, lam: &Lambda, fn_ty: &Type) -> bool {
-//RS         if lam.meta.needs_fn_mut {
-//RS             return false;
-//RS         }
-//RS         let param_names: HashSet<String> = lam.params.iter().map(|p| p.name.clone()).collect();
-//RS         let mut read_caps = HashSet::new();
-//RS         let mut mut_caps = HashSet::new();
-//RS         lambda_collect_captures(&lam.body, &param_names, &mut read_caps, &mut mut_caps);
-//RS         for name in read_caps.iter().chain(mut_caps.iter()) {
-//RS             if param_names.contains(name) {
-//RS                 continue;
-//RS             }
-//RS             let Some(info) = self.lookup(name) else {
-//RS                 // A top-level function or module item is emitted as a static
-//RS                 // wrapper, not as a captured Rc local.
-//RS                 continue;
-//RS             };
-//RS             if matches!(&info.ty, Type::Fn { .. }) {
-//RS                 if info.param_conv.is_some() || !info.interrupt_sendable {
-//RS                     return false;
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             if !self.sendability_for(name)
-//RS                 || self.sendability_problem(&info.ty, true).is_some()
-//RS                 || matches!(
-//RS                     info.param_conv,
-//RS                     Some(AccessConvention::Read) | Some(AccessConvention::Write)
-//RS                 )
-//RS             {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS         match fn_ty {
-//RS             Type::Fn { ret: Some(ret), .. } => self.sendability_problem(ret, true).is_none(),
-//RS             Type::Fn { .. } => true,
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Whether an expression already has the one representation that may
-//RS     /// cross a retained thread callback. Ordinary function values lower to
-//RS     /// `Rc`; only named functions and callback-safe aliases/lambdas may use
-//RS     /// the `Arc<dyn Fn + Send + Sync>` host representation.
-//RS     fn thread_callback_expr_sendable(&self, expr: &Expr, ty: &Type) -> bool {
-//RS         if !matches!(ty, Type::Fn { .. }) {
-//RS             return false;
-//RS         }
-//RS         match expr {
-//RS             Expr::Ident(name, _) => {
-//RS                 let resolved = self
-//RS                     .unqualified
-//RS                     .get(name)
-//RS                     .map(String::as_str)
-//RS                     .or_else(|| {
-//RS                         self.unqualified_file
-//RS                             .get(name)
-//RS                             .map(|(function_name, _)| function_name.as_str())
-//RS                     })
-//RS                     .unwrap_or(name);
-//RS                 self.lookup(name)
-//RS                     .map(|info| {
-//RS                         if info.param_conv.is_some() || !info.interrupt_sendable {
-//RS                             return false;
-//RS                         }
-//RS                         match &info.ty {
-//RS                             Type::Fn { ret: Some(ret), .. } => {
-//RS                                 self.sendability_problem(ret, true).is_none()
-//RS                             }
-//RS                             Type::Fn { .. } => true,
-//RS                             _ => false,
-//RS                         }
-//RS                     })
-//RS                     .or_else(|| {
-//RS                         self.funcs
-//RS                             .get(name)
-//RS                             .or_else(|| self.funcs.get(resolved))
-//RS                             .map(|sig| {
-//RS                                 sig.return_type
-//RS                                     .as_ref()
-//RS                                     .is_none_or(|ret| self.sendability_problem(ret, true).is_none())
-//RS                             })
-//RS                     })
-//RS                     .unwrap_or(false)
-//RS             }
-//RS             Expr::Paren(inner, _) => self.thread_callback_expr_sendable(inner, ty),
-//RS             Expr::Lambda(lam) => self.lambda_interrupt_sendable(lam, ty),
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Reject a function value that would otherwise reach a retained thread
-//RS     /// callback as an ordinary `Rc`. The caller supplies the crossing so the
-//RS     /// same proof serves interrupts and scheduler-backed stream operators.
-//RS     fn check_thread_callback_expr_at(
-//RS         &mut self,
-//RS         expr: &Expr,
-//RS         ty: &Type,
-//RS         crossing: SendCrossing,
-//RS     ) {
-//RS         if !matches!(ty, Type::Fn { .. }) || self.thread_callback_expr_sendable(expr, ty) {
-//RS             return;
-//RS         }
-//RS         fn ident(expr: &Expr) -> Option<&str> {
-//RS             match expr {
-//RS                 Expr::Ident(name, _) => Some(name),
-//RS                 Expr::Paren(inner, _) => ident(inner),
-//RS                 _ => None,
-//RS             }
-//RS         }
-//RS         fn lambda(expr: &Expr) -> bool {
-//RS             match expr {
-//RS                 Expr::Lambda(_) => true,
-//RS                 Expr::Paren(inner, _) => lambda(inner),
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS         fn needs_fn_mut(expr: &Expr) -> bool {
-//RS             match expr {
-//RS                 Expr::Lambda(lam) => lam.meta.needs_fn_mut,
-//RS                 Expr::Paren(inner, _) => needs_fn_mut(inner),
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS         fn lambda_span(expr: &Expr) -> Option<Span> {
-//RS             match expr {
-//RS                 Expr::Lambda(lam) => Some(lam.span),
-//RS                 Expr::Paren(inner, _) => lambda_span(inner),
-//RS                 _ => None,
-//RS             }
-//RS         }
-//RS         if ident(expr).is_none() && lambda(expr) {
-//RS             // Lambda capture checking already owns detailed Send/'static
-//RS             // diagnostics. Keep the callback-specific FnMut refusal here,
-//RS             // before an Arc coercion reaches rustc.
-//RS             if needs_fn_mut(expr)
-//RS                 && !lambda_span(expr).is_some_and(|span| {
-//RS                     self.diags
-//RS                         .iter()
-//RS                         .any(|diag| diag.code == "E1102" && diag.span == Some(span))
-//RS                 })
-//RS             {
-//RS                 self.report_unsendable(
-//RS                     "this callback",
-//RS                     ty,
-//RS                     SendabilityProblem {
-//RS                         root: None,
-//RS                         path: Vec::new(),
-//RS                         kind: SendProblemKind::ClosureCaptures,
-//RS                     },
-//RS                     crossing,
-//RS                     expr.span(),
-//RS                 );
-//RS             }
-//RS             return;
-//RS         }
-//RS         let Some(name) = ident(expr) else {
-//RS             self.report_unsendable(
-//RS                 "this callback",
-//RS                 ty,
-//RS                 SendabilityProblem {
-//RS                     root: None,
-//RS                     path: Vec::new(),
-//RS                     kind: SendProblemKind::ClosureCaptures,
-//RS                 },
-//RS                 crossing,
-//RS                 expr.span(),
-//RS             );
-//RS             return;
-//RS         };
-//RS         let problem = self
-//RS             .sendability_problem(ty, false)
-//RS             .unwrap_or(SendabilityProblem {
-//RS                 root: None,
-//RS                 path: Vec::new(),
-//RS                 kind: SendProblemKind::ClosureCaptures,
-//RS             });
-//RS         self.report_unsendable(name, ty, problem, crossing, expr.span());
-//RS     }
-//RS 
-//RS     /// Whether an expression already has the one representation that may
-//RS     /// cross `core.sys.on_interrupt`.
-//RS     pub(crate) fn interrupt_callback_expr_sendable(&self, expr: &Expr, ty: &Type) -> bool {
-//RS         self.thread_callback_expr_sendable(expr, ty)
-//RS     }
-//RS 
-//RS     /// Reject a local function value that would otherwise reach the interrupt
-//RS     /// host as an ordinary Rc.
-//RS     pub(crate) fn check_interrupt_callback_expr(&mut self, expr: &Expr, ty: &Type) {
-//RS         if self.interrupt_callback_depth > 0 {
-//RS             self.check_thread_callback_expr_at(expr, ty, SendCrossing::InterruptCallback);
-//RS         }
-//RS     }
-//RS 
-//RS     /// Check a callback retained by the scheduler-backed Stream kernel.
-//RS     pub(crate) fn check_stream_callback_expr(&mut self, expr: &Expr, ty: &Type) {
-//RS         self.check_thread_callback_expr_at(expr, ty, SendCrossing::Kernel);
-//RS     }
-//RS 
-//RS     pub(crate) fn sendability_problem(
-//RS         &self,
-//RS         ty: &Type,
-//RS         closure_taken: bool,
-//RS     ) -> Option<SendabilityProblem> {
-//RS         self.send_query(ty, closure_taken, false, false)
-//RS     }
-//RS 
-//RS     /// D-CONC-CROSS1=A: every concurrent boundary asks the same ownership
-//RS     /// prover. Parallel workers and safe kernels additionally reject callable
-//RS     /// values even when the caller could otherwise consume the closure.
-//RS     pub(crate) fn crossing_problem(
-//RS         &self,
-//RS         ty: &Type,
-//RS         crossing: SendCrossing,
-//RS         closure_taken: bool,
-//RS     ) -> Option<SendabilityProblem> {
-//RS         let strict_callable = matches!(
-//RS             crossing,
-//RS             SendCrossing::ParallelWorker | SendCrossing::Kernel | SendCrossing::HttpHandler
-//RS         );
-//RS         self.send_query(ty, closure_taken, strict_callable, false)
-//RS     }
-//RS 
-//RS     /// One sendability query: a `NominalWalk` enters each named
-//RS     /// instantiation once, and a clean answer is remembered for the module.
-//RS     fn send_query(
-//RS         &self,
-//RS         ty: &Type,
-//RS         closure_taken: bool,
-//RS         strict_callable: bool,
-//RS         cell_only: bool,
-//RS     ) -> Option<SendabilityProblem> {
-//RS         let mut seen = NominalWalk::new(
-//RS             NominalQuery::Sendable {
-//RS                 strict_callable,
-//RS                 cell_only,
-//RS             },
-//RS             self.registry,
-//RS         );
-//RS         let problem =
-//RS             self.sendability_problem_inner(ty, closure_taken, strict_callable, cell_only, &mut seen);
-//RS         seen.finish(problem.is_none());
-//RS         problem
-//RS     }
-//RS 
-//RS     /// The `Shared<T>` constructor has one narrower crossing rule: reject local
-//RS     /// cell state, while preserving the historical acceptance of other values
-//RS     /// that are not themselves crossing boundaries. It still uses the same
-//RS     /// recursive prover as every worker crossing.
-// END-PORT-PENDING 0421 crates/jet-sema/src/Sema/CheckerOwnership.rs:3537-5346
+// Rust ownership checker continuation: view provenance, moves, must-use and retained callbacks.
+use jet_foundation.[Type, Expr, Stmt, Span, Diagnostic, TextEdit, FixApplicability, FixSafety, AccessConvention, CallArg, Lambda, VariantPayload, TagMarker, InternalTag, ViewSource, ViewSourcePath, ViewSourceProjection, ViewProvenance, ViewProvenanceMap, TypeRegistry]
+use jet_sema.[Checker, ViewAccess, ViewKind, ViewPlace, ViewProjection, ViewOwnerOrigin, NominalWalk, NominalQuery, MoveOrigin, SendCrossing, SendabilityProblem, SendProblemKind, expr_root_ident, type_requires_owned_iteration, type_is_copy, is_task_type, is_one_pass_source, one_pass_materializer, tracks_named_move, lambda_collect_captures, current_view_fact, contains_expiring_secret_loan, l1101_unjoined_task, e0140_unconsumed, core_single_use_type, core_must_use_type]
+use jet_syntax as Syntax
 
+impl Checker {
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3537
+    pub fn view_leaf_paths(self, ty: Type) -> [([String], ViewAccess)] Never! {
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3538
+        struct ViewWalk { active: [String:Bool], reaches: [String:Bool] }
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3543
+        fn is_window(ty: Type) -> ViewAccess? Never! {
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "View" || name == Syntax.TYPE_VIEW_ITER -> return Val(ViewAccess.Read)
+                    if name == "ViewMut" || name == Syntax.TYPE_PIN -> return Val(ViewAccess.Write)
+                    None
+                }
+                .Tagged(.Internal(.AllocatorView), _) -> Val(ViewAccess.Write)
+                else -> None
+            }
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3568
+        fn type_reaches_window(checker: Checker, ty: Type, visited: &[String:Bool]) -> Bool Never! {
+            if is_window(ty).is_some() -> return true
+            if ty == {
+                .List(inner) | .FixedList(inner, _) | .Option(inner) | .Tagged(_, inner) -> type_reaches_window(checker, inner, &visited)
+                .Tuple(fields) -> fields.any(|(_, field_ty)| type_reaches_window(checker, field_ty, &visited))
+                .Result(ok, err) -> type_reaches_window(checker, ok, &visited) || type_reaches_window(checker, err, &visited)
+                .Named(name) | .Apply(name, _) -> {
+                    if visited.has_key(name) -> return false
+                    visited[~name] = true
+                    if checker.registry.struct_fields(name) == .Val(fields) -> return fields.any(|(_, _, field_ty)| type_reaches_window(checker, field_ty, &visited))
+                    if checker.resolve_enum_variants_cloned(name) == .Val(variants) {
+                        loop (_, (_, payload)) in variants {
+                            if payload == {
+                                .Unit -> {}
+                                .Single(inner, _) -> { if type_reaches_window(checker, inner, &visited) -> return true }
+                                .Named(fields) -> { if fields.any(|field| type_reaches_window(checker, field.ty, &visited)) -> return true }
+                            }
+                        }
+                    }
+                    false
+                }
+                else -> false
+            }
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3610
+        fn nominal_reaches_window(checker: Checker, ty: Type, name: String, state: &ViewWalk) -> Bool Never! {
+            if state.reaches.get(name) == .Val(reaches) -> return reaches
+            visited := [String:Bool]{}
+            reaches :: type_reaches_window(checker, ty, &visited)
+            state.reaches[~name] = reaches
+            reaches
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3619
+        fn walk(checker: Checker, ty: Type, path: &[String], seen: &ViewWalk, out: &[([String], ViewAccess)]) Never! {
+            if is_window(ty) == .Val(access) { out.push((~path, access)); return }
+            if ty == {
+                .List(inner) | .FixedList(inner, _) -> { path.push("[]"); walk(checker, inner, &path, &seen, &out); _ :: path.pop() }
+                .Tuple(fields) -> {
+                    loop (field, field_ty) in fields { path.push(~field); walk(checker, field_ty, &path, &seen, &out); _ :: path.pop() }
+                }
+                .Option(inner) | .Tagged(_, inner) -> walk(checker, inner, &path, &seen, &out)
+                .Result(ok, err) -> { walk(checker, ok, &path, &seen, &out); walk(checker, err, &path, &seen, &out) }
+                .Named(name) | .Apply(name, _) -> {
+                    if !nominal_reaches_window(checker, ty, name, &seen) || seen.active.has_key(name) -> return
+                    seen.active[~name] = true
+                    if checker.registry.struct_fields(name) == .Val(fields) {
+                        loop (field, _, field_ty) in fields { path.push(~field); walk(checker, field_ty, &path, &seen, &out); _ :: path.pop() }
+                    } else if checker.resolve_enum_variants_cloned(name) == .Val(variants) {
+                        order := variants.keys().collect()
+                        order.sort()
+                        loop variant in order {
+                            (_, payload) :: variants[variant]
+                            if payload == {
+                                .Unit -> {}
+                                .Single(inner, _) -> {
+                                    path.push(~variant); path.push("0")
+                                    walk(checker, inner, &path, &seen, &out)
+                                    _ :: path.pop(); _ :: path.pop()
+                                }
+                                .Named(fields) -> {
+                                    loop field in fields {
+                                        path.push(~variant); path.push(~field.name)
+                                        walk(checker, field.ty, &path, &seen, &out)
+                                        _ :: path.pop(); _ :: path.pop()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    seen.active.remove(name)
+                }
+                else -> {}
+            }
+        }
+        out := [([String], ViewAccess)]{}
+        seen := ViewWalk{active: [:], reaches: [:]}
+        path := [String]{}
+        walk(self, ty, &path, &seen, &out)
+        ^out
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3698
+    fn conservative_callback_view_provenance(self, params: [Type], ret: Type) -> ViewProvenanceMap Never! {
+        sources := [ViewSourcePath:Bool]{} // GATE #4499: structural source/path key equality.
+        loop index in 0..<params.len() {
+            if !params[index].is_scalar() { sources[ViewSourcePath{source: ViewSource.Parameter(index), projections: []}] = true }
+        }
+        result := [[String]:ViewProvenance]{} // GATE #4499: ordered structural path keys.
+        loop (output_path, access) in self.view_leaf_paths(ret) {
+            result[^output_path] = ViewProvenance{sources: ~sources, mutable: access == ViewAccess.Write}
+        }
+        ^result
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3726
+    fn pattern_variant_slot_names(self, subject: Expr, variant: String, slot_count: Int) -> [String] Never! {
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3732
+        fn subject_type(checker: Checker, subject: Expr) -> Type? Never! {
+            if subject == {
+                .Ident(name, _) -> { if checker.lookup(name) == .Val(info) -> Val(~info.ty) else -> None }
+                .Copy(inner, _) | .Paren(inner, _) -> subject_type(checker, inner)
+                else -> None
+            }
+        }
+        if subject_type(self, subject) == .Val(ty) {
+            if ty == .Named(name) || ty == .Apply(name, _) {
+                if self.resolve_enum_variants_cloned(name) == .Val(variants) && variants.get(variant) == .Val((_, .Named(fields))) {
+                    names := [String]{}
+                    loop field in fields { names.push(~field.name) }
+                    return ^names
+                }
+            }
+        }
+        names := [String]{}
+        loop index in 0..<slot_count { names.push(index.to_string()) }
+        ^names
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3757
+    pub fn transfer_named_view(self: &Self, target: String, source: String, span: Span) -> Bool Never! {
+        facts :: self.view_facts(source).cloned().collect()
+        if facts.is_empty() -> return false
+        loop fact in facts { self.record_view(target, ^fact.output_path, ^fact.place, fact.kind, fact.access, span) }
+        true
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3778
+    pub fn mutable_view_aggregate_root(self, expr: Expr) -> String? Never! {
+        operand :: if expr == { .Place(inner, _, _) | .Paren(inner, _) -> inner; else -> expr }
+        if operand != .Field && operand != .Index -> return None
+        root :: expr_root_ident(operand) ?? return None
+        if self.view_facts(root).any(|fact| fact.access == ViewAccess.Write) -> Val(~root) else -> None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3793
+    pub fn finish_mutable_view_aggregate_transfer(self: &Self, root: String?, span: Span, consumer: String) Never! {
+        if root == .Val(name) { self.flow.moved.set(name, MoveOrigin.new(span, ^consumer)); self.clear_origin(name) }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3807
+    pub fn transfer_mutable_pattern_subject(self: &Self, subject: Expr) -> Bool Never! {
+        if subject != .Ident(name, span) -> return false
+        if self.view_facts(name).all(|fact| fact.access == ViewAccess.Read) -> return false
+        self.flow.moved.set(name, MoveOrigin.new(span, "the pattern match"))
+        self.clear_origin(name)
+        true
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3827
+    pub fn is_list_view(self, name: String) -> Bool Never! {
+        if self.view_kind(name) == .Val(kind) -> kind.is_named_window() else -> false
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3831
+    pub fn type_contains_view_boundary(self, ty: Type) -> Bool Never! {
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3832
+        fn payload_contains(registry: TypeRegistry, payload: VariantPayload, seen: &NominalWalk) -> Bool Never! {
+            if payload == {
+                .Unit -> false
+                .Single(ty, _) -> contains(registry, ty, &seen)
+                .Named(fields) -> fields.any(|field| contains(registry, field.ty, &seen))
+            }
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3846
+        fn named_contains(registry: TypeRegistry, name: String, seen: &NominalWalk) -> Bool Never! {
+            key :: seen.enter(name, []) ?? return false
+            found := false
+            if registry.struct_fields(name) == .Val(fields) { found = fields.any(|(_, _, field_ty)| contains(registry, field_ty, &seen)) }
+            if !found && registry.enum_variants(name) == .Val(variants) {
+                loop (_, (_, payload)) in variants { if payload_contains(registry, payload, &seen) { found = true; break } }
+            }
+            seen.leave(name, key)
+            found
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3863
+        fn contains(registry: TypeRegistry, ty: Type, seen: &NominalWalk) -> Bool Never! {
+            if ty == {
+                .Apply(name, args) -> {
+                    if (name == "View" || name == "ViewMut" || name == Syntax.TYPE_PIN || name == Syntax.TYPE_VIEW_ITER) && args.len() == 1 -> return true
+                    args.any(|arg| contains(registry, arg, &seen)) || named_contains(registry, name, &seen)
+                }
+                .Tagged(.Internal(.AllocatorView), _) -> true
+                .Named(name) -> named_contains(registry, name, &seen)
+                .Option(inner) | .List(inner) | .Shared(inner) | .Tagged(_, inner) | .FixedList(inner, _) -> contains(registry, inner, &seen)
+                .Result(ok, err) -> contains(registry, ok, &seen) || contains(registry, err, &seen)
+                .Map(key, _, value) -> contains(registry, key, &seen) || contains(registry, value, &seen)
+                .Tuple(fields) -> fields.any(|(_, field_ty)| contains(registry, field_ty, &seen))
+                .Fn -> ty.params.any(|param| contains(registry, param, &seen)) || (if ty.ret == { .Val(ret) -> contains(registry, ret, &seen); else -> false })
+                else -> false
+            }
+        }
+        seen := NominalWalk.new(NominalQuery.ViewBoundary, self.registry)
+        found :: contains(self.registry, ty, &seen)
+        seen.finish(!found)
+        found
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3915
+    pub fn named_view_has_stable_owner(self, name: String) -> Bool Never! {
+        if self.view_fact(name) != .Val(fact) -> return false
+        if fact.place.owner.origin == { .Receiver | .Parameter | .Static -> true; else -> false }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3929
+    pub fn report_view_owns_return(self: &Self, place: ViewPlace, span: Span) Never! {
+        owner :: place.owner.name
+        self.diags.push(Diagnostic.error("E2305", "this view points into `{owner}`, which this function owns", "`{owner}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at", "return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it", Val(span)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:3949
+    pub fn check_named_view_return(self: &Self, place: ViewPlace, access: ViewAccess, output_path: [String], span: Span) Never! {
+        source :: if place.owner.origin == {
+            .Receiver -> ViewSource.Receiver
+            .Parameter(index) -> ViewSource.Parameter(index)
+            else -> { self.report_view_owns_return(place, span); return }
+        }
+        projections := [ViewSourceProjection]{}
+        loop projection in place.projections {
+            projections.push(if projection == {
+                .Field(name) -> ViewSourceProjection.Field(~name)
+                .Index -> ViewSourceProjection.Index
+                .Range -> ViewSourceProjection.Range
+                .Fresh -> { self.report_view_return_boundary(span); return }
+            })
+        }
+        source_path :: ViewSourcePath{source: ^source, projections: ^projections}
+        if self.return_view_provenance.is_none() { self.return_view_provenance = Val([[String]:ViewProvenance]{}) }
+        if self.return_view_provenance != .Val(map) -> panic("provenance map was just initialized")
+        if !map.has_key(output_path) { map[~output_path] = ViewProvenance{sources: [ViewSourcePath:Bool]{}, mutable: access == ViewAccess.Write} }
+        provenance := &map[output_path]
+        if provenance.mutable != (access == ViewAccess.Write) {
+            self.diags.push(Diagnostic.error("E2305", "returned view paths disagree about read or write access", "one public output slot cannot sometimes be a read view and sometimes be an exclusive write view", "return the same view access on every path", Val(span)))
+            return
+        }
+        provenance.sources[^source_path] = true // GATE #4499: structural source keys.
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4004
+    pub fn check_named_view_binding_return(self: &Self, name: String, span: Span) Never! {
+        facts :: self.view_facts(name).cloned().collect()
+        if facts.is_empty() { self.report_view_return_boundary(span); return }
+        loop fact in facts { self.check_named_view_return(fact.place, fact.access, ^fact.output_path, span) }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4015
+    pub fn check_named_string_view_binding_return(self: &Self, name: String, span: Span) Never! {
+        facts :: self.view_facts(name).cloned().collect()
+        if facts.is_empty() { self.report_string_view_boundary(span); return }
+        loop fact in facts {
+            if fact.place.owner.origin != .Receiver && fact.place.owner.origin != .Parameter { self.report_string_view_unsupported_use(name, "be returned", span); return }
+            self.check_named_view_return(fact.place, fact.access, ^fact.output_path, span)
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4033
+    pub fn check_aggregate_view_return(self: &Self, expr: Expr) Never! {
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4034
+        fn walk(checker: &Checker, expr: Expr, path: &[String]) Never! {
+            if expr == {
+                .StructLit -> { loop (field, _, value) in expr.fields { path.push(~field); walk(&checker, value, &path); _ :: path.pop() } }
+                .TypedLit -> expr.body.for_each_expr(|value| walk(&checker, value, &path))
+                .TupleLit(fields, _) -> { loop (field, value) in fields { path.push(~field); walk(&checker, value, &path); _ :: path.pop() } }
+                .ListLit(elements, _) -> { path.push("[]"); loop value in elements { walk(&checker, value, &path) }; _ :: path.pop() }
+                .EnumLit -> {
+                    path.push(~expr.variant)
+                    loop index in 0..<expr.args.len() {
+                        arg :: expr.args[index]
+                        if arg == {
+                            .Positional(value) -> { path.push(index.to_string()); walk(&checker, value, &path); _ :: path.pop() }
+                            .Named -> { path.push(~arg.label); walk(&checker, arg.expr, &path); _ :: path.pop() }
+                        }
+                    }
+                    _ :: path.pop()
+                }
+                .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Paren(inner, _) -> walk(&checker, inner, &path)
+                .Ident(name, span) -> {
+                    facts :: checker.view_facts(name).cloned().collect()
+                    loop fact in facts {
+                        output_path := ~path
+                        output_path.extend(^fact.output_path)
+                        checker.check_named_view_return(fact.place, fact.access, ^output_path, span)
+                    }
+                }
+                else -> {
+                    loop (suffix, place, _, access) in checker.view_call_sources(expr) {
+                        output_path := ~path
+                        output_path.extend(^suffix)
+                        checker.check_named_view_return(place, access, ^output_path, expr.span())
+                    }
+                }
+            }
+        }
+        path := [String]{}
+        walk(&self, expr, &path)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4102
+    pub fn report_view_return_boundary(self: &Self, span: Span) Never! {
+        self.diags.push(Diagnostic.error("E2305", "returned views need a stable owner relationship", "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `~`", Val(span)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4114
+    pub fn report_string_view_boundary(self: &Self, span: Span) Never! {
+        self.diags.push(Diagnostic.error("E2307", "returned string views need a stable owner relationship", "each public `View<str>` slot must name a bounded set of receiver, parameter, or static `String` sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `~`", Val(span)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4129
+    pub fn report_owned_string_as_view_str(self: &Self, span: Span) Never! {
+        self.diags.push(Diagnostic.error("E2307", "an owned `String` cannot fill a `View<str>` slot", "`View<str>` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead", "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `~`", Val(span)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4160
+    pub fn string_view_call_source(self, init: Expr) -> ViewPlace? Never! {
+        if init != .MethodCall -> return None
+        arity_ok :: if init.method == { "trim" -> init.args.is_empty(); "after" | "before" -> init.args.len() == 1; else -> return None }
+        if !arity_ok -> return None
+        if init.receiver != .Ident(name, _) -> return None
+        if self.consts.has_key(name) -> return None
+        info :: self.lookup(name) ?? return None
+        if info.ty != Type.String -> return None
+        self.place_from_expr(init.receiver)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4195
+    pub fn record_string_view(self: &Self, name: String, place: ViewPlace, span: Span) Never! {
+        self.record_view(name, [], ^place, ViewKind.String, ViewAccess.Read, span)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4207
+    pub fn is_string_view(self, name: String) -> Bool Never! { self.view_kind(name) == Val(ViewKind.String) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4218
+    pub fn report_string_view_unsupported_use(self: &Self, name: String, what: String, span: Span) Never! {
+        owner :: if current_view_fact(self.flow.views, name) == .Val(fact) { ~fact.place.owner.name } else { "its owner" }
+        diagnostic :: Diagnostic.error("E2307", "`{name}` cannot {what} without an owning copy", "`{name}` is a zero-copy view into `{owner}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled", "write `{Syntax.SIGIL_COPY}{name}` first, or remove `copies: .Explicit` to use the default owning copy", Val(span))
+        self.diags.push(self.with_ownership_copy_edit(^diagnostic, span, Val(Type.String)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4255
+    pub fn type_is_single_use(self, ty: Type) -> Bool Never! {
+        if type_requires_owned_iteration(ty) -> return true
+        name :: ty.base_name() ?? return false
+        if core_single_use_type(name) || self.registry.is_single_use(name) -> return true
+        if self.modules == .Val(mods) {
+            loop (_, idx) in self.imports { if self.type_is_pub_in(idx, name) && mods[idx].registry.is_single_use(name) -> return true }
+        }
+        false
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4280
+    pub fn type_is_must_use(self, ty: Type) -> Bool Never! {
+        name :: ty.base_name() ?? return false
+        if core_must_use_type(name) || self.registry.is_must_use(name) -> return true
+        if self.modules == .Val(mods) {
+            loop (_, idx) in self.imports { if self.type_is_pub_in(idx, name) && mods[idx].registry.is_must_use(name) -> return true }
+        }
+        false
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4302
+    pub fn ignored_must_use_call_target(self, expr: Expr) -> String? Never! {
+        if expr == .Call(call) && self.funcs.get(call.name) == .Val(sig) && sig.is_must_use -> return Val(~call.name)
+        if expr == .MethodCall && self.receiver_type_name(expr.receiver) == .Val(type_name) && self.method_is_must_use(type_name, expr.method) -> return Val("{type_name}.{expr.method}")
+        None
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4321
+    fn receiver_type_name(self, receiver: Expr) -> String? Never! {
+        if receiver != .Ident(name, _) -> return None
+        info :: self.lookup(name) ?? return None
+        base :: info.ty.base_name() ?? return None
+        Val(~base)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4330
+    fn method_is_must_use(self, type_name: String, method: String) -> Bool Never! {
+        if self.registry.method(type_name, method) == .Val(m) && m.must_use -> return true
+        if self.modules == .Val(mods) {
+            loop (_, idx) in self.imports {
+                if self.type_is_pub_in(idx, type_name) && mods[idx].registry.method(type_name, method) == .Val(m) && m.must_use -> return true
+            }
+        }
+        false
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4354
+    pub fn check_ignored_must_use(self: &Self, expr: Expr, ty: Type, span: Span, call_target: String?) Never! {
+        if self.suppress_must_use || is_task_type(ty) -> return
+        target := call_target ?? self.ignored_must_use_call_target(expr)
+        if target.is_none() {
+            if ty == .Named(n) && n == "Unit" -> return
+            if !self.type_is_must_use(ty) -> return
+            target = Val(ty.name())
+        }
+        name :: target.expect("must-use target was resolved")
+        self.diags.push(Diagnostic.error("E0419", "`{name}` must be used — it was dropped as a bare statement", "a `#MustUse` result carries work or a resource that is lost when nothing checks it", "bind it (`x := …`), use `{Syntax.OP_TRY_SUFFIX}`, `{Syntax.BUILTIN_PANIC} …`, or `.drop(\"reason\")` to discard intentionally", Val(span)))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4388
+    pub fn has_core_mem_import(self) -> Bool Never! { self.core_imports.values().any(|m| m == Syntax.CORE_MEM_MODULE) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4396
+    pub fn lint_allocation_hints(self: &Self, method: String, span: Span) Never! {
+        grows_heap :: if method == { "push" | "append" | "insert" | "add" | "add_new" -> true; else -> false }
+        if !grows_heap -> return
+        if self.loop_depth > 0 && self.has_core_mem_import() {
+            self.diags.push(Diagnostic.lint("L0505", "heap growth inside a loop — consider an arena", "each `push` may allocate on the global heap; in a hot loop that adds up", "bind `arena :: mem.Arena.new()` outside the loop and use `arena.alloc(…)` for scratch data", Val(span)))
+        }
+        if self.context_depth > 0 && !self.context_allocator_active {
+            self.diags.push(Diagnostic.lint("L0506", "hidden allocation inside `#Context` without an allocator", "this call may allocate on the global heap while a scoped context is active", "add `allocator: …` to the `#Context(…)` fields, or move the allocation outside the block", Val(span)))
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4421
+    fn place_reads_untagged_or_read_shared_guard(self, expr: Expr) -> Bool Never! {
+        if expr_root_ident(expr) == .Val(name) && self.lookup(name) == .Val(info) && info.param_conv == Val(AccessConvention.Write) -> return false
+        if expr == {
+            .Field(base, field, _) -> {
+                if field == "value" && self.place_expr_type(base) == .Val(ty) {
+                    if ty == .Apply(name, _) && name == Syntax.TYPE_SHARED_GUARD -> return true
+                    if ty == .Tagged(.Internal(.SharedGuardRead), _) -> return true
+                }
+                self.place_reads_untagged_or_read_shared_guard(base)
+            }
+            .Index -> self.place_reads_untagged_or_read_shared_guard(expr.base)
+            .Paren(base, _) | .Place(base, _, _) -> self.place_reads_untagged_or_read_shared_guard(base)
+            else -> false
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4454
+    fn reject_read_shared_guard_write(self: &Self, expr: Expr, span: Span) -> Bool Never! {
+        if !self.place_reads_untagged_or_read_shared_guard(expr) -> return false
+        self.diags.push(Diagnostic.error("E0205", "cannot edit through this read-only `SharedGuard` view", "a public guard type outside its acquisition site preserves read access unless a helper explicitly receives it with write access", "keep the edit at the acquisition site, or pass the guard to a helper with the write-access marker `&`, such as `&guard: SharedGuard<T>`", Val(span)))
+        true
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4468
+    fn move_keys_overlap(left: String, right: String) -> Bool Never! { Self.contains_place(left, right) || Self.contains_place(right, left) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4472
+    fn contains_place(parent: String, child: String) -> Bool Never! {
+        suffix := child.strip_prefix(parent) ?? return false // #4303
+        suffix.is_empty() || suffix.starts_with('.') || suffix.starts_with('[')
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4478
+    pub fn clear_moved_binding(self: &Self, name: String) Never! { self.flow.moved.retain(|place, _| !Self.contains_place(name, place)) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4484
+    pub fn clear_moved_expr(self: &Self, expr: Expr) Never! {
+        place :: self.capture_place_from_expr(expr) ?? return
+        place_name :: Self.place_name(place)
+        self.flow.moved.retain(|moved, _| !Self.contains_place(place_name, moved))
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4497
+    pub fn rewind_moves_in_span(self: &Self, span: Span) Never! {
+        self.flow.moved.retain(|_, origin| origin.span.start < span.start || origin.span.end > span.end)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4503
+    fn moved_use_diagnostic(self, moved_place: String, moved_at: MoveOrigin, reuse_span: Span, moved_ty: Type?) -> Diagnostic Never! {
+        consumer :: moved_at.consumer
+        note := String?{None}
+        if moved_ty == .Val(ty) {
+            if self.is_resource_type(ty) { note = Val("acquire a new `{ty.show()}` resource; closed resources cannot be copied or reused") } else if is_one_pass_source(ty) {
+                if one_pass_materializer(ty) == .Val(method) { note = Val("`{moved_place}` is one-pass — materialize it first with `{moved_place}{method}`, or create a fresh source for the second drive") } else { note = Val("`{moved_place}` is one-pass and cannot be copied — create a fresh source for the second drive") }
+            }
+        }
+        label :: if moved_at.span == reuse_span { "`{moved_place}` moved to {consumer} here on an earlier loop iteration" } else { "`{moved_place}` moved to {consumer} here" }
+        diagnostic :: Diagnostic.from_row("E0121", [(String, String)]{("name", moved_place), ("consumer", consumer)}, Val(reuse_span)).with_label(moved_at.span, ^label)
+        if note == .Val(text) -> diagnostic.with_detail(" Note: {text}") else -> ^diagnostic
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4547
+    fn push_moved_use_diagnostic(self: &Self, diagnostic: Diagnostic) Never! {
+        duplicate :: self.diags.any(|previous| previous.code == "E0121" && previous.span == diagnostic.span && previous.what == diagnostic.what)
+        if !duplicate { self.diags.push(^diagnostic) }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4558
+    pub fn reject_moved_expr_use(self: &Self, expr: Expr, span: Span) -> Bool Never! {
+        place :: self.capture_place_from_expr(expr) ?? return false
+        place_name :: Self.place_name(place)
+        moved := [(String, MoveOrigin)]{}
+        if expr == .Ident && self.suppress_partial_move_root_read {
+            if self.flow.moved.get(place_name) == .Val(at) { moved.push((~place_name, ~at)) }
+        } else {
+            loop (key, at) in self.flow.moved { if Self.move_keys_overlap(place_name, key) { moved.push((~key, ~at)) } }
+        }
+        if moved.is_empty() -> return false
+        moved_ty := Type?{None}
+        if self.lookup(place.owner.name) == .Val(info) { moved_ty = Val(~info.ty) }
+        if moved.all(|(_, at)| at.is_shareable()) {
+            loop (moved_place, moved_at) in moved {
+                diagnostic :: self.moved_use_diagnostic(moved_place, moved_at, span, moved_ty)
+                self.flow.moved.retain(|key, _| key != moved_place)
+                loop site in moved_at.share_sites { self.record_share_site(site, ~diagnostic) }
+            }
+            return false
+        }
+        shortest := 0
+        loop index in 1..<moved.len() { if moved[index].0.len() < moved[shortest].0.len() { shortest = index } }
+        (moved_place, moved_at) :: moved[shortest]
+        self.push_moved_use_diagnostic(self.moved_use_diagnostic(moved_place, moved_at, span, moved_ty))
+        true
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4614
+    fn record_share_site(self: &Self, site: Span, diagnostic: Diagnostic) Never! {
+        if !self.share_sites.any(|(known, _)| known == site) { self.share_sites.push((site, ^diagnostic)) }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4625
+    fn move_is_shareable(self, place: ViewPlace, span: Span) -> Bool Never! {
+        name :: place.owner.name
+        if !place.projections.is_empty() || span.end.saturating_sub(span.start) != name.len() || self.copies_explicit() -> return false
+        info :: self.lookup(name) ?? return false
+        ty :: info.ty
+        type_param :: if ty == { .Named(n) -> self.type_param_scope.any(|param| param.name == n); else -> false }
+        info.single_use_span.is_none() && !type_param && !type_is_copy(ty) && self.is_cloneable_type(ty) && !self.is_resource_type(ty) && !is_one_pass_source(ty) && !is_task_type(ty) && !self.type_is_single_use(ty) && !self.type_contains_view_boundary(ty)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4656
+    pub fn materialize_share_sites(self: &Self, body: &[Stmt]) Never! {
+        if self.share_sites.is_empty() -> return
+        pending := [Span:Diagnostic]{} // GATE #4499: exact span-key equality/hash.
+        sites :: ^self.share_sites
+        self.share_sites = [(Span, Diagnostic)]{}
+        loop (span, diagnostic) in sites { pending[span] = ^diagnostic }
+        found := [Span:Bool]{}
+        loop stmt in &body {
+            wrapped := Span?{None}
+            stmt.for_each_expr_mut(|expr: &Expr| {
+                if expr != .Ident(_, span) -> return
+                previous :: wrapped
+                wrapped = None
+                if previous == Val(span) || !pending.has_key(span) -> return
+                name :: ^expr
+                expr = Expr.Copy(^name, span)
+                wrapped = Val(span)
+                found[span] = true
+            })
+        }
+        pending.retain(|span, _| !found.has_key(span))
+        unmaterialized := pending.into_entries()
+        unmaterialized.sort_by(|a, b| (a.0.start, a.0.end) <=> (b.0.start, b.0.end))
+        loop (_, diagnostic) in unmaterialized { self.push_moved_use_diagnostic(^diagnostic) }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4691
+    pub fn mark_moved_place(self: &Self, place: ViewPlace, span: Span, consumer: String) Never! { self.mark_moved_place_with_consumer(^place, span, ^consumer, true) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4702
+    pub fn mark_moved_place_exact(self: &Self, place: ViewPlace, span: Span, consumer: String) Never! { self.mark_moved_place_with_consumer(^place, span, ^consumer, false) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4714
+    pub fn mark_moved_place_by(self: &Self, place: ViewPlace, span: Span, callee: String) Never! { self.mark_moved_place_with_consumer(^place, span, "`{callee}`", false) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4728
+    fn mark_moved_place_with_consumer(self: &Self, place: ViewPlace, span: Span, consumer: String, unmarked: Bool) Never! {
+        name :: ~place.owner.name
+        place_name :: Self.place_name(place)
+        if !tracks_named_move(name) || self.reject_expiring_secret_loan_change(name, "be moved", span) -> return
+        self.check_owner_change(name, "be moved", span)
+        if self.flow.moved.get(place_name) == .Val(origin) && !origin.is_shareable() -> return
+        shareable :: unmarked && self.move_is_shareable(place, span)
+        if self.lookup(name) == .Val(info) {
+            exit_depth :: if self.loop_exit_depth == .Val((exit, at)) && at == self.loop_depth { exit } else { self.loop_depth }
+            if info.decl_loop_depth < exit_depth {
+                moved := (String, MoveOrigin)?{None}
+                loop (key, origin) in self.flow.moved {
+                    if Self.move_keys_overlap(place_name, key) {
+                        if moved.is_none() || (if moved == { .Val((known, _)) -> key.len() < known.len(); else -> false }) { moved = Val((~key, ~origin)) }
+                    }
+                }
+                (moved_name, moved_origin) :: moved ?? (~place_name, MoveOrigin.new(span, ^consumer))
+                diagnostic :: self.moved_use_diagnostic(moved_name, moved_origin, span, Val(info.ty))
+                if shareable { self.record_share_site(span, ^diagnostic) } else { self.push_moved_use_diagnostic(^diagnostic) }
+                return
+            }
+        }
+        self.flow.moved.set(place_name, if shareable { MoveOrigin.shareable(span, ^consumer) } else { MoveOrigin.new(span, ^consumer) })
+        if place.projections.is_empty() { self.clear_origin(name) }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4811
+    pub fn mark_moved(self: &Self, name: String, span: Span, consumer: String) Never! {
+        self.mark_moved_place(ViewPlace{owner: self.owner_id(name), projections: []}, span, ^consumer)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4824
+    pub fn mark_moved_exact(self: &Self, name: String, span: Span, consumer: String) Never! {
+        self.mark_moved_place_exact(ViewPlace{owner: self.owner_id(name), projections: []}, span, ^consumer)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4846
+    pub fn note_exact_move(self: &Self, place: Expr, ty: Type?, mark_span: Span) Never! {
+        if ty == .Val(known) && type_is_copy(known) -> return
+        sigil_span :: Span.new(mark_span.start, mark_span.start + Syntax.SIGIL_MOVE.len())
+        root :: expr_root_ident(place) ?? return
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4854
+        fn place_text(expr: Expr) -> String? Never! {
+            if expr == {
+                .Ident(name, _) -> Val(~name)
+                .Field(base, member, _) -> { parent :: place_text(base) ?? return None; Val("{parent}.{member}") }
+                else -> None
+            }
+        }
+        spelling :: place_text(place) ?? root
+        consumer :: "the move `{Syntax.SIGIL_MOVE}{spelling}`"
+        if place == .Index {
+            self.diags.push(Diagnostic.error("E0225", "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned in its collection, which has no hole to leave behind", "remove `{Syntax.SIGIL_MOVE}` to copy the element", Val(sigil_span)).with_edit(TextEdit{span: sigil_span, new_text: ""}))
+            return
+        }
+        info :: self.lookup(root) ?? return
+        if info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write) {
+            self.diags.push(Diagnostic.error("E0201", "`{root}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `{Syntax.SIGIL_COPY}`, or accept it with the move marker `{Syntax.SIGIL_MOVE}`", Val(sigil_span)))
+            return
+        }
+        if self.place_from_expr(place) == .Val(view_place) { self.mark_moved_place_exact(^view_place, mark_span, ^consumer) } else { self.mark_moved_exact(~root, mark_span, ^consumer) }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4913
+    pub fn mark_moved_by(self: &Self, name: String, span: Span, callee: String) Never! {
+        self.mark_moved_place_by(ViewPlace{owner: self.owner_id(name), projections: []}, span, ^callee)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4928
+    pub fn with_ownership_copy_edit(self, diagnostic: Diagnostic, anchor: Span, ty: Type?) -> Diagnostic Never! {
+        if ty != .Val(known) || self.is_resource_type(known) || !self.is_cloneable_type(known) -> return ^diagnostic
+        diagnostic.with_edit_grade(TextEdit{span: Span.new(anchor.start, anchor.start), new_text: Syntax.SIGIL_COPY}, FixApplicability.Safe, FixSafety.BehaviorPreserving)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4947
+    fn reject_expiring_secret_loan_change(self: &Self, name: String, action: String, span: Span) -> Bool Never! {
+        if self.lookup(name) != .Val(info) || !contains_expiring_secret_loan(info.ty) -> return false
+        self.diags.push(Diagnostic.error("E0201", "ExpiringSecret loan `{name}` cannot {action}", "the callback receives temporary read access; moving, changing, or dropping it could let the credential escape its expiry boundary", "use the loan only for read-only operations inside this callback", Val(span)))
+        true
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:4968
+    pub fn finish_core_call_ownership(self: &Self, call_name: String, index: Int, arg: CallArg, param_conv: AccessConvention, param_ty: Type) Never! {
+        if param_conv != AccessConvention.Move -> return
+        if arg.convention != AccessConvention.Move {
+            self.diags.push(Diagnostic.error("E0201", "argument {index + 1} to `{call_name}` transfers ownership through the move marker `^`", "this Core operation retains the value's ownership until its work is complete", "write the move marker `^`: `{Syntax.SIGIL_MOVE}value` for this argument", Val(arg.span)))
+            return
+        }
+        if type_is_copy(param_ty) -> return
+        if arg.expr == .Ident(name, span) { self.mark_moved_by(~name, span, ~call_name) }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5008
+    pub fn note_move_if_direct_ident(self: &Self, e: Expr, consumer: String) Never! {
+        if e == {
+            .Ident(n, span) -> {
+                if self.lookup(n) == .Val(info) && !type_is_copy(info.ty) && info.param_conv.is_none() { self.mark_moved(~n, span, ~consumer) }
+            }
+            .Paren(inner, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Tainted(inner, _, _) -> self.note_move_if_direct_ident(inner, consumer)
+            else -> {}
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5032
+    pub fn check_single_use_consumed_in_current_scope(self: &Self) Never! {
+        pending := [(String, Span, Bool)]{}
+        loop (name, info) in self.flow.bindings.iter_at(self.scope_depth()) {
+            if info.single_use_span == .Val(span) && !self.flow.moved.contains(name) { pending.push((~name, span, is_task_type(info.ty))) }
+        }
+        pending.sort_by(|a, b| (a.1.start, a.0) <=> (b.1.start, b.0))
+        loop (name, span, is_task) in pending {
+            if is_task { self.diags.push(l1101_unjoined_task("`{name}`", "the program may end before this task finishes", span)) } else { self.diags.push(e0140_unconsumed(name, span)) }
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5062
+    pub fn lambda_value_sendable(self, lam: Lambda, fn_ty: Type) -> Bool Never! {
+        param_names := [String:Bool]{}
+        loop p in lam.params { param_names[~p.name] = true }
+        take_set := [String:Bool]{}
+        loop (name, _) in lam.take_names { take_set[~name] = true }
+        read_caps := [String:Bool]{}
+        mut_caps := [String:Bool]{}
+        lambda_collect_captures(lam.body, param_names, &read_caps, &mut_caps)
+        loop (name, _) in lam.take_names { read_caps[~name] = true }
+        loop name in read_caps.keys().chain(mut_caps.keys()) {
+            if param_names.has_key(name) -> continue
+            cap := (Type, Bool)?{None}
+            if self.lookup(name) == .Val(info) { cap = Val((~info.ty, self.sendability_for(name))) } else if self.consts.get(name) == .Val(ty) { cap = Val((~ty, true)) }
+            if cap != .Val((cap_ty, cap_sendable)) -> continue
+            moves_capture :: take_set.has_key(name) || !self.is_cloneable_type(cap_ty)
+            if !cap_sendable || self.sendability_problem(cap_ty, moves_capture).is_some() -> return false
+        }
+        if fn_ty == .Fn && fn_ty.ret == .Val(ret) -> self.sendability_problem(ret, false).is_none() else -> true
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5098
+    pub fn lambda_interrupt_sendable(self, lam: Lambda, fn_ty: Type) -> Bool Never! {
+        if lam.meta.needs_fn_mut -> return false
+        param_names := [String:Bool]{}
+        loop p in lam.params { param_names[~p.name] = true }
+        read_caps := [String:Bool]{}
+        mut_caps := [String:Bool]{}
+        lambda_collect_captures(lam.body, param_names, &read_caps, &mut_caps)
+        loop name in read_caps.keys().chain(mut_caps.keys()) {
+            if param_names.has_key(name) -> continue
+            info :: self.lookup(name) ?? continue
+            if info.ty == .Fn {
+                if info.param_conv.is_some() || !info.interrupt_sendable -> return false
+                continue
+            }
+            if !self.sendability_for(name) || self.sendability_problem(info.ty, true).is_some() || info.param_conv == Val(AccessConvention.Read) || info.param_conv == Val(AccessConvention.Write) -> return false
+        }
+        if fn_ty != .Fn -> return false
+        if fn_ty.ret == .Val(ret) -> self.sendability_problem(ret, true).is_none() else -> true
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5142
+    fn thread_callback_expr_sendable(self, expr: Expr, ty: Type) -> Bool Never! {
+        if ty != .Fn -> return false
+        if expr == {
+            .Ident(name, _) -> {
+                resolved := name
+                if self.unqualified.get(name) == .Val(value) { resolved = value } else if self.unqualified_file.get(name) == .Val((function_name, _)) { resolved = function_name }
+                if self.lookup(name) == .Val(info) {
+                    if info.param_conv.is_some() || !info.interrupt_sendable || info.ty != .Fn -> return false
+                    if info.ty.ret == .Val(ret) -> return self.sendability_problem(ret, true).is_none()
+                    return true
+                }
+                signature :: self.funcs.get(name) ?? self.funcs.get(resolved) ?? return false
+                if signature.return_type == .Val(ret) -> self.sendability_problem(ret, true).is_none() else -> true
+            }
+            .Paren(inner, _) -> self.thread_callback_expr_sendable(inner, ty)
+            .Lambda(lam) -> self.lambda_interrupt_sendable(lam, ty)
+            else -> false
+        }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5192
+    fn check_thread_callback_expr_at(self: &Self, expr: Expr, ty: Type, crossing: SendCrossing) Never! {
+        if ty != .Fn || self.thread_callback_expr_sendable(expr, ty) -> return
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5201
+        fn ident(expr: Expr) -> String? Never! {
+            if expr == { .Ident(name, _) -> Val(name); .Paren(inner, _) -> ident(inner); else -> None }
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5208
+        fn lambda(expr: Expr) -> Bool Never! {
+            if expr == { .Lambda -> true; .Paren(inner, _) -> lambda(inner); else -> false }
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5215
+        fn needs_fn_mut(expr: Expr) -> Bool Never! {
+            if expr == { .Lambda(lam) -> lam.meta.needs_fn_mut; .Paren(inner, _) -> needs_fn_mut(inner); else -> false }
+        }
+        // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5222
+        fn lambda_span(expr: Expr) -> Span? Never! {
+            if expr == { .Lambda(lam) -> Val(lam.span); .Paren(inner, _) -> lambda_span(inner); else -> None }
+        }
+        if ident(expr).is_none() && lambda(expr) {
+            duplicate :: if lambda_span(expr) == .Val(span) { self.diags.any(|diag| diag.code == "E1102" && diag.span == Val(span)) } else { false }
+            if needs_fn_mut(expr) && !duplicate { self.report_unsendable("this callback", ty, SendabilityProblem{root: None, path: [], kind: SendProblemKind.ClosureCaptures}, crossing, expr.span()) }
+            return
+        }
+        name :: ident(expr) ?? {
+            self.report_unsendable("this callback", ty, SendabilityProblem{root: None, path: [], kind: SendProblemKind.ClosureCaptures}, crossing, expr.span())
+            return
+        }
+        problem :: self.sendability_problem(ty, false) ?? SendabilityProblem{root: None, path: [], kind: SendProblemKind.ClosureCaptures}
+        self.report_unsendable(name, ty, ^problem, crossing, expr.span())
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5280
+    pub fn interrupt_callback_expr_sendable(self, expr: Expr, ty: Type) -> Bool Never! { self.thread_callback_expr_sendable(expr, ty) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5286
+    pub fn check_interrupt_callback_expr(self: &Self, expr: Expr, ty: Type) Never! {
+        if self.interrupt_callback_depth > 0 { self.check_thread_callback_expr_at(expr, ty, SendCrossing.InterruptCallback) }
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5293
+    pub fn check_stream_callback_expr(self: &Self, expr: Expr, ty: Type) Never! { self.check_thread_callback_expr_at(expr, ty, SendCrossing.Kernel) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5297
+    pub fn sendability_problem(self, ty: Type, closure_taken: Bool) -> SendabilityProblem? Never! { self.send_query(ty, closure_taken, false, false) }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5308
+    pub fn crossing_problem(self, ty: Type, crossing: SendCrossing, closure_taken: Bool) -> SendabilityProblem? Never! {
+        strict_callable :: if crossing == { .ParallelWorker | .Kernel | .HttpHandler -> true; else -> false }
+        self.send_query(ty, closure_taken, strict_callable, false)
+    }
+
+    // Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5323
+    fn send_query(self, ty: Type, closure_taken: Bool, strict_callable: Bool, cell_only: Bool) -> SendabilityProblem? Never! {
+        seen := NominalWalk.new(NominalQuery.Sendable{strict_callable: strict_callable, cell_only: cell_only}, self.registry)
+        problem :: self.sendability_problem_inner(ty, closure_taken, strict_callable, cell_only, &seen)
+        seen.finish(problem.is_none())
+        problem
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerOwnership.rs:5343-5346
+// The Shared<T> constructor's narrower cell-only crossing continues in the next ownership fragment.

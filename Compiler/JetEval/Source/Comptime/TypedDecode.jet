@@ -1,1802 +1,858 @@
-// PORT-PENDING 0604 crates-jet-comptime-src-comptime-typeddecode: crates/jet-comptime/src/Comptime/TypedDecode.rs:1-1798
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #392 pass 5: typed `Decode` dispatch at comptime — the machinery
-//RS //! behind `json.decode<T>` (and the csv/toml/yaml
-//RS //! siblings, plus `core.data.csv<T>`'s row decode). Mirrors AOT's derived
-//RS //! `__jet_Decode::jet_decode` field-by-field walk from the shared typed codec
-//RS //! item bodies and migration-chain walker
-//RS //! and `Sema::SchemaMigration`'s `#PublishedSchema` migration chain
-//RS //! byte-for-byte (R12 parity) — including error message text (E2410/E2412)
-//RS //! and the canonical `[FieldError]` value defined by `jet_std`.
-//RS //! parity: guard tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run
-//RS //!
-//RS //! Operates directly on the canonical `DataTree`-tagged `CtValue` tree that
-//RS //! `JSONInterp`/`EncodingLite` build for every codec (json/csv/toml/yaml) — its
-//RS //! variant tags (`Null`/`Bool`/`Int`/`Float`/`Text`/`Array`/`Object`) are
-//RS //! exactly AOT's `DataTree` shape, so no separate value type is needed at this
-//RS //! tier.
-//RS 
-//RS use std::collections::{BTreeSet, HashMap};
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::{CtFloat, CtKey, Field, Marker, MigrationDecl, MigrationOp, StructDef, Type};
-//RS 
-//RS use super::Diagnostics::unsupported;
-//RS use super::Interpreter::Interp;
-//RS use super::JSONInterp::{json_payload, json_variant};
-//RS use crate::AST::{CtReport, CtValue};
-//RS 
-//RS mod sql_query {
-//RS     include!("../../../jet-codegen/src/Prelude/Core/SqlQuery.rs");
-//RS }
-//RS 
-//RS mod datatree_kind_rt {
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
-//RS }
-//RS 
-//RS mod inline_range_semantics {
-//RS     include!("../../../jet-codegen/src/Prelude/Core/InlineRange.rs");
-//RS }
-//RS mod codec_rt {
-//RS     pub(crate) mod jet_std {
-//RS         pub(crate) type JetDecimal = crate::Numeric::CtDecimal;
-//RS     }
-//RS 
-//RS     include!("../../../jet-codegen/src/Prelude/Core/Codec.rs");
-//RS }
-//RS 
-//RS 
-//RS // ── canonical [FieldError] CtValue shape ─────────────────────────────────
-//RS 
-//RS pub(super) fn decode_error(reason: impl Into<String>) -> CtValue {
-//RS     decode_error_at("", reason)
-//RS }
-//RS 
-//RS pub(super) fn decode_error_at(path: impl Into<String>, reason: impl Into<String>) -> CtValue {
-//RS     CtValue::List(vec![CtValue::Struct {
-//RS         type_name: "FieldError".to_string(),
-//RS         fields: vec![
-//RS             ("path".to_string(), CtValue::Str(path.into())),
-//RS             ("reason".to_string(), CtValue::Str(reason.into())),
-//RS         ],
-//RS     }])
-//RS }
-//RS 
-//RS fn extend_decode_errors(errors: &mut Vec<CtValue>, error: CtValue) {
-//RS     match error {
-//RS         CtValue::List(items) => errors.extend(items),
-//RS         other => errors.extend(match decode_error(other.jet_show()) {
-//RS             CtValue::List(items) => items,
-//RS             _ => Vec::new(),
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS #[allow(dead_code)]
-//RS mod field_error_prelude {
-//RS     include!("../../../jet-codegen/src/Prelude/Core/FieldError.rs");
-//RS }
-//RS 
-//RS /// Frame every child error with the shared Prelude field/index path policy.
-//RS pub fn decode_error_under(seg: &str, e: CtValue) -> CtValue {
-//RS     match e {
-//RS         CtValue::List(errors) => CtValue::List(
-//RS             errors
-//RS                 .into_iter()
-//RS                 .map(|error| match error {
-//RS                     CtValue::Struct { fields, .. } => {
-//RS                         let mut fields = fields;
-//RS                         if let Some((_, CtValue::Str(path))) =
-//RS                             fields.iter_mut().find(|(n, _)| n == "path")
-//RS                         {
-//RS                             *path = field_error_prelude::jet_field_error_kernel_under(seg, path);
-//RS                         }
-//RS                         CtValue::Struct {
-//RS                             type_name: "FieldError".to_string(),
-//RS                             fields,
-//RS                         }
-//RS                     }
-//RS                     other => other,
-//RS                 })
-//RS                 .collect(),
-//RS         ),
-//RS         other => decode_error(other.jet_show()),
-//RS     }
-//RS }
-//RS 
-//RS // ── serde marker helpers (mirrors `Codegen/Items.rs`'s private helpers) ────
-//RS 
-//RS fn serde_marker<'a>(markers: &'a [Marker], name: &str) -> Option<&'a Marker> {
-//RS     markers.iter().find(|m| m.name == name)
-//RS }
-//RS fn serde_has(markers: &[Marker], name: &str) -> bool {
-//RS     markers.iter().any(|m| m.name == name)
-//RS }
-//RS fn apply_rename_all(style: &str, name: &str) -> String {
-//RS     match style {
-//RS         crate::Syntax::RENAME_ALL_CAMEL => crate::Syntax::to_camel_acronym(name),
-//RS         crate::Syntax::RENAME_ALL_PASCAL => crate::Syntax::to_pascal_acronym(name),
-//RS         crate::Syntax::RENAME_ALL_KEBAB => crate::Syntax::to_snake_acronym(name).replace('_', "-"),
-//RS         crate::Syntax::RENAME_ALL_SCREAMING => crate::Syntax::to_shouty_acronym(name),
-//RS         _ => crate::Syntax::to_snake_acronym(name),
-//RS     }
-//RS }
-//RS fn container_rename_all(markers: &[Marker]) -> Option<String> {
-//RS     serde_marker(markers, crate::Syntax::MARKER_RENAME_ALL).and_then(|m| match m.expr_arg(0) {
-//RS         Some(crate::AST::Expr::Ident(n, _)) => Some(n.clone()),
-//RS         _ => None,
-//RS     })
-//RS }
-//RS fn marker_str_arg(m: &Marker) -> Option<String> {
-//RS     match m.expr_arg(0) {
-//RS         Some(crate::AST::Expr::Str(parts, _)) if parts.len() == 1 => match &parts[0] {
-//RS             crate::AST::StrPart::Lit(s) => Some(s.clone()),
-//RS             _ => None,
-//RS         },
-//RS         _ => None,
-//RS     }
-//RS }
-//RS fn field_wire_key(style: Option<&str>, f: &Field) -> String {
-//RS     if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::MARKER_RENAME) {
-//RS         if let Some(s) = marker_str_arg(m) {
-//RS             return s;
-//RS         }
-//RS     }
-//RS     match style {
-//RS         Some(st) => apply_rename_all(st, &f.name),
-//RS         None => f.name.clone(),
-//RS     }
-//RS }
-//RS /// Mirrors `Codegen/Items.rs::migration_wire_key` — the wire key a (possibly
-//RS /// historical, no-longer-present) field name carries.
-//RS fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String {
-//RS     if let Some(f) = s.fields.iter().find(|f| f.name == name) {
-//RS         return field_wire_key(style, f);
-//RS     }
-//RS     match style {
-//RS         Some(st) => apply_rename_all(st, name),
-//RS         None => name.to_string(),
-//RS     }
-//RS }
-//RS 
-//RS // ── DataTree-tagged CtValue tree helpers (the canonical `DataTree` shape) ──
-//RS 
-//RS fn variant_of(tree: &CtValue) -> Option<(&str, Option<&CtValue>)> {
-//RS     match tree {
-//RS         CtValue::Enum {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS         } if type_name == "DataTree" => Some((variant.as_str(), args.first().map(|(_, v)| v))),
-//RS         CtValue::Bytes(_) => Some(("Bytes", Some(tree))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS fn datatree_kind_for(tree: &CtValue) -> &'static str {
-//RS     let tag = variant_of(tree).map(|(tag, _)| tag).unwrap_or("value");
-//RS     datatree_kind_rt::datatree_kind(tag)
-//RS }
-//RS fn object_pairs(tree: &CtValue) -> Option<Vec<(String, CtValue)>> {
-//RS     match json_payload(tree, "Object") {
-//RS         Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
-//RS             Some(fields.clone())
-//RS         }
-//RS         Some(CtValue::Map(m)) => Some(
-//RS             m.iter()
-//RS                 .map(|(k, v)| {
-//RS                     (
-//RS                         match k {
-//RS                             CtKey::Str(s) => s.clone(),
-//RS                             other => format!("{:?}", other),
-//RS                         },
-//RS                         v.clone(),
-//RS                     )
-//RS                 })
-//RS                 .collect(),
-//RS         ),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS fn object_get<'a>(tree: &'a CtValue, key: &str) -> Option<&'a CtValue> {
-//RS     match json_payload(tree, "Object") {
-//RS         Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => fields
-//RS             .iter()
-//RS             .find(|(field, _)| field == key)
-//RS             .map(|(_, value)| value),
-//RS         Some(CtValue::Map(m)) => m.get(&CtKey::Str(key.to_string())),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS fn rebuild_object(pairs: Vec<(String, CtValue)>) -> CtValue {
-//RS     json_variant(
-//RS         "Object",
-//RS         Some(CtValue::Struct {
-//RS             type_name: "JSONObject".to_string(),
-//RS             fields: pairs,
-//RS         }),
-//RS     )
-//RS }
-//RS fn object_key_set(tree: &CtValue) -> BTreeSet<String> {
-//RS     object_pairs(tree)
-//RS         .map(|p| p.into_iter().map(|(k, _)| k).collect())
-//RS         .unwrap_or_default()
-//RS }
-//RS fn text_cell(cell: String) -> CtValue {
-//RS     json_variant("Text", Some(CtValue::Str(cell)))
-//RS }
-//RS 
-//RS fn typed_csv_values(
-//RS     interp: &mut Interp<'_>,
-//RS     rows: Vec<jet_foundation::CsvKernel::CsvRecord>,
-//RS     ty: &Type,
-//RS     span: Span,
-//RS ) -> Result<(Vec<String>, Vec<CtValue>), CtValue> {
-//RS     let mut it = rows.into_iter();
-//RS     let Some(header) = it.next() else {
-//RS         return Ok((Vec::new(), Vec::new()));
-//RS     };
-//RS     let fields = header.fields;
-//RS     let mut values = Vec::new();
-//RS     let mut errors = Vec::new();
-//RS     for (i, row) in it.enumerate() {
-//RS         let entries: Vec<(CtKey, CtValue)> = fields
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(c, name)| {
-//RS                 let cell = row.fields.get(c).cloned().unwrap_or_default();
-//RS                 (CtKey::Str(name.clone()), text_cell(cell))
-//RS             })
-//RS             .collect();
-//RS         let tree = json_variant("Object", Some(CtValue::Map(entries.into_iter().collect())));
-//RS         match interp.typed_decode_top(ty, &tree, span) {
-//RS             Ok(value) => values.push(value),
-//RS             Err(error) => {
-//RS                 extend_decode_errors(
-//RS                     &mut errors,
-//RS                     decode_error_under(&format!("row {}", i + 1), error),
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     if errors.is_empty() {
-//RS         Ok((fields, values))
-//RS     } else {
-//RS         Err(CtValue::List(errors))
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS pub(super) fn value_type_name(value: &CtValue) -> Option<String> {
-//RS     match value {
-//RS         CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
-//RS             Some(type_name.clone())
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn key_to_string(key: &CtKey) -> String {
-//RS     match key {
-//RS         CtKey::Str(value) => value.clone(),
-//RS         other => other.to_value().jet_show(),
-//RS     }
-//RS }
-//RS 
-//RS /// Generic encode of a `CtValue` back into the `JSON`-tagged tree shape —
-//RS /// mirrors the `__jet_Encode` blanket impls (`EncodingTraits.rs`) used by a
-//RS /// migration `add`/`change` step to write its new field's value onto the
-//RS /// wire before re-decoding. Struct encoding recurses using the type's own
-//RS /// field wire keys (so a nested-struct `add`/`change` stays consistent with
-//RS /// how that type would normally serialize).
-//RS fn encode_ct_value(
-//RS     v: &CtValue,
-//RS     structs: &std::collections::HashMap<String, &StructDef>,
-//RS ) -> CtValue {
-//RS     match v {
-//RS         CtValue::Int(n) => json_variant("Int", Some(CtValue::Int(*n))),
-//RS         CtValue::BigInt(n) => json_variant("Int", Some(CtValue::BigInt(n.clone()))),
-//RS         CtValue::Float(value) => {
-//RS             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value.as_f64()))))
-//RS         }
-//RS         CtValue::Bool(b) => json_variant("Bool", Some(CtValue::Bool(*b))),
-//RS         CtValue::Str(s) => json_variant("Text", Some(CtValue::Str(s.clone()))),
-//RS         CtValue::Char(c) => json_variant("Text", Some(CtValue::Str(c.to_string()))),
-//RS         CtValue::List(xs) => json_variant(
-//RS             "Array",
-//RS             Some(CtValue::List(
-//RS                 xs.iter().map(|x| encode_ct_value(x, structs)).collect(),
-//RS             )),
-//RS         ),
-//RS         CtValue::Present(inner) => encode_ct_value(inner, structs),
-//RS         CtValue::Failed(CtReport::Clean(_)) => json_variant("Null", None),
-//RS         CtValue::Struct { type_name, fields } => {
-//RS             let style = structs
-//RS                 .get(type_name.as_str())
-//RS                 .and_then(|s| container_rename_all(&s.serde_markers));
-//RS             let entries: Vec<(String, CtValue)> = fields
-//RS                 .iter()
-//RS                 .map(|(name, v)| {
-//RS                     let key = structs
-//RS                         .get(type_name.as_str())
-//RS                         .and_then(|s| s.fields.iter().find(|f| &f.name == name))
-//RS                         .map(|f| field_wire_key(style.as_deref(), f))
-//RS                         .unwrap_or_else(|| name.clone());
-//RS                     (key, encode_ct_value(v, structs))
-//RS                 })
-//RS                 .collect();
-//RS             json_variant(
-//RS                 "Object",
-//RS                 Some(CtValue::Map(
-//RS                     entries
-//RS                         .into_iter()
-//RS                         .map(|(k, v)| (CtKey::Str(k), v))
-//RS                         .collect(),
-//RS                 )),
-//RS             )
-//RS         }
-//RS         CtValue::Enum {
-//RS             type_name, args, ..
-//RS         } if type_name.starts_with("__JetUnion_") => args
-//RS             .first()
-//RS             .map(|(_, value)| encode_ct_value(value, structs))
-//RS             .unwrap_or_else(|| json_variant("Null", None)),
-//RS         _ => json_variant("Null", None),
-//RS     }
-//RS }
-//RS 
-//RS /// D-SERDE-ENGINE1 / D-UNIONTYPE1=A: mirror the sema-known outer wire-shape
-//RS /// table for the interpreter's direct typed decode adapter.
-//RS fn typed_union_wire_shapes(
-//RS     ty: &Type,
-//RS     structs: &HashMap<String, &StructDef>,
-//RS     distinct_bases: &HashMap<String, Type>,
-//RS ) -> Vec<&'static str> {
-//RS     let mut shapes = match ty {
-//RS         Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => vec!["Int"],
-//RS         Type::Float | Type::Float32 => vec!["Float"],
-//RS         Type::Bool => vec!["Bool"],
-//RS         Type::String | Type::Char => vec!["Text"],
-//RS         Type::Named(name)
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 "Date" | "LocalDate" | "LocalTime" | "DateTime"
-//RS             ) =>
-//RS         {
-//RS             vec!["Text"]
-//RS         }
-//RS         Type::Named(name) if name == "Duration" => vec!["Int"],
-//RS         Type::Named(name) if name == "Decimal" => vec!["Text"],
-//RS         Type::List(_) | Type::FixedList { .. } => vec!["Array"],
-//RS         Type::Map { .. } | Type::Tuple(_) => vec!["Object"],
-//RS         Type::Shared(inner) | Type::Quantity { base: inner, .. } | Type::Tagged { inner, .. } => {
-//RS             typed_union_wire_shapes(inner, structs, distinct_bases)
-//RS         }
-//RS         Type::Option(inner) => {
-//RS             let mut shapes = vec!["Null"];
-//RS             shapes.extend(typed_union_wire_shapes(inner, structs, distinct_bases));
-//RS             shapes
-//RS         }
-//RS         Type::Union(members) => members
-//RS             .iter()
-//RS             .flat_map(|member| typed_union_wire_shapes(member, structs, distinct_bases))
-//RS             .collect(),
-//RS         Type::Named(name) => distinct_bases
-//RS             .get(name)
-//RS             .map(|base| typed_union_wire_shapes(base, structs, distinct_bases))
-//RS             .or_else(|| structs.contains_key(name).then_some(vec!["Object"]))
-//RS             .unwrap_or_default(),
-//RS         Type::Apply { name, .. } => structs
-//RS             .contains_key(name)
-//RS             .then_some(vec!["Object"])
-//RS             .unwrap_or_default(),
-//RS         Type::Result { .. } | Type::Fn { .. } | Type::TraitObject(_) | Type::Measure(_) => {
-//RS             Vec::new()
-//RS         }
-//RS     };
-//RS     shapes.sort_unstable();
-//RS     shapes.dedup();
-//RS     shapes
-//RS }
-//RS 
-//RS // ── decoding primitives (mirrors `EncodingTraits.rs`'s scalar `__jet_Decode` impls) ─
-//RS 
-//RS fn decode_int(tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     super::SyncLite::decode_int_ct(tree)
-//RS }
-//RS fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     match variant_of(tree) {
-//RS         Some(("Float", Some(CtValue::Float(value)))) => {
-//RS             Ok(CtValue::Float(CtFloat::f64(value.as_f64())))
-//RS         }
-//RS         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Float(CtFloat::f64(*n as f64))),
-//RS         Some(("Int", Some(CtValue::BigInt(value)))) => value
-//RS             .to_string_rep()
-//RS             .parse::<f64>()
-//RS             .ok()
-//RS             .filter(|value| value.is_finite())
-//RS             .map(|value| CtValue::Float(CtFloat::f64(value)))
-//RS             .ok_or_else(|| decode_error("expected Float, found out-of-range Int")),
-//RS         Some(("Number", Some(CtValue::Str(text)))) | Some(("Text", Some(CtValue::Str(text)))) => {
-//RS             let value = text
-//RS                 .trim()
-//RS                 .parse::<f64>()
-//RS                 .map_err(|_| decode_error(format!("expected Float, found text {:?}", text)))?;
-//RS             if value.is_finite() {
-//RS                 Ok(CtValue::Float(CtFloat::f64(value)))
-//RS             } else {
-//RS                 Err(decode_error("expected Float, found out-of-range Float"))
-//RS             }
-//RS         }
-//RS         Some(("TypedText", Some(CtValue::Str(text)))) => Err(decode_error(format!(
-//RS             "expected Float, found text {:?}",
-//RS             text
-//RS         ))),
-//RS         _ => Err(decode_error(format!(
-//RS             "expected Float, found {}",
-//RS             datatree_kind_for(tree)
-//RS         ))),
-//RS     }
-//RS }
-//RS fn decode_bool(tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     match variant_of(tree) {
-//RS         Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Bool(*b)),
-//RS         Some(("TypedText", Some(CtValue::Str(text)))) => Err(decode_error(format!(
-//RS             "expected Bool, found text {:?}",
-//RS             text
-//RS         ))),
-//RS         Some(("Text", Some(CtValue::Str(text)))) => match text.trim() {
-//RS             "true" => Ok(CtValue::Bool(true)),
-//RS             "false" => Ok(CtValue::Bool(false)),
-//RS             _ => Err(decode_error(format!(
-//RS                 "expected Bool, found text {:?}",
-//RS                 text
-//RS             ))),
-//RS         },
-//RS         _ => Err(decode_error(format!(
-//RS             "expected Bool, found {}",
-//RS             datatree_kind_for(tree)
-//RS         ))),
-//RS     }
-//RS }
-//RS fn decode_string(tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     match variant_of(tree) {
-//RS         Some(("Text", Some(CtValue::Str(text))))
-//RS         | Some(("TypedText", Some(CtValue::Str(text)))) => Ok(CtValue::Str(text.clone())),
-//RS         Some(("Number", Some(CtValue::Str(text)))) => {
-//RS             Err(decode_error(format!("expected Text, found number {text}")))
-//RS         }
-//RS         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Str(n.to_string())),
-//RS         Some(("Int", Some(CtValue::BigInt(n)))) => Ok(CtValue::Str(n.to_string_rep())),
-//RS         Some(("Float", Some(CtValue::Float(f)))) => Ok(CtValue::Str(format!("{:?}", f))),
-//RS         Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Str(b.to_string())),
-//RS         _ => Err(decode_error(format!(
-//RS             "expected Text, found {}",
-//RS             datatree_kind_for(tree)
-//RS         ))),
-//RS     }
-//RS }
-//RS fn decode_char(tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     let CtValue::Str(s) = decode_string(tree)? else {
-//RS         unreachable!()
-//RS     };
-//RS     let mut it = s.chars();
-//RS     match (it.next(), it.next()) {
-//RS         (Some(c), None) => Ok(CtValue::Char(c)),
-//RS         _ => Err(decode_error(format!(
-//RS             "expected a single Char, found {:?}",
-//RS             s
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn decode_int_n(tree: &CtValue, signed: bool, bits: u8, name: &str) -> Result<CtValue, CtValue> {
-//RS     super::SyncLite::decode_int_n_ct(tree, signed, bits, name)
-//RS }
-//RS 
-//RS fn decode_f32(tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     let value = match variant_of(tree) {
-//RS         Some(("Float", Some(CtValue::Float(value)))) => value.as_f64(),
-//RS         Some(("Int", Some(CtValue::Int(value)))) => *value as f64,
-//RS         Some(("Number", Some(CtValue::Str(text)))) | Some(("Text", Some(CtValue::Str(text)))) => {
-//RS             text.trim()
-//RS                 .parse::<f64>()
-//RS                 .map_err(|_| decode_error(format!("expected F32, found text {:?}", text)))?
-//RS         }
-//RS         Some(("TypedText", Some(CtValue::Str(text)))) => {
-//RS             return Err(decode_error(format!("expected F32, found text {:?}", text)))
-//RS         }
-//RS         _ => {
-//RS             return Err(decode_error(format!(
-//RS                 "expected F32, found {}",
-//RS                 datatree_kind_for(tree)
-//RS             )))
-//RS         }
-//RS     };
-//RS     if value.is_finite() && value >= -(f32::MAX as f64) && value <= f32::MAX as f64 {
-//RS         Ok(CtValue::Float(CtFloat::f32(value as f32)))
-//RS     } else {
-//RS         Err(decode_error("expected F32, found out-of-range Float"))
-//RS     }
-//RS }
-//RS 
-//RS fn decode_decimal(tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     let parsed = match variant_of(tree) {
-//RS         Some(("Number", Some(CtValue::Str(text)))) => {
-//RS             crate::Numeric::CtDecimal::from_json_number(text)
-//RS         }
-//RS         Some(("TypedText", Some(CtValue::Str(text)))) => {
-//RS             return Err(decode_error(format!(
-//RS                 "expected Decimal, found text {:?}",
-//RS                 text
-//RS             )))
-//RS         }
-//RS         Some(("Text", Some(CtValue::Str(text)))) => crate::Numeric::CtDecimal::from_str(text),
-//RS         Some(("Int", Some(CtValue::Int(value)))) => {
-//RS             crate::Numeric::CtDecimal::from_str(&value.to_string())
-//RS         }
-//RS         _ => {
-//RS             return Err(decode_error(format!(
-//RS                 "expected Decimal, found {}",
-//RS                 datatree_kind_for(tree)
-//RS             )))
-//RS         }
-//RS     };
-//RS     parsed
-//RS         .map(|value| value.to_value())
-//RS         .map_err(|error| decode_error(format!("expected Decimal: {error}")))
-//RS }
-//RS 
-//RS /// Stable kind IDs shared with the resident codec host. Keep these IDs tied to
-//RS /// the canonical Prelude adapter, not to a backend-specific representation.
-//RS pub fn builtin_codec_kind(name: &str) -> Option<i64> {
-//RS     match name {
-//RS         "Date" => Some(0),
-//RS         "LocalDate" => Some(1),
-//RS         "LocalTime" => Some(2),
-//RS         "DateTime" => Some(3),
-//RS         "Duration" => Some(4),
-//RS         "Decimal" => Some(5),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn codec_field<'a>(value: &'a CtValue, expected: &[&str], field: &str) -> Result<&'a CtValue, String> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(format!("expected {}, found non-struct value", expected.join(" or ")));
-//RS     };
-//RS     if !expected.iter().any(|name| *name == type_name) {
-//RS         return Err(format!(
-//RS             "expected {}, found {type_name}",
-//RS             expected.join(" or ")
-//RS         ));
-//RS     }
-//RS     fields
-//RS         .iter()
-//RS         .find(|(name, _)| name == field)
-//RS         .map(|(_, value)| value)
-//RS         .ok_or_else(|| format!("missing {type_name}.{field}"))
-//RS }
-//RS 
-//RS fn codec_int_field(
-//RS     value: &CtValue,
-//RS     expected: &[&str],
-//RS     field: &str,
-//RS ) -> Result<i64, String> {
-//RS     match codec_field(value, expected, field)? {
-//RS         CtValue::Int(value) => Ok(*value),
-//RS         CtValue::BigInt(value) => value
-//RS             .try_i64()
-//RS             .ok_or_else(|| format!("{field} is outside the I64 range")),
-//RS         _ => Err(format!("{field} is not an Int")),
-//RS     }
-//RS }
-//RS 
-//RS /// Encode one of the closed Prelude builtin codec types to the canonical
-//RS /// DataTree-tagged comptime value. The same Codec.rs kernels are used by AOT
-//RS /// and resident JIT adapters.
-//RS pub fn encode_builtin_codec(kind: i64, value: &CtValue) -> Result<CtValue, String> {
-//RS     let text = match kind {
-//RS         0 | 1 => codec_rt::jet_codec_date_encode(
-//RS             codec_int_field(value, &["Date", "LocalDate"], "year")?,
-//RS             codec_int_field(value, &["Date", "LocalDate"], "month")?,
-//RS             codec_int_field(value, &["Date", "LocalDate"], "day")?,
-//RS         ),
-//RS         2 => codec_rt::jet_codec_local_time_encode(
-//RS             codec_int_field(value, &["LocalTime"], "hour")?,
-//RS             codec_int_field(value, &["LocalTime"], "minute")?,
-//RS             codec_int_field(value, &["LocalTime"], "second")?,
-//RS         ),
-//RS         3 => codec_rt::jet_codec_datetime_encode(
-//RS             codec_int_field(value, &["DateTime"], "secs")?,
-//RS             codec_int_field(value, &["DateTime"], "nanos")?
-//RS                 .try_into()
-//RS                 .map_err(|_| "DateTime.nanos is outside the U32 range".to_string())?,
-//RS             match codec_field(value, &["DateTime"], "leap_second")? {
-//RS                 CtValue::Bool(value) => *value,
-//RS                 _ => return Err("DateTime.leap_second is not a Bool".to_string()),
-//RS             },
-//RS         ),
-//RS         4 => {
-//RS             let ns = codec_int_field(value, &["Duration"], "ns")?;
-//RS             return Ok(json_variant(
-//RS                 "Int",
-//RS                 Some(CtValue::Int(codec_rt::jet_codec_duration_encode(ns))),
-//RS             ));
-//RS         }
-//RS         5 => {
-//RS             let decimal = crate::Numeric::CtDecimal::from_value(value)?;
-//RS             return Ok(json_variant(
-//RS                 "Text",
-//RS                 Some(CtValue::Str(codec_rt::jet_codec_decimal_encode(&decimal))),
-//RS             ));
-//RS         }
-//RS         _ => return Err(format!("unknown builtin codec kind {kind}")),
-//RS     };
-//RS     Ok(json_variant("Text", Some(CtValue::Str(text))))
-//RS }
-//RS 
-//RS fn decode_date(tree: &CtValue, type_name: &str) -> Result<CtValue, CtValue> {
-//RS     let CtValue::Str(value) = decode_string(tree)? else {
-//RS         unreachable!()
-//RS     };
-//RS     codec_rt::jet_codec_date_decode(&value)
-//RS         .map(|(year, month, day)| CtValue::Struct {
-//RS             type_name: type_name.to_string(),
-//RS             fields: vec![
-//RS                 ("year".to_string(), CtValue::Int(year)),
-//RS                 ("month".to_string(), CtValue::Int(month)),
-//RS                 ("day".to_string(), CtValue::Int(day)),
-//RS             ],
-//RS         })
-//RS         .map_err(|error| decode_error(format!("expected Date: {error}")))
-//RS }
-//RS 
-//RS fn decode_local_time(tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     let CtValue::Str(value) = decode_string(tree)? else {
-//RS         unreachable!()
-//RS     };
-//RS     codec_rt::jet_codec_local_time_decode(&value)
-//RS         .map(|(hour, minute, second)| CtValue::Struct {
-//RS             type_name: "LocalTime".to_string(),
-//RS             fields: vec![
-//RS                 ("hour".to_string(), CtValue::Int(hour)),
-//RS                 ("minute".to_string(), CtValue::Int(minute)),
-//RS                 ("second".to_string(), CtValue::Int(second)),
-//RS                 ("millisecond".to_string(), CtValue::Int(0)),
-//RS                 ("microsecond".to_string(), CtValue::Int(0)),
-//RS                 ("nanosecond".to_string(), CtValue::Int(0)),
-//RS             ],
-//RS         })
-//RS         .map_err(|error| decode_error(format!("expected LocalTime: {error}")))
-//RS }
-//RS 
-//RS fn decode_datetime(tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     let CtValue::Str(value) = decode_string(tree)? else {
-//RS         unreachable!()
-//RS     };
-//RS     codec_rt::jet_codec_datetime_decode(&value)
-//RS         .map(|(secs, nanos, leap_second)| CtValue::Struct {
-//RS             type_name: "DateTime".to_string(),
-//RS             fields: vec![
-//RS                 ("secs".to_string(), CtValue::Int(secs)),
-//RS                 ("nanos".to_string(), CtValue::Int(i64::from(nanos))),
-//RS                 ("leap_second".to_string(), CtValue::Bool(leap_second)),
-//RS             ],
-//RS         })
-//RS         .map_err(|error| decode_error(format!("expected DateTime: {error}")))
-//RS }
-//RS 
-//RS fn decode_duration(tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     let value = decode_int(tree)?;
-//RS     let ns = match value {
-//RS         CtValue::Int(value) => value,
-//RS         CtValue::BigInt(value) => value
-//RS             .try_i64()
-//RS             .ok_or_else(|| decode_error("expected Duration, found out-of-range Int"))?,
-//RS         _ => unreachable!(),
-//RS     };
-//RS     Ok(CtValue::Struct {
-//RS         type_name: "Duration".to_string(),
-//RS         fields: vec![(
-//RS             "ns".to_string(),
-//RS             CtValue::Int(codec_rt::jet_codec_duration_decode(ns)),
-//RS         )],
-//RS     })
-//RS }
-//RS 
-//RS pub fn decode_builtin_codec(ty: &Type, tree: &CtValue) -> Result<CtValue, CtValue> {
-//RS     match ty.without_user_tags() {
-//RS         Type::Named(name) if name == "Date" || name == "LocalDate" => decode_date(tree, name),
-//RS         Type::Named(name) if name == "LocalTime" => decode_local_time(tree),
-//RS         Type::Named(name) if name == "DateTime" => decode_datetime(tree),
-//RS         Type::Named(name) if name == "Duration" => decode_duration(tree),
-//RS         Type::Named(name) if name == "Decimal" => decode_decimal(tree),
-//RS         _ => Err(decode_error(format!(
-//RS             "no builtin codec for `{}`",
-//RS             ty.name()
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// Decode the closed primitive/container subset without an interpreter-owned
-//RS /// struct registry. TIR core calls retain their resolved return type but not
-//RS /// source turbofish syntax, so CBOR uses this same scalar/list walker instead
-//RS /// of falling through to an untyped `DataTree`.
-//RS pub(super) fn typed_decode_builtin_value(
-//RS     ty: &Type,
-//RS     tree: &CtValue,
-//RS ) -> Option<Result<CtValue, CtValue>> {
-//RS     typed_decode_value_with(ty, tree, &mut |_, _| None)
-//RS }
-//RS 
-//RS /// Callback used by the checked MIR decoder for nominal leaves (a `#Codable`
-//RS /// struct or enum) that only a generated Decode method can read.
-//RS pub(super) type DecodeNominalCallback<'a> =
-//RS     dyn FnMut(&Type, &CtValue) -> Option<Result<CtValue, CtValue>> + 'a;
-//RS 
-//RS /// The typed decode walker: scalar, option, list, fixed-list and string-key
-//RS /// map policy stays here for every tier; unsupported leaves go to the
-//RS /// caller's checked Decode method, as `encode_typed_value_with` does.
-//RS pub(super) fn typed_decode_value_with(
-//RS     ty: &Type,
-//RS     tree: &CtValue,
-//RS     decode_nominal: &mut DecodeNominalCallback<'_>,
-//RS ) -> Option<Result<CtValue, CtValue>> {
-//RS     match ty {
-//RS         Type::Int => Some(decode_int(tree)),
-//RS         Type::IntN { signed, bits } => Some(decode_int_n(tree, *signed, *bits, &ty.name())),
-//RS         Type::InlineRange { base, lo, hi } => {
-//RS             typed_decode_value_with(base, tree, decode_nominal).map(|result| {
-//RS                 result.and_then(|value| match value {
-//RS                     CtValue::Int(n) => {
-//RS                         match inline_range_semantics::jet_inline_range_from_int(n, *lo, *hi) {
-//RS                             Ok(value) => Ok(CtValue::Int(value)),
-//RS                             Err(reason) => Err(decode_error(reason)),
-//RS                         }
-//RS                     }
-//RS                     other => Ok(other),
-//RS                 })
-//RS             })
-//RS         }
-//RS         Type::Float => Some(decode_float(tree)),
-//RS         Type::Float32 => Some(decode_f32(tree)),
-//RS         Type::Bool => Some(decode_bool(tree)),
-//RS         Type::String => Some(decode_string(tree)),
-//RS         Type::Char => Some(decode_char(tree)),
-//RS         Type::Named(name) if name == "DataTree" || name == "Data" => {
-//RS             Some(Ok(tree.clone()))
-//RS         }
-//RS         Type::Named(name) if matches!(
-//RS             name.as_str(),
-//RS             "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32" | "U64" | "U128"
-//RS         ) => {
-//RS             let (signed, bits) = match name.as_str() {
-//RS                 "I8" => (true, 8),
-//RS                 "I16" => (true, 16),
-//RS                 "I32" => (true, 32),
-//RS                 "I64" => (true, 64),
-//RS                 "I128" => (true, 128),
-//RS                 "U8" => (false, 8),
-//RS                 "U16" => (false, 16),
-//RS                 "U32" => (false, 32),
-//RS                 "U64" => (false, 64),
-//RS                 "U128" => (false, 128),
-//RS                 _ => unreachable!(),
-//RS             };
-//RS             Some(decode_int_n(tree, signed, bits, name))
-//RS         }
-//RS         Type::Named(name) if name == "Date" || name == "LocalDate" => {
-//RS             Some(decode_date(tree, name))
-//RS         }
-//RS         Type::Named(name) if name == "LocalTime" => Some(decode_local_time(tree)),
-//RS         Type::Named(name) if name == "DateTime" => Some(decode_datetime(tree)),
-//RS         Type::Named(name) if name == "Duration" => Some(decode_duration(tree)),
-//RS         Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL => Some(decode_decimal(tree)),
-//RS         Type::Option(inner) => match variant_of(tree) {
-//RS             Some(("Null", _)) => Some(Ok(CtValue::absent((**inner).clone()))),
-//RS             _ => typed_decode_value_with(inner, tree, decode_nominal)
-//RS                 .map(|result| result.map(|value| CtValue::Present(Box::new(value)))),
-//RS         },
-//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-//RS             if (matches!(
-//RS                 inner.as_ref(),
-//RS                 Type::IntN {
-//RS                     signed: false,
-//RS                     bits: 8
-//RS                 }
-//RS             ) || matches!(inner.as_ref(), Type::Named(name) if name == "U8"))
-//RS                 && matches!(tree, CtValue::Bytes(_))
-//RS             {
-//RS                 let CtValue::Bytes(bytes) = tree else {
-//RS                     unreachable!();
-//RS                 };
-//RS                 if let Type::FixedList { len, .. } = ty {
-//RS                     if bytes.len() != len.require_literal() as usize {
-//RS                         return Some(Err(decode_error(format!(
-//RS                             "expected a fixed list of length {len}, found {}",
-//RS                             bytes.len()
-//RS                         ))));
-//RS                     }
-//RS                 }
-//RS                 return Some(Ok(CtValue::List(
-//RS                     bytes
-//RS                         .iter()
-//RS                         .map(|byte| CtValue::Int(i64::from(*byte)))
-//RS                         .collect(),
-//RS                 )));
-//RS             }
-//RS             let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
-//RS                 return Some(Err(decode_error(format!(
-//RS                     "expected a list, found {}",
-//RS                     datatree_kind_for(tree)
-//RS                 ))));
-//RS             };
-//RS             if let Type::FixedList { len, .. } = ty {
-//RS                 if items.len() != len.require_literal() as usize {
-//RS                     return Some(Err(decode_error(format!(
-//RS                         "expected a fixed list of length {len}, found {}",
-//RS                         items.len()
-//RS                     ))));
-//RS                 }
-//RS             }
-//RS             let mut out = Vec::with_capacity(items.len());
-//RS             let mut errors = Vec::new();
-//RS             for (index, item) in items.iter().enumerate() {
-//RS                 match typed_decode_value_with(inner, item, decode_nominal)? {
-//RS                     Ok(value) => out.push(value),
-//RS                     Err(error) => extend_decode_errors(
-//RS                         &mut errors,
-//RS                         decode_error_under(&format!("[{index}]"), error),
-//RS                     ),
-//RS                 }
-//RS             }
-//RS             Some(if errors.is_empty() {
-//RS                 Ok(CtValue::List(out))
-//RS             } else {
-//RS                 Err(CtValue::List(errors))
-//RS             })
-//RS         }
-//RS         Type::Map { key, value, .. } if matches!(key.as_ref(), Type::String) => {
-//RS             let Some(pairs) = object_pairs(tree) else {
-//RS                 return Some(Err(decode_error(format!(
-//RS                     "expected an object, found {}",
-//RS                     datatree_kind_for(tree)
-//RS                 ))));
-//RS             };
-//RS             let mut out = std::collections::BTreeMap::new();
-//RS             let mut errors = Vec::new();
-//RS             for (map_key, item) in pairs {
-//RS                 match typed_decode_value_with(value, &item, decode_nominal)? {
-//RS                     Ok(decoded) => {
-//RS                         out.insert(CtKey::Str(map_key), decoded);
-//RS                     }
-//RS                     Err(error) => extend_decode_errors(
-//RS                         &mut errors,
-//RS                         decode_error_under(&map_key, error),
-//RS                     ),
-//RS                 }
-//RS             }
-//RS             Some(if errors.is_empty() {
-//RS                 Ok(CtValue::Map(out))
-//RS             } else {
-//RS                 Err(CtValue::List(errors))
-//RS             })
-//RS         }
-//RS         Type::Map { .. } => Some(Err(decode_error("comptime maps require String keys"))),
-//RS         _ => decode_nominal(ty, tree),
-//RS     }
-//RS }
-//RS 
-//RS fn typed_encode_u8(ty: &Type) -> bool {
-//RS     match ty.without_user_tags() {
-//RS         Type::IntN {
-//RS             signed: false,
-//RS             bits: 8,
-//RS         } => true,
-//RS         Type::Named(name) => name == "U8",
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn typed_encode_scalar(value: &CtValue) -> Result<CtValue, String> {
-//RS     match value {
-//RS         CtValue::Int(n) => Ok(json_variant("Int", Some(CtValue::Int(*n)))),
-//RS         CtValue::BigInt(n) => Ok(json_variant("Int", Some(CtValue::BigInt(n.clone())))),
-//RS         CtValue::Float(n) => Ok(json_variant("Float", Some(CtValue::Float(*n)))),
-//RS         CtValue::Bool(b) => Ok(json_variant("Bool", Some(CtValue::Bool(*b)))),
-//RS         CtValue::Str(s) => Ok(json_variant("Text", Some(CtValue::Str(s.clone())))),
-//RS         CtValue::Char(c) => Ok(json_variant("Text", Some(CtValue::Str(c.to_string())))),
-//RS         other => Err(format!("typed codec encoder received {}", other.jet_show())),
-//RS     }
-//RS }
-//RS 
-//RS /// Callback used by the checked MIR encoder for nominal values that are not
-//RS /// part of this module's closed scalar/container representation.
-//RS pub(super) type EncodeNominalCallback<'a> =
-//RS     dyn FnMut(&Type, &CtValue) -> Result<Option<CtValue>, String> + 'a;
-//RS 
-//RS /// Encode the closed scalar/container subset used by the MIR typed codec
-//RS /// route, delegating unsupported leaves to the caller's checked codec method.
-//RS ///
-//RS /// The callback is deliberately only a nominal/unsupported-value seam.  All
-//RS /// scalar, option, list, fixed-list, and string-key map policy stays in this
-//RS /// one walker so every execution tier uses the same wire representation.
-//RS pub(super) fn encode_typed_value_with(
-//RS     ty: &Type,
-//RS     value: &CtValue,
-//RS     encode_nominal: &mut EncodeNominalCallback<'_>,
-//RS ) -> Option<Result<CtValue, String>> {
-//RS     match ty.without_user_tags() {
-//RS         Type::Int
-//RS         | Type::Float
-//RS         | Type::Bool
-//RS         | Type::String
-//RS         | Type::Char
-//RS         | Type::IntN { .. }
-//RS         | Type::Float32 => Some(typed_encode_scalar(value)),
-//RS         Type::InlineRange { base, .. }
-//RS         | Type::Shared(base)
-//RS         | Type::Tagged { inner: base, .. }
-//RS         | Type::Quantity { base, .. } => encode_typed_value_with(base, value, encode_nominal),
-//RS         Type::Named(name) if name == crate::Syntax::TYPE_DATA || name == "DataTree" => {
-//RS             Some(Ok(value.clone()))
-//RS         }
-//RS         Type::Named(name)
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32"
-//RS                     | "U64" | "U128"
-//RS             ) =>
-//RS         {
-//RS             Some(typed_encode_scalar(value))
-//RS         }
-//RS         Type::Named(name) if builtin_codec_kind(name).is_some() => Some(
-//RS             encode_builtin_codec(builtin_codec_kind(name).expect("checked codec kind"), value),
-//RS         ),
-//RS         Type::Option(inner) => match value {
-//RS             CtValue::Present(value) => encode_typed_value_with(inner, value, encode_nominal)
-//RS                 .or_else(|| {
-//RS                     Some(Err(format!(
-//RS                         "typed codec encoder has no builtin encoder for {}",
-//RS                         inner.name()
-//RS                     )))
-//RS                 }),
-//RS             CtValue::Failed(CtReport::Clean(_)) => Some(Ok(json_variant("Null", None))),
-//RS             CtValue::Failed(CtReport::Told(_)) => {
-//RS                 Some(Err("typed codec encoder received a failed outcome".to_string()))
-//RS             }
-//RS             _ => Some(Err("typed codec encoder received a non-option value".to_string())),
-//RS         },
-//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-//RS             if typed_encode_u8(inner) {
-//RS                 if let CtValue::Bytes(bytes) = value {
-//RS                     return Some(Ok(CtValue::Bytes(bytes.clone())));
-//RS                 }
-//RS                 let CtValue::List(items) = value else {
-//RS                     return Some(Err("typed codec encoder received a non-list value".to_string()));
-//RS                 };
-//RS                 let mut bytes = Vec::with_capacity(items.len());
-//RS                 for item in items {
-//RS                     let CtValue::Int(byte) = item else {
-//RS                         return Some(Err("typed codec [U8] contains a non-integer".to_string()));
-//RS                     };
-//RS                     let Ok(byte) = u8::try_from(*byte) else {
-//RS                         return Some(Err("typed codec [U8] contains an out-of-range byte".to_string()));
-//RS                     };
-//RS                     bytes.push(byte);
-//RS                 }
-//RS                 return Some(Ok(CtValue::Bytes(bytes)));
-//RS             }
-//RS             let CtValue::List(items) = value else {
-//RS                 return Some(Err("typed codec encoder received a non-list value".to_string()));
-//RS             };
-//RS             let mut encoded = Vec::with_capacity(items.len());
-//RS             for item in items {
-//RS                 let Some(result) = encode_typed_value_with(inner, item, encode_nominal) else {
-//RS                     return Some(Err(format!(
-//RS                         "typed codec encoder has no builtin encoder for {}",
-//RS                         inner.name()
-//RS                     )));
-//RS                 };
-//RS                 match result {
-//RS                     Ok(item) => encoded.push(item),
-//RS                     Err(error) => return Some(Err(error)),
-//RS                 }
-//RS             }
-//RS             Some(Ok(json_variant("Array", Some(CtValue::List(encoded)))))
-//RS         }
-//RS         Type::Map {
-//RS             key,
-//RS             value: value_ty,
-//RS             ..
-//RS         } if matches!(key.without_user_tags(), Type::String) => {
-//RS             let CtValue::Map(entries) = value else {
-//RS                 return Some(Err("typed codec encoder received a non-map value".to_string()));
-//RS             };
-//RS             let mut fields = Vec::with_capacity(entries.len());
-//RS             for (key, item) in entries {
-//RS                 let Some(result) = encode_typed_value_with(value_ty, item, encode_nominal) else {
-//RS                     return Some(Err(format!(
-//RS                         "typed codec encoder has no builtin encoder for {}",
-//RS                         value_ty.name()
-//RS                     )));
-//RS                 };
-//RS                 let item = match result {
-//RS                     Ok(item) => item,
-//RS                     Err(error) => return Some(Err(error)),
-//RS                 };
-//RS                 fields.push((key_to_string(key), item));
-//RS             }
-//RS             Some(Ok(json_variant(
-//RS                 "Object",
-//RS                 Some(CtValue::Struct {
-//RS                     type_name: "JSONObject".to_string(),
-//RS                     fields,
-//RS                 }),
-//RS             )))
-//RS         }
-//RS         _ => match encode_nominal(ty.without_user_tags(), value) {
-//RS             Ok(Some(encoded)) => Some(Ok(encoded)),
-//RS             Ok(None) => None,
-//RS             Err(error) => Some(Err(error)),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS /// Encode the closed scalar/container subset used by the MIR typed codec
-//RS /// route without a checked nominal callback.
-//RS pub(super) fn encode_typed_builtin_value(
-//RS     ty: &Type,
-//RS     value: &CtValue,
-//RS ) -> Option<Result<CtValue, String>> {
-//RS     encode_typed_value_with(ty, value, &mut |_, _| Ok(None))
-//RS }
-//RS 
-//RS /// A reasonable zero value for a type with no `#[Default(expr)]` argument —
-//RS /// mirrors what `Default::default()` would build for AOT's Rust field type.
-//RS fn zero_value(ty: &Type) -> CtValue {
-//RS     match ty {
-//RS         Type::Int | Type::IntN { .. } => CtValue::Int(0),
-//RS         Type::InlineRange { lo, .. } => CtValue::Int(*lo),
-//RS         Type::Float | Type::Float32 => CtValue::Float(CtFloat::f64(0.0)),
-//RS         Type::Bool => CtValue::Bool(false),
-//RS         Type::String => CtValue::Str(String::new()),
-//RS         Type::Char => CtValue::Char('\0'),
-//RS         Type::List(_) | Type::FixedList { .. } => CtValue::List(Vec::new()),
-//RS         Type::Map { .. } => CtValue::Map(std::collections::BTreeMap::new()),
-//RS         Type::Option(inner) => CtValue::absent((**inner).clone()),
-//RS         _ => CtValue::Unit,
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> Interp<'a> {
-//RS     /// Run the ordinary `Encode` method for a value when one is registered,
-//RS     /// then fall back to the scalar/container representation used by the
-//RS     /// typed tree walker. This is the interpreter-side marshalling adapter:
-//RS     /// codec policy remains in the Jet method body, just as it does for AOT.
-//RS     pub(super) fn encode_value(
-//RS         &mut self,
-//RS         value: &CtValue,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, Diagnostic> {
-//RS         if let Some(type_name) = value_type_name(value) {
-//RS             let codec_key = format!("{type_name}::encode");
-//RS             if let Some(func) = self.funcs.get(&codec_key).copied().or_else(|| {
-//RS                 self.methods
-//RS                     .get(&(type_name.clone(), "encode".to_string()))
-//RS                     .copied()
-//RS             }) {
-//RS                 if func.params.len() == 1 {
-//RS                     let mut frame = std::collections::HashMap::new();
-//RS                     frame.insert(func.params[0].name.clone(), value.clone());
-//RS                     return self.call_func(&format!("{type_name}.encode"), func, frame);
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Some(encoded) = encode_typed_builtin_value(&value.jet_type(), value) {
-//RS             return encoded.map_err(|error| unsupported(&error, span));
-//RS         }
-//RS         Ok(match value {
-//RS             CtValue::Int(n) => json_variant("Int", Some(CtValue::Int(*n))),
-//RS             CtValue::BigInt(n) => json_variant("Int", Some(CtValue::BigInt(n.clone()))),
-//RS             CtValue::Float(n) => json_variant("Float", Some(CtValue::Float(*n))),
-//RS             CtValue::Bool(b) => json_variant("Bool", Some(CtValue::Bool(*b))),
-//RS             CtValue::Str(s) => json_variant("Text", Some(CtValue::Str(s.clone()))),
-//RS             CtValue::Char(c) => json_variant("Text", Some(CtValue::Str(c.to_string()))),
-//RS             CtValue::Bytes(bytes) => json_variant("Bytes", Some(CtValue::Bytes(bytes.clone()))),
-//RS             CtValue::List(values) => json_variant(
-//RS                 "Array",
-//RS                 Some(CtValue::List(
-//RS                     values
-//RS                         .iter()
-//RS                         .map(|item| self.encode_value(item, span))
-//RS                         .collect::<Result<Vec<_>, _>>()?,
-//RS                 )),
-//RS             ),
-//RS             CtValue::Map(values) => json_variant(
-//RS                 "Object",
-//RS                 Some(CtValue::Struct {
-//RS                     type_name: "JSONObject".to_string(),
-//RS                     fields: values
-//RS                         .iter()
-//RS                         .map(|(key, value)| {
-//RS                             Ok((key_to_string(key), self.encode_value(value, span)?))
-//RS                         })
-//RS                         .collect::<Result<Vec<_>, Diagnostic>>()?,
-//RS                 }),
-//RS             ),
-//RS             CtValue::Present(value) => self.encode_value(value, span)?,
-//RS             CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit => json_variant("Null", None),
-//RS             CtValue::Struct { fields, .. } => json_variant(
-//RS                 "Object",
-//RS                 Some(CtValue::Struct {
-//RS                     type_name: "JSONObject".to_string(),
-//RS                     fields: fields
-//RS                         .iter()
-//RS                         .map(|(name, value)| Ok((name.clone(), self.encode_value(value, span)?)))
-//RS                         .collect::<Result<Vec<_>, Diagnostic>>()?,
-//RS                 }),
-//RS             ),
-//RS             CtValue::Enum {
-//RS                 type_name, args, ..
-//RS             } if type_name.starts_with("__JetUnion_") => {
-//RS                 let Some((_, value)) = args.first() else {
-//RS                     return Err(unsupported("this union has no payload", span));
-//RS                 };
-//RS                 self.encode_value(value, span)?
-//RS             }
-//RS             // I4: this encoder runs on the runtime TIR evaluator too, so both
-//RS             // refusals name the value, never a phase.
-//RS             CtValue::Enum { .. } | CtValue::Failed(CtReport::Told(_)) => {
-//RS                 return Err(unsupported(
-//RS                     "this value has no shared-evaluator Encode implementation",
-//RS                     span,
-//RS                 ));
-//RS             }
-//RS             CtValue::Closure(_) => {
-//RS                 return Err(unsupported("closures cannot be encoded", span));
-//RS             }
-//RS         })
-//RS     }
-//RS 
-//RS     fn decode_user_value(
-//RS         &mut self,
-//RS         name: &str,
-//RS         tree: &CtValue,
-//RS     ) -> Option<Result<CtValue, CtValue>> {
-//RS         let codec_key = format!("{name}::decode");
-//RS         let func = self.funcs.get(&codec_key).copied().or_else(|| {
-//RS             self.methods
-//RS                 .get(&(name.to_string(), "decode".to_string()))
-//RS                 .copied()
-//RS         })?;
-//RS         if func.params.len() != 1 {
-//RS             return Some(Err(decode_error(format!(
-//RS                 "`{name}.decode` has the wrong number of parameters"
-//RS             ))));
-//RS         }
-//RS         let mut frame = std::collections::HashMap::new();
-//RS         frame.insert(func.params[0].name.clone(), tree.clone());
-//RS         Some(
-//RS             match self.call_func(&format!("{name}.decode"), func, frame) {
-//RS                 Ok(CtValue::Present(value)) => Ok(*value),
-//RS                 Ok(CtValue::Failed(CtReport::Told(error))) => Err(*error),
-//RS                 Ok(CtValue::Failed(CtReport::Clean(_))) => {
-//RS                     Err(decode_error(format!("`{name}.decode` returned no value")))
-//RS                 }
-//RS                 Ok(other) => Err(decode_error(format!(
-//RS                     "`{name}.decode` returned {}",
-//RS                     other.jet_show()
-//RS                 ))),
-//RS                 Err(diagnostic) => Err(decode_error(diagnostic.what)),
-//RS             },
-//RS         )
-//RS     }
-//RS 
-//RS     /// The non-migrating decode: mirrors a type's plain `jet_decode` walk.
-//RS     /// Recurses through Option/List and nested user structs; the top-level
-//RS     /// The typed `decode<T>` entry point (`typed_decode_top`) is what
-//RS     /// additionally tries the `#PublishedSchema` migration chain on failure.
-//RS     pub(super) fn typed_decode_value(
-//RS         &mut self,
-//RS         ty: &Type,
-//RS         tree: &CtValue,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, CtValue> {
-//RS         if let Some(decoded) = typed_decode_builtin_value(ty, tree) {
-//RS             return decoded;
-//RS         }
-//RS         match ty {
-//RS             Type::Union(members) => {
-//RS                 let name = crate::AST::union_enum_name(members);
-//RS                 if let Some(decoded) = self.decode_user_value(&name, tree) {
-//RS                     return decoded;
-//RS                 }
-//RS                 let shape = datatree_kind_for(tree);
-//RS                 let Some(member) = members
-//RS                     .iter()
-//RS                     .find(|member| {
-//RS                         typed_union_wire_shapes(member, self.structs, self.distinct_bases)
-//RS                             .contains(&shape)
-//RS                     })
-//RS                     .cloned()
-//RS                 else {
-//RS                     return Err(decode_error("no matching union member"));
-//RS                 };
-//RS                 let value = self.typed_decode_value(&member, tree, span)?;
-//RS                 Ok(CtValue::Enum {
-//RS                     type_name: name,
-//RS                     variant: crate::AST::union_member_tag(&member),
-//RS                     args: vec![(None, value)],
-//RS                 })
-//RS             }
-//RS             Type::Option(inner) => match variant_of(tree) {
-//RS                 Some(("Null", _)) => Ok(CtValue::absent((**inner).clone())),
-//RS                 _ => Ok(CtValue::Present(Box::new(self.typed_decode_value(inner, tree, span)?))),
-//RS             },
-//RS             Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-//RS                 let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
-//RS                     return Err(decode_error(format!(
-//RS                         "expected a list, found {}",
-//RS                         datatree_kind_for(tree)
-//RS                     )));
-//RS                 };
-//RS                 if let Type::FixedList { len, .. } = ty {
-//RS                     if items.len() != len.require_literal() as usize {
-//RS                         return Err(decode_error(format!(
-//RS                             "expected a fixed list of length {len}, found {}",
-//RS                             items.len()
-//RS                         )));
-//RS                     }
-//RS                 }
-//RS                 let mut out = Vec::with_capacity(items.len());
-//RS                 let mut errors = Vec::new();
-//RS                 for (i, item) in items.iter().enumerate() {
-//RS                     match self.typed_decode_value(inner, item, span) {
-//RS                         Ok(value) => out.push(value),
-//RS                         Err(error) => extend_decode_errors(
-//RS                             &mut errors,
-//RS                             decode_error_under(&format!("[{i}]"), error),
-//RS                         ),
-//RS                     }
-//RS                 }
-//RS                 if errors.is_empty() {
-//RS                     Ok(CtValue::List(out))
-//RS                 } else {
-//RS                     Err(CtValue::List(errors))
-//RS                 }
-//RS             }
-//RS             Type::Map { key, value, .. } if matches!(key.as_ref(), Type::String) => {
-//RS                 let Some(pairs) = object_pairs(tree) else {
-//RS                     return Err(decode_error(format!(
-//RS                         "expected an object, found {}",
-//RS                         datatree_kind_for(tree)
-//RS                     )));
-//RS                 };
-//RS                 let mut out = std::collections::BTreeMap::new();
-//RS                 let mut errors = Vec::new();
-//RS                 for (map_key, item) in pairs {
-//RS                     match self.typed_decode_value(value, &item, span) {
-//RS                         Ok(decoded) => {
-//RS                             out.insert(CtKey::Str(map_key), decoded);
-//RS                         }
-//RS                         Err(error) => extend_decode_errors(
-//RS                             &mut errors,
-//RS                             decode_error_under(&map_key, error),
-//RS                         ),
-//RS                     }
-//RS                 }
-//RS                 if errors.is_empty() {
-//RS                     Ok(CtValue::Map(out))
-//RS                 } else {
-//RS                     Err(CtValue::List(errors))
-//RS                 }
-//RS             }
-//RS             Type::Map { .. } => Err(decode_error("comptime maps require String keys")),
-//RS             Type::Quantity { base, .. } => self.typed_decode_value(base, tree, span),
-//RS             Type::Named(name) => self
-//RS                 .decode_user_value(name, tree)
-//RS                 .unwrap_or_else(|| self.typed_decode_struct(name, tree, span)),
-//RS             other => Err(decode_error(format!(
-//RS                 "comptime can't decode `{}` yet — this type isn't a struct, primitive, `[T]`, or `T?`",
-//RS                 other.name()
-//RS             ))),
-//RS         }
-//RS     }
-//RS 
-//RS     fn typed_decode_struct(
-//RS         &mut self,
-//RS         name: &str,
-//RS         tree: &CtValue,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, CtValue> {
-//RS         let Some(sdef) = self.structs.get(name).copied() else {
-//RS             return Err(decode_error(format!(
-//RS                 "comptime has no `{}` struct registered to decode into",
-//RS                 name
-//RS             )));
-//RS         };
-//RS         if !matches!(variant_of(tree), Some(("Object", _))) {
-//RS             return Err(decode_error("expected an object"));
-//RS         }
-//RS         let style = container_rename_all(&sdef.serde_markers);
-//RS         let style = style.as_deref();
-//RS         let deny = serde_has(
-//RS             &sdef.serde_markers,
-//RS             crate::Syntax::MARKER_DENY_UNKNOWN_FIELDS,
-//RS         );
-//RS         let has_flatten = sdef
-//RS             .fields
-//RS             .iter()
-//RS             .any(|f| serde_has(&f.serde_markers, crate::Syntax::MARKER_FLATTEN));
-//RS         let mut errors = Vec::new();
-//RS         if deny && !has_flatten {
-//RS             if let Some(pairs) = object_pairs(tree) {
-//RS                 let known: Vec<String> = sdef
-//RS                     .fields
-//RS                     .iter()
-//RS                     .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::MARKER_SKIP))
-//RS                     .map(|f| field_wire_key(style, f))
-//RS                     .collect();
-//RS                 for (k, _) in &pairs {
-//RS                     if !known.contains(k) {
-//RS                         errors.push(CtValue::Struct {
-//RS                             type_name: "FieldError".to_string(),
-//RS                             fields: vec![
-//RS                                 ("path".to_string(), CtValue::Str(k.clone())),
-//RS                                 (
-//RS                                     "reason".to_string(),
-//RS                                     CtValue::Str(format!("E2412: unknown field `{k}`")),
-//RS                                 ),
-//RS                             ],
-//RS                         });
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         let mut out_fields = Vec::new();
-//RS         for f in sdef.fields.iter().filter(|f| f.computed.is_none()) {
-//RS             if serde_has(&f.serde_markers, crate::Syntax::MARKER_SKIP) {
-//RS                 let v = self.field_default_value(f, span);
-//RS                 out_fields.push((f.name.clone(), v));
-//RS                 continue;
-//RS             }
-//RS             if serde_has(&f.serde_markers, crate::Syntax::MARKER_FLATTEN) {
-//RS                 let v = match self.typed_decode_value(&f.ty, tree, span) {
-//RS                     Ok(value) => value,
-//RS                     Err(error) => {
-//RS                         extend_decode_errors(&mut errors, decode_error_under(&f.name, error));
-//RS                         zero_value(&f.ty)
-//RS                     }
-//RS                 };
-//RS                 out_fields.push((f.name.clone(), v));
-//RS                 continue;
-//RS             }
-//RS             let key = field_wire_key(style, f);
-//RS             let v = match object_get(tree, &key) {
-//RS                 Some(cell) => match self.typed_decode_value(&f.ty, cell, span) {
-//RS                     Ok(value) => value,
-//RS                     Err(error) => {
-//RS                         extend_decode_errors(&mut errors, decode_error_under(&key, error));
-//RS                         zero_value(&f.ty)
-//RS                     }
-//RS                 },
-//RS                 None => {
-//RS                     if let Type::Option(inner) = &f.ty {
-//RS                         CtValue::absent((**inner).clone())
-//RS                     } else if serde_marker(&f.serde_markers, crate::Syntax::MARKER_DEFAULT)
-//RS                         .is_some()
-//RS                     {
-//RS                         self.field_default_value(f, span)
-//RS                     } else {
-//RS                         errors.push(CtValue::Struct {
-//RS                             type_name: "FieldError".to_string(),
-//RS                             fields: vec![
-//RS                                 ("path".to_string(), CtValue::Str(key.clone())),
-//RS                                 (
-//RS                                     "reason".to_string(),
-//RS                                     CtValue::Str(format!(
-//RS                                         "E2410: missing required field `{}`",
-//RS                                         f.name
-//RS                                     )),
-//RS                                 ),
-//RS                             ],
-//RS                         });
-//RS                         zero_value(&f.ty)
-//RS                     }
-//RS                 }
-//RS             };
-//RS             out_fields.push((f.name.clone(), v));
-//RS         }
-//RS         if !errors.is_empty() {
-//RS             return Err(CtValue::List(errors));
-//RS         }
-//RS         let decoded = CtValue::Struct {
-//RS             type_name: name.to_string(),
-//RS             fields: out_fields,
-//RS         };
-//RS         if let Some(validate) = self
-//RS             .methods
-//RS             .get(&(name.to_string(), "validate".to_string()))
-//RS             .copied()
-//RS         {
-//RS             let Some(param) = validate.params.first() else {
-//RS                 return Err(decode_error(
-//RS                     "generated validate method has no value parameter",
-//RS                 ));
-//RS             };
-//RS             let mut frame = std::collections::HashMap::new();
-//RS             frame.insert(param.name.clone(), decoded.clone());
-//RS             match self.call_func(&format!("{name}.validate"), validate, frame) {
-//RS                 Ok(CtValue::Present(value)) => return Ok(*value),
-//RS                 Ok(CtValue::Failed(CtReport::Told(error))) => return Err(*error),
-//RS                 Ok(other) => {
-//RS                     return Err(decode_error(format!(
-//RS                         "generated validate method returned {}",
-//RS                         other.jet_show()
-//RS                     )))
-//RS                 }
-//RS                 Err(diagnostic) => return Err(decode_error(diagnostic.what)),
-//RS             }
-//RS         }
-//RS         Ok(decoded)
-//RS     }
-//RS 
-//RS     fn field_default_value(&mut self, f: &Field, _span: Span) -> CtValue {
-//RS         if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::MARKER_DEFAULT) {
-//RS             // Card #131: prefer the value sema already baked onto the marker, so
-//RS             // this decode tier and AOT codegen use the byte-identical default
-//RS             // (R12). Fall back to a live eval only if sema's pass didn't run.
-//RS             if let Some(v) = &m.ct {
-//RS                 return v.clone();
-//RS             }
-//RS             if let Some(expr) = m.expr_arg(0) {
-//RS                 let mut empty_scope = std::collections::HashMap::new();
-//RS                 if let Ok(v) = self.eval(expr, &mut empty_scope) {
-//RS                     return v;
-//RS                 }
-//RS             }
-//RS         }
-//RS         zero_value(&f.ty)
-//RS     }
-//RS 
-//RS     /// `TypeName -> [v1..vK] wire-key shapes` — mirrors
-//RS     /// `Codegen/Items.rs::migration_shapes`.
-//RS     fn migration_shapes(
-//RS         &self,
-//RS         style: Option<&str>,
-//RS         s: &StructDef,
-//RS         blocks: &[&MigrationDecl],
-//RS     ) -> Vec<Vec<String>> {
-//RS         let mut shape: BTreeSet<String> = s
-//RS             .fields
-//RS             .iter()
-//RS             .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::MARKER_SKIP))
-//RS             .map(|f| field_wire_key(style, f))
-//RS             .collect();
-//RS         let mut shapes: Vec<Vec<String>> = Vec::with_capacity(blocks.len());
-//RS         for block in blocks.iter().rev() {
-//RS             for op in &block.ops {
-//RS                 match op {
-//RS                     MigrationOp::Add { field, .. } => {
-//RS                         shape.remove(&migration_wire_key(style, s, field));
-//RS                     }
-//RS                     MigrationOp::Remove { field, .. } => {
-//RS                         shape.insert(migration_wire_key(style, s, field));
-//RS                     }
-//RS                     MigrationOp::Rename { from, to, .. } => {
-//RS                         shape.remove(&migration_wire_key(style, s, to));
-//RS                         shape.insert(migration_wire_key(style, s, from));
-//RS                     }
-//RS                     MigrationOp::Change { .. } => {}
-//RS                 }
-//RS             }
-//RS             shapes.push(shape.iter().cloned().collect());
-//RS         }
-//RS         shapes.reverse();
-//RS         shapes
-//RS     }
-//RS 
-//RS     /// One migration block's ops, rewriting `pairs` from shape v<i> to v<i+1>
-//RS     /// — mirrors `Codegen/Items.rs::emit_migration_step_fns`.
-//RS     fn apply_migration_step(
-//RS         &mut self,
-//RS         s: &StructDef,
-//RS         style: Option<&str>,
-//RS         block: &MigrationDecl,
-//RS         pairs: &mut Vec<(String, CtValue)>,
-//RS         span: Span,
-//RS     ) -> Result<(), CtValue> {
-//RS         for op in &block.ops {
-//RS             match op {
-//RS                 MigrationOp::Rename { from, to, .. } => {
-//RS                     let from_key = migration_wire_key(style, s, from);
-//RS                     let to_key = migration_wire_key(style, s, to);
-//RS                     for p in pairs.iter_mut() {
-//RS                         if p.0 == from_key {
-//RS                             p.0 = to_key.clone();
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 MigrationOp::Remove { field, .. } => {
-//RS                     let key = migration_wire_key(style, s, field);
-//RS                     pairs.retain(|p| p.0 != key);
-//RS                 }
-//RS                 MigrationOp::Add {
-//RS                     field, default_fn, ..
-//RS                 } => {
-//RS                     let key = migration_wire_key(style, s, field);
-//RS                     let Some(fn_name) = default_fn.as_deref() else {
-//RS                         return Err(decode_error(format!(
-//RS                             "migration `add {}` has no lowered default function",
-//RS                             field
-//RS                         )));
-//RS                     };
-//RS                     let Some(func) = self.funcs.get(fn_name).copied() else {
-//RS                         return Err(decode_error(format!(
-//RS                             "migration `add {}`'s default function `{}` isn't registered",
-//RS                             field, fn_name
-//RS                         )));
-//RS                     };
-//RS                     let value = self
-//RS                         .call_func(fn_name, func, std::collections::HashMap::new())
-//RS                         .map_err(|d| decode_error(d.what.clone()))?;
-//RS                     let encoded = encode_ct_value(&value, self.structs);
-//RS                     pairs.push((key, encoded));
-//RS                 }
-//RS                 MigrationOp::Change {
-//RS                     field,
-//RS                     from_ty,
-//RS                     conv_fn,
-//RS                     ..
-//RS                 } => {
-//RS                     let key = migration_wire_key(style, s, field);
-//RS                     let Some(fn_name) = conv_fn.as_deref() else {
-//RS                         return Err(decode_error(format!(
-//RS                             "migration `change {}` has no lowered converter function",
-//RS                             field
-//RS                         )));
-//RS                     };
-//RS                     let Some(func) = self.funcs.get(fn_name).copied() else {
-//RS                         return Err(decode_error(format!(
-//RS                             "migration `change {}`'s converter function `{}` isn't registered",
-//RS                             field, fn_name
-//RS                         )));
-//RS                     };
-//RS                     let Some(pos) = pairs.iter().position(|p| p.0 == key) else {
-//RS                         return Err(decode_error(format!(
-//RS                             "E2410: missing required field `{}`",
-//RS                             field
-//RS                         )));
-//RS                     };
-//RS                     let old_value = self
-//RS                         .typed_decode_value(from_ty, &pairs[pos].1, span)
-//RS                         .map_err(|e| decode_error_under(&key, e))?;
-//RS                     let mut frame = std::collections::HashMap::new();
-//RS                     if let Some(param) = func.params.first() {
-//RS                         frame.insert(param.name.clone(), old_value);
-//RS                     }
-//RS                     let new_value = self
-//RS                         .call_func(fn_name, func, frame)
-//RS                         .map_err(|d| decode_error(d.what.clone()))?;
-//RS                     pairs[pos].1 = encode_ct_value(&new_value, self.structs);
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// The typed decoder's full entry point — mirrors the generated canonical
-//RS     /// `jet_decode` path's default (try current shape) plus, for a
-//RS     /// `#PublishedSchema` type with `migration { }` blocks, the runtime
-//RS     /// chain-walker (`emit_migration_chain_walker`): on failure, detect which
-//RS     /// historical shape the data's key set matches (newest first) and walk
-//RS     /// the step functions forward.
-//RS     pub(super) fn typed_decode_top(
-//RS         &mut self,
-//RS         ty: &Type,
-//RS         tree: &CtValue,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, CtValue> {
-//RS         match self.typed_decode_value(ty, tree, span) {
-//RS             Ok(v) => Ok(v),
-//RS             Err(e) => {
-//RS                 let Type::Named(name) = ty else { return Err(e) };
-//RS                 let Some(sdef) = self.structs.get(name.as_str()).copied() else {
-//RS                     return Err(e);
-//RS                 };
-//RS                 let published = sdef.is_published_schema
-//RS                     || sdef
-//RS                         .derives
-//RS                         .iter()
-//RS                         .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
-//RS                 if !published || !sdef.type_params.is_empty() {
-//RS                     return Err(e);
-//RS                 }
-//RS                 let Some(blocks) = self.migrations.get(name.as_str()).cloned() else {
-//RS                     return Err(e);
-//RS                 };
-//RS                 if blocks.is_empty() {
-//RS                     return Err(e);
-//RS                 }
-//RS                 let style = container_rename_all(&sdef.serde_markers);
-//RS                 let shapes = self.migration_shapes(style.as_deref(), sdef, &blocks);
-//RS                 let keys = object_key_set(tree);
-//RS                 for j in (0..shapes.len()).rev() {
-//RS                     let shape = &shapes[j];
-//RS                     let matches = if shape.is_empty() {
-//RS                         keys.is_empty()
-//RS                     } else {
-//RS                         shape.len() == keys.len() && shape.iter().all(|k| keys.contains(k))
-//RS                     };
-//RS                     if !matches {
-//RS                         continue;
-//RS                     }
-//RS                     let Some(mut pairs) = object_pairs(tree) else {
-//RS                         return Err(e);
-//RS                     };
-//RS                     for i in j..shapes.len() {
-//RS                         self.apply_migration_step(
-//RS                             sdef,
-//RS                             style.as_deref(),
-//RS                             blocks[i],
-//RS                             &mut pairs,
-//RS                             span,
-//RS                         )?;
-//RS                     }
-//RS                     let new_tree = rebuild_object(pairs);
-//RS                     let value = self.typed_decode_value(ty, &new_tree, span)?;
-//RS                     return Ok(value);
-//RS                 }
-//RS                 Err(e)
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// The `json.decode<T>` / csv/toml/yaml sibling entry point — parses
-//RS     /// `text` with the codec's own parser, then runs `typed_decode_top` and
-//RS     /// returns only the canonical value or `[FieldError]` result.
-//RS     pub(super) fn eval_typed_decode(
-//RS         &mut self,
-//RS         module: &str,
-//RS         text: &str,
-//RS         ty: &Type,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, Diagnostic> {
-//RS         if module == "core.encoding.csv" {
-//RS             return self.eval_typed_csv_decode(text, ty, span);
-//RS         }
-//RS         let parsed: Result<CtValue, CtValue> = match module {
-//RS             "core.encoding.json" => {
-//RS                 super::JSONInterp::parse_json_typed_ordered(text).map_err(|e| {
-//RS                     json_parse_err_to_decode("JSON", super::JSONInterp::encoding_error_value(e))
-//RS                 })
-//RS             }
-//RS             "core.encoding.toml" => super::EncodingLite::toml_parse(text)
-//RS                 .map_err(|e| json_parse_err_to_decode("TOML", e)),
-//RS             "core.encoding.yaml" => super::EncodingLite::yaml_parse(text)
-//RS                 .map_err(|e| json_parse_err_to_decode("YAML", e)),
-//RS             "core.encoding.xml" => match super::EncodingLite::xml_parse(text) {
-//RS                 Ok(document) => super::EncodingLite::xml_project_for_decode(&document),
-//RS                 Err(e) => Err(super::EncodingLite::xml_error_value(e)),
-//RS             },
-//RS             // I4: named construct, not a phase — the typed decoder is the
-//RS             // runtime evaluator's decoder too.
-//RS             // This function serves the typed `decode` verb, so name it rather
-//RS             // than a variable that does not exist in this scope.
-//RS             _ => return Err(unsupported(&format!("`{module}.decode()`"), span)),
-//RS         };
-//RS         let tree = match parsed {
-//RS             Ok(t) => t,
-//RS             Err(e) => return Ok(CtValue::failed(Box::new(e))),
-//RS         };
-//RS         match self.typed_decode_top(ty, &tree, span) {
-//RS             Ok(value) => Ok(CtValue::Present(Box::new(value))),
-//RS             Err(e) => Ok(CtValue::failed(Box::new(e))),
-//RS         }
-//RS     }
-//RS 
-//RS     /// `core.data.csv<T>` / `core.encoding.csv.decode<T>` — header row
-//RS     /// maps columns to fields by name; each data row becomes an Object of Text
-//RS     /// cells, then decodes to `T`.
-//RS     pub(super) fn eval_typed_csv_decode(
-//RS         &mut self,
-//RS         text: &str,
-//RS         ty: &Type,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, Diagnostic> {
-//RS         let rows = match super::EncodingLite::csv_parse(text, ",", false, false) {
-//RS             Ok(rows) => rows,
-//RS             Err(error) => return Ok(CtValue::failed(Box::new(decode_error(error)))),
-//RS         };
-//RS         let (_, values) = match typed_csv_values(self, rows, ty, span) {
-//RS             Ok(result) => result,
-//RS             Err(error) => return Ok(CtValue::failed(Box::new(error))),
-//RS         };
-//RS         Ok(CtValue::Present(Box::new(CtValue::List(values))))
-//RS     }
-//RS 
-//RS     /// `core.encoding.csv.query<T>` reads, validates, decodes, and then
-//RS     /// applies the canonical SQL row selector to typed values.
-//RS     pub(super) fn eval_typed_csv_query(
-//RS         &mut self,
-//RS         text: &str,
-//RS         sql: &str,
-//RS         ty: &Type,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, Diagnostic> {
-//RS         let rows = match super::EncodingLite::csv_parse(text, ",", false, false) {
-//RS             Ok(rows) => rows,
-//RS             Err(error) => return Ok(CtValue::failed(Box::new(decode_error(error)))),
-//RS         };
-//RS         let fields = rows
-//RS             .first()
-//RS             .map(|row| row.fields.clone())
-//RS             .unwrap_or_default();
-//RS         let query = match sql_query::parse_sql_query(sql) {
-//RS             Ok(query) => query,
-//RS             Err(error) => {
-//RS                 return Ok(CtValue::failed(Box::new(decode_error(format!(
-//RS                     "`core.encoding.csv.query()`: {error}"
-//RS                 )))))
-//RS             }
-//RS         };
-//RS         if let Err(error) = sql_query::validate_sql_query_schema(
-//RS             &query,
-//RS             |field| fields.iter().any(|known| known == field),
-//RS             "`core.encoding.csv.query()`",
-//RS         ) {
-//RS             return Ok(CtValue::failed(Box::new(decode_error(error))));
-//RS         }
-//RS         let (_, values) = match typed_csv_values(self, rows, ty, span) {
-//RS             Ok(result) => result,
-//RS             Err(error) => return Ok(CtValue::failed(Box::new(error))),
-//RS         };
-//RS         let selected = sql_query::select_sql_indices(values.len(), &query, |index, field| {
-//RS             super::DataPipeline::query_row_field(&values[index], field)
-//RS                 .map(super::DataPipeline::query_cell_text)
-//RS         });
-//RS         Ok(CtValue::Present(Box::new(CtValue::List(
-//RS             selected
-//RS                 .into_iter()
-//RS                 .map(|index| values[index].clone())
-//RS                 .collect(),
-//RS         ))))
-//RS     }
-//RS }
-//RS 
-//RS /// The one `invalid <codec> (line N): message` `[FieldError]` a typed decode
-//RS /// reports for a syntax error, read from the codec's `EncodingError` value.
-//RS pub(super) fn json_parse_err_to_decode(codec: &str, e: CtValue) -> CtValue {
-//RS     let (line, message) = match e {
-//RS         CtValue::Struct { fields, .. } => {
-//RS             // `EncodingError.line` is `Int?`; `reason` carries the parser text.
-//RS             let line = fields
-//RS                 .iter()
-//RS                 .find(|(n, _)| n == "line")
-//RS                 .and_then(|(_, v)| match v {
-//RS                     CtValue::Int(n) => Some(*n),
-//RS                     CtValue::Present(inner) => match inner.as_ref() {
-//RS                         CtValue::Int(n) => Some(*n),
-//RS                         _ => None,
-//RS                     },
-//RS                     _ => None,
-//RS                 })
-//RS                 .unwrap_or(0);
-//RS             let message = fields
-//RS                 .iter()
-//RS                 .find(|(n, _)| n == "reason")
-//RS                 .and_then(|(_, v)| match v {
-//RS                     CtValue::Str(s) => Some(s.clone()),
-//RS                     _ => None,
-//RS                 })
-//RS                 .unwrap_or_default();
-//RS             (line, message)
-//RS         }
-//RS         _ => (0, String::new()),
-//RS     };
-//RS     decode_error(format!("invalid {} (line {}): {}", codec, line, message))
-//RS }
-// END-PORT-PENDING 0604 crates/jet-comptime/src/Comptime/TypedDecode.rs:1-1798
+// Typed Decode dispatch over the canonical DataTree-tagged CtValue tree.
+// Scalar/container policy is shared by the interpreter and checked MIR adapters.
+use jet_foundation.AST.[CtFloat, CtKey, CtValue, CtReport, NamedCtValue, CtMapEntry, CtEnumArg, Field, Marker, MigrationDecl, MigrationOp, StructDef, Type, Expr, StrPart, union_enum_name, union_member_tag]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.Numeric.[CtBigInt, CtDecimal]
+use jet_foundation.Foundation.[TEXT_NUL]
+use jet_foundation.CsvKernel.[CsvRecord]
+use jet_foundation.Syntax.*
+use jet_comptime.Comptime.Diagnostics.[unsupported]
+use jet_comptime.Comptime.Interpreter.[Interp]
+use jet_comptime.Comptime.JSONInterp.[json_payload, json_variant]
+use jet_comptime.Comptime.[JSONInterp, EncodingLite, SyncLite, DataPipeline]
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:27
+use jet_codegen.Prelude.Core.SqlQuery as sql_query
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:31
+use jet_codegen.Prelude.CoreLib.JetStd.DataTreeKind as datatree_kind_rt
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:35
+use jet_codegen.Prelude.Core.InlineRange as inline_range_semantics
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:38
+use jet_codegen.Prelude.Core.Codec as codec_rt
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:73
+use jet_codegen.Prelude.Core.FieldError as field_error_prelude
 
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:49
+pub fn decode_error(reason: String) -> CtValue { decode_error_at("", reason) }
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:53
+pub fn decode_error_at(path: String, reason: String) -> CtValue {
+    CtValue.List{values: [CtValue]{CtValue.Struct{type_name: "FieldError", fields: [NamedCtValue]{
+        NamedCtValue{name: "path", value: CtValue.Str{value: path}},
+        NamedCtValue{name: "reason", value: CtValue.Str{value: reason}}
+    }}}}
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:63
+fn extend_decode_errors(errors: &[CtValue], error: CtValue) -> {
+    if error == {
+        .List(items) -> &errors.extend(^items)
+        else -> if decode_error(error.jet_show()) == { .List(items) -> &errors.extend(^items) else -> {} }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:79
+pub fn decode_error_under(seg: String, e: CtValue) -> CtValue {
+    if e == {
+        .List(errors) -> {
+            out := [CtValue]{}
+            loop error in errors {
+                if error == {
+                    .Struct(_, fields) -> {
+                        fields := ^fields
+                        loop field in &fields {
+                            if field.name == "path" && field.value == .Str(path) {
+                                field.value = CtValue.Str{value: field_error_prelude.jet_field_error_kernel_under(seg, path)}
+                                break
+                            }
+                        }
+                        out.push(CtValue.Struct{type_name: "FieldError", fields: ^fields})
+                    }
+                    else -> out.push(^error)
+                }
+            }
+            CtValue.List{values: ^out}
+        }
+        else -> decode_error(e.jet_show())
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:107
+fn serde_marker(markers: &[Marker], name: String) -> Marker? {
+    loop m in markers { if m.name == name -> return Val(m) }
+    None
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:110
+fn serde_has(markers: &[Marker], name: String) -> Bool { serde_marker(markers, name).is_some() }
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:113
+fn apply_rename_all(style: String, name: String) -> String {
+    if style == {
+        RENAME_ALL_CAMEL -> to_camel_acronym(name)
+        RENAME_ALL_PASCAL -> to_pascal_acronym(name)
+        RENAME_ALL_KEBAB -> to_snake_acronym(name).replace('_', "-")
+        RENAME_ALL_SCREAMING -> to_shouty_acronym(name)
+        else -> to_snake_acronym(name)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:122
+fn container_rename_all(markers: &[Marker]) -> String? {
+    m :: serde_marker(markers, MARKER_RENAME_ALL) ?? return None
+    if m.expr_arg(0) == { Val(Expr.Ident(n, _)) -> Val(n) else -> None }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:128
+fn marker_str_arg(m: &Marker) -> String? {
+    if m.expr_arg(0) == {
+        Val(Expr.Str(parts, _)) if parts.len() == 1 -> if parts[0] == { .Lit(s) -> Val(s) else -> None }
+        else -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:137
+fn field_wire_key(style: String?, f: &Field) -> String {
+    if serde_marker(&f.serde_markers, MARKER_RENAME) == Val(m) {
+        if marker_str_arg(&m) == Val(s) -> return s
+    }
+    if style == { Val(st) -> apply_rename_all(st, f.name) None -> f.name }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:150
+fn migration_wire_key(style: String?, s: &StructDef, name: String) -> String {
+    loop f in s.fields { if f.name == name -> return field_wire_key(style, &f) }
+    if style == { Val(st) -> apply_rename_all(st, name) None -> name }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:162
+fn variant_of(tree: &CtValue) -> (String, CtValue?)? {
+    if tree == {
+        .Enum(type_name, variant, args) if type_name == "DataTree" -> Val((variant, if args.is_empty() -> None else -> Val(args[0].value)))
+        .Bytes(_) -> Val(("Bytes", Val(tree)))
+        else -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:173
+fn datatree_kind_for(tree: &CtValue) -> String {
+    tag :: if variant_of(tree) == { Val((tag, _)) -> tag None -> "value" }
+    datatree_kind_rt.datatree_kind(tag)
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:177
+fn object_pairs(tree: &CtValue) -> [NamedCtValue]? {
+    if json_payload(tree, "Object") == {
+        Val(CtValue.Struct(type_name, fields)) if type_name == "JSONObject" -> Val(fields.clone())
+        Val(CtValue.Map(entries)) -> {
+            out := [NamedCtValue]{}
+            loop entry in entries {
+                name :: if entry.key == { .Str(s) -> s else -> entry.key.debug() }
+                out.push(NamedCtValue{name: name, value: entry.value.clone()})
+            }
+            Val(^out)
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:198
+fn object_get(tree: &CtValue, key: String) -> CtValue? {
+    if json_payload(tree, "Object") == {
+        Val(CtValue.Struct(type_name, fields)) if type_name == "JSONObject" -> {
+            loop field in fields { if field.name == key -> return Val(field.value) }
+            None
+        }
+        Val(CtValue.Map(entries)) -> {
+            // Canonical CtMapEntry storage retains the Rust BTreeMap ordering.
+            // GATE #4499: CtKey equality/order must be the canonical user-key policy.
+            if entries.binary_search_by(fn(entry) -> entry.key.cmp(CtKey.Str{value: key})) == {
+                Ok(index) -> Val(entries[index].value)
+                Err(_) -> None
+            }
+        }
+        else -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:208
+fn rebuild_object(pairs: [NamedCtValue]) -> CtValue {
+    json_variant("Object", Val(CtValue.Struct{type_name: "JSONObject", fields: ^pairs}))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:217
+fn object_key_set(tree: &CtValue) -> [String:Bool] {
+    out := [String:Bool]{}
+    if object_pairs(tree) == Val(pairs) { loop pair in pairs { out[pair.name] = true } }
+    out
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:222
+fn text_cell(cell: String) -> CtValue { json_variant("Text", Val(CtValue.Str{value: cell})) }
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:226
+fn typed_csv_values(interp: &Interp, rows: [CsvRecord], ty: &Type, span: Span) -> ([String], [CtValue]) CtValue! {
+    if rows.is_empty() -> return Ok(([String]{}, [CtValue]{}))
+    fields :: rows[0].fields
+    values := [CtValue]{}
+    errors := [CtValue]{}
+    loop i in 1..rows.len() {
+        cells := [String:CtValue]{}
+        loop c in 0..fields.len() { cells[fields[c]] = text_cell(rows[i].fields.get(c) ?? "") }
+        keys := cells.keys().collect(); keys.sort()
+        entries := [CtMapEntry]{}
+        loop key in keys { entries.push(CtMapEntry{key: CtKey.Str{value: key}, value: cells[key]}) }
+        tree :: json_variant("Object", Val(CtValue.Map{entries: ^entries}))
+        if interp.typed_decode_top(ty, &tree, span) == {
+            Ok(value) -> values.push(^value)
+            Err(error) -> extend_decode_errors(&errors, decode_error_under("row {i}", ^error))
+        }
+    }
+    if errors.is_empty() -> Ok((fields, ^values)) else -> Err(CtValue.List{values: ^errors})
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:267
+pub fn value_type_name(value: &CtValue) -> String? {
+    if value == { .Struct(name, _) | .Enum(name, _, _) -> Val(name) else -> None }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:276
+fn key_to_string(key: &CtKey) -> String { if key == { .Str(value) -> value else -> key.to_value().jet_show() } }
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:289
+fn encode_ct_value(v: &CtValue, structs: &[String:StructDef]) -> CtValue {
+    if v == {
+        .Int(n) -> json_variant("Int", Val(CtValue.Int{value: n}))
+        .BigInt(n) -> json_variant("Int", Val(CtValue.BigInt{value: n}))
+        .Float(value) -> json_variant("Float", Val(CtValue.Float{value: CtFloat.f64(value.as_f64())}))
+        .Bool(b) -> json_variant("Bool", Val(CtValue.Bool{value: b}))
+        .Str(s) -> json_variant("Text", Val(CtValue.Str{value: s}))
+        .Char(c) -> json_variant("Text", Val(CtValue.Str{value: c.to_string()}))
+        .List(xs) -> {
+            out := [CtValue]{}
+            loop x in xs { out.push(encode_ct_value(&x, structs)) }
+            json_variant("Array", Val(CtValue.List{values: ^out}))
+        }
+        .Present(inner) -> encode_ct_value(&inner, structs)
+        .Failed(CtReport.Clean(_)) -> json_variant("Null", None)
+        .Struct(type_name, fields) -> {
+            sdef :: structs.get(type_name)
+            style :: if sdef == { Val(s) -> container_rename_all(&s.serde_markers) None -> None }
+            entries := [String:CtValue]{}
+            loop field in fields {
+                key := field.name
+                if sdef == Val(s) { loop f in s.fields { if f.name == field.name { key = field_wire_key(style, &f); break } } }
+                entries[key] = encode_ct_value(&field.value, structs)
+            }
+            keys := entries.keys().collect(); keys.sort()
+            out := [CtMapEntry]{}
+            loop key in keys { out.push(CtMapEntry{key: CtKey.Str{value: key}, value: entries[key]}) }
+            json_variant("Object", Val(CtValue.Map{entries: ^out}))
+        }
+        .Enum(type_name, _, args) if type_name.starts_with("__JetUnion_") -> if args.is_empty() -> json_variant("Null", None) else -> encode_ct_value(&args[0].value, structs)
+        else -> json_variant("Null", None)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:347
+fn typed_union_wire_shapes(ty: &Type, structs: &[String:StructDef], distinct_bases: &[String:Type]) -> [String] {
+    shapes := if ty == {
+        .Int | .IntN(_, _) | .InlineRange(_, _, _) -> [String]{"Int"}
+        .Float | .Float32 -> [String]{"Float"}
+        .Bool -> [String]{"Bool"}
+        .String | .Char -> [String]{"Text"}
+        .Named(name) if [String]{"Date", "LocalDate", "LocalTime", "DateTime"}.contains(name) -> [String]{"Text"}
+        .Named(name) if name == "Duration" -> [String]{"Int"}
+        .Named(name) if name == "Decimal" -> [String]{"Text"}
+        .List(_) | .FixedList(_, _) -> [String]{"Array"}
+        .Map(_, _, _) | .Tuple(_) -> [String]{"Object"}
+        .Shared(inner) | .Quantity(inner, _) | .Tagged(_, inner) -> typed_union_wire_shapes(&inner, structs, distinct_bases)
+        .Option(inner) -> { out := [String]{"Null"}; out.extend(typed_union_wire_shapes(&inner, structs, distinct_bases)); out }
+        .Union(members) -> { out := [String]{}; loop member in members { out.extend(typed_union_wire_shapes(&member, structs, distinct_bases)) }; out }
+        .Named(name) -> if distinct_bases.get(name) == { Val(base) -> typed_union_wire_shapes(&base, structs, distinct_bases) None -> if structs.contains_key(name) -> [String]{"Object"} else -> [String]{} }
+        .Apply(name, _) -> if structs.contains_key(name) -> [String]{"Object"} else -> [String]{}
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Measure(_) -> [String]{}
+    }
+    shapes.sort(); shapes.dedup(); shapes
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:401
+fn decode_int(tree: &CtValue) -> CtValue CtValue! { SyncLite.decode_int_ct(tree) }
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:404
+fn decode_float(tree: &CtValue) -> CtValue CtValue! {
+    if variant_of(tree) == {
+        Val(("Float", Val(CtValue.Float(value)))) -> Ok(CtValue.Float{value: CtFloat.f64(value.as_f64())})
+        Val(("Int", Val(CtValue.Int(n)))) -> Ok(CtValue.Float{value: CtFloat.f64(n as F64)})
+        Val(("Int", Val(CtValue.BigInt(value)))) -> {
+            if value.parse<F64>() == Ok(n) && n.is_finite() -> Ok(CtValue.Float{value: CtFloat.f64(n)})
+            else -> Err(decode_error("expected Float, found out-of-range Int"))
+        }
+        Val(("Number", Val(CtValue.Str(text)))) | Val(("Text", Val(CtValue.Str(text)))) -> {
+            trimmed := text.trim() // #4303
+            value :: trimmed.parse<F64>().map_err(fn(_) -> decode_error("expected Float, found text {text.debug()}"))?
+            if value.is_finite() -> Ok(CtValue.Float{value: CtFloat.f64(value)}) else -> Err(decode_error("expected Float, found out-of-range Float"))
+        }
+        Val(("TypedText", Val(CtValue.Str(text)))) -> Err(decode_error("expected Float, found text {text.debug()}"))
+        else -> Err(decode_error("expected Float, found {datatree_kind_for(tree)}"))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:438
+fn decode_bool(tree: &CtValue) -> CtValue CtValue! {
+    if variant_of(tree) == {
+        Val(("Bool", Val(CtValue.Bool(b)))) -> Ok(CtValue.Bool{value: b})
+        Val(("TypedText", Val(CtValue.Str(text)))) -> Err(decode_error("expected Bool, found text {text.debug()}"))
+        Val(("Text", Val(CtValue.Str(text)))) -> {
+            trimmed := text.trim() // #4303
+            if trimmed == { "true" -> Ok(CtValue.Bool{value: true}) "false" -> Ok(CtValue.Bool{value: false}) else -> Err(decode_error("expected Bool, found text {text.debug()}")) }
+        }
+        else -> Err(decode_error("expected Bool, found {datatree_kind_for(tree)}"))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:459
+fn decode_string(tree: &CtValue) -> CtValue CtValue! {
+    if variant_of(tree) == {
+        Val(("Text", Val(CtValue.Str(text)))) | Val(("TypedText", Val(CtValue.Str(text)))) -> Ok(CtValue.Str{value: text})
+        Val(("Number", Val(CtValue.Str(text)))) -> Err(decode_error("expected Text, found number {text}"))
+        Val(("Int", Val(CtValue.Int(n)))) -> Ok(CtValue.Str{value: n.to_string()})
+        Val(("Int", Val(CtValue.BigInt(n)))) -> Ok(CtValue.Str{value: n})
+        Val(("Float", Val(CtValue.Float(f)))) -> Ok(CtValue.Str{value: f.debug()})
+        Val(("Bool", Val(CtValue.Bool(b)))) -> Ok(CtValue.Str{value: b.to_string()})
+        else -> Err(decode_error("expected Text, found {datatree_kind_for(tree)}"))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:476
+fn decode_char(tree: &CtValue) -> CtValue CtValue! {
+    s :: if decode_string(tree)? == { .Str(s) -> s else -> panic("decode_string must return Str") }
+    chars := s.chars().iter()
+    first :: chars.next()
+    if (first, chars.next()) == { (Val(c), None) -> Ok(CtValue.Char{value: c}) else -> Err(decode_error("expected a single Char, found {s.debug()}")) }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:490
+fn decode_int_n(tree: &CtValue, signed: Bool, bits: Int, name: String) -> CtValue CtValue! { SyncLite.decode_int_n_ct(tree, signed, bits, name) }
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:494
+fn decode_f32(tree: &CtValue) -> CtValue CtValue! {
+    value :: if variant_of(tree) == {
+        Val(("Float", Val(CtValue.Float(value)))) -> value.as_f64()
+        Val(("Int", Val(CtValue.Int(value)))) -> value as F64
+        Val(("Number", Val(CtValue.Str(text)))) | Val(("Text", Val(CtValue.Str(text)))) -> {
+            trimmed := text.trim() // #4303
+            trimmed.parse<F64>().map_err(fn(_) -> decode_error("expected F32, found text {text.debug()}"))?
+        }
+        Val(("TypedText", Val(CtValue.Str(text)))) -> return Err(decode_error("expected F32, found text {text.debug()}"))
+        else -> return Err(decode_error("expected F32, found {datatree_kind_for(tree)}"))
+    }
+    if value.is_finite() && value >= -(F32.MAX as F64) && value <= F32.MAX as F64 -> Ok(CtValue.Float{value: CtFloat.f32(value as F32)})
+    else -> Err(decode_error("expected F32, found out-of-range Float"))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:520
+fn decode_decimal(tree: &CtValue) -> CtValue CtValue! {
+    parsed :: if variant_of(tree) == {
+        Val(("Number", Val(CtValue.Str(text)))) -> CtDecimal.from_json_number(text)
+        Val(("TypedText", Val(CtValue.Str(text)))) -> return Err(decode_error("expected Decimal, found text {text.debug()}"))
+        Val(("Text", Val(CtValue.Str(text)))) -> CtDecimal.from_str(text)
+        Val(("Int", Val(CtValue.Int(value)))) -> CtDecimal.from_str(value.to_string())
+        else -> return Err(decode_error("expected Decimal, found {datatree_kind_for(tree)}"))
+    }
+    parsed.map(fn(value) -> value.to_value()).map_err(fn(error) -> decode_error("expected Decimal: {error}"))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:549
+pub fn builtin_codec_kind(name: String) -> Int? {
+    if name == { "Date" -> Val(0) "LocalDate" -> Val(1) "LocalTime" -> Val(2) "DateTime" -> Val(3) "Duration" -> Val(4) "Decimal" -> Val(5) else -> None }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:561
+fn codec_field(value: &CtValue, expected: &[String], field: String) -> CtValue Err! {
+    if value == .Struct(type_name, fields) {
+        if !expected.contains(type_name) -> return Err("expected {expected.join(" or ")}, found {type_name}")
+        loop f in fields { if f.name == field -> return Ok(f.value) }
+        return Err("missing {type_name}.{field}")
+    }
+    Err("expected {expected.join(" or ")}, found non-struct value")
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:578
+fn codec_int_field(value: &CtValue, expected: &[String], field: String) -> Int Err! {
+    if codec_field(value, expected, field)? == {
+        .Int(value) -> Ok(value)
+        .BigInt(value) -> CtBigInt.from_str(value)?.try_i64().ok_or("{field} is outside the I64 range")
+        else -> Err("{field} is not an Int")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:595
+pub fn encode_builtin_codec(kind: Int, value: &CtValue) -> CtValue Err! {
+    text :: if kind == {
+        0 | 1 -> codec_rt.jet_codec_date_encode(codec_int_field(value, &[String]{"Date", "LocalDate"}, "year")?, codec_int_field(value, &[String]{"Date", "LocalDate"}, "month")?, codec_int_field(value, &[String]{"Date", "LocalDate"}, "day")?)
+        2 -> codec_rt.jet_codec_local_time_encode(codec_int_field(value, &[String]{"LocalTime"}, "hour")?, codec_int_field(value, &[String]{"LocalTime"}, "minute")?, codec_int_field(value, &[String]{"LocalTime"}, "second")?)
+        3 -> {
+            secs :: codec_int_field(value, &[String]{"DateTime"}, "secs")?
+            nanos :: codec_int_field(value, &[String]{"DateTime"}, "nanos")?
+            if nanos < 0 || nanos > U32.MAX as Int -> return Err("DateTime.nanos is outside the U32 range")
+            leap :: if codec_field(value, &[String]{"DateTime"}, "leap_second")? == { .Bool(value) -> value else -> return Err("DateTime.leap_second is not a Bool") }
+            codec_rt.jet_codec_datetime_encode(secs, nanos as U32, leap)
+        }
+        4 -> return Ok(json_variant("Int", Val(CtValue.Int{value: codec_rt.jet_codec_duration_encode(codec_int_field(value, &[String]{"Duration"}, "ns")?)})))
+        5 -> {
+            decimal :: CtDecimal.from_value(value)?
+            return Ok(json_variant("Text", Val(CtValue.Str{value: codec_rt.jet_codec_decimal_encode(&decimal)})))
+        }
+        else -> return Err("unknown builtin codec kind {kind}")
+    }
+    Ok(json_variant("Text", Val(CtValue.Str{value: text})))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:636
+fn decode_date(tree: &CtValue, type_name: String) -> CtValue CtValue! {
+    value :: if decode_string(tree)? == { .Str(value) -> value else -> panic("decode_string must return Str") }
+    codec_rt.jet_codec_date_decode(value).map(fn((year, month, day)) -> CtValue.Struct{type_name: type_name, fields: [NamedCtValue]{
+        NamedCtValue{name: "year", value: CtValue.Int{value: year}}, NamedCtValue{name: "month", value: CtValue.Int{value: month}}, NamedCtValue{name: "day", value: CtValue.Int{value: day}}
+    }}).map_err(fn(error) -> decode_error("expected Date: {error}"))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:652
+fn decode_local_time(tree: &CtValue) -> CtValue CtValue! {
+    value :: if decode_string(tree)? == { .Str(value) -> value else -> panic("decode_string must return Str") }
+    codec_rt.jet_codec_local_time_decode(value).map(fn((hour, minute, second)) -> CtValue.Struct{type_name: "LocalTime", fields: [NamedCtValue]{
+        NamedCtValue{name: "hour", value: CtValue.Int{value: hour}}, NamedCtValue{name: "minute", value: CtValue.Int{value: minute}}, NamedCtValue{name: "second", value: CtValue.Int{value: second}},
+        NamedCtValue{name: "millisecond", value: CtValue.Int{value: 0}}, NamedCtValue{name: "microsecond", value: CtValue.Int{value: 0}}, NamedCtValue{name: "nanosecond", value: CtValue.Int{value: 0}}
+    }}).map_err(fn(error) -> decode_error("expected LocalTime: {error}"))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:671
+fn decode_datetime(tree: &CtValue) -> CtValue CtValue! {
+    value :: if decode_string(tree)? == { .Str(value) -> value else -> panic("decode_string must return Str") }
+    codec_rt.jet_codec_datetime_decode(value).map(fn((secs, nanos, leap_second)) -> CtValue.Struct{type_name: "DateTime", fields: [NamedCtValue]{
+        NamedCtValue{name: "secs", value: CtValue.Int{value: secs}}, NamedCtValue{name: "nanos", value: CtValue.Int{value: nanos as Int}}, NamedCtValue{name: "leap_second", value: CtValue.Bool{value: leap_second}}
+    }}).map_err(fn(error) -> decode_error("expected DateTime: {error}"))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:687
+fn decode_duration(tree: &CtValue) -> CtValue CtValue! {
+    ns :: if decode_int(tree)? == {
+        .Int(value) -> value
+        .BigInt(value) -> CtBigInt.from_str(value).expect("canonical exact integer").try_i64().ok_or_else(fn() -> decode_error("expected Duration, found out-of-range Int"))?
+        else -> panic("decode_int must return an integer")
+    }
+    Ok(CtValue.Struct{type_name: "Duration", fields: [NamedCtValue]{NamedCtValue{name: "ns", value: CtValue.Int{value: codec_rt.jet_codec_duration_decode(ns)}}}})
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:705
+pub fn decode_builtin_codec(ty: &Type, tree: &CtValue) -> CtValue CtValue! {
+    if ty.without_user_tags() == {
+        .Named(name) if name == "Date" || name == "LocalDate" -> decode_date(tree, name)
+        .Named(name) if name == "LocalTime" -> decode_local_time(tree)
+        .Named(name) if name == "DateTime" -> decode_datetime(tree)
+        .Named(name) if name == "Duration" -> decode_duration(tree)
+        .Named(name) if name == "Decimal" -> decode_decimal(tree)
+        else -> Err(decode_error("no builtin codec for `{ty.name()}`"))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:724
+pub fn typed_decode_builtin_value(ty: &Type, tree: &CtValue) -> Result<CtValue, CtValue>? {
+    typed_decode_value_with(ty, tree, &fn(_, _) -> None)
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:733
+pub type DecodeNominalCallback = fn(&Type, &CtValue) -> Result<CtValue, CtValue>?
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:739
+pub fn typed_decode_value_with(ty: &Type, tree: &CtValue, decode_nominal: &DecodeNominalCallback) -> Result<CtValue, CtValue>? {
+    if ty == {
+        .Int -> Val(decode_int(tree))
+        .IntN(signed, bits) -> Val(decode_int_n(tree, signed, bits, ty.name()))
+        .InlineRange(base, lo, hi) -> typed_decode_value_with(&base, tree, decode_nominal).map(fn(result) -> result.and_then(fn(value) -> if value == {
+            .Int(n) -> inline_range_semantics.jet_inline_range_from_int(n, lo, hi).map(fn(value) -> CtValue.Int{value: value}).map_err(decode_error)
+            else -> Ok(value)
+        }))
+        .Float -> Val(decode_float(tree))
+        .Float32 -> Val(decode_f32(tree))
+        .Bool -> Val(decode_bool(tree))
+        .String -> Val(decode_string(tree))
+        .Char -> Val(decode_char(tree))
+        .Named(name) if name == "DataTree" || name == "Data" -> Val(Ok(tree.clone()))
+        .Named(name) if [String]{"I8", "I16", "I32", "I64", "I128", "U8", "U16", "U32", "U64", "U128"}.contains(name) -> {
+            (signed, bits) :: if name == { "I8" -> (true, 8) "I16" -> (true, 16) "I32" -> (true, 32) "I64" -> (true, 64) "I128" -> (true, 128) "U8" -> (false, 8) "U16" -> (false, 16) "U32" -> (false, 32) "U64" -> (false, 64) "U128" -> (false, 128) else -> panic("checked integer name") }
+            Val(decode_int_n(tree, signed, bits, name))
+        }
+        .Named(name) if name == "Date" || name == "LocalDate" -> Val(decode_date(tree, name))
+        .Named(name) if name == "LocalTime" -> Val(decode_local_time(tree))
+        .Named(name) if name == "DateTime" -> Val(decode_datetime(tree))
+        .Named(name) if name == "Duration" -> Val(decode_duration(tree))
+        .Named(name) if name == TYPE_DECIMAL -> Val(decode_decimal(tree))
+        .Option(inner) -> if variant_of(tree) == { Val(("Null", _)) -> Val(Ok(CtValue.absent(inner.clone()))) else -> typed_decode_value_with(&inner, tree, decode_nominal).map(fn(result) -> result.map(fn(value) -> CtValue.Present{value: ^value})) }
+        .List(inner) | .FixedList(inner, _) -> {
+            is_u8 :: if inner == { .IntN(false, 8) -> true .Named(name) -> name == "U8" else -> false }
+            if is_u8 && tree == .Bytes(bytes) {
+                if ty == .FixedList(_, len) && bytes.len() != len.require_literal() as Int -> return Val(Err(decode_error("expected a fixed list of length {len}, found {bytes.len()}")))
+                out := [CtValue]{}; out.reserve(bytes.len())
+                loop byte in bytes { out.push(CtValue.Int{value: byte as Int}) }
+                return Val(Ok(CtValue.List{values: ^out}))
+            }
+            items :: if variant_of(tree) == { Val(("Array", Val(CtValue.List(items)))) -> items else -> return Val(Err(decode_error("expected a list, found {datatree_kind_for(tree)}"))) }
+            if ty == .FixedList(_, len) && items.len() != len.require_literal() as Int -> return Val(Err(decode_error("expected a fixed list of length {len}, found {items.len()}")))
+            out := [CtValue]{}; out.reserve(items.len())
+            errors := [CtValue]{}
+            loop index in 0..items.len() {
+                result :: typed_decode_value_with(&inner, &items[index], decode_nominal) ?? return None
+                if result == { Ok(value) -> out.push(^value) Err(error) -> extend_decode_errors(&errors, decode_error_under("[{index}]", ^error)) }
+            }
+            Val(if errors.is_empty() -> Ok(CtValue.List{values: ^out}) else -> Err(CtValue.List{values: ^errors}))
+        }
+        .Map(key, _, value) if key == Type.String -> {
+            pairs :: object_pairs(tree) ?? return Val(Err(decode_error("expected an object, found {datatree_kind_for(tree)}")))
+            out := [String:CtValue]{}
+            errors := [CtValue]{}
+            loop pair in pairs {
+                result :: typed_decode_value_with(&value, &pair.value, decode_nominal) ?? return None
+                if result == { Ok(decoded) -> out[pair.name] = ^decoded Err(error) -> extend_decode_errors(&errors, decode_error_under(pair.name, ^error)) }
+            }
+            if !errors.is_empty() -> return Val(Err(CtValue.List{values: ^errors}))
+            keys := out.keys().collect(); keys.sort()
+            entries := [CtMapEntry]{}
+            loop key in keys { entries.push(CtMapEntry{key: CtKey.Str{value: key}, value: out[key]}) }
+            Val(Ok(CtValue.Map{entries: ^entries}))
+        }
+        .Map(_, _, _) -> Val(Err(decode_error("comptime maps require String keys")))
+        else -> decode_nominal(ty, tree)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:889
+fn typed_encode_u8(ty: &Type) -> Bool { if ty.without_user_tags() == { .IntN(false, 8) -> true .Named(name) -> name == "U8" else -> false } }
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:900
+fn typed_encode_scalar(value: &CtValue) -> CtValue Err! {
+    if value == {
+        .Int(n) -> Ok(json_variant("Int", Val(CtValue.Int{value: n})))
+        .BigInt(n) -> Ok(json_variant("Int", Val(CtValue.BigInt{value: n})))
+        .Float(n) -> Ok(json_variant("Float", Val(CtValue.Float{value: n})))
+        .Bool(b) -> Ok(json_variant("Bool", Val(CtValue.Bool{value: b})))
+        .Str(s) -> Ok(json_variant("Text", Val(CtValue.Str{value: s})))
+        .Char(c) -> Ok(json_variant("Text", Val(CtValue.Str{value: c.to_string()})))
+        else -> Err("typed codec encoder received {value.jet_show()}")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:914
+pub type EncodeNominalCallback = fn(&Type, &CtValue) -> CtValue? Err!
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:923
+pub fn encode_typed_value_with(ty: &Type, value: &CtValue, encode_nominal: &EncodeNominalCallback) -> Result<CtValue, String>? {
+    if ty.without_user_tags() == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> Val(typed_encode_scalar(value))
+        .InlineRange(base, _, _) | .Shared(base) | .Tagged(_, base) | .Quantity(base, _) -> encode_typed_value_with(&base, value, encode_nominal)
+        .Named(name) if name == TYPE_DATA || name == "DataTree" -> Val(Ok(value.clone()))
+        .Named(name) if [String]{"I8", "I16", "I32", "I64", "I128", "U8", "U16", "U32", "U64", "U128"}.contains(name) -> Val(typed_encode_scalar(value))
+        .Named(name) if builtin_codec_kind(name).is_some() -> Val(encode_builtin_codec(builtin_codec_kind(name).expect("checked codec kind"), value))
+        .Option(inner) -> if value == {
+            .Present(value) -> encode_typed_value_with(&inner, &value, encode_nominal) ?? Val(Err("typed codec encoder has no builtin encoder for {inner.name()}"))
+            .Failed(CtReport.Clean(_)) -> Val(Ok(json_variant("Null", None)))
+            .Failed(CtReport.Told(_)) -> Val(Err("typed codec encoder received a failed outcome"))
+            else -> Val(Err("typed codec encoder received a non-option value"))
+        }
+        .List(inner) | .FixedList(inner, _) -> {
+            if typed_encode_u8(&inner) {
+                if value == .Bytes(bytes) -> return Val(Ok(CtValue.Bytes{value: bytes.clone()}))
+                items :: if value == { .List(items) -> items else -> return Val(Err("typed codec encoder received a non-list value")) }
+                bytes := [U8]{}; bytes.reserve(items.len())
+                loop item in items {
+                    byte :: if item == { .Int(byte) -> byte else -> return Val(Err("typed codec [U8] contains a non-integer")) }
+                    if byte < 0 || byte > 255 -> return Val(Err("typed codec [U8] contains an out-of-range byte"))
+                    bytes.push(byte as U8)
+                }
+                return Val(Ok(CtValue.Bytes{value: ^bytes}))
+            }
+            items :: if value == { .List(items) -> items else -> return Val(Err("typed codec encoder received a non-list value")) }
+            encoded := [CtValue]{}; encoded.reserve(items.len())
+            loop item in items {
+                result :: encode_typed_value_with(&inner, &item, encode_nominal) ?? return Val(Err("typed codec encoder has no builtin encoder for {inner.name()}"))
+                if result == { Ok(item) -> encoded.push(^item) Err(error) -> return Val(Err(error)) }
+            }
+            Val(Ok(json_variant("Array", Val(CtValue.List{values: ^encoded}))))
+        }
+        .Map(key, _, value_ty) if key.without_user_tags() == Type.String -> {
+            entries :: if value == { .Map(entries) -> entries else -> return Val(Err("typed codec encoder received a non-map value")) }
+            fields := [NamedCtValue]{}; fields.reserve(entries.len())
+            loop entry in entries {
+                result :: encode_typed_value_with(&value_ty, &entry.value, encode_nominal) ?? return Val(Err("typed codec encoder has no builtin encoder for {value_ty.name()}"))
+                item :: if result == { Ok(item) -> item Err(error) -> return Val(Err(error)) }
+                fields.push(NamedCtValue{name: key_to_string(&entry.key), value: ^item})
+            }
+            Val(Ok(json_variant("Object", Val(CtValue.Struct{type_name: "JSONObject", fields: ^fields}))))
+        }
+        else -> if encode_nominal(ty.without_user_tags(), value) == { Ok(Val(encoded)) -> Val(Ok(encoded)) Ok(None) -> None Err(error) -> Val(Err(error)) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1047
+pub fn encode_typed_builtin_value(ty: &Type, value: &CtValue) -> Result<CtValue, String>? { encode_typed_value_with(ty, value, &fn(_, _) -> Ok(None)) }
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1056
+fn zero_value(ty: &Type) -> CtValue {
+    if ty == {
+        .Int | .IntN(_, _) -> CtValue.Int{value: 0}
+        .InlineRange(_, lo, _) -> CtValue.Int{value: lo}
+        .Float | .Float32 -> CtValue.Float{value: CtFloat.f64(0.0)}
+        .Bool -> CtValue.Bool{value: false}
+        .String -> CtValue.Str{value: ""}
+        .Char -> CtValue.Char{value: TEXT_NUL.chars()[0]}
+        .List(_) | .FixedList(_, _) -> CtValue.List{values: [CtValue]{}}
+        .Map(_, _, _) -> CtValue.Map{entries: [CtMapEntry]{}}
+        .Option(inner) -> CtValue.absent(inner.clone())
+        else -> CtValue.Unit
+    }
+}
+
+extend Interp {
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1076
+    fn encode_value(&self, value: &CtValue, span: Span) -> CtValue Diagnostic! {
+        if value_type_name(value) == Val(type_name) {
+            codec_key :: "{type_name}::encode"
+            func :: self.funcs.get(codec_key).or_else(fn() -> self.methods.get((type_name, "encode")))
+            if func == Val(func) && func.params.len() == 1 {
+                frame := [String:CtValue]{}
+                frame[func.params[0].name] = value.clone()
+                return self.call_func("{type_name}.encode", func, ^frame)
+            }
+        }
+        if encode_typed_builtin_value(&value.jet_type(), value) == Val(encoded) -> return encoded.map_err(fn(error) -> unsupported(error, span))
+        if value == {
+            .Int(n) -> Ok(json_variant("Int", Val(CtValue.Int{value: n})))
+            .BigInt(n) -> Ok(json_variant("Int", Val(CtValue.BigInt{value: n})))
+            .Float(n) -> Ok(json_variant("Float", Val(CtValue.Float{value: n})))
+            .Bool(b) -> Ok(json_variant("Bool", Val(CtValue.Bool{value: b})))
+            .Str(s) -> Ok(json_variant("Text", Val(CtValue.Str{value: s})))
+            .Char(c) -> Ok(json_variant("Text", Val(CtValue.Str{value: c.to_string()})))
+            .Bytes(bytes) -> Ok(json_variant("Bytes", Val(CtValue.Bytes{value: bytes.clone()})))
+            .List(values) -> {
+                out := [CtValue]{}
+                loop item in values { out.push(self.encode_value(&item, span)?) }
+                Ok(json_variant("Array", Val(CtValue.List{values: ^out})))
+            }
+            .Map(values) -> {
+                out := [NamedCtValue]{}
+                loop entry in values { out.push(NamedCtValue{name: key_to_string(&entry.key), value: self.encode_value(&entry.value, span)?}) }
+                Ok(json_variant("Object", Val(CtValue.Struct{type_name: "JSONObject", fields: ^out})))
+            }
+            .Present(value) -> self.encode_value(&value, span)
+            .Failed(CtReport.Clean(_)) | .Unit -> Ok(json_variant("Null", None))
+            .Struct(_, fields) -> {
+                out := [NamedCtValue]{}
+                loop field in fields { out.push(NamedCtValue{name: field.name, value: self.encode_value(&field.value, span)?}) }
+                Ok(json_variant("Object", Val(CtValue.Struct{type_name: "JSONObject", fields: ^out})))
+            }
+            .Enum(type_name, _, args) if type_name.starts_with("__JetUnion_") -> {
+                if args.is_empty() -> return Err(unsupported("this union has no payload", span))
+                self.encode_value(&args[0].value, span)
+            }
+            .Enum(_, _, _) | .Failed(CtReport.Told(_)) -> Err(unsupported("this value has no shared-evaluator Encode implementation", span))
+            .Closure(_) -> Err(unsupported("closures cannot be encoded", span))
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1161
+    fn decode_user_value(&self, name: String, tree: &CtValue) -> Result<CtValue, CtValue>? {
+        func :: self.funcs.get("{name}::decode").or_else(fn() -> self.methods.get((name, "decode"))) ?? return None
+        if func.params.len() != 1 -> return Val(Err(decode_error("`{name}.decode` has the wrong number of parameters")))
+        frame := [String:CtValue]{}
+        frame[func.params[0].name] = tree.clone()
+        Val(if self.call_func("{name}.decode", func, ^frame) == {
+            Ok(CtValue.Present(value)) -> Ok(value)
+            Ok(CtValue.Failed(CtReport.Told(error))) -> Err(error)
+            Ok(CtValue.Failed(CtReport.Clean(_))) -> Err(decode_error("`{name}.decode` returned no value"))
+            Ok(other) -> Err(decode_error("`{name}.decode` returned {other.jet_show()}"))
+            Err(diagnostic) -> Err(decode_error(diagnostic.what))
+        })
+    }
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1199
+    fn typed_decode_value(&self, ty: &Type, tree: &CtValue, span: Span) -> CtValue CtValue! {
+        if typed_decode_builtin_value(ty, tree) == Val(decoded) -> return decoded
+        if ty == {
+            .Union(members) -> {
+                name :: union_enum_name(members)
+                if self.decode_user_value(name, tree) == Val(decoded) -> return decoded
+                shape :: datatree_kind_for(tree)
+                member := None
+                loop candidate in members {
+                    if typed_union_wire_shapes(&candidate, self.structs, self.distinct_bases).contains(shape) { member = Val(candidate); break }
+                }
+                member :: member ?? return Err(decode_error("no matching union member"))
+                value :: self.typed_decode_value(&member, tree, span)?
+                Ok(CtValue.Enum{type_name: name, variant: union_member_tag(&member), args: [CtEnumArg]{CtEnumArg{label: None, value: ^value}}})
+            }
+            .Option(inner) -> if variant_of(tree) == { Val(("Null", _)) -> Ok(CtValue.absent(inner.clone())) else -> Ok(CtValue.Present{value: self.typed_decode_value(&inner, tree, span)?}) }
+            .List(inner) | .FixedList(inner, _) -> {
+                items :: if variant_of(tree) == { Val(("Array", Val(CtValue.List(items)))) -> items else -> return Err(decode_error("expected a list, found {datatree_kind_for(tree)}")) }
+                if ty == .FixedList(_, len) && items.len() != len.require_literal() as Int -> return Err(decode_error("expected a fixed list of length {len}, found {items.len()}"))
+                out := [CtValue]{}; out.reserve(items.len())
+                errors := [CtValue]{}
+                loop i in 0..items.len() {
+                    if self.typed_decode_value(&inner, &items[i], span) == { Ok(value) -> out.push(^value) Err(error) -> extend_decode_errors(&errors, decode_error_under("[{i}]", ^error)) }
+                }
+                if errors.is_empty() -> Ok(CtValue.List{values: ^out}) else -> Err(CtValue.List{values: ^errors})
+            }
+            .Map(key, _, value) if key == Type.String -> {
+                pairs :: object_pairs(tree) ?? return Err(decode_error("expected an object, found {datatree_kind_for(tree)}"))
+                out := [String:CtValue]{}
+                errors := [CtValue]{}
+                loop pair in pairs {
+                    if self.typed_decode_value(&value, &pair.value, span) == { Ok(decoded) -> out[pair.name] = ^decoded Err(error) -> extend_decode_errors(&errors, decode_error_under(pair.name, ^error)) }
+                }
+                if !errors.is_empty() -> return Err(CtValue.List{values: ^errors})
+                keys := out.keys().collect(); keys.sort()
+                entries := [CtMapEntry]{}
+                loop key in keys { entries.push(CtMapEntry{key: CtKey.Str{value: key}, value: out[key]}) }
+                Ok(CtValue.Map{entries: ^entries})
+            }
+            .Map(_, _, _) -> Err(decode_error("comptime maps require String keys"))
+            .Quantity(base, _) -> self.typed_decode_value(&base, tree, span)
+            .Named(name) -> if self.decode_user_value(name, tree) == { Val(decoded) -> decoded None -> self.typed_decode_struct(name, tree, span) }
+            else -> Err(decode_error("comptime can't decode `{ty.name()}` yet — this type isn't a struct, primitive, `[T]`, or `T?`"))
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1306
+    fn typed_decode_struct(&self, name: String, tree: &CtValue, span: Span) -> CtValue CtValue! {
+        sdef :: self.structs.get(name) ?? return Err(decode_error("comptime has no `{name}` struct registered to decode into"))
+        if variant_of(tree) != Val(("Object", json_payload(tree, "Object"))) -> return Err(decode_error("expected an object"))
+        style :: container_rename_all(&sdef.serde_markers)
+        deny :: serde_has(&sdef.serde_markers, MARKER_DENY_UNKNOWN_FIELDS)
+        has_flatten := false
+        loop f in sdef.fields { if serde_has(&f.serde_markers, MARKER_FLATTEN) { has_flatten = true; break } }
+        errors := [CtValue]{}
+        if deny && !has_flatten {
+            if object_pairs(tree) == Val(pairs) {
+                known := [String:Bool]{}
+                loop f in sdef.fields { if !serde_has(&f.serde_markers, MARKER_SKIP) -> known[field_wire_key(style, &f)] = true }
+                loop pair in pairs {
+                    if !known.contains_key(pair.name) {
+                        if decode_error_at(pair.name, "E2412: unknown field `{pair.name}`") == .List(items) { errors.extend(^items) }
+                    }
+                }
+            }
+        }
+        out_fields := [NamedCtValue]{}
+        loop f in sdef.fields {
+            if f.computed.is_some() -> continue
+            if serde_has(&f.serde_markers, MARKER_SKIP) { out_fields.push(NamedCtValue{name: f.name, value: self.field_default_value(&f, span)}); continue }
+            if serde_has(&f.serde_markers, MARKER_FLATTEN) {
+                v :: if self.typed_decode_value(&f.ty, tree, span) == {
+                    Ok(value) -> value
+                    Err(error) -> { extend_decode_errors(&errors, decode_error_under(f.name, ^error)); zero_value(&f.ty) }
+                }
+                out_fields.push(NamedCtValue{name: f.name, value: ^v}); continue
+            }
+            key :: field_wire_key(style, &f)
+            v :: if object_get(tree, key) == {
+                Val(cell) -> if self.typed_decode_value(&f.ty, &cell, span) == { Ok(value) -> value Err(error) -> { extend_decode_errors(&errors, decode_error_under(key, ^error)); zero_value(&f.ty) } }
+                None -> {
+                    if f.ty == .Option(inner) -> CtValue.absent(inner.clone())
+                    else if serde_marker(&f.serde_markers, MARKER_DEFAULT).is_some() -> self.field_default_value(&f, span)
+                    else -> {
+                        if decode_error_at(key, "E2410: missing required field `{f.name}`") == .List(items) { errors.extend(^items) }
+                        zero_value(&f.ty)
+                    }
+                }
+            }
+            out_fields.push(NamedCtValue{name: f.name, value: ^v})
+        }
+        if !errors.is_empty() -> return Err(CtValue.List{values: ^errors})
+        decoded :: CtValue.Struct{type_name: name, fields: ^out_fields}
+        if self.methods.get((name, "validate")) == Val(validate) {
+            param :: validate.params.first() ?? return Err(decode_error("generated validate method has no value parameter"))
+            frame := [String:CtValue]{}
+            frame[param.name] = decoded.clone()
+            return if self.call_func("{name}.validate", validate, ^frame) == {
+                Ok(CtValue.Present(value)) -> Ok(value)
+                Ok(CtValue.Failed(CtReport.Told(error))) -> Err(error)
+                Ok(other) -> Err(decode_error("generated validate method returned {other.jet_show()}"))
+                Err(diagnostic) -> Err(decode_error(diagnostic.what))
+            }
+        }
+        Ok(decoded)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1444
+    fn field_default_value(&self, f: &Field, _span: Span) -> CtValue {
+        if serde_marker(&f.serde_markers, MARKER_DEFAULT) == Val(m) {
+            // Prefer sema's baked value so this tier and AOT use identical defaults.
+            if m.ct == Val(v) -> return v.clone()
+            if m.expr_arg(0) == Val(expr) {
+                scope := [String:CtValue]{}
+                if self.eval(&expr, &scope) == Ok(v) -> return v
+            }
+        }
+        zero_value(&f.ty)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1464
+    fn migration_shapes(self: &Interp, style: String?, s: &StructDef, blocks: &[MigrationDecl]) -> [[String]] {
+        shape := [String:Bool]{}
+        loop f in s.fields { if !serde_has(&f.serde_markers, MARKER_SKIP) -> shape[field_wire_key(style, &f)] = true }
+        shapes := [[String]]{}; shapes.reserve(blocks.len())
+        loop block in blocks.iter().rev() {
+            loop op in block.ops {
+                if op == {
+                    .Add(field, _, _, _, _, _, _) -> _ :: shape.remove(migration_wire_key(style, s, field))
+                    .Remove(field, _) -> shape[migration_wire_key(style, s, field)] = true
+                    .Rename(from, _, to, _) -> { _ :: shape.remove(migration_wire_key(style, s, to)); shape[migration_wire_key(style, s, from)] = true }
+                    .Change(_, _, _, _, _, _, _, _, _) -> {}
+                }
+            }
+            keys := shape.keys().collect(); keys.sort(); shapes.push(^keys)
+        }
+        shapes.reverse(); shapes
+    }
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1501
+    fn apply_migration_step(&self, s: &StructDef, style: String?, block: &MigrationDecl, pairs: &[NamedCtValue], span: Span) -> Unit CtValue! {
+        loop op in block.ops {
+            if op == {
+                .Rename(from, _, to, _) -> {
+                    from_key :: migration_wire_key(style, s, from)
+                    to_key :: migration_wire_key(style, s, to)
+                    loop p in &pairs { if p.name == from_key -> p.name = to_key }
+                }
+                .Remove(field, _) -> { key :: migration_wire_key(style, s, field); pairs.retain(fn(p) -> p.name != key) }
+                .Add(field, _, _, _, _, _, default_fn) -> {
+                    key :: migration_wire_key(style, s, field)
+                    fn_name :: default_fn ?? return Err(decode_error("migration `add {field}` has no lowered default function"))
+                    func :: self.funcs.get(fn_name) ?? return Err(decode_error("migration `add {field}`'s default function `{fn_name}` isn't registered"))
+                    value :: self.call_func(fn_name, func, [String:CtValue]{}).map_err(fn(d) -> decode_error(d.what))?
+                    pairs.push(NamedCtValue{name: key, value: encode_ct_value(&value, self.structs)})
+                }
+                .Change{field, from_ty, conv_fn, ..} -> {
+                    key :: migration_wire_key(style, s, field)
+                    fn_name :: conv_fn ?? return Err(decode_error("migration `change {field}` has no lowered converter function"))
+                    func :: self.funcs.get(fn_name) ?? return Err(decode_error("migration `change {field}`'s converter function `{fn_name}` isn't registered"))
+                    pos :: pairs.iter().position(fn(p) -> p.name == key) ?? return Err(decode_error("E2410: missing required field `{field}`"))
+                    old_value :: self.typed_decode_value(&from_ty, &pairs[pos].value, span).map_err(fn(e) -> decode_error_under(key, ^e))?
+                    frame := [String:CtValue]{}
+                    if func.params.first() == Val(param) -> frame[param.name] = ^old_value
+                    new_value :: self.call_func(fn_name, func, ^frame).map_err(fn(d) -> decode_error(d.what))?
+                    pairs[pos].value = encode_ct_value(&new_value, self.structs)
+                }
+            }
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1594
+    fn typed_decode_top(&self, ty: &Type, tree: &CtValue, span: Span) -> CtValue CtValue! {
+        if self.typed_decode_value(ty, tree, span) == {
+            Ok(v) -> Ok(v)
+            Err(e) -> {
+                name :: if ty == { .Named(name) -> name else -> return Err(e) }
+                sdef :: self.structs.get(name) ?? return Err(e)
+                published := sdef.is_published_schema
+                loop derive in sdef.derives { if derive.0 == MARKER_PUBLISHED_SCHEMA { published = true; break } }
+                if !published || !sdef.type_params.is_empty() -> return Err(e)
+                blocks :: self.migrations.get(name) ?? return Err(e)
+                if blocks.is_empty() -> return Err(e)
+                style :: container_rename_all(&sdef.serde_markers)
+                shapes :: self.migration_shapes(style, &sdef, &blocks)
+                keys :: object_key_set(tree)
+                loop j in (0..shapes.len()).rev() {
+                    shape :: shapes[j]
+                    matches :: if shape.is_empty() -> keys.is_empty() else -> shape.len() == keys.len() && shape.iter().all(fn(k) -> keys.contains_key(k))
+                    if !matches -> continue
+                    pairs := object_pairs(tree) ?? return Err(e)
+                    loop i in j..shapes.len() { self.apply_migration_step(&sdef, style, &blocks[i], &pairs, span)? }
+                    new_tree :: rebuild_object(^pairs)
+                    return self.typed_decode_value(ty, &new_tree, span)
+                }
+                Err(e)
+            }
+        }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1658
+    fn eval_typed_decode(&self, module: String, text: String, ty: &Type, span: Span) -> CtValue Diagnostic! {
+        if module == "core.encoding.csv" -> return self.eval_typed_csv_decode(text, ty, span)
+        parsed :: if module == {
+            "core.encoding.json" -> JSONInterp.parse_json_typed_ordered(text).map_err(fn(e) -> json_parse_err_to_decode("JSON", JSONInterp.encoding_error_value(e)))
+            "core.encoding.toml" -> EncodingLite.toml_parse(text).map_err(fn(e) -> json_parse_err_to_decode("TOML", ^e))
+            "core.encoding.yaml" -> EncodingLite.yaml_parse(text).map_err(fn(e) -> json_parse_err_to_decode("YAML", ^e))
+            "core.encoding.xml" -> if EncodingLite.xml_parse(text) == { Ok(document) -> EncodingLite.xml_project_for_decode(&document) Err(e) -> Err(EncodingLite.xml_error_value(e)) }
+            else -> return Err(unsupported("`{module}.decode()`", span))
+        }
+        tree :: if parsed == { Ok(t) -> t Err(e) -> return Ok(CtValue.failed(^e)) }
+        Ok(if self.typed_decode_top(ty, &tree, span) == { Ok(value) -> CtValue.Present{value: ^value} Err(e) -> CtValue.failed(^e) })
+    }
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1701
+    fn eval_typed_csv_decode(&self, text: String, ty: &Type, span: Span) -> CtValue Diagnostic! {
+        rows :: if EncodingLite.csv_parse(text, ",", false, false) == { Ok(rows) -> rows Err(error) -> return Ok(CtValue.failed(decode_error(error))) }
+        (_, values) :: if typed_csv_values(self, ^rows, ty, span) == { Ok(result) -> result Err(error) -> return Ok(CtValue.failed(^error)) }
+        Ok(CtValue.Present{value: CtValue.List{values: ^values}})
+    }
+    // Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1720
+    fn eval_typed_csv_query(&self, text: String, sql: String, ty: &Type, span: Span) -> CtValue Diagnostic! {
+        rows :: if EncodingLite.csv_parse(text, ",", false, false) == { Ok(rows) -> rows Err(error) -> return Ok(CtValue.failed(decode_error(error))) }
+        fields :: if rows.is_empty() -> [String]{} else -> rows[0].fields
+        query :: if sql_query.parse_sql_query(sql) == { Ok(query) -> query Err(error) -> return Ok(CtValue.failed(decode_error("`core.encoding.csv.query()`: {error}"))) }
+        if sql_query.validate_sql_query_schema(&query, fn(field) -> fields.iter().any(fn(known) -> known == field), "`core.encoding.csv.query()`") == Err(error) -> return Ok(CtValue.failed(decode_error(error)))
+        (_, values) :: if typed_csv_values(self, ^rows, ty, span) == { Ok(result) -> result Err(error) -> return Ok(CtValue.failed(^error)) }
+        selected :: sql_query.select_sql_indices(values.len(), &query, fn(index, field) -> DataPipeline.query_row_field(&values[index], field).map(DataPipeline.query_cell_text))
+        out := [CtValue]{}
+        loop index in selected { out.push(values[index].clone()) }
+        Ok(CtValue.Present{value: CtValue.List{values: ^out}})
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1769
+pub fn json_parse_err_to_decode(codec: String, e: CtValue) -> CtValue {
+    line := 0
+    message := ""
+    if e == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == "line" {
+                line = if field.value == { .Int(n) -> n .Present(CtValue.Int(n)) -> n else -> 0 }
+                break
+            }
+        }
+        loop field in fields { if field.name == "reason" { message = if field.value == { .Str(s) -> s else -> "" }; break } }
+    }
+    decode_error("invalid {codec} (line {line}): {message}")
+}

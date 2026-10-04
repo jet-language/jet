@@ -1,0 +1,51 @@
+use jet_foundation.[Type, Span]
+use jet_codegen.Codegen.Functions03.[TirWorklist, TLocal, generic_method_instance_key, generic_free_function_instance_key, migration_shape_name, local_place, ambient_err_local]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:414-449 (no original inline tests)
+#Test("tir_worklist_preserves_reversed_source_order_and_lifo_extensions") {
+    work := TirWorklist<Int>.from_reversed([Int]{1, 2, 3})
+    assert_eq(&work.pop(), Val(1))
+    &work.extend([Int]{4, 5})
+    assert_eq(&work.pop(), Val(5))
+    assert_eq(&work.pop(), Val(4))
+    assert_eq(&work.pop(), Val(2))
+    assert_eq(&work.pop(), Val(3))
+    assert_eq(&work.pop(), None)
+    empty := TirWorklist<Int>.default()
+    assert_eq(&empty.pop(), None)
+    &empty.push(7)
+    assert_eq(&empty.pop(), Val(7))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1439-1453
+#Test("generic_instance_keys_retain_empty_arguments_and_exact_ascii_suffix") {
+    assert_eq(generic_method_instance_key(Type.Int, "parse", []), "Int::parse")
+    assert_eq(generic_free_function_instance_key("module::parse", []), "module::parse")
+    assert_eq(generic_method_instance_key(Type.Int, "parse", [Type]{Type.Named("mod::Row"), Type.String}), "Int::parse__generic__mod__Row__String")
+    assert_eq(generic_free_function_instance_key("parse", [Type]{Type.Named("Å")}), "parse__generic___")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:872-874
+#Test("migration_shapes_are_one_based") {
+    assert_eq(migration_shape_name(0), "v1")
+    assert_eq(migration_shape_name(9), "v10")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1104-1230
+#Test("local_storage_modifiers_preserve_user_identity_and_reserved_names") {
+    user :: TLocal.user("value")
+    assert(!user.generated)
+    assert(!user.deref)
+    assert(!user.mutable)
+    assert_eq(user.rust_name(), local_place("value"))
+    mutable :: user.as_mutable().through_ref()
+    assert(mutable.mutable)
+    assert(mutable.deref)
+    assert_eq(mutable.rust_place(), "(*" + local_place("value") + ")")
+    receiver :: TLocal.generated("self")
+    assert_eq(receiver.rust_name(), "self")
+    assert(TLocal.stm().mutable)
+    assert(ambient_err_local().generated)
+    persistent :: TLocal.persistent("value", "module", Type.Int)
+    assert(persistent.is_persistent())
+    assert_eq(persistent.persist_key, Val("module::value"))
+    assert_eq(persistent.rust_name(), local_place("value").to_uppercase())
+    assert_eq(persistent.address_lifetime, None)
+}

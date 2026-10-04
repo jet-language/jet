@@ -1,1720 +1,819 @@
-// PORT-PENDING 0472 crates-jet-codegen-src-codegen-tir-lower-call-args: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1-1716
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::AST::{AccessConvention, CtValue, Expr, Lambda, LambdaBody, Stmt, StrPart, Type};
-//RS use crate::Codegen::Cx;
-//RS use crate::Codegen::TIR::LowerEnv;
-//RS use crate::Codegen::TIR::TCallArg;
-//RS use crate::Codegen::TIR::TEnumArg;
-//RS use crate::Codegen::TIR::TEnumPayload;
-//RS use crate::Codegen::TIR::TExpr;
-//RS use crate::Codegen::TIR::TExprKind;
-//RS use crate::Codegen::TIR::TExternArg;
-//RS use crate::Codegen::TIR::TFnCoerce;
-//RS use crate::Codegen::TIR::TLocal;
-//RS use crate::Codegen::TIR::TStrPart;
-//RS use crate::Codegen::TIR::clone_env;
-//RS use crate::Codegen::TIR::lower_expr;
-//RS use crate::Codegen::TIR::lower_expr_as_mut_place;
-//RS use crate::Codegen::TIR::lower_lambda_expecting;
-//RS use crate::Codegen::TIR::lower_lambda_expecting_callable;
-//RS use crate::Codegen::TIR::lower_lambda_expecting_host_borrow_with_return;
-//RS use crate::Codegen::TIR::lower_stmts;
-//RS use crate::Codegen::TIR::unit_type;
-//RS use crate::Codegen::TIR::with_lambda_body_expr_cache;
-//RS use crate::Codegen::mangle;
-//RS use crate::Diagnostics::Span;
-//RS use crate::jet_generated_format as jet_format;
-//RS 
-//RS /// D-UNIONTYPE1=A: wrap a member value into the compiler-generated union enum.
-//RS pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type) -> TExpr {
-//RS     match want {
-//RS         Type::Union(members)
-//RS             if members.iter().any(|m| m == &value.ty) && !matches!(&value.ty, Type::Union(_)) =>
-//RS         {
-//RS             let enum_type = crate::AST::union_enum_name(members);
-//RS             let variant = crate::AST::union_member_tag(&value.ty);
-//RS             TExpr {
-//RS                 ty: want.clone(),
-//RS                 kind: TExprKind::EnumLit {
-//RS                     enum_type,
-//RS                     variant,
-//RS                     payload: TEnumPayload::Positional(vec![TEnumArg {
-//RS                         value,
-//RS                         clone: false,
-//RS                         boxed: false,
-//RS                     }]),
-//RS                 },
-//RS             }
-//RS         }
-//RS         _ => value,
-//RS     }
-//RS }
-//RS 
-//RS /// S48: `Val(value)` meeting a single-trait optional slot (`Adapter?`) holds
-//RS /// the trait value, not the concrete payload. Sema proved the payload
-//RS /// implements the trait; retype the optional so MIR boxes the payload once
-//RS /// (`lower_carrier_payload` -> `TraitBox`).
-//RS pub(crate) fn box_present_trait_payload(mut value: TExpr, want: &Type, cx: &Cx) -> TExpr {
-//RS     let Type::Option(slot) = want else {
-//RS         return value;
-//RS     };
-//RS     let trait_name = match slot.as_ref() {
-//RS         Type::TraitObject(names) if names.len() == 1 => &names[0],
-//RS         Type::Named(name) if cx.trait_names.contains(name) => name,
-//RS         _ => return value,
-//RS     };
-//RS     let boxes = match &value.kind {
-//RS         TExprKind::Present(payload) => match &payload.ty {
-//RS             Type::Named(concrete) | Type::Apply { name: concrete, .. } => {
-//RS                 concrete != trait_name && !cx.trait_names.contains(concrete)
-//RS             }
-//RS             _ => false,
-//RS         },
-//RS         _ => false,
-//RS     };
-//RS     if boxes {
-//RS         value.ty = Type::Option(Box::new(Type::TraitObject(vec![trait_name.clone()])));
-//RS     }
-//RS     value
-//RS }
-//RS 
-//RS /// Last expression-producing statement in a lambda block (mirrors sema tail rules).
-//RS /// Only the **final** statement may be a tail; an earlier `send()`/`call()` followed
-//RS /// by a loop is not a tail expression.
-//RS pub(super) fn lambda_block_tail<'a>(stmts: &'a [Stmt]) -> Option<(&'a [Stmt], &'a Stmt)> {
-//RS     let last_idx = stmts.len().checked_sub(1)?;
-//RS     let last = &stmts[last_idx];
-//RS     match last {
-//RS         Stmt::Return(Some(_), _) | Stmt::Expr(_) => Some((&stmts[..last_idx], last)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn callback_fn_type(ty: &Type) -> Option<&Type> {
-//RS     match ty {
-//RS         Type::Fn { .. } => Some(ty),
-//RS         Type::Tagged { marker, inner }
-//RS             if matches!(
-//RS                 marker,
-//RS                 crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi)
-//RS             ) && matches!(inner.as_ref(), Type::Fn { .. }) =>
-//RS         {
-//RS             Some(inner)
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn is_opaque_handle_type(ty: &Type, cx: &Cx) -> bool {
-//RS     match ty {
-//RS         Type::Named(name) => cx.opaque_handles.contains(name),
-//RS         Type::Tagged { inner, .. } => is_opaque_handle_type(inner, cx),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS fn invariant_arg_value(arg: &crate::AST::CallArg, construct: impl Into<String>) -> TExpr {
-//RS     TExpr {
-//RS         ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-//RS         kind: TExprKind::InvariantViolation {
-//RS             construct: construct.into(),
-//RS             span: arg.span,
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn invariant_call_arg(arg: &crate::AST::CallArg, construct: impl Into<String>) -> TCallArg {
-//RS     TCallArg {
-//RS         value: invariant_arg_value(arg, construct),
-//RS         template_items: None,
-//RS         borrow: false,
-//RS         mut_borrow: false,
-//RS         clone: false,
-//RS         arc_clone: false,
-//RS         fn_coerce: None,
-//RS         widen_to_vec: false,
-//RS         widen_to_union: None,
-//RS         box_as_trait: None,
-//RS     }
-//RS }
-//RS 
-//RS fn invariant_extern_arg(arg: &crate::AST::CallArg, construct: impl Into<String>) -> TExternArg {
-//RS     TExternArg {
-//RS         value: invariant_arg_value(arg, construct),
-//RS         clone: false,
-//RS         mut_borrow: false,
-//RS     }
-//RS }
-//RS 
-//RS fn template_never_expr(name: impl Into<String>) -> TExpr {
-//RS     TExpr {
-//RS         ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-//RS         kind: TExprKind::Local(TLocal::user(name)),
-//RS     }
-//RS }
-//RS 
-//RS /// D-NAME-SPLICE1=B: a template reference is `$name` (or a plain template
-//RS /// binding); the local is the binding under either spelling.
-//RS fn template_reference_expr(name: &str, env: &LowerEnv) -> TExpr {
-//RS     let bare_name = name.trim_start_matches('$');
-//RS     let marked_name = format!("${bare_name}");
-//RS     let local_name = if env.locals.contains_key(name) {
-//RS         name
-//RS     } else if env.locals.contains_key(bare_name) {
-//RS         bare_name
-//RS     } else if env.locals.contains_key(&marked_name) {
-//RS         marked_name.as_str()
-//RS     } else {
-//RS         name
-//RS     };
-//RS     let mut value = template_never_expr(local_name);
-//RS     if let Some(ty) = env.ty_of(local_name) {
-//RS         value.ty = ty;
-//RS         value.kind = TExprKind::Local(env.local_of(local_name));
-//RS     }
-//RS     value
-//RS }
-//RS 
-//RS fn template_expr_root(expr: &Expr) -> Option<&str> {
-//RS     match expr {
-//RS         Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name),
-//RS         Expr::Field(base, ..) | Expr::OptField { base, .. } => template_expr_root(base),
-//RS         Expr::Paren(inner, _) => template_expr_root(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn lower_template_expr(
-//RS     expr: &Expr,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS     template_vars: &std::collections::HashSet<String>,
-//RS ) -> TExpr {
-//RS     match expr {
-//RS         Expr::ComptimeName { name, .. } if cx.const_values.contains_key(name) => {
-//RS             lower_expr(expr, cx, env)
-//RS         }
-//RS         Expr::ComptimeName { value: Some(_), .. } => lower_expr(expr, cx, env),
-//RS         Expr::ComptimeName { name, .. } => template_reference_expr(name, env),
-//RS         Expr::Ident(name, _) if name.starts_with('$') => template_reference_expr(name, env),
-//RS         Expr::Ident(name, _) if template_vars.contains(name) => template_reference_expr(name, env),
-//RS         Expr::Field(base, member, _)
-//RS             if member.starts_with('$')
-//RS                 || template_expr_root(base)
-//RS                     .is_some_and(|name| template_vars.contains(name.trim_start_matches('$'))) =>
-//RS         {
-//RS             let recv = lower_template_expr(base, cx, env, template_vars);
-//RS             TExpr {
-//RS                 ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-//RS                 kind: TExprKind::Field {
-//RS                     recv: Box::new(recv),
-//RS                     field: member.trim_start_matches('$').to_string(),
-//RS                     boxed: false,
-//RS                 },
-//RS             }
-//RS         }
-//RS         Expr::Str(parts, _) => TExpr {
-//RS             ty: Type::String,
-//RS             kind: TExprKind::StrLit(
-//RS                 parts
-//RS                     .iter()
-//RS                     .map(|part| match part {
-//RS                         StrPart::Lit(text) => TStrPart::Lit(text.clone()),
-//RS                         StrPart::Interp(value, format) => TStrPart::Interp(
-//RS                             lower_template_expr(value, cx, env, template_vars),
-//RS                             format.clone(),
-//RS                         ),
-//RS                     })
-//RS                     .collect(),
-//RS             ),
-//RS         },
-//RS         Expr::ListLit(values, _) => TExpr {
-//RS             ty: Type::List(Box::new(Type::Named(crate::Syntax::TYPE_NEVER.to_string()))),
-//RS             kind: TExprKind::ListLit(
-//RS                 values
-//RS                     .iter()
-//RS                     .map(|value| lower_template_expr(value, cx, env, template_vars))
-//RS                     .collect(),
-//RS             ),
-//RS         },
-//RS         Expr::Paren(inner, _) => lower_template_expr(inner, cx, env, template_vars),
-//RS         _ => lower_expr(expr, cx, env),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_template_loop_expr(
-//RS     expr: &Expr,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS     template_vars: &std::collections::HashSet<String>,
-//RS ) -> TExpr {
-//RS     if let Expr::ListLit(values, _) = expr {
-//RS         if let Some(items) = values
-//RS             .iter()
-//RS             .map(|value| {
-//RS                 let name = match value {
-//RS                     Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => name,
-//RS                     _ => return None,
-//RS                 };
-//RS                 Some(TExpr {
-//RS                     ty: Type::String,
-//RS                     kind: TExprKind::CtLit(CtValue::Str(name.trim_start_matches('$').to_string())),
-//RS                 })
-//RS             })
-//RS             .collect::<Option<Vec<_>>>()
-//RS         {
-//RS             return TExpr {
-//RS                 ty: Type::List(Box::new(Type::String)),
-//RS                 kind: TExprKind::ListLit(items),
-//RS             };
-//RS         }
-//RS     }
-//RS     lower_template_expr(expr, cx, env, template_vars)
-//RS }
-//RS 
-//RS struct TemplateMarker {
-//RS     start: usize,
-//RS     end: usize,
-//RS     value: bool,
-//RS }
-//RS 
-//RS fn scan_template_markers(
-//RS     source: &str,
-//RS     template_vars: &std::collections::HashSet<String>,
-//RS ) -> Vec<TemplateMarker> {
-//RS     fn ident(byte: u8) -> bool {
-//RS         byte.is_ascii_alphanumeric() || byte == b'_'
-//RS     }
-//RS     fn name_context(bytes: &[u8], start: usize) -> bool {
-//RS         let mut end = start;
-//RS         while end > 0 && bytes[end - 1].is_ascii_whitespace() {
-//RS             end -= 1;
-//RS         }
-//RS         if end > 0 && bytes[end - 1] == b'.' {
-//RS             return true;
-//RS         }
-//RS         let word_end = end;
-//RS         while end > 0 && ident(bytes[end - 1]) {
-//RS             end -= 1;
-//RS         }
-//RS         std::str::from_utf8(&bytes[end..word_end]).is_ok_and(|word| {
-//RS             matches!(
-//RS                 word,
-//RS                 "fn" | "impl" | "struct" | "enum" | "type" | "trait" | "module" | "const"
-//RS             )
-//RS         })
-//RS     }
-//RS     fn skip_quoted(bytes: &[u8], mut at: usize, quote: u8) -> usize {
-//RS         at += 1;
-//RS         while at < bytes.len() {
-//RS             match bytes[at] {
-//RS                 b'\\' => at = at.saturating_add(2),
-//RS                 current if current == quote => return at + 1,
-//RS                 _ => at += 1,
-//RS             }
-//RS         }
-//RS         bytes.len()
-//RS     }
-//RS     fn scan_code(
-//RS         bytes: &[u8],
-//RS         mut at: usize,
-//RS         stop_at_brace: bool,
-//RS         value_context: bool,
-//RS         template_vars: &std::collections::HashSet<String>,
-//RS         out: &mut Vec<TemplateMarker>,
-//RS     ) -> usize {
-//RS         while at < bytes.len() {
-//RS             match bytes[at] {
-//RS                 b'/' if bytes.get(at + 1) == Some(&b'/') => {
-//RS                     at += 2;
-//RS                     while at < bytes.len() && bytes[at] != b'\n' {
-//RS                         at += 1;
-//RS                     }
-//RS                 }
-//RS                 b'/' if bytes.get(at + 1) == Some(&b'*') => {
-//RS                     at += 2;
-//RS                     let mut nested = 1usize;
-//RS                     while at < bytes.len() && nested > 0 {
-//RS                         if bytes.get(at..at + 2).is_some_and(|pair| pair == b"/*") {
-//RS                             nested += 1;
-//RS                             at += 2;
-//RS                         } else if bytes.get(at..at + 2).is_some_and(|pair| pair == b"*/") {
-//RS                             nested -= 1;
-//RS                             at += 2;
-//RS                         } else {
-//RS                             at += 1;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 b'"' => {
-//RS                     at = scan_string(bytes, at, template_vars, out);
-//RS                 }
-//RS                 b'\'' => {
-//RS                     at = skip_quoted(bytes, at, b'\'');
-//RS                 }
-//RS                 b'{' if value_context => {
-//RS                     at = scan_code(bytes, at + 1, true, true, template_vars, out);
-//RS                 }
-//RS                 b'{' => at += 1,
-//RS                 b'}' if stop_at_brace => {
-//RS                     return at + 1;
-//RS                 }
-//RS                 byte if ident(byte) => {
-//RS                     let start = at;
-//RS                     at += 1;
-//RS                     while at < bytes.len() && ident(bytes[at]) {
-//RS                         at += 1;
-//RS                     }
-//RS                     let name = std::str::from_utf8(&bytes[start..at]).ok();
-//RS                     let mut marker_end = at;
-//RS                     let mut field_chain = false;
-//RS                     if name.is_some_and(|name| template_vars.contains(name)) {
-//RS                         loop {
-//RS                             let Some(&b'.') = bytes.get(marker_end) else {
-//RS                                 break;
-//RS                             };
-//RS                             let field_start = marker_end + 1;
-//RS                             let Some(&first) = bytes.get(field_start) else {
-//RS                                 break;
-//RS                             };
-//RS                             if first == b'$' || !ident(first) {
-//RS                                 break;
-//RS                             }
-//RS                             let mut field_end = field_start + 1;
-//RS                             while field_end < bytes.len() && ident(bytes[field_end]) {
-//RS                                 field_end += 1;
-//RS                             }
-//RS                             marker_end = field_end;
-//RS                             field_chain = true;
-//RS                         }
-//RS                     }
-//RS                     if let Some(name) = name {
-//RS                         if template_vars.contains(name)
-//RS                             && (marker_end != at || bytes.get(at) != Some(&b'.'))
-//RS                         {
-//RS                             out.push(TemplateMarker {
-//RS                                 start,
-//RS                                 end: marker_end,
-//RS                                 value: value_context || field_chain,
-//RS                             });
-//RS                         }
-//RS                     }
-//RS                     at = marker_end;
-//RS                 }
-//RS                 // D-NAME-SPLICE1=B: `$name` may splice a template binding;
-//RS                 // `template_source` keeps only the splices of bound names.
-//RS                 b'$' => {
-//RS                     let start = at;
-//RS                     at += 1;
-//RS                     while at < bytes.len() && ident(bytes[at]) {
-//RS                         at += 1;
-//RS                     }
-//RS                     if at > start + 1 {
-//RS                         out.push(TemplateMarker {
-//RS                             start,
-//RS                             end: at,
-//RS                             value: value_context || !name_context(bytes, start),
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 _ => at += 1,
-//RS             }
-//RS         }
-//RS         bytes.len()
-//RS     }
-//RS     fn scan_string(
-//RS         bytes: &[u8],
-//RS         mut at: usize,
-//RS         template_vars: &std::collections::HashSet<String>,
-//RS         out: &mut Vec<TemplateMarker>,
-//RS     ) -> usize {
-//RS         at += 1;
-//RS         while at < bytes.len() {
-//RS             match bytes[at] {
-//RS                 b'\\' => at = at.saturating_add(2),
-//RS                 b'"' => return at + 1,
-//RS                 b'{' if bytes.get(at + 1) == Some(&b'{') => {
-//RS                     at += 2;
-//RS                     while at < bytes.len() {
-//RS                         if bytes.get(at..at + 2).is_some_and(|pair| pair == b"}}") {
-//RS                             at += 2;
-//RS                             break;
-//RS                         }
-//RS                         at += 1;
-//RS                     }
-//RS                 }
-//RS                 b'{' => {
-//RS                     at = scan_code(bytes, at + 1, true, true, template_vars, out);
-//RS                 }
-//RS                 _ => at += 1,
-//RS             }
-//RS         }
-//RS         bytes.len()
-//RS     }
-//RS     let mut markers = Vec::new();
-//RS     scan_code(
-//RS         source.as_bytes(),
-//RS         0,
-//RS         false,
-//RS         false,
-//RS         template_vars,
-//RS         &mut markers,
-//RS     );
-//RS     markers
-//RS }
-//RS 
-//RS fn template_marker_base(source: &str, start: usize) -> Option<String> {
-//RS     let before = source.get(..start)?.strip_suffix('.')?;
-//RS     let end = before.len();
-//RS     let begin = before
-//RS         .char_indices()
-//RS         .rev()
-//RS         .find_map(|(index, character)| {
-//RS             (!character.is_ascii_alphanumeric() && character != '_')
-//RS                 .then_some(index + character.len_utf8())
-//RS         })
-//RS         .unwrap_or(0);
-//RS     (begin < end).then(|| before[begin..end].to_string())
-//RS }
-//RS 
-//RS fn template_path_expr(
-//RS     path: &str,
-//RS     env: &LowerEnv,
-//RS     template_vars: &std::collections::HashSet<String>,
-//RS ) -> Option<TExpr> {
-//RS     let mut segments = path.split('.');
-//RS     let root_segment = segments.next()?;
-//RS     let explicit_root = root_segment.starts_with('$');
-//RS     let root = root_segment.trim_start_matches('$');
-//RS     if root.is_empty()
-//RS         || (!explicit_root
-//RS             && !template_vars.contains(root)
-//RS             && !env.locals.contains_key(root)
-//RS             && !env.locals.contains_key(&format!("${root}")))
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let root_name = if explicit_root {
-//RS         format!("${root}")
-//RS     } else {
-//RS         root.to_string()
-//RS     };
-//RS     let mut value = template_reference_expr(&root_name, env);
-//RS     for field in segments {
-//RS         let field = field.trim_start_matches('$');
-//RS         if field.is_empty() {
-//RS             return None;
-//RS         }
-//RS         value = TExpr {
-//RS             ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-//RS             kind: TExprKind::Field {
-//RS                 recv: Box::new(value),
-//RS                 field: field.to_string(),
-//RS                 boxed: false,
-//RS             },
-//RS         };
-//RS     }
-//RS     Some(value)
-//RS }
-//RS 
-//RS fn template_marker_expr(
-//RS     source: &str,
-//RS     marker: &TemplateMarker,
-//RS     cx: &Cx,
-//RS     env: &LowerEnv,
-//RS     template_vars: &std::collections::HashSet<String>,
-//RS ) -> TExpr {
-//RS     let marker_text = &source[marker.start..marker.end];
-//RS     if marker_text.contains('.') {
-//RS         if let Some(value) = template_path_expr(marker_text, env, template_vars) {
-//RS             return value;
-//RS         }
-//RS     }
-//RS     let marker_name = marker_text.strip_prefix('$').unwrap_or(marker_text);
-//RS     if template_vars.contains(marker_name) {
-//RS         return template_reference_expr(marker_name, env);
-//RS     }
-//RS     if let Some(base) = template_marker_base(source, marker.start) {
-//RS         let marked_base = format!("${base}");
-//RS         if template_vars.contains(&base)
-//RS             || env.locals.contains_key(&base)
-//RS             || env.locals.contains_key(&marked_base)
-//RS         {
-//RS             return TExpr {
-//RS                 ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-//RS                 kind: TExprKind::Field {
-//RS                     recv: Box::new(template_reference_expr(&base, env)),
-//RS                     field: source[marker.start + 1..marker.end].to_string(),
-//RS                     boxed: false,
-//RS                 },
-//RS             };
-//RS         }
-//RS     }
-//RS     let _ = cx;
-//RS     template_reference_expr(&source[marker.start..marker.end], env)
-//RS }
-//RS 
-//RS /// D-NAME-SPLICE1=B: `$name` splices a template binding. A `$` word naming
-//RS /// no binding (`$build`), or read as a member of a bound value
-//RS /// (`field.$name`), is a compiler fact and stays in the source.
-//RS fn template_splice_is_bound(
-//RS     source: &str,
-//RS     marker: &TemplateMarker,
-//RS     env: &LowerEnv,
-//RS     template_vars: &std::collections::HashSet<String>,
-//RS ) -> bool {
-//RS     let Some(bare) = source[marker.start..marker.end].strip_prefix('$') else {
-//RS         return true;
-//RS     };
-//RS     let bound = |name: &str| template_vars.contains(name) || env.locals.contains_key(name);
-//RS     bound(bare)
-//RS         && !template_marker_base(source, marker.start).is_some_and(|base| bound(base.as_str()))
-//RS }
-//RS 
-//RS fn template_source(
-//RS     span: Span,
-//RS     cx: &Cx,
-//RS     env: &LowerEnv,
-//RS     template_vars: &std::collections::HashSet<String>,
-//RS ) -> Option<crate::Comptime::TemplateSource<TExpr>> {
-//RS     let source = cx.src.get(span.start..span.end)?.to_string();
-//RS     let holes = scan_template_markers(&source, template_vars)
-//RS         .into_iter()
-//RS         .filter(|marker| template_splice_is_bound(&source, marker, env, template_vars))
-//RS         .map(|marker| crate::Comptime::TemplateHole {
-//RS             start: marker.start,
-//RS             end: marker.end,
-//RS             expr: Box::new(template_marker_expr(
-//RS                 &source,
-//RS                 &marker,
-//RS                 cx,
-//RS                 env,
-//RS                 template_vars,
-//RS             )),
-//RS             kind: if marker.value {
-//RS                 crate::Comptime::TemplateHoleKind::Value
-//RS             } else {
-//RS                 crate::Comptime::TemplateHoleKind::Name
-//RS             },
-//RS             span: Span::new(span.start + marker.start, span.start + marker.end),
-//RS         })
-//RS         .collect();
-//RS     Some(crate::Comptime::TemplateSource {
-//RS         source,
-//RS         holes,
-//RS         span,
-//RS     })
-//RS }
-//RS 
-//RS fn item_span(item: &crate::AST::Item, cx: &Cx) -> Span {
-//RS     match item {
-//RS         crate::AST::Item::Func(item) => item.span,
-//RS         crate::AST::Item::Struct(item) => item.span,
-//RS         crate::AST::Item::Enum(item) => item.span,
-//RS         crate::AST::Item::Distinct(item) => item.span,
-//RS         crate::AST::Item::TypeAlias(item) => item.span,
-//RS         crate::AST::Item::UnitFamily(item) => item.span,
-//RS         crate::AST::Item::Trait(item) => item.span,
-//RS         crate::AST::Item::Tag(item) => item.span,
-//RS         crate::AST::Item::EffectDecl(item) => item.span,
-//RS         crate::AST::Item::Impl(item) => item.span,
-//RS         crate::AST::Item::Const(item) => item.span,
-//RS         crate::AST::Item::Test(item) => item.span,
-//RS         crate::AST::Item::ExternRust(item) => item.span,
-//RS         crate::AST::Item::Module(item) => item.span,
-//RS         crate::AST::Item::CModule(item) => item.span,
-//RS         crate::AST::Item::CodeModule(item) => item.span,
-//RS         crate::AST::Item::ErrorConv(item) => {
-//RS             let line_start = cx
-//RS                 .src
-//RS                 .get(..item.from_span.start)
-//RS                 .and_then(|source| source.rfind('\n'))
-//RS                 .map_or(0, |index| index + 1);
-//RS             let start = cx
-//RS                 .src
-//RS                 .get(line_start..item.from_span.start)
-//RS                 .and_then(|line| line.rfind("impl "))
-//RS                 .map_or(item.from_span.start, |offset| line_start + offset);
-//RS             Span::new(start, item.body_span.end)
-//RS         }
-//RS         crate::AST::Item::Migration(item) => item.span,
-//RS         crate::AST::Item::ProtocolDecl(item) => item.span,
-//RS         crate::AST::Item::UserDerive(item) => item.span,
-//RS         crate::AST::Item::TemplateLoop(item) => item.span,
-//RS         crate::AST::Item::GenericModule(item) => item.span,
-//RS         crate::AST::Item::ModuleAlias(item) => item.span,
-//RS         crate::AST::Item::MarkerDecl(item) => item.span,
-//RS         crate::AST::Item::FactDecl(item) => item.span,
-//RS     }
-//RS }
-//RS 
-//RS fn lower_template_stmt(
-//RS     statement: &Stmt,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS     template_vars: &std::collections::HashSet<String>,
-//RS ) -> Vec<Box<crate::Comptime::TemplateItem<TExpr>>> {
-//RS     match statement {
-//RS         Stmt::Val(binding) if !binding.name.is_empty() && binding.pattern.is_none() => {
-//RS             let name = binding.name.clone();
-//RS             let value = lower_template_expr(&binding.init, cx, env, template_vars);
-//RS             env.bind(&name, TLocal::user(name.clone()), Some(value.ty.clone()));
-//RS             vec![Box::new(crate::Comptime::TemplateItem::Statement(
-//RS                 crate::Comptime::TemplateStatement::Binding {
-//RS                     name,
-//RS                     value: Box::new(value),
-//RS                     span: statement.span(),
-//RS                 },
-//RS             ))]
-//RS         }
-//RS         Stmt::Expr(expr) => {
-//RS             vec![Box::new(crate::Comptime::TemplateItem::Statement(
-//RS                 crate::Comptime::TemplateStatement::Expr {
-//RS                     value: Box::new(lower_template_expr(expr, cx, env, template_vars)),
-//RS                     span: statement.span(),
-//RS                 },
-//RS             ))]
-//RS         }
-//RS         Stmt::ComptimeIf {
-//RS             cond,
-//RS             then_body,
-//RS             else_body,
-//RS             span,
-//RS             selected_then,
-//RS             ..
-//RS         } => {
-//RS             let then_body = lower_template_stmts(then_body, cx, env, template_vars);
-//RS             let else_body = match else_body {
-//RS                 Some(body) => lower_template_stmts(body, cx, env, template_vars),
-//RS                 None => Vec::new(),
-//RS             };
-//RS             vec![Box::new(crate::Comptime::TemplateItem::If {
-//RS                 condition: Box::new(lower_template_expr(cond, cx, env, template_vars)),
-//RS                 then_body,
-//RS                 else_body,
-//RS                 selected: *selected_then,
-//RS                 span: *span,
-//RS             })]
-//RS         }
-//RS         Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Unsafe { body, .. } => lower_template_stmts(body, cx, env, template_vars),
-//RS         _ => vec![Box::new(crate::Comptime::TemplateItem::Invalid {
-//RS             construct: "unsupported checked template statement shape".to_string(),
-//RS             span: statement.span(),
-//RS         })],
-//RS     }
-//RS }
-//RS 
-//RS fn lower_template_stmts(
-//RS     statements: &[Stmt],
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS     template_vars: &std::collections::HashSet<String>,
-//RS ) -> Vec<Box<crate::Comptime::TemplateItem<TExpr>>> {
-//RS     statements
-//RS         .iter()
-//RS         .flat_map(|statement| lower_template_stmt(statement, cx, env, template_vars))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn lower_template_items(
-//RS     items: &[crate::AST::DeriveBodyItem],
-//RS     body_span: Span,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS     template_vars: &std::collections::HashSet<String>,
-//RS ) -> crate::Comptime::TemplateBody<TExpr> {
-//RS     let mut lowered = Vec::new();
-//RS     for item in items {
-//RS         match item {
-//RS             crate::AST::DeriveBodyItem::Item(item) => {
-//RS                 let span = item_span(item, cx);
-//RS                 let lowered_item = match template_source(span, cx, env, template_vars) {
-//RS                     Some(source) => crate::Comptime::TemplateItem::Item(source),
-//RS                     None => crate::Comptime::TemplateItem::Invalid {
-//RS                         construct: "template item source span is outside the source file"
-//RS                             .to_string(),
-//RS                         span,
-//RS                     },
-//RS                 };
-//RS                 lowered.push(Box::new(lowered_item));
-//RS             }
-//RS             crate::AST::DeriveBodyItem::Stmt(statement) => {
-//RS                 lowered.extend(lower_template_stmt(statement, cx, env, template_vars));
-//RS             }
-//RS             crate::AST::DeriveBodyItem::Loop {
-//RS                 var,
-//RS                 source,
-//RS                 body,
-//RS                 span,
-//RS                 ..
-//RS             } => {
-//RS                 let source = lower_template_loop_expr(source, cx, env, template_vars);
-//RS                 let element_ty = match &source.ty {
-//RS                     Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-//RS                         Some(inner.as_ref().clone())
-//RS                     }
-//RS                     _ => None,
-//RS                 };
-//RS                 let mut loop_env = clone_env(env);
-//RS                 loop_env.bind(var, TLocal::user(var.clone()), element_ty);
-//RS                 let mut nested_vars = template_vars.clone();
-//RS                 nested_vars.insert(var.clone());
-//RS                 let body = lower_template_items(body, *span, cx, &mut loop_env, &nested_vars).items;
-//RS                 lowered.push(Box::new(crate::Comptime::TemplateItem::Loop {
-//RS                     var: var.clone(),
-//RS                     source: Box::new(source),
-//RS                     body,
-//RS                     span: *span,
-//RS                 }));
-//RS             }
-//RS         }
-//RS     }
-//RS     crate::Comptime::TemplateBody {
-//RS         items: lowered,
-//RS         span: body_span,
-//RS     }
-//RS }
-//RS 
-//RS /// Recognize the raw `Ordering` forms accepted by a binary sort comparator.
-//RS fn is_ordering_comparator_expr(expr: &Expr) -> bool {
-//RS     match expr {
-//RS         Expr::Paren(inner, _) => is_ordering_comparator_expr(inner),
-//RS         Expr::Binary(crate::AST::BinOp::Compare, ..) => true,
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } if method == "compare" && args.len() == 1 => {
-//RS             let _ = receiver;
-//RS             true
-//RS         }
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } if method == "then" && args.len() == 1 => is_ordering_comparator_expr(receiver),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn is_ordering_comparator_lambda(lam: &Lambda) -> bool {
-//RS     if lam.params.len() != 2 {
-//RS         return false;
-//RS     }
-//RS     let tail = match &lam.body {
-//RS         LambdaBody::Expr(expr) => Some(expr.as_ref()),
-//RS         LambdaBody::Block(stmts) => stmts.iter().rev().find_map(|stmt| match stmt {
-//RS             Stmt::Return(Some(expr), _) | Stmt::Expr(expr) => Some(expr),
-//RS             _ => None,
-//RS         }),
-//RS     };
-//RS     tail.is_some_and(is_ordering_comparator_expr)
-//RS }
-//RS 
-//RS /// Lower an inline binary Ordering comparator through the same host-borrow
-//RS /// lambda boundary as named collection callbacks. This keeps the checked raw
-//RS /// return slot visible to TIR instead of allowing the ambient failure carrier
-//RS /// to turn the callback into a fallible adapter.
-//RS fn lower_ordering_comparator_callback(
-//RS     lam: &Lambda,
-//RS     cx: &Cx,
-//RS     env: &LowerEnv,
-//RS     params: &[Type],
-//RS ) -> TExpr {
-//RS     let ordering = Type::Named(crate::Syntax::TYPE_ORDERING.to_string());
-//RS     let lowered =
-//RS         lower_lambda_expecting_host_borrow_with_return(lam, cx, env, params, false, &ordering);
-//RS     TExpr {
-//RS         ty: Type::Fn {
-//RS             params: params.to_vec(),
-//RS             ret: Some(Box::new(ordering)),
-//RS             effect_bound: None,
-//RS             param_contract: None,
-//RS             call_metadata: None,
-//RS             return_view_provenance: None,
-//RS         },
-//RS         kind: TExprKind::Lambda(Box::new(lowered)),
-//RS     }
-//RS }
-//RS 
-//RS /// Lower a named function, or an inline binary comparator, for a collection
-//RS /// adapter's callback ABI. Ordinary function values carry their effective
-//RS /// failure result; raw comparator slots keep their checked return shape.
-//RS pub(crate) fn lower_named_collection_callback(
-//RS     expr: &Expr,
-//RS     cx: &Cx,
-//RS     env: &LowerEnv,
-//RS     effective: bool,
-//RS     params: Option<&[Type]>,
-//RS ) -> Option<TExpr> {
-//RS     if let (Expr::Lambda(lam), Some(params)) = (expr, params) {
-//RS         if is_ordering_comparator_lambda(lam) {
-//RS             return Some(lower_ordering_comparator_callback(lam, cx, env, params));
-//RS         }
-//RS         return None;
-//RS     }
-//RS     let Expr::Ident(name, _) = expr else {
-//RS         return None;
-//RS     };
-//RS     if env.locals.contains_key(name) || cx.consts.contains_key(name) {
-//RS         return None;
-//RS     }
-//RS     let ty = if effective {
-//RS         cx.fn_types.get(name)
-//RS     } else {
-//RS         cx.fn_source_types.get(name)
-//RS     }?;
-//RS     if !matches!(ty, Type::Fn { .. }) {
-//RS         return None;
-//RS     }
-//RS     let callable = TExpr {
-//RS         ty: ty.clone(),
-//RS         kind: TExprKind::FnValue {
-//RS             kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
-//RS                 name: Some(name.clone()),
-//RS                 lambda: None,
-//RS             },
-//RS         },
-//RS     };
-//RS     // Collection Prelude callbacks borrow their inputs. Keep the named
-//RS     // function value behind one direct closure so the adapter receives
-//RS     // `Fn(&T, ...)`, not an Rc whose ABI is incompatible with `Fn`.
-//RS     if let Some(params) = params {
-//RS         return Some(TExpr {
-//RS             ty: callable.ty.clone(),
-//RS             kind: TExprKind::HostBorrowCallback {
-//RS                 callable: Box::new(callable),
-//RS                 params: params.to_vec(),
-//RS             },
-//RS         });
-//RS     }
-//RS     Some(callable)
-//RS }
-//RS 
-//RS /// Compare element types at the fixed-list to growable-list boundary.
-//RS ///
-//RS /// `Int` is the canonical signed 64-bit integer. Keep this comparison
-//RS /// structural: a narrower or unsigned integer must never be widened without
-//RS /// an explicit conversion.
-//RS pub(crate) fn fixed_list_elem_compatible(actual: &Type, want: &Type) -> bool {
-//RS     fn canonical(ty: &Type) -> Type {
-//RS         match ty.erased_carrier() {
-//RS             Type::IntN {
-//RS                 signed: true,
-//RS                 bits: 64,
-//RS             } => Type::Int,
-//RS             ty => ty,
-//RS         }
-//RS     }
-//RS 
-//RS     canonical(actual) == canonical(want)
-//RS }
-//RS 
-//RS /// c109 Phase 13: the type of a lambda's body (its return), used for a `spawn`ed
-//RS /// closure's `Task<T>` element type. Block bodies use the tail expression/return
-//RS /// (same rule as sema), not `Unit`.
-//RS pub(crate) fn lambda_body_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
-//RS     lambda_body_ty_expecting(lam, cx, env, None)
-//RS }
-//RS 
-//RS /// D-CONC-SPAWN1: the source-level element type of a spawned task. The
-//RS /// callable's effective failure carrier is an execution detail; `Task<T>`
-//RS /// exposes the body's successful value `T` to `join()` and task combinators.
-//RS pub(crate) fn spawn_body_result_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
-//RS     lambda_body_ty(lam, cx, env)
-//RS }
-//RS 
-//RS /// D-CONC-FAIL1=A: the private carrier returned by a spawned closure. Keep
-//RS /// this separate from [`spawn_body_result_ty`]: the worker closure may use a
-//RS /// `Result`/`Option` carrier while the source-level task remains `Task<T>`.
-//RS pub(crate) fn spawn_body_carrier_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
-//RS     let t = spawn_body_result_ty(lam, cx, env);
-//RS     let checked_carrier = lam.meta.fallible_carrier.as_ref().or_else(|| {
-//RS         lam.meta
-//RS             .fallible_propagation
-//RS             .then(|| env.ret_ty.as_ref())
-//RS             .flatten()
-//RS     });
-//RS     if let Some(carrier) = checked_carrier {
-//RS         return match carrier {
-//RS             Type::Result { err, .. } => Type::Result {
-//RS                 ok: Box::new(match &t {
-//RS                     Type::Result { ok, .. } => (**ok).clone(),
-//RS                     other => other.clone(),
-//RS                 }),
-//RS                 err: err.clone(),
-//RS             },
-//RS             Type::Option(_) => Type::Option(Box::new(match &t {
-//RS                 Type::Option(inner) => (**inner).clone(),
-//RS                 other => other.clone(),
-//RS             })),
-//RS             other => other.clone(),
-//RS         };
-//RS     }
-//RS     match t {
-//RS         Type::Result { .. } | Type::Option(_) => t,
-//RS         t => Type::Result {
-//RS             ok: Box::new(t),
-//RS             err: Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS /// `lambda_body_ty`, but seeding a bare (unannotated) param from `expected_params`
-//RS /// at the same position — same fallback `lower_lambda_expecting` uses (D-MEM1 S6:
-//RS /// `Shared<T>.read(s => …)`'s bare `s` needs its real type here too, or the
-//RS /// closure's OWN return type comes back wrong for a chained field/method read).
-//RS pub(crate) fn lambda_body_ty_expecting(
-//RS     lam: &Lambda,
-//RS     cx: &Cx,
-//RS     env: &LowerEnv,
-//RS     expected_params: Option<&[Type]>,
-//RS ) -> Type {
-//RS     lambda_body_ty_expecting_with_return(lam, cx, env, expected_params, None)
-//RS }
-//RS 
-//RS /// Probe a lambda body under the callback's checked return carrier rather than
-//RS /// the enclosing callable's ambient carrier.  The body probe must see the same
-//RS /// return context as executable lowering or a source `Ok(...)` gets typed as
-//RS /// the enclosing function's result and is wrapped again by the lambda carrier.
-//RS pub(crate) fn lambda_body_ty_expecting_with_return(
-//RS     lam: &Lambda,
-//RS     cx: &Cx,
-//RS     env: &LowerEnv,
-//RS     expected_params: Option<&[Type]>,
-//RS     expected_return: Option<&Type>,
-//RS ) -> Type {
-//RS     fn bind_params(
-//RS         lam: &Lambda,
-//RS         env: &LowerEnv,
-//RS         expected_params: Option<&[Type]>,
-//RS         expected_return: Option<&Type>,
-//RS     ) -> LowerEnv {
-//RS         let mut lam_env = clone_env(env);
-//RS         lam_env.fallback_subject = false;
-//RS         let callback_return = expected_return
-//RS             .cloned()
-//RS             .or_else(|| crate::Codegen::TIR::lambda_explicit_failure_carrier(lam))
-//RS             .or_else(|| lam.meta.fallible_carrier.clone());
-//RS         lam_env.ret_ty = callback_return;
-//RS         for (i, p) in lam.params.iter().enumerate() {
-//RS             let ty =
-//RS                 p.ty.clone()
-//RS                     .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
-//RS             lam_env
-//RS                 .locals
-//RS                 .insert(p.name.clone(), (TLocal::user(&p.name), ty));
-//RS         }
-//RS         lam_env
-//RS     }
-//RS     // Type probing lowers the expression to recover its total type, but the
-//RS     // probe is not the executable TIR pass. Do not publish spawn callbacks it
-//RS     // discovers into the shared JIT lambda table — table AND site map, or a
-//RS     // later pass would dedup onto an index whose entry was just discarded; the
-//RS     // real lowering pass that follows owns those entries and their site
-//RS     // indexes. The probe also binds params in an env of its own, so it gets
-//RS     // its own expression memo.
-//RS     let saved_spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
-//RS     let saved_spawn_sites = cx.jit_spawn_sites.borrow().clone();
-//RS     let body_ty = with_lambda_body_expr_cache(|| match &lam.body {
-//RS         LambdaBody::Expr(e) => {
-//RS             let mut lam_env = bind_params(lam, env, expected_params, expected_return);
-//RS             lower_expr(e, cx, &mut lam_env).ty
-//RS         }
-//RS         LambdaBody::Block(stmts) => {
-//RS             // A tail such as `inner(4)` is only typed once the prefix has
-//RS             // bound `inner`. Probing the tail in an env of its own keeps the
-//RS             // callback's return carrier independent of its caller.
-//RS             let mut lam_env = bind_params(lam, env, expected_params, expected_return);
-//RS             if let Some((prefix, tail)) = lambda_block_tail(stmts) {
-//RS                 let _ = lower_stmts(prefix, cx, &mut lam_env);
-//RS                 match tail {
-//RS                     Stmt::Return(Some(e), _) | Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env).ty,
-//RS                     _ => unit_type(),
-//RS                 }
-//RS             } else {
-//RS                 unit_type()
-//RS             }
-//RS         }
-//RS     });
-//RS     *cx.jit_spawn_lambdas.borrow_mut() = saved_spawn_lambdas;
-//RS     *cx.jit_spawn_sites.borrow_mut() = saved_spawn_sites;
-//RS     body_ty
-//RS }
-//RS 
-//RS /// c109 Phase 6/13: lower method-call arguments. The clone/Arc, borrow, and mut-borrow
-//RS /// wrappers, and the Fn-typed Box-coercion are all decided here from total facts
-//RS /// (`CallArg.flags` + the resolved param convention/type), never re-derived in emit.
-//RS pub(crate) fn lower_method_args(
-//RS     args: &[crate::AST::CallArg],
-//RS     sig: &[(AccessConvention, Type)],
-//RS     env: &mut LowerEnv,
-//RS     cx: &Cx,
-//RS ) -> Vec<TCallArg> {
-//RS     args.iter()
-//RS         .enumerate()
-//RS         .map(|(i, a)| {
-//RS             let Some((convention, ty)) = sig.get(i) else {
-//RS                 return invariant_call_arg(
-//RS                     a,
-//RS                     format!("method call argument {} has no resolved parameter", i + 1),
-//RS                 );
-//RS             };
-//RS             lower_one_call_arg(a, Some((*convention, ty.clone())), env, cx)
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS /// c109 Phase 13: lower ONE call argument — the single source of truth for
-//RS /// the clone/Arc, Fn-coercion, and borrow/mut-borrow wrapper order. `conv` is the
-//RS /// resolved param `(convention, type)` for this position (`None` when the callee has
-//RS /// no known signature, e.g. a `CallValue`). The emit order is exactly the AST path's:
-//RS ///   1. the implicit-clone / Arc-clone wrapper (`(…).clone()` / `Arc::clone(&…)`);
-//RS ///   2. the Fn-typed coercion (`Rc`/`Arc`/`Box::new(…) as <fn-type>`, or just
-//RS ///      ` as <fn-type>` when already wrapped);
-//RS ///   3. the borrow wrapper (`&(…)` for a `Read` non-scalar non-Fn, `&mut (…)` for a
-//RS ///      `Mutate`).
-//RS pub(crate) fn lower_call_arg_value(
-//RS     a: &crate::AST::CallArg,
-//RS     conv: Option<(AccessConvention, Type)>,
-//RS     env: &mut LowerEnv,
-//RS     cx: &Cx,
-//RS ) -> TExpr {
-//RS     if a.flags.c_callback_symbol
-//RS         && !conv
-//RS             .as_ref()
-//RS             .is_some_and(|(_, ty)| callback_fn_type(ty).is_some())
-//RS     {
-//RS         return invariant_arg_value(a, "C callback argument has no function signature");
-//RS     }
-//RS     let saved_binder_refs = env.binder_refs.clone();
-//RS     if !a.flags.binder_refs.is_empty() {
-//RS         let Some(site) = a.flags.binder_site else {
-//RS             return invariant_arg_value(a, "call argument binder has no site");
-//RS         };
-//RS         for (name, slot, ty) in &a.flags.binder_refs {
-//RS             let temp = jet_format!("{jet_prefix}arg{site}_{slot}");
-//RS             env.binder_refs.insert(name.clone(), (temp, ty.clone()));
-//RS         }
-//RS     }
-//RS     let _arg_cache_scope = env
-//RS         .fallback_subject
-//RS         .then(super::expressions::ExprCacheScope::enter);
-//RS     let fallback_subject = env.fallback_subject;
-//RS     env.fallback_subject = false;
-//RS     // A bare lambda flowing into a user fn-typed parameter takes its param
-//RS     // types from that fn-type so codegen emits the Rust closure-param types
-//RS     // rustc needs (c142). Other args lower normally.
-//RS     let mut value = match (&a.expr, &conv) {
-//RS         (Expr::Ident(name, _), Some((AccessConvention::Move, ty))) if env.is_resource(name) => {
-//RS             TExpr {
-//RS                 ty: ty.clone(),
-//RS                 kind: TExprKind::ResourceTake(env.resource_take_place(name)),
-//RS             }
-//RS         }
-//RS         (Expr::Ident(name, _), Some((_, ty)))
-//RS             if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() =>
-//RS         {
-//RS             let Some(callback_key) = a.flags.c_callback_function_key.as_ref() else {
-//RS                 return invariant_arg_value(a, "named C callback has no canonical function key");
-//RS             };
-//RS             TExpr {
-//RS                 ty: ty.clone(),
-//RS                 kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FnName(
-//RS                     callback_key.clone(),
-//RS                 ))),
-//RS             }
-//RS         }
-//RS         (Expr::Ident(name, _), Some((_, ty @ Type::Fn { .. })))
-//RS             if !env.locals.contains_key(name)
-//RS                 && !cx.consts.contains_key(name)
-//RS                 && cx
-//RS                     .fn_types
-//RS                     .get(name)
-//RS                     .is_some_and(|fn_ty| matches!(fn_ty, Type::Fn { .. })) =>
-//RS         {
-//RS             TExpr {
-//RS                 ty: ty.clone(),
-//RS                 kind: TExprKind::FnValue {
-//RS                     kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
-//RS                         name: Some(name.clone()),
-//RS                         lambda: None,
-//RS                     },
-//RS                 },
-//RS             }
-//RS         }
-//RS         (Expr::Lambda(lam), Some((_, ty)))
-//RS             if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() =>
-//RS         {
-//RS             match callback_fn_type(ty) {
-//RS                 Some(Type::Fn { params, ret, .. }) => {
-//RS                     let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
-//RS                     let name = mangle(&format!("c_callback_{}_{}", lam.span.start, lam.span.end));
-//RS                     TExpr {
-//RS                         ty: ty.clone(),
-//RS                         kind: TExprKind::HostCall(Box::new(
-//RS                             crate::Codegen::TIR::THostCall::CCallback {
-//RS                                 symbol: name,
-//RS                                 lambda: tl,
-//RS                                 ret: ret.as_deref().cloned(),
-//RS                                 managed: a.flags.c_callback_managed,
-//RS                                 plan_digest: a.flags.c_callback_plan_digest.clone(),
-//RS                                 callback_identity: a.flags.c_callback_identity.clone(),
-//RS                             },
-//RS                         )),
-//RS                     }
-//RS                 }
-//RS                 _ => invariant_arg_value(a, "C callback argument has a non-function signature"),
-//RS             }
-//RS         }
-//RS         (Expr::Lambda(lam), Some((_, ty @ Type::Fn { .. }))) => {
-//RS             let tl = lower_lambda_expecting_callable(lam, cx, env, ty);
-//RS             TExpr {
-//RS                 ty: ty.clone(),
-//RS                 kind: TExprKind::Lambda(Box::new(tl)),
-//RS             }
-//RS         }
-//RS         // D-SHAPE-PLACE1=A: a projected write window `&node.items` /
-//RS         // `&values[i]` lowers as the exclusive place itself, so the callee's
-//RS         // edits land in the owner's storage on every tier.
-//RS         (Expr::Field(..) | Expr::Index { .. }, Some((AccessConvention::Write, _)))
-//RS             if a.convention == AccessConvention::Write =>
-//RS         {
-//RS             lower_expr_as_mut_place(&a.expr, cx, env)
-//RS         }
-//RS         _ => lower_expr(&a.expr, cx, env),
-//RS     };
-//RS     // `None` carries no payload to type it; the checked parameter does.
-//RS     if matches!(value.kind, TExprKind::Absent) {
-//RS         if let Some((_, want @ Type::Option(_))) = &conv {
-//RS             value.ty = want.clone();
-//RS         }
-//RS     }
-//RS     env.fallback_subject = fallback_subject;
-//RS     env.binder_refs = saved_binder_refs;
-//RS     value
-//RS }
-//RS 
-//RS pub(crate) fn lower_one_call_arg(
-//RS     a: &crate::AST::CallArg,
-//RS     conv: Option<(AccessConvention, Type)>,
-//RS     env: &mut LowerEnv,
-//RS     cx: &Cx,
-//RS ) -> TCallArg {
-//RS     if a.flags.c_callback_symbol
-//RS         && !conv
-//RS             .as_ref()
-//RS             .is_some_and(|(_, ty)| callback_fn_type(ty).is_some())
-//RS     {
-//RS         return invariant_call_arg(a, "C callback argument has no function signature");
-//RS     }
-//RS     let template_items = a.flags.template_items.as_deref().map(|items| {
-//RS         let _template_cache_scope = env
-//RS             .fallback_subject
-//RS             .then(super::expressions::ExprCacheScope::enter);
-//RS         let mut template_env = clone_env(env);
-//RS         template_env.fallback_subject = false;
-//RS         lower_template_items(
-//RS             items,
-//RS             a.span,
-//RS             cx,
-//RS             &mut template_env,
-//RS             &std::collections::HashSet::new(),
-//RS         )
-//RS     });
-//RS     let resource_move = matches!(
-//RS         (&a.expr, &conv),
-//RS         (Expr::Ident(name, _), Some((AccessConvention::Move, _))) if env.is_resource(name)
-//RS     );
-//RS     // Default expressions carry private references to earlier declaration
-//RS     // slots. A plain worklist pass cannot install that mapping, so never reuse
-//RS     // its cached value here; lower the argument through the binder-aware path.
-//RS     let value = if template_items.is_some() {
-//RS         TExpr {
-//RS             ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
-//RS             kind: TExprKind::Unit,
-//RS         }
-//RS     } else {
-//RS         (if a.flags.binder_refs.is_empty() && !a.flags.c_callback_symbol {
-//RS             super::take_scheduled_expr(&a.expr, cx)
-//RS         } else {
-//RS             None
-//RS         })
-//RS         .unwrap_or_else(|| lower_call_arg_value(a, conv.clone(), env, cx))
-//RS     };
-//RS     // A worklist cache may have lowered a local identifier before an earlier
-//RS     // binding's refined type was installed in the sequential environment.
-//RS     // Refresh local reads from that environment before resolving boundary
-//RS     // conversions such as `[T#N]` to `[T]`.
-//RS     let value = match (&a.expr, value.kind) {
-//RS         (Expr::Ident(name, _), TExprKind::Local(local)) => {
-//RS             let ty = env.ty_of(name).or_else(|| {
-//RS                 a.flags
-//RS                     .binder_refs
-//RS                     .iter()
-//RS                     .find(|(binder, _, _)| binder == name)
-//RS                     .map(|(_, _, ty)| ty.clone())
-//RS             });
-//RS             let Some(ty) = ty else {
-//RS                 return invariant_call_arg(a, "call argument local has no resolved type");
-//RS             };
-//RS             TExpr {
-//RS                 ty,
-//RS                 kind: TExprKind::Local(local),
-//RS             }
-//RS         }
-//RS         (_, kind) => TExpr { ty: value.ty, kind },
-//RS     };
-//RS     // Decide this before `preserve_typed_list_shape` retags the local read to
-//RS     // the callee's growable-list type. The source expression is still the
-//RS     // fixed array at this point.
-//RS     let widen_to_vec = matches!(
-//RS         (&value.ty, conv.as_ref().map(|(_, t)| t)),
-//RS         (Type::FixedList { elem: arg_elem, .. }, Some(Type::List(param_elem)))
-//RS             if fixed_list_elem_compatible(arg_elem, param_elem)
-//RS     );
-//RS     // D-SG9: call-site `[U8].{…}` / contextual list args need IntN suffixes.
-//RS     //
-//RS     // D-GENERIC-CALL1=A: a generic callee's `[T]` must NOT be stamped onto the
-//RS     // argument. The retag would overwrite the argument's real type with the
-//RS     // callee's binder, and every consumer of the lowered argument type then
-//RS     // reads a type variable instead of the actual: `call_return_type_with_args`
-//RS     // binds `T := T` and hands engines an unsubstituted `T?`, and
-//RS     // `specialize_generic_free_functions` records the same binder as the
-//RS     // monomorphisation shape, so no instantiation ever happens. The retag's
-//RS     // jobs (IntN suffixes, trait-object element injection, one-element typed
-//RS     // head collapse) all need a concrete element type, so nothing is lost.
-//RS     let value = match (&conv, value) {
-//RS         (Some((_, want @ Type::List(_))), v)
-//RS             if !crate::Generics::free_type_params(want).is_empty() =>
-//RS         {
-//RS             v
-//RS         }
-//RS         (Some((_, want @ (Type::List(_) | Type::FixedList { .. }))), v) => {
-//RS             super::preserve_typed_list_shape(v, want, cx)
-//RS         }
-//RS         (Some((_, want @ Type::Option(_))), v) => box_present_trait_payload(v, want, cx),
-//RS         (_, v) => v,
-//RS     };
-//RS     let web_noncopy_int = cx.web_wasm_noncopy_int
-//RS         && match &value.ty {
-//RS             Type::Int => true,
-//RS             Type::InlineRange { base, .. } => matches!(base.as_ref(), Type::Int),
-//RS             _ => false,
-//RS         };
-//RS     let clone = !resource_move
-//RS         && !is_opaque_handle_type(&value.ty, cx)
-//RS         && (web_noncopy_int
-//RS             || a.flags.implicit_clone
-//RS             || matches!(
-//RS                 (&a.expr, conv.as_ref()),
-//RS                 (Expr::Ident(name, _), None | Some((AccessConvention::Move, _)))
-//RS                     if env.is_borrowed(name)
-//RS                         && env.ty_of(name).is_some_and(|ty| !ty.is_scalar())
-//RS             ));
-//RS     let arc_clone = a.flags.shared_auto_clone;
-//RS     // The fn-value carrier is materialized exactly once at the call boundary.
-//RS     // Named values and escaping lambda TIR already emit the carrier; an
-//RS     // immediate lambda still needs coercion into the expected function slot.
-//RS     let fn_coerce = match &conv {
-//RS         Some((_, ty)) if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() => None,
-//RS         Some((_, ty @ Type::Fn { .. })) => {
-//RS             let already_carrier = ast_arg_is_named_fn_value(&a.expr, cx, env)
-//RS                 || matches!(
-//RS                     &a.expr,
-//RS                     Expr::Ident(name, _)
-//RS                         if env.ty_of(name).is_some_and(|t| matches!(t, Type::Fn { .. }))
-//RS                 )
-//RS                 || matches!(
-//RS                     &value.kind,
-//RS                     TExprKind::Lambda(lam) if lam.boxed || lam.rc || lam.arc
-//RS                 );
-//RS             Some(TFnCoerce {
-//RS                 ty: ty.clone(),
-//RS                 already_boxed: already_carrier,
-//RS             })
-//RS         }
-//RS         _ => None,
-//RS     };
-//RS     // D-UNIONTYPE1=A: member → union inject at the call boundary.
-//RS     let widen_to_union = match (&value.ty, conv.as_ref().map(|(_, t)| t)) {
-//RS         (got, Some(want @ Type::Union(members))) if members.iter().any(|m| m == got) => {
-//RS             Some(want.clone())
-//RS         }
-//RS         _ => None,
-//RS     };
-//RS     // S48: a concrete value meeting a single-trait value slot is boxed at the
-//RS     // call boundary. Keep the target type as a typed TIR fact; MIR resolves it
-//RS     // to a MirTypeId and each backend consumes that row.
-//RS     let box_as_trait = match (&value.ty, conv.as_ref().map(|(_, t)| t)) {
-//RS         (Type::TraitObject(_), _) => None,
-//RS         (Type::Named(concrete) | Type::Apply { name: concrete, .. }, Some(want)) => {
-//RS             let trait_name = match want {
-//RS                 Type::TraitObject(names) if names.len() == 1 => names.first(),
-//RS                 Type::Named(name) if cx.trait_names.contains(name) => Some(name),
-//RS                 _ => None,
-//RS             };
-//RS             trait_name
-//RS                 .filter(|trait_name| *trait_name != concrete)
-//RS                 .cloned()
-//RS                 .map(|name| Type::TraitObject(vec![name]))
-//RS         }
-//RS         _ => None,
-//RS     };
-//RS     // Borrow wrappers (applied after the clone + fn-coerce wrappers). A `Read`
-//RS     // non-scalar is `&(…)`; a `Mutate` is `&mut (…)`.
-//RS     // When widening to Vec, the borrow wrapper applies to the widened Vec (not the array).
-//RS     let (borrow, mut_borrow) = match &conv {
-//RS         Some((AccessConvention::Read, t))
-//RS             if !t.is_scalar() && !(a.flags.c_callback_symbol && callback_fn_type(t).is_some()) =>
-//RS         {
-//RS             (true, false)
-//RS         }
-//RS         Some((AccessConvention::Write, _)) => (false, true),
-//RS         _ => (false, false),
-//RS     };
-//RS     // Argument evaluation can have materialized an explicit move into a
-//RS     // temporary. Preserve the checked parameter convention on that final read.
-//RS     let value = if matches!(conv, Some((AccessConvention::Move, _)))
-//RS         && !clone
-//RS         && !arc_clone
-//RS         && !matches!(&value.kind, TExprKind::Move(_) | TExprKind::ResourceTake(_))
-//RS     {
-//RS         TExpr {
-//RS             ty: value.ty.clone(),
-//RS             kind: TExprKind::Move(Box::new(value)),
-//RS         }
-//RS     } else {
-//RS         value
-//RS     };
-//RS     TCallArg {
-//RS         value,
-//RS         template_items,
-//RS         borrow,
-//RS         mut_borrow,
-//RS         clone,
-//RS         arc_clone,
-//RS         fn_coerce,
-//RS         widen_to_vec,
-//RS         widen_to_union,
-//RS         box_as_trait,
-//RS     }
-//RS }
-//RS 
-//RS /// c109 Phase 14: lower a cross-module call's arguments against the callee's import
-//RS /// signature, reproducing `emit_call_args`. Each arg's borrow/clone/fn-coercion is
-//RS /// resolved from the sig param convention (the same `lower_one_call_arg` used by the
-//RS /// plain-call path).
-//RS pub(crate) fn lower_module_args(
-//RS     args: &[crate::AST::CallArg],
-//RS     sig: Option<&[(AccessConvention, Type)]>,
-//RS     env: &mut LowerEnv,
-//RS     cx: &Cx,
-//RS ) -> Vec<TCallArg> {
-//RS     let Some(sig) = sig else {
-//RS         return args
-//RS             .iter()
-//RS             .map(|arg| invariant_call_arg(arg, "module call has no resolved signature"))
-//RS             .collect();
-//RS     };
-//RS     args.iter()
-//RS         .enumerate()
-//RS         .map(|(i, a)| {
-//RS             let Some((convention, ty)) = sig.get(i) else {
-//RS                 return invariant_call_arg(
-//RS                     a,
-//RS                     format!("module call argument {} has no resolved parameter", i + 1),
-//RS                 );
-//RS             };
-//RS             lower_one_call_arg(a, Some((*convention, ty.clone())), env, cx)
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS /// c109 Phase 14: lower one FFI extern-call argument. The value is wrapped in
-//RS /// `(…).clone()` when the arg carries `implicit_clone`, OR when its param is a
-//RS /// non-scalar `Read`-convention type and `implicit_clone` is NOT already set (the AST
-//RS /// `if a.flags.implicit_clone { … } else if … } if let Some((_, ty)) = sig … if
-//RS /// !ty.is_scalar() && !implicit_clone`). The Arc (`shared_auto_clone`) form is excluded
-//RS /// from the subset, so it never reaches here.
-//RS pub(crate) fn lower_extern_call_arg(
-//RS     a: &crate::AST::CallArg,
-//RS     conv: Option<(AccessConvention, Type)>,
-//RS     env: &mut LowerEnv,
-//RS     cx: &Cx,
-//RS ) -> TExternArg {
-//RS     let Some((convention, ty)) = conv.as_ref() else {
-//RS         return invariant_extern_arg(a, "extern call argument has no resolved parameter");
-//RS     };
-//RS     // D-CABI-CALLBACK1: the C bridge is still an extern call, but its callback
-//RS     // argument needs the same stable function item / lambda wrapper as a direct
-//RS     // C call. Preserve sema's fact instead of re-boxing it as `dyn Fn`.
-//RS     let c_callback = a.flags.c_callback_symbol && callback_fn_type(ty).is_some();
-//RS     if a.flags.c_callback_symbol && !c_callback {
-//RS         return invariant_extern_arg(a, "C callback argument has a non-function signature");
-//RS     }
-//RS     // Lower through the shared call-argument path so an owning resource move
-//RS     // becomes `ResourceTake` and invalidates the source slot before the native
-//RS     // close call. A plain `lower_expr` would read/clone the handle, then move
-//RS     // the clone and leave the original for the drop edge.
-//RS     let value = lower_call_arg_value(a, conv.clone(), env, cx);
-//RS     let mut_borrow = *convention == AccessConvention::Write;
-//RS     let non_scalar_param = !ty.is_scalar() && !c_callback;
-//RS     // `(…).clone()` is emitted once: either the explicit implicit_clone flag, or
-//RS     // the non-scalar-param clone (when implicit_clone is false). The two never stack —
-//RS     // the AST applies the param clone only `&& !a.flags.implicit_clone`.
-//RS     let clone = *convention == AccessConvention::Read
-//RS         && !is_opaque_handle_type(ty, cx)
-//RS         && (a.flags.implicit_clone || (non_scalar_param && !a.flags.implicit_clone));
-//RS     TExternArg {
-//RS         value,
-//RS         clone,
-//RS         mut_borrow,
-//RS     }
-//RS }
-//RS 
-//RS /// c109 Phase 13: does this AST arg expression emit as a `Box::new(…)` (a bare
-//RS /// fn-name value via `emit_named_fn_value`)? That is exactly an `Expr::Ident` which
-//RS /// is NOT a local and resolves to a `Type::Fn` in `cx.fn_types` (a top-level fn used
-//RS /// as a value). Mirrors `emit_expr`'s `Expr::Ident` arm + `emit_call_args`'
-//RS /// `s.starts_with("Box::new(")` check, resolved at lowering.
-//RS pub(crate) fn ast_arg_is_named_fn_value(e: &Expr, cx: &Cx, env: &LowerEnv) -> bool {
-//RS     if let Expr::Ident(name, _) = e {
-//RS         if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
-//RS             return matches!(cx.fn_types.get(name), Some(Type::Fn { .. }));
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS /// The type a built-in method dispatches on, once compile-time-only tag
-//RS /// wrappers are erased. Shared by `tir_recv_jet_ty` and by `builtin_recv_ty`
-//RS /// (TIR/lower/builtins.rs), which closes this function's struct-`Field` hole for
-//RS /// the builtin table — one tag rule, read the same way from both.
-//RS ///
-//RS /// D-TAINT1/D-TAG-SURFACE1: most `Type::Tagged` markers (the terminal
-//RS /// capability report's own D-PROCESS-SESSION2 tag, `#Input`/other user
-//RS /// taint facts, …) are compile-time-only dataflow facts with no runtime
-//RS /// representation — the same erasure `Expr::Tainted` gets in
-//RS /// `expr_in_subset` (TIR/subset/expressions.rs). Builtin-method
-//RS /// dispatch must see the real underlying type (String/List/Map/…)
-//RS /// or a tagged receiver's `.split()`/`.get()`/etc. misses the curated
-//RS /// `TBuiltinOp` fast path and falls back to a generic call the JIT
-//RS /// declines to native-compile.
-//RS ///
-//RS /// The compiler-owned exceptions mirror sema's OWN rule at
-//RS /// `infer_method_call` (Sema/CheckerInfer/calls/method_calls.rs,
-//RS /// "Most fact tags are type-transparent"): SharedGuard read/edit and
-//RS /// the crypto nominal tag carry method POLICY, not just a dataflow
-//RS /// fact — `SharedGuard.wait()` dispatches through the tagged type's
-//RS /// own handle-method table, not a generic `TypeName::method` lookup.
-//RS /// Stripping those here misroutes the call and regresses an
-//RS /// already-JIT-covered stem (memory/shared_guard_queue).
-//RS pub(crate) fn builtin_dispatch_ty(ty: Type) -> Type {
-//RS     match ty {
-//RS         Type::Tagged { marker, inner }
-//RS             if matches!(
-//RS                 marker,
-//RS                 crate::AST::TagMarker::Internal(
-//RS                     crate::AST::InternalTag::SharedGuardRead
-//RS                         | crate::AST::InternalTag::SharedGuardEdit
-//RS                         | crate::AST::InternalTag::CoreCryptoNominal
-//RS                 )
-//RS             ) =>
-//RS         {
-//RS             Type::Tagged { marker, inner }
-//RS         }
-//RS         Type::Tagged { inner, .. } => builtin_dispatch_ty(*inner),
-//RS         Type::Apply { name, mut args } if name == crate::Syntax::TYPE_LIST && args.len() == 1 => {
-//RS             // `List<T>` is the legacy generic spelling. Builtin routes own
-//RS             // the canonical `Type::List` carrier, so normalize it at the
-//RS             // shared dispatch seam rather than teaching every collection
-//RS             // route a second receiver shape.
-//RS             let element = args.pop().expect("checked one-element List");
-//RS             Type::List(Box::new(builtin_dispatch_ty(element)))
-//RS         }
-//RS         other => other,
-//RS     }
-//RS }
-//RS 
-//RS /// c109 Phase 9: the receiver type of a built-in method call, read off the TIR
-//RS /// lowering env's slot types. Only `Ident` (via its slot type), `Str`/`Char`, and
-//RS /// transparent `Paren`/`Copy` wrappers around those or chained method calls
-//RS /// resolve; everything else (notably a struct `Field` read) is `None`.
-//RS ///
-//RS /// That partiality is load-bearing for the callers that read a `None` as a fact —
-//RS /// the for-in `lines` split (a `child.stdout` receiver is recognized by its BASE),
-//RS /// the mutable-place hint, the view-owner peeks. It is NOT load-bearing for the
-//RS /// builtin TABLE, which is receiver-TYPED: there a `None` silently means "take the
-//RS /// List surface", which is how a `String` field's `.replace(a, b)` reached
-//RS /// `jet_list_replace` (I2). `builtin_recv_ty` (TIR/lower/builtins.rs) closes that
-//RS /// one hole for the dispatch; keep this function as it is.
-//RS pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
-//RS     fn literal_ty(expr: &Expr) -> Option<Type> {
-//RS         match expr {
-//RS             Expr::Int(..) => Some(Type::Int),
-//RS             Expr::Float(_, _, _, _) => Some(Type::Float),
-//RS             Expr::Bool(_, _) => Some(Type::Bool),
-//RS             Expr::Char(_, _) => Some(Type::Char),
-//RS             Expr::Str(_, _) => Some(Type::String),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn set_constructor_elem(expr: &Expr, env: &LowerEnv) -> Option<Type> {
-//RS         match expr {
-//RS             Expr::ListLit(items, _) => items.first().and_then(literal_ty),
-//RS             Expr::Ident(name, _) => match env.ty_of(name) {
-//RS                 Some(Type::List(elem)) | Some(Type::FixedList { elem, .. }) => Some(*elem),
-//RS                 _ => None,
-//RS             },
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     match e {
-//RS         Expr::Paren(inner, _) | Expr::Copy(inner, _) => tir_recv_jet_ty(inner, env),
-//RS         Expr::Binary(crate::AST::BinOp::Compare, _, _, _) => {
-//RS             Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string()))
-//RS         }
-//RS         Expr::Ident(name, _) => env.ty_of(name).map(builtin_dispatch_ty),
-//RS         Expr::ComptimeName { name, value, .. } => env
-//RS             .ty_of(name)
-//RS             .or_else(|| value.as_ref().map(crate::AST::CtValue::jet_type))
-//RS             .map(builtin_dispatch_ty),
-//RS         Expr::Str(_, _) => Some(Type::String),
-//RS         Expr::Char(_, _) => Some(Type::Char),
-//RS         Expr::TupleLit(_, _, Some(ty)) => Some(builtin_dispatch_ty(ty.clone())),
-//RS         Expr::Try(inner, ..) => tir_recv_jet_ty(inner, env).map(|ty| match ty {
-//RS             Type::Result { ok, .. } => builtin_dispatch_ty(*ok),
-//RS             Type::Option(inner) => builtin_dispatch_ty(*inner),
-//RS             other => other,
-//RS         }),
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             recv_type,
-//RS             resolved_ret,
-//RS             ..
-//RS         } => {
-//RS             if recv_type.as_deref() == Some("SQL") {
-//RS                 match method.as_str() {
-//RS                     "template" => return Some(Type::String),
-//RS                     "params" => {
-//RS                         return Some(Type::List(Box::new(Type::Named(
-//RS                             crate::Syntax::TYPE_DB_VALUE.to_string(),
-//RS                         ))));
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS             if recv_type.as_deref() == Some("HTTPResponse") {
-//RS                 let ret = match method.as_str() {
-//RS                     "cookies" | "redirect_history" => Some(Type::List(Box::new(Type::String))),
-//RS                     "timings" => Some(Type::List(Box::new(Type::Int))),
-//RS                     _ => None,
-//RS                 };
-//RS                 if let Some(ret) = ret {
-//RS                     return Some(builtin_dispatch_ty(ret));
-//RS                 }
-//RS             }
-//RS             // `resolved_ret` exists only when sema persisted a result more exact
-//RS             // than the generic method table (or another required exact shape).
-//RS             if let Some(ty) = resolved_ret {
-//RS                 return Some(builtin_dispatch_ty(ty.clone()));
-//RS             }
-//RS             if let Expr::Ident(name, _) = receiver.as_ref() {
-//RS                 if !env.locals.contains_key(name)
-//RS                     && method == "from"
-//RS                     && matches!(
-//RS                         name.as_str(),
-//RS                         crate::Syntax::TYPE_SET | crate::Syntax::TYPE_RANK
-//RS                     )
-//RS                     && args.len() == 1
-//RS                 {
-//RS                     let Some(elem) = set_constructor_elem(&args[0].expr, env) else {
-//RS                         return None;
-//RS                     };
-//RS                     return Some(Type::Apply {
-//RS                         name: name.clone(),
-//RS                         args: vec![elem],
-//RS                     });
-//RS                 }
-//RS                 // Bytes static constructors used as chain receivers
-//RS                 // (`Bytes.from([…]).to_lower()`).
-//RS                 if !env.locals.contains_key(name)
-//RS                     && name == crate::Syntax::TYPE_BYTES
-//RS                     && matches!(
-//RS                         (method.as_str(), args.len()),
-//RS                         ("new", 0) | ("from", 1) | ("with_capacity", 1)
-//RS                     )
-//RS                 {
-//RS                     return Some(Type::Named(crate::Syntax::TYPE_BYTES.to_string()));
-//RS                 }
-//RS             }
-//RS             // D-ITERTOOLS1=A: chained adapters (`nums.take(3).to_list()`) must
-//RS             // resolve as `Iter`, not fall through to the list receiver — otherwise
-//RS             // `to_list` lowers as SetToList and rustc sees `.iter()` on JetIter.
-//RS             if let Some(recv_ty) = tir_recv_jet_ty(receiver, env) {
-//RS                 if let Some(Some(ret)) =
-//RS                     crate::Collections::builtin_method_return(&recv_ty, method, args.len(), false)
-//RS                 {
-//RS                     return Some(builtin_dispatch_ty(ret));
-//RS                 }
-//RS             }
-//RS             // Path and sketch method calls may carry their checked owner/return
-//RS             // facts without a persisted `resolved_ret` (the owner is still the
-//RS             // canonical dispatch key). Recover the carrier here so an outer
-//RS             // builtin, such as `Path.to_string().ends_with(...)`, selects the
-//RS             // same target as the lowered inner call.
-//RS             if let Some(handle) = recv_type {
-//RS                 let receiver_ty = Type::Named(handle.clone());
-//RS                 if let Some(Some(ret)) =
-//RS                     crate::Sema::sketch_method_return(&receiver_ty, method, args)
-//RS                 {
-//RS                     return Some(builtin_dispatch_ty(ret));
-//RS                 }
-//RS                 if crate::Codegen::TIR::handle_method_op(handle, method, args.len()).is_some() {
-//RS                     let ret = crate::Codegen::TIR::handle_method_return_ty(
-//RS                         handle,
-//RS                         method,
-//RS                         args.len(),
-//RS                         &receiver_ty,
-//RS                         None,
-//RS                     );
-//RS                     return Some(builtin_dispatch_ty(ret));
-//RS                 }
-//RS             }
-//RS             if method == "chars" {
-//RS                 return Some(Type::List(Box::new(Type::Char)));
-//RS             }
-//RS             // D-DYNARRAY1: `xs.view(a..b).fold(...)` chained with no intermediate
-//RS             // binding — resolve the constructed `View<T>`'s element type from the
-//RS             // list receiver so the chained call still dispatches correctly.
-//RS             if method == crate::Syntax::METHOD_VIEW {
-//RS                 if let Some(list_ty) = tir_recv_jet_ty(receiver, env) {
-//RS                     let elem = match list_ty {
-//RS                         Type::List(e) => Some(*e),
-//RS                         Type::FixedList { elem, .. } => Some(*elem),
-//RS                         _ => None,
-//RS                     };
-//RS                     if let Some(elem) = elem {
-//RS                         return Some(Type::Apply {
-//RS                             name: "View".to_string(),
-//RS                             args: vec![elem],
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 return None;
-//RS             }
-//RS             tir_recv_jet_ty(receiver, env)
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-// END-PORT-PENDING 0472 crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1-1716
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1
+use jet_foundation.AST.[AccessConvention, CtValue, Expr, Lambda, LambdaBody, Stmt, StrPart, Type, TagMarker, InternalTag, BinOp, CallArg, Item, DeriveBodyItem, union_enum_name, union_member_tag]
+use jet_codegen.Codegen.[Cx, mangle]
+use jet_codegen.Codegen.TIR.[LowerEnv, TCallArg, TEnumArg, TEnumPayload, TExpr, TExprKind, TExternArg, TFnCoerce, TLocal, TStrPart, TFnValueKind, THostCall, clone_env, lower_expr, lower_expr_as_mut_place, lower_lambda_expecting, lower_lambda_expecting_callable, lower_lambda_expecting_host_borrow_with_return, lower_stmts, unit_type, with_lambda_body_expr_cache, lambda_explicit_failure_carrier, handle_method_op, handle_method_return_ty]
+use jet_codegen.Codegen.TIR.Lower.Expressions.[ExprCacheScope, take_scheduled_expr, preserve_typed_list_shape]
+use jet_foundation.Diagnostics.[Span]
+use jet_foundation.Syntax.*
+use jet_comptime.Comptime.[TemplateSource, TemplateHole, TemplateHoleKind, TemplateItem, TemplateStatement, TemplateBody]
+use jet_sema.Generics.[free_type_params]
+use jet_sema.Collections.[builtin_method_return]
+use jet_sema.Sema.[sketch_method_return]
+use std.collections.[HashSet]
+use std.str.[from_utf8]
+use std.mem.[take]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:27
+// D-UNIONTYPE1=A: inject a member into the compiler-generated union enum.
+fn maybe_widen_expr_to_union(value: TExpr, want: Type) -> TExpr Never! {
+    if want == {
+        .Union(members) if members.iter().any(fn(m) { m == value.ty }) && !(value.ty is .Union(_)) -> {
+            TExpr(ty: want.clone(), kind: TExprKind.EnumLit(
+                enum_type: union_enum_name(members), variant: union_member_tag(value.ty),
+                payload: TEnumPayload.Positional([TEnumArg(value: ^value, clone: false, boxed: false)])))
+        }
+        _ -> ^value
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:55
+// S48: retype Val(concrete) to the optional trait slot so MIR boxes once.
+fn box_present_trait_payload(value: TExpr, want: Type, cx: Cx) -> TExpr Never! {
+    slot :: if want == { .Option(slot) -> slot, _ -> { return ^value } }
+    trait_name :: if slot == {
+        .TraitObject(names) if names.len() == 1 -> names[0]
+        .Named(name) if cx.trait_names.contains(name) -> name
+        _ -> { return ^value }
+    }
+    boxes :: if value.kind == {
+        .Present(payload) -> if payload.ty == {
+            .Named(concrete) | .Apply(name: concrete, ..) -> concrete != trait_name && !cx.trait_names.contains(concrete)
+            _ -> false
+        }
+        _ -> false
+    }
+    if boxes { value.ty = Type.Option(Type.TraitObject([trait_name.clone()])) }
+    ^value
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:82
+// Only the final statement can be a tail, never a call preceding a loop.
+fn lambda_block_tail(stmts: [Stmt]) -> ([Stmt], Stmt)? Never! {
+    last_idx :: stmts.len().checked_sub(1)?
+    last :: stmts[last_idx]
+    if last == {
+        .Return(Some(_), _) | .Expr(_) -> Some((stmts[..last_idx], last))
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:91
+fn callback_fn_type(ty: Type) -> Type? Never! {
+    if ty == {
+        .Fn(..) -> Some(ty)
+        .Tagged(marker: .Internal(.CppCallbackAbi), inner) if inner is .Fn(..) -> Some(inner)
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:106
+fn is_opaque_handle_type(ty: Type, cx: Cx) -> Bool Never! {
+    if ty == {
+        .Named(name) -> cx.opaque_handles.contains(name)
+        .Tagged(inner, ..) -> is_opaque_handle_type(inner, cx)
+        _ -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:113
+fn invariant_arg_value(arg: CallArg, construct: String) -> TExpr Never! {
+    TExpr(ty: Type.Named(TYPE_NEVER.to_string()), kind: TExprKind.InvariantViolation(construct: ^construct, span: arg.span))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:123
+fn invariant_call_arg(arg: CallArg, construct: String) -> TCallArg Never! {
+    TCallArg(value: invariant_arg_value(arg, ^construct), template_items: None, borrow: false,
+        mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None,
+        widen_to_vec: false, widen_to_union: None, box_as_trait: None)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:138
+fn invariant_extern_arg(arg: CallArg, construct: String) -> TExternArg Never! {
+    TExternArg(value: invariant_arg_value(arg, ^construct), clone: false, mut_borrow: false)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:146
+fn template_never_expr(name: String) -> TExpr Never! {
+    TExpr(ty: Type.Named(TYPE_NEVER.to_string()), kind: TExprKind.Local(TLocal.user(^name)))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:155
+fn template_reference_expr(name: String, env: LowerEnv) -> TExpr Never! {
+    bare_name := name.trim_start_matches('$') // #4303
+    marked_name :: "${bare_name}"
+    local_name :: if env.locals.contains_key(name) { name }
+        else if env.locals.contains_key(bare_name) { bare_name }
+        else if env.locals.contains_key(marked_name) { marked_name } else { name }
+    value := template_never_expr(local_name.to_string())
+    if env.ty_of(local_name) == Some(ty) {
+        value.ty = ^ty
+        value.kind = TExprKind.Local(env.local_of(local_name))
+    }
+    ^value
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:175
+fn template_expr_root(expr: Expr) -> String? Never! {
+    if expr == {
+        .Ident(name, _) | .ComptimeName(name, ..) -> Some(name)
+        .Field(base, ..) | .OptField(base, ..) -> template_expr_root(base)
+        .Paren(inner, _) -> template_expr_root(inner)
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:184
+fn lower_template_expr(expr: Expr, cx: Cx, env: &LowerEnv, template_vars: HashSet<String>) -> TExpr Never! {
+    if expr == {
+        .ComptimeName(name, ..) if cx.const_values.contains_key(name) -> lower_expr(expr, cx, &env)
+        .ComptimeName(value: Some(_), ..) -> lower_expr(expr, cx, &env)
+        .ComptimeName(name, ..) -> template_reference_expr(name, env)
+        .Ident(name, _) if name.starts_with('$') || template_vars.contains(name) -> template_reference_expr(name, env)
+        .Field(base, member, _) if member.starts_with('$') || template_expr_root(base).is_some_and(fn(name) { template_vars.contains(name.trim_start_matches('$')) }) -> {
+            recv :: lower_template_expr(base, cx, &env, template_vars)
+            field := member.trim_start_matches('$') // #4303
+            TExpr(ty: Type.Named(TYPE_NEVER.to_string()), kind: TExprKind.Field(recv: ^recv, field: field.to_string(), boxed: false))
+        }
+        .Str(parts, _) -> TExpr(ty: Type.String, kind: TExprKind.StrLit(parts.iter().map(fn(part) {
+            if part == {
+                .Lit(text) -> TStrPart.Lit(text.clone())
+                .Interp(value, format) -> TStrPart.Interp(lower_template_expr(value, cx, &env, template_vars), format.clone())
+            }
+        }).collect()))
+        .ListLit(values, _) -> TExpr(ty: Type.List(Type.Named(TYPE_NEVER.to_string())),
+            kind: TExprKind.ListLit(values.iter().map(fn(value) { lower_template_expr(value, cx, &env, template_vars) }).collect()))
+        .Paren(inner, _) -> lower_template_expr(inner, cx, &env, template_vars)
+        _ -> lower_expr(expr, cx, &env)
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:242
+fn lower_template_loop_expr(expr: Expr, cx: Cx, env: &LowerEnv, template_vars: HashSet<String>) -> TExpr Never! {
+    if expr == .ListLit(values, _) {
+        items := [TExpr]()
+        all_names := true
+        for value in values {
+            name :: if value == {
+                .Ident(name, _) | .ComptimeName(name, ..) -> name
+                _ -> { all_names = false; break }
+            }
+            bare := name.trim_start_matches('$') // #4303
+            items.push(TExpr(ty: Type.String, kind: TExprKind.CtLit(CtValue.Str(bare.to_string()))))
+        }
+        if all_names { return TExpr(ty: Type.List(Type.String), kind: TExprKind.ListLit(^items)) }
+    }
+    lower_template_expr(expr, cx, &env, template_vars)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:272
+struct TemplateMarker { start: USize, end: USize, value: Bool }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:278
+fn scan_template_markers(source: String, template_vars: HashSet<String>) -> [TemplateMarker] Never! {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:282
+    fn ident(byte: U8) -> Bool Never! { byte.is_ascii_alphanumeric() || byte == 95 }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:285
+    fn name_context(bytes: [U8], start: USize) -> Bool Never! {
+        end := start
+        while end > 0 && bytes[end - 1].is_ascii_whitespace() { end -= 1 }
+        if end > 0 && bytes[end - 1] == 46 { return true }
+        word_end :: end
+        while end > 0 && ident(bytes[end - 1]) { end -= 1 }
+        from_utf8(bytes[end..word_end]).is_ok_and(fn(word) {
+            word is "fn" | "impl" | "struct" | "enum" | "type" | "trait" | "module" | "const"
+        })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:304
+    fn skip_quoted(bytes: [U8], at: USize, quote: U8) -> USize Never! {
+        at += 1
+        while at < bytes.len() {
+            if bytes[at] == {
+                92 -> { at = at.saturating_add(2) }
+                current if current == quote -> { return at + 1 }
+                _ -> { at += 1 }
+            }
+        }
+        bytes.len()
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:315
+    fn scan_code(bytes: [U8], at: USize, stop_at_brace: Bool, value_context: Bool,
+        template_vars: HashSet<String>, out: &[TemplateMarker]) -> USize Never! {
+        while at < bytes.len() {
+            if bytes[at] == {
+                47 if bytes.get(at + 1) == Some(47) -> {
+                    at += 2
+                    while at < bytes.len() && bytes[at] != 10 { at += 1 }
+                }
+                47 if bytes.get(at + 1) == Some(42) -> {
+                    at += 2
+                    nested := 1
+                    while at < bytes.len() && nested > 0 {
+                        if bytes.get(at..at + 2).is_some_and(fn(pair) { pair == [47, 42] }) {
+                            nested += 1; at += 2
+                        } else if bytes.get(at..at + 2).is_some_and(fn(pair) { pair == [42, 47] }) {
+                            nested -= 1; at += 2
+                        } else { at += 1 }
+                    }
+                }
+                34 -> { at = scan_string(bytes, at, template_vars, &out) }
+                39 -> { at = skip_quoted(bytes, at, 39) }
+                123 if value_context -> { at = scan_code(bytes, at + 1, true, true, template_vars, &out) }
+                123 -> { at += 1 }
+                125 if stop_at_brace -> { return at + 1 }
+                byte if ident(byte) -> {
+                    start :: at
+                    at += 1
+                    while at < bytes.len() && ident(bytes[at]) { at += 1 }
+                    name :: from_utf8(bytes[start..at]).ok()
+                    marker_end := at
+                    field_chain := false
+                    if name.is_some_and(fn(name) { template_vars.contains(name) }) {
+                        loop {
+                            if bytes.get(marker_end) != Some(46) { break }
+                            field_start :: marker_end + 1
+                            first :: if bytes.get(field_start) == { Some(first) -> first, None -> { break } }
+                            if first == 36 || !ident(first) { break }
+                            field_end := field_start + 1
+                            while field_end < bytes.len() && ident(bytes[field_end]) { field_end += 1 }
+                            marker_end = field_end
+                            field_chain = true
+                        }
+                    }
+                    if name == Some(name) {
+                        if template_vars.contains(name) && (marker_end != at || bytes.get(at) != Some(46)) {
+                            out.push(TemplateMarker(start: start, end: marker_end, value: value_context || field_chain))
+                        }
+                    }
+                    at = marker_end
+                }
+                // D-NAME-SPLICE1=B: retain only bound $name splices later.
+                36 -> {
+                    start :: at
+                    at += 1
+                    while at < bytes.len() && ident(bytes[at]) { at += 1 }
+                    if at > start + 1 {
+                        out.push(TemplateMarker(start: start, end: at, value: value_context || !name_context(bytes, start)))
+                    }
+                }
+                _ -> { at += 1 }
+            }
+        }
+        bytes.len()
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:422
+    fn scan_string(bytes: [U8], at: USize, template_vars: HashSet<String>, out: &[TemplateMarker]) -> USize Never! {
+        at += 1
+        while at < bytes.len() {
+            if bytes[at] == {
+                92 -> { at = at.saturating_add(2) }
+                34 -> { return at + 1 }
+                123 if bytes.get(at + 1) == Some(123) -> {
+                    at += 2
+                    while at < bytes.len() {
+                        if bytes.get(at..at + 2).is_some_and(fn(pair) { pair == [125, 125] }) { at += 2; break }
+                        at += 1
+                    }
+                }
+                123 -> { at = scan_code(bytes, at + 1, true, true, template_vars, &out) }
+                _ -> { at += 1 }
+            }
+        }
+        bytes.len()
+    }
+    markers := [TemplateMarker]()
+    _ :: scan_code(source.as_bytes(), 0, false, false, template_vars, &markers)
+    ^markers
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:463
+fn template_marker_base(source: String, start: USize) -> String? Never! {
+    before := source.get(..start)?.strip_suffix('.')? // #4303
+    end :: before.len()
+    begin :: before.char_indices().rev().find_map(fn(pair) {
+        (index, character) :: pair
+        (!character.is_ascii_alphanumeric() && character != '_').then_some(index + character.len_utf8())
+    }).unwrap_or(0)
+    (begin < end).then(fn() { before[begin..end].to_string() })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:477
+fn template_path_expr(path: String, env: LowerEnv, template_vars: HashSet<String>) -> TExpr? Never! {
+    segments := path.split('.')
+    root_segment :: segments.next()?
+    explicit_root :: root_segment.starts_with('$')
+    root := root_segment.trim_start_matches('$') // #4303
+    if root.is_empty() || (!explicit_root && !template_vars.contains(root)
+        && !env.locals.contains_key(root) && !env.locals.contains_key("${root}")) { return None }
+    root_name :: if explicit_root { "${root}" } else { root.to_string() }
+    value := template_reference_expr(root_name, env)
+    for field in segments {
+        field := field.trim_start_matches('$') // #4303
+        if field.is_empty() { return None }
+        value = TExpr(ty: Type.Named(TYPE_NEVER.to_string()), kind: TExprKind.Field(recv: ^value, field: field.to_string(), boxed: false))
+    }
+    Some(^value)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:517
+fn template_marker_expr(source: String, marker: TemplateMarker, cx: Cx, env: LowerEnv, template_vars: HashSet<String>) -> TExpr Never! {
+    marker_text := source[marker.start..marker.end] // #4303
+    if marker_text.contains('.') {
+        if template_path_expr(marker_text, env, template_vars) == Some(value) { return ^value }
+    }
+    marker_name := marker_text.strip_prefix('$').unwrap_or(marker_text) // #4303
+    if template_vars.contains(marker_name) { return template_reference_expr(marker_name, env) }
+    if template_marker_base(source, marker.start) == Some(base) {
+        marked_base :: "${base}"
+        if template_vars.contains(base) || env.locals.contains_key(base) || env.locals.contains_key(marked_base) {
+            return TExpr(ty: Type.Named(TYPE_NEVER.to_string()), kind: TExprKind.Field(
+                recv: template_reference_expr(base, env), field: source[marker.start + 1..marker.end].to_string(), boxed: false))
+        }
+    }
+    _ :: cx
+    template_reference_expr(source[marker.start..marker.end], env)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:557
+// Unbound $build and field.$name compiler facts remain verbatim source.
+fn template_splice_is_bound(source: String, marker: TemplateMarker, env: LowerEnv, template_vars: HashSet<String>) -> Bool Never! {
+    bare :: if source[marker.start..marker.end].strip_prefix('$') == { Some(bare) -> bare, None -> { return true } }
+    bound :: fn(name: String) { template_vars.contains(name) || env.locals.contains_key(name) }
+    bound(bare) && !template_marker_base(source, marker.start).is_some_and(fn(base) { bound(base) })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:571
+fn template_source(span: Span, cx: Cx, env: LowerEnv, template_vars: HashSet<String>) -> TemplateSource<TExpr>? Never! {
+    source :: cx.src.get(span.start..span.end)?.to_string()
+    holes :: scan_template_markers(source, template_vars).into_iter()
+        .filter(fn(marker) { template_splice_is_bound(source, marker, env, template_vars) })
+        .map(fn(marker) { TemplateHole(start: marker.start, end: marker.end,
+            expr: template_marker_expr(source, marker, cx, env, template_vars),
+            kind: if marker.value { TemplateHoleKind.Value } else { TemplateHoleKind.Name },
+            span: Span.new(span.start + marker.start, span.start + marker.end)) }).collect()
+    Some(TemplateSource(source: ^source, holes: ^holes, span: span))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:606
+fn item_span(item: Item, cx: Cx) -> Span Never! {
+    if item == {
+        .Func(item) | .Struct(item) | .Enum(item) | .Distinct(item) | .TypeAlias(item)
+        | .UnitFamily(item) | .Trait(item) | .Tag(item) | .EffectDecl(item) | .Impl(item)
+        | .Const(item) | .Test(item) | .ExternRust(item) | .Module(item) | .CModule(item)
+        | .CodeModule(item) -> item.span
+        .ErrorConv(item) -> {
+            line_start :: cx.src.get(..item.from_span.start).and_then(fn(source) { source.rfind('\n') }).map_or(0, fn(index) { index + 1 })
+            start :: cx.src.get(line_start..item.from_span.start).and_then(fn(line) { line.rfind("impl ") })
+                .map_or(item.from_span.start, fn(offset) { line_start + offset })
+            Span.new(start, item.body_span.end)
+        }
+        .Migration(item) | .ProtocolDecl(item) | .UserDerive(item) | .TemplateLoop(item)
+        | .GenericModule(item) | .ModuleAlias(item) | .MarkerDecl(item) | .FactDecl(item) -> item.span
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:648
+fn lower_template_stmt(statement: Stmt, cx: Cx, env: &LowerEnv, template_vars: HashSet<String>) -> [TemplateItem<TExpr>] Never! {
+    if statement == {
+        .Val(binding) if !binding.name.is_empty() && binding.pattern.is_none() -> {
+            name :: binding.name.clone()
+            value :: lower_template_expr(binding.init, cx, &env, template_vars)
+            env.bind(name, TLocal.user(name.clone()), Some(value.ty.clone()))
+            [TemplateItem.Statement(TemplateStatement.Binding(name: ^name, value: ^value, span: statement.span()))]
+        }
+        .Expr(expr) -> [TemplateItem.Statement(TemplateStatement.Expr(value: lower_template_expr(expr, cx, &env, template_vars), span: statement.span()))]
+        .ComptimeIf(cond, then_body, else_body, span, selected_then, ..) -> {
+            then_body :: lower_template_stmts(then_body, cx, &env, template_vars)
+            else_body :: if else_body == { Some(body) -> lower_template_stmts(body, cx, &env, template_vars), None -> [] }
+            [TemplateItem.If(condition: lower_template_expr(cond, cx, &env, template_vars), then_body: ^then_body,
+                else_body: ^else_body, selected: selected_then, span: span)]
+        }
+        .ComptimeBlock(body, ..) | .Impure(body, ..) | .Unsafe(body, ..) -> lower_template_stmts(body, cx, &env, template_vars)
+        _ -> [TemplateItem.Invalid(construct: "unsupported checked template statement shape", span: statement.span())]
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:706
+fn lower_template_stmts(statements: [Stmt], cx: Cx, env: &LowerEnv, template_vars: HashSet<String>) -> [TemplateItem<TExpr>] Never! {
+    statements.iter().flat_map(fn(statement) { lower_template_stmt(statement, cx, &env, template_vars) }).collect()
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:718
+fn lower_template_items(items: [DeriveBodyItem], body_span: Span, cx: Cx, env: &LowerEnv, template_vars: HashSet<String>) -> TemplateBody<TExpr> Never! {
+    lowered := [TemplateItem<TExpr>]()
+    for item in items {
+        if item == {
+            .Item(item) -> {
+                span :: item_span(item, cx)
+                lowered_item :: if template_source(span, cx, env, template_vars) == {
+                    Some(source) -> TemplateItem.Item(^source)
+                    None -> TemplateItem.Invalid(construct: "template item source span is outside the source file", span: span)
+                }
+                lowered.push(^lowered_item)
+            }
+            .Stmt(statement) -> { lowered.extend(lower_template_stmt(statement, cx, &env, template_vars)) }
+            .Loop(var, source, body, span, ..) -> {
+                source :: lower_template_loop_expr(source, cx, &env, template_vars)
+                element_ty :: if source.ty == { .List(inner) | .FixedList(elem: inner, ..) -> Some(inner.clone()), _ -> None }
+                loop_env := clone_env(env)
+                loop_env.bind(var, TLocal.user(var.clone()), ^element_ty)
+                nested_vars := template_vars.clone()
+                nested_vars.insert(var.clone())
+                body :: lower_template_items(body, span, cx, &loop_env, nested_vars).items
+                lowered.push(TemplateItem.Loop(var: var.clone(), source: ^source, body: ^body, span: span))
+            }
+        }
+    }
+    TemplateBody(items: ^lowered, span: body_span)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:778
+fn is_ordering_comparator_expr(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Paren(inner, _) -> is_ordering_comparator_expr(inner)
+        .Binary(.Compare, ..) -> true
+        .MethodCall(method: "compare", args, ..) if args.len() == 1 -> true
+        .MethodCall(receiver, method: "then", args, ..) if args.len() == 1 -> is_ordering_comparator_expr(receiver)
+        _ -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:801
+fn is_ordering_comparator_lambda(lam: Lambda) -> Bool Never! {
+    if lam.params.len() != 2 { return false }
+    tail :: if lam.body == {
+        .Expr(expr) -> Some(expr)
+        .Block(stmts) -> stmts.iter().rev().find_map(fn(stmt) {
+            if stmt == { .Return(Some(expr), _) | .Expr(expr) -> Some(expr), _ -> None }
+        })
+    }
+    tail.is_some_and(is_ordering_comparator_expr)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:819
+fn lower_ordering_comparator_callback(lam: Lambda, cx: Cx, env: LowerEnv, params: [Type]) -> TExpr Never! {
+    ordering :: Type.Named(TYPE_ORDERING.to_string())
+    lowered :: lower_lambda_expecting_host_borrow_with_return(lam, cx, env, params, false, ordering)
+    TExpr(ty: Type.Fn(params: params.to_vec(), ret: Some(^ordering), effect_bound: None,
+        param_contract: None, call_metadata: None, return_view_provenance: None), kind: TExprKind.Lambda(^lowered))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:844
+fn lower_named_collection_callback(expr: Expr, cx: Cx, env: LowerEnv, effective: Bool, params: [Type]?) -> TExpr? Never! {
+    if (expr, params) == (.Lambda(lam), Some(params)) {
+        if is_ordering_comparator_lambda(lam) { return Some(lower_ordering_comparator_callback(lam, cx, env, params)) }
+        return None
+    }
+    name :: if expr == { .Ident(name, _) -> name, _ -> { return None } }
+    if env.locals.contains_key(name) || cx.consts.contains_key(name) { return None }
+    ty :: (if effective { cx.fn_types.get(name) } else { cx.fn_source_types.get(name) })?
+    if !(ty is .Fn(..)) { return None }
+    callable :: TExpr(ty: ty.clone(), kind: TExprKind.FnValue(kind: TFnValueKind.NamedFn(name: Some(name.clone()), lambda: None)))
+    // Collection callbacks borrow inputs; retain one direct closure boundary.
+    if params == Some(params) {
+        return Some(TExpr(ty: callable.ty.clone(), kind: TExprKind.HostBorrowCallback(callable: ^callable, params: params.to_vec())))
+    }
+    Some(^callable)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:900
+fn fixed_list_elem_compatible(actual: Type, want: Type) -> Bool Never! {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:901
+    fn canonical(ty: Type) -> Type Never! {
+        if ty.erased_carrier() == { .IntN(signed: true, bits: 64) -> Type.Int, ty -> ^ty }
+    }
+    canonical(actual) == canonical(want)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:917
+fn lambda_body_ty(lam: Lambda, cx: Cx, env: LowerEnv) -> Type Never! { lambda_body_ty_expecting(lam, cx, env, None) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:924
+fn spawn_body_result_ty(lam: Lambda, cx: Cx, env: LowerEnv) -> Type Never! { lambda_body_ty(lam, cx, env) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:931
+fn spawn_body_carrier_ty(lam: Lambda, cx: Cx, env: LowerEnv) -> Type Never! {
+    t :: spawn_body_result_ty(lam, cx, env)
+    checked_carrier :: lam.meta.fallible_carrier.or_else(fn() { if lam.meta.fallible_propagation { env.ret_ty } else { None } })
+    if checked_carrier == Some(carrier) {
+        return if carrier == {
+            .Result(err, ..) -> Type.Result(ok: if t == { .Result(ok, ..) -> ok.clone(), other -> other.clone() }, err: err.clone())
+            .Option(_) -> Type.Option(if t == { .Option(inner) -> inner.clone(), other -> other.clone() })
+            other -> other.clone()
+        }
+    }
+    if t == {
+        .Result(..) | .Option(_) -> ^t
+        t -> Type.Result(ok: ^t, err: Type.Named(TYPE_ERR.to_string()))
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:968
+fn lambda_body_ty_expecting(lam: Lambda, cx: Cx, env: LowerEnv, expected_params: [Type]?) -> Type Never! {
+    lambda_body_ty_expecting_with_return(lam, cx, env, expected_params, None)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:981
+fn lambda_body_ty_expecting_with_return(lam: Lambda, cx: Cx, env: LowerEnv, expected_params: [Type]?, expected_return: Type?) -> Type Never! {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:988
+    fn bind_params(lam: Lambda, env: LowerEnv, expected_params: [Type]?, expected_return: Type?) -> LowerEnv Never! {
+        lam_env := clone_env(env)
+        lam_env.fallback_subject = false
+        lam_env.ret_ty = expected_return.cloned().or_else(fn() { lambda_explicit_failure_carrier(lam) }).or_else(fn() { lam.meta.fallible_carrier.clone() })
+        for (i, p) in lam.params.iter().enumerate() {
+            ty :: p.ty.clone().or_else(fn() { expected_params.and_then(fn(ps) { ps.get(i) }).cloned() })
+            lam_env.locals.insert(p.name.clone(), (TLocal.user(p.name), ^ty))
+        }
+        ^lam_env
+    }
+    // A probe must restore both callback entries and their site indexes.
+    saved_spawn_lambdas :: take(&cx.jit_spawn_lambdas.borrow_mut())
+    saved_spawn_sites :: cx.jit_spawn_sites.borrow().clone()
+    body_ty :: with_lambda_body_expr_cache(fn() {
+        if lam.body == {
+            .Expr(e) -> {
+                lam_env := bind_params(lam, env, expected_params, expected_return)
+                lower_expr(e, cx, &lam_env).ty
+            }
+            .Block(stmts) -> {
+                lam_env := bind_params(lam, env, expected_params, expected_return)
+                if lambda_block_tail(stmts) == {
+                    Some((prefix, tail)) -> {
+                        _ :: lower_stmts(prefix, cx, &lam_env)
+                        if tail == { .Return(Some(e), _) | .Expr(e) -> lower_expr(e, cx, &lam_env).ty, _ -> unit_type() }
+                    }
+                    None -> unit_type()
+                }
+            }
+        }
+    })
+    cx.jit_spawn_lambdas.borrow_mut().set(^saved_spawn_lambdas)
+    cx.jit_spawn_sites.borrow_mut().set(^saved_spawn_sites)
+    ^body_ty
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1049
+fn lower_method_args(args: [CallArg], sig: [(AccessConvention, Type)], env: &LowerEnv, cx: Cx) -> [TCallArg] Never! {
+    args.iter().enumerate().map(fn(pair) {
+        (i, a) :: pair
+        if sig.get(i) == {
+            Some((convention, ty)) -> lower_one_call_arg(a, Some((convention, ty.clone())), &env, cx)
+            None -> invariant_call_arg(a, "method call argument {i + 1} has no resolved parameter")
+        }
+    }).collect()
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1078
+fn lower_call_arg_value(a: CallArg, conv: (AccessConvention, Type)?, env: &LowerEnv, cx: Cx) -> TExpr Never! {
+    if a.flags.c_callback_symbol && !conv.is_some_and(fn(pair) { callback_fn_type(pair.1).is_some() }) {
+        return invariant_arg_value(a, "C callback argument has no function signature")
+    }
+    saved_binder_refs :: env.binder_refs.clone()
+    if !a.flags.binder_refs.is_empty() {
+        site :: if a.flags.binder_site == { Some(site) -> site, None -> { return invariant_arg_value(a, "call argument binder has no site") } }
+        for (name, slot, ty) in a.flags.binder_refs {
+            temp :: "{JET_PREFIX}arg{site}_{slot}"
+            env.binder_refs.insert(name.clone(), (^temp, ty.clone()))
+        }
+    }
+    arg_cache_scope :: env.fallback_subject.then(ExprCacheScope.enter)
+    fallback_subject :: env.fallback_subject
+    env.fallback_subject = false
+    value := if (a.expr, conv) == {
+        (.Ident(name, _), Some((.Move, ty))) if env.is_resource(name) -> TExpr(ty: ty.clone(), kind: TExprKind.ResourceTake(env.resource_take_place(name)))
+        (.Ident(name, _), Some((_, ty))) if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() -> {
+            callback_key :: if a.flags.c_callback_function_key == {
+                Some(key) -> key
+                None -> { return invariant_arg_value(a, "named C callback has no canonical function key") }
+            }
+            TExpr(ty: ty.clone(), kind: TExprKind.HostCall(THostCall.FnName(callback_key.clone())))
+        }
+        (.Ident(name, _), Some((_, ty))) if ty is .Fn(..) && !env.locals.contains_key(name)
+            && !cx.consts.contains_key(name) && cx.fn_types.get(name).is_some_and(fn(fn_ty) { fn_ty is .Fn(..) }) -> {
+            TExpr(ty: ty.clone(), kind: TExprKind.FnValue(kind: TFnValueKind.NamedFn(name: Some(name.clone()), lambda: None)))
+        }
+        (.Lambda(lam), Some((_, ty))) if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() -> {
+            if callback_fn_type(ty) == {
+                Some(.Fn(params, ret, ..)) -> {
+                    tl :: lower_lambda_expecting(lam, cx, env, Some(params))
+                    name :: mangle("c_callback_{lam.span.start}_{lam.span.end}")
+                    TExpr(ty: ty.clone(), kind: TExprKind.HostCall(THostCall.CCallback(symbol: ^name, lambda: ^tl,
+                        ret: ret.cloned(), managed: a.flags.c_callback_managed, plan_digest: a.flags.c_callback_plan_digest.clone(),
+                        callback_identity: a.flags.c_callback_identity.clone())))
+                }
+                _ -> invariant_arg_value(a, "C callback argument has a non-function signature")
+            }
+        }
+        (.Lambda(lam), Some((_, ty))) if ty is .Fn(..) -> {
+            tl :: lower_lambda_expecting_callable(lam, cx, env, ty)
+            TExpr(ty: ty.clone(), kind: TExprKind.Lambda(^tl))
+        }
+        (.Field(..) | .Index(..), Some((.Write, _))) if a.convention == AccessConvention.Write -> lower_expr_as_mut_place(a.expr, cx, &env)
+        _ -> lower_expr(a.expr, cx, &env)
+    }
+    if value.kind is .Absent {
+        if conv == Some((_, want)) { if want is .Option(_) { value.ty = want.clone() } }
+    }
+    env.fallback_subject = fallback_subject
+    env.binder_refs = ^saved_binder_refs
+    // arg_cache_scope's lexical lifetime covers the entire lowering.
+    ^value
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1199
+fn lower_one_call_arg(a: CallArg, conv: (AccessConvention, Type)?, env: &LowerEnv, cx: Cx) -> TCallArg Never! {
+    if a.flags.c_callback_symbol && !conv.is_some_and(fn(pair) { callback_fn_type(pair.1).is_some() }) {
+        return invariant_call_arg(a, "C callback argument has no function signature")
+    }
+    template_items :: a.flags.template_items.map(fn(items) {
+        template_cache_scope :: env.fallback_subject.then(ExprCacheScope.enter)
+        template_env := clone_env(env)
+        template_env.fallback_subject = false
+        lower_template_items(items, a.span, cx, &template_env, HashSet<String>.new())
+    })
+    resource_move :: if (a.expr, conv) == { (.Ident(name, _), Some((.Move, _))) -> env.is_resource(name), _ -> false }
+    // Binder defaults cannot reuse a worklist value lacking declaration-slot refs.
+    value := if template_items.is_some() {
+        TExpr(ty: Type.Named(INTERNAL_UNIT_TYPE.to_string()), kind: TExprKind.Unit)
+    } else {
+        cached :: if a.flags.binder_refs.is_empty() && !a.flags.c_callback_symbol { take_scheduled_expr(a.expr, cx) } else { None }
+        cached.unwrap_or_else(fn() { lower_call_arg_value(a, conv.clone(), &env, cx) })
+    }
+    if (a.expr, value.kind) == (.Ident(name, _), .Local(local)) {
+        ty :: env.ty_of(name).or_else(fn() {
+            a.flags.binder_refs.iter().find(fn(binding) { binding.0 == name }).map(fn(binding) { binding.2.clone() })
+        })
+        if ty == {
+            Some(ty) -> { value = TExpr(ty: ^ty, kind: TExprKind.Local(local)) }
+            None -> { return invariant_call_arg(a, "call argument local has no resolved type") }
+        }
+    }
+    // Capture fixed-list widening before contextual retagging erases the shape.
+    widen_to_vec :: if (value.ty, conv.map(fn(pair) { pair.1 })) == {
+        (.FixedList(elem: arg_elem, ..), Some(.List(param_elem))) -> fixed_list_elem_compatible(arg_elem, param_elem)
+        _ -> false
+    }
+    if conv == Some((_, want)) {
+        if want == {
+            .List(_) if !free_type_params(want).is_empty() -> {}
+            .List(_) | .FixedList(..) -> { value = preserve_typed_list_shape(^value, want, cx) }
+            .Option(_) -> { value = box_present_trait_payload(^value, want, cx) }
+            _ -> {}
+        }
+    }
+    web_noncopy_int :: cx.web_wasm_noncopy_int && if value.ty == {
+        .Int -> true
+        .InlineRange(base, ..) -> base is .Int
+        _ -> false
+    }
+    clone :: !resource_move && !is_opaque_handle_type(value.ty, cx) && (web_noncopy_int || a.flags.implicit_clone || if (a.expr, conv) == {
+        (.Ident(name, _), None | Some((.Move, _))) -> env.is_borrowed(name) && env.ty_of(name).is_some_and(fn(ty) { !ty.is_scalar() })
+        _ -> false
+    })
+    arc_clone :: a.flags.shared_auto_clone
+    fn_coerce :: if conv == {
+        Some((_, ty)) if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() -> None
+        Some((_, ty)) if ty is .Fn(..) -> {
+            already_carrier :: ast_arg_is_named_fn_value(a.expr, cx, env)
+                || if a.expr == { .Ident(name, _) -> env.ty_of(name).is_some_and(fn(t) { t is .Fn(..) }), _ -> false }
+                || if value.kind == { .Lambda(lam) -> lam.boxed || lam.rc || lam.arc, _ -> false }
+            Some(TFnCoerce(ty: ty.clone(), already_boxed: already_carrier))
+        }
+        _ -> None
+    }
+    widen_to_union :: if conv == {
+        Some((_, want)) if want is .Union(members) && members.iter().any(fn(m) { m == value.ty }) -> Some(want.clone())
+        _ -> None
+    }
+    box_as_trait :: if (value.ty, conv.map(fn(pair) { pair.1 })) == {
+        (.TraitObject(_), _) -> None
+        (.Named(concrete) | .Apply(name: concrete, ..), Some(want)) -> {
+            trait_name :: if want == {
+                .TraitObject(names) if names.len() == 1 -> names.first()
+                .Named(name) if cx.trait_names.contains(name) -> Some(name)
+                _ -> None
+            }
+            trait_name.filter(fn(trait_name) { trait_name != concrete }).cloned().map(fn(name) { Type.TraitObject([name]) })
+        }
+        _ -> None
+    }
+    (borrow, mut_borrow) :: if conv == {
+        Some((.Read, t)) if !t.is_scalar() && !(a.flags.c_callback_symbol && callback_fn_type(t).is_some()) -> (true, false)
+        Some((.Write, _)) -> (false, true)
+        _ -> (false, false)
+    }
+    if conv is Some((.Move, _)) && !clone && !arc_clone && !(value.kind is .Move(_) | .ResourceTake(_)) {
+        value = TExpr(ty: value.ty.clone(), kind: TExprKind.Move(^value))
+    }
+    TCallArg(value: ^value, template_items: ^template_items, borrow: borrow, mut_borrow: mut_borrow,
+        clone: clone, arc_clone: arc_clone, fn_coerce: ^fn_coerce, widen_to_vec: widen_to_vec,
+        widen_to_union: ^widen_to_union, box_as_trait: ^box_as_trait)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1409
+fn lower_module_args(args: [CallArg], sig: [(AccessConvention, Type)]?, env: &LowerEnv, cx: Cx) -> [TCallArg] Never! {
+    sig :: if sig == {
+        Some(sig) -> sig
+        None -> { return args.iter().map(fn(arg) { invariant_call_arg(arg, "module call has no resolved signature") }).collect() }
+    }
+    args.iter().enumerate().map(fn(pair) {
+        (i, a) :: pair
+        if sig.get(i) == {
+            Some((convention, ty)) -> lower_one_call_arg(a, Some((convention, ty.clone())), &env, cx)
+            None -> invariant_call_arg(a, "module call argument {i + 1} has no resolved parameter")
+        }
+    }).collect()
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1441
+fn lower_extern_call_arg(a: CallArg, conv: (AccessConvention, Type)?, env: &LowerEnv, cx: Cx) -> TExternArg Never! {
+    (convention, ty) :: if conv == { Some(pair) -> pair, None -> { return invariant_extern_arg(a, "extern call argument has no resolved parameter") } }
+    c_callback :: a.flags.c_callback_symbol && callback_fn_type(ty).is_some()
+    if a.flags.c_callback_symbol && !c_callback { return invariant_extern_arg(a, "C callback argument has a non-function signature") }
+    // Shared path consumes owning resource slots before the native close call.
+    value :: lower_call_arg_value(a, conv.clone(), &env, cx)
+    mut_borrow :: convention == AccessConvention.Write
+    non_scalar_param :: !ty.is_scalar() && !c_callback
+    clone :: convention == AccessConvention.Read && !is_opaque_handle_type(ty, cx)
+        && (a.flags.implicit_clone || (non_scalar_param && !a.flags.implicit_clone))
+    TExternArg(value: ^value, clone: clone, mut_borrow: mut_borrow)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1482
+fn ast_arg_is_named_fn_value(e: Expr, cx: Cx, env: LowerEnv) -> Bool Never! {
+    if e == .Ident(name, _) {
+        if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
+            return cx.fn_types.get(name).is_some_and(fn(ty) { ty is .Fn(..) })
+        }
+    }
+    false
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1514
+// Policy-bearing compiler tags survive; ordinary fact tags erase for dispatch.
+fn builtin_dispatch_ty(ty: Type) -> Type Never! {
+    if ty == {
+        .Tagged(marker: .Internal(.SharedGuardRead | .SharedGuardEdit | .CoreCryptoNominal), inner) -> ^ty
+        .Tagged(inner, ..) -> builtin_dispatch_ty(^inner)
+        .Apply(name, args) if name == TYPE_LIST && args.len() == 1 -> {
+            element :: args.pop().expect("checked one-element List")
+            Type.List(builtin_dispatch_ty(^element))
+        }
+        other -> ^other
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1553
+// Deliberately partial: callers use None for fields as a meaningful fact.
+fn tir_recv_jet_ty(e: Expr, env: LowerEnv) -> Type? Never! {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1554
+    fn literal_ty(expr: Expr) -> Type? Never! {
+        if expr == {
+            .Int(..) -> Some(Type.Int)
+            .Float(_, _, _, _) -> Some(Type.Float)
+            .Bool(_, _) -> Some(Type.Bool)
+            .Char(_, _) -> Some(Type.Char)
+            .Str(_, _) -> Some(Type.String)
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs:1565
+    fn set_constructor_elem(expr: Expr, env: LowerEnv) -> Type? Never! {
+        if expr == {
+            .ListLit(items, _) -> items.first().and_then(literal_ty)
+            .Ident(name, _) -> if env.ty_of(name) == {
+                Some(.List(elem)) | Some(.FixedList(elem, ..)) -> Some(^elem)
+                _ -> None
+            }
+            _ -> None
+        }
+    }
+    if e == {
+        .Paren(inner, _) | .Copy(inner, _) -> tir_recv_jet_ty(inner, env)
+        .Binary(.Compare, _, _, _) -> Some(Type.Named(TYPE_ORDERING.to_string()))
+        .Ident(name, _) -> env.ty_of(name).map(builtin_dispatch_ty)
+        .ComptimeName(name, value, ..) -> env.ty_of(name).or_else(fn() { value.map(CtValue.jet_type) }).map(builtin_dispatch_ty)
+        .Str(_, _) -> Some(Type.String)
+        .Char(_, _) -> Some(Type.Char)
+        .TupleLit(_, _, Some(ty)) -> Some(builtin_dispatch_ty(ty.clone()))
+        .Try(inner, ..) -> tir_recv_jet_ty(inner, env).map(fn(ty) {
+            if ty == {
+                .Result(ok, ..) -> builtin_dispatch_ty(^ok)
+                .Option(inner) -> builtin_dispatch_ty(^inner)
+                other -> ^other
+            }
+        })
+        .MethodCall(receiver, method, args, recv_type, resolved_ret, ..) -> {
+            if recv_type == Some("SQL") {
+                if method == {
+                    "template" -> { return Some(Type.String) }
+                    "params" -> { return Some(Type.List(Type.Named(TYPE_DB_VALUE.to_string()))) }
+                    _ -> {}
+                }
+            }
+            if recv_type == Some("HTTPResponse") {
+                ret :: if method == {
+                    "cookies" | "redirect_history" -> Some(Type.List(Type.String))
+                    "timings" -> Some(Type.List(Type.Int))
+                    _ -> None
+                }
+                if ret == Some(ret) { return Some(builtin_dispatch_ty(^ret)) }
+            }
+            if resolved_ret == Some(ty) { return Some(builtin_dispatch_ty(ty.clone())) }
+            if receiver == .Ident(name, _) {
+                if !env.locals.contains_key(name) && method == "from" && (name == TYPE_SET || name == TYPE_RANK) && args.len() == 1 {
+                    elem :: set_constructor_elem(args[0].expr, env)?
+                    return Some(Type.Apply(name: name.clone(), args: [^elem]))
+                }
+                if !env.locals.contains_key(name) && name == TYPE_BYTES && ((method == "new" && args.len() == 0)
+                    || ((method == "from" || method == "with_capacity") && args.len() == 1)) {
+                    return Some(Type.Named(TYPE_BYTES.to_string()))
+                }
+            }
+            if tir_recv_jet_ty(receiver, env) == Some(recv_ty) {
+                if builtin_method_return(recv_ty, method, args.len(), false) == Some(Some(ret)) { return Some(builtin_dispatch_ty(^ret)) }
+            }
+            // Checked owner facts recover Path/sketch carriers for outer dispatch.
+            if recv_type == Some(handle) {
+                receiver_ty :: Type.Named(handle.clone())
+                if sketch_method_return(receiver_ty, method, args) == Some(Some(ret)) { return Some(builtin_dispatch_ty(^ret)) }
+                if handle_method_op(handle, method, args.len()).is_some() {
+                    ret :: handle_method_return_ty(handle, method, args.len(), receiver_ty, None)
+                    return Some(builtin_dispatch_ty(^ret))
+                }
+            }
+            if method == "chars" { return Some(Type.List(Type.Char)) }
+            if method == METHOD_VIEW {
+                if tir_recv_jet_ty(receiver, env) == Some(list_ty) {
+                    elem :: if list_ty == { .List(e) -> Some(^e), .FixedList(elem, ..) -> Some(^elem), _ -> None }
+                    if elem == Some(elem) { return Some(Type.Apply(name: "View", args: [^elem])) }
+                }
+                return None
+            }
+            tir_recv_jet_ty(receiver, env)
+        }
+        _ -> None
+    }
+}

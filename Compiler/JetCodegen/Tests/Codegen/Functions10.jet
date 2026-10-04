@@ -1,0 +1,51 @@
+use jet_foundation.[Type, TFailureCarrier, TBuiltinOp, TTryConvert]
+use jet_foundation.AST.FailureContract
+use jet_codegen.Codegen.TIR.try_target_is_default_error
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:12703
+#Test("failure_carrier_preserves_optional_and_unreachable_contracts") {
+    optional := TFailureCarrier.from_contract(FailureContract.Optional(Type.Int))
+    assert(optional is .Optional)
+    if optional == .Optional(value) { assert(value == Type.Int) }
+    unreachable := TFailureCarrier.from_contract(FailureContract.InferredNever(Type.String))
+    assert(unreachable is .Result)
+    if unreachable == .Result(success, error) {
+        assert(success == Type.String)
+        assert(error == Type.Named("Never"))
+    }
+    assert(TFailureCarrier.default() is .Infallible)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:12732
+#Test("failure_carrier_maps_both_result_types") {
+    carrier := TFailureCarrier.Result(Type.Int, Type.String)
+    mapped := carrier.map_types(fn(_) { Type.Bool })
+    if mapped == .Result(success, error) {
+        assert(success == Type.Bool)
+        assert(error == Type.Bool)
+    } else { assert(false) }
+    assert(TFailureCarrier.Infallible.map_types(fn(_) { Type.Bool }) is .Infallible)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:13022
+#Test("structured_error_context_requires_default_error_target") {
+    input := Type.Result{ok: Type.Int, err: Type.Named("Err")}
+    assert(try_target_is_default_error(input, TTryConvert.NoConversion))
+    assert(!try_target_is_default_error(input, TTryConvert.Never))
+    assert(!try_target_is_default_error(input, TTryConvert.ProtocolExit))
+    other := Type.Result{ok: Type.Int, err: Type.String}
+    assert(!try_target_is_default_error(other, TTryConvert.NoConversion))
+    assert(try_target_is_default_error(other, TTryConvert.DefaultErr))
+    assert(try_target_is_default_error(other, TTryConvert.Typed("convert", Type.String, Type.Named("Err"))))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:13595
+#Test("builtin_place_requirement_excludes_lazy_value_adapters") {
+    assert(TBuiltinOp.IterNext.needs_mut_receiver_place())
+    assert(TBuiltinOp.LRUGet.needs_mut_receiver_place())
+    assert(TBuiltinOp.ByteBufferMethod("read_bytes").needs_mut_receiver_place())
+    assert(TBuiltinOp.ByteBufferMethod("copy_to").needs_mut_receiver_place())
+    assert(!TBuiltinOp.ByteBufferMethod("len").needs_mut_receiver_place())
+    assert(!TBuiltinOp.Take.needs_mut_receiver_place())
+    assert(!TBuiltinOp.MapMerge.needs_mut_receiver_place())
+}

@@ -1,177 +1,72 @@
-// PORT-PENDING 0591 crates-jet-comptime-src-comptime-methods-core-calls-impure-module-group: crates/jet-comptime/src/Comptime/Methods/core_calls/values.rs:1-173
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS 
-//RS pub(super) fn named_tuple(fields: &[(&str, CtValue)]) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: format!(
-//RS             "({})",
-//RS             fields.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(",")
-//RS         ),
-//RS         fields: fields
-//RS             .iter()
-//RS             .map(|(n, v)| ((*n).to_string(), v.clone()))
-//RS             .collect(),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
-//RS     match v {
-//RS         CtValue::Str(s) => Ok(s.as_str()),
-//RS         _ => Err(unsupported(
-//RS             "non-string argument to a Core string call",
-//RS             span,
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn as_string_rows(v: &CtValue, span: Span) -> Result<Vec<Vec<String>>, Diagnostic> {
-//RS     match v {
-//RS         CtValue::List(rows) => rows
-//RS             .iter()
-//RS             .map(|row| match row {
-//RS                 CtValue::List(cols) => cols
-//RS                     .iter()
-//RS                     .map(|c| Ok(as_string(c, span)?.to_string()))
-//RS                     .collect::<Result<Vec<_>, _>>(),
-//RS                 _ => Err(unsupported("rows that are not `[[String]]`", span)),
-//RS             })
-//RS             .collect(),
-//RS         _ => Err(unsupported("rows that are not `[[String]]`", span)),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
-//RS     let CtValue::List(items) = v else {
-//RS         return None;
-//RS     };
-//RS     let field_names = |value: &CtValue| match value {
-//RS         CtValue::Struct { fields, .. } => Some(
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|(name, _)| {
-//RS                     name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-//RS                         .unwrap_or(name)
-//RS                         .to_string()
-//RS                 })
-//RS                 .collect::<Vec<_>>(),
-//RS         ),
-//RS         _ => None,
-//RS     };
-//RS     let header = field_names(items.first()?)?;
-//RS     if items.iter().any(|item| field_names(item).is_none()) {
-//RS         return None;
-//RS     }
-//RS     let cell = |value: &CtValue| match value {
-//RS         CtValue::Str(s) => s.clone(),
-//RS         CtValue::Int(n) => n.to_string(),
-//RS         CtValue::Float(f) => f.render(),
-//RS         CtValue::Bool(b) => b.to_string(),
-//RS         CtValue::Unit | CtValue::Failed(CtReport::Clean(_)) => String::new(),
-//RS         other => other.to_json(),
-//RS     };
-//RS     let mut rows = vec![header.clone()];
-//RS     for item in items {
-//RS         let CtValue::Struct { fields, .. } = item else {
-//RS             return None;
-//RS         };
-//RS         rows.push(
-//RS             header
-//RS                 .iter()
-//RS                 .map(|key| {
-//RS                     fields
-//RS                         .iter()
-//RS                         .find(|(name, _)| {
-//RS                             name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-//RS                                 .unwrap_or(name)
-//RS                                 == key
-//RS                         })
-//RS                         .map(|(_, value)| cell(value))
-//RS                         .unwrap_or_default()
-//RS                 })
-//RS                 .collect(),
-//RS         );
-//RS     }
-//RS     Some(rows)
-//RS }
-//RS 
-//RS /// D-BOUND-HEAD1=A: the `core.net.url.URL` record in `Core/net/url.jet` field
-//RS /// order, projected by the URL kernel exactly as AOT's `JetURL::from_url_parts`
-//RS /// and the JIT typed head, so every tier carries one URL layout.
-//RS pub(crate) fn url_parts_to_ct(u: &super::super::super::UrlLite::UrlParts) -> CtValue {
-//RS     let (port, port_explicit) = u.core_port();
-//RS     let text = |value: &Option<String>| CtValue::Str(value.clone().unwrap_or_default());
-//RS     CtValue::Struct {
-//RS         type_name: "URL".to_string(),
-//RS         fields: vec![
-//RS             ("scheme".to_string(), CtValue::Str(u.scheme.clone())),
-//RS             ("user_text".to_string(), text(&u.username)),
-//RS             ("password_text".to_string(), text(&u.password)),
-//RS             ("host".to_string(), text(&u.host)),
-//RS             ("port".to_string(), CtValue::Int(port)),
-//RS             ("port_explicit".to_string(), CtValue::Bool(port_explicit)),
-//RS             ("path".to_string(), CtValue::Str(u.path.clone())),
-//RS             ("query".to_string(), CtValue::Str(u.query())),
-//RS             ("fragment".to_string(), text(&u.fragment)),
-//RS             ("raw".to_string(), CtValue::Str(u.to_string_value())),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn url_record_field<'a>(
-//RS     fields: &'a [(String, CtValue)],
-//RS     name: &str,
-//RS     span: Span,
-//RS ) -> Result<&'a CtValue, Diagnostic> {
-//RS     fields
-//RS         .iter()
-//RS         .find(|(field, _)| field == name)
-//RS         .map(|(_, value)| value)
-//RS         .ok_or_else(|| unsupported(&format!("malformed URL {name}"), span))
-//RS }
-//RS 
-//RS fn url_record_text<'a>(
-//RS     fields: &'a [(String, CtValue)],
-//RS     name: &str,
-//RS     span: Span,
-//RS ) -> Result<&'a str, Diagnostic> {
-//RS     match url_record_field(fields, name, span)? {
-//RS         CtValue::Str(value) => Ok(value.as_str()),
-//RS         _ => Err(unsupported(&format!("malformed URL {name}"), span)),
-//RS     }
-//RS }
-//RS 
-//RS /// Re-enter the URL kernel from the `core.net.url.URL` record fields.
-//RS pub(crate) fn url_parts_from_ct(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<super::super::super::UrlLite::UrlParts, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("malformed URL value", span));
-//RS     };
-//RS     let type_name = type_name
-//RS         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-//RS         .unwrap_or(type_name);
-//RS     if type_name != "URL" {
-//RS         return Err(unsupported("malformed URL value", span));
-//RS     }
-//RS     let CtValue::Int(port) = url_record_field(fields, "port", span)? else {
-//RS         return Err(unsupported("malformed URL port", span));
-//RS     };
-//RS     let CtValue::Bool(port_explicit) = url_record_field(fields, "port_explicit", span)? else {
-//RS         return Err(unsupported("malformed URL port_explicit", span));
-//RS     };
-//RS     Ok(super::super::super::UrlLite::from_core_record(
-//RS         url_record_text(fields, "scheme", span)?,
-//RS         url_record_text(fields, "user_text", span)?,
-//RS         url_record_text(fields, "password_text", span)?,
-//RS         url_record_text(fields, "host", span)?,
-//RS         *port,
-//RS         *port_explicit,
-//RS         url_record_text(fields, "path", span)?,
-//RS         url_record_text(fields, "query", span)?,
-//RS         url_record_text(fields, "fragment", span)?,
-//RS     ))
-//RS }
-// END-PORT-PENDING 0591 crates/jet-comptime/src/Comptime/Methods/core_calls/values.rs:1-173
-
+use jet_foundation.AST.[CtValue, CtReport]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.Syntax.GENERATED_NAME_PREFIX
+use jet_comptime.Comptime.Diagnostics.unsupported
+use jet_comptime.Comptime.UrlLite
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/values.rs:3
+pub fn named_tuple(fields: &[(String, CtValue)]) -> CtValue {
+    names: [String] := fields.iter().map(fn(e) { e.0 }).collect()
+    CtValue.Struct { type_name: "({names.join(",")})", fields: fields.iter().map(fn(e) { (e.0.to_string(), e.1.clone()) }).collect() }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/values.rs:16
+pub fn as_string(v: &CtValue, span: Span) -> &String Diagnostic! {
+    v == { Str(s) -> s; _ -> { fail unsupported("non-string argument to a Core string call", span) } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/values.rs:26
+pub fn as_string_rows(v: &CtValue, span: Span) -> [[String]] Diagnostic! {
+    v == {
+        List(rows) -> rows.iter().map(fn(row) { row == {
+            List(cols) -> cols.iter().map(fn(c) { as_string(c, span)?.to_string() }).collect()?
+            _ -> { fail unsupported("rows that are not `[[String]]`", span) }
+        } }).collect()?
+        _ -> { fail unsupported("rows that are not `[[String]]`", span) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/values.rs:42
+pub fn csv_rows_from_records(v: &CtValue) -> [[String]]? {
+    items := v == { List(items) -> items; _ -> { return None } }
+    field_names := fn(value) { value == {
+        Struct { fields, .. } -> Val(fields.iter().map(fn(e) { e.0.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(e.0).to_string() }).collect())
+        _ -> None
+    } }
+    header := field_names(items.first()?)?
+    if items.iter().any(fn(item) { field_names(item).is_none() }) { return None }
+    cell := fn(value) { value == {
+        Str(s) -> s.clone(); Int(n) -> n.to_string(); Float(f) -> f.render(); Bool(b) -> b.to_string()
+        Unit | Failed(Clean(_)) -> ""; other -> other.to_json()
+    } }
+    rows := [header.clone()]
+    for item in items {
+        fields := item == { Struct { fields, .. } -> fields; _ -> { return None } }
+        rows.push(header.iter().map(fn(key) {
+            fields.iter().find(fn(e) { e.0.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(e.0) == key }).map(fn(e) { cell(e.1) }).unwrap_or_default()
+        }).collect())
+    }
+    Val(rows)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/values.rs:99
+pub fn url_parts_to_ct(u: &UrlLite.UrlParts) -> CtValue {
+    (port, port_explicit) := u.core_port(); text := fn(value: &String?) { CtValue.Str(value.clone().unwrap_or_default()) }
+    CtValue.Struct { type_name: "URL", fields: [
+        ("scheme", CtValue.Str(u.scheme.clone())), ("user_text", text(&u.username)), ("password_text", text(&u.password)),
+        ("host", text(&u.host)), ("port", CtValue.Int(port)), ("port_explicit", CtValue.Bool(port_explicit)),
+        ("path", CtValue.Str(u.path.clone())), ("query", CtValue.Str(u.query())), ("fragment", text(&u.fragment)), ("raw", CtValue.Str(u.to_string_value()))
+    ] }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/values.rs:119
+fn url_record_field(fields: &[(String, CtValue)], name: String, span: Span) -> &CtValue Diagnostic! {
+    fields.iter().find(fn(e) { e.0 == name }).map(fn(e) { e.1 }).ok_or_else(fn() { unsupported("malformed URL {name}", span) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/values.rs:131
+fn url_record_text(fields: &[(String, CtValue)], name: String, span: Span) -> &String Diagnostic! {
+    url_record_field(fields, name, span)? == { Str(value) -> value; _ -> { fail unsupported("malformed URL {name}", span) } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/values.rs:143
+pub fn url_parts_from_ct(value: &CtValue, span: Span) -> UrlLite.UrlParts Diagnostic! {
+    (type_name, fields) := value == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("malformed URL value", span) } }
+    type_name := type_name.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(type_name)
+    if type_name != "URL" { fail unsupported("malformed URL value", span) }
+    port := url_record_field(fields, "port", span)? == { Int(port) -> port; _ -> { fail unsupported("malformed URL port", span) } }
+    port_explicit := url_record_field(fields, "port_explicit", span)? == { Bool(v) -> v; _ -> { fail unsupported("malformed URL port_explicit", span) } }
+    UrlLite.from_core_record(url_record_text(fields, "scheme", span)?, url_record_text(fields, "user_text", span)?, url_record_text(fields, "password_text", span)?, url_record_text(fields, "host", span)?, port, port_explicit, url_record_text(fields, "path", span)?, url_record_text(fields, "query", span)?, url_record_text(fields, "fragment", span)?)
+}

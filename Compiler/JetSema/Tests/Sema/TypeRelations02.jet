@@ -1,0 +1,35 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Behavioral controls for crates/jet-sema/src/Sema/CheckerItems.rs:1768-3596 (no inline Rust tests).
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2893
+#Test("record_field_mismatch_is_field_specific") {
+    diagnostics :: statements05_diagnostics("struct Row {{ value: Int }}\nfn run() {{ row :: Row{{ value: \"wrong\" }}\n _ :: row }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0108" && d.what.contains("field `value`") }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2992
+#Test("record_missing_field_and_duplicate_are_distinct") {
+    missing :: statements05_diagnostics("struct Row {{ value: Int, other: Int }}\nfn run() {{ row :: Row{{ value: 1 }}\n _ :: row }}\n")
+    assert(missing.any(fn(d: Diagnostic) { d.code == "E0303" && d.what.contains("missing fields: other") }))
+    duplicate :: statements05_diagnostics("struct Row {{ value: Int }}\nfn run() {{ row :: Row{{ value: 1, value: 2 }}\n _ :: row }}\n")
+    assert(duplicate.any(fn(d: Diagnostic) { d.code == "E0303" && d.what.contains("appears more than once") }))
+}
+#Test("unknown_record_field_keeps_typed_edit") {
+    diagnostics :: statements05_diagnostics("struct Row {{ value: Int }}\nfn run() {{ row :: Row{{ vaule: 1 }}\n _ :: row }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0303" && d.fix.contains("did you mean `value`") }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:2893-2930
+#Test("record_optional_field_accepts_plain_payload") {
+    diagnostics :: statements05_diagnostics("struct Row {{ value: Int? }}\nfn run() {{ row :: Row{{ value: 1 }}\n _ :: row }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:3320-3354
+#Test("record_default_fills_omitted_field") {
+    diagnostics :: statements05_diagnostics("struct Row {{ value: Int{{7}} }}\nfn run() {{ row :: Row{{}}\n _ :: row }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+}
+// Rust: crates/jet-sema/src/Sema/CheckerItems.rs:3103-3112
+#Test("never_has_no_record_value") {
+    diagnostics :: statements05_diagnostics("fn run() {{ value :: Never{{}}\n _ :: value }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E2422" }))
+}

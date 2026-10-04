@@ -1,0 +1,35 @@
+use jet_foundation.[Type]
+use jet_codegen.[resolve_self_ty, is_prelude_struct_name, is_covered_atomic_ty]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/types.rs:20
+#Test("resolve_self_changes_only_literal_self") {
+    self_ty :: Type.Named("Self")
+    assert(resolve_self_ty(@self_ty, "Widget") == Type.Named("Widget"))
+    nested :: Type.Option(Type.Named("Self"))
+    assert(resolve_self_ty(@nested, "Widget") == nested)
+    scalar :: Type.Int
+    assert(resolve_self_ty(@scalar, "Widget") == Type.Int)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/types.rs:584
+#Test("prelude_struct_literal_allowlist_is_closed") {
+    assert(is_prelude_struct_name("HTTPRequest"))
+    assert(is_prelude_struct_name("TextWidth"))
+    assert(is_prelude_struct_name("ModGrant"))
+    assert(!is_prelude_struct_name("TcpStream"))
+    assert(!is_prelude_struct_name("UserRecord"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/types.rs:146
+#Test("atomic_requires_exactly_one_closed_scalar") {
+    scalar :: Type.Apply("Atomic", [Type.Bool])
+    empty :: Type.Apply("Atomic", [])
+    extra :: Type.Apply("Atomic", [Type.Bool, Type.Int])
+    text :: Type.Apply("Atomic", [Type.String])
+    unrelated :: Type.Apply("Cell", [Type.Bool])
+    assert(is_covered_atomic_ty(@scalar))
+    assert(!is_covered_atomic_ty(@empty))
+    assert(!is_covered_atomic_ty(@extra))
+    assert(!is_covered_atomic_ty(@text))
+    assert(!is_covered_atomic_ty(@unrelated))
+}

@@ -1,792 +1,261 @@
-// PORT-PENDING 0428 crates-jet-sema-src-sema-edition-module-group: crates/jet-sema/src/Sema/GateLedger.rs:1-788
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-FACT-GATE1=A: one compile-time read model for every written gate.
-//RS //!
-//RS //! Source markers and policy data remain the writers. This module only merges
-//RS //! their already-parsed facts, keeps provenance, and exposes stable projections
-//RS //! to inspect commands. No entry is carried into TIR or generated Rust.
-//RS 
-//RS use crate::Diagnostics::Span;
-//RS use crate::Policy::GateSet;
-//RS use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, StrPart, Type};
-//RS pub use jet_foundation::Authority::{GateDiagnostic, GateEntry, GateKind, GateOperation};
-//RS use std::collections::HashSet;
-//RS 
-//RS #[derive(Debug, Clone, Default)]
-//RS pub struct GateLedger {
-//RS     inner: jet_foundation::Authority::GateLedger,
-//RS }
-//RS 
-//RS impl GateLedger {
-//RS     /// Collect the parser/sema-visible source gates and the existing unsafe
-//RS     /// obligation report. External readers append lock, trust, and invocation
-//RS     /// facts with [`Self::push`].
-//RS     pub fn collect(bundle: &ProgramBundle, gates: GateSet) -> Self {
-//RS         let inspection = crate::Sema::UnsafeObligations::inspect_with_gates(bundle, gates);
-//RS         let unsafe_gates = inspection.gates.clone();
-//RS         let checked_text_types = checked_text_type_names(bundle);
-//RS         let context = GateContext {
-//RS             checked_text_types: &checked_text_types,
-//RS             unsafe_gates: &unsafe_gates,
-//RS         };
-//RS         let mut ledger = Self::default();
-//RS         for gate in inspection.gates {
-//RS             let discharged = gate.operations.iter().all(|operation| operation.discharged);
-//RS             let mut provenance = gate.provenance;
-//RS             provenance.push(format!(
-//RS                 "{}:{}..{}",
-//RS                 gate.source, gate.span.start, gate.span.end
-//RS             ));
-//RS             ledger.push(GateEntry {
-//RS                 kind: GateKind::Unsafe,
-//RS                 domain: "security".to_string(),
-//RS                 scope: "source".to_string(),
-//RS                 source: gate.source,
-//RS                 span: Some(gate.span),
-//RS                 subject: "#Unsafe".to_string(),
-//RS                 reason: gate.reason,
-//RS                 status: Some(if discharged { "discharged" } else { "missing" }.to_string()),
-//RS                 detail: format!("mode={}", gate.mode),
-//RS                 provenance,
-//RS                 operations: gate
-//RS                     .operations
-//RS                     .into_iter()
-//RS                     .map(|operation| GateOperation {
-//RS                         kind: operation.kind,
-//RS                         span: operation.span,
-//RS                         required: operation.required,
-//RS                         asserted: operation.asserted,
-//RS                         discharged: operation.discharged,
-//RS                     })
-//RS                     .collect(),
-//RS             });
-//RS         }
-//RS         ledger.set_diagnostics(
-//RS             inspection
-//RS                 .diagnostics
-//RS                 .into_iter()
-//RS                 .map(|entry| GateDiagnostic {
-//RS                     source: entry.source,
-//RS                     diagnostic: entry.diagnostic,
-//RS                 })
-//RS                 .collect(),
-//RS         );
-//RS 
-//RS         for module in &bundle.modules {
-//RS             visit_statements(&module.display, &module.script_body, &mut ledger, &context);
-//RS             visit_items(&module.display, &module.items, &mut ledger, &context);
-//RS         }
-//RS         append_fact_gates(&mut ledger, &bundle.build_facts);
-//RS         ledger.append_structure_facts(&bundle.name_ledger);
-//RS         ledger.sort();
-//RS         ledger
-//RS     }
-//RS 
-//RS     pub fn entries(&self) -> &[GateEntry] {
-//RS         self.inner.entries()
-//RS     }
-//RS 
-//RS     pub fn diagnostics(&self) -> &[GateDiagnostic] {
-//RS         self.inner.diagnostics()
-//RS     }
-//RS 
-//RS     pub fn set_diagnostics(&mut self, diagnostics: Vec<GateDiagnostic>) {
-//RS         self.inner.set_diagnostics(diagnostics);
-//RS     }
-//RS 
-//RS     /// Add one writer's fact while coalescing the same fact with another
-//RS     /// provenance source. The ledger never drops provenance.
-//RS     pub fn push(&mut self, entry: GateEntry) {
-//RS         self.inner.push(entry);
-//RS     }
-//RS 
-//RS     pub fn sort(&mut self) {
-//RS         self.inner.sort();
-//RS     }
-//RS 
-//RS     /// Project structure exceptions into the same gate ledger as every other
-//RS     /// written escape. A structure fact with no gate tightens silently and is
-//RS     /// deliberately absent from this projection.
-//RS     pub fn append_structure_facts(&mut self, facts: &jet_foundation::Names::NameLedger) {
-//RS         for fact in facts.structure_facts() {
-//RS             let Some(gate) = fact.gate.as_deref() else {
-//RS                 continue;
-//RS             };
-//RS             self.push(GateEntry {
-//RS                 kind: GateKind::Structure,
-//RS                 domain: "structure".to_string(),
-//RS                 scope: fact.kind.name().to_string(),
-//RS                 source: fact.source.clone(),
-//RS                 span: Some(fact.span),
-//RS                 subject: fact.subject.clone(),
-//RS                 reason: Some(gate.to_string()),
-//RS                 status: Some(fact.status.clone()),
-//RS                 detail: fact.detail.clone(),
-//RS                 provenance: vec![format!(
-//RS                     "{}:{}..{}",
-//RS                     fact.source, fact.span.start, fact.span.end
-//RS                 )],
-//RS                 operations: Vec::new(),
-//RS             });
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-FACT-GATE1=A: a system/fleet `.Force` writer is a build gate, so it is
-//RS /// recorded in the same ledger as every other written move away from safety.
-//RS /// The effective snapshot already owns the complete provenance chain; this
-//RS /// adapter only projects the forced writers into the ledger's build kind.
-//RS fn append_fact_gates(ledger: &mut GateLedger, facts: &jet_foundation::Facts::BuildFactSnapshot) {
-//RS     for fact in facts.contributions.values() {
-//RS         for contribution in fact
-//RS             .provenance
-//RS             .iter()
-//RS             .filter(|contribution| contribution.force)
-//RS         {
-//RS             ledger.push(GateEntry {
-//RS                 kind: GateKind::BuildFlag,
-//RS                 domain: "build".to_string(),
-//RS                 scope: contribution.layer.name().to_string(),
-//RS                 source: contribution.source.clone(),
-//RS                 span: Some(contribution.span),
-//RS                 subject: fact.key.name.clone(),
-//RS                 reason: contribution
-//RS                     .force_reason
-//RS                     .clone()
-//RS                     .or_else(|| Some(".Force".to_string())),
-//RS                 status: Some("recorded".to_string()),
-//RS                 detail: format!(".Force {}", contribution.value.display()),
-//RS                 provenance: vec![format!(
-//RS                     "{}:{}..{}",
-//RS                     contribution.source, contribution.span.start, contribution.span.end
-//RS                 )],
-//RS                 operations: Vec::new(),
-//RS             });
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn source_entry(
-//RS     kind: GateKind,
-//RS     domain: &str,
-//RS     scope: &str,
-//RS     source: &str,
-//RS     span: Span,
-//RS     subject: &str,
-//RS     reason: Option<String>,
-//RS     detail: &str,
-//RS     status: &str,
-//RS ) -> GateEntry {
-//RS     GateEntry {
-//RS         kind,
-//RS         domain: domain.to_string(),
-//RS         scope: scope.to_string(),
-//RS         source: source.to_string(),
-//RS         span: Some(span),
-//RS         subject: subject.to_string(),
-//RS         reason,
-//RS         status: Some(status.to_string()),
-//RS         detail: detail.to_string(),
-//RS         provenance: vec![format!("{}:{}..{}", source, span.start, span.end)],
-//RS         operations: Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS struct GateContext<'a> {
-//RS     checked_text_types: &'a HashSet<String>,
-//RS     unsafe_gates: &'a [crate::Sema::UnsafeObligations::UnsafeGateInspection],
-//RS }
-//RS 
-//RS fn checked_text_type_names(bundle: &ProgramBundle) -> HashSet<String> {
-//RS     let registries = crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
-//RS     let mut names = HashSet::new();
-//RS     for registry in registries {
-//RS         for (name, base) in &registry.distinct_bases {
-//RS             if *base == Type::String
-//RS                 && registry.implements_trait(name, crate::Generics::CHECKED_TEXT)
-//RS             {
-//RS                 names.insert(name.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     names
-//RS }
-//RS 
-//RS fn visit_items(source: &str, items: &[Item], ledger: &mut GateLedger, context: &GateContext<'_>) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) => visit_function(source, function, ledger, context),
-//RS             Item::Const(constant) => visit_expression(source, &constant.value, ledger, context),
-//RS             Item::Struct(definition) => {
-//RS                 for function in &definition.methods {
-//RS                     visit_function(source, function, ledger, context);
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     for function in &implementation.methods {
-//RS                         visit_function(source, function, ledger, context);
-//RS                     }
-//RS                 }
-//RS                 visit_statements(source, &definition.validate_block, ledger, context);
-//RS                 for field in &definition.fields {
-//RS                     if let Some(expression) = &field.computed {
-//RS                         visit_expression(source, expression, ledger, context);
-//RS                     }
-//RS                     if let Some(expression) = &field.default {
-//RS                         visit_expression(source, expression, ledger, context);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 for function in &definition.methods {
-//RS                     visit_function(source, function, ledger, context);
-//RS                 }
-//RS                 for implementation in &definition.trait_impls {
-//RS                     for function in &implementation.methods {
-//RS                         visit_function(source, function, ledger, context);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Impl(implementation) => {
-//RS                 for function in &implementation.methods {
-//RS                     visit_function(source, function, ledger, context);
-//RS                 }
-//RS             }
-//RS             Item::Test(test) => visit_statements(source, &test.body, ledger, context),
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     visit_items(source, body, ledger, context);
-//RS                 }
-//RS             }
-//RS             Item::GenericModule(module) => visit_items(source, &module.body, ledger, context),
-//RS             Item::Module(module) => {
-//RS                 for expression in &module.imports {
-//RS                     visit_expression(source, expression, ledger, context);
-//RS                 }
-//RS                 for expression in &module.members {
-//RS                     visit_expression(source, expression, ledger, context);
-//RS                 }
-//RS                 for contribution in &module.contributions {
-//RS                     if let crate::AST::ContribValue::Expr(expression) = &contribution.value {
-//RS                         visit_expression(source, expression, ledger, context);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::MarkerDecl(marker) => {
-//RS                 if let Some(body) = &marker.body {
-//RS                     visit_template_body(source, body, ledger, context);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-META-CODE1=A / D-META-USER1=A: marker and derive bodies retain typed
-//RS /// item templates until expansion. Walk both branches here so gate inspection
-//RS /// sees expressions in generated items and compile-time control flow without
-//RS /// inventing a source-string parser path.
-//RS fn visit_template_body(
-//RS     source: &str,
-//RS     body: &[crate::AST::DeriveBodyItem],
-//RS     ledger: &mut GateLedger,
-//RS     context: &GateContext<'_>,
-//RS ) {
-//RS     for body_item in body {
-//RS         match body_item {
-//RS             crate::AST::DeriveBodyItem::Stmt(statement) => {
-//RS                 visit_statements(source, std::slice::from_ref(statement), ledger, context);
-//RS             }
-//RS             crate::AST::DeriveBodyItem::Item(item) => {
-//RS                 visit_items(source, std::slice::from_ref(item.as_ref()), ledger, context);
-//RS             }
-//RS             crate::AST::DeriveBodyItem::Loop {
-//RS                 source: expression,
-//RS                 body,
-//RS                 ..
-//RS             } => {
-//RS                 visit_expression(source, expression, ledger, context);
-//RS                 visit_template_body(source, body, ledger, context);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn visit_function(
-//RS     source: &str,
-//RS     function: &Func,
-//RS     ledger: &mut GateLedger,
-//RS     context: &GateContext<'_>,
-//RS ) {
-//RS     if let Some(transition) = &function.state_transition {
-//RS         let from = transition.from.as_deref().unwrap_or("_");
-//RS         let spelling = format!("#Transition({from}, {})", transition.to);
-//RS         let detail = format!("state transition {from} -> {}", transition.to);
-//RS         ledger.push(source_entry(
-//RS             GateKind::StateTransition,
-//RS             "knowledge",
-//RS             "function",
-//RS             source,
-//RS             transition.span,
-//RS             &spelling,
-//RS             Some(spelling.clone()),
-//RS             &detail,
-//RS             "recorded",
-//RS         ));
-//RS     }
-//RS     if let Some(tag) = &function.scrub_tag {
-//RS         let span = function
-//RS             .markers
-//RS             .iter()
-//RS             .find(|marker| marker.name == crate::Syntax::KW_SCRUB)
-//RS             .map(|marker| marker.span)
-//RS             .unwrap_or(function.name_span);
-//RS         ledger.push(source_entry(
-//RS             GateKind::TaintScrub,
-//RS             "knowledge",
-//RS             "function",
-//RS             source,
-//RS             span,
-//RS             &format!("#Scrub({tag})"),
-//RS             None,
-//RS             &format!("taint removed: {tag}"),
-//RS             "cleared",
-//RS         ));
-//RS     }
-//RS     for marker in &function.markers {
-//RS         let (kind, subject, detail) = match marker.name.as_str() {
-//RS             name if name == crate::Syntax::MARKER_NONDETERMINISTIC => (
-//RS                 GateKind::Nondeterministic,
-//RS                 "#Nondeterministic",
-//RS                 "determinism escape",
-//RS             ),
-//RS             name if name == crate::Syntax::KW_IMPURE => {
-//RS                 (GateKind::Impure, "#Impure", "impure function")
-//RS             }
-//RS             _ => continue,
-//RS         };
-//RS         ledger.push(source_entry(
-//RS             kind,
-//RS             "security",
-//RS             "function",
-//RS             source,
-//RS             marker.span,
-//RS             subject,
-//RS             literal_text(marker.expr_arg(0)),
-//RS             detail,
-//RS             "recorded",
-//RS         ));
-//RS     }
-//RS     visit_statements(source, &function.body, ledger, context);
-//RS }
-//RS 
-//RS fn visit_statements(
-//RS     source: &str,
-//RS     body: &[Stmt],
-//RS     ledger: &mut GateLedger,
-//RS     context: &GateContext<'_>,
-//RS ) {
-//RS     for statement in body {
-//RS         visit_statement_expressions(source, statement, ledger, context);
-//RS     }
-//RS     visit_statement_gates(source, body, ledger);
-//RS }
-//RS 
-//RS fn visit_statement_expressions(
-//RS     source: &str,
-//RS     statement: &Stmt,
-//RS     ledger: &mut GateLedger,
-//RS     context: &GateContext<'_>,
-//RS ) {
-//RS     let mut copy = statement.clone();
-//RS     copy.for_each_expr_mut(|expression| {
-//RS         visit_expression_value(source, expression, ledger, context)
-//RS     });
-//RS }
-//RS 
-//RS fn visit_expression(
-//RS     source: &str,
-//RS     expression: &Expr,
-//RS     ledger: &mut GateLedger,
-//RS     context: &GateContext<'_>,
-//RS ) {
-//RS     let mut copy = expression.clone();
-//RS     copy.for_each_expr_mut(|value| visit_expression_value(source, value, ledger, context));
-//RS }
-//RS 
-//RS fn visit_expression_value(
-//RS     source: &str,
-//RS     expression: &Expr,
-//RS     ledger: &mut GateLedger,
-//RS     context: &GateContext<'_>,
-//RS ) {
-//RS     match expression {
-//RS         Expr::Call(call) if call.widen_approx || call.name == crate::Syntax::BUILTIN_APPROX => {
-//RS             ledger.push(source_entry(
-//RS                 GateKind::PrecisionDemotion,
-//RS                 "knowledge",
-//RS                 "expression",
-//RS                 source,
-//RS                 call.name_span,
-//RS                 "approx",
-//RS                 None,
-//RS                 "exact value widened to an approximation",
-//RS                 "recorded",
-//RS             ));
-//RS         }
-//RS         Expr::Call(call)
-//RS             if matches!(
-//RS                 call.name.as_str(),
-//RS                 crate::Syntax::BUILTIN_WRAPPING
-//RS                     | crate::Syntax::BUILTIN_SATURATING
-//RS                     | crate::Syntax::BUILTIN_CHECKED
-//RS             ) =>
-//RS         {
-//RS             let detail = match call.name.as_str() {
-//RS                 crate::Syntax::BUILTIN_SATURATING => {
-//RS                     "overflow fact replaced by saturating arithmetic"
-//RS                 }
-//RS                 crate::Syntax::BUILTIN_CHECKED => "overflow fact represented as an optional result",
-//RS                 _ => "overflow fact replaced by wrapping arithmetic",
-//RS             };
-//RS             ledger.push(source_entry(
-//RS                 GateKind::PrecisionDemotion,
-//RS                 "knowledge",
-//RS                 "expression",
-//RS                 source,
-//RS                 call.name_span,
-//RS                 &call.name,
-//RS                 None,
-//RS                 detail,
-//RS                 "recorded",
-//RS             ));
-//RS         }
-//RS         Expr::MethodCall {
-//RS             method,
-//RS             method_span,
-//RS             args,
-//RS             ..
-//RS         } if is_rounded_conversion(method, args) => {
-//RS             ledger.push(source_entry(
-//RS                 GateKind::PrecisionDemotion,
-//RS                 "knowledge",
-//RS                 "expression",
-//RS                 source,
-//RS                 *method_span,
-//RS                 method,
-//RS                 None,
-//RS                 "unit conversion rounded with an explicit mode",
-//RS                 "recorded",
-//RS             ));
-//RS         }
-//RS         Expr::MethodCall {
-//RS             method,
-//RS             method_span,
-//RS             args,
-//RS             ..
-//RS         } if method == crate::Syntax::METHOD_DROP => {
-//RS             ledger.push(source_entry(
-//RS                 GateKind::DutyDrop,
-//RS                 "duty",
-//RS                 "expression",
-//RS                 source,
-//RS                 *method_span,
-//RS                 ".drop",
-//RS                 args.first()
-//RS                     .and_then(|argument| literal_text(Some(&argument.expr))),
-//RS                 "result duty explicitly discharged",
-//RS                 "discharged",
-//RS             ));
-//RS         }
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             method_span,
-//RS             ..
-//RS         } if method == "raw"
-//RS             && is_checked_text_static_receiver(receiver, context.checked_text_types) =>
-//RS         {
-//RS             ledger.push(checked_text_raw_entry(source, *method_span, context));
-//RS         }
-//RS         Expr::MethodCall {
-//RS             method,
-//RS             method_span,
-//RS             ..
-//RS         } if method == crate::Syntax::TASK_DETACH => {
-//RS             ledger.push(source_entry(
-//RS                 GateKind::DutyDrop,
-//RS                 "duty",
-//RS                 "expression",
-//RS                 source,
-//RS                 *method_span,
-//RS                 "detach",
-//RS                 None,
-//RS                 "join duty explicitly abandoned",
-//RS                 "discharged",
-//RS             ));
-//RS         }
-//RS         Expr::MethodCall {
-//RS             method,
-//RS             method_span,
-//RS             ..
-//RS         } if method == "raw" => {
-//RS             ledger.push(source_entry(
-//RS                 GateKind::PrecisionDemotion,
-//RS                 "knowledge",
-//RS                 "expression",
-//RS                 source,
-//RS                 *method_span,
-//RS                 ".raw",
-//RS                 None,
-//RS                 "typed fact extracted as a raw value",
-//RS                 "recorded",
-//RS             ));
-//RS         }
-//RS         Expr::RawOf(_, span) => {
-//RS             ledger.push(source_entry(
-//RS                 GateKind::PrecisionDemotion,
-//RS                 "knowledge",
-//RS                 "expression",
-//RS                 source,
-//RS                 *span,
-//RS                 ".raw",
-//RS                 None,
-//RS                 "typed fact extracted as a raw value",
-//RS                 "recorded",
-//RS             ));
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn is_checked_text_static_receiver(receiver: &Expr, checked_text_types: &HashSet<String>) -> bool {
-//RS     let Some(name) = static_type_receiver_name(receiver) else {
-//RS         return false;
-//RS     };
-//RS     checked_text_types.contains(name)
-//RS         || name
-//RS             .rsplit_once("::")
-//RS             .is_some_and(|(_, leaf)| checked_text_types.contains(leaf))
-//RS }
-//RS 
-//RS fn static_type_receiver_name(receiver: &Expr) -> Option<&str> {
-//RS     match receiver {
-//RS         Expr::Ident(name, _) => Some(name),
-//RS         Expr::Field(base, name, _) if matches!(base.as_ref(), Expr::Ident(..)) => Some(name),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn checked_text_raw_entry(source: &str, span: Span, context: &GateContext<'_>) -> GateEntry {
-//RS     let enclosing = context
-//RS         .unsafe_gates
-//RS         .iter()
-//RS         .filter(|gate| {
-//RS             gate.source == source && gate.span.start <= span.start && span.end <= gate.span.end
-//RS         })
-//RS         .min_by_key(|gate| (gate.span.end - gate.span.start, gate.span.start));
-//RS     let mut entry = source_entry(
-//RS         GateKind::Unsafe,
-//RS         "security",
-//RS         "expression",
-//RS         source,
-//RS         span,
-//RS         "Type.raw",
-//RS         enclosing.and_then(|gate| gate.reason.clone()),
-//RS         "checked text raw construction requires an audited unsafe region",
-//RS         if enclosing.is_some_and(|gate| gate.reason.is_some()) {
-//RS             "recorded"
-//RS         } else {
-//RS             "missing"
-//RS         },
-//RS     );
-//RS     if let Some(gate) = enclosing {
-//RS         entry.provenance.push(format!(
-//RS             "unsafe gate {}:{}..{}",
-//RS             gate.source, gate.span.start, gate.span.end
-//RS         ));
-//RS     }
-//RS     entry
-//RS }
-//RS 
-//RS fn is_rounded_conversion(method: &str, args: &[crate::AST::CallArg]) -> bool {
-//RS     // The checker owns validity of the source, mode, and result. The ledger
-//RS     // only recognizes the canonical destination-owned spelling and its
-//RS     // required `digits:` slot, so it does not become a second authority.
-//RS     method.starts_with("from_")
-//RS         && method.ends_with("_rounded")
-//RS         && args.len() == 3
-//RS         && args
-//RS             .iter()
-//RS             .any(|arg| matches!(arg.label.as_ref(), Some((label, _)) if label == "digits"))
-//RS }
-//RS 
-//RS fn literal_text(expression: Option<&Expr>) -> Option<String> {
-//RS     let Some(Expr::Str(parts, _)) = expression else {
-//RS         return None;
-//RS     };
-//RS     let mut text = String::new();
-//RS     for part in parts {
-//RS         let StrPart::Lit(value) = part else {
-//RS             return None;
-//RS         };
-//RS         text.push_str(value);
-//RS     }
-//RS     Some(text)
-//RS }
-//RS 
-//RS fn visit_statement_gates(source: &str, body: &[Stmt], ledger: &mut GateLedger) {
-//RS     for statement in body {
-//RS         match statement {
-//RS             Stmt::Impure { reason, span, .. } => ledger.push(source_entry(
-//RS                 GateKind::Impure,
-//RS                 "security",
-//RS                 "block",
-//RS                 source,
-//RS                 *span,
-//RS                 "#Impure",
-//RS                 reason.clone(),
-//RS                 "ambient comptime effect gate",
-//RS                 if reason.is_some() {
-//RS                     "recorded"
-//RS                 } else {
-//RS                     "missing"
-//RS                 },
-//RS             )),
-//RS             Stmt::AuthorityScope { caps, span, .. } => ledger.push(source_entry(
-//RS                 GateKind::DependencyGrant,
-//RS                 "security",
-//RS                 "block",
-//RS                 source,
-//RS                 *span,
-//RS                 "#FX",
-//RS                 None,
-//RS                 &format!(
-//RS                     "effects: {}",
-//RS                     caps.iter()
-//RS                         .map(|(name, _)| name.as_str())
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(",")
-//RS                 ),
-//RS                 "recorded",
-//RS             )),
-//RS             Stmt::AssumeDet { reason, span, .. } => ledger.push(source_entry(
-//RS                 GateKind::Nondeterministic,
-//RS                 "security",
-//RS                 "block",
-//RS                 source,
-//RS                 *span,
-//RS                 "assume_deterministic",
-//RS                 Some(reason.clone()),
-//RS                 "determinism escape",
-//RS                 "recorded",
-//RS             )),
-//RS             _ => {}
-//RS         }
-//RS         if let Stmt::Unsafe { body, .. } = statement {
-//RS             visit_statement_gates(source, body, ledger);
-//RS         } else {
-//RS             for nested in crate::Sema::UnsafeObligations::nested_bodies(statement) {
-//RS                 visit_statement_gates(source, nested, ledger);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn entry(kind: GateKind, source: &str, span: usize) -> GateEntry {
-//RS         source_entry(
-//RS             kind,
-//RS             "test",
-//RS             "test",
-//RS             source,
-//RS             Span::new(span, span + 1),
-//RS             "x",
-//RS             None,
-//RS             "x",
-//RS             "recorded",
-//RS         )
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn security_entries_sort_before_knowledge_entries() {
-//RS         let mut ledger = GateLedger::default();
-//RS         ledger.push(entry(GateKind::PrecisionDemotion, "a.jet", 1));
-//RS         ledger.push(entry(GateKind::Unsafe, "a.jet", 2));
-//RS         ledger.sort();
-//RS         assert_eq!(ledger.entries()[0].kind, GateKind::Unsafe);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn duplicate_fact_keeps_both_provenance_rows() {
-//RS         let mut ledger = GateLedger::default();
-//RS         let mut first = entry(GateKind::TrustGrant, "trust", 0);
-//RS         first.provenance = vec!["trust store".to_string()];
-//RS         let mut second = first.clone();
-//RS         second.provenance = vec!["lockfile".to_string()];
-//RS         ledger.push(first);
-//RS         ledger.push(second);
-//RS         assert_eq!(ledger.entries().len(), 1);
-//RS         assert_eq!(ledger.entries()[0].provenance.len(), 2);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn structure_facts_use_the_same_gate_ledger() {
-//RS         let mut names = jet_foundation::Names::NameLedger::default();
-//RS         names.record_structure_fact(jet_foundation::Names::StructureFact::new(
-//RS             jet_foundation::Names::StructureFactKind::Liveness,
-//RS             "files",
-//RS             "app.jet",
-//RS             Span::new(4, 9),
-//RS             "unused",
-//RS             "remove or rename to _files",
-//RS             Some("_name".to_string()),
-//RS         ));
-//RS 
-//RS         let mut ledger = GateLedger::default();
-//RS         ledger.append_structure_facts(&names);
-//RS 
-//RS         assert_eq!(ledger.entries().len(), 1);
-//RS         assert_eq!(ledger.entries()[0].kind, GateKind::Structure);
-//RS         assert_eq!(ledger.entries()[0].domain, "structure");
-//RS         assert_eq!(ledger.entries()[0].reason.as_deref(), Some("_name"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn forced_build_fact_is_one_build_gate_entry() {
-//RS         let span = Span::new(7, 12);
-//RS         let contribution = jet_foundation::Policy::FactContribution::new(
-//RS             "Build.Settings.tls",
-//RS             jet_foundation::Policy::FactValue::Bool(false),
-//RS             jet_foundation::Policy::SourceScope::Package,
-//RS             jet_foundation::Policy::ContributionLayer::System,
-//RS             "system.jet",
-//RS         )
-//RS         .at(span)
-//RS         .force_with_reason("fleet certification");
-//RS         let fact = jet_foundation::Policy::resolve(
-//RS             jet_foundation::Policy::FactKey::new("Build.Settings.tls"),
-//RS             [contribution],
-//RS         )
-//RS         .expect("system force is a valid build contribution")
-//RS         .expect("the forced writer resolves");
-//RS         let mut facts = jet_foundation::Facts::BuildFactSnapshot::default();
-//RS         facts.contributions.insert(fact.key.name.clone(), fact);
-//RS 
-//RS         let mut ledger = GateLedger::default();
-//RS         append_fact_gates(&mut ledger, &facts);
-//RS 
-//RS         assert_eq!(ledger.entries().len(), 1);
-//RS         let entry = &ledger.entries()[0];
-//RS         assert_eq!(entry.kind, GateKind::BuildFlag);
-//RS         assert_eq!(entry.domain, "build");
-//RS         assert_eq!(entry.subject, "Build.Settings.tls");
-//RS         assert_eq!(entry.source, "system.jet");
-//RS         assert_eq!(entry.reason.as_deref(), Some("fleet certification"));
-//RS         assert_eq!(entry.span, Some(span));
-//RS     }
-//RS }
-// END-PORT-PENDING 0428 crates/jet-sema/src/Sema/GateLedger.rs:1-788
+// One compile-time gate read model. Source markers and policy remain the writers.
+use jet_foundation.[Span, GateDiagnostic, GateEntry, GateKind, GateOperation, NameLedger, BuildFactSnapshot, Expr, Func, Item, ProgramBundle, Stmt, StrPart, Type, DeriveBodyItem, ContribValue, CallArg]
+use jet_foundation.Authority as Authority
+use jet_foundation.Syntax as Syntax
+use jet_sema.Traits.[TraitRegistry]
+use jet_sema.Generics.[CHECKED_TEXT]
+use jet_sema.Policy.[GateSet]
+use jet_sema.Sema.UnsafeObligations.[inspect_with_gates, UnsafeGateInspection, nested_bodies]
 
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:14
+pub struct GateLedger {
+    inner: Authority.GateLedger
+    pub fn default() -> GateLedger Never! { GateLedger{inner: Authority.GateLedger.default()} }
+    // Rust: crates/jet-sema/src/Sema/GateLedger.rs:22
+    pub fn collect(bundle: ProgramBundle, gates: GateSet) -> GateLedger Never! {
+        inspection :: inspect_with_gates(bundle, gates)
+        checked_text_types :: checked_text_type_names(bundle)
+        context :: GateContext{checked_text_types: checked_text_types, unsafe_gates: inspection.gates}
+        ledger := GateLedger.default()
+        loop gate in inspection.gates {
+            discharged :: gate.operations.all(fn(operation) { operation.discharged })
+            provenance := gate.provenance
+            &provenance.push("{gate.source}:{gate.span.start}..{gate.span.end}")
+            operations :: loop operation in gate.operations -> GateOperation{kind: operation.kind, span: operation.span, required: operation.required, asserted: operation.asserted, discharged: operation.discharged}
+            &ledger.push(GateEntry{kind: GateKind.Unsafe, domain: "security", scope: "source", source: gate.source, span: Val(gate.span), subject: "#Unsafe", reason: gate.reason, status: Val(if discharged -> "discharged" else -> "missing"), detail: "mode={gate.mode}", provenance: provenance, operations: operations})
+        }
+        &ledger.set_diagnostics(loop entry in inspection.diagnostics -> GateDiagnostic{source: entry.source, diagnostic: entry.diagnostic})
+        loop module in bundle.modules {
+            visit_statements(module.display, module.script_body, &ledger, context)
+            visit_items(module.display, module.items, &ledger, context)
+        }
+        append_fact_gates(&ledger, bundle.build_facts)
+        &ledger.append_structure_facts(bundle.name_ledger)
+        &ledger.sort()
+        ledger
+    }
+    // Rust: crates/jet-sema/src/Sema/GateLedger.rs:83
+    pub fn entries(self) -> [GateEntry].View Never! { self.inner.entries() }
+    // Rust: crates/jet-sema/src/Sema/GateLedger.rs:87
+    pub fn diagnostics(self) -> [GateDiagnostic].View Never! { self.inner.diagnostics() }
+    // Rust: crates/jet-sema/src/Sema/GateLedger.rs:91
+    pub fn set_diagnostics(&self, diagnostics: [GateDiagnostic]) Never! { &self.inner.set_diagnostics(diagnostics) }
+    // Rust: crates/jet-sema/src/Sema/GateLedger.rs:97
+    pub fn push(&self, entry: GateEntry) Never! { &self.inner.push(entry) }
+    // Rust: crates/jet-sema/src/Sema/GateLedger.rs:101
+    pub fn sort(&self) Never! { &self.inner.sort() }
+    // Rust: crates/jet-sema/src/Sema/GateLedger.rs:108
+    pub fn append_structure_facts(&self, facts: NameLedger) Never! {
+        loop fact in facts.structure_facts() {
+            gate :: fact.gate ?? next
+            &self.push(GateEntry{kind: GateKind.Structure, domain: "structure", scope: fact.kind.name(), source: fact.source, span: Val(fact.span), subject: fact.subject, reason: Val(gate), status: Val(fact.status), detail: fact.detail, provenance: ["{fact.source}:{fact.span.start}..{fact.span.end}"], operations: []})
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:137
+fn append_fact_gates(ledger: &GateLedger, facts: BuildFactSnapshot) Never! {
+    loop fact in facts.contributions.values() {
+        loop contribution in fact.provenance {
+            if !contribution.force -> next
+            &ledger.push(GateEntry{kind: GateKind.BuildFlag, domain: "build", scope: contribution.layer.name(), source: contribution.source, span: Val(contribution.span), subject: fact.key.name, reason: Val(contribution.force_reason ?? ".Force"), status: Val("recorded"), detail: ".Force {contribution.value.display()}", provenance: ["{contribution.source}:{contribution.span.start}..{contribution.span.end}"], operations: []})
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:167
+fn source_entry(kind: GateKind, domain: String, scope: String, source: String, span: Span, subject: String, reason: String?, detail: String, status: String) -> GateEntry Never! {
+    GateEntry{kind: kind, domain: domain, scope: scope, source: source, span: Val(span), subject: subject, reason: reason, status: Val(status), detail: detail, provenance: ["{source}:{span.start}..{span.end}"], operations: []}
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:193
+struct GateContext { checked_text_types: [String:Bool], unsafe_gates: [UnsafeGateInspection] }
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:198
+fn checked_text_type_names(bundle: ProgramBundle) -> [String:Bool] Never! {
+    registries :: TraitRegistry.bundle_auto_derives(bundle, bundle.name_ledger)
+    names := [String:Bool]{}
+    loop registry in registries {
+        loop (name, base) in registry.distinct_bases {
+            if base == Type.String && registry.implements_trait(name, CHECKED_TEXT) -> names[name] = true
+        }
+    }
+    names
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:213
+fn visit_items(source: String, items: [Item], ledger: &GateLedger, context: GateContext) Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> visit_function(source, function, &ledger, context)
+            .Const(constant) -> visit_expression(source, constant.value, &ledger, context)
+            .Struct(definition) -> {
+                loop function in definition.methods -> visit_function(source, function, &ledger, context)
+                loop implementation in definition.trait_impls {
+                    loop function in implementation.methods -> visit_function(source, function, &ledger, context)
+                }
+                visit_statements(source, definition.validate_block, &ledger, context)
+                loop field in definition.fields {
+                    if field.computed == .Val(expression) -> visit_expression(source, expression, &ledger, context)
+                    if field.default == .Val(expression) -> visit_expression(source, expression, &ledger, context)
+                }
+            }
+            .Enum(definition) -> {
+                loop function in definition.methods -> visit_function(source, function, &ledger, context)
+                loop implementation in definition.trait_impls {
+                    loop function in implementation.methods -> visit_function(source, function, &ledger, context)
+                }
+            }
+            .Impl(implementation) -> { loop function in implementation.methods -> visit_function(source, function, &ledger, context) }
+            .Test(test) -> visit_statements(source, test.body, &ledger, context)
+            .CodeModule(module) -> { if module.body == .Val(body) -> visit_items(source, body, &ledger, context) }
+            .GenericModule(module) -> visit_items(source, module.body, &ledger, context)
+            .Module(module) -> {
+                loop expression in module.imports -> visit_expression(source, expression, &ledger, context)
+                loop expression in module.members -> visit_expression(source, expression, &ledger, context)
+                loop contribution in module.contributions {
+                    if contribution.value == .Expr(expression) -> visit_expression(source, expression, &ledger, context)
+                }
+            }
+            .MarkerDecl(marker) -> { if marker.body == .Val(body) -> visit_template_body(source, body, &ledger, context) }
+            else -> {}
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:286
+fn visit_template_body(source: String, body: [DeriveBodyItem], ledger: &GateLedger, context: GateContext) Never! {
+    loop body_item in body {
+        if body_item == {
+            .Stmt(statement) -> visit_statements(source, [statement], &ledger, context)
+            .Item(item) -> visit_items(source, [item], &ledger, context)
+            .Loop{source: expression, body, ..} -> {
+                visit_expression(source, expression, &ledger, context)
+                visit_template_body(source, body, &ledger, context)
+            }
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:312
+fn visit_function(source: String, function: Func, ledger: &GateLedger, context: GateContext) Never! {
+    if function.state_transition == .Val(transition) {
+        from :: transition.from ?? "_"
+        spelling :: "#Transition({from}, {transition.to})"
+        &ledger.push(source_entry(GateKind.StateTransition, "knowledge", "function", source, transition.span, spelling, Val(spelling), "state transition {from} -> {transition.to}", "recorded"))
+    }
+    if function.scrub_tag == .Val(tag) {
+        span :: function.markers.find(fn(marker) { marker.name == Syntax.KW_SCRUB }).map(fn(marker) { marker.span }) ?? function.name_span
+        &ledger.push(source_entry(GateKind.TaintScrub, "knowledge", "function", source, span, "#Scrub({tag})", None, "taint removed: {tag}", "cleared"))
+    }
+    loop marker in function.markers {
+        gate :: if marker.name == {
+            Syntax.MARKER_NONDETERMINISTIC -> (GateKind.Nondeterministic, "#Nondeterministic", "determinism escape")
+            Syntax.KW_IMPURE -> (GateKind.Impure, "#Impure", "impure function")
+            else -> next
+        }
+        &ledger.push(source_entry(gate.0, "security", "function", source, marker.span, gate.1, literal_text(marker.expr_arg(0)), gate.2, "recorded"))
+    }
+    visit_statements(source, function.body, &ledger, context)
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:380
+fn visit_statements(source: String, body: [Stmt], ledger: &GateLedger, context: GateContext) Never! {
+    loop statement in body -> visit_statement_expressions(source, statement, &ledger, context)
+    visit_statement_gates(source, body, &ledger)
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:392
+fn visit_statement_expressions(source: String, statement: Stmt, ledger: &GateLedger, context: GateContext) Never! {
+    statement.for_each_expr(fn(expression) { visit_expression_value(source, expression, &ledger, context) })
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:404
+fn visit_expression(source: String, expression: Expr, ledger: &GateLedger, context: GateContext) Never! {
+    expression.for_each_expr(fn(value) { visit_expression_value(source, value, &ledger, context) })
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:414
+fn visit_expression_value(source: String, expression: Expr, ledger: &GateLedger, context: GateContext) Never! {
+    if expression == {
+        .Call(call) -> {
+            if call.widen_approx || call.name == Syntax.BUILTIN_APPROX {
+                &ledger.push(source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, call.name_span, "approx", None, "exact value widened to an approximation", "recorded"))
+            } else if call.name == Syntax.BUILTIN_WRAPPING || call.name == Syntax.BUILTIN_SATURATING || call.name == Syntax.BUILTIN_CHECKED {
+                detail :: if call.name == {
+                    Syntax.BUILTIN_SATURATING -> "overflow fact replaced by saturating arithmetic"
+                    Syntax.BUILTIN_CHECKED -> "overflow fact represented as an optional result"
+                    else -> "overflow fact replaced by wrapping arithmetic"
+                }
+                &ledger.push(source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, call.name_span, call.name, None, detail, "recorded"))
+            }
+        }
+        .MethodCall{receiver, method, method_span, args, ..} -> {
+            if is_rounded_conversion(method, args) {
+                &ledger.push(source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, method_span, method, None, "unit conversion rounded with an explicit mode", "recorded"))
+            } else if method == Syntax.METHOD_DROP {
+                reason :: args.first().and_then(fn(argument) { literal_text(Val(argument.expr)) })
+                &ledger.push(source_entry(GateKind.DutyDrop, "duty", "expression", source, method_span, ".drop", reason, "result duty explicitly discharged", "discharged"))
+            } else if method == "raw" && is_checked_text_static_receiver(receiver, context.checked_text_types) {
+                &ledger.push(checked_text_raw_entry(source, method_span, context))
+            } else if method == Syntax.TASK_DETACH {
+                &ledger.push(source_entry(GateKind.DutyDrop, "duty", "expression", source, method_span, "detach", None, "join duty explicitly abandoned", "discharged"))
+            } else if method == "raw" {
+                &ledger.push(source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, method_span, ".raw", None, "typed fact extracted as a raw value", "recorded"))
+            }
+        }
+        .RawOf(_, span) -> &ledger.push(source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, span, ".raw", None, "typed fact extracted as a raw value", "recorded"))
+        else -> {}
+    }
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:559
+fn is_checked_text_static_receiver(receiver: Expr, checked_text_types: [String:Bool]) -> Bool Never! {
+    name :: static_type_receiver_name(receiver) ?? return false
+    if checked_text_types.contains(name) -> return true
+    if name.rsplit_once("::") == .Val((_, leaf)) -> return checked_text_types.contains(leaf)
+    false
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:569
+fn static_type_receiver_name(receiver: Expr) -> String? Never! {
+    if receiver == {
+        .Ident(name, _) -> Val(name)
+        .Field(base, name, _) -> if base is Expr.Ident -> Val(name) else -> None
+        else -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:577
+fn checked_text_raw_entry(source: String, span: Span, context: GateContext) -> GateEntry Never! {
+    enclosing := UnsafeGateInspection?{None}
+    loop gate in context.unsafe_gates {
+        if gate.source != source || gate.span.start > span.start || span.end > gate.span.end -> next
+        if enclosing == .Val(previous) {
+            if (gate.span.end - gate.span.start, gate.span.start) >= (previous.span.end - previous.span.start, previous.span.start) -> next
+        }
+        enclosing = Val(gate)
+    }
+    reason :: enclosing.and_then(fn(gate) { gate.reason })
+    entry := source_entry(GateKind.Unsafe, "security", "expression", source, span, "Type.raw", reason, "checked text raw construction requires an audited unsafe region", if reason != None -> "recorded" else -> "missing")
+    if enclosing == .Val(gate) -> &entry.provenance.push("unsafe gate {gate.source}:{gate.span.start}..{gate.span.end}")
+    entry
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:609
+fn is_rounded_conversion(method: String, args: [CallArg]) -> Bool Never! {
+    method.starts_with("from_") && method.ends_with("_rounded") && args.len() == 3 && args.any(fn(arg) { arg.label.map(fn(label) { label.0 == "digits" }) ?? false })
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:621
+fn literal_text(expression: Expr?) -> String? Never! {
+    value :: expression ?? return None
+    if value == .Str(parts, _) {
+        text := ""
+        loop part in parts {
+            if part == { .Lit(value) -> &text.push_str(value); else -> return None }
+        }
+        return Val(text)
+    }
+    None
+}
+// Rust: crates/jet-sema/src/Sema/GateLedger.rs:635
+fn visit_statement_gates(source: String, body: [Stmt], ledger: &GateLedger) Never! {
+    loop statement in body {
+        if statement == {
+            .Impure{reason, span, ..} -> &ledger.push(source_entry(GateKind.Impure, "security", "block", source, span, "#Impure", reason, "ambient comptime effect gate", if reason != None -> "recorded" else -> "missing"))
+            .AuthorityScope{caps, span, ..} -> {
+                effects :: (loop cap in caps -> cap.0).join(",")
+                &ledger.push(source_entry(GateKind.DependencyGrant, "security", "block", source, span, "#FX", None, "effects: {effects}", "recorded"))
+            }
+            .AssumeDet{reason, span, ..} -> &ledger.push(source_entry(GateKind.Nondeterministic, "security", "block", source, span, "assume_deterministic", Val(reason), "determinism escape", "recorded"))
+            else -> {}
+        }
+        if statement == .Unsafe{body, ..} -> visit_statement_gates(source, body, &ledger)
+        else -> { loop nested in nested_bodies(statement) -> visit_statement_gates(source, nested, &ledger) }
+    }
+}

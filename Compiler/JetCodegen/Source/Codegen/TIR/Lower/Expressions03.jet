@@ -1,820 +1,397 @@
-// PORT-PENDING 0477 crates-jet-codegen-src-codegen-tir-lower-expressions-slice-3604: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3604-4419
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn lower_boundary_typed_lit(
-//RS     type_name: &str,
-//RS     body: &TypedLitBody,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS ) -> Option<TExpr> {
-//RS     let TypedLitBody::Value(inner) = body else {
-//RS         return None;
-//RS     };
-//RS     let Expr::Str(parts, _) = inner.as_ref() else {
-//RS         return None;
-//RS     };
-//RS     let mut literals = Vec::new();
-//RS     let mut holes = Vec::new();
-//RS     let mut trusted_html = Vec::new();
-//RS     for part in parts {
-//RS         match part {
-//RS             StrPart::Lit(text) => literals.push(text.clone()),
-//RS             StrPart::Interp(expr, _) => {
-//RS                 if literals.len() == holes.len() {
-//RS                     literals.push(String::new());
-//RS                 }
-//RS                 let hole = lower_expr(expr, cx, env);
-//RS                 trusted_html.push(
-//RS                     type_name == Syntax::TYPE_HTML
-//RS                         && matches!(
-//RS                             &hole.ty,
-//RS                             Type::Named(name) if name == Syntax::TYPE_HTML
-//RS                         ),
-//RS                 );
-//RS                 holes.push(hole);
-//RS             }
-//RS         }
-//RS     }
-//RS     if literals.len() == holes.len() {
-//RS         literals.push(String::new());
-//RS     }
-//RS     let kind = Syntax::typed_head_kind(type_name).filter(|kind| kind.is_boundary())?;
-//RS     let ty = Type::Named(kind.internal_type_name().to_string());
-//RS     Some(TExpr {
-//RS         ty,
-//RS         kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedTextInterp {
-//RS             kind,
-//RS             literals,
-//RS             holes,
-//RS             trusted_html,
-//RS         })),
-//RS     })
-//RS }
-//RS 
-//RS /// D-BYTELIT1=B: mirror sema's byte-text rewrite for raw comptime fragments
-//RS /// that reach TIR before ordinary typed-literal elaboration.
-//RS fn byte_text_exprs(parts: &[crate::AST::ByteTextPart], span: Span) -> Option<Vec<Expr>> {
-//RS     let bytes = TypedLitBody::byte_text_bytes(parts)?;
-//RS     Some(
-//RS         bytes
-//RS             .into_iter()
-//RS             .map(|byte| Expr::Int(byte as i64, span, None, Some(byte.to_string())))
-//RS             .collect(),
-//RS     )
-//RS }
-//RS 
-//RS fn lower_unit_text(value: TExpr, style: crate::AST::UnitFormat, cx: &Cx) -> TExpr {
-//RS     let original_ty = value.ty.clone();
-//RS     let raw = if let Type::Named(name) = &original_ty {
-//RS         let base = cx
-//RS             .distinct_types
-//RS             .get(name)
-//RS             .map(|(base, _)| base.clone())
-//RS             .unwrap_or(Type::Float);
-//RS         TExpr {
-//RS             ty: base,
-//RS             kind: TExprKind::DistinctRaw(Box::new(value)),
-//RS         }
-//RS     } else if let Some((base, _)) = original_ty.quantity_parts() {
-//RS         TExpr {
-//RS             ty: base.clone(),
-//RS             ..value
-//RS         }
-//RS     } else {
-//RS         value
-//RS     };
-//RS     // Keep the raw magnitude on the dedicated quantity formatter route. The
-//RS     // Unit selector is an internal TIR marker here; user Unit selectors are
-//RS     // already lowered to this checked String-producing function.
-//RS     let mut parts = vec![TStrPart::Interp(
-//RS         raw,
-//RS         crate::AST::StrFormat::Unit(crate::AST::UnitFormat::Bare),
-//RS     )];
-//RS     if style != crate::AST::UnitFormat::Bare {
-//RS         let label = cx
-//RS             .unit_label(&original_ty)
-//RS             .map(|label| match style {
-//RS                 crate::AST::UnitFormat::Name => label.name.clone(),
-//RS                 crate::AST::UnitFormat::Symbol | crate::AST::UnitFormat::Bare => {
-//RS                     label.symbol.clone()
-//RS                 }
-//RS             })
-//RS             .or_else(|| {
-//RS                 original_ty
-//RS                     .quantity_parts()
-//RS                     .map(|(_, dimension)| cx.quantity_unit_label(dimension, style))
-//RS             })
-//RS             .or_else(|| {
-//RS                 cx.quantity_dimension(&original_ty)
-//RS                     .map(|dimension| cx.quantity_unit_label(dimension, style))
-//RS             })
-//RS             .expect("sema accepted unit formatting only for unit values");
-//RS         parts.push(TStrPart::Lit(format!(" {label}")));
-//RS     }
-//RS     TExpr {
-//RS         ty: Type::String,
-//RS         kind: TExprKind::StrLit(parts),
-//RS     }
-//RS }
-//RS 
-//RS /// D-VERDICT-1321-1: variadic `print`/`io.print`/`io.eprint` — join the
-//RS /// arguments with newline separators into one string value, so downstream
-//RS /// engines see the ordinary single-value print they already implement.
-//RS pub(crate) fn join_print_args(args: &[crate::AST::CallArg], cx: &Cx, env: &mut LowerEnv) -> TExpr {
-//RS     join_print_values(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)), cx)
-//RS }
-//RS 
-//RS pub(crate) fn join_print_values(values: impl IntoIterator<Item = TExpr>, cx: &Cx) -> TExpr {
-//RS     let values: Vec<TExpr> = values
-//RS         .into_iter()
-//RS         .map(|value| lower_display_value(value, cx))
-//RS         .collect();
-//RS     let mut parts = Vec::with_capacity(values.len() * 2);
-//RS     for (index, value) in values.into_iter().enumerate() {
-//RS         if index > 0 {
-//RS             parts.push(TStrPart::Lit("\n".to_string()));
-//RS         }
-//RS         parts.push(TStrPart::Interp(value, crate::AST::StrFormat::Display));
-//RS     }
-//RS     TExpr {
-//RS         ty: Type::String,
-//RS         kind: TExprKind::StrLit(parts),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
-//RS     if value.ty.quantity_parts().is_some() {
-//RS         return lower_unit_text(value, crate::AST::UnitFormat::Symbol, cx);
-//RS     }
-//RS     // D-TYPE2-IMAG1=A: the precise `Complex` carrier has no scalar print ABI on
-//RS     // any tier — it is a two-`f64` value AOT renders through `JetShow for
-//RS     // JetComplex` and the resident/web engines render through a host handle. Name
-//RS     // that render once here, as the shared Prelude `Complex.to_string` call every
-//RS     // tier already lowers (`jet_complex_to_string`, the same `to_string_rep` the
-//RS     // AOT trait impl and the comptime evaluator use), so no engine grows a
-//RS     // private display rule for it. Without this, `print(z)` on a `Complex` left
-//RS     // TIR with a `Print` whose payload type has no print dispatch, which the
-//RS     // resident JIT can only report as a compile gap and deopt on.
-//RS     if matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX)
-//RS         && !cx.type_names.contains(Syntax::TYPE_COMPLEX)
-//RS     {
-//RS         return TExpr {
-//RS             ty: Type::String,
-//RS             kind: TExprKind::PreciseBuiltin {
-//RS                 type_name: Syntax::TYPE_COMPLEX.to_string(),
-//RS                 func: "to_string".to_string(),
-//RS                 args: vec![value],
-//RS             },
-//RS         };
-//RS     }
-//RS     // D-TYPE2-NUM1=A: exact `Int / Int` produces a `Fraction` carrier. Keep
-//RS     // display on the shared precise Prelude path so interpolation does not ask
-//RS     // the resident engine to treat the opaque rational handle as a user record.
-//RS     if matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_FRACTION)
-//RS         && !cx.type_names.contains(Syntax::TYPE_FRACTION)
-//RS     {
-//RS         return TExpr {
-//RS             ty: Type::String,
-//RS             kind: TExprKind::PreciseBuiltin {
-//RS                 type_name: Syntax::TYPE_FRACTION.to_string(),
-//RS                 func: "to_string".to_string(),
-//RS                 args: vec![value],
-//RS             },
-//RS         };
-//RS     }
-//RS     let Type::Named(name) = &value.ty else {
-//RS         return value;
-//RS     };
-//RS     // Primitive display is a shared Prelude operation; it has no checked
-//RS     // instance receiver row in fragment registries.
-//RS     let prelude_scalar = matches!(
-//RS         value.ty.without_user_tags(),
-//RS         Type::Named(name)
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 "Int" | "Float" | "Bool" | "String" | "Char" | "I8" | "I16" | "I32" | "I64"
-//RS                     | "I128" | "U8" | "U16" | "U32" | "U64" | "U128"
-//RS             )
-//RS     );
-//RS     // A generic Printable parameter is formatted through the shared Prelude
-//RS     // route after monomorphization. It has no concrete Display receiver
-//RS     // convention in the fragment registry, so do not synthesize a user trait
-//RS     // method call for it here.
-//RS     let generic_parameter = cx.current_type_params.borrow().contains(name);
-//RS     if !prelude_scalar && !generic_parameter && cx.has_display_type(name) {
-//RS         return TExpr {
-//RS             ty: Type::String,
-//RS             kind: TExprKind::MethodCall {
-//RS                 recv: Box::new(value),
-//RS                 method: TMethodRef::trait_method("Display", "display"),
-//RS                 type_args: Vec::new(),
-//RS                 args: Vec::new(),
-//RS                 source_first_string_literal: None,
-//RS                 operator_line: None,
-//RS             },
-//RS         };
-//RS     }
-//RS     if cx.unit_label(&value.ty).is_none() {
-//RS         return value;
-//RS     }
-//RS     lower_unit_text(value, crate::AST::UnitFormat::Symbol, cx)
-//RS }
-//RS 
-//RS /// Preserve typed Printable values for the shared Print operation, except for
-//RS /// unit-bearing values whose canonical metadata renderer must run before the
-//RS /// backend sees the erased numeric carrier.
-//RS fn lower_print_value(value: TExpr, cx: &Cx) -> TExpr {
-//RS     let printable_unit = value.ty.quantity_parts().is_some() || cx.unit_label(&value.ty).is_some();
-//RS     let explicit_display = matches!(&value.ty, Type::Named(name) if cx.has_display_type(name));
-//RS     if printable_unit || explicit_display {
-//RS         lower_display_value(value, cx)
-//RS     } else {
-//RS         value
-//RS     }
-//RS }
-//RS 
-//RS /// Lower a variadic print as ordered one-value Print operations.
-//RS ///
-//RS /// Sema checks every argument independently and specifies one output line per
-//RS /// argument.  Keeping one Print node per argument preserves both contracts
-//RS /// without forcing a Printable-only value through Display.
-//RS pub(crate) fn print_values(values: impl IntoIterator<Item = TExpr>, cx: &Cx, site: usize) -> TExpr {
-//RS     let mut values: Vec<TExpr> = values
-//RS         .into_iter()
-//RS         .map(|value| lower_print_value(value, cx))
-//RS         .collect();
-//RS     if values.len() == 1 {
-//RS         return TExpr {
-//RS             ty: unit_type(),
-//RS             kind: TExprKind::Print(Box::new(
-//RS                 values
-//RS                     .pop()
-//RS                     .expect("one-value print fast path has one value"),
-//RS             )),
-//RS         };
-//RS     }
-//RS     let mut stmts = Vec::with_capacity(values.len() * 2);
-//RS     let mut locals = Vec::with_capacity(values.len());
-//RS     for (index, value) in values.into_iter().enumerate() {
-//RS         let temp = jet_format!("{jet_prefix}print_arg_{site}_{index}");
-//RS         let local = TLocal::generated(&temp);
-//RS         locals.push((local.clone(), value.ty.clone()));
-//RS         stmts.push(TStmt::Let {
-//RS             name: temp,
-//RS             kw: "let",
-//RS             let_ty: crate::Codegen::TIR::TLetTy::inferred(),
-//RS             init: value,
-//RS             gc_promotion: None,
-//RS             gc_transferred: false,
-//RS         });
-//RS     }
-//RS     for (local, ty) in locals {
-//RS         let value = TExpr {
-//RS             ty,
-//RS             kind: TExprKind::Local(local),
-//RS         };
-//RS         stmts.push(TStmt::ExprStmt(TExpr {
-//RS             ty: unit_type(),
-//RS             kind: TExprKind::Print(Box::new(value)),
-//RS         }));
-//RS     }
-//RS     TExpr {
-//RS         ty: unit_type(),
-//RS         kind: TExprKind::InlineBlock(stmts),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn print_args(
-//RS     args: &[crate::AST::CallArg],
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS     site: usize,
-//RS ) -> TExpr {
-//RS     print_values(
-//RS         args.iter().map(|arg| lower_expr(&arg.expr, cx, env)),
-//RS         cx,
-//RS         site,
-//RS     )
-//RS }
-//RS 
-//RS /// D-FMT-PRETTY1=A: convert a Debug-capable value to canonical Debug text
-//RS /// before the shared Prelude formatter sees it. This keeps the formatter's
-//RS /// only input a String while preserving one value-to-text path across tiers.
-//RS pub(crate) fn lower_debug_text(value: TExpr) -> TExpr {
-//RS     TExpr {
-//RS         ty: Type::String,
-//RS         kind: TExprKind::StrLit(vec![TStrPart::Interp(value, crate::AST::StrFormat::Debug)]),
-//RS     }
-//RS }
-//RS 
-//RS /// D-DBG1=A: a checked `debug(value)` trace evaluates the value once, writes
-//RS /// `[debug] <site> = <Debug form>` to stderr through the shared
-//RS /// `core.term.eprint` row (one text on every tier), and yields the value
-//RS /// unchanged. Sema stored the site text as the second argument. A traced
-//RS /// place is copied so the caller keeps its binding, matching the read
-//RS /// convention sema checked.
-//RS pub(crate) fn lower_debug_trace(call: &crate::AST::Call, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-//RS     let mut value = lower_expr(&call.args[0].expr, cx, env);
-//RS     if !value.ty.is_scalar()
-//RS         && matches!(
-//RS             value.kind,
-//RS             TExprKind::Local(_) | TExprKind::Field { .. } | TExprKind::Index { .. }
-//RS         )
-//RS     {
-//RS         value = TExpr {
-//RS             ty: value.ty.clone(),
-//RS             kind: TExprKind::Clone(Box::new(value), jet_foundation::MIR::MirCopyFact::Materialize),
-//RS         };
-//RS     }
-//RS     let site: String = match call.args.get(1).map(|arg| &arg.expr) {
-//RS         Some(Expr::Str(parts, _)) => parts
-//RS             .iter()
-//RS             .filter_map(|part| match part {
-//RS                 crate::AST::StrPart::Lit(text) => Some(text.as_str()),
-//RS                 crate::AST::StrPart::Interp(..) => None,
-//RS             })
-//RS             .collect(),
-//RS         _ => String::new(),
-//RS     };
-//RS     let ty = value.ty.clone();
-//RS     let temp = jet_format!("{jet_prefix}debug_trace_{}", call.name_span.start);
-//RS     let local = TLocal::generated(&temp);
-//RS     let read = || TExpr {
-//RS         ty: ty.clone(),
-//RS         kind: TExprKind::Local(local.clone()),
-//RS     };
-//RS     let line = TExpr {
-//RS         ty: Type::String,
-//RS         kind: TExprKind::StrLit(vec![
-//RS             TStrPart::Lit(format!("{} {site} = ", Syntax::DEBUG_TRACE_PREFIX)),
-//RS             TStrPart::Interp(read(), crate::AST::StrFormat::Debug),
-//RS         ]),
-//RS     };
-//RS     let write = core_call_expr(
-//RS         unit_type(),
-//RS         "core.term",
-//RS         "eprint",
-//RS         vec![line],
-//RS         call.name_span,
-//RS         vec![false],
-//RS     );
-//RS     TExpr {
-//RS         ty: ty.clone(),
-//RS         kind: TExprKind::InlineBlock(vec![
-//RS             TStmt::Let {
-//RS                 name: temp,
-//RS                 kw: "let",
-//RS                 let_ty: crate::Codegen::TIR::TLetTy::inferred(),
-//RS                 init: value,
-//RS                 gc_promotion: None,
-//RS                 gc_transferred: false,
-//RS             },
-//RS             TStmt::ExprStmt(write),
-//RS             TStmt::ExprStmt(read()),
-//RS         ]),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_fmt_call(method: &str, args: Vec<TExpr>, source_span: crate::Diagnostics::Span) -> TExpr {
-//RS     let widen_to_vec = vec![false; args.len()];
-//RS     core_call_expr(
-//RS         Type::String,
-//RS         "core.text.fmt",
-//RS         method,
-//RS         args,
-//RS         source_span,
-//RS         widen_to_vec,
-//RS     )
-//RS }
-//RS 
-//RS fn lower_fmt_int(value: i64) -> TExpr {
-//RS     TExpr {
-//RS         ty: Type::Int,
-//RS         kind: TExprKind::IntLit(value, None),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_fmt_string(value: String) -> TExpr {
-//RS     TExpr {
-//RS         ty: Type::String,
-//RS         kind: TExprKind::StrLit(vec![TStrPart::Lit(value)]),
-//RS     }
-//RS }
-//RS 
-//RS /// Default `Err` fields that were omitted as `None` still have a checked type
-//RS /// (`?String` / `?Err`). Bare `Expr::Absent` otherwise lowers as `?Int`, and
-//RS /// AOT then annotates the temp as `JetOutcome<i64, JetAbsent>` — which cannot
-//RS /// fill `jet_err`.
-//RS fn lower_default_err_field(name: &str, value: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-//RS     match (name, strip_expr_parens(value)) {
-//RS         ("code", Expr::Absent(_)) => TExpr {
-//RS             ty: Type::Option(Box::new(Type::String)),
-//RS             kind: TExprKind::Absent,
-//RS         },
-//RS         ("cause", Expr::Absent(_)) => TExpr {
-//RS             ty: Type::Option(Box::new(Type::Named(Syntax::TYPE_ERR.to_string()))),
-//RS             kind: TExprKind::Absent,
-//RS         },
-//RS         _ => lower_expr(value, cx, env),
-//RS     }
-//RS }
-//RS 
-//RS /// D-FAIL-ERROR1=A: top-level comptime values are lowered before sema has
-//RS /// rewritten raw `Err(...)` calls to `Expr::Err` plus the default `Err` struct.
-//RS /// Normalize that one early shape here so the comptime evaluator consumes the
-//RS /// same TIR carrier as the post-sema AOT/JIT paths.
-//RS fn lower_raw_err_value(call: &Call, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-//RS     let message = call
-//RS         .args
-//RS         .first()
-//RS         .filter(|arg| arg.label.is_none())
-//RS         .map(|arg| lower_expr(&arg.expr, cx, env))
-//RS         .unwrap_or_else(|| TExpr {
-//RS             ty: Type::String,
-//RS             kind: TExprKind::StrLit(vec![TStrPart::Lit(String::new())]),
-//RS         });
-//RS     let optional = |value: Option<TExpr>, fallback: Type| match value {
-//RS         Some(value) => TExpr {
-//RS             ty: Type::Option(Box::new(value.ty.clone())),
-//RS             kind: TExprKind::Present(Box::new(value)),
-//RS         },
-//RS         None => TExpr {
-//RS             ty: Type::Option(Box::new(fallback)),
-//RS             kind: TExprKind::Absent,
-//RS         },
-//RS     };
-//RS     let code = call
-//RS         .args
-//RS         .iter()
-//RS         .find(|arg| arg.label.as_ref().is_some_and(|(name, _)| name == "code"))
-//RS         .map(|arg| lower_expr(&arg.expr, cx, env));
-//RS     let cause = call
-//RS         .args
-//RS         .iter()
-//RS         .find(|arg| arg.label.as_ref().is_some_and(|(name, _)| name == "cause"))
-//RS         .map(|arg| match strip_expr_parens(&arg.expr) {
-//RS             Expr::Call(nested) if nested.name == Syntax::LIT_ERR => {
-//RS                 lower_raw_err_value(nested, cx, env)
-//RS             }
-//RS             _ => lower_expr(&arg.expr, cx, env),
-//RS         });
-//RS     TExpr {
-//RS         ty: Type::Named(Syntax::TYPE_ERR.to_string()),
-//RS         kind: TExprKind::StructLit {
-//RS             fields: vec![
-//RS                 ("message".to_string(), message, false),
-//RS                 ("code".to_string(), optional(code, Type::String), false),
-//RS                 (
-//RS                     "cause".to_string(),
-//RS                     optional(cause, Type::Named(Syntax::TYPE_ERR.to_string())),
-//RS                     false,
-//RS                 ),
-//RS             ],
-//RS             extra: None,
-//RS             as_trait: None,
-//RS         },
-//RS     }
-//RS }
-//RS /// D-FAIL-OK1=A: top-level comptime function bodies can reach TIR before sema
-//RS /// rewrites raw `Ok(...)` calls to `Expr::Ok`. Keep that early shape on the
-//RS /// same Result carrier path as the post-sema constructor node.
-//RS fn lower_raw_ok_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
-//RS     if call.name != Syntax::LIT_OK
-//RS         || cx.sigs.contains_key(&call.name)
-//RS         || env.locals.contains_key(&call.name)
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let mut payload = call
-//RS         .args
-//RS         .first()
-//RS         .map(|arg| lower_owned_expr(&arg.expr, cx, env))
-//RS         .unwrap_or_else(|| TExpr {
-//RS             ty: unit_type(),
-//RS             kind: TExprKind::Unit,
-//RS         });
-//RS     let (ok_ty, err_ty) = match env.ret_ty.as_ref() {
-//RS         Some(Type::Result { ok, err }) => {
-//RS             payload = preserve_typed_list_shape(payload, ok, cx);
-//RS             payload = crate::Codegen::TIR::maybe_widen_expr_to_union(payload, ok);
-//RS             ((**ok).clone(), (**err).clone())
-//RS         }
-//RS         _ => (
-//RS             payload.ty.clone(),
-//RS             Type::Named(Syntax::TYPE_ERR.to_string()),
-//RS         ),
-//RS     };
-//RS     Some(TExpr {
-//RS         ty: Type::Result {
-//RS             ok: Box::new(ok_ty),
-//RS             err: Box::new(err_ty),
-//RS         },
-//RS         kind: TExprKind::Ok(Box::new(payload)),
-//RS     })
-//RS }
-//RS 
-//RS /// D-FAIL-ENUM1=A: a leading-dot `.Ok(...)`/`.Err(...)` can reach a comptime
-//RS /// fragment before sema rewrites the contextual enum literal to `Expr::Ok` or
-//RS /// `Expr::Err`. Reuse the raw-call carrier lowering instead of routing Result
-//RS /// through user-enum payload layout.
-//RS fn lower_raw_contextual_result_variant(
-//RS     variant: &str,
-//RS     args: &[EnumLitArg],
-//RS     span: Span,
-//RS     cx: &Cx,
-//RS     env: &mut LowerEnv,
-//RS ) -> Option<TExpr> {
-//RS     if !matches!(env.ret_ty, Some(Type::Result { .. }))
-//RS         || (variant != Syntax::LIT_OK && variant != Syntax::LIT_ERR)
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let call = Call {
-//RS         name: variant.to_string(),
-//RS         name_span: span,
-//RS         type_args: Vec::new(),
-//RS         args: args
-//RS             .iter()
-//RS             .map(|arg| match arg {
-//RS                 EnumLitArg::Positional(expr) => CallArg {
-//RS                     convention: AccessConvention::Move,
-//RS                     expr: expr.clone(),
-//RS                     span: expr.span(),
-//RS                     flags: Default::default(),
-//RS                     label: None,
-//RS                     spread: false,
-//RS                 },
-//RS                 EnumLitArg::Named { label, expr } => CallArg {
-//RS                     convention: AccessConvention::Move,
-//RS                     expr: expr.clone(),
-//RS                     span: expr.span(),
-//RS                     flags: Default::default(),
-//RS                     label: Some((label.clone(), expr.span())),
-//RS                     spread: false,
-//RS                 },
-//RS             })
-//RS             .collect(),
-//RS         resolved_ret: None,
-//RS         range_checked: false,
-//RS         widen_approx: false,
-//RS     };
-//RS     if variant == Syntax::LIT_OK {
-//RS         lower_raw_ok_call(&call, cx, env)
-//RS     } else {
-//RS         lower_raw_err_call(&call, cx, env)
-//RS     }
-//RS }
-//RS 
-//RS /// A leading-dot variant such as `return .Less` can reach a comptime fragment
-//RS /// before sema names its enum. The enclosing return type (its success payload
-//RS /// when the helper is fallible) is the only context an unchecked body carries,
-//RS /// so it names the enum when that enum declares the variant.
-//RS fn raw_contextual_return_enum(variant: &str, cx: &Cx, env: &LowerEnv) -> Option<String> {
-//RS     let success = match env.ret_ty.as_ref()? {
-//RS         Type::Result { ok, .. } => ok.as_ref(),
-//RS         other => other,
-//RS     };
-//RS     let (Type::Named(name) | Type::Apply { name, .. }) = success else {
-//RS         return None;
-//RS     };
-//RS     let resolved = cx
-//RS         .local_type_identities
-//RS         .get(name)
-//RS         .map(String::as_str)
-//RS         .or_else(|| cx.core_qualified_rust_type_name(name))
-//RS         .unwrap_or(name.as_str());
-//RS     let declared = [name.as_str(), resolved].iter().any(|owner| {
-//RS         cx.enum_variants
-//RS             .get(*owner)
-//RS             .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
-//RS     }) || crate::Codegen::TIR::tir_to_mir_types::compiler_owned_enum_variants(name)
-//RS         .is_some_and(|variants| variants.contains(&variant))
-//RS         || jet_foundation::CoreModuleExports::core_enum_variants(resolved)
-//RS             .is_some_and(|variants| variants.contains(&variant));
-//RS     declared.then(|| name.clone())
-//RS }
-//RS 
-//RS fn lower_raw_err_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
-//RS     if call.name != Syntax::LIT_ERR
-//RS         || cx.sigs.contains_key(&call.name)
-//RS         || env.locals.contains_key(&call.name)
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let target_error = match env.ret_ty.as_ref() {
-//RS         Some(Type::Result { err, .. }) => Some((**err).clone()),
-//RS         _ => None,
-//RS     };
-//RS     let default_error = target_error
-//RS         .as_ref()
-//RS         .is_none_or(|error| matches!(error, Type::Named(name) if name == Syntax::TYPE_ERR));
-//RS     if default_error {
-//RS         let value = lower_raw_err_value(call, cx, env);
-//RS         return Some(match target_error {
-//RS             Some(_) => TExpr {
-//RS                 ty: Type::Result {
-//RS                     ok: Box::new(match env.ret_ty.as_ref() {
-//RS                         Some(Type::Result { ok, .. }) => (**ok).clone(),
-//RS                         _ => Type::Int,
-//RS                     }),
-//RS                     err: Box::new(value.ty.clone()),
-//RS                 },
-//RS                 kind: TExprKind::Err(Box::new(value), None),
-//RS             },
-//RS             None => value,
-//RS         });
-//RS     }
-//RS     let payload = call
-//RS         .args
-//RS         .first()
-//RS         .map(|arg| lower_expr(&arg.expr, cx, env))
-//RS         .unwrap_or_else(|| TExpr {
-//RS             ty: Type::Named(Syntax::TYPE_ERR.to_string()),
-//RS             kind: TExprKind::StructLit {
-//RS                 fields: Vec::new(),
-//RS                 extra: None,
-//RS                 as_trait: None,
-//RS             },
-//RS         });
-//RS     let payload = match target_error.as_ref() {
-//RS         Some(error) => crate::Codegen::TIR::maybe_widen_expr_to_union(payload, error),
-//RS         None => payload,
-//RS     };
-//RS     Some(TExpr {
-//RS         ty: Type::Result {
-//RS             ok: Box::new(match env.ret_ty.as_ref() {
-//RS                 Some(Type::Result { ok, .. }) => (**ok).clone(),
-//RS                 _ => Type::Int,
-//RS             }),
-//RS             err: Box::new(payload.ty.clone()),
-//RS         },
-//RS         kind: TExprKind::Err(Box::new(payload), None),
-//RS     })
-//RS }
-//RS 
-//RS fn lower_positive_integer_literal(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
-//RS     match expr {
-//RS         Expr::Paren(inner, _) => lower_positive_integer_literal(inner, cx, env),
-//RS         Expr::Int(..) => Some(lower_expr(expr, cx, env)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn integer_literal_is_zero(expr: &Expr) -> bool {
-//RS     match expr {
-//RS         Expr::Paren(inner, _) => integer_literal_is_zero(inner),
-//RS         Expr::Int(value, _, _, raw) => {
-//RS             let exact = raw
-//RS                 .as_deref()
-//RS                 .and_then(|raw| jet_foundation::Numeric::CtBigInt::from_literal(raw).ok())
-//RS                 .unwrap_or_else(|| jet_foundation::Numeric::CtBigInt::from_int(*value));
-//RS             exact.is_zero()
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn lower_negative_power_exponent(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
-//RS     match expr {
-//RS         Expr::Paren(inner, _) => lower_negative_power_exponent(inner, cx, env),
-//RS         Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
-//RS             if integer_literal_is_zero(inner) {
-//RS                 return None;
-//RS             }
-//RS             lower_positive_integer_literal(inner, cx, env)
-//RS         }
-//RS         Expr::Int(value, _, _, raw) => {
-//RS             let exact = raw
-//RS                 .as_deref()
-//RS                 .and_then(|raw| jet_foundation::Numeric::CtBigInt::from_literal(raw).ok())
-//RS                 .unwrap_or_else(|| jet_foundation::Numeric::CtBigInt::from_int(*value));
-//RS             exact.negative.then(|| TExpr {
-//RS                 ty: Type::Int,
-//RS                 kind: TExprKind::CtLit(CtValue::BigInt(exact.abs())),
-//RS             })
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
-//RS     TExpr {
-//RS         ty: Type::Named(Syntax::TYPE_NEVER.to_string()),
-//RS         kind: TExprKind::InvariantViolation {
-//RS             construct: construct.into(),
-//RS             span,
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn checked_const_ref_name(name: &str, cx: &Cx) -> String {
-//RS     cx.const_ref_keys
-//RS         .get(name)
-//RS         .cloned()
-//RS         .unwrap_or_else(|| name.to_string())
-//RS }
-//RS /// A compile-time name is an ordinary identifier whose mark is part of the
-//RS /// spelling. When sema has not yet baked `value`, look the binding up the same
-//RS /// way `Ident` does: a fragment local first, then the evaluator's const table.
-//RS 
-//RS fn lower_named_comptime_binding(name: &str, cx: &Cx, env: &LowerEnv) -> Option<TExpr> {
-//RS     if env.locals.contains_key(name) {
-//RS         return Some(TExpr {
-//RS             ty: env.ty_of(name).unwrap_or(Type::Int),
-//RS             kind: TExprKind::Local(env.local_of(name)),
-//RS         });
-//RS     }
-//RS     if !cx.consts.contains_key(name)
-//RS         && !cx.const_values.contains_key(name)
-//RS         && !cx.const_ref_keys.contains_key(name)
-//RS     {
-//RS         return None;
-//RS     }
-//RS     Some(in_own_frame(|| {
-//RS         let value = cx.const_values.get(name);
-//RS         let ty = env
-//RS             .ty_of(name)
-//RS             .or_else(|| cx.const_ref_types.get(name).cloned())
-//RS             .or_else(|| value.map(crate::AST::CtValue::jet_type))
-//RS             .unwrap_or(Type::Int);
-//RS         TExpr {
-//RS             kind: lower_comptime_scalar(value, Some(&ty))
-//RS                 .unwrap_or_else(|| TExprKind::ConstRef(checked_const_ref_name(name, cx))),
-//RS             ty,
-//RS         }
-//RS     }))
-//RS }
-//RS pub(crate) fn core_call_expr(
-//RS     ty: Type,
-//RS     module: &str,
-//RS     member: &str,
-//RS     args: Vec<TExpr>,
-//RS     source_span: Span,
-//RS     widen_to_vec: Vec<bool>,
-//RS ) -> TExpr {
-//RS     let Some(record) = Syntax::core_call(module, member) else {
-//RS         return invariant_violation_expr(source_span, format!("CoreCall `{module}.{member}`"));
-//RS     };
-//RS     let fallibility = TFailureCarrier::from_checked_type(&ty);
-//RS     let data_plan = match data_plan_for_core_call(record, &args, &ty, source_span) {
-//RS         Ok(plan) => plan,
-//RS         Err(error) => return invariant_violation_expr(source_span, error),
-//RS     };
-//RS     TExpr {
-//RS         ty,
-//RS         kind: TExprKind::CoreCall {
-//RS             record,
-//RS             args,
-//RS             source_span,
-//RS             type_args: Vec::new(),
-//RS             widen_to_vec,
-//RS             data_plan,
-//RS             fallibility,
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS /// The checked value a prepared-constant path (`NAME.field[0].inner`)
-//RS /// reads, unless a local shadows the constant. Sema wraps a non-Copy field
-//RS /// read in the implicit `Copy` node; the copied value is the same constant.
-//RS fn prepared_constant_path_value<'a>(
-//RS     expr: &Expr,
-//RS     cx: &'a Cx,
-//RS     env: &LowerEnv,
-//RS ) -> Option<&'a CtValue> {
-//RS     match expr {
-//RS         Expr::Paren(inner, _) | Expr::Copy(inner, _) => {
-//RS             prepared_constant_path_value(inner, cx, env)
-//RS         }
-//RS         Expr::Ident(name, _) if !env.locals.contains_key(name) => cx.const_values.get(name),
-//RS         // Optional facts (`$exactness`, `$unit_scale_provenance`) prepare a
-//RS         // present carrier; a field read goes through it to the fact record.
-//RS         Expr::Field(base, field, _) => match prepared_constant_path_value(base, cx, env)? {
-//RS             CtValue::Struct { fields, .. } => fields
-//RS                 .iter()
-//RS                 .find(|(name, _)| name == field)
-//RS                 .map(|(_, value)| value),
-//RS             CtValue::Present(inner) => match inner.as_ref() {
-//RS                 CtValue::Struct { fields, .. } => fields
-//RS                     .iter()
-//RS                     .find(|(name, _)| name == field)
-//RS                     .map(|(_, value)| value),
-//RS                 _ => None,
-//RS             },
-//RS             _ => None,
-//RS         },
-//RS         Expr::Index { base, index, .. } => match (
-//RS             prepared_constant_path_value(base, cx, env)?,
-//RS             index.without_parens(),
-//RS         ) {
-//RS             (CtValue::List(items), Expr::Int(position, ..)) => {
-//RS                 items.get(usize::try_from(*position).ok()?)
-//RS             }
-//RS             _ => None,
-//RS         },
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS #[inline(never)]
-// END-PORT-PENDING 0477 crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3604-4419
+// Private continuation of Codegen.TIR.Lower.Expressions.
+use jet_codegen.AST.[AccessConvention, Call, CallArg, CtValue, EnumLitArg, Expr, StrPart, Type, TypedLitBody, ByteTextPart, UnitFormat, StrFormat, UnOp]
+use jet_codegen.Codegen.[Cx, generated_prefix]
+use jet_codegen.Codegen.TIR.[LowerEnv, TExpr, TExprKind, THostCall, TStrPart, TMethodRef, TLocal, TStmt, TLetTy, TFailureCarrier, data_plan_for_core_call, maybe_widen_expr_to_union]
+use jet_codegen.Codegen.TIR.Lower.Expressions.[lower_expr, lower_owned_expr, preserve_typed_list_shape, strip_expr_parens, lower_comptime_scalar, unit_type, in_own_frame]
+use jet_codegen.Codegen.TIR.tir_to_mir_types.[compiler_owned_enum_variants]
+use jet_codegen.Diagnostics.[Span]
+use jet_codegen.Syntax
+use jet_foundation.MIR.[MirCopyFact]
+use jet_foundation.Numeric.[CtBigInt]
+use jet_foundation.CoreModuleExports.[core_enum_variants]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3604
+fn lower_boundary_typed_lit(type_name: String, body: TypedLitBody, cx: Cx, mut env: LowerEnv) -> TExpr? {
+    if body == {
+        Value(inner) -> {
+            if inner == {
+                Str(parts, _) -> {
+                    literals := [String]{}
+                    holes := [TExpr]{}
+                    trusted_html := [Bool]{}
+                    loop part in parts {
+                        if part == {
+                            Lit(text) -> &literals.push(text.clone())
+                            Interp(expr, _) -> {
+                                if literals.len() == holes.len() { &literals.push("") }
+                                hole :: lower_expr(expr, cx, &env)
+                                trusted :: type_name == Syntax.TYPE_HTML && (if hole.ty == { Named(name) -> name == Syntax.TYPE_HTML _ -> false })
+                                &trusted_html.push(trusted)
+                                &holes.push(hole)
+                            }
+                        }
+                    }
+                    if literals.len() == holes.len() { &literals.push("") }
+                    kind :: Syntax.typed_head_kind(type_name).filter(fn(kind) { kind.is_boundary() }) ?? return None
+                    Val(TExpr{ty: Type.Named(kind.internal_type_name().to_string()), kind: TExprKind.HostCall(THostCall.TypedTextInterp{
+                        kind: kind, literals: literals, holes: holes, trusted_html: trusted_html,
+                    })})
+                }
+                _ -> None
+            }
+        }
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3656
+fn byte_text_exprs(parts: [ByteTextPart], span: Span) -> [Expr]? {
+    bytes :: TypedLitBody.byte_text_bytes(parts) ?? return None
+    Val(loop byte in bytes -> Expr.Int(byte as I64, span, None, Val(byte.to_string())))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3666
+fn lower_unit_text(value: TExpr, style: UnitFormat, cx: Cx) -> TExpr {
+    original_ty :: value.ty.clone()
+    raw :: if original_ty == {
+        Named(name) -> {
+            base :: cx.distinct_types.get(name).map(fn(pair) { pair.0.clone() }) ?? Type.Float
+            TExpr{ty: base, kind: TExprKind.DistinctRaw(value)}
+        }
+        _ -> {
+            if original_ty.quantity_parts() == {
+                Val((base, _)) -> TExpr{ty: base.clone(), kind: value.kind}
+                None -> value
+            }
+        }
+    }
+    // The Bare marker keeps the magnitude on the dedicated quantity formatter.
+    parts := [TStrPart]{TStrPart.Interp(raw, StrFormat.Unit(UnitFormat.Bare))}
+    if style != UnitFormat.Bare {
+        label :: cx.unit_label(original_ty).map(fn(label) {
+            if style == { Name -> label.name.clone() Symbol | Bare -> label.symbol.clone() }
+        }) ?? original_ty.quantity_parts().map(fn(pair) { cx.quantity_unit_label(pair.1, style) })
+            ?? cx.quantity_dimension(original_ty).map(fn(dimension) { cx.quantity_unit_label(dimension, style) })
+            ?? panic("sema accepted unit formatting only for unit values")
+        &parts.push(TStrPart.Lit(" {label}"))
+    }
+    TExpr{ty: Type.String, kind: TExprKind.StrLit(parts)}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3723
+fn join_print_args(args: [CallArg], cx: Cx, mut env: LowerEnv) -> TExpr {
+    values :: loop arg in args -> lower_expr(arg.expr, cx, &env)
+    join_print_values(values, cx)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3727
+fn join_print_values(values: [TExpr], cx: Cx) -> TExpr {
+    display_values :: loop value in values -> lower_display_value(value, cx)
+    parts := [TStrPart].with_capacity(display_values.len() * 2)
+    loop (index, value) in display_values.enumerate() {
+        if index > 0 { &parts.push(TStrPart.Lit("\n")) }
+        &parts.push(TStrPart.Interp(value, StrFormat.Display))
+    }
+    TExpr{ty: Type.String, kind: TExprKind.StrLit(parts)}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3745
+fn lower_display_value(value: TExpr, cx: Cx) -> TExpr {
+    if value.ty.quantity_parts() != None { return lower_unit_text(value, UnitFormat.Symbol, cx) }
+    if (if value.ty == { Named(name) -> name == Syntax.TYPE_COMPLEX _ -> false }) && !cx.type_names.contains(Syntax.TYPE_COMPLEX) {
+        return TExpr{ty: Type.String, kind: TExprKind.PreciseBuiltin{type_name: Syntax.TYPE_COMPLEX.to_string(), func: "to_string", args: [value]}}
+    }
+    if (if value.ty == { Named(name) -> name == Syntax.TYPE_FRACTION _ -> false }) && !cx.type_names.contains(Syntax.TYPE_FRACTION) {
+        return TExpr{ty: Type.String, kind: TExprKind.PreciseBuiltin{type_name: Syntax.TYPE_FRACTION.to_string(), func: "to_string", args: [value]}}
+    }
+    name :: if value.ty == { Named(name) -> name _ -> return value }
+    prelude_scalar :: if value.ty.without_user_tags() == {
+        Named("Int" | "Float" | "Bool" | "String" | "Char" | "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32" | "U64" | "U128") -> true
+        _ -> false
+    }
+    // Generic Printable parameters have no concrete fragment Display receiver.
+    generic_parameter :: cx.current_type_params.borrow().contains(name)
+    if !prelude_scalar && !generic_parameter && cx.has_display_type(name) {
+        return TExpr{ty: Type.String, kind: TExprKind.MethodCall{
+            recv: value, method: TMethodRef.trait_method("Display", "display"),
+            type_args: [], args: [], source_first_string_literal: None, operator_line: None,
+        }}
+    }
+    if cx.unit_label(value.ty) == None { return value }
+    lower_unit_text(value, UnitFormat.Symbol, cx)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3826
+fn lower_print_value(value: TExpr, cx: Cx) -> TExpr {
+    printable_unit :: value.ty.quantity_parts() != None || cx.unit_label(value.ty) != None
+    explicit_display :: if value.ty == { Named(name) -> cx.has_display_type(name) _ -> false }
+    if printable_unit || explicit_display { lower_display_value(value, cx) } else { value }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3841
+fn print_values(values: [TExpr], cx: Cx, site: USize) -> TExpr {
+    lowered := loop value in values -> lower_print_value(value, cx)
+    if lowered.len() == 1 {
+        value :: &lowered.pop() ?? panic("one-value print fast path has one value")
+        return TExpr{ty: unit_type(), kind: TExprKind.Print(value)}
+    }
+    stmts := [TStmt].with_capacity(lowered.len() * 2)
+    locals := [(TLocal, Type)].with_capacity(lowered.len())
+    loop (index, value) in lowered.enumerate() {
+        temp :: "{generated_prefix()}print_arg_{site}_{index}"
+        local :: TLocal.generated(temp)
+        &locals.push((local.clone(), value.ty.clone()))
+        &stmts.push(TStmt.Let{name: temp, kw: "let", let_ty: TLetTy.inferred(), init: value, gc_promotion: None, gc_transferred: false})
+    }
+    // All arguments evaluate before the first Print, preserving source order.
+    loop (local, ty) in locals {
+        value :: TExpr{ty: ty, kind: TExprKind.Local(local)}
+        &stmts.push(TStmt.ExprStmt(TExpr{ty: unit_type(), kind: TExprKind.Print(value)}))
+    }
+    TExpr{ty: unit_type(), kind: TExprKind.InlineBlock(stmts)}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3887
+fn print_args(args: [CallArg], cx: Cx, mut env: LowerEnv, site: USize) -> TExpr {
+    values :: loop arg in args -> lower_expr(arg.expr, cx, &env)
+    print_values(values, cx, site)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3903
+fn lower_debug_text(value: TExpr) -> TExpr {
+    TExpr{ty: Type.String, kind: TExprKind.StrLit([TStrPart.Interp(value, StrFormat.Debug)])}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3916
+fn lower_debug_trace(call: Call, cx: Cx, mut env: LowerEnv) -> TExpr {
+    value := lower_expr(call.args[0].expr, cx, &env)
+    if !value.ty.is_scalar() && (if value.kind == { Local(_) | Field{..} | Index{..} -> true _ -> false }) {
+        value = TExpr{ty: value.ty.clone(), kind: TExprKind.Clone(value, MirCopyFact.Materialize)}
+    }
+    site :: if call.args.get(1).map(fn(arg) { arg.expr }) == {
+        Val(Expr.Str(parts, _)) -> {
+            text := String.new()
+            loop part in parts { if part == { Lit(literal) -> &text.push_str(literal) Interp(..) -> {} } }
+            text
+        }
+        _ -> ""
+    }
+    ty :: value.ty.clone()
+    temp :: "{generated_prefix()}debug_trace_{call.name_span.start}"
+    local :: TLocal.generated(temp)
+    read :: fn() { TExpr{ty: ty.clone(), kind: TExprKind.Local(local.clone())} }
+    line :: TExpr{ty: Type.String, kind: TExprKind.StrLit([
+        TStrPart.Lit("{Syntax.DEBUG_TRACE_PREFIX} {site} = "), TStrPart.Interp(read(), StrFormat.Debug),
+    ])}
+    write :: core_call_expr(unit_type(), "core.term", "eprint", [line], call.name_span, [false])
+    TExpr{ty: ty.clone(), kind: TExprKind.InlineBlock([
+        TStmt.Let{name: temp, kw: "let", let_ty: TLetTy.inferred(), init: value, gc_promotion: None, gc_transferred: false},
+        TStmt.ExprStmt(write), TStmt.ExprStmt(read()),
+    ])}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3978
+fn lower_fmt_call(method: String, args: [TExpr], source_span: Span) -> TExpr {
+    widen_to_vec :: [Bool].repeat(false, args.len())
+    core_call_expr(Type.String, "core.text.fmt", method, args, source_span, widen_to_vec)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3990
+fn lower_fmt_int(value: I64) -> TExpr { TExpr{ty: Type.Int, kind: TExprKind.IntLit(value, None)} }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:3997
+fn lower_fmt_string(value: String) -> TExpr { TExpr{ty: Type.String, kind: TExprKind.StrLit([TStrPart.Lit(value)])} }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4008
+fn lower_default_err_field(name: String, value: Expr, cx: Cx, mut env: LowerEnv) -> TExpr {
+    if (name, strip_expr_parens(value)) == {
+        ("code", Expr.Absent(_)) -> TExpr{ty: Type.Option(Type.String), kind: TExprKind.Absent}
+        ("cause", Expr.Absent(_)) -> TExpr{ty: Type.Option(Type.Named(Syntax.TYPE_ERR.to_string())), kind: TExprKind.Absent}
+        _ -> lower_expr(value, cx, &env)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4026
+fn lower_raw_err_value(call: Call, cx: Cx, mut env: LowerEnv) -> TExpr {
+    message :: call.args.first().filter(fn(arg) { arg.label == None }).map(fn(arg) { lower_expr(arg.expr, cx, &env) })
+        ?? TExpr{ty: Type.String, kind: TExprKind.StrLit([TStrPart.Lit("")])}
+    optional :: fn(value: TExpr?, fallback: Type) {
+        if value == {
+            Val(value) -> TExpr{ty: Type.Option(value.ty.clone()), kind: TExprKind.Present(value)}
+            None -> TExpr{ty: Type.Option(fallback), kind: TExprKind.Absent}
+        }
+    }
+    code :: call.args.find(fn(arg) { arg.label.is_some_and(fn(pair) { pair.0 == "code" }) }).map(fn(arg) { lower_expr(arg.expr, cx, &env) })
+    cause :: call.args.find(fn(arg) { arg.label.is_some_and(fn(pair) { pair.0 == "cause" }) }).map(fn(arg) {
+        if strip_expr_parens(arg.expr) == {
+            Call(nested) -> { if nested.name == Syntax.LIT_ERR { lower_raw_err_value(nested, cx, &env) } else { lower_expr(arg.expr, cx, &env) } }
+            _ -> lower_expr(arg.expr, cx, &env)
+        }
+    })
+    TExpr{ty: Type.Named(Syntax.TYPE_ERR.to_string()), kind: TExprKind.StructLit{
+        fields: [("message", message, false), ("code", optional(code, Type.String), false), ("cause", optional(cause, Type.Named(Syntax.TYPE_ERR.to_string())), false)],
+        extra: None, as_trait: None,
+    }}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4081
+fn lower_raw_ok_call(call: Call, cx: Cx, mut env: LowerEnv) -> TExpr? {
+    if call.name != Syntax.LIT_OK || cx.sigs.contains_key(call.name) || env.locals.contains_key(call.name) { return None }
+    payload := call.args.first().map(fn(arg) { lower_owned_expr(arg.expr, cx, &env) }) ?? TExpr{ty: unit_type(), kind: TExprKind.Unit}
+    (ok_ty, err_ty) :: if env.ret_ty == {
+        Val(Type.Result{ok, err}) -> {
+            payload = preserve_typed_list_shape(payload, ok, cx)
+            payload = maybe_widen_expr_to_union(payload, ok)
+            (ok.clone(), err.clone())
+        }
+        _ -> (payload.ty.clone(), Type.Named(Syntax.TYPE_ERR.to_string()))
+    }
+    Val(TExpr{ty: Type.Result{ok: ok_ty, err: err_ty}, kind: TExprKind.Ok(payload)})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4120
+fn lower_raw_contextual_result_variant(variant: String, args: [EnumLitArg], span: Span, cx: Cx, mut env: LowerEnv) -> TExpr? {
+    if !(if env.ret_ty == { Val(Type.Result{..}) -> true _ -> false }) || (variant != Syntax.LIT_OK && variant != Syntax.LIT_ERR) { return None }
+    call_args :: loop arg in args {
+        if arg == {
+            Positional(expr) -> CallArg{convention: AccessConvention.Move, expr: expr.clone(), span: expr.span(), flags: .default(), label: None, spread: false}
+            Named{label, expr} -> CallArg{convention: AccessConvention.Move, expr: expr.clone(), span: expr.span(), flags: .default(), label: Val((label.clone(), expr.span())), spread: false}
+        }
+    }
+    call :: Call{name: variant.to_string(), name_span: span, type_args: [], args: call_args, resolved_ret: None, range_checked: false, widen_approx: false}
+    if variant == Syntax.LIT_OK { lower_raw_ok_call(call, cx, &env) } else { lower_raw_err_call(call, cx, &env) }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4172
+fn raw_contextual_return_enum(variant: String, cx: Cx, env: LowerEnv) -> String? {
+    return_type :: env.ret_ty ?? return None
+    success :: if return_type == { Result{ok, ..} -> ok _ -> return_type }
+    name :: if success == { Named(name) | Apply{name, ..} -> name _ -> return None }
+    resolved :: cx.local_type_identities.get(name) ?? cx.core_qualified_rust_type_name(name) ?? name
+    declared :: [name, resolved].any(fn(owner) {
+        cx.enum_variants.get(owner).is_some_and(fn(variants) { variants.any(fn(pair) { pair.0 == variant }) })
+    }) || compiler_owned_enum_variants(name).is_some_and(fn(variants) { variants.contains(variant) })
+        || core_enum_variants(resolved).is_some_and(fn(variants) { variants.contains(variant) })
+    if declared { Val(name.clone()) } else { None }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4197
+fn lower_raw_err_call(call: Call, cx: Cx, mut env: LowerEnv) -> TExpr? {
+    if call.name != Syntax.LIT_ERR || cx.sigs.contains_key(call.name) || env.locals.contains_key(call.name) { return None }
+    target_error :: if env.ret_ty == { Val(Type.Result{err, ..}) -> Val(err.clone()) _ -> None }
+    default_error :: if target_error == {
+        None -> true
+        Val(error) -> if error == { Named(name) -> name == Syntax.TYPE_ERR _ -> false }
+    }
+    if default_error {
+        value :: lower_raw_err_value(call, cx, &env)
+        return Val(if target_error == {
+            Val(_) -> {
+                ok :: if env.ret_ty == { Val(Type.Result{ok, ..}) -> ok.clone() _ -> Type.Int }
+                TExpr{ty: Type.Result{ok: ok, err: value.ty.clone()}, kind: TExprKind.Err(value, None)}
+            }
+            None -> value
+        })
+    }
+    payload :: call.args.first().map(fn(arg) { lower_expr(arg.expr, cx, &env) })
+        ?? TExpr{ty: Type.Named(Syntax.TYPE_ERR.to_string()), kind: TExprKind.StructLit{fields: [], extra: None, as_trait: None}}
+    widened :: if target_error == { Val(error) -> maybe_widen_expr_to_union(payload, error) None -> payload }
+    ok :: if env.ret_ty == { Val(Type.Result{ok, ..}) -> ok.clone() _ -> Type.Int }
+    Val(TExpr{ty: Type.Result{ok: ok, err: widened.ty.clone()}, kind: TExprKind.Err(widened, None)})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4255
+fn lower_positive_integer_literal(expr: Expr, cx: Cx, mut env: LowerEnv) -> TExpr? {
+    if expr == { Paren(inner, _) -> lower_positive_integer_literal(inner, cx, &env) Int(..) -> Val(lower_expr(expr, cx, &env)) _ -> None }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4263
+fn integer_literal_is_zero(expr: Expr) -> Bool {
+    if expr == {
+        Paren(inner, _) -> integer_literal_is_zero(inner)
+        Int(value, _, _, raw) -> {
+            exact :: raw.and_then(fn(text) { CtBigInt.from_literal(text).ok() }) ?? CtBigInt.from_int(value)
+            exact.is_zero()
+        }
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4277
+fn lower_negative_power_exponent(expr: Expr, cx: Cx, mut env: LowerEnv) -> TExpr? {
+    if expr == {
+        Paren(inner, _) -> lower_negative_power_exponent(inner, cx, &env)
+        Unary(UnOp.Neg, inner, _) -> {
+            if integer_literal_is_zero(inner) { return None }
+            lower_positive_integer_literal(inner, cx, &env)
+        }
+        Int(value, _, _, raw) -> {
+            exact :: raw.and_then(fn(text) { CtBigInt.from_literal(text).ok() }) ?? CtBigInt.from_int(value)
+            if exact.negative { Val(TExpr{ty: Type.Int, kind: TExprKind.CtLit(CtValue.BigInt(exact.abs()))}) } else { None }
+        }
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4300
+fn invariant_violation_expr(span: Span, construct: String) -> TExpr {
+    TExpr{ty: Type.Named(Syntax.TYPE_NEVER.to_string()), kind: TExprKind.InvariantViolation{construct: construct, span: span}}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4310
+fn checked_const_ref_name(name: String, cx: Cx) -> String { cx.const_ref_keys.get(name).map(fn(key) { key.clone() }) ?? name.to_string() }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4320
+fn lower_named_comptime_binding(name: String, cx: Cx, env: LowerEnv) -> TExpr? {
+    if env.locals.contains_key(name) { return Val(TExpr{ty: env.ty_of(name) ?? Type.Int, kind: TExprKind.Local(env.local_of(name))}) }
+    if !cx.consts.contains_key(name) && !cx.const_values.contains_key(name) && !cx.const_ref_keys.contains_key(name) { return None }
+    Val(in_own_frame(fn() {
+        value :: cx.const_values.get(name)
+        ty :: env.ty_of(name) ?? cx.const_ref_types.get(name).map(fn(ty) { ty.clone() }) ?? value.map(fn(value) { value.jet_type() }) ?? Type.Int
+        kind :: lower_comptime_scalar(value, Val(ty)) ?? TExprKind.ConstRef(checked_const_ref_name(name, cx))
+        TExpr{kind: kind, ty: ty}
+    }))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4347
+fn core_call_expr(ty: Type, module: String, member: String, args: [TExpr], source_span: Span, widen_to_vec: [Bool]) -> TExpr {
+    record :: Syntax.core_call(module, member) ?? return invariant_violation_expr(source_span, "CoreCall `{module}.{member}`")
+    fallibility :: TFailureCarrier.from_checked_type(ty)
+    data_plan :: data_plan_for_core_call(record, args, ty, source_span) catch error { return invariant_violation_expr(source_span, error) }
+    TExpr{ty: ty, kind: TExprKind.CoreCall{
+        record: record, args: args, source_span: source_span, type_args: [], widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility,
+    }}
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4380
+fn prepared_constant_path_value(expr: Expr, cx: Cx, env: LowerEnv) -> CtValue? {
+    if expr == {
+        Paren(inner, _) | Copy(inner, _) -> prepared_constant_path_value(inner, cx, env)
+        Ident(name, _) -> { if !env.locals.contains_key(name) { cx.const_values.get(name) } else { None } }
+        Field(base, field, _) -> {
+            value :: prepared_constant_path_value(base, cx, env) ?? return None
+            if value == {
+                Struct{fields, ..} -> fields.find(fn(pair) { pair.0 == field }).map(fn(pair) { pair.1 })
+                Present(inner) -> if inner == {
+                    Struct{fields, ..} -> fields.find(fn(pair) { pair.0 == field }).map(fn(pair) { pair.1 })
+                    _ -> None
+                }
+                _ -> None
+            }
+        }
+        Index{base, index, ..} -> {
+            value :: prepared_constant_path_value(base, cx, env) ?? return None
+            if (value, index.without_parens()) == {
+                (CtValue.List(items), Expr.Int(position, ..)) -> {
+                    offset :: USize.try_from(position).ok() ?? return None
+                    items.get(offset)
+                }
+                _ -> None
+            }
+        }
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4419
+// The inline(never) attribute belongs to the following fragment's routine.

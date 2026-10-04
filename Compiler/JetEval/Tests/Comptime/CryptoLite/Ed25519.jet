@@ -1,0 +1,33 @@
+use jet_comptime.Comptime.CryptoLite.Ed25519.[verify_strict, sign]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:342
+fn bytes<const N: USize>(hex: String) -> [U8#N] {
+    decoded := hex.as_bytes().chunks_exact(2).map(fn(pair) {
+        digit := fn(byte: U8) -> U8 { if byte <= b'9' -> byte - b'0' else -> byte - b'a' + 10 }
+        digit(pair[0]) * 16 + digit(pair[1])
+    }).collect::<[U8]>()
+    decoded.try_into::<[U8#N]>().ok().unwrap()
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:361
+#Test("rfc_8032_empty_message") {
+    public := bytes::<32>("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+    signature := bytes::<64>("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
+    assert(verify_strict(&public, b"", &signature) == Ok(true))
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:371
+#Test("rfc_8032_sign_empty_message") {
+    seed := bytes::<32>("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+    expected := bytes::<64>("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
+    signature := sign(&seed, b"")
+    assert(signature == expected)
+    public := bytes::<32>("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+    assert(verify_strict(&public, b"", &signature) == Ok(true))
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Ed25519.rs:385
+#Test("strict_rejects_modified_and_weak_signatures") {
+    public := bytes::<32>("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+    signature := bytes::<64>("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
+    signature[0] ^= 1
+    assert(verify_strict(&public, b"", &signature) == Ok(false))
+    weak := [U8#32]{uninit}; weak.fill(0); weak[0] = 1
+    assert(verify_strict(&weak, b"", &signature) == Ok(false))
+}

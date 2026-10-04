@@ -1,686 +1,293 @@
-// PORT-PENDING 0555 crates-jet-comptime-src-comptime-ambientruntime-module-group: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:1-682
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Optional host callbacks for whole-program interpreter deopt (`jet run`).
-//RS //!
-//RS //! Cranelift hosts for `core.db` / `core.crypto` live in `jet-jit` (rusqlite +
-//RS //! bridge crypto). Pure comptime / REPL/dev entry points leave this unset so
-//RS //! those modules stay unsupported or REPL-native-denied. `jet-jit` installs
-//RS //! hooks only around `MirBridge::run_bundle` for runtime-tier deopt.
-//RS 
-//RS use std::any::Any;
-//RS use std::cell::{Cell, RefCell};
-//RS use std::path::{Path, PathBuf};
-//RS use std::sync::Arc;
-//RS 
-//RS use crate::Comptime::DevSink;
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::ComptimeInput;
-//RS use crate::AST::{CtValue, Type};
-//RS use crate::MIR::{
-//RS     MirCoreClosureKind, MirForeign, MirPreludeCall, MirPreludeCallId, MirRuntimeValue, MirSiteId,
-//RS };
-//RS 
-//RS pub type AmbientCoreCall = fn(
-//RS     &str,
-//RS     &str,
-//RS     Vec<CtValue>,
-//RS     Span,
-//RS     Option<Type>,
-//RS     Option<&mut DevSink>,
-//RS ) -> Option<Result<CtValue, Diagnostic>>;
-//RS /// Typed bridge for closure-taking Core routes.
-//RS ///
-//RS /// The evaluator supplies the checked route, closure kind, canonical MIR
-//RS /// operands, and the opaque closure value. Adapters may marshal those facts to
-//RS /// a host representation, but they must not reinterpret the source spelling.
-//RS pub type AmbientCoreClosureCall = fn(
-//RS     &str,
-//RS     &str,
-//RS     MirPreludeCallId,
-//RS     MirCoreClosureKind,
-//RS     Vec<MirRuntimeValue>,
-//RS     Option<MirRuntimeValue>,
-//RS     MirSiteId,
-//RS     &str,
-//RS     Span,
-//RS ) -> Option<Result<MirRuntimeValue, Diagnostic>>;
-//RS pub type AmbientHandle =
-//RS     fn(&str, &mut CtValue, &mut [CtValue], Span) -> Option<Result<CtValue, Diagnostic>>;
-//RS pub type AmbientExternCall =
-//RS     fn(&str, Vec<CtValue>, Span, Option<Type>) -> Option<Result<CtValue, Diagnostic>>;
-//RS 
-//RS /// Host implementation for a checked MIR closure that must run after a
-//RS /// semantic Core adapter has retained it. The wrapper is stored in `CtOpaque`;
-//RS /// the visible closure remains a normal `CtValue::Closure`.
-//RS pub trait StandaloneClosureHost: Send + Sync {
-//RS     fn invoke(&self, args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic>;
-//RS 
-//RS     /// Mutable callback variant used by transaction adapters. Hosts that do
-//RS     /// not mutate arguments inherit the ordinary call result; a MIR host
-//RS     /// overrides this to return the post-call argument frame.
-//RS     fn invoke_mut(
-//RS         &self,
-//RS         args: &mut Vec<CtValue>,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, Diagnostic> {
-//RS         self.invoke(args.clone(), span)
-//RS     }
-//RS     /// Stable checked identity for this callback, including its relevant
-//RS     /// captured values. Hosts must provide this; opaque callbacks cannot
-//RS     /// silently fall back to process addresses or rendered debug text.
-//RS     fn history_callback_identity(&self) -> Result<String, String>;
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct AmbientStandaloneClosure(Arc<dyn StandaloneClosureHost>);
-//RS 
-//RS impl AmbientStandaloneClosure {
-//RS     pub fn new<T>(host: T) -> Self
-//RS     where
-//RS         T: StandaloneClosureHost + 'static,
-//RS     {
-//RS         Self(Arc::new(host))
-//RS     }
-//RS 
-//RS     pub fn invoke(
-//RS         &self,
-//RS         args: Vec<CtValue>,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, Diagnostic> {
-//RS         self.0.invoke(args, span)
-//RS     }
-//RS 
-//RS     pub fn invoke_mut(
-//RS         &self,
-//RS         args: &mut Vec<CtValue>,
-//RS         span: Span,
-//RS     ) -> Result<CtValue, Diagnostic> {
-//RS         self.0.invoke_mut(args, span)
-//RS     }
-//RS     pub fn history_callback_identity(&self) -> Result<String, String> {
-//RS         self.0.history_callback_identity()
-//RS     }
-//RS }
-//RS 
-//RS /// Detect a MIR-backed standalone closure without changing ordinary AST
-//RS /// closure dispatch. `None` means that the value is not an ambient host
-//RS /// closure; `Some(Err(_))` preserves the host's actual callback failure.
-//RS pub fn try_ambient_standalone_closure(
-//RS     closure: &CtValue,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     let CtValue::Closure(data) = closure else {
-//RS         return None;
-//RS     };
-//RS     let host = data
-//RS         .opaque
-//RS         .as_ref()?
-//RS         .downcast_ref::<AmbientStandaloneClosure>()?;
-//RS     Some(host.invoke(args, span))
-//RS }
-//RS 
-//RS pub fn try_ambient_standalone_closure_mut(
-//RS     closure: &CtValue,
-//RS     args: &mut Vec<CtValue>,
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     let CtValue::Closure(data) = closure else {
-//RS         return None;
-//RS     };
-//RS     let host = data
-//RS         .opaque
-//RS         .as_ref()?
-//RS         .downcast_ref::<AmbientStandaloneClosure>()?;
-//RS     Some(host.invoke_mut(args, span))
-//RS }
-//RS 
-//RS /// Result of a typed MIR handle operation. Opaque handles remain private to
-//RS /// the adapter and never masquerade as a canonical MIR integer.
-//RS #[derive(Debug, Clone, PartialEq)]
-//RS pub enum AmbientMirHandleResult {
-//RS     Value(MirRuntimeValue),
-//RS     Handle(i64),
-//RS }
-//RS 
-//RS /// Typed interpreter carrier operations that must not cross the CtValue
-//RS /// boundary. The raw token is private to the resident adapter; `args` and the
-//RS /// result remain canonical MIR values.
-//RS pub type AmbientMirHandle = fn(
-//RS     &str,
-//RS     Option<i64>,
-//RS     Vec<MirRuntimeValue>,
-//RS     Span,
-//RS ) -> Option<Result<AmbientMirHandleResult, Diagnostic>>;
-//RS 
-//RS /// Result envelope for private MIR Prelude effect/control transport.
-//RS ///
-//RS /// Value remains the ordinary route result. Effect and Control carry captured
-//RS /// stream bytes rather than writing process IO; the evaluator owns appending
-//RS /// them to its result state.
-//RS #[derive(Debug, Clone, PartialEq)]
-//RS pub enum AmbientMirPreludeResult {
-//RS     Value(MirRuntimeValue),
-//RS     Effect {
-//RS         value: MirRuntimeValue,
-//RS         stdout: Vec<u8>,
-//RS         stderr: Vec<u8>,
-//RS     },
-//RS     Control {
-//RS         value: MirRuntimeValue,
-//RS         stdout: Vec<u8>,
-//RS         stderr: Vec<u8>,
-//RS         exit_code: i32,
-//RS     },
-//RS }
-//RS /// Native callback for one checked MIR Prelude route.
-//RS ///
-//RS /// The route row and result type remain canonical MIR facts; the callback only
-//RS /// supplies the host implementation and returns the evaluator-owned result
-//RS /// envelope.
-//RS pub type AmbientMirPreludeCall = fn(
-//RS     &MirPreludeCall,
-//RS     Vec<MirRuntimeValue>,
-//RS     Option<crate::MIR::MirType>,
-//RS     Span,
-//RS ) -> Option<Result<AmbientMirPreludeResult, Diagnostic>>;
-//RS 
-//RS /// Writeback produced by a checked native MIR foreign call.
-//RS ///
-//RS /// `parameter` is the zero-based index in the original `MirForeign.params`
-//RS /// vector. It is deliberately not a lowered slot or hidden-argument index:
-//RS /// every native adapter reports the same source-checked argument identity.
-//RS #[derive(Debug, Clone, PartialEq)]
-//RS pub struct AmbientMirExternWriteback {
-//RS     pub parameter: usize,
-//RS     pub value: MirRuntimeValue,
-//RS }
-//RS 
-//RS /// Lossless result of a checked native MIR foreign call.
-//RS ///
-//RS /// Native adapters return the ordinary value and the post-call values of all
-//RS /// checked writable parameters. The evaluator owns applying those values to
-//RS /// its live places; this carrier never contains a frame address or native
-//RS /// pointer.
-//RS #[derive(Debug, Clone, PartialEq)]
-//RS pub struct AmbientMirExternResult {
-//RS     pub value: MirRuntimeValue,
-//RS     pub writebacks: Vec<AmbientMirExternWriteback>,
-//RS }
-//RS 
-//RS /// Native callback for a checked MIR foreign route. The selected row carries
-//RS /// its canonical signature and authority facts; adapters receive that row and
-//RS /// canonical MIR values, then return the actual native result plus checked
-//RS /// argument-index writebacks.
-//RS pub type AmbientMirExternCall = fn(
-//RS     &MirForeign,
-//RS     Vec<MirRuntimeValue>,
-//RS     Span,
-//RS ) -> Option<Result<AmbientMirExternResult, Diagnostic>>;
-//RS pub type AmbientWorkerContext = Arc<dyn Any + Send + Sync>;
-//RS 
-//RS #[derive(Clone, Default)]
-//RS pub struct AmbientRuntimeSnapshot {
-//RS     core_call: Option<AmbientCoreCall>,
-//RS     core_closure_call: Option<AmbientCoreClosureCall>,
-//RS     handle: Option<AmbientHandle>,
-//RS     extern_call: Option<AmbientExternCall>,
-//RS     mir_handle_call: Option<AmbientMirHandle>,
-//RS     mir_extern_call: Option<AmbientMirExternCall>,
-//RS     mir_prelude_call: Option<AmbientMirPreludeCall>,
-//RS     worker_context: Option<AmbientWorkerContext>,
-//RS }
-//RS thread_local! {
-//RS     static CORE_CALL: Cell<Option<AmbientCoreCall>> = const { Cell::new(None) };
-//RS     static CORE_CLOSURE_CALL: Cell<Option<AmbientCoreClosureCall>> = const { Cell::new(None) };
-//RS     static HANDLE: Cell<Option<AmbientHandle>> = const { Cell::new(None) };
-//RS     static EXTERN_CALL: Cell<Option<AmbientExternCall>> = const { Cell::new(None) };
-//RS     static MIR_HANDLE_CALL: Cell<Option<AmbientMirHandle>> = const { Cell::new(None) };
-//RS     static MIR_EXTERN_CALL: Cell<Option<AmbientMirExternCall>> = const { Cell::new(None) };
-//RS     static MIR_PRELUDE_CALL: Cell<Option<AmbientMirPreludeCall>> = const { Cell::new(None) };
-//RS     static WORKER_CONTEXT: RefCell<Option<AmbientWorkerContext>> = const { RefCell::new(None) };
-//RS     static PACKAGE_READ_CONTEXT: RefCell<Option<PackageReadContext>> = const { RefCell::new(None) };
-//RS }
-//RS struct AmbientHooksGuard {
-//RS     core_call: Option<AmbientCoreCall>,
-//RS     handle: Option<AmbientHandle>,
-//RS     extern_call: Option<AmbientExternCall>,
-//RS }
-//RS 
-//RS impl Drop for AmbientHooksGuard {
-//RS     fn drop(&mut self) {
-//RS         CORE_CALL.with(|slot| slot.set(self.core_call));
-//RS         HANDLE.with(|slot| slot.set(self.handle));
-//RS         EXTERN_CALL.with(|slot| slot.set(self.extern_call));
-//RS     }
-//RS }
-//RS struct AmbientWorkerContextGuard(Option<AmbientWorkerContext>);
-//RS 
-//RS impl Drop for AmbientWorkerContextGuard {
-//RS     fn drop(&mut self) {
-//RS         WORKER_CONTEXT.with(|slot| {
-//RS             slot.replace(self.0.take());
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS pub fn with_ambient_worker_context<R>(
-//RS     context: Option<AmbientWorkerContext>,
-//RS     body: impl FnOnce() -> R,
-//RS ) -> R {
-//RS     let previous = WORKER_CONTEXT.with(|slot| slot.replace(context));
-//RS     let _guard = AmbientWorkerContextGuard(previous);
-//RS     body()
-//RS }
-//RS 
-//RS pub fn ambient_worker_context<T: Any + Send + Sync>() -> Option<Arc<T>> {
-//RS     WORKER_CONTEXT
-//RS         .with(|slot| slot.borrow().clone())
-//RS         .and_then(|context| Arc::downcast::<T>(context).ok())
-//RS }
-//RS #[derive(Debug, Default)]
-//RS struct PackageReadContext {
-//RS     root: PathBuf,
-//RS     inputs: Vec<ComptimeInput>,
-//RS }
-//RS 
-//RS /// Run compile-time work with the package root used by the public package
-//RS /// views. The context is deliberately separate from the ambient Core callback:
-//RS /// the callback stays a function pointer, while package reads need the
-//RS /// selected build root and must append their hashes to the existing input
-//RS /// provenance stream.
-//RS pub fn with_package_read_context<R>(
-//RS     root: &Path,
-//RS     body: impl FnOnce() -> R,
-//RS ) -> (R, Vec<ComptimeInput>) {
-//RS     let previous = PACKAGE_READ_CONTEXT.with(|slot| {
-//RS         slot.replace(Some(PackageReadContext {
-//RS             root: root.to_path_buf(),
-//RS             inputs: Vec::new(),
-//RS         }))
-//RS     });
-//RS     let result = body();
-//RS     let inputs = match PACKAGE_READ_CONTEXT.with(|slot| slot.replace(previous)) {
-//RS         Some(current) => current.inputs,
-//RS         None => Vec::new(),
-//RS     };
-//RS     PACKAGE_READ_CONTEXT.with(|slot| {
-//RS         if let Some(parent) = slot.borrow_mut().as_mut() {
-//RS             for input in &inputs {
-//RS                 if !parent
-//RS                     .inputs
-//RS                     .iter()
-//RS                     .any(|existing| existing.path == input.path)
-//RS                 {
-//RS                     parent.inputs.push(input.clone());
-//RS                 }
-//RS             }
-//RS         }
-//RS     });
-//RS     (result, inputs)
-//RS }
-//RS 
-//RS /// Return the pinned package root for a compile-time package-view call.
-//RS pub fn package_read_root() -> Option<PathBuf> {
-//RS     PACKAGE_READ_CONTEXT.with(|slot| slot.borrow().as_ref().map(|context| context.root.clone()))
-//RS }
-//RS 
-//RS /// Record one authority-checked file in the existing compile-time input
-//RS /// stream. Repeated reads of one path keep the first hash; a changed handle
-//RS /// is rejected by the authority resolver before this function is called.
-//RS pub fn record_package_input(path: impl Into<String>, hash: impl Into<String>) {
-//RS     PACKAGE_READ_CONTEXT.with(|slot| {
-//RS         let mut slot = slot.borrow_mut();
-//RS         let Some(context) = slot.as_mut() else {
-//RS             return;
-//RS         };
-//RS         let input = ComptimeInput {
-//RS             path: path.into(),
-//RS             hash: hash.into(),
-//RS         };
-//RS         if !context
-//RS             .inputs
-//RS             .iter()
-//RS             .any(|existing| existing.path == input.path)
-//RS         {
-//RS             context.inputs.push(input);
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS /// Install ambient hooks for the duration of `body`, then restore the hooks
-//RS /// that were active before this scope.
-//RS pub fn with_ambient<R>(
-//RS     core_call: Option<AmbientCoreCall>,
-//RS     handle: Option<AmbientHandle>,
-//RS     extern_call: Option<AmbientExternCall>,
-//RS     body: impl FnOnce() -> R,
-//RS ) -> R {
-//RS     let _previous = AmbientHooksGuard {
-//RS         core_call: CORE_CALL.with(|slot| slot.replace(core_call)),
-//RS         handle: HANDLE.with(|slot| slot.replace(handle)),
-//RS         extern_call: EXTERN_CALL.with(|slot| slot.replace(extern_call)),
-//RS     };
-//RS     body()
-//RS }
-//RS 
-//RS struct AmbientCoreClosureGuard(Option<AmbientCoreClosureCall>);
-//RS 
-//RS impl Drop for AmbientCoreClosureGuard {
-//RS     fn drop(&mut self) {
-//RS         CORE_CLOSURE_CALL.with(|slot| slot.set(self.0));
-//RS     }
-//RS }
-//RS 
-//RS /// Install the typed closure-taking Core bridge for the duration of `body`.
-//RS pub fn with_ambient_core_closure<R>(
-//RS     core_closure_call: Option<AmbientCoreClosureCall>,
-//RS     body: impl FnOnce() -> R,
-//RS ) -> R {
-//RS     let _previous =
-//RS         AmbientCoreClosureGuard(CORE_CLOSURE_CALL.with(|slot| slot.replace(core_closure_call)));
-//RS     body()
-//RS }
-//RS 
-//RS /// Dispatch one checked closure-taking Core route to the active adapter.
-//RS pub fn try_ambient_core_closure(
-//RS     module: &str,
-//RS     method: &str,
-//RS     call: MirPreludeCallId,
-//RS     kind: MirCoreClosureKind,
-//RS     args: Vec<MirRuntimeValue>,
-//RS     closure: Option<MirRuntimeValue>,
-//RS     site: MirSiteId,
-//RS     label: &str,
-//RS     span: Span,
-//RS ) -> Option<Result<MirRuntimeValue, Diagnostic>> {
-//RS     CORE_CLOSURE_CALL.with(|slot| {
-//RS         slot.get().and_then(|hook| {
-//RS             hook(
-//RS                 module, method, call, kind, args, closure, site, label, span,
-//RS             )
-//RS         })
-//RS     })
-//RS }
-//RS 
-//RS struct AmbientMirExternGuard(Option<AmbientMirExternCall>);
-//RS 
-//RS impl Drop for AmbientMirExternGuard {
-//RS     fn drop(&mut self) {
-//RS         MIR_EXTERN_CALL.with(|slot| slot.set(self.0));
-//RS     }
-//RS }
-//RS 
-//RS /// Install the canonical MIR foreign callback for the duration of `body`.
-//RS /// This scope is separate from the legacy CtValue callback so callers can
-//RS /// migrate without changing the established interpreter hook transport.
-//RS pub fn with_ambient_mir_extern<R>(
-//RS     mir_extern_call: Option<AmbientMirExternCall>,
-//RS     body: impl FnOnce() -> R,
-//RS ) -> R {
-//RS     let _previous = AmbientMirExternGuard(MIR_EXTERN_CALL.with(|slot| slot.replace(mir_extern_call)));
-//RS     body()
-//RS }
-//RS 
-//RS struct AmbientMirPreludeGuard(Option<AmbientMirPreludeCall>);
-//RS 
-//RS impl Drop for AmbientMirPreludeGuard {
-//RS     fn drop(&mut self) {
-//RS         MIR_PRELUDE_CALL.with(|slot| slot.set(self.0));
-//RS     }
-//RS }
-//RS 
-//RS /// Install the canonical MIR Prelude callback for the duration of `body`.
-//RS pub fn with_ambient_mir_prelude<R>(
-//RS     mir_prelude_call: Option<AmbientMirPreludeCall>,
-//RS     body: impl FnOnce() -> R,
-//RS ) -> R {
-//RS     let _previous =
-//RS         AmbientMirPreludeGuard(MIR_PRELUDE_CALL.with(|slot| slot.replace(mir_prelude_call)));
-//RS     body()
-//RS }
-//RS 
-//RS /// Invoke the selected canonical MIR Prelude callback, if one is installed.
-//RS pub fn try_ambient_mir_prelude(
-//RS     row: &MirPreludeCall,
-//RS     args: Vec<MirRuntimeValue>,
-//RS     result_ty: Option<crate::MIR::MirType>,
-//RS     span: Span,
-//RS ) -> Option<Result<AmbientMirPreludeResult, Diagnostic>> {
-//RS     MIR_PRELUDE_CALL
-//RS         .with(|slot| slot.get())
-//RS         .and_then(|hook| hook(row, args, result_ty, span))
-//RS }
-//RS 
-//RS /// Return the callback currently installed for canonical MIR Prelude calls.
-//RS pub fn ambient_mir_prelude_hook() -> Option<AmbientMirPreludeCall> {
-//RS     MIR_PRELUDE_CALL.with(|slot| slot.get())
-//RS }
-//RS 
-//RS struct AmbientMirHandleGuard(Option<AmbientMirHandle>);
-//RS 
-//RS impl Drop for AmbientMirHandleGuard {
-//RS     fn drop(&mut self) {
-//RS         MIR_HANDLE_CALL.with(|slot| slot.set(self.0));
-//RS     }
-//RS }
-//RS 
-//RS /// Install typed MIR handle operations for the duration of `body`.
-//RS pub fn with_ambient_mir_handle<R>(
-//RS     mir_handle: Option<AmbientMirHandle>,
-//RS     body: impl FnOnce() -> R,
-//RS ) -> R {
-//RS     let _previous =
-//RS         AmbientMirHandleGuard(MIR_HANDLE_CALL.with(|slot| slot.replace(mir_handle)));
-//RS     body()
-//RS }
-//RS 
-//RS /// Return the callback currently installed for canonical MIR handle operations.
-//RS pub fn try_ambient_mir_handle(
-//RS     operation: &str,
-//RS     handle: Option<i64>,
-//RS     args: Vec<MirRuntimeValue>,
-//RS     span: Span,
-//RS ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
-//RS     MIR_HANDLE_CALL
-//RS         .with(|slot| slot.get())
-//RS         .and_then(|hook| hook(operation, handle, args, span))
-//RS }
-//RS 
-//RS /// Capture every ambient callback and the thread-safe host context so a checked
-//RS /// runtime closure can preserve the same authority on a scheduler worker.
-//RS pub fn ambient_runtime_snapshot() -> AmbientRuntimeSnapshot {
-//RS     AmbientRuntimeSnapshot {
-//RS         core_call: CORE_CALL.with(|slot| slot.get()),
-//RS         core_closure_call: CORE_CLOSURE_CALL.with(|slot| slot.get()),
-//RS         handle: HANDLE.with(|slot| slot.get()),
-//RS         extern_call: EXTERN_CALL.with(|slot| slot.get()),
-//RS         mir_handle_call: MIR_HANDLE_CALL.with(|slot| slot.get()),
-//RS         mir_extern_call: MIR_EXTERN_CALL.with(|slot| slot.get()),
-//RS         mir_prelude_call: MIR_PRELUDE_CALL.with(|slot| slot.get()),
-//RS         worker_context: WORKER_CONTEXT.with(|slot| slot.borrow().clone()),
-//RS     }
-//RS }
-//RS 
-//RS pub fn with_ambient_runtime_snapshot<R>(
-//RS     snapshot: AmbientRuntimeSnapshot,
-//RS     body: impl FnOnce() -> R,
-//RS ) -> R {
-//RS     with_ambient(
-//RS         snapshot.core_call,
-//RS         snapshot.handle,
-//RS         snapshot.extern_call,
-//RS         || {
-//RS             with_ambient_core_closure(snapshot.core_closure_call, || {
-//RS                 with_ambient_mir_handle(snapshot.mir_handle_call, || {
-//RS                     with_ambient_mir_extern(snapshot.mir_extern_call, || {
-//RS                         with_ambient_mir_prelude(snapshot.mir_prelude_call, || {
-//RS                             with_ambient_worker_context(snapshot.worker_context, body)
-//RS                         })
-//RS                     })
-//RS                 })
-//RS             })
-//RS         },
-//RS     )
-//RS }
-//RS 
-//RS /// Copy the legacy callbacks into a compiler-stack worker.
-//RS pub fn ambient_hooks() -> (
-//RS     Option<AmbientCoreCall>,
-//RS     Option<AmbientHandle>,
-//RS     Option<AmbientExternCall>,
-//RS ) {
-//RS     (
-//RS         CORE_CALL.with(|slot| slot.get()),
-//RS         HANDLE.with(|slot| slot.get()),
-//RS         EXTERN_CALL.with(|slot| slot.get()),
-//RS     )
-//RS }
-//RS 
-//RS pub fn try_core_call(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     try_core_call_typed(module, method, args, span, None)
-//RS }
-//RS 
-//RS pub fn try_core_call_typed(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     resolved_ret: Option<Type>,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     try_core_call_typed_with_sink(module, method, args, span, resolved_ret, None)
-//RS }
-//RS 
-//RS pub fn try_core_call_typed_with_sink(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     resolved_ret: Option<Type>,
-//RS     sink: Option<&mut DevSink>,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     CORE_CALL
-//RS         .with(|slot| slot.get())
-//RS         .and_then(|hook| hook(module, method, args, span, resolved_ret, sink))
-//RS }
-//RS 
-//RS pub fn try_handle(
-//RS     op: &str,
-//RS     recv: &mut CtValue,
-//RS     args: &mut [CtValue],
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     HANDLE
-//RS         .with(|slot| slot.get())
-//RS         .and_then(|hook| hook(op, recv, args, span))
-//RS }
-//RS 
-//RS pub fn try_extern_call(
-//RS     wrapper: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     resolved_ret: Option<Type>,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     EXTERN_CALL
-//RS         .with(|slot| slot.get())
-//RS         .and_then(|hook| hook(wrapper, args, span, resolved_ret))
-//RS }
-//RS 
-//RS 
-//RS /// Invoke the selected canonical MIR foreign callback, if one is installed.
-//RS pub fn try_mir_extern_call(
-//RS     foreign: &MirForeign,
-//RS     args: Vec<MirRuntimeValue>,
-//RS     span: Span,
-//RS ) -> Option<Result<AmbientMirExternResult, Diagnostic>> {
-//RS     MIR_EXTERN_CALL
-//RS         .with(|slot| slot.get())
-//RS         .and_then(|hook| hook(foreign, args, span))
-//RS }
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS     use std::panic::{catch_unwind, AssertUnwindSafe};
-//RS 
-//RS     fn outer_core(
-//RS         _: &str,
-//RS         _: &str,
-//RS         _: Vec<CtValue>,
-//RS         _: Span,
-//RS         _: Option<Type>,
-//RS         _: Option<&mut DevSink>,
-//RS     ) -> Option<Result<CtValue, Diagnostic>> {
-//RS         None
-//RS     }
-//RS 
-//RS     fn inner_core(
-//RS         _: &str,
-//RS         _: &str,
-//RS         _: Vec<CtValue>,
-//RS         _: Span,
-//RS         _: Option<Type>,
-//RS         _: Option<&mut DevSink>,
-//RS     ) -> Option<Result<CtValue, Diagnostic>> {
-//RS         None
-//RS     }
-//RS 
-//RS     fn outer_handle(
-//RS         _: &str,
-//RS         _: &mut CtValue,
-//RS         _: &mut [CtValue],
-//RS         _: Span,
-//RS     ) -> Option<Result<CtValue, Diagnostic>> {
-//RS         None
-//RS     }
-//RS 
-//RS     fn outer_extern(
-//RS         _: &str,
-//RS         _: Vec<CtValue>,
-//RS         _: Span,
-//RS         _: Option<Type>,
-//RS     ) -> Option<Result<CtValue, Diagnostic>> {
-//RS         None
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn nested_ambient_scopes_restore_previous_hooks() {
-//RS         assert_eq!(ambient_hooks(), (None, None, None));
-//RS         let outer = (
-//RS             Some(outer_core as AmbientCoreCall),
-//RS             Some(outer_handle as AmbientHandle),
-//RS             Some(outer_extern as AmbientExternCall),
-//RS         );
-//RS         let inner = (Some(inner_core as AmbientCoreCall), None, None);
-//RS 
-//RS         with_ambient(
-//RS             Some(outer_core),
-//RS             Some(outer_handle),
-//RS             Some(outer_extern),
-//RS             || {
-//RS                 assert_eq!(ambient_hooks(), outer);
-//RS 
-//RS                 with_ambient(Some(inner_core), None, None, || {
-//RS                     assert_eq!(ambient_hooks(), inner);
-//RS                 });
-//RS                 assert_eq!(ambient_hooks(), outer);
-//RS 
-//RS                 let unwound = catch_unwind(AssertUnwindSafe(|| {
-//RS                     with_ambient(None, Some(outer_handle), None, || {
-//RS                         panic!("ambient scope unwind");
-//RS                     });
-//RS                 }));
-//RS                 assert!(unwound.is_err());
-//RS                 assert_eq!(ambient_hooks(), outer);
-//RS             },
-//RS         );
-//RS 
-//RS         assert_eq!(ambient_hooks(), (None, None, None));
-//RS     }
-//RS }
-// END-PORT-PENDING 0555 crates/jet-comptime/src/Comptime/AmbientRuntime.rs:1-682
+// Optional callbacks for checked whole-program evaluator deopt. No callback reinterprets routes.
+use std.any.Any
+use std.cell.[Cell, RefCell]
+use std.sync.Arc
+use std.thread.ThreadLocal
+use jet_comptime.Comptime.DevSink
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.AST.[ComptimeInput, CtValue, Type]
+use jet_foundation.MIR.[MirCoreClosureKind, MirForeign, MirPreludeCall, MirPreludeCallId, MirRuntimeValue, MirSiteId, MirType]
 
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:21
+pub type AmbientCoreCall = fn(String, String, [CtValue], Span, Type?, &DevSink?) -> (CtValue Diagnostic!)?
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:34
+pub type AmbientCoreClosureCall = fn(String, String, MirPreludeCallId, MirCoreClosureKind, [MirRuntimeValue], MirRuntimeValue?, MirSiteId, String, Span) -> (MirRuntimeValue Diagnostic!)?
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:45
+pub type AmbientHandle = fn(String, &CtValue, &[CtValue], Span) -> (CtValue Diagnostic!)?
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:47
+pub type AmbientExternCall = fn(String, [CtValue], Span, Type?) -> (CtValue Diagnostic!)?
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:53
+pub trait StandaloneClosureHost: Send + Sync {
+    // Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:54
+    fn invoke(self: &Self, args: [CtValue], span: Span) -> CtValue Diagnostic!
+    // Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:59
+    fn invoke_mut(self: &Self, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+        self.invoke(args.clone(), span)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:69
+    fn history_callback_identity(self: &Self) -> String Err!
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:73
+pub struct AmbientStandaloneClosure { host: Arc<dyn StandaloneClosureHost> }
+impl AmbientStandaloneClosure {
+    // Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:76
+    pub fn new<T: StandaloneClosureHost>(host: T) -> AmbientStandaloneClosure Never! {
+        AmbientStandaloneClosure(host: Arc.new(^host))
+    }
+    // Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:83
+    pub fn invoke(self: &AmbientStandaloneClosure, args: [CtValue], span: Span) -> CtValue Diagnostic! {
+        self.host.invoke(^args, span)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:91
+    pub fn invoke_mut(self: &AmbientStandaloneClosure, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+        self.host.invoke_mut(args, span)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:98
+    pub fn history_callback_identity(self: &AmbientStandaloneClosure) -> String Err! { self.host.history_callback_identity() }
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:106
+pub fn try_ambient_standalone_closure(closure: &CtValue, args: [CtValue], span: Span) -> (CtValue Diagnostic!)? Never! {
+    if closure == {
+        .Closure(data) -> {
+            host :: data.opaque.as_ref()?.downcast_ref<AmbientStandaloneClosure>()?
+            Val(host.invoke(^args, span))
+        }
+        _ -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:121
+pub fn try_ambient_standalone_closure_mut(closure: &CtValue, args: &[CtValue], span: Span) -> (CtValue Diagnostic!)? Never! {
+    if closure == {
+        .Closure(data) -> {
+            host :: data.opaque.as_ref()?.downcast_ref<AmbientStandaloneClosure>()?
+            Val(host.invoke_mut(args, span))
+        }
+        _ -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:139
+pub enum AmbientMirHandleResult { Value(MirRuntimeValue), Handle(I64) }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:147
+pub type AmbientMirHandle = fn(String, I64?, [MirRuntimeValue], Span) -> (AmbientMirHandleResult Diagnostic!)?
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:160
+pub enum AmbientMirPreludeResult {
+    Value(MirRuntimeValue)
+    Effect { value: MirRuntimeValue, stdout: [U8], stderr: [U8] }
+    Control { value: MirRuntimeValue, stdout: [U8], stderr: [U8], exit_code: I32 }
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:179
+pub type AmbientMirPreludeCall = fn(&MirPreludeCall, [MirRuntimeValue], MirType?, Span) -> (AmbientMirPreludeResult Diagnostic!)?
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:192
+pub struct AmbientMirExternWriteback { pub parameter: USize, pub value: MirRuntimeValue }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:204
+pub struct AmbientMirExternResult { pub value: MirRuntimeValue, pub writebacks: [AmbientMirExternWriteback] }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:213
+pub type AmbientMirExternCall = fn(&MirForeign, [MirRuntimeValue], Span) -> (AmbientMirExternResult Diagnostic!)?
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:218
+pub type AmbientWorkerContext = Arc<dyn Any + Send + Sync>
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:221
+pub struct AmbientRuntimeSnapshot {
+    core_call: AmbientCoreCall? = None
+    core_closure_call: AmbientCoreClosureCall? = None
+    handle: AmbientHandle? = None
+    extern_call: AmbientExternCall? = None
+    mir_handle_call: AmbientMirHandle? = None
+    mir_extern_call: AmbientMirExternCall? = None
+    mir_prelude_call: AmbientMirPreludeCall? = None
+    worker_context: AmbientWorkerContext? = None
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:231
+// GATE #4494: actual thread-local cells, refcells, Arc/downcast and Drop unwind restoration.
+CORE_CALL :: ThreadLocal.new(fn() { Cell.new(AmbientCoreCall?{None}) })
+CORE_CLOSURE_CALL :: ThreadLocal.new(fn() { Cell.new(AmbientCoreClosureCall?{None}) })
+HANDLE :: ThreadLocal.new(fn() { Cell.new(AmbientHandle?{None}) })
+EXTERN_CALL :: ThreadLocal.new(fn() { Cell.new(AmbientExternCall?{None}) })
+MIR_HANDLE_CALL :: ThreadLocal.new(fn() { Cell.new(AmbientMirHandle?{None}) })
+MIR_EXTERN_CALL :: ThreadLocal.new(fn() { Cell.new(AmbientMirExternCall?{None}) })
+MIR_PRELUDE_CALL :: ThreadLocal.new(fn() { Cell.new(AmbientMirPreludeCall?{None}) })
+WORKER_CONTEXT :: ThreadLocal.new(fn() { RefCell.new(AmbientWorkerContext?{None}) })
+PACKAGE_READ_CONTEXT :: ThreadLocal.new(fn() { RefCell.new(PackageReadContext?{None}) })
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:242
+struct AmbientHooksGuard { core_call: AmbientCoreCall?, handle: AmbientHandle?, extern_call: AmbientExternCall? }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:249
+impl Drop for AmbientHooksGuard {
+    fn drop(self: &AmbientHooksGuard) -> Unit Never! {
+        CORE_CALL.with(fn(slot) { slot.set(self.core_call) })
+        HANDLE.with(fn(slot) { slot.set(self.handle) })
+        EXTERN_CALL.with(fn(slot) { slot.set(self.extern_call) })
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:255
+struct AmbientWorkerContextGuard { previous: AmbientWorkerContext? }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:258
+impl Drop for AmbientWorkerContextGuard {
+    fn drop(self: &AmbientWorkerContextGuard) -> Unit Never! { WORKER_CONTEXT.with(fn(slot) { _ :: slot.replace(self.previous.take()) }) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:265
+pub fn with_ambient_worker_context<R>(context: AmbientWorkerContext?, body: fn() -> R) -> R Never! {
+    previous :: WORKER_CONTEXT.with(fn(slot) { slot.replace(^context) })
+    _guard :: AmbientWorkerContextGuard(previous: ^previous)
+    body()
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:274
+pub fn ambient_worker_context<T: Any + Send + Sync>() -> Arc<T>? Never! {
+    WORKER_CONTEXT.with(fn(slot) { slot.borrow().clone() }).and_then(fn(context) { Arc.downcast<T>(^context).ok() })
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:280
+struct PackageReadContext { root: OSPath, inputs: [ComptimeInput] }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:290
+pub fn with_package_read_context<R>(root: &OSPath, body: fn() -> R) -> (R, [ComptimeInput]) Never! {
+    previous :: PACKAGE_READ_CONTEXT.with(fn(slot) { slot.replace(Val(PackageReadContext(root: root.clone(), inputs: []))) })
+    result :: body()
+    current :: PACKAGE_READ_CONTEXT.with(fn(slot) { slot.replace(^previous) })
+    inputs :: if current == { .Val(context) -> ^context.inputs; .None -> [] }
+    PACKAGE_READ_CONTEXT.with(fn(slot) {
+        parent_slot := slot.borrow_mut()
+        if parent_slot.as_mut() == {
+            .Val(parent) -> {
+                for input in &inputs {
+                    if !parent.inputs.iter().any(fn(existing) { existing.path == input.path }) -> parent.inputs.push(input.clone())
+                }
+            }
+            .None -> {}
+        }
+    })
+    (result, ^inputs)
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:322
+pub fn package_read_root() -> OSPath? Never! {
+    PACKAGE_READ_CONTEXT.with(fn(slot) { slot.borrow().as_ref().map(fn(context) { context.root.clone() }) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:329
+pub fn record_package_input(path: String, hash: String) -> Unit Never! {
+    PACKAGE_READ_CONTEXT.with(fn(slot) {
+        context_slot := slot.borrow_mut()
+        if context_slot.as_mut() == {
+            .Val(context) -> {
+                input :: ComptimeInput(path: ^path, hash: ^hash)
+                if !context.inputs.iter().any(fn(existing) { existing.path == input.path }) -> context.inputs.push(^input)
+            }
+            .None -> {}
+        }
+    })
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:351
+pub fn with_ambient<R>(core_call: AmbientCoreCall?, handle: AmbientHandle?, extern_call: AmbientExternCall?, body: fn() -> R) -> R Never! {
+    _previous :: AmbientHooksGuard(
+        core_call: CORE_CALL.with(fn(slot) { slot.replace(core_call) }),
+        handle: HANDLE.with(fn(slot) { slot.replace(handle) }),
+        extern_call: EXTERN_CALL.with(fn(slot) { slot.replace(extern_call) }))
+    body()
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:365
+struct AmbientCoreClosureGuard { previous: AmbientCoreClosureCall? }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:368
+impl Drop for AmbientCoreClosureGuard {
+    fn drop(self: &AmbientCoreClosureGuard) -> Unit Never! { CORE_CLOSURE_CALL.with(fn(slot) { slot.set(self.previous) }) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:374
+pub fn with_ambient_core_closure<R>(core_closure_call: AmbientCoreClosureCall?, body: fn() -> R) -> R Never! {
+    _previous :: AmbientCoreClosureGuard(previous: CORE_CLOSURE_CALL.with(fn(slot) { slot.replace(core_closure_call) }))
+    body()
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:384
+pub fn try_ambient_core_closure(module: String, method: String, call: MirPreludeCallId, kind: MirCoreClosureKind,
+    args: [MirRuntimeValue], closure: MirRuntimeValue?, site: MirSiteId, label: String, span: Span
+) -> (MirRuntimeValue Diagnostic!)? Never! {
+    CORE_CLOSURE_CALL.with(fn(slot) { slot.get().and_then(fn(hook) { hook(module, method, call, kind, ^args, ^closure, site, label, span) }) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:404
+struct AmbientMirExternGuard { previous: AmbientMirExternCall? }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:407
+impl Drop for AmbientMirExternGuard {
+    fn drop(self: &AmbientMirExternGuard) -> Unit Never! { MIR_EXTERN_CALL.with(fn(slot) { slot.set(self.previous) }) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:415
+pub fn with_ambient_mir_extern<R>(mir_extern_call: AmbientMirExternCall?, body: fn() -> R) -> R Never! {
+    _previous :: AmbientMirExternGuard(previous: MIR_EXTERN_CALL.with(fn(slot) { slot.replace(mir_extern_call) }))
+    body()
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:423
+struct AmbientMirPreludeGuard { previous: AmbientMirPreludeCall? }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:426
+impl Drop for AmbientMirPreludeGuard {
+    fn drop(self: &AmbientMirPreludeGuard) -> Unit Never! { MIR_PRELUDE_CALL.with(fn(slot) { slot.set(self.previous) }) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:432
+pub fn with_ambient_mir_prelude<R>(mir_prelude_call: AmbientMirPreludeCall?, body: fn() -> R) -> R Never! {
+    _previous :: AmbientMirPreludeGuard(previous: MIR_PRELUDE_CALL.with(fn(slot) { slot.replace(mir_prelude_call) }))
+    body()
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:442
+pub fn try_ambient_mir_prelude(row: &MirPreludeCall, args: [MirRuntimeValue], result_ty: MirType?, span: Span) -> (AmbientMirPreludeResult Diagnostic!)? Never! {
+    MIR_PRELUDE_CALL.with(fn(slot) { slot.get() }).and_then(fn(hook) { hook(row, ^args, ^result_ty, span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:454
+pub fn ambient_mir_prelude_hook() -> AmbientMirPreludeCall? Never! { MIR_PRELUDE_CALL.with(fn(slot) { slot.get() }) }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:458
+struct AmbientMirHandleGuard { previous: AmbientMirHandle? }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:461
+impl Drop for AmbientMirHandleGuard {
+    fn drop(self: &AmbientMirHandleGuard) -> Unit Never! { MIR_HANDLE_CALL.with(fn(slot) { slot.set(self.previous) }) }
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:467
+pub fn with_ambient_mir_handle<R>(mir_handle: AmbientMirHandle?, body: fn() -> R) -> R Never! {
+    _previous :: AmbientMirHandleGuard(previous: MIR_HANDLE_CALL.with(fn(slot) { slot.replace(mir_handle) }))
+    body()
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:477
+pub fn try_ambient_mir_handle(operation: String, handle: I64?, args: [MirRuntimeValue], span: Span) -> (AmbientMirHandleResult Diagnostic!)? Never! {
+    MIR_HANDLE_CALL.with(fn(slot) { slot.get() }).and_then(fn(hook) { hook(operation, handle, ^args, span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:490
+pub fn ambient_runtime_snapshot() -> AmbientRuntimeSnapshot Never! {
+    AmbientRuntimeSnapshot(core_call: CORE_CALL.with(fn(slot) { slot.get() }),
+        core_closure_call: CORE_CLOSURE_CALL.with(fn(slot) { slot.get() }),
+        handle: HANDLE.with(fn(slot) { slot.get() }), extern_call: EXTERN_CALL.with(fn(slot) { slot.get() }),
+        mir_handle_call: MIR_HANDLE_CALL.with(fn(slot) { slot.get() }),
+        mir_extern_call: MIR_EXTERN_CALL.with(fn(slot) { slot.get() }),
+        mir_prelude_call: MIR_PRELUDE_CALL.with(fn(slot) { slot.get() }),
+        worker_context: WORKER_CONTEXT.with(fn(slot) { slot.borrow().clone() }))
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:503
+pub fn with_ambient_runtime_snapshot<R>(snapshot: AmbientRuntimeSnapshot, body: fn() -> R) -> R Never! {
+    with_ambient(snapshot.core_call, snapshot.handle, snapshot.extern_call, fn() {
+        with_ambient_core_closure(snapshot.core_closure_call, fn() {
+            with_ambient_mir_handle(snapshot.mir_handle_call, fn() {
+                with_ambient_mir_extern(snapshot.mir_extern_call, fn() {
+                    with_ambient_mir_prelude(snapshot.mir_prelude_call, fn() {
+                        with_ambient_worker_context(^snapshot.worker_context, ^body)
+                    })
+                })
+            })
+        })
+    })
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:526
+pub fn ambient_hooks() -> (AmbientCoreCall?, AmbientHandle?, AmbientExternCall?) Never! {
+    (CORE_CALL.with(fn(slot) { slot.get() }), HANDLE.with(fn(slot) { slot.get() }), EXTERN_CALL.with(fn(slot) { slot.get() }))
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:538
+pub fn try_core_call(module: String, method: String, args: [CtValue], span: Span) -> (CtValue Diagnostic!)? Never! {
+    try_core_call_typed(module, method, ^args, span, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:547
+pub fn try_core_call_typed(module: String, method: String, args: [CtValue], span: Span, resolved_ret: Type?) -> (CtValue Diagnostic!)? Never! {
+    try_core_call_typed_with_sink(module, method, ^args, span, ^resolved_ret, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:557
+pub fn try_core_call_typed_with_sink(module: String, method: String, args: [CtValue], span: Span, resolved_ret: Type?, sink: &DevSink?) -> (CtValue Diagnostic!)? Never! {
+    CORE_CALL.with(fn(slot) { slot.get() }).and_then(fn(hook) { hook(module, method, ^args, span, ^resolved_ret, sink) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:570
+pub fn try_handle(op: String, recv: &CtValue, args: &[CtValue], span: Span) -> (CtValue Diagnostic!)? Never! {
+    HANDLE.with(fn(slot) { slot.get() }).and_then(fn(hook) { hook(op, recv, args, span) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:581
+pub fn try_extern_call(wrapper: String, args: [CtValue], span: Span, resolved_ret: Type?) -> (CtValue Diagnostic!)? Never! {
+    EXTERN_CALL.with(fn(slot) { slot.get() }).and_then(fn(hook) { hook(wrapper, ^args, span, ^resolved_ret) })
+}
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:594
+pub fn try_mir_extern_call(foreign: &MirForeign, args: [MirRuntimeValue], span: Span) -> (AmbientMirExternResult Diagnostic!)? Never! {
+    MIR_EXTERN_CALL.with(fn(slot) { slot.get() }).and_then(fn(hook) { hook(foreign, ^args, span) })
+}

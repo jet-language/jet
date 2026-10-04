@@ -1,0 +1,42 @@
+use jet_foundation.AST.[AccessConvention, Type, Param, ParamZone, ExternFn, FfiHandleFact, FfiCloseSource, FfiThreadSafety]
+use jet_foundation.Diagnostics.[Span]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:2134
+fn param(name: String, convention: AccessConvention, ty: Type) -> Param {
+    Param{convention: convention, root: false, name: name, name_span: Span.new(0, 0), public_label: None, zone: ParamZone.Either, ty: ty, ty_span: Span.new(0, 0), default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:2151
+fn foreign(name: String, params: [Param], return_type: Type?, generated: Bool) -> ExternFn {
+    ExternFn{abi: None, name: name, name_span: Span.new(0, 0), params: params, return_type: return_type, return_type_span: None, rust_path: name, rust_path_span: Span.new(0, 0), generated: generated, callback_transport: None, callback_plan_digest: None, callback_identity: None, effect_root: None, undo: None, close: None, span: Span.new(0, 0)}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:2172
+fn handle(name: String) -> FfiHandleFact {
+    FfiHandleFact{lib: "fixture", typedef_name: name, jet_name: name, close: "{name}_close", close_source: FfiCloseSource.Conventional, thread_safety: FfiThreadSafety.Safe}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:2184
+#Test("writeback_rows_reach_artifact_foreign_facts") {
+    handles := [FfiHandleFact]{handle("HbFont"), handle("HbBuffer")}
+    cases := [ExternFn]{
+        foreign("edit_scalar", [Param]{param("value", AccessConvention.Write, Type.Int)}, None, false),
+        foreign("edit_string", [Param]{param("value", AccessConvention.Write, Type.String)}, Val(Type.String), false),
+        foreign("edit_handle", [Param]{param("font", AccessConvention.Write, Type.Named("HbFont"))}, None, true),
+        foreign("edit_mixed_handles", [Param]{param("font", AccessConvention.Write, Type.Named("HbFont")), param("buffer", AccessConvention.Read, Type.Named("HbBuffer"))}, None, true),
+    }
+    loop function in cases {
+        assert(function.hidden_c_bridge_compatible_with_handles(handles), "{function.name} must use the resident writeback bridge")
+        row := lower_c_foreign(function, "ffi_fixture", "fixture", handles, TirArtifactTarget.Cranelift)
+        assert(row.abi == "C")
+        assert(row.language == "c")
+        assert(row.applicability.cranelift)
+        assert(row.params[0].access == TirAccess.Write)
+    }
+    handle_row := lower_c_foreign(cases[2], "ffi_fixture", "fixture", handles, TirArtifactTarget.Interpreter)
+    assert(handle_row.handle_key == Val("c::fixture::HbFont"))
+    assert(handle_row.applicability.interpreter)
+    typed_record := foreign("typed_record", [Param]{param("coord", AccessConvention.Read, Type.Named("Coord"))}, Val(Type.Named("Coord")), false)
+    direct_row := lower_c_foreign(typed_record, "ffi_fixture", "fixture", handles, TirArtifactTarget.RustAot)
+    assert(!direct_row.bridge_eligible)
+    assert(direct_row.key == "ffi_fixture::typed_record")
+    assert(direct_row.symbol == "typed_record")
+    assert(direct_row.path == "typed_record")
+}

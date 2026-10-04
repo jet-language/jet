@@ -1,0 +1,15 @@
+use jet_driver.PluginExport.*
+
+// Behavioral controls for Rust PluginExport.rs:57/101/116; no inline Rust tests.
+#Test("plugin_snapshot_identity_cannot_collide_with_library_identity") {
+    assert_eq(snapshot_package_key("guest"), "plugin__guest")
+    assert_eq(snapshot_package_key(""), "plugin__")
+}
+#Test("plugin_export_errors_preserve_registered_codes_and_detail") {
+    unsupported :: e1260("bad shape")
+    assert_eq(unsupported.code, "E1260")
+    assert_eq(unsupported.why, "bad shape")
+    incompatible :: e1257("export `old` was removed")
+    assert_eq(incompatible.code, "E1257")
+    assert(incompatible.why.contains("export `old` was removed"))
+}

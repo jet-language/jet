@@ -1,103 +1,87 @@
-// PORT-PENDING 0469 crates-jet-codegen-src-codegen-receipt-module-group: crates/jet-codegen/src/Codegen/Statement.rs:1-99
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS use crate::Syntax;
-//RS use crate::AST::{Type, VariantPayload};
-//RS 
-//RS 
-//RS /// The payload types a variant binds, so destructured names carry their type
-//RS /// into the body (needed so e.g. `.get` on a `Map` bound from `Object(root)`
-//RS /// lowers to a map lookup, not list indexing — B3). Mirrors sema's
-//RS /// `core_json_pattern_types` for the core `JSON` enum and reads `cx` for user
-//RS /// enums. Returns `None` when the types aren't known (binding stays untyped).
-//RS pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
-//RS     if is_json_variant(variant) {
-//RS         let data = Type::Named(Syntax::TYPE_DATA.to_string());
-//RS         return match variant {
-//RS             "Null" => Some(Vec::new()),
-//RS             "Bool" => Some(vec![Type::Bool]),
-//RS             "Int" => Some(vec![Type::Int]),
-//RS             "Float" => Some(vec![Type::Float]),
-//RS             "Text" => Some(vec![Type::String]),
-//RS             "Array" => Some(vec![Type::List(Box::new(data.clone()))]),
-//RS             "Object" => Some(vec![Type::Map {
-//RS                 key: Box::new(Type::String),
-//RS                 key_span: None,
-//RS                 value: Box::new(data),
-//RS             }]),
-//RS             "Number" => Some(vec![Type::String]),
-//RS             _ => None,
-//RS         };
-//RS     }
-//RS     if let Some(owner) = cx.variant_owner.get(variant) {
-//RS         if let Some(types) = variant_binding_types_for_enum(cx, owner, variant) {
-//RS             return Some(types);
-//RS         }
-//RS     }
-//RS     // D-TERM1 (ratified 2026-06-22): `Key` variant payload types for codegen.
-//RS     if is_key_variant(variant) {
-//RS         return match variant {
-//RS             "Char" | "Ctrl" => Some(vec![Type::Char]),
-//RS             "F" => Some(vec![Type::Int]),
-//RS             _ => Some(Vec::new()), // unit variants
-//RS         };
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS pub(crate) fn variant_binding_types_for_enum(
-//RS     cx: &Cx,
-//RS     enum_name: &str,
-//RS     variant: &str,
-//RS ) -> Option<Vec<Type>> {
-//RS     if enum_name == Syntax::TYPE_KEY {
-//RS         return match variant {
-//RS             "Char" | "Ctrl" => Some(vec![Type::Char]),
-//RS             "F" => Some(vec![Type::Int]),
-//RS             _ => Some(Vec::new()),
-//RS         };
-//RS     }
-//RS     if enum_name == "DataEvent" {
-//RS         return match variant {
-//RS             "Bool" => Some(vec![Type::Bool]),
-//RS             "Int" => Some(vec![Type::Int]),
-//RS             "Float" => Some(vec![Type::Float]),
-//RS             "Text" | "Key" => Some(vec![Type::String]),
-//RS             "Bytes" => Some(vec![Type::List(Box::new(Type::Int))]),
-//RS             "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => Some(Vec::new()),
-//RS             _ => None,
-//RS         };
-//RS     }
-//RS     let resolved = crate::Codegen::TIR::canonical_enum_owner(cx, enum_name);
-//RS     let variants = cx.enum_variants.get(&resolved)?;
-//RS     let (_, payload) = variants.iter().find(|(n, _)| n == variant)?;
-//RS     match payload {
-//RS         VariantPayload::Unit => Some(Vec::new()),
-//RS         VariantPayload::Single(t, _) => Some(vec![t.clone()]),
-//RS         VariantPayload::Named(fields) => Some(fields.iter().map(|f| f.ty.clone()).collect()),
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// D-TAG1: the ordered leaves under a group path of `enum_type`, with payloads.
-//RS /// Empty when `variant` isn't a group (or the enum is unknown) — callers fall
-//RS /// back to the plain single-variant pattern.
-//RS pub(crate) fn group_leaves<'c>(
-//RS     cx: &'c Cx,
-//RS     enum_type: Option<&str>,
-//RS     variant: &str,
-//RS ) -> Vec<(&'c String, &'c VariantPayload)> {
-//RS     let Some(et) = enum_type else {
-//RS         return Vec::new();
-//RS     };
-//RS     let Some(vars) = cx.enum_variants.get(et) else {
-//RS         return Vec::new();
-//RS     };
-//RS     let prefix = format!("{variant}.");
-//RS     vars.iter()
-//RS         .filter(|(n, _)| n.starts_with(&prefix))
-//RS         .map(|(n, p)| (n, p))
-//RS         .collect()
-//RS }
-// END-PORT-PENDING 0469 crates/jet-codegen/src/Codegen/Statement.rs:1-99
+use JetCodegen.Codegen.[is_json_variant, is_key_variant]
+use JetCodegen.Codegen.Context.Cx
+use JetFoundation.Syntax
+use JetFoundation.AST.[Type, VariantPayload]
+use JetCodegen.Codegen.TIR.canonical_enum_owner
 
+// Rust: crates/jet-codegen/src/Codegen/Statement.rs:11
+// Payload types carried into destructured bindings; unknown variants stay untyped.
+fn variant_binding_types(cx: &Cx, variant: String) -> [Type]? Never! {
+    if is_json_variant(variant) {
+        data := Type.Named(Syntax.TYPE_DATA.to_string())
+        return match variant {
+            "Null" => Some([])
+            "Bool" => Some([Type.Bool])
+            "Int" => Some([Type.Int])
+            "Float" => Some([Type.Float])
+            "Text" => Some([Type.String])
+            "Array" => Some([Type.List(data)])
+            "Object" => Some([Type.Map { key: Type.String, key_span: None, value: data }])
+            "Number" => Some([Type.String])
+            _ => None
+        }
+    }
+    if cx.variant_owner.get(variant) is Some(owner) {
+        if variant_binding_types_for_enum(cx, owner, variant) is Some(types) { return Some(types) }
+    }
+    // D-TERM1: Key variant payloads.
+    if is_key_variant(variant) {
+        return match variant {
+            "Char" | "Ctrl" => Some([Type.Char])
+            "F" => Some([Type.Int])
+            _ => Some([])
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Statement.rs:46
+fn variant_binding_types_for_enum(cx: &Cx, enum_name: String, variant: String) -> [Type]? Never! {
+    if enum_name == Syntax.TYPE_KEY {
+        return match variant {
+            "Char" | "Ctrl" => Some([Type.Char])
+            "F" => Some([Type.Int])
+            _ => Some([])
+        }
+    }
+    if enum_name == "DataEvent" {
+        return match variant {
+            "Bool" => Some([Type.Bool])
+            "Int" => Some([Type.Int])
+            "Float" => Some([Type.Float])
+            "Text" | "Key" => Some([Type.String])
+            "Bytes" => Some([Type.List(Type.Int)])
+            "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => Some([])
+            _ => None
+        }
+    }
+    resolved := canonical_enum_owner(cx, enum_name)
+    if cx.enum_variants.get(resolved) is Some(variants) {
+        for (name, payload) in variants {
+            if name == variant {
+                return match payload {
+                    VariantPayload.Unit => Some([])
+                    VariantPayload.Single(ty, _) => Some([ty.clone()])
+                    VariantPayload.Named(fields) => Some(fields.iter().map(fn(field) { field.ty.clone() }).collect())
+                }
+            }
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Statement.rs:83
+// Ordered group leaves; an unknown enum/group yields no leaves.
+fn group_leaves(cx: &Cx, enum_type: String?, variant: String) -> [(&String, &VariantPayload)] Never! {
+    if enum_type is Some(owner) {
+        if cx.enum_variants.get(owner) is Some(variants) {
+            prefix := "{variant}."
+            leaves: [(&String, &VariantPayload)] := []
+            for (name, payload) in variants {
+                if name.starts_with(prefix) { leaves.push((&name, &payload)) }
+            }
+            return ^leaves
+        }
+    }
+    []
+}

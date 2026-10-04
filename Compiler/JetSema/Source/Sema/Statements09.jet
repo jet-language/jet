@@ -1,2022 +1,727 @@
-// PORT-PENDING 0495 crates-jet-codegen-src-codegen-tir-lower-statements-slice-1812: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1812-3829
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt {
-//RS     if let Expr::Ident(name, _) = e {
-//RS         if env.gc_return && env.is_gc(name) {
-//RS             return TStmt::Return(Some(TExpr {
-//RS                 ty: env.ty_of(name).unwrap_or(Type::Int),
-//RS                 kind: TExprKind::Local(env.local_of(name)),
-//RS             }));
-//RS         }
-//RS     }
-//RS     in_own_frame(|| {
-//RS         let return_expr = e;
-//RS         let annotated = annotate_return_todo(return_expr, env.ret_ty.as_ref());
-//RS         let mut value = lower_owned_expr(annotated.as_ref().unwrap_or(return_expr), cx, env);
-//RS         super::expressions::suppress_module_call_target_return(&mut value);
-//RS         // An HTTPHandler is an Arc-backed callable at the Rust boundary. Sema
-//RS         // permits its source spelling to return an inline handler lambda, so
-//RS         // force the same Send representation before returning through that
-//RS         // nominal handle type.
-//RS         if env.ret_ty.as_ref().is_some_and(|want| {
-//RS             matches!(want, Type::Named(name) if name == "HTTPHandler")
-//RS                 && matches!(&value.ty, Type::Fn { .. })
-//RS         }) {
-//RS             value = force_thread_callback_value(value, cx);
-//RS         }
-//RS         if let Some(want) = &env.ret_ty {
-//RS             if matches!(value.kind, TExprKind::Absent) && matches!(want, Type::Option(_)) {
-//RS                 value.ty = want.clone();
-//RS             }
-//RS             // Sema erases the type head from an empty typed list literal.
-//RS             // At a return boundary the success payload is the contextual
-//RS             // element shape, not the internal Result/Option carrier.
-//RS             let payload = match want {
-//RS                 Type::Result { ok, .. } | Type::Option(ok) => ok.as_ref(),
-//RS                 other => other,
-//RS             };
-//RS             value = preserve_typed_list_shape(value, payload, cx);
-//RS             value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
-//RS             let carrier_slot = match want {
-//RS                 Type::Result { ok, .. } => ok.as_ref(),
-//RS                 other => other,
-//RS             };
-//RS             value = crate::Codegen::TIR::box_present_trait_payload(value, carrier_slot, cx);
-//RS             // `??` consumes its input carrier and leaves a bare success value.
-//RS             // Restore the enclosing callable's Result carrier exactly once,
-//RS             // matching sema's implicit `Ok` for ordinary source returns.
-//RS             if matches!(want, Type::Result { .. }) {
-//RS                 if matches!(value.kind, TExprKind::Ok(_) | TExprKind::Err(..)) {
-//RS                     value.ty = want.clone();
-//RS                 } else if !matches!(value.ty, Type::Result { .. }) {
-//RS                     value = TExpr {
-//RS                         ty: want.clone(),
-//RS                         kind: TExprKind::Ok(Box::new(value)),
-//RS                     };
-//RS                 }
-//RS                 // #3713: the `Err(...)` a function returns is where its
-//RS                 // failure starts; every tier records that site as the origin.
-//RS                 if let TExprKind::Err(_, origin) = &mut value.kind {
-//RS                     let (line, column) = cx.src_line_col(return_expr.span().start);
-//RS                     *origin = Some(crate::Codegen::TIR::TFailureOrigin {
-//RS                         file: crate::Codegen::escape_rust_str(&cx.file),
-//RS                         line,
-//RS                         column,
-//RS                         fn_name: crate::Codegen::escape_rust_str(&env.fn_name),
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS         let is_never = matches!(
-//RS             &value.ty,
-//RS             Type::Named(name) if name == crate::Syntax::TYPE_NEVER
-//RS         );
-//RS         if !matches!(&value.ty, Type::Result { .. } | Type::Option(_)) && !is_never {
-//RS             // A value every path of which already left (each arm of a tail
-//RS             // `if` table returns) has nothing to bind or return: lowering it
-//RS             // runs those exits. Binding it would write the unit tail of a
-//RS             // closed arm into a slot of the success type.
-//RS             if !super::expressions::tir_expr_reaches_merge(&value) {
-//RS                 return TStmt::ExprStmt(value);
-//RS             }
-//RS             let result = TLocal::generated("result");
-//RS             let result_name = result.name.clone();
-//RS             let result_value = TExpr {
-//RS                 ty: value.ty.clone(),
-//RS                 kind: TExprKind::Local(TLocal::user(&result_name)),
-//RS             };
-//RS             return TStmt::Inline(vec![
-//RS                 TStmt::Let {
-//RS                     name: result_name,
-//RS                     kw: "let",
-//RS                     let_ty: TLetTy::Inferred,
-//RS                     init: value,
-//RS                     gc_promotion: None,
-//RS                     gc_transferred: false,
-//RS                 },
-//RS                 TStmt::Return(Some(result_value)),
-//RS             ]);
-//RS         }
-//RS         TStmt::Return(Some(value))
-//RS     })
-//RS }
-//RS #[inline(never)]
-//RS pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
-//RS     let before_payload = CanonicalPass::enabled()
-//RS         .then(|| CanonicalPass::debug_payload("ast", "tir.lower-statements", &stmts));
-//RS     let before_identity = CanonicalPass::enabled()
-//RS         .then(|| CanonicalPass::debug_identity("ast", "tir.lower-statements", &stmts));
-//RS     // Child blocks are heap tasks. A nested source block therefore resumes its
-//RS     // parent through `LowerBlock::resume` instead of keeping the parent lowering
-//RS     // frame on the native stack.
-//RS     let mut lowered = lower_stmts_with_markers(stmts, cx, env, true);
-//RS     let targets = env.resource_take_targets();
-//RS     mark_resource_bindings_mutable(&mut lowered, &targets);
-//RS     if let (Some(before_payload), Some(before_identity)) = (before_payload, before_identity) {
-//RS         CanonicalPass::record(
-//RS             "lowering",
-//RS             "tir.lower-statements",
-//RS             "crates/jet-codegen/src/Codegen/TIR/lower/statements.rs",
-//RS             "ast",
-//RS             before_payload,
-//RS             before_identity,
-//RS             "tir",
-//RS             crate::Codegen::TIR::canonical_statements_payload(&lowered),
-//RS             crate::Codegen::TIR::canonical_statements_identity(&lowered),
-//RS             "preserve",
-//RS         );
-//RS     }
-//RS     lowered
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct SplitViewCandidate {
-//RS     stmt_index: usize,
-//RS     owner: Expr,
-//RS     owner_key: String,
-//RS     name: String,
-//RS     ty: Option<Type>,
-//RS     start: i64,
-//RS     end: i64,
-//RS     single: bool,
-//RS     write: bool,
-//RS     line: usize,
-//RS     last_use: usize,
-//RS }
-//RS 
-//RS struct PlannedSplitView {
-//RS     candidate: SplitViewCandidate,
-//RS     root: String,
-//RS     len: String,
-//RS     source: String,
-//RS     source_start: i64,
-//RS     before: String,
-//RS     split_tail: String,
-//RS     segment: String,
-//RS     after: String,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct SplitRegion {
-//RS     name: String,
-//RS     start: i64,
-//RS     end: Option<i64>,
-//RS }
-//RS 
-//RS fn const_place_bound(expr: &Expr) -> Option<i64> {
-//RS     let mut expr = expr;
-//RS     let mut negations = 0usize;
-//RS     let mut value = loop {
-//RS         match expr {
-//RS             Expr::Int(value, ..) => break *value,
-//RS             Expr::Unary(UnOp::Neg, inner, _) => {
-//RS                 negations += 1;
-//RS                 expr = inner;
-//RS             }
-//RS             Expr::Paren(inner, _) => expr = inner,
-//RS             _ => return None,
-//RS         }
-//RS     };
-//RS     for _ in 0..negations {
-//RS         value = value.checked_neg()?;
-//RS     }
-//RS     Some(value)
-//RS }
-//RS 
-//RS fn split_owner_key(expr: &Expr) -> Option<String> {
-//RS     let mut expr = expr;
-//RS     let mut suffixes = Vec::new();
-//RS     let root = loop {
-//RS         match expr {
-//RS             Expr::Ident(name, _) => break Some(format!("name:{name}")),
-//RS             Expr::Field(base, field, _) => {
-//RS                 suffixes.push(format!(".field:{field}"));
-//RS                 expr = base;
-//RS             }
-//RS             Expr::Index { base, index, .. } => {
-//RS                 suffixes.push(format!(".index:{}", const_place_bound(index)?));
-//RS                 expr = base;
-//RS             }
-//RS             Expr::Paren(inner, _) | Expr::Place(inner, _, _) => expr = inner,
-//RS             _ => return None,
-//RS         }
-//RS     };
-//RS     let mut key = root?;
-//RS     for suffix in suffixes.into_iter().rev() {
-//RS         key.push_str(&suffix);
-//RS     }
-//RS     Some(key)
-//RS }
-//RS 
-//RS fn split_owner_root(expr: &Expr) -> Option<String> {
-//RS     let mut expr = expr;
-//RS     loop {
-//RS         match expr {
-//RS             Expr::Ident(name, _) => return Some(name.clone()),
-//RS             Expr::Field(base, _, _) | Expr::Index { base, .. } => expr = base,
-//RS             Expr::Paren(inner, _) | Expr::Place(inner, _, _) => expr = inner,
-//RS             _ => return None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-PIN1=A: `mem.pin(&place)` IS a write window on `place` — the pin adds a
-//RS /// sema-side no-move promise, not a second runtime shape. Every tier therefore
-//RS /// lowers it through the same path as a written `Expr::Place`, which is what
-//RS /// keeps the interpreter and JIT aliasing behaviour identical to AOT (I9).
-//RS /// Returns the windowed place and its access when `init` is either spelling.
-//RS pub(crate) fn place_window_init<'a>(init: &'a Expr, cx: &Cx) -> Option<(&'a Expr, PlaceAccess)> {
-//RS     match init {
-//RS         Expr::Place(inner, access, _) => Some((inner.as_ref(), *access)),
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             args,
-//RS             ..
-//RS         } if method == crate::Syntax::MEM_PIN
-//RS             && matches!(receiver.as_ref(), Expr::Ident(alias, _)
-//RS                 if cx
-//RS                     .any_core_import_module(alias)
-//RS                     .is_some_and(|m| m == crate::Syntax::CORE_MEM_MODULE)) =>
-//RS         {
-//RS             let inner = &args.first()?.expr;
-//RS             Some((
-//RS                 match inner {
-//RS                     Expr::Place(place, _, _) => place.as_ref(),
-//RS                     other => other,
-//RS                 },
-//RS                 PlaceAccess::Write,
-//RS             ))
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<SplitViewCandidate> {
-//RS     let Stmt::Val(binding) = stmt else {
-//RS         return None;
-//RS     };
-//RS     let (inner, access) = place_window_init(&binding.init, cx)?;
-//RS     let (base, start, end, single) = match inner {
-//RS         Expr::Slice {
-//RS             base,
-//RS             start,
-//RS             end,
-//RS             range,
-//RS             ..
-//RS         } => {
-//RS             let (start, end) = match range.as_deref() {
-//RS                 Some(Expr::Range {
-//RS                     start,
-//RS                     end,
-//RS                     exclusive,
-//RS                     ..
-//RS                 }) => {
-//RS                     let start = const_place_bound(start)?;
-//RS                     let end = const_place_bound(end)?;
-//RS                     (start, if *exclusive { end.checked_sub(1)? } else { end })
-//RS                 }
-//RS                 Some(_) => return None,
-//RS                 None => (const_place_bound(start)?, const_place_bound(end)?),
-//RS             };
-//RS             (base.as_ref(), start, end, false)
-//RS         }
-//RS         Expr::Index { base, index, .. } => {
-//RS             let index = const_place_bound(index)?;
-//RS             (base.as_ref(), index, index, true)
-//RS         }
-//RS         _ => return None,
-//RS     };
-//RS     let owner_key = split_owner_key(base)?;
-//RS     Some(SplitViewCandidate {
-//RS         stmt_index,
-//RS         owner: base.clone(),
-//RS         owner_key,
-//RS         name: binding.name.clone(),
-//RS         ty: binding.ty.clone(),
-//RS         start,
-//RS         end,
-//RS         single,
-//RS         write: matches!(access, PlaceAccess::Write),
-//RS         line: cx.src_line_col(binding.name_span.start).0,
-//RS         last_use: stmt_index,
-//RS     })
-//RS }
-//RS 
-//RS fn split_view_plan(stmts: &[Stmt], cx: &Cx, env: &LowerEnv) -> HashMap<usize, PlannedSplitView> {
-//RS     // The planner emits Rust slice operations. Compute windows use
-//RS     // checked Prelude handles instead, so resolve block-local owners before
-//RS     // planning and leave those bindings on the normal `Expr::Place` path.
-//RS     // This temporary environment never affects lexical lowering; it only makes
-//RS     // the already-resolved local types visible while selecting candidates. It
-//RS     // must advance in source order: prebinding the whole block makes an earlier
-//RS     // owner look like a later shadow and can route a compute alias through Rust slices.
-//RS     let mut owner_env = env.clone();
-//RS     let mut owner_generation: HashMap<String, usize> = HashMap::new();
-//RS     let mut candidates = Vec::new();
-//RS     for (index, stmt) in stmts.iter().enumerate() {
-//RS         if let Some(mut view) = split_view_candidate(stmt, index, cx) {
-//RS             let is_tensor = matches!(
-//RS                 tir_recv_jet_ty(&view.owner, &owner_env),
-//RS                 Some(ty) if ty.is_compute_tensor_family()
-//RS             );
-//RS             if !is_tensor && view.start >= 0 && view.end >= view.start {
-//RS                 let root = split_owner_root(&view.owner).unwrap_or_default();
-//RS                 let generation = owner_generation.get(&root).copied().unwrap_or_default();
-//RS                 view.owner_key = format!("{}@{generation}", view.owner_key);
-//RS                 candidates.push(view);
-//RS             }
-//RS         }
-//RS         if let Stmt::Val(binding) = stmt {
-//RS             owner_generation
-//RS                 .entry(binding.name.clone())
-//RS                 .and_modify(|generation| *generation += 1)
-//RS                 .or_insert(1);
-//RS             owner_env.bind(
-//RS                 &binding.name,
-//RS                 TLocal::user(&binding.name),
-//RS                 binding.ty.clone(),
-//RS             );
-//RS         }
-//RS     }
-//RS     for candidate in &mut candidates {
-//RS         candidate.last_use = stmts[candidate.stmt_index + 1..]
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter(|(_, stmt)| crate::Sema::stmt_references_name_deep(stmt, &candidate.name))
-//RS             .map(|(offset, _)| candidate.stmt_index + 1 + offset)
-//RS             .next_back()
-//RS             .unwrap_or(candidate.stmt_index);
-//RS     }
-//RS 
-//RS     let mut parent: Vec<usize> = (0..candidates.len()).collect();
-//RS     fn find(parent: &mut [usize], mut index: usize) -> usize {
-//RS         while parent[index] != index {
-//RS             parent[index] = parent[parent[index]];
-//RS             index = parent[index];
-//RS         }
-//RS         index
-//RS     }
-//RS     fn union(parent: &mut [usize], a: usize, b: usize) {
-//RS         let a = find(parent, a);
-//RS         let b = find(parent, b);
-//RS         if a != b {
-//RS             parent[b] = a;
-//RS         }
-//RS     }
-//RS     for a in 0..candidates.len() {
-//RS         for b in a + 1..candidates.len() {
-//RS             let earlier = &candidates[a];
-//RS             let later = &candidates[b];
-//RS             if earlier.owner_key == later.owner_key
-//RS                 && earlier.last_use >= later.stmt_index
-//RS                 && (earlier.write || later.write)
-//RS                 && (earlier.end < later.start || later.end < earlier.start)
-//RS             {
-//RS                 union(&mut parent, a, b);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
-//RS     for index in 0..candidates.len() {
-//RS         let root = find(&mut parent, index);
-//RS         groups.entry(root).or_default().push(index);
-//RS     }
-//RS     let mut groups: Vec<_> = groups.into_values().collect();
-//RS     groups.sort_by_key(|group| {
-//RS         group
-//RS             .iter()
-//RS             .map(|&index| candidates[index].stmt_index)
-//RS             .min()
-//RS             .unwrap_or(usize::MAX)
-//RS     });
-//RS     let mut planned = HashMap::new();
-//RS     for (plan_index, mut group) in groups.into_iter().enumerate() {
-//RS         // A lone read borrow needs no plan: reading a clone reads the same
-//RS         // values. A lone WRITE borrow does need one — without it the emitted
-//RS         // Rust borrows a temporary clone and the write is silently dropped,
-//RS         // while the JIT applies it. Same source, two answers (I9).
-//RS         let lone_write = group.len() == 1 && candidates[group[0]].write;
-//RS         if (group.len() < 2 && !lone_write)
-//RS             || group.iter().enumerate().any(|(i, &a)| {
-//RS                 group.iter().skip(i + 1).any(|&b| {
-//RS                     let a = &candidates[a];
-//RS                     let b = &candidates[b];
-//RS                     !(a.end < b.start || b.end < a.start)
-//RS                 })
-//RS             })
-//RS         {
-//RS             continue;
-//RS         }
-//RS         group.sort_by_key(|&index| candidates[index].stmt_index);
-//RS         let root = jet_format!("{jet_prefix}place_plan_{plan_index}_root");
-//RS         let len = jet_format!("{jet_prefix}place_plan_{plan_index}_len");
-//RS         let mut regions = vec![SplitRegion {
-//RS             name: root.clone(),
-//RS             start: 0,
-//RS             end: None,
-//RS         }];
-//RS         for (step, candidate_index) in group.into_iter().enumerate() {
-//RS             let candidate = candidates[candidate_index].clone();
-//RS             let Some(region_index) = regions.iter().position(|region| {
-//RS                 candidate.start >= region.start && region.end.is_none_or(|end| candidate.end <= end)
-//RS             }) else {
-//RS                 continue;
-//RS             };
-//RS             let region = regions.remove(region_index);
-//RS             let prefix = jet_format!("{jet_prefix}place_plan_{plan_index}_{step}_before");
-//RS             let split_tail = jet_format!("{jet_prefix}place_plan_{plan_index}_{step}_tail");
-//RS             let segment = jet_format!("{jet_prefix}place_plan_{plan_index}_{step}_segment");
-//RS             let suffix = jet_format!("{jet_prefix}place_plan_{plan_index}_{step}_after");
-//RS             if candidate.start > region.start {
-//RS                 regions.push(SplitRegion {
-//RS                     name: prefix.clone(),
-//RS                     start: region.start,
-//RS                     end: Some(candidate.start - 1),
-//RS                 });
-//RS             }
-//RS             if region.end.is_none_or(|end| candidate.end < end) {
-//RS                 regions.push(SplitRegion {
-//RS                     name: suffix.clone(),
-//RS                     start: candidate.end + 1,
-//RS                     end: region.end,
-//RS                 });
-//RS             }
-//RS             planned.insert(
-//RS                 candidate.stmt_index,
-//RS                 PlannedSplitView {
-//RS                     candidate,
-//RS                     root: root.clone(),
-//RS                     len: len.clone(),
-//RS                     source: region.name,
-//RS                     source_start: region.start,
-//RS                     before: prefix,
-//RS                     split_tail,
-//RS                     segment,
-//RS                     after: suffix,
-//RS                 },
-//RS             );
-//RS         }
-//RS     }
-//RS     planned
-//RS }
-//RS 
-//RS /// A typed list head can reach lowering as a one-element `ListLit` after sema
-//RS /// elaborates the head away. Preserve the asserted list shape:
-//RS /// the value already has the exact expected list type, so the wrapper is not
-//RS /// another list dimension.
-//RS pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -> TExpr {
-//RS     if !matches!(expected, Type::List(_) | Type::FixedList { .. }) {
-//RS         return expr;
-//RS     }
-//RS     // A carrier is already a complete value. Retagging its visible payload
-//RS     // shape would leave `Ok(...)`/`Present(...)` with a bare list type and
-//RS     // trigger a second wrapper at the surrounding return boundary.
-//RS     if matches!(&expr.ty, Type::Result { .. } | Type::Option(_)) {
-//RS         return expr;
-//RS     }
-//RS     let mut expr = match expr {
-//RS         TExpr {
-//RS             ty,
-//RS             kind: TExprKind::ListLit(mut elems),
-//RS         } => {
-//RS             if elems.len() == 1 && elems[0].ty == *expected {
-//RS                 elems.pop().unwrap()
-//RS             } else {
-//RS                 TExpr {
-//RS                     ty,
-//RS                     kind: TExprKind::ListLit(elems),
-//RS                 }
-//RS             }
-//RS         }
-//RS         other => other,
-//RS     };
-//RS     let expected_elem = match expected {
-//RS         Type::List(elem) | Type::FixedList { elem, .. } => elem.as_ref(),
-//RS         _ => return expr,
-//RS     };
-//RS     // D-SG9: typed `[U8].{…}` / `[I32].{…}` heads must drive each element's
-//RS     // Rust integer suffix. Sema may leave bare `IntLit(_, None)` when the list
-//RS     // type comes from the head alone; retag from the expected element type so
-//RS     // emit produces `104u8` rather than `104i64` (I2).
-//RS     if matches!(
-//RS         expected_elem,
-//RS         Type::IntN { .. } | Type::InlineRange { .. } | Type::List(_) | Type::FixedList { .. }
-//RS     ) {
-//RS         if let TExprKind::ListLit(elems) = &mut expr.kind {
-//RS             for elem in elems.iter_mut() {
-//RS                 match (&mut elem.kind, expected_elem) {
-//RS                     (TExprKind::IntLit(_, width), Type::IntN { signed, bits }) => {
-//RS                         *width = Some((*signed, *bits));
-//RS                         elem.ty = expected_elem.clone();
-//RS                     }
-//RS                     (TExprKind::IntLit(_, width), Type::InlineRange { .. }) => {
-//RS                         *width = None;
-//RS                         elem.ty = expected_elem.clone();
-//RS                     }
-//RS                     // A nested list literal (`[[U8]]`) drives suffixes one
-//RS                     // dimension down with the same rule.
-//RS                     (TExprKind::ListLit(_), Type::List(_) | Type::FixedList { .. }) => {
-//RS                         let inner = std::mem::replace(
-//RS                             elem,
-//RS                             TExpr {
-//RS                                 ty: Type::Int,
-//RS                                 kind: TExprKind::ListLit(Vec::new()),
-//RS                             },
-//RS                         );
-//RS                         *elem = preserve_typed_list_shape(inner, expected_elem, cx);
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS             expr.ty = expected.clone();
-//RS             return expr;
-//RS         }
-//RS     }
-//RS     let trait_name = match expected_elem {
-//RS         Type::TraitObject(names) if names.len() == 1 => names.first(),
-//RS         Type::Named(name) if cx.trait_names.contains(name) => Some(name),
-//RS         _ => None,
-//RS     };
-//RS     let Some(trait_name) = trait_name else {
-//RS         expr.ty = expected.clone();
-//RS         return expr;
-//RS     };
-//RS     let TExprKind::ListLit(elems) = &mut expr.kind else {
-//RS         expr.ty = expected.clone();
-//RS         return expr;
-//RS     };
-//RS     for elem in elems {
-//RS         let concrete = match &elem.ty {
-//RS             Type::Named(name) => Some(name.clone()),
-//RS             Type::Apply { name, .. } => Some(name.clone()),
-//RS             _ => None,
-//RS         };
-//RS         let (Some(concrete), TExprKind::StructLit { as_trait, .. }) = (concrete, &mut elem.kind)
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         if as_trait.is_none() {
-//RS             *as_trait = Some((trait_name.clone(), concrete));
-//RS             elem.ty = Type::TraitObject(vec![trait_name.clone()]);
-//RS         }
-//RS     }
-//RS     expr.ty = expected.clone();
-//RS     expr
-//RS }
-//RS 
-//RS fn is_refutable_unwrap_pattern(pattern: &Pattern) -> bool {
-//RS     if pattern.has_nested_pattern() {
-//RS         return false;
-//RS     }
-//RS     match pattern {
-//RS         Pattern::Ok { .. } | Pattern::Present { .. } => true,
-//RS         Pattern::Variant {
-//RS             variant, bindings, ..
-//RS         } if bindings.len() == 1
-//RS             && matches!(
-//RS                 variant.as_str(),
-//RS                 Syntax::LIT_OK | Syntax::LIT_VALUE | "value"
-//RS             ) =>
-//RS         {
-//RS             true
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn refutable_binding_name<'a>(pattern: &'a Pattern, _init: &TExpr) -> Option<&'a str> {
-//RS     match pattern {
-//RS         Pattern::Ok { binding, .. } | Pattern::Present { binding, .. } => Some(binding),
-//RS         Pattern::Variant { bindings, .. } => {
-//RS             bindings.first().and_then(crate::AST::PatSlot::as_bind)
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn is_direct_refutable_pattern(pattern: &Pattern, cx: &Cx) -> bool {
-//RS     matches!(
-//RS         pattern,
-//RS         Pattern::Variant { variant, .. } if cx.variant_owner.contains_key(variant)
-//RS     )
-//RS }
-//RS 
-//RS fn lower_refutable_fallback(fallback: &OrFallback, cx: &Cx, env: &LowerEnv) -> Vec<TStmt> {
-//RS     let mut fallback_env = clone_env(env);
-//RS     let unreachable = || {
-//RS         TStmt::ExprStmt(TExpr {
-//RS             ty: unit_type(),
-//RS             kind: TExprKind::Unreachable { line: 0 },
-//RS         })
-//RS     };
-//RS     match fallback {
-//RS         OrFallback::Return(value, _) => vec![TStmt::Return(
-//RS             value
-//RS                 .as_ref()
-//RS                 .map(|value| lower_expr(value, cx, &mut fallback_env)),
-//RS         )],
-//RS         OrFallback::Panic { name_span, args } => {
-//RS             let (kind, loc) = lower_panic_stop(name_span, args, cx, &mut fallback_env);
-//RS             debug_assert!(matches!(&kind, TRequireKind::Panic { .. }));
-//RS             vec![TStmt::ExprStmt(TExpr {
-//RS                 ty: unit_type(),
-//RS                 kind: TExprKind::RequireStop {
-//RS                     kind,
-//RS                     loc,
-//RS                     always_stops: true,
-//RS                 },
-//RS             })]
-//RS         }
-//RS         OrFallback::Break(_) => vec![TStmt::Break(None)],
-//RS         OrFallback::Continue(_) => vec![TStmt::Continue(None)],
-//RS         OrFallback::BreakLabel(name, _) => vec![TStmt::Break(Some(name.clone()))],
-//RS         OrFallback::ContinueLabel(name, _) => vec![TStmt::Continue(Some(name.clone()))],
-//RS         OrFallback::Value(value) => vec![
-//RS             TStmt::ExprStmt(lower_expr(value, cx, &mut fallback_env)),
-//RS             unreachable(),
-//RS         ],
-//RS         OrFallback::Block { body, value, .. } => {
-//RS             let mut out = lower_stmts(body, cx, &mut fallback_env);
-//RS             if let Some(value) = value {
-//RS                 out.push(TStmt::ExprStmt(lower_expr(value, cx, &mut fallback_env)));
-//RS                 out.push(unreachable());
-//RS             }
-//RS             out
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS const INT_SMALL_MIN: i128 = -(1i128 << 62);
-//RS const INT_SMALL_MAX: i128 = (1i128 << 62) - 1;
-//RS 
-//RS fn interval_fits_inline(bounds: TIntegerBounds) -> bool {
-//RS     bounds.lo >= INT_SMALL_MIN && bounds.hi <= INT_SMALL_MAX
-//RS }
-//RS 
-//RS fn range_iteration_bounds(
-//RS     start: &TExpr,
-//RS     end: &TExpr,
-//RS     step: Option<&TExpr>,
-//RS     exclusive: bool,
-//RS ) -> Option<TIntegerBounds> {
-//RS     let start = integer_bounds_for_expr(start)?;
-//RS     let end = integer_bounds_for_expr(end)?;
-//RS     let step = match step {
-//RS         Some(step) => integer_bounds_for_expr(step)?,
-//RS         None => TIntegerBounds::exact(1),
-//RS     };
-//RS     if !interval_fits_inline(start) || !interval_fits_inline(end) || !interval_fits_inline(step) {
-//RS         return None;
-//RS     }
-//RS     let (lo, hi) = if step.lo >= 1 {
-//RS         (
-//RS             start.lo,
-//RS             if exclusive {
-//RS                 end.hi.checked_sub(1)?
-//RS             } else {
-//RS                 end.hi
-//RS             },
-//RS         )
-//RS     } else if step.hi <= -1 {
-//RS         (
-//RS             if exclusive {
-//RS                 end.lo.checked_add(1)?
-//RS             } else {
-//RS                 end.lo
-//RS             },
-//RS             start.hi,
-//RS         )
-//RS     } else {
-//RS         return None;
-//RS     };
-//RS     let bounds = TIntegerBounds { lo, hi };
-//RS     (lo <= hi && interval_fits_inline(bounds)).then_some(bounds)
-//RS }
-//RS 
-//RS fn refine_loop_local(
-//RS     env: &mut LowerEnv,
-//RS     local_expr: &TExpr,
-//RS     lower: Option<i128>,
-//RS     upper: Option<i128>,
-//RS ) {
-//RS     let TExprKind::Local(local) = &local_expr.kind else {
-//RS         return;
-//RS     };
-//RS     if local.deref || local.is_persistent() {
-//RS         return;
-//RS     }
-//RS     let Some(mut current) = integer_bounds_for_expr(local_expr) else {
-//RS         return;
-//RS     };
-//RS     if let Some(lower) = lower {
-//RS         current.lo = current.lo.max(lower);
-//RS     }
-//RS     if let Some(upper) = upper {
-//RS         current.hi = current.hi.min(upper);
-//RS     }
-//RS     if current.lo <= current.hi {
-//RS         env.set_integer_bounds(&local.name, Some(current));
-//RS     }
-//RS }
-//RS 
-//RS fn refine_loop_comparison(env: &mut LowerEnv, op: crate::AST::BinOp, lhs: &TExpr, rhs: &TExpr) {
-//RS     let rhs_bounds = integer_bounds_for_expr(rhs);
-//RS     if matches!(&lhs.kind, TExprKind::Local(_)) {
-//RS         if let Some(bounds) = rhs_bounds {
-//RS             match op {
-//RS                 crate::AST::BinOp::Lt => {
-//RS                     refine_loop_local(env, lhs, None, bounds.hi.checked_sub(1))
-//RS                 }
-//RS                 crate::AST::BinOp::Le => refine_loop_local(env, lhs, None, Some(bounds.hi)),
-//RS                 crate::AST::BinOp::Gt => {
-//RS                     refine_loop_local(env, lhs, bounds.lo.checked_add(1), None)
-//RS                 }
-//RS                 crate::AST::BinOp::Ge => refine_loop_local(env, lhs, Some(bounds.lo), None),
-//RS                 crate::AST::BinOp::Eq => {
-//RS                     refine_loop_local(env, lhs, Some(bounds.lo), Some(bounds.hi))
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         return;
-//RS     }
-//RS     let lhs_bounds = integer_bounds_for_expr(lhs);
-//RS     let Some(bounds) = lhs_bounds else {
-//RS         return;
-//RS     };
-//RS     if !matches!(&rhs.kind, TExprKind::Local(_)) {
-//RS         return;
-//RS     }
-//RS     match op {
-//RS         crate::AST::BinOp::Lt => refine_loop_local(env, rhs, bounds.lo.checked_add(1), None),
-//RS         crate::AST::BinOp::Le => refine_loop_local(env, rhs, Some(bounds.lo), None),
-//RS         crate::AST::BinOp::Gt => refine_loop_local(env, rhs, None, bounds.hi.checked_sub(1)),
-//RS         crate::AST::BinOp::Ge => refine_loop_local(env, rhs, None, Some(bounds.hi)),
-//RS         crate::AST::BinOp::Eq => refine_loop_local(env, rhs, Some(bounds.lo), Some(bounds.hi)),
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn refine_loop_condition(env: &mut LowerEnv, condition: &TExpr) {
-//RS     if let TExprKind::Binary {
-//RS         op: crate::AST::BinOp::And,
-//RS         lhs,
-//RS         rhs,
-//RS         ..
-//RS     } = &condition.kind
-//RS     {
-//RS         refine_loop_condition(env, lhs);
-//RS         refine_loop_condition(env, rhs);
-//RS         return;
-//RS     }
-//RS     let TExprKind::Binary { op, lhs, rhs, .. } = &condition.kind else {
-//RS         return;
-//RS     };
-//RS     refine_loop_comparison(env, *op, lhs, rhs);
-//RS }
-//RS #[inline(never)]
-//RS fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmtPlan<'a> {
-//RS     macro_rules! ready_return {
-//RS         ($stmt:expr) => {
-//RS             return LowerStmtPlan::ready($stmt);
-//RS         };
-//RS     }
-//RS     if let Stmt::Assign { target, value, .. } = s {
-//RS         let root_name = match target {
-//RS             LValue::Local { name, .. } => Some(name.as_str()),
-//RS             LValue::Index { base, .. } | LValue::Field { base, .. } => match base.as_ref() {
-//RS                 Expr::Ident(name, _) => Some(name.as_str()),
-//RS                 _ => None,
-//RS             },
-//RS         };
-//RS         if let Some(name) = root_name.filter(|name| env.is_gc(name)) {
-//RS             return in_own_frame(|| {
-//RS                 let root = env.place_of(name);
-//RS                 let edges = env.gc_edges_for_expr(value, Some(name));
-//RS                 let slot = match target {
-//RS                     LValue::Local { name, .. } => format!("local:{name}"),
-//RS                     LValue::Field { field, .. } => format!("field:{field}"),
-//RS                     LValue::Index { span, .. } => format!("index:{}", span.start),
-//RS                 };
-//RS                 let mut lowered_source = s.clone();
-//RS                 let index_temp =
-//RS                     if let (LValue::Index { index, span, .. }, Stmt::Assign { target, .. }) =
-//RS                         (target, &mut lowered_source)
-//RS                     {
-//RS                         let lowered = lower_expr(index, cx, env);
-//RS                         let source_name = jet_format!("{jet_prefix}gc_index_{}", span.start);
-//RS                         let rust_name = source_name.clone();
-//RS                         let LValue::Index {
-//RS                             index: lowered_index,
-//RS                             ..
-//RS                         } = target
-//RS                         else {
-//RS                             unreachable!("matched index assignment")
-//RS                         };
-//RS                         *lowered_index = Box::new(Expr::Ident(source_name.clone(), *span));
-//RS                         env.bind(
-//RS                             &source_name,
-//RS                             TLocal::generated(&rust_name),
-//RS                             Some(lowered.ty.clone()),
-//RS                         );
-//RS                         Some((rust_name, lowered))
-//RS                     } else {
-//RS                         None
-//RS                     };
-//RS                 let saved = env.locals.get(name).cloned();
-//RS                 env.gc_locals.remove(name);
-//RS                 // The edit body still addresses the original root place. A
-//RS                 // generated alias is not a lexical MIR local and cannot carry
-//RS                 // the root's storage identity through the authority scope.
-//RS                 let replacement = saved
-//RS                     .as_ref()
-//RS                     .map(|(slot, _)| slot.clone())
-//RS                     .unwrap_or_else(|| TLocal::user(name));
-//RS                 env.bind(
-//RS                     name,
-//RS                     replacement,
-//RS                     saved.as_ref().and_then(|(_, ty)| ty.clone()),
-//RS                 );
-//RS                 let plan = lower_stmt_plan(&lowered_source, cx, env);
-//RS                 let LowerStmtPlan { bodies, finish } = plan;
-//RS                 debug_assert!(bodies.is_empty(), "GC edit lowering has no nested body");
-//RS                 let stmt = finish(Vec::new());
-//RS                 if let Some((slot, ty)) = saved {
-//RS                     env.bind(name, slot, ty);
-//RS                 }
-//RS                 env.mark_gc(name);
-//RS                 if let Some((temp, _)) = &index_temp {
-//RS                     env.locals.remove(temp);
-//RS                 }
-//RS                 ready_return!(TStmt::GcEdit {
-//RS                     root,
-//RS                     slot,
-//RS                     edges,
-//RS                     replace_all: matches!(target, LValue::Local { .. }),
-//RS                     index_temp,
-//RS                     stmt: Box::new(stmt),
-//RS                 });
-//RS             });
-//RS         }
-//RS     }
-//RS     LowerStmtPlan::ready(match s {
-//RS         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Struct { .. })) => {
-//RS             return in_own_frame(|| {
-//RS                 // c109: a struct-destructuring binding `Type { x, y } :: <init>`. Lower the
-//RS                 // init ONCE; its total `.ty` is a checked `Type::Named`/`Apply` struct.
-//RS                 // TIR carries source local and checked field labels; MIR resolves the
-//RS                 // field type and stable field ID from that checked owner row.
-//RS                 let Some(BindPattern::Struct { fields, span, .. }) = &b.pattern else {
-//RS                     unreachable!("guard matched a struct pattern")
-//RS                 };
-//RS                 let init = lower_expr(&b.init, cx, env);
-//RS                 let field_tys: HashMap<String, Type> = match &init.ty {
-//RS                     Type::Named(n) | Type::Apply { name: n, .. } => cx
-//RS                         .struct_fields
-//RS                         .get(n)
-//RS                         .map(|fs| fs.iter().cloned().collect())
-//RS                         .unwrap_or_default(),
-//RS                     _ => HashMap::new(),
-//RS                 };
-//RS                 let move_fields = fields.iter().any(|field| {
-//RS                     field_tys
-//RS                         .get(&field.name)
-//RS                         .is_some_and(|ty| cx.type_contains_shared_guard(ty))
-//RS                 });
-//RS                 let tmp = jet_format!("{jet_prefix}d{}", span.start);
-//RS                 let kw = if b.mutable { "let mut" } else { "let" };
-//RS                 let mut binds = Vec::new();
-//RS                 for f in fields {
-//RS                     let local_name = f.local_name().to_string();
-//RS                     let field_name = f.name.clone();
-//RS                     binds.push((local_name, field_name));
-//RS                     env.bind(
-//RS                         f.local_name(),
-//RS                         TLocal::user(f.local_name()),
-//RS                         field_tys.get(&f.name).cloned(),
-//RS                     );
-//RS                 }
-//RS                 ready_return!(TStmt::StructDestructure {
-//RS                     tmp,
-//RS                     init,
-//RS                     kw,
-//RS                     move_fields,
-//RS                     binds,
-//RS                 });
-//RS             });
-//RS         }
-//RS         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Tuple { .. })) => {
-//RS             return in_own_frame(|| {
-//RS                 // c109 Phase 23: a tuple-destructuring binding `(a, b) :: <init>`. Lower the
-//RS                 // init ONCE; checked tuple fields (or the VjpRun field prefix) determine
-//RS                 // canonical labels and types by position. TIR carries source names; MIR
-//RS                 // resolves the stable field IDs from the checked shape.
-//RS                 let Some(BindPattern::Tuple { elems, span }) = &b.pattern else {
-//RS                     unreachable!("guard matched a tuple pattern")
-//RS                 };
-//RS                 let init = lower_expr(&b.init, cx, env);
-//RS                 let canonical: Vec<(String, Type)> = match &init.ty {
-//RS                     Type::Tuple(fs) => fs.iter().map(|(n, t)| (n.clone(), (**t).clone())).collect(),
-//RS                     Type::Apply { name, args } if name == "VJPRun" && args.len() == 1 => [
-//RS                         ("value".to_string(), Type::Named("Tensor".to_string())),
-//RS                         (
-//RS                             "pull".to_string(),
-//RS                             struct_field_type(cx, &init.ty, "pull").unwrap_or_else(|| Type::Fn {
-//RS                                 params: vec![Type::Named("Tensor".to_string())],
-//RS                                 ret: Some(Box::new(args[0].clone())),
-//RS                                 effect_bound: None,
-//RS                                 param_contract: None,
-//RS                                 call_metadata: None,
-//RS                                 return_view_provenance: None,
-//RS                             }),
-//RS                         ),
-//RS                     ]
-//RS                     .into_iter()
-//RS                     .collect(),
-//RS                     _ => Vec::new(),
-//RS                 };
-//RS                 let move_fields = canonical.iter().any(|(_, ty)| {
-//RS                     cx.type_contains_shared_guard(ty)
-//RS                         || matches!(
-//RS                             ty,
-//RS                             Type::Apply { name, .. }
-//RS                                 if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
-//RS                         )
-//RS                 });
-//RS                 let tmp = jet_format!("{jet_prefix}d{}", span.start);
-//RS                 let kw = if b.mutable { "let mut" } else { "let" };
-//RS                 let mut binds = Vec::new();
-//RS                 for (e, (fname, fty)) in elems.iter().zip(canonical.iter()) {
-//RS                     let local_name = e.name.clone();
-//RS                     let field_name = fname.clone();
-//RS                     binds.push((local_name, field_name));
-//RS                     env.bind(&e.name, TLocal::user(&e.name), Some(fty.clone()));
-//RS                 }
-//RS                 ready_return!(TStmt::TupleDestructure {
-//RS                     tmp,
-//RS                     init,
-//RS                     kw,
-//RS                     move_fields,
-//RS                     binds,
-//RS                 });
-//RS             });
-//RS         }
-//RS         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::List { .. })) => {
-//RS             return in_own_frame(|| {
-//RS                 // c109 Phase 26: a list-destructuring binding `[a, b, c] :: <init>`. Lower
-//RS                 // the init ONCE, then bind each element via `jet_unpack_vec(tmp, want, i,
-//RS                 // file, line)`, reproducing `emit_stmt`'s `BindPattern::List` arm. The
-//RS                 // element slot type reproduces `expr_jet_ty(init)`'s `Some(List(inner))`-only
-//RS                 // match: the LOWERED init's `.ty` is exactly what `expr_jet_ty(&b.init)`
-//RS                 // resolves (an Ident → its slot type), so a non-`List` init (e.g. a `[T#N]`
-//RS                 // fan-out result) yields a `None` element type — byte-identical partiality.
-//RS                 let Some(BindPattern::List { elems, span }) = &b.pattern else {
-//RS                     unreachable!("guard matched a list pattern")
-//RS                 };
-//RS                 let init = lower_expr(&b.init, cx, env);
-//RS                 let elem_ty = match &init.ty {
-//RS                     Type::List(inner) => Some((**inner).clone()),
-//RS                     _ => None,
-//RS                 };
-//RS                 let tmp = jet_format!("{jet_prefix}d{}", span.start);
-//RS                 let kw = if b.mutable { "let mut" } else { "let" };
-//RS                 let line = cx.src_line_col(span.start).0;
-//RS                 let mut elem_names = Vec::new();
-//RS                 for e in elems {
-//RS                     elem_names.push(mangle(&e.name));
-//RS                     env.bind(&e.name, TLocal::user(&e.name), elem_ty.clone());
-//RS                 }
-//RS                 ready_return!(TStmt::ListDestructure {
-//RS                     tmp,
-//RS                     init,
-//RS                     kw,
-//RS                     want: elems.len(),
-//RS                     file: cx.file.clone(),
-//RS                     line,
-//RS                     elems: elem_names,
-//RS                 });
-//RS             });
-//RS         }
-//RS         Stmt::Val(b)
-//RS             if matches!(
-//RS                 &b.pattern,
-//RS                 Some(BindPattern::Refutable { pattern, .. })
-//RS                     if is_refutable_unwrap_pattern(pattern)
-//RS             ) =>
-//RS         {
-//RS             return in_own_frame(|| {
-//RS                 // D-CHOOSE-TEST1=A: a successful `Ok`/`value` pattern test is the
-//RS                 // canonical fallible unwrap already used by `??`. The miss route
-//RS                 // is retained in the same TExpr so AOT, JIT, interpreter, and the
-//RS                 // pre-sema comptime fragment all execute one prelude-backed
-//RS                 // fallback operation. The comptime pass runs before body sema, so
-//RS                 // its raw contextual variant is normalized from the lowered
-//RS                 // carrier type here; sema remains authoritative for validity.
-//RS                 let Some(BindPattern::Refutable {
-//RS                     pattern, fallback, ..
-//RS                 }) = &b.pattern
-//RS                 else {
-//RS                     unreachable!("refutable-binding guard lost its pattern")
-//RS                 };
-//RS                 let init = super::expressions::lower_or_fallback(&b.init, fallback, cx, env);
-//RS                 let binding = refutable_binding_name(pattern, &init)
-//RS                     .expect("refutable unwrap pattern must carry one validated binding");
-//RS                 env.bind(binding, TLocal::user(binding), Some(init.ty.clone()));
-//RS                 env.set_integer_bounds(binding, integer_bounds_for_expr(&init));
-//RS                 ready_return!(TStmt::Let {
-//RS                     name: binding.to_owned(),
-//RS                     kw: "let",
-//RS                     let_ty: TLetTy::inferred(),
-//RS                     init,
-//RS                     gc_promotion: None,
-//RS                     gc_transferred: false,
-//RS                 });
-//RS             });
-//RS         }
-//RS         Stmt::Val(b)
-//RS             if matches!(
-//RS                 &b.pattern,
-//RS                 Some(BindPattern::Refutable { pattern, .. })
-//RS                     if is_direct_refutable_pattern(pattern, cx)
-//RS             ) =>
-//RS         {
-//RS             return in_own_frame(|| {
-//RS                 let Some(BindPattern::Refutable {
-//RS                     pattern, fallback, ..
-//RS                 }) = &b.pattern
-//RS                 else {
-//RS                     unreachable!("direct refutable-binding guard lost its pattern")
-//RS                 };
-//RS                 let mut init = lower_expr(&b.init, cx, env);
-//RS                 if matches!(&b.init, Expr::Ident(name, _) if env.is_borrowed(name)) {
-//RS                     init = TExpr {
-//RS                         ty: init.ty.clone(),
-//RS                         kind: TExprKind::Clone(Box::new(init), jet_foundation::MIR::MirCopyFact::Materialize),
-//RS                     };
-//RS                 }
-//RS                 let fallback = lower_refutable_fallback(fallback, cx, env);
-//RS                 let subject_ty = init.ty.clone();
-//RS                 if let Err(reason) =
-//RS                     super::patterns::tir_add_pattern_bindings(cx, pattern, env, Some(&subject_ty))
-//RS                 {
-//RS                     return LowerStmtPlan::ready(TStmt::InvariantViolation {
-//RS                         construct: reason.to_string(),
-//RS                         span: pattern.span(),
-//RS                     });
-//RS                 }
-//RS                 ready_return!(TStmt::RefutableBind {
-//RS                     pattern: TPattern::binding_with_values(pattern.clone(), |value| lower_expr(
-//RS                         value, cx, env
-//RS                     ),),
-//RS                     init,
-//RS                     fallback,
-//RS                 });
-//RS             });
-//RS         }
-//RS         Stmt::Val(b) => {
-//RS             return in_own_frame(|| {
-//RS                 LowerStmtPlan::ready({
-//RS                     // D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2: lower
-//RS                     // `name := T.{ uninit }` to
-//RS                     //   `let mut name: T = unsafe { std::mem::MaybeUninit::<T>::uninit().assume_init() };`
-//RS                     // The source's `use core.mem` + `Type.{ uninit }` is the expert-tier opt-in (I1: no
-//RS                     // `unsafe` in generated code without a source-level gate). Sema proved
-//RS                     // write-before-read (E0420), so every subsequent read is post-write — the
-//RS                     // `assume_init()` at declaration yields garbage bytes that are always
-//RS                     // overwritten before any read. The `is_pod_uninit_type` guard in sema
-//RS                     // (E0423) ensures T has no Drop glue, so no destructor ever reads the garbage.
-//RS                     if b.uninit {
-//RS                         return in_own_frame(|| {
-//RS                             let ty =
-//RS                                 b.ty.as_ref()
-//RS                                     .expect("E0421 ensures a `Type.{ uninit }` binding has a type");
-//RS                             let ty = ty.without_user_tags();
-//RS                             let slot = if matches!(ty, Type::FixedList { .. }) {
-//RS                                 env.mark_uninit_fixed(&b.name);
-//RS                                 TLocal::user(&b.name).as_uninit_fixed()
-//RS                             } else {
-//RS                                 TLocal::user(&b.name).as_uninit_scalar()
-//RS                             };
-//RS                             env.bind(&b.name, slot, b.ty.clone());
-//RS                             ready_return!(TStmt::Let {
-//RS                                 name: b.name.clone(),
-//RS                                 kw: "let mut",
-//RS                                 let_ty: crate::Codegen::TIR::let_ty_for_opt(Some(ty), false, false),
-//RS                                 init: TExpr {
-//RS                                     ty: ty.clone(),
-//RS                                     kind: TExprKind::Uninit,
-//RS                                 },
-//RS                                 gc_promotion: None,
-//RS                                 gc_transferred: false,
-//RS                             });
-//RS                         });
-//RS                     }
-//RS                     // c109 Phase 19: an arena `view` binding (`x :: arena.alloc(v)`). The AST
-//RS                     // `emit_let`'s `arena_view` branch emits `let <x> = <init>;` (NO type clause,
-//RS                     // NEVER `let mut` — a view is a non-reassignable `&mut T`) and binds a DEREF'd
-//RS                     // slot (reads go through `(*x)`). Reproduce it exactly: a `Let` with `kw: "let"`,
-//RS                     // empty `ty_clause`, and a deref'd slot place `(*<x>)`.
-//RS                     if b.arena_view {
-//RS                         return in_own_frame(|| {
-//RS                             let mut init = lower_expr(&b.init, cx, env);
-//RS                             // The source spelling is `T`, but the checked allocator
-//RS                             // method returns an exclusive view. Preserve that
-//RS                             // compiler-only carrier through MIR so resident tiers
-//RS                             // can materialize the slot instead of printing the
-//RS                             // opaque view handle.
-//RS                             if !init.ty.is_allocator_view() {
-//RS                                 init.ty = Type::allocator_view(init.ty.clone());
-//RS                             }
-//RS                             let binding_ty = init.ty.clone();
-//RS                             let slot = TLocal::user(&b.name).through_ref();
-//RS                             env.bind(&b.name, slot, Some(binding_ty));
-//RS                             ready_return!(TStmt::Let {
-//RS                                 name: b.name.clone(),
-//RS                                 kw: "let",
-//RS                                 let_ty: TLetTy::Inferred,
-//RS                                 init,
-//RS                                 gc_promotion: None,
-//RS                                 gc_transferred: false,
-//RS                             });
-//RS                         });
-//RS                     }
-//RS                     // D-SHAPE-PLACE1=A: local place windows are references with no
-//RS                     // written Rust type clause. Range windows already behave as slices;
-//RS                     // whole/field/index windows bind a dereferenced transparent slot.
-//RS                     let moved_view = if let Some((inner, _)) = place_window_init(&b.init, cx) {
-//RS                         let moved = lower_owned_expr(inner, cx, env);
-//RS                         if matches!(
-//RS                             &moved.ty,
-//RS                             Type::Apply { name, .. }
-//RS                                 if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
-//RS                         ) {
-//RS                             Some(moved)
-//RS                         } else {
-//RS                             let init = lower_expr(&b.init, cx, env);
-//RS                             // A place-window binding may be represented as a
-//RS                             // transparent dereferenced slot. Preserve the
-//RS                             // referent's storage provenance on that slot:
-//RS                             // current-frame locals expire with this frame,
-//RS                             // collection elements are heap-owned, and
-//RS                             // by-reference parameters remain caller-owned.
-//RS                             let address_lifetime = tir_address_lifetime(&init);
-//RS                             let range = matches!(inner, Expr::Slice { .. });
-//RS                             let slot = if range {
-//RS                                 TLocal::user(&b.name).with_address_lifetime(address_lifetime)
-//RS                             } else {
-//RS                                 TLocal::user(&b.name)
-//RS                                     .through_ref()
-//RS                                     .with_address_lifetime(address_lifetime)
-//RS                             };
-//RS                             let binding_ty = if init.ty.is_compute_view_mut() {
-//RS                                 Some(init.ty.clone())
-//RS                             } else {
-//RS                                 b.ty.clone()
-//RS                             };
-//RS                             env.bind(&b.name, slot, binding_ty);
-//RS                             ready_return!(TStmt::Let {
-//RS                                 name: b.name.clone(),
-//RS                                 kw: if init.ty.is_compute_view_mut() {
-//RS                                     "let mut"
-//RS                                 } else {
-//RS                                     "let"
-//RS                                 },
-//RS                                 let_ty: TLetTy::Inferred,
-//RS                                 init,
-//RS                                 gc_promotion: None,
-//RS                                 gc_transferred: false,
-//RS                             });
-//RS                         }
-//RS                     } else {
-//RS                         None
-//RS                     };
-//RS                     // D-MEM1/D-MEM-COPYSEM1: a string-view binding (`x :: s.trim()` /
-//RS                     // `x :: s.after(sep)` / `x :: s.before(sep)`; sema sets
-//RS                     // `string_view` after proving the local view fact is sound — see
-//RS                     // `CheckerCore.rs`'s binding check). An owning destination copies
-//RS                     // this binding later through the shared Prelude.
-//RS                     // Unlike `arena_view` this binds a plain `&str` (no deref needed to
-//RS                     // read it): `ty_clause: ": &str"`, `kw: "let"` (non-reassignable,
-//RS                     // non-escaping local, I8, same as arena/list views), and the init
-//RS                     // goes through the borrowed `_view` builtin op instead of
-//RS                     // `resolve_builtin_op`'s owned default.
-//RS                     if b.string_view {
-//RS                         return in_own_frame(|| {
-//RS                             let init = lower_string_view_init(&b.init, cx, env);
-//RS                             env.bind(&b.name, TLocal::user(&b.name), Some(Type::String));
-//RS                             env.mark_string_view(&b.name);
-//RS                             ready_return!(TStmt::Let {
-//RS                                 name: b.name.clone(),
-//RS                                 kw: "let",
-//RS                                 let_ty: TLetTy::StrView,
-//RS                                 init,
-//RS                                 gc_promotion: None,
-//RS                                 gc_transferred: false,
-//RS                             });
-//RS                         });
-//RS                     }
-//RS                     // c109 (S57/M9.5): a comptime LOCAL `@name :: expr`. The AST `emit_let`
-//RS                     // builds `init` from `b.ct.serialize()` (the sema-evaluated value rendered to a
-//RS                     // Rust literal) — the runtime `init` expr is never emitted. Reproduce it: a
-//RS                     // verbatim `ConstInline` of the same serialized string, with `kw: "let"` (the
-//RS                     // `(b.mutable && !b.is_comptime)` guard makes it `let`, never `let mut`) and the
-//RS                     // type clause from `b.ty` (rendered exactly as the non-comptime path below). All
-//RS                     // facts are pre-resolved (I3): no inference here.
-//RS                     // A comptime local inside a `@ { … }` block is evaluated by
-//RS                     // the interpreter itself, so sema never pre-resolves `b.ct`. There
-//RS                     // the binding is an ordinary one whose init runs now; only a
-//RS                     // pre-resolved value becomes literal data.
-//RS                     // D-FIXARR1: `[T#N]` must emit a Rust array. `CtValue::serialize` always
-//RS                     // prints lists as `vec![…]`, so skip the comptime shortcut and lower the
-//RS                     // source literal (retag below) instead of baking a CtLit.
-//RS                     // D-SG9: same for `[U8]`/`[I32]`/… — serialize always suffixes `i64`, which
-//RS                     // rustc rejects against `Vec<u8>` (I2). Lower + preserve_typed_list_shape.
-//RS                     // Trait-object elements (`[Shape].{ Circle.{…}, Square.{…} }`) need the
-//RS                     // same skip: `CtValue::serialize`/`bake_comptime_value_with_type` have no
-//RS                     // concept of `Box<dyn Trait>` boxing, so a comptime-baked `CtLit` emits
-//RS                     // bare struct literals where rustc expects `Box::new(...)` (I2). Lower +
-//RS                     // preserve_typed_list_shape instead, which already boxes trait elements.
-//RS                     let is_trait_elem = |elem: &Type| {
-//RS                         matches!(elem, Type::TraitObject(_))
-//RS                             || matches!(elem, Type::Named(name) if cx.trait_names.contains(name))
-//RS                     };
-//RS                     let binding_ty = b.ty.as_ref().map(Type::without_user_tags);
-//RS                     // Recursive: `[[U8]]` and deeper nestings need the same skip as
-//RS                     // `[U8]` — serialize suffixes every level `i64`.
-//RS                     fn list_needs_lowering(
-//RS                         ty: &Type,
-//RS                         is_trait_elem: &impl Fn(&Type) -> bool,
-//RS                     ) -> bool {
-//RS                         match ty {
-//RS                             Type::FixedList { .. } => true,
-//RS                             Type::List(elem) => {
-//RS                                 matches!(elem.as_ref(), Type::IntN { .. })
-//RS                                     || is_trait_elem(elem)
-//RS                                     || list_needs_lowering(elem, is_trait_elem)
-//RS                             }
-//RS                             _ => false,
-//RS                         }
-//RS                     }
-//RS                     let skip_ct_list_bake =
-//RS                         binding_ty.is_some_and(|ty| list_needs_lowering(ty, &is_trait_elem));
-//RS                     let skip_ct_view_bake = binding_ty.is_some_and(|ty| cx.type_contains_view(ty));
-//RS                     let skip_ct_boxed_bake =
-//RS                         binding_ty.is_some_and(|ty| cx.type_contains_boxed_edge(ty));
-//RS                     let skip_ct_typed_literal_bake =
-//RS                         binding_ty.is_some_and(|ty| cx.type_contains_typed_literal_edge(ty));
-//RS                     // A typed pointer constructor is semantically a checked runtime
-//RS                     // operation even when its address operand is a literal. Baking the
-//RS                     // sema scalar fact would erase `PtrFromAddr` and leave AOT with an
-//RS                     // integer literal in a `Ptr<T>` slot.
-//RS                     let skip_ct_ptr_bake = {
-//RS                         let mut init = &b.init;
-//RS                         loop {
-//RS                             match init {
-//RS                                 Expr::Paren(inner, _) => init = inner,
-//RS                                 Expr::PtrFromAddr { .. } => break true,
-//RS                                 _ => break false,
-//RS                             }
-//RS                         }
-//RS                     };
-//RS                     // Enum literals need the TIR enum-prefix resolver: a comptime enum
-//RS                     // serialization preserves the Jet dotted variant (`Fire.Burn`) but
-//RS                     // does not know the flat Rust variant spelling.
-//RS                     let skip_ct_enum_bake = matches!(b.ct, Some(crate::AST::CtValue::Enum { .. }));
-//RS                     // D-SHAPE-RESOURCE1=A: a `Close` value is a tracked resource even
-//RS                     // when its initializer folds; baking it would drop the ownership
-//RS                     // transfer facts that keep scope-end cleanup from closing it twice.
-//RS                     let skip_ct_resource_bake = binding_ty
-//RS                         .and_then(|ty| match ty {
-//RS                             Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
-//RS                             _ => None,
-//RS                         })
-//RS                         .or(match &b.ct {
-//RS                             Some(crate::AST::CtValue::Struct { type_name, .. }) => Some(type_name.as_str()),
-//RS                             _ => None,
-//RS                         })
-//RS                         .is_some_and(|name| {
-//RS                             cx.has_close_type(name)
-//RS                                 || cx.has_close_type(name.rsplit("::").next().unwrap_or(name))
-//RS                         });
-//RS                     if b.ct.is_some()
-//RS                         && !matches!(b.ty.as_ref(), Some(Type::Result { .. }))
-//RS                         && !skip_ct_list_bake
-//RS                         && !skip_ct_view_bake
-//RS                         && !skip_ct_boxed_bake
-//RS                         && !skip_ct_typed_literal_bake
-//RS                         && !skip_ct_enum_bake
-//RS                         && !skip_ct_ptr_bake
-//RS                         && !skip_ct_resource_bake
-//RS                     {
-//RS                         return in_own_frame(|| {
-//RS                             let let_ty =
-//RS                                 crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), false, false);
-//RS                             let init_ty = match &b.init {
-//RS                                 Expr::TupleLit(_, _, Some(ty @ Type::Tuple(_))) => ty.clone(),
-//RS                                 _ => {
-//RS                                     b.ty.as_ref()
-//RS                                         .map(|ty| ty.without_user_tags().clone())
-//RS                                         .unwrap_or(Type::Int)
-//RS                                 }
-//RS                             };
-//RS                             let init = TExpr {
-//RS                                 ty: init_ty.clone(),
-//RS                                 // A folded member value in an anonymous union has a
-//RS                                 // scalar `CtValue` (for example `Str`), but its runtime
-//RS                                 // carrier is the generated union enum. Do not let the
-//RS                                 // scalar shortcut erase that injection; bake the typed
-//RS                                 // enum fact below instead.
-//RS                                 kind: (!matches!(
-//RS                                     b.ty.as_ref().map(Type::without_user_tags),
-//RS                                     Some(Type::Union(_))
-//RS                                 ))
-//RS                                 .then(|| lower_comptime_scalar(b.ct.as_ref(), b.ty.as_ref()))
-//RS                                 .flatten()
-//RS                                 .unwrap_or_else(|| {
-//RS                                     b.ct.as_ref()
-//RS                                         .map(|v| {
-//RS                                             let value = b.ty.as_ref().map_or_else(
-//RS                                                 || v.clone(),
-//RS                                                 |ty| {
-//RS                                                     bake_comptime_value_with_type(
-//RS                                                         v,
-//RS                                                         ty.without_user_tags(),
-//RS                                                         cx,
-//RS                                                     )
-//RS                                                 },
-//RS                                             );
-//RS                                             TExprKind::CtLit(value)
-//RS                                         })
-//RS                                         .unwrap_or(TExprKind::DefaultLit)
-//RS                                 }),
-//RS                             };
-//RS                             let slot = TLocal::user(&b.name);
-//RS                             env.bind(&b.name, slot, Some(init_ty.clone()));
-//RS                             env.set_integer_bounds(&b.name, integer_bounds_for_expr(&init));
-//RS                             ready_return!(TStmt::Let {
-//RS                                 name: b.name.clone(),
-//RS                                 kw: "let",
-//RS                                 let_ty,
-//RS                                 init,
-//RS                                 gc_promotion: None,
-//RS                                 gc_transferred: false,
-//RS                             });
-//RS                         });
-//RS                     }
-//RS                     in_own_frame(|| {
-//RS                         let dma_transfer_channel = hardware_dma_channel(&b.init, cx);
-//RS                         let mut init =
-//RS                             moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
-//RS                         // success value. A fallible binding still needs the
-//RS                         // enclosing Result carrier at this binding boundary.
-//RS                         // Inline loop lowering produces a bare value in an
-//RS                         // InlineBlock, even when its cached TIR type has already
-//RS                         // been widened to the Result carrier.
-//RS                         let result_loop_binding = matches!(&init.kind, TExprKind::InlineBlock(_));
-//RS                         if result_loop_binding {
-//RS                             if let Some(Type::Result { ok, .. }) = &b.ty {
-//RS                                 let carrier =
-//RS                                     b.ty.as_ref().expect("matched Result binding").clone();
-//RS                                 if !matches!(&init.kind, TExprKind::Ok(_)) {
-//RS                                     let success_ty = (**ok).clone();
-//RS                                     init.ty = success_ty;
-//RS                                     init = TExpr {
-//RS                                         ty: carrier,
-//RS                                         kind: TExprKind::Ok(Box::new(init)),
-//RS                                     };
-//RS                                 } else {
-//RS                                     init.ty = carrier;
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         // D-ALLOCFAIL1=A: a fallible allocator result carries a live view
-//RS                         // even though the source surface names only `T !AllocError`.
-//RS                         // Keep that internal carrier through TIR so every tier returns and
-//RS                         // binds the same reference, rather than materializing a copy.
-//RS                         let allocator_carrier =
-//RS                             init.ty.is_allocator_view() || init.ty.is_allocator_result();
-//RS                         // The source binding remains `Task<T>` in sema, while the
-//RS                         // lowered closure stores its effective `Result`/`Option`
-//RS                         // carrier in `Task<carrier>`. Inferred Rust bindings must
-//RS                         // follow the initializer so the join adapter can flatten it.
-//RS                         let spawn_carrier = matches!(
-//RS                             &init.kind,
-//RS                             TExprKind::CoreClosureCall {
-//RS                                 kind: TCoreClosureKind::Spawn { .. }
-//RS                             }
-//RS                         ) && matches!(
-//RS                             &init.ty,
-//RS                             Type::Apply { name, args }
-//RS                                 if name == "Task"
-//RS                                     && matches!(
-//RS                                         args.first(),
-//RS                                         Some(Type::Result { .. }) | Some(Type::Option(_))
-//RS                                     )
-//RS                         ) && b
-//RS                             .ty
-//RS                             .as_ref()
-//RS                             .is_some_and(|ty| ty.without_user_tags() != &init.ty);
-//RS                         // No declared `b.ty`? A typed list head (`[Shape].{ Circle.{…}, … }`)
-//RS                         // still carries its own resolved element type on `init.ty` — reuse it
-//RS                         // self-referentially so trait-object elements still get boxed
-//RS                         // (`Box::new(...)`) below. Without this, an inferred `shapes :: [Shape].{…}`
-//RS                         // binding skipped the same coercion an explicit `shapes: [Shape] :: …`
-//RS                         // binding got, and rustc rejected the un-boxed struct literals (I2).
-//RS                         let want = if allocator_carrier || spawn_carrier {
-//RS                             init.ty.clone()
-//RS                         } else {
-//RS                             b.ty.as_ref()
-//RS                                 .map(|ty| ty.without_user_tags().clone())
-//RS                                 .unwrap_or_else(|| init.ty.clone())
-//RS                         };
-//RS                         if matches!(&init.kind, TExprKind::Absent)
-//RS                             && matches!(&want, Type::Option(_))
-//RS                         {
-//RS                             init.ty = want.clone();
-//RS                         }
-//RS                         init = preserve_typed_list_shape(init, &want, cx);
-//RS                         // D-EMPTYLIT1: a bare `[]` under a map expectation reaches lowering as
-//RS                         // `MapLit([])`; retain declared key/value types so emit does not default
-//RS                         // the map key to `String` before task-group codegen consumes the value.
-//RS                         if matches!(&want, Type::Map { .. })
-//RS                             && matches!(&init.kind, TExprKind::MapLit(_))
-//RS                         {
-//RS                             init.ty = want.clone();
-//RS                         }
-//RS                         // D-FIXARR1: if the binding type is `[T#N]` and the init lowered as a
-//RS                         // growable list (e.g. a typed-head literal elaborated to ListLit), re-tag
-//RS                         // so emit produces a Rust array `[e1, …]` instead of `vec![…]`.
-//RS                         if let Some(fl @ Type::FixedList { .. }) =
-//RS                             b.ty.as_ref().map(Type::without_user_tags)
-//RS                         {
-//RS                             init.ty = fl.clone();
-//RS                         }
-//RS                         // D-UNIONTYPE1=A: member → union inject at the binding boundary.
-//RS                         if let Some(want) = b.ty.as_ref().map(Type::without_user_tags) {
-//RS                             init = crate::Codegen::TIR::maybe_widen_expr_to_union(init, want);
-//RS                         }
-//RS                         // D-SOA1: an EMPTY list literal `[]` for a declared columnar `[S]` lowers
-//RS                         // with an Int placeholder element type (no element to infer from), so it
-//RS                         // came through as a plain `ListLit([])`/`vec![]`. Rewrite it to the
-//RS                         // columnar empty constructor (`JetColumnList<S>::from_aos(vec![])`, one
-//RS                         // empty column per stored field) using the binding's declared type.
-//RS                         if let Some(decl @ Type::List(inner)) =
-//RS                             b.ty.as_ref().map(Type::without_user_tags)
-//RS                         {
-//RS                             if let Some(columns_ty) = cx.columnar_list_type(inner) {
-//RS                                 if matches!(&init.kind, TExprKind::ListLit(es) if es.is_empty()) {
-//RS                                     init = TExpr {
-//RS                                         ty: decl.clone(),
-//RS                                         kind: TExprKind::ColumnarListLit {
-//RS                                             columns_ty,
-//RS                                             elems: Vec::new(),
-//RS                                         },
-//RS                                     };
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         // S47: a lambda binding has exactly one of two shapes.
-//RS                         // An escaping lambda already carries the owned
-//RS                         // function-value carrier from its lambda lowering
-//RS                         // (`boxed`); the binding and every container see the
-//RS                         // same slot type. A non-escaping lambda stays a bare
-//RS                         // closure that borrows this frame: its Rust borrow
-//RS                         // ends at its last direct call, so the enclosing
-//RS                         // locals remain readable afterwards, and its capture
-//RS                         // writes land in those locals on every tier.
-//RS                         let mut_fn = matches!(
-//RS                             &b.init,
-//RS                             Expr::Lambda(l) if l.meta.needs_fn_mut
-//RS                         );
-//RS                         let direct_closure = matches!(
-//RS                             &init.kind,
-//RS                             TExprKind::Lambda(lambda) if !lambda.boxed && !lambda.rc && !lambda.arc
-//RS                         );
-//RS                         // Totality: if the source omitted the type, infer it ONCE here from
-//RS                         // the init's already-resolved type. Codegen never infers.
-//RS                         // A named function value is an executable callable,
-//RS                         // so its TIR binding keeps the effective Result
-//RS                         // carrier. The source spelling remains in
-//RS                         // `fn_source_types` for diagnostics and wrapper
-//RS                         // selection, not for the Rust local ABI.
-//RS                         let named_fn_value_ty = match &init.kind {
-//RS                             TExprKind::FnValue {
-//RS                                 kind: TFnValueKind::NamedFn { name: Some(_), .. },
-//RS                             } => Some(init.ty.clone()),
-//RS                             _ => None,
-//RS                         };
-//RS                         // A written Tensor place has an internal carrier that keeps the
-//RS                         // owner/range for the shared Prelude window setter. It must stay
-//RS                         // inferred; the source-facing ViewMut spelling is a sema type,
-//RS                         // not the generated Rust carrier.
-//RS                         let ty = if matches!(
-//RS                             &init.ty,
-//RS                             Type::Tuple(_) | Type::Map { .. } | Type::Fn { .. }
-//RS                         ) {
-//RS                             // Sema records tuple bindings through their display spelling
-//RS                             // (`Type::Named("(x: T, …)")`) and map annotations as
-//RS                             // `[K:fn(...) T]`. TIR already carries structural Map/Tuple
-//RS                             // types and the callable ABI (named functions and map-extracted
-//RS                             // handlers use the Result carrier; lambdas keep a payload return).
-//RS                             init.ty.clone()
-//RS                         } else if allocator_carrier
-//RS                             || spawn_carrier
-//RS                             || init.ty.is_compute_view_mut()
-//RS                         {
-//RS                             init.ty.clone()
-//RS                         } else if let Some(fn_ty) = named_fn_value_ty.as_ref() {
-//RS                             fn_ty.clone()
-//RS                         } else {
-//RS                             b.ty.as_ref()
-//RS                                 .map(|ty| ty.without_user_tags().clone())
-//RS                                 .unwrap_or_else(|| init.ty.clone())
-//RS                         };
-//RS                         let send_fn =
-//RS                             env.is_send_fn(&b.name) && matches!(&ty, Type::Fn { .. }) && !mut_fn;
-//RS                         if send_fn {
-//RS                             init = force_thread_callback_value(init, cx);
-//RS                         }
-//RS                         let is_resource = match &ty {
-//RS                             Type::Named(name) | Type::Apply { name, .. } => {
-//RS                                 cx.has_close_type(name)
-//RS                             }
-//RS                             _ => false,
-//RS                         };
-//RS                         if is_resource {
-//RS                             init = TExpr {
-//RS                                 ty: ty.clone(),
-//RS                                 kind: TExprKind::ResourceNew(Box::new(init)),
-//RS                             };
-//RS                         }
-//RS                         // E2-M7/E2-M10/D-ALLOC1/D-ROUTE1: a handle binding forces `let mut` even
-//RS                         // when bound immutably (its methods take `&mut self`). Mirror
-//RS                         // `emit_let`'s `is_file_handle` set exactly.
-//RS                         // card #1859: `Mailer` (`jet_email::Mailer::send`, Prelude/CoreLib/Email.rs)
-//RS                         // takes `&mut self` too and was missing from this set, so a `mailer ::
-//RS                         // email.smtp(…)` local kept `let` and rustc rejected `.send()` (E0596, I2).
-//RS                         let is_file_handle = matches!(
-//RS                         &ty,
-//RS                         Type::Named(n) if n == "FileReader" || n == "FileWriter"
-//RS                             || n == "JSONReader" || n == "JSONWriter"
-//RS                             || n == "JSONLReader" || n == "JSONLWriter"
-//RS                             || n == "CSVReader" || n == "CSVWriter"
-//RS                             || n == "XMLReader" || n == "XMLWriter"
-//RS                             || n == "CBORReader" || n == "CBORWriter"
-//RS                             || n == "Stdout" || n == "Stderr"
-//RS                             || n == "TcpStream" || n == "TLSStream" || n == "UnixStream" || n == "HTTPRouter"
-//RS                             || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
-//RS                             || n == "Mailer"
-//RS                     )
-//RS                     // D-DATAFLOW1=A: DataStream.next / stream reducers take &mut.
-//RS                     || matches!(
-//RS                         &ty,
-//RS                         Type::Apply { name, .. }
-//RS                             if name == "DataStream" && !cx.type_names.contains(name.as_str())
-//RS                     )
-//RS                     // D-SHIFT1 (c7shift): `Reader`/`Cursor` bindings are usually
-//RS                     // written without an annotation (`r :: Reader.over(bytes)`), so
-//RS                     // test the resolved type; every read advances `pos` (`&mut self`).
-//RS                     // User-type-wins guard as everywhere else for these two names.
-//RS                     || matches!(
-//RS                         &ty,
-//RS                         Type::Named(n) if (n == "Reader" || n == "Cursor")
-//RS                             && !cx.type_names.contains(n.as_str())
-//RS                     )
-//RS                     || matches!(
-//RS                         &ty,
-//RS                         Type::Tagged { marker, inner }
-//RS                             if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit))
-//RS                                 && matches!(
-//RS                                     inner.as_ref(),
-//RS                                     Type::Apply { name, .. }
-//RS                                         if name == Syntax::TYPE_SHARED_GUARD
-//RS                                 )
-//RS                     );
-//RS                         let kw = if (b.mutable && !b.is_comptime)
-//RS                             || mut_fn
-//RS                             || is_file_handle
-//RS                             || cx.type_contains_mutable_view(&ty)
-//RS                         {
-//RS                             "let mut"
-//RS                         } else {
-//RS                             "let"
-//RS                         };
-//RS                         // The type annotation clause, rendered exactly as `emit_let`: every local
-//RS                         // lambda stays inferred; only escaping values use a trait-object carrier.
-//RS                         let let_ty = if allocator_carrier {
-//RS                             crate::Codegen::TIR::TLetTy::plain(ty.clone())
-//RS                         } else if spawn_carrier || ty.is_compute_view_mut() {
-//RS                             // The effective spawn carrier binds unannotated;
-//RS                             // its Rust type is fixed by the closure initializer.
-//RS                             TLetTy::Inferred
-//RS                         } else if direct_closure {
-//RS                             // A bare closure keeps its concrete Rust type;
-//RS                             // only the owned carrier spells a trait object.
-//RS                             TLetTy::Inferred
-//RS                         } else if send_fn {
-//RS                             TLetTy::SendFn(ty.clone())
-//RS                         } else if named_fn_value_ty.is_some() {
-//RS                             // A named callback's surface binding type is the source
-//RS                             // declaration, not sema's effective failure carrier.
-//RS                             crate::Codegen::TIR::let_ty_for_opt(
-//RS                                 Some(&ty),
-//RS                                 is_resource,
-//RS                                 b.gc_promotion.is_some() || b.gc_transferred,
-//RS                             )
-//RS                         } else {
-//RS                             crate::Codegen::TIR::let_ty_for_opt(
-//RS                                 b.ty.as_ref(),
-//RS                                 is_resource,
-//RS                                 b.gc_promotion.is_some() || b.gc_transferred,
-//RS                             )
-//RS                         };
-//RS                         let binding_name = if is_resource {
-//RS                             mangle_generated(&format!("resource_{}_{}", b.name, b.name_span.start))
-//RS                         } else {
-//RS                             b.name.clone()
-//RS                         };
-//RS                         let slot = if is_resource {
-//RS                             TLocal::user(&binding_name).through_ref()
-//RS                         } else if ty.is_allocator_view() {
-//RS                             TLocal::user(&binding_name).through_ref()
-//RS                         } else if kw == "let mut" {
-//RS                             TLocal::user(&binding_name).as_mutable()
-//RS                         } else {
-//RS                             TLocal::user(&binding_name)
-//RS                         };
-//RS                         let slot = if direct_closure {
-//RS                             slot.as_direct_closure()
-//RS                         } else {
-//RS                             slot
-//RS                         };
-//RS                         env.bind(&b.name, slot, Some(ty));
-//RS                         if let Some(channel) = dma_transfer_channel {
-//RS                             env.mark_dma_transfer(&b.name, channel);
-//RS                         }
-//RS                         env.set_integer_bounds(&b.name, integer_bounds_for_expr(&init));
-//RS                         if b.gc_promotion.is_some() || b.gc_transferred {
-//RS                             env.mark_gc(&b.name);
-//RS                         }
-//RS                         if is_resource {
-//RS                             env.mark_resource(&b.name);
-//RS                         }
-//RS                         TStmt::Let {
-//RS                             name: binding_name,
-//RS                             kw,
-//RS                             let_ty,
-//RS                             init,
-//RS                             gc_promotion: b.gc_promotion.clone(),
-//RS                             gc_transferred: b.gc_transferred,
-//RS                         }
-//RS                     })
-//RS                 })
-//RS             });
-//RS         }
-//RS         Stmt::Assign {
-//RS             target,
-//RS             op,
-//RS             op_span,
-//RS             value,
-//RS         } => match target {
-//RS             LValue::Local { name, .. } => {
-//RS                 return in_own_frame(|| {
-//RS                     LowerStmtPlan::ready({
-//RS                         // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
-//RS                         // ident on the RHS would move out of a shared reference (E0507, I2).
-//RS                         let clone_value = if let Expr::Ident(vname, _) = value {
-//RS                             env.is_borrowed(vname)
-//RS                                 && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
-//RS                         } else {
-//RS                             false
-//RS                         };
-//RS                         let mut value_t = lower_expr(value, cx, env);
-//RS                         if let Some(want) = env.ty_of(name) {
-//RS                             // A typed empty list has no element type after sema
-//RS                             // elaborates its head; assignment supplies the
-//RS                             // destination shape.
-//RS                             value_t = preserve_typed_list_shape(value_t, &want, cx);
-//RS                         }
-//RS                         if env.is_send_fn(name) && matches!(&value_t.ty, Type::Fn { .. }) {
-//RS                             // Keep every write to an indirect callback in the same
-//RS                             // canonical representation as its declaration. Otherwise
-//RS                             // a later hot-swapped registration could load an ordinary
-//RS                             // Rc/raw function value into the Send crossing.
-//RS                             value_t = force_thread_callback_value(value_t, cx);
-//RS                         }
-//RS                         env.update_integer_bounds(name, *op, &value_t);
-//RS                         let place = if let Some(local) = cx.persistent_local(name) {
-//RS                             TPlace::Expr(Box::new(TExpr {
-//RS                                 ty: local
-//RS                                     .persist_ty
-//RS                                     .clone()
-//RS                                     .unwrap_or_else(|| env.ty_of(name).unwrap_or(Type::Int)),
-//RS                                 kind: TExprKind::Local(local),
-//RS                             }))
-//RS                         } else {
-//RS                             TPlace::Local(env.local_of(name))
-//RS                         };
-//RS                         TStmt::Assign {
-//RS                             place,
-//RS                             op: *op,
-//RS                             value: value_t,
-//RS                             clone_value,
-//RS                             line: cx.src_line_col(op_span.start).0 as u32,
-//RS                         }
-//RS                     })
-//RS                 });
-//RS             }
-//RS             // c109 Phase 5: `coll[i] = v`. Checked functions carry the
-//RS             // canonical `IndexKind` from sema; pre-sema fragments may leave it
-//RS             // unknown, so the lowering helper recovers it from operand types.
-//RS             LValue::Index {
-//RS                 base,
-//RS                 index,
-//RS                 kind,
-//RS                 span,
-//RS             } => {
-//RS                 return in_own_frame(|| {
-//RS                     LowerStmtPlan::ready({
-//RS                         let base_t = lower_expr(base, cx, env);
-//RS                         let index_t = lower_expr(index, cx, env);
-//RS                         let inferred_kind = if matches!(kind, IndexKind::Unknown) {
-//RS                             super::expressions::resolve_unknown_index_kind(
-//RS                                 &base_t, &index_t, index, cx,
-//RS                             )
-//RS                         } else {
-//RS                             None
-//RS                         };
-//RS                         let kind = inferred_kind.as_ref().unwrap_or(kind);
-//RS                         let base_t = if matches!(kind, IndexKind::List | IndexKind::FixedListProof)
-//RS                         {
-//RS                             lower_expr_as_mut_place(base, cx, env)
-//RS                         } else {
-//RS                             base_t
-//RS                         };
-//RS                         debug_assert!(
-//RS                             !matches!(kind, IndexKind::Unknown),
-//RS                             "sema-to-TIR handoff violated: unresolved index kind"
-//RS                         );
-//RS                         if matches!(kind, IndexKind::Unknown) {
-//RS                             ready_return!(TStmt::InvariantViolation {
-//RS                                 construct: "sema-to-TIR handoff violated: unresolved index kind"
-//RS                                     .to_string(),
-//RS                                 span: *span,
-//RS                             });
-//RS                         }
-//RS                         if matches!(kind, IndexKind::LayoutField(_)) {
-//RS                             ready_return!(TStmt::InvariantViolation {
-//RS                                 construct: "layout field selector cannot be assigned".to_string(),
-//RS                                 span: *span,
-//RS                             });
-//RS                         }
-//RS                         let value_t = lower_expr(value, cx, env);
-//RS                         let target_ty = match &base_t.ty {
-//RS                             Type::List(elem) | Type::FixedList { elem, .. } => {
-//RS                                 Some((**elem).clone())
-//RS                             }
-//RS                             Type::Map { value, .. } => Some((**value).clone()),
-//RS                             Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
-//RS                                 Some(args[0].clone())
-//RS                             }
-//RS                             _ => None,
-//RS                         };
-//RS                         let value_t = if let Some(want) = target_ty.as_ref() {
-//RS                             preserve_typed_list_shape(value_t, want, cx)
-//RS                         } else {
-//RS                             value_t
-//RS                         };
-//RS                         if let IndexKind::User(type_name) = kind {
-//RS                             return in_own_frame(|| {
-//RS                                 ready_return!(TStmt::IndexHookAssign {
-//RS                                     type_name: type_name.clone(),
-//RS                                     base: base_t,
-//RS                                     index: index_t,
-//RS                                     value: value_t,
-//RS                                 });
-//RS                             });
-//RS                         }
-//RS                         // D-MEM1 S6: `pool[id] = v` — a genuine mutable place through
-//RS                         // `jet_pool_get_mut` (generation-checked, panics on a stale `id`),
-//RS                         // not a value round-trip. Reuses the plain `TStmt::Assign` (a raw
-//RS                         // Rust place string) rather than `IndexAssign`'s bool-keyed
-//RS                         // List/Map dispatch, since Pool needs its own helper + panic text.
-//RS                         if matches!(kind, IndexKind::Pool) {
-//RS                             return in_own_frame(|| {
-//RS                                 let line = cx.src_line_col(span.start).0;
-//RS                                 let src_line = cx.src_line_text(line).to_string();
-//RS                                 let elem_ty = value_t.ty.clone();
-//RS                                 ready_return!(TStmt::Assign {
-//RS                                     place: TPlace::Expr(Box::new(TExpr {
-//RS                                         ty: elem_ty,
-//RS                                         kind: TExprKind::PoolSlot {
-//RS                                             pool: Box::new(base_t),
-//RS                                             id: Box::new(index_t),
-//RS                                             mutable: true,
-//RS                                             field: None,
-//RS                                             line,
-//RS                                             src_line,
-//RS                                         },
-//RS                                     })),
-//RS                                     op: *op,
-//RS                                     value: value_t,
-//RS                                     clone_value: false,
-//RS                                     line: cx.src_line_col(op_span.start).0 as u32,
-//RS                                 });
-//RS                             });
-//RS                         }
-//RS                         TStmt::IndexAssign {
-//RS                             uninit: matches!(base.as_ref(), Expr::Ident(name, _) if env.is_uninit_fixed(name)),
-//RS                             base: base_t,
-//RS                             index: index_t,
-//RS                             is_map: matches!(kind, IndexKind::Map),
-//RS                             value: value_t,
-//RS                         }
-//RS                     })
-//RS                 });
-//RS             }
-//RS             // D-MUTSELF1: a field-assignment `place.field [op]= v`. The place is the
-//RS             // field READ lowered to its resolved Rust string (`((*self)).field` once
-//RS             // the `mut self` slot derefs), reusing the same `Expr::Field` lowering the
-//RS             // read path uses — byte-for-byte the AST `LValue::Field` form. Carried as a
-//RS             // plain `TStmt::Assign` so the `op` compound form rides the shared emit.
-//RS             LValue::Field { base, field, span } => {
-//RS                 return in_own_frame(|| {
-//RS                     LowerStmtPlan::ready({
-//RS                         if let Expr::Index {
-//RS                             base: collection,
-//RS                             index,
-//RS                             kind,
-//RS                             span: index_span,
-//RS                         } = base.as_ref()
-//RS                         {
-//RS                             let is_map = matches!(kind, IndexKind::Map);
-//RS                             let index_proven = matches!(kind, IndexKind::FixedListProof);
-//RS                             if is_map || index_proven || matches!(kind, IndexKind::List) {
-//RS                                 let collection_t = lower_expr_as_mut_place(collection, cx, env);
-//RS                                 let elem_ty = match &collection_t.ty {
-//RS                                     Type::List(elem) | Type::FixedList { elem, .. } => {
-//RS                                         Some((**elem).clone())
-//RS                                     }
-//RS                                     Type::Map { value, .. } => Some((**value).clone()),
-//RS                                     // D-MEM-VIEWRET1 / #1163: `ViewMut<T>[i].field`
-//RS                                     // must write through the slice element, not clone
-//RS                                     // via `jet_index_vec` and mutate a temporary.
-//RS                                     Type::Apply { name, args }
-//RS                                         if matches!(
-//RS                                             name.as_str(),
-//RS                                             "View" | "ViewMut" | "ComputeViewMut"
-//RS                                         ) && args.len() == 1 =>
-//RS                                     {
-//RS                                         Some(args[0].clone())
-//RS                                     }
-//RS                                     _ => None,
-//RS                                 };
-//RS                                 if let Some(elem_ty) = elem_ty {
-//RS                                     return in_own_frame(|| {
-//RS                                         let field_ty = struct_field_type(cx, &elem_ty, field)
-//RS                                             .unwrap_or(Type::Int);
-//RS                                         let clone_value = if let Expr::Ident(vname, _) = value {
-//RS                                             env.is_borrowed(vname)
-//RS                                                 && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
-//RS                                         } else {
-//RS                                             false
-//RS                                         };
-//RS                                         let line = cx.src_line_col(index_span.start).0;
-//RS                                         let value_t = lower_expr(value, cx, env);
-//RS                                         let value_t =
-//RS                                             preserve_typed_list_shape(value_t, &field_ty, cx);
-//RS                                         ready_return!(TStmt::IndexFieldAssign(Box::new(
-//RS                                             TIndexFieldAssign {
-//RS                                                 base: collection_t,
-//RS                                                 index: lower_expr(index, cx, env),
-//RS                                                 is_map,
-//RS                                                 index_proven,
-//RS                                                 field: field.to_string(),
-//RS                                                 field_ty,
-//RS                                                 op: *op,
-//RS                                                 value: value_t,
-//RS                                                 clone_value,
-//RS                                                 line,
-//RS                                             }
-//RS                                         )));
-//RS                                     });
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         let base_t = lower_expr(base, cx, env);
-//RS                         let swizzle_write = match &base_t.ty {
-//RS                             Type::Named(type_name)
-//RS                                 if crate::Sema::is_swizzleable_math_type(type_name)
-//RS                                     && !cx.struct_fields.contains_key(type_name) =>
-//RS                             {
-//RS                                 match crate::Sema::parse_swizzle_member(field, type_name) {
-//RS                                     crate::Sema::SwizzleParse::Ok(lanes) => {
-//RS                                         let lanes_u8: Vec<u8> =
-//RS                                             lanes.iter().map(|&i| i as u8).collect();
-//RS                                         Some((type_name.clone(), lanes_u8))
-//RS                                     }
-//RS                                     _ => None,
-//RS                                 }
-//RS                             }
-//RS                             _ => None,
-//RS                         };
-//RS                         if let Some((type_name, lanes_u8)) = swizzle_write {
-//RS                             return in_own_frame(|| {
-//RS                                 let clone_value = if let Expr::Ident(vname, _) = value {
-//RS                                     env.is_borrowed(vname)
-//RS                                         && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
-//RS                                 } else {
-//RS                                     false
-//RS                                 };
-//RS                                 ready_return!(TStmt::MathSwizzleAssign {
-//RS                                     base: base_t,
-//RS                                     type_name,
-//RS                                     lanes: lanes_u8,
-//RS                                     value: lower_expr(value, cx, env),
-//RS                                     clone_value,
-//RS                                 });
-//RS                             });
-//RS                         }
-//RS                         // D-MEM1 S6: `pool[id].field = v` — the general fallback below
-//RS                         // resolves `place` by re-emitting the FIELD-READ expression (fine
-//RS                         // for an owning local/`self`, but a `Pool` index-read is a value
-//RS                         // clone via `jet_pool_get` — writing `.field` on that would edit a
-//RS                         // throwaway copy and silently drop the change). Build a genuine
-//RS                         // mutable place through `jet_pool_get_mut` instead.
-//RS                         if let Expr::Index {
-//RS                             base: pool_expr,
-//RS                             index: id_expr,
-//RS                             kind: IndexKind::Pool,
-//RS                             span: idx_span,
-//RS                         } = base.as_ref()
-//RS                         {
-//RS                             return in_own_frame(|| {
-//RS                                 let line = cx.src_line_col(idx_span.start).0;
-//RS                                 let src_line = cx.src_line_text(line).to_string();
-//RS                                 let pool_t = lower_expr(pool_expr, cx, env);
-//RS                                 let id_t = lower_expr(id_expr, cx, env);
-//RS                                 let elem_ty = match &pool_t.ty {
-//RS                                     Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
-//RS                                     _ => Type::Int,
-//RS                                 };
-//RS                                 let field_ty =
-//RS                                     struct_field_type(cx, &elem_ty, field).unwrap_or(Type::Int);
-//RS                                 let place = TPlace::Expr(Box::new(TExpr {
-//RS                                     ty: field_ty.clone(),
-//RS                                     kind: TExprKind::PoolSlot {
-//RS                                         pool: Box::new(pool_t),
-//RS                                         id: Box::new(id_t),
-//RS                                         mutable: true,
-//RS                                         field: Some(field.to_string()),
-//RS                                         line,
-//RS                                         src_line,
-//RS                                     },
-//RS                                 }));
-//RS                                 let clone_value = if let Expr::Ident(vname, _) = value {
-//RS                                     env.is_borrowed(vname)
-//RS                                         && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
-//RS                                 } else {
-//RS                                     false
-//RS                                 };
-//RS                                 let value_t = lower_expr(value, cx, env);
-//RS                                 let value_t = preserve_typed_list_shape(value_t, &field_ty, cx);
-//RS                                 ready_return!(TStmt::Assign {
-//RS                                     place,
-//RS                                     op: *op,
-//RS                                     value: value_t,
-//RS                                     clone_value,
-//RS                                     line: cx.src_line_col(op_span.start).0 as u32,
-//RS                                 });
-//RS                             });
-//RS                         }
-//RS                         let field_expr = Expr::Field(base.clone(), field.clone(), *span);
-//RS                         let place = TPlace::Expr(Box::new(lower_expr(&field_expr, cx, env)));
-//RS                         let field_ty = match &place {
-//RS                             TPlace::Expr(expr) => expr.ty.clone(),
-//RS                             TPlace::Local(local) => env.ty_of(&local.name).unwrap_or(Type::Int),
-//RS                         };
-//RS                         // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
-//RS                         // ident on the RHS would move out of a shared reference (E0507, I2).
-//RS                         let clone_value = if let Expr::Ident(vname, _) = value {
-//RS                             env.is_borrowed(vname)
-//RS                                 && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
-//RS                         } else {
-//RS                             false
-//RS                         };
-//RS                         let value_t = lower_expr(value, cx, env);
-//RS                         let value_t = preserve_typed_list_shape(value_t, &field_ty, cx);
-//RS                         TStmt::Assign {
-//RS                             place,
-//RS                             op: *op,
-//RS                             value: value_t,
-//RS                             clone_value,
-//RS                             line: cx.src_line_col(op_span.start).0 as u32,
-//RS                         }
-//RS                     })
-//RS                 });
-//RS             }
-//RS         },
-// END-PORT-PENDING 0495 crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1812-3829
+// Private continuation of Sema.Statements: return/binding/write lowering and split windows.
+use jet_foundation.[Expr, Stmt, Type, Pattern, BindPattern, Binding, PlaceAccess, OrFallback, LValue, IndexKind, BinOp, UnOp, TagMarker, InternalTag, CtValue, Syntax, CanonicalPass, Span, TPattern, TExpr, TExprKind, TStmt, TLocal, TLetTy, TPlace, TRequireKind, TIntegerBounds, TFailureOrigin, TCoreClosureKind, TFnValueKind, TIndexFieldAssign]
+use jet_foundation.MIR.[MirCopyFact]
+use JetCodegen.Codegen.[Cx, escape_rust_str, mangle, mangle_generated]
+use JetCodegen.Codegen.TIR.[LowerEnv, clone_env, integer_bounds_for_expr, maybe_widen_expr_to_union, box_present_trait_payload, canonical_statements_payload, canonical_statements_identity, let_ty_for_opt, lower_expr, lower_owned_expr, lower_expr_as_mut_place, struct_field_type, tir_address_lifetime, tir_recv_jet_ty, unit_type]
+use JetSema.Sema.Statements08.[LowerStmtPlan, annotate_return_todo, force_thread_callback_value, lower_stmts_with_markers, mark_resource_bindings_mutable, thread_callback_lambda, bake_comptime_value_with_type]
+use JetSema.Sema.Statements10.[lower_stmt_plan_tail, hardware_dma_channel]
+use JetCodegen.Codegen.TIR.Lower.[in_own_frame, lower_panic_stop, lower_string_view_init, lower_comptime_scalar]
+use JetCodegen.Codegen.TIR.Lower.Expressions.[suppress_module_call_target_return, tir_expr_reaches_merge, lower_or_fallback, resolve_unknown_index_kind]
+use JetCodegen.Codegen.TIR.Lower.Patterns.[tir_add_pattern_bindings]
+use JetSema.Sema.[stmt_references_name_deep, is_swizzleable_math_type, parse_swizzle_member]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1812
+pub fn lower_return_value(e: Expr, cx: Cx, env: &LowerEnv) -> TStmt {
+    if e == .Ident(name, _) && env.gc_return && env.is_gc(name) {
+        return .Return(Val(TExpr.{ty: env.ty_of(name).unwrap_or(.Int), kind: .Local(env.local_of(name))}))
+    }
+    return in_own_frame(() -> {
+        annotated :: annotate_return_todo(e, env.ret_ty)
+        value := lower_owned_expr(annotated.unwrap_or(e), cx, &env)
+        suppress_module_call_target_return(&value)
+        if env.ret_ty.is_some_and(want -> if want == { .Named(name) -> name == "HTTPHandler" && value.ty == .Fn{..}; _ -> false }) {
+            value = force_thread_callback_value(^value, cx)
+        }
+        if env.ret_ty == .Val(want) {
+            if value.kind == .Absent && want == .Option(_) -> value.ty = ~want
+            payload :: if want == { .Result{ok, ..} | .Option(ok) -> ok; other -> other }
+            value = preserve_typed_list_shape(^value, payload, cx)
+            value = maybe_widen_expr_to_union(^value, want)
+            carrier_slot :: if want == { .Result{ok, ..} -> ok; other -> other }
+            value = box_present_trait_payload(^value, carrier_slot, cx)
+            if want == .Result{..} {
+                if value.kind == .Ok(_) || value.kind == .Err(..) {
+                    value.ty = ~want
+                } else if value.ty != .Result{..} {
+                    value = TExpr.{ty: ~want, kind: .Ok(^value)}
+                }
+                if value.kind == .Err(_, origin) {
+                    (line, column) :: cx.src_line_col(e.span().start)
+                    origin = Val(TFailureOrigin.{file: escape_rust_str(cx.file), line, column, fn_name: escape_rust_str(env.fn_name)})
+                }
+            }
+        }
+        is_never :: if value.ty == { .Named(name) -> name == Syntax.TYPE_NEVER; _ -> false }
+        if value.ty != .Result{..} && value.ty != .Option(_) && !is_never {
+            if !tir_expr_reaches_merge(value) -> return .ExprStmt(^value)
+            result :: TLocal.generated("result")
+            result_name :: ~result.name
+            result_value :: TExpr.{ty: ~value.ty, kind: .Local(TLocal.user(result_name))}
+            return .Inline([.Let{name: result_name, kw: "let", let_ty: .Inferred, init: ^value, gc_promotion: None, gc_transferred: false}, .Return(Val(result_value))])
+        }
+        return .Return(Val(^value))
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1913
+pub fn lower_stmts(stmts: [Stmt], cx: Cx, env: &LowerEnv) -> [TStmt] {
+    before_payload :: if CanonicalPass.enabled() { Val(CanonicalPass.debug_payload("ast", "tir.lower-statements", stmts)) } else { None }
+    before_identity :: if CanonicalPass.enabled() { Val(CanonicalPass.debug_identity("ast", "tir.lower-statements", stmts)) } else { None }
+    lowered := lower_stmts_with_markers(stmts, cx, &env, true)
+    targets :: env.resource_take_targets()
+    mark_resource_bindings_mutable(&lowered, targets)
+    if (before_payload, before_identity) == (.Val(payload), .Val(identity)) {
+        CanonicalPass.record("lowering", "tir.lower-statements", "crates/jet-codegen/src/Codegen/TIR/lower/statements.rs", "ast", payload, identity, "tir", canonical_statements_payload(lowered), canonical_statements_identity(lowered), "preserve")
+    }
+    return ^lowered
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1942
+pub struct SplitViewCandidate {
+    pub stmt_index: USize
+    pub owner: Expr
+    pub owner_key: String
+    pub name: String
+    pub ty: Type?
+    pub start: I64
+    pub end: I64
+    pub single: Bool
+    pub write: Bool
+    pub line: USize
+    pub last_use: USize
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1956
+pub struct PlannedSplitView {
+    pub candidate: SplitViewCandidate
+    pub root: String
+    pub len: String
+    pub source: String
+    pub source_start: I64
+    pub before: String
+    pub split_tail: String
+    pub segment: String
+    pub after: String
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1968
+struct SplitRegion { name: String, start: I64, end: I64? }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1975
+fn const_place_bound(input: Expr) -> I64? {
+    expr := input
+    negations: USize := 0
+    value: I64 := loop {
+        if expr == {
+            .Int(value, ..) -> break value
+            .Unary(.Neg, inner, _) -> { negations += 1; expr = inner }
+            .Paren(inner, _) -> expr = inner
+            _ -> return None
+        }
+    }
+    loop _ in 0..<negations -> value = value.checked_neg()?
+    return Val(value)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1995
+fn split_owner_key(input: Expr) -> String? {
+    expr := input
+    suffixes: [String] := []
+    key := loop {
+        if expr == {
+            .Ident(name, _) -> break "name:{name}"
+            .Field(base, field, _) -> { suffixes.push(".field:{field}"); expr = base }
+            .Index{base, index, ..} -> { suffixes.push(".index:{const_place_bound(index)?}"); expr = base }
+            .Paren(inner, _) | .Place(inner, _, _) -> expr = inner
+            _ -> return None
+        }
+    }
+    loop suffix in suffixes.iter().rev() -> key.push_str(suffix)
+    return Val(^key)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2020
+fn split_owner_root(input: Expr) -> String? {
+    expr := input
+    loop {
+        if expr == {
+            .Ident(name, _) -> return Val(~name)
+            .Field(base, _, _) | .Index{base, ..} -> expr = base
+            .Paren(inner, _) | .Place(inner, _, _) -> expr = inner
+            _ -> return None
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2037
+// mem.pin adds a no-move promise; its runtime shape is the same write window.
+pub fn place_window_init(init: Expr, cx: Cx) -> (Expr, PlaceAccess)? {
+    return if init == {
+        .Place(inner, access, _) -> Val((inner, access))
+        .MethodCall{receiver, method, args, ..} if method == Syntax.MEM_PIN && (if receiver == {
+            .Ident(alias, _) -> cx.any_core_import_module(alias).is_some_and(m -> m == Syntax.CORE_MEM_MODULE)
+            _ -> false
+        }) -> {
+            inner :: args.first()?.expr
+            Val((if inner == { .Place(place, _, _) -> place; other -> other }, .Write))
+        }
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2064
+fn split_view_candidate(stmt: Stmt, stmt_index: USize, cx: Cx) -> SplitViewCandidate? {
+    if stmt != .Val(binding) -> return None
+    (inner, access) :: place_window_init(binding.init, cx)?
+    (base, start, end, single) :: if inner == {
+        .Slice{base, start, end, range, ..} -> {
+            (a, b) :: if range == {
+                .Val(.Range{start, end, exclusive, ..}) -> {
+                    a :: const_place_bound(start)?
+                    b :: const_place_bound(end)?
+                    (a, if exclusive { b.checked_sub(1)? } else { b })
+                }
+                .Val(_) -> return None
+                .None -> (const_place_bound(start)?, const_place_bound(end)?)
+            }
+            (base, a, b, false)
+        }
+        .Index{base, index, ..} -> { i :: const_place_bound(index)?; (base, i, i, true) }
+        _ -> return None
+    }
+    owner_key :: split_owner_key(base)?
+    return Val(SplitViewCandidate.{stmt_index, owner: ~base, owner_key, name: ~binding.name, ty: ~binding.ty, start, end, single, write: access == .Write, line: cx.src_line_col(binding.name_span.start).0, last_use: stmt_index})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2115
+pub fn split_view_plan(stmts: [Stmt], cx: Cx, env: LowerEnv) -> [USize: PlannedSplitView] {
+    // The temporary type environment advances in source order to preserve shadows.
+    owner_env := ~env
+    owner_generation: [String: USize] := [:]
+    candidates: [SplitViewCandidate] := []
+    loop (index, stmt) in stmts.iter().enumerate() {
+        if split_view_candidate(stmt, index, cx) == .Val(view) {
+            view := ^view
+            is_tensor :: tir_recv_jet_ty(view.owner, owner_env).is_some_and(ty -> ty.is_compute_tensor_family())
+            if !is_tensor && view.start >= 0 && view.end >= view.start {
+                root :: split_owner_root(view.owner).unwrap_or_default()
+                generation :: owner_generation.get(root).copied().unwrap_or_default()
+                view.owner_key = "{view.owner_key}@{generation}"
+                candidates.push(^view)
+            }
+        }
+        if stmt == .Val(binding) {
+            generation :: owner_generation.get(binding.name).copied().unwrap_or(0)
+            owner_generation.insert(~binding.name, generation + 1)
+            owner_env.bind(binding.name, TLocal.user(binding.name), ~binding.ty)
+        }
+    }
+    loop candidate in &candidates {
+        last: USize := candidate.stmt_index
+        loop index in candidate.stmt_index + 1..<stmts.len() {
+            if stmt_references_name_deep(stmts[index], candidate.name) -> last = index
+        }
+        candidate.last_use = last
+    }
+    parent: [USize] := (0..<candidates.len()).collect()
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2162
+    fn find(parent: &[USize], initial: USize) -> USize {
+        index := initial
+        loop while parent[index] != index { parent[index] = parent[parent[index]]; index = parent[index] }
+        return index
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2169
+    fn union(parent: &[USize], first: USize, second: USize) {
+        a :: find(&parent, first)
+        b :: find(&parent, second)
+        if a != b -> parent[b] = a
+    }
+    loop a in 0..<candidates.len() {
+        loop b in a + 1..<candidates.len() {
+            earlier :: candidates[a]
+            later :: candidates[b]
+            if earlier.owner_key == later.owner_key && earlier.last_use >= later.stmt_index && (earlier.write || later.write) && (earlier.end < later.start || later.end < earlier.start) -> union(&parent, a, b)
+        }
+    }
+    grouped: [USize: [USize]] := [:]
+    loop index in 0..<candidates.len() {
+        root :: find(&parent, index)
+        grouped.entry(root).or_default().push(index)
+    }
+    groups: [[USize]] := grouped.into_values().collect()
+    groups.sort_by_key(group -> group.iter().map(index -> candidates[index].stmt_index).min().unwrap_or(USize.MAX))
+    planned: [USize: PlannedSplitView] := [:]
+    loop (plan_index, group) in groups.into_iter().enumerate() {
+        group := ^group
+        lone_write :: group.len() == 1 && candidates[group[0]].write
+        overlaps :: group.iter().enumerate().any((i, a) -> group.iter().skip(i + 1).any(b -> !(candidates[a].end < candidates[b].start || candidates[b].end < candidates[a].start)))
+        if (group.len() < 2 && !lone_write) || overlaps -> continue
+        group.sort_by_key(index -> candidates[index].stmt_index)
+        root :: mangle_generated("place_plan_{plan_index}_root")
+        len :: mangle_generated("place_plan_{plan_index}_len")
+        regions: [SplitRegion] := [SplitRegion.{name: ~root, start: 0, end: None}]
+        loop (step, candidate_index) in group.into_iter().enumerate() {
+            candidate :: ~candidates[candidate_index]
+            region_index :: regions.iter().position(region -> candidate.start >= region.start && region.end.is_none_or(end -> candidate.end <= end))
+            if region_index != .Val(index) -> continue
+            region :: regions.remove(index)
+            prefix :: mangle_generated("place_plan_{plan_index}_{step}_before")
+            split_tail :: mangle_generated("place_plan_{plan_index}_{step}_tail")
+            segment :: mangle_generated("place_plan_{plan_index}_{step}_segment")
+            suffix :: mangle_generated("place_plan_{plan_index}_{step}_after")
+            if candidate.start > region.start -> regions.push(SplitRegion.{name: ~prefix, start: region.start, end: Val(candidate.start - 1)})
+            if region.end.is_none_or(end -> candidate.end < end) -> regions.push(SplitRegion.{name: ~suffix, start: candidate.end + 1, end: region.end})
+            planned.insert(candidate.stmt_index, PlannedSplitView.{candidate, root: ~root, len: ~len, source: region.name, source_start: region.start, before: prefix, split_tail, segment, after: suffix})
+        }
+    }
+    return ^planned
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2278
+pub fn preserve_typed_list_shape(input: TExpr, expected: Type, cx: Cx) -> TExpr {
+    if expected != .List(_) && expected != .FixedList{..} -> return ^input
+    if input.ty == .Result{..} || input.ty == .Option(_) -> return ^input
+    expr := if input.kind == {
+        .ListLit(elems) if elems.len() == 1 && elems[0].ty == expected -> elems.pop().unwrap()
+        _ -> ^input
+    }
+    expected_elem :: if expected == { .List(elem) | .FixedList{elem, ..} -> elem; _ -> return ^expr }
+    if expected_elem == .IntN{..} || expected_elem == .InlineRange{..} || expected_elem == .List(_) || expected_elem == .FixedList{..} {
+        if expr.kind == .ListLit(elems) {
+            loop elem in &elems {
+                if (elem.kind, expected_elem) == {
+                    (.IntLit(_, width), .IntN{signed, bits}) -> { width = Val((signed, bits)); elem.ty = ~expected_elem }
+                    (.IntLit(_, width), .InlineRange{..}) -> { width = None; elem.ty = ~expected_elem }
+                    (.ListLit(_), .List(_) | .FixedList{..}) -> elem = preserve_typed_list_shape(^elem, expected_elem, cx)
+                    _ -> {}
+                }
+            }
+            expr.ty = ~expected
+            return ^expr
+        }
+    }
+    trait_name :: if expected_elem == {
+        .TraitObject(names) if names.len() == 1 -> names.first()
+        .Named(name) if cx.trait_names.contains(name) -> Val(name)
+        _ -> None
+    }
+    if trait_name != .Val(trait_name) { expr.ty = ~expected; return ^expr }
+    if expr.kind != .ListLit(elems) { expr.ty = ~expected; return ^expr }
+    loop elem in &elems {
+        concrete :: if elem.ty == { .Named(name) | .Apply{name, ..} -> Val(~name); _ -> None }
+        if (concrete, elem.kind) != (.Val(concrete), .StructLit{as_trait, ..}) -> continue
+        if as_trait.is_none() { as_trait = Val((~trait_name, concrete)); elem.ty = .TraitObject([~trait_name]) }
+    }
+    expr.ty = ~expected
+    return ^expr
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2378
+fn is_refutable_unwrap_pattern(pattern: Pattern) -> Bool {
+    if pattern.has_nested_pattern() -> return false
+    return if pattern == {
+        .Ok{..} | .Present{..} -> true
+        .Variant{variant, bindings, ..} if bindings.len() == 1 && (variant == Syntax.LIT_OK || variant == Syntax.LIT_VALUE || variant == "value") -> true
+        _ -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2398
+fn refutable_binding_name(pattern: Pattern, init: TExpr) -> String? {
+    return if pattern == {
+        .Ok{binding, ..} | .Present{binding, ..} -> Val(binding)
+        .Variant{bindings, ..} -> bindings.first().and_then(slot -> slot.as_bind())
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2408
+fn is_direct_refutable_pattern(pattern: Pattern, cx: Cx) -> Bool {
+    return if pattern == { .Variant{variant, ..} -> cx.variant_owner.contains_key(variant); _ -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2415
+fn lower_refutable_fallback(fallback: OrFallback, cx: Cx, env: LowerEnv) -> [TStmt] {
+    fallback_env := clone_env(env)
+    unreachable :: () -> TStmt.ExprStmt(TExpr.{ty: unit_type(), kind: .Unreachable{line: 0}})
+    return if fallback == {
+        .Return(value, _) -> [.Return(value.map(v -> lower_expr(v, cx, &fallback_env)))]
+        .Panic{name_span, args} -> {
+            (kind, loc) :: lower_panic_stop(name_span, args, cx, &fallback_env)
+            assert(kind == .Panic{..})
+            [.ExprStmt(TExpr.{ty: unit_type(), kind: .RequireStop{kind, loc, always_stops: true}})]
+        }
+        .Break(_) -> [.Break(None)]
+        .Continue(_) -> [.Continue(None)]
+        .BreakLabel(name, _) -> [.Break(Val(~name))]
+        .ContinueLabel(name, _) -> [.Continue(Val(~name))]
+        .Value(value) -> [.ExprStmt(lower_expr(value, cx, &fallback_env)), unreachable()]
+        .Block{body, value, ..} -> {
+            out := lower_stmts(body, cx, &fallback_env)
+            if value == .Val(v) { out.push(.ExprStmt(lower_expr(v, cx, &fallback_env))); out.push(unreachable()) }
+            ^out
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2460
+const INT_SMALL_MIN: I128 = -(1 as I128 << 62)
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2461
+const INT_SMALL_MAX: I128 = (1 as I128 << 62) - 1
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2463
+fn interval_fits_inline(bounds: TIntegerBounds) -> Bool { return bounds.lo >= INT_SMALL_MIN && bounds.hi <= INT_SMALL_MAX }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2467
+pub fn range_iteration_bounds(start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool) -> TIntegerBounds? {
+    start :: integer_bounds_for_expr(start)?
+    end :: integer_bounds_for_expr(end)?
+    step :: if step == { .Val(s) -> integer_bounds_for_expr(s)?; .None -> TIntegerBounds.exact(1) }
+    if !interval_fits_inline(start) || !interval_fits_inline(end) || !interval_fits_inline(step) -> return None
+    (lo, hi) :: if step.lo >= 1 { (start.lo, if exclusive { end.hi.checked_sub(1)? } else { end.hi }) } else if step.hi <= -1 { (if exclusive { end.lo.checked_add(1)? } else { end.lo }, start.hi) } else { return None }
+    bounds :: TIntegerBounds.{lo, hi}
+    return if lo <= hi && interval_fits_inline(bounds) { Val(bounds) } else { None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2507
+fn refine_loop_local(env: &LowerEnv, local_expr: TExpr, lower: I128?, upper: I128?) {
+    if local_expr.kind != .Local(local) -> return
+    if local.deref || local.is_persistent() -> return
+    if integer_bounds_for_expr(local_expr) != .Val(current) -> return
+    current := current
+    if lower == .Val(lo) -> current.lo = current.lo.max(lo)
+    if upper == .Val(hi) -> current.hi = current.hi.min(hi)
+    if current.lo <= current.hi -> env.set_integer_bounds(local.name, Val(current))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2533
+fn refine_loop_comparison(env: &LowerEnv, op: BinOp, lhs: TExpr, rhs: TExpr) {
+    rhs_bounds :: integer_bounds_for_expr(rhs)
+    if lhs.kind == .Local(_) {
+        if rhs_bounds == .Val(bounds) {
+            if op == {
+                .Lt -> refine_loop_local(&env, lhs, None, bounds.hi.checked_sub(1))
+                .Le -> refine_loop_local(&env, lhs, None, Val(bounds.hi))
+                .Gt -> refine_loop_local(&env, lhs, bounds.lo.checked_add(1), None)
+                .Ge -> refine_loop_local(&env, lhs, Val(bounds.lo), None)
+                .Eq -> refine_loop_local(&env, lhs, Val(bounds.lo), Val(bounds.hi))
+                _ -> {}
+            }
+        }
+        return
+    }
+    if integer_bounds_for_expr(lhs) != .Val(bounds) -> return
+    if rhs.kind != .Local(_) -> return
+    if op == {
+        .Lt -> refine_loop_local(&env, rhs, bounds.lo.checked_add(1), None)
+        .Le -> refine_loop_local(&env, rhs, Val(bounds.lo), None)
+        .Gt -> refine_loop_local(&env, rhs, None, bounds.hi.checked_sub(1))
+        .Ge -> refine_loop_local(&env, rhs, None, Val(bounds.hi))
+        .Eq -> refine_loop_local(&env, rhs, Val(bounds.lo), Val(bounds.hi))
+        _ -> {}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2571
+pub fn refine_loop_condition(env: &LowerEnv, condition: TExpr) {
+    if condition.kind == .Binary{op: .And, lhs, rhs, ..} {
+        refine_loop_condition(&env, lhs)
+        refine_loop_condition(&env, rhs)
+        return
+    }
+    if condition.kind != .Binary{op, lhs, rhs, ..} -> return
+    refine_loop_comparison(&env, op, lhs, rhs)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2589
+pub fn lower_stmt_plan(s: Stmt, cx: Cx, env: &LowerEnv) -> LowerStmtPlan {
+    if s == .Assign{target, value, ..} {
+        root_name :: if target == {
+            .Local{name, ..} -> Val(name)
+            .Index{base, ..} | .Field{base, ..} -> if base == { .Ident(name, _) -> Val(name); _ -> None }
+        }
+        if root_name.filter(name -> env.is_gc(name)) == .Val(name) {
+            return in_own_frame(() -> {
+                root :: env.place_of(name)
+                edges :: env.gc_edges_for_expr(value, Val(name))
+                slot :: if target == { .Local{name, ..} -> "local:{name}"; .Field{field, ..} -> "field:{field}"; .Index{span, ..} -> "index:{span.start}" }
+                lowered_source := ~s
+                index_temp: (String, TExpr)? := None
+                if (target, lowered_source) == (.Index{index, span, ..}, .Assign{target: .Index{index: lowered_index, ..}, ..}) {
+                    lowered :: lower_expr(index, cx, &env)
+                    source_name :: mangle_generated("gc_index_{span.start}")
+                    rust_name :: ~source_name
+                    lowered_index = .Ident(~source_name, span)
+                    env.bind(source_name, TLocal.generated(rust_name), Val(~lowered.ty))
+                    index_temp = Val((rust_name, lowered))
+                }
+                saved :: env.locals.get(name).cloned()
+                env.gc_locals.remove(name)
+                replacement :: saved.map((slot, _) -> ~slot).unwrap_or_else(() -> TLocal.user(name))
+                env.bind(name, replacement, saved.and_then((_, ty) -> ~ty))
+                plan :: lower_stmt_plan(lowered_source, cx, &env)
+                assert(plan.bodies.is_empty(), "GC edit lowering has no nested body")
+                stmt :: plan.finish([])
+                if saved == .Val((slot, ty)) -> env.bind(name, slot, ty)
+                env.mark_gc(name)
+                if index_temp == .Val((temp, _)) -> env.locals.remove(temp)
+                return LowerStmtPlan.ready(.GcEdit{root, slot, edges, replace_all: target == .Local{..}, index_temp, stmt})
+            })
+        }
+    }
+    return if s == {
+        .Val(b) -> in_own_frame(() -> lower_val_plan(b, cx, &env))
+        .Assign{target, op, op_span, value} -> in_own_frame(() -> LowerStmtPlan.ready(lower_assignment(target, op, op_span, value, cx, &env)))
+        // The remaining exhaustive statement variants are owned by the adjacent fragment.
+        _ -> lower_stmt_plan_tail(s, cx, &env)
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2674
+fn lower_val_plan(b: Binding, cx: Cx, env: &LowerEnv) -> LowerStmtPlan {
+    if b.pattern == .Val(.Struct{fields, span, ..}) {
+        init :: lower_expr(b.init, cx, &env)
+        field_tys: [String: Type] :: if init.ty == { .Named(n) | .Apply{name: n, ..} -> cx.struct_fields.get(n).map(fs -> fs.iter().cloned().collect()).unwrap_or_default(); _ -> [:] }
+        move_fields :: fields.iter().any(field -> field_tys.get(field.name).is_some_and(ty -> cx.type_contains_shared_guard(ty)))
+        tmp :: mangle_generated("d{span.start}")
+        kw :: if b.mutable { "let mut" } else { "let" }
+        binds: [(String, String)] := []
+        loop f in fields { binds.push((f.local_name().to_string(), ~f.name)); env.bind(f.local_name(), TLocal.user(f.local_name()), field_tys.get(f.name).cloned()) }
+        return LowerStmtPlan.ready(.StructDestructure{tmp, init, kw, move_fields, binds})
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2719
+    if b.pattern == .Val(.Tuple{elems, span}) {
+        init :: lower_expr(b.init, cx, &env)
+        canonical: [(String, Type)] :: if init.ty == {
+            .Tuple(fs) -> fs.iter().map((n, t) -> (~n, ~t)).collect()
+            .Apply{name, args} if name == "VJPRun" && args.len() == 1 -> [
+                ("value", .Named("Tensor")),
+                ("pull", struct_field_type(cx, init.ty, "pull").unwrap_or_else(() -> .Fn{params: [.Named("Tensor")], ret: Val(~args[0]), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}))
+            ]
+            _ -> []
+        }
+        move_fields :: canonical.iter().any((_, ty) -> cx.type_contains_shared_guard(ty) || (if ty == { .Apply{name, ..} -> name == "CellReadGuard" || name == "CellEditGuard"; _ -> false }))
+        tmp :: mangle_generated("d{span.start}")
+        kw :: if b.mutable { "let mut" } else { "let" }
+        binds: [(String, String)] := []
+        loop (e, (fname, fty)) in elems.iter().zip(canonical.iter()) { binds.push((~e.name, ~fname)); env.bind(e.name, TLocal.user(e.name), Val(~fty)) }
+        return LowerStmtPlan.ready(.TupleDestructure{tmp, init, kw, move_fields, binds})
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2775
+    if b.pattern == .Val(.List{elems, span}) {
+        init :: lower_expr(b.init, cx, &env)
+        elem_ty :: if init.ty == { .List(inner) -> Val(~inner); _ -> None }
+        tmp :: mangle_generated("d{span.start}")
+        kw :: if b.mutable { "let mut" } else { "let" }
+        line :: cx.src_line_col(span.start).0
+        elem_names: [String] := []
+        loop e in elems { elem_names.push(mangle(e.name)); env.bind(e.name, TLocal.user(e.name), ~elem_ty) }
+        return LowerStmtPlan.ready(.ListDestructure{tmp, init, kw, want: elems.len(), file: ~cx.file, line, elems: ^elem_names})
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2811
+    if b.pattern == .Val(.Refutable{pattern, fallback, ..}) && is_refutable_unwrap_pattern(pattern) {
+        init :: lower_or_fallback(b.init, fallback, cx, &env)
+        binding :: refutable_binding_name(pattern, init).expect("refutable unwrap pattern must carry one validated binding")
+        env.bind(binding, TLocal.user(binding), Val(~init.ty))
+        env.set_integer_bounds(binding, integer_bounds_for_expr(init))
+        return LowerStmtPlan.ready(.Let{name: ~binding, kw: "let", let_ty: TLetTy.inferred(), init, gc_promotion: None, gc_transferred: false})
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2847
+    if b.pattern == .Val(.Refutable{pattern, fallback, ..}) && is_direct_refutable_pattern(pattern, cx) {
+        init := lower_expr(b.init, cx, &env)
+        if b.init == .Ident(name, _) && env.is_borrowed(name) -> init = TExpr.{ty: ~init.ty, kind: .Clone(^init, .Materialize)}
+        fallback :: lower_refutable_fallback(fallback, cx, env)
+        subject_ty :: ~init.ty
+        binding_result :: tir_add_pattern_bindings(cx, pattern, &env, Val(subject_ty))
+        if binding_result == .Err(reason) -> return LowerStmtPlan.ready(.InvariantViolation{construct: reason.to_string(), span: pattern.span()})
+        return LowerStmtPlan.ready(.RefutableBind{pattern: TPattern.binding_with_values(~pattern, value -> lower_expr(value, cx, &env)), init: ^init, fallback})
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2887
+    if b.uninit {
+        ty :: b.ty.expect("E0421 ensures a `Type.{ uninit }` binding has a type").without_user_tags()
+        slot :: if ty == .FixedList{..} { env.mark_uninit_fixed(b.name); TLocal.user(b.name).as_uninit_fixed() } else { TLocal.user(b.name).as_uninit_scalar() }
+        env.bind(b.name, slot, ~b.ty)
+        return LowerStmtPlan.ready(.Let{name: ~b.name, kw: "let mut", let_ty: let_ty_for_opt(Val(ty), false, false), init: TExpr.{ty: ~ty, kind: .Uninit}, gc_promotion: None, gc_transferred: false})
+    }
+    if b.arena_view {
+        init := lower_expr(b.init, cx, &env)
+        if !init.ty.is_allocator_view() -> init.ty = Type.allocator_view(~init.ty)
+        env.bind(b.name, TLocal.user(b.name).through_ref(), Val(~init.ty))
+        return LowerStmtPlan.ready(.Let{name: ~b.name, kw: "let", let_ty: .Inferred, init: ^init, gc_promotion: None, gc_transferred: false})
+    }
+    moved_view: TExpr? := None
+    if place_window_init(b.init, cx) == .Val((inner, _)) {
+        moved :: lower_owned_expr(inner, cx, &env)
+        if moved.ty == .Apply{name, ..} && (name == "ViewMut" || name == "ComputeViewMut") {
+            moved_view = Val(^moved)
+        } else {
+            init :: lower_expr(b.init, cx, &env)
+            address_lifetime :: tir_address_lifetime(init)
+            range :: inner == .Slice{..}
+            slot :: if range { TLocal.user(b.name).with_address_lifetime(address_lifetime) } else { TLocal.user(b.name).through_ref().with_address_lifetime(address_lifetime) }
+            binding_ty :: if init.ty.is_compute_view_mut() { Val(~init.ty) } else { ~b.ty }
+            env.bind(b.name, slot, binding_ty)
+            return LowerStmtPlan.ready(.Let{name: ~b.name, kw: if init.ty.is_compute_view_mut() { "let mut" } else { "let" }, let_ty: .Inferred, init, gc_promotion: None, gc_transferred: false})
+        }
+    }
+    if b.string_view {
+        init :: lower_string_view_init(b.init, cx, &env)
+        env.bind(b.name, TLocal.user(b.name), Val(.String))
+        env.mark_string_view(b.name)
+        return LowerStmtPlan.ready(.Let{name: ~b.name, kw: "let", let_ty: .StrView, init, gc_promotion: None, gc_transferred: false})
+    }
+    is_trait_elem :: elem -> elem == .TraitObject(_) || (if elem == { .Named(name) -> cx.trait_names.contains(name); _ -> false })
+    binding_ty :: b.ty.map(ty -> ty.without_user_tags())
+    // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:3057
+    fn list_needs_lowering(ty: Type, is_trait_elem: fn(Type) Bool) -> Bool {
+        return if ty == {
+            .FixedList{..} -> true
+            .List(elem) -> elem == .IntN{..} || is_trait_elem(elem) || list_needs_lowering(elem, is_trait_elem)
+            _ -> false
+        }
+    }
+    skip_ct_list_bake :: binding_ty.is_some_and(ty -> list_needs_lowering(ty, is_trait_elem))
+    skip_ct_view_bake :: binding_ty.is_some_and(ty -> cx.type_contains_view(ty))
+    skip_ct_boxed_bake :: binding_ty.is_some_and(ty -> cx.type_contains_boxed_edge(ty))
+    skip_ct_typed_literal_bake :: binding_ty.is_some_and(ty -> cx.type_contains_typed_literal_edge(ty))
+    ptr_init := b.init
+    loop while ptr_init == .Paren(inner, _) -> ptr_init = inner
+    skip_ct_ptr_bake :: ptr_init == .PtrFromAddr{..}
+    skip_ct_enum_bake :: b.ct == .Val(.Enum{..})
+    resource_name :: binding_ty.and_then(ty -> if ty == { .Named(name) | .Apply{name, ..} -> Val(name); _ -> None }).or(if b.ct == { .Val(.Struct{type_name, ..}) -> Val(type_name); _ -> None })
+    skip_ct_resource_bake :: resource_name.is_some_and(name -> cx.has_close_type(name) || cx.has_close_type(name.rsplit("::").next().unwrap_or(name)))
+    if b.ct.is_some() && b.ty != .Val(.Result{..}) && !skip_ct_list_bake && !skip_ct_view_bake && !skip_ct_boxed_bake && !skip_ct_typed_literal_bake && !skip_ct_enum_bake && !skip_ct_ptr_bake && !skip_ct_resource_bake {
+        let_ty :: let_ty_for_opt(b.ty, false, false)
+        init_ty :: if b.init == { .TupleLit(_, _, .Val(ty)) if ty == .Tuple(_) -> ~ty; _ -> b.ty.map(ty -> ~ty.without_user_tags()).unwrap_or(.Int) }
+        scalar :: if binding_ty == .Val(.Union(_)) { None } else { lower_comptime_scalar(b.ct, b.ty) }
+        kind :: scalar.unwrap_or_else(() -> b.ct.map(v -> .CtLit(b.ty.map(ty -> bake_comptime_value_with_type(v, ty.without_user_tags(), cx)).unwrap_or_else(() -> ~v))).unwrap_or(.DefaultLit))
+        init :: TExpr.{ty: ~init_ty, kind}
+        env.bind(b.name, TLocal.user(b.name), Val(~init_ty))
+        env.set_integer_bounds(b.name, integer_bounds_for_expr(init))
+        return LowerStmtPlan.ready(.Let{name: ~b.name, kw: "let", let_ty, init, gc_promotion: None, gc_transferred: false})
+    }
+    return LowerStmtPlan.ready(in_own_frame(() -> {
+        dma_transfer_channel :: hardware_dma_channel(b.init, cx)
+        init := moved_view.unwrap_or_else(() -> lower_owned_expr(b.init, cx, &env))
+        if init.kind == .InlineBlock(_) && b.ty == .Val(carrier) && carrier == .Result{ok, ..} {
+            if init.kind != .Ok(_) { init.ty = ~ok; init = TExpr.{ty: ~carrier, kind: .Ok(^init)} } else { init.ty = ~carrier }
+        }
+        allocator_carrier :: init.ty.is_allocator_view() || init.ty.is_allocator_result()
+        spawn_carrier :: init.kind == .CoreClosureCall{kind: .Spawn{..}} && (if init.ty == {
+            .Apply{name, args} -> name == "Task" && (args.first() == .Val(.Result{..}) || args.first() == .Val(.Option(_)))
+            _ -> false
+        }) && b.ty.is_some_and(ty -> ty.without_user_tags() != init.ty)
+        want :: if allocator_carrier || spawn_carrier { ~init.ty } else { b.ty.map(ty -> ~ty.without_user_tags()).unwrap_or_else(() -> ~init.ty) }
+        if init.kind == .Absent && want == .Option(_) -> init.ty = ~want
+        init = preserve_typed_list_shape(^init, want, cx)
+        if want == .Map{..} && init.kind == .MapLit(_) -> init.ty = ~want
+        if binding_ty == .Val(fl) && fl == .FixedList{..} -> init.ty = ~fl
+        if binding_ty == .Val(want) -> init = maybe_widen_expr_to_union(^init, want)
+        if binding_ty == .Val(decl) && decl == .List(inner) {
+            if cx.columnar_list_type(inner) == .Val(columns_ty) && init.kind == .ListLit(es) && es.is_empty() -> init = TExpr.{ty: ~decl, kind: .ColumnarListLit{columns_ty, elems: []}}
+        }
+        mut_fn :: if b.init == { .Lambda(l) -> l.meta.needs_fn_mut; _ -> false }
+        direct_closure :: if init.kind == { .Lambda(lambda) -> !lambda.boxed && !lambda.rc && !lambda.arc; _ -> false }
+        named_fn_value_ty :: if init.kind == { .FnValue{kind: .NamedFn{name: .Val(_), ..}} -> Val(~init.ty); _ -> None }
+        ty :: if init.ty == .Tuple(_) || init.ty == .Map{..} || init.ty == .Fn{..} || allocator_carrier || spawn_carrier || init.ty.is_compute_view_mut() {
+            ~init.ty
+        } else { named_fn_value_ty.as_ref().map(fn_ty -> ~fn_ty).unwrap_or_else(() -> b.ty.map(ty -> ~ty.without_user_tags()).unwrap_or_else(() -> ~init.ty)) }
+        send_fn :: env.is_send_fn(b.name) && ty == .Fn{..} && !mut_fn
+        if send_fn -> init = force_thread_callback_value(^init, cx)
+        is_resource :: if ty == { .Named(name) | .Apply{name, ..} -> cx.has_close_type(name); _ -> false }
+        if is_resource -> init = TExpr.{ty: ~ty, kind: .ResourceNew(^init)}
+        is_file_handle :: if ty == {
+            .Named(n) -> (if n == {
+                "FileReader" | "FileWriter" | "JSONReader" | "JSONWriter" | "JSONLReader" | "JSONLWriter" | "CSVReader" | "CSVWriter" | "XMLReader" | "XMLWriter" | "CBORReader" | "CBORWriter" | "Stdout" | "Stderr" | "TcpStream" | "TLSStream" | "UnixStream" | "HTTPRouter" | "Arena" | "Bump" | "Pool" | "Fixed" | "Mailer" -> true
+                _ -> false
+            }) || ((n == "Reader" || n == "Cursor") && !cx.type_names.contains(n))
+            .Apply{name, ..} -> name == "DataStream" && !cx.type_names.contains(name)
+            .Tagged{marker: .Internal(.SharedGuardEdit), inner: .Apply{name, ..}} -> name == Syntax.TYPE_SHARED_GUARD
+            _ -> false
+        }
+        kw :: if (b.mutable && !b.is_comptime) || mut_fn || is_file_handle || cx.type_contains_mutable_view(ty) { "let mut" } else { "let" }
+        let_ty :: if allocator_carrier { TLetTy.plain(~ty) } else if spawn_carrier || ty.is_compute_view_mut() || direct_closure { .Inferred } else if send_fn { .SendFn(~ty) } else if named_fn_value_ty.is_some() { let_ty_for_opt(Val(ty), is_resource, b.gc_promotion.is_some() || b.gc_transferred) } else { let_ty_for_opt(b.ty, is_resource, b.gc_promotion.is_some() || b.gc_transferred) }
+        binding_name :: if is_resource { mangle_generated("resource_{b.name}_{b.name_span.start}") } else { ~b.name }
+        slot := if is_resource || ty.is_allocator_view() { TLocal.user(binding_name).through_ref() } else if kw == "let mut" { TLocal.user(binding_name).as_mutable() } else { TLocal.user(binding_name) }
+        if direct_closure -> slot = slot.as_direct_closure()
+        env.bind(b.name, ^slot, Val(ty))
+        if dma_transfer_channel == .Val(channel) -> env.mark_dma_transfer(b.name, channel)
+        env.set_integer_bounds(b.name, integer_bounds_for_expr(init))
+        if b.gc_promotion.is_some() || b.gc_transferred -> env.mark_gc(b.name)
+        if is_resource -> env.mark_resource(b.name)
+        return TStmt.Let{name: binding_name, kw, let_ty, init: ^init, gc_promotion: ~b.gc_promotion, gc_transferred: b.gc_transferred}
+    }))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:3486
+fn lower_assignment(target: LValue, op: BinOp?, op_span: Span, value: Expr, cx: Cx, env: &LowerEnv) -> TStmt {
+    return if target == {
+        .Local{name, ..} -> {
+            clone_value :: if value == { .Ident(vname, _) -> env.is_borrowed(vname) && env.ty_of(vname).is_some_and(t -> !t.is_scalar()); _ -> false }
+            value_t := lower_expr(value, cx, &env)
+            if env.ty_of(name) == .Val(want) -> value_t = preserve_typed_list_shape(^value_t, want, cx)
+            if env.is_send_fn(name) && value_t.ty == .Fn{..} -> value_t = force_thread_callback_value(^value_t, cx)
+            env.update_integer_bounds(name, op, value_t)
+            place :: if cx.persistent_local(name) == {
+                .Val(local) -> TPlace.Expr(TExpr.{ty: local.persist_ty.unwrap_or_else(() -> env.ty_of(name).unwrap_or(.Int)), kind: .Local(local)})
+                .None -> TPlace.Local(env.local_of(name))
+            }
+            .Assign{place, op, value: ^value_t, clone_value, line: cx.src_line_col(op_span.start).0 as U32}
+        }
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:3542
+        .Index{base, index, kind, span} -> {
+            base_t := lower_expr(base, cx, &env)
+            index_t :: lower_expr(index, cx, &env)
+            inferred_kind :: if kind == .Unknown { resolve_unknown_index_kind(base_t, index_t, index, cx) } else { None }
+            kind :: inferred_kind.unwrap_or(kind)
+            if kind == .List || kind == .FixedListProof -> base_t = lower_expr_as_mut_place(base, cx, &env)
+            assert(kind != .Unknown, "sema-to-TIR handoff violated: unresolved index kind")
+            if kind == .Unknown -> return .InvariantViolation{construct: "sema-to-TIR handoff violated: unresolved index kind", span}
+            if kind == .LayoutField(_) -> return .InvariantViolation{construct: "layout field selector cannot be assigned", span}
+            value_t := lower_expr(value, cx, &env)
+            target_ty :: if base_t.ty == {
+                .List(elem) | .FixedList{elem, ..} -> Val(~elem)
+                .Map{value, ..} -> Val(~value)
+                .Apply{name, args} if name == "Pool" && !args.is_empty() -> Val(~args[0])
+                _ -> None
+            }
+            if target_ty == .Val(want) -> value_t = preserve_typed_list_shape(^value_t, want, cx)
+            if kind == .User(type_name) -> return .IndexHookAssign{type_name: ~type_name, base: ^base_t, index: index_t, value: ^value_t}
+            if kind == .Pool {
+                line :: cx.src_line_col(span.start).0
+                src_line :: cx.src_line_text(line).to_string()
+                elem_ty :: ~value_t.ty
+                return .Assign{place: .Expr(TExpr.{ty: elem_ty, kind: .PoolSlot{pool: ^base_t, id: index_t, mutable: true, field: None, line, src_line}}), op, value: ^value_t, clone_value: false, line: cx.src_line_col(op_span.start).0 as U32}
+            }
+            .IndexAssign{uninit: if base == { .Ident(name, _) -> env.is_uninit_fixed(name); _ -> false }, base: ^base_t, index: index_t, is_map: kind == .Map, value: ^value_t}
+        }
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:3653
+        .Field{base, field, span} -> {
+            if base == .Index{base: collection, index, kind, span: index_span} {
+                is_map :: kind == .Map
+                index_proven :: kind == .FixedListProof
+                if is_map || index_proven || kind == .List {
+                    collection_t :: lower_expr_as_mut_place(collection, cx, &env)
+                    elem_ty :: if collection_t.ty == {
+                        .List(elem) | .FixedList{elem, ..} -> Val(~elem)
+                        .Map{value, ..} -> Val(~value)
+                        .Apply{name, args} if (name == "View" || name == "ViewMut" || name == "ComputeViewMut") && args.len() == 1 -> Val(~args[0])
+                        _ -> None
+                    }
+                    if elem_ty == .Val(elem_ty) {
+                        field_ty :: struct_field_type(cx, elem_ty, field).unwrap_or(.Int)
+                        clone_value :: if value == { .Ident(vname, _) -> env.is_borrowed(vname) && env.ty_of(vname).is_some_and(t -> !t.is_scalar()); _ -> false }
+                        line :: cx.src_line_col(index_span.start).0
+                        value_t :: lower_expr(value, cx, &env)
+                        value_t :: preserve_typed_list_shape(value_t, field_ty, cx)
+                        return .IndexFieldAssign(TIndexFieldAssign.{base: collection_t, index: lower_expr(index, cx, &env), is_map, index_proven, field: field.to_string(), field_ty, op, value: value_t, clone_value, line})
+                    }
+                }
+            }
+            base_t :: lower_expr(base, cx, &env)
+            swizzle_write :: if base_t.ty == {
+                .Named(type_name) if is_swizzleable_math_type(type_name) && !cx.struct_fields.contains_key(type_name) -> if parse_swizzle_member(field, type_name) == {
+                    .Ok(lanes) -> Val((~type_name, lanes.iter().map(i -> i as U8).collect()))
+                    _ -> None
+                }
+                _ -> None
+            }
+            if swizzle_write == .Val((type_name, lanes_u8)) {
+                clone_value :: if value == { .Ident(vname, _) -> env.is_borrowed(vname) && env.ty_of(vname).is_some_and(t -> !t.is_scalar()); _ -> false }
+                return .MathSwizzleAssign{base: base_t, type_name, lanes: lanes_u8, value: lower_expr(value, cx, &env), clone_value}
+            }
+            if base == .Index{base: pool_expr, index: id_expr, kind: .Pool, span: idx_span} {
+                line :: cx.src_line_col(idx_span.start).0
+                src_line :: cx.src_line_text(line).to_string()
+                pool_t :: lower_expr(pool_expr, cx, &env)
+                id_t :: lower_expr(id_expr, cx, &env)
+                elem_ty :: if pool_t.ty == { .Apply{args, ..} if !args.is_empty() -> ~args[0]; _ -> .Int }
+                field_ty :: struct_field_type(cx, elem_ty, field).unwrap_or(.Int)
+                place :: TPlace.Expr(TExpr.{ty: ~field_ty, kind: .PoolSlot{pool: pool_t, id: id_t, mutable: true, field: Val(field.to_string()), line, src_line}})
+                clone_value :: if value == { .Ident(vname, _) -> env.is_borrowed(vname) && env.ty_of(vname).is_some_and(t -> !t.is_scalar()); _ -> false }
+                value_t :: lower_expr(value, cx, &env)
+                value_t :: preserve_typed_list_shape(value_t, field_ty, cx)
+                return .Assign{place, op, value: value_t, clone_value, line: cx.src_line_col(op_span.start).0 as U32}
+            }
+            field_expr :: Expr.Field(~base, ~field, span)
+            place :: TPlace.Expr(lower_expr(field_expr, cx, &env))
+            field_ty :: if place == { .Expr(expr) -> ~expr.ty; .Local(local) -> env.ty_of(local.name).unwrap_or(.Int) }
+            clone_value :: if value == { .Ident(vname, _) -> env.is_borrowed(vname) && env.ty_of(vname).is_some_and(t -> !t.is_scalar()); _ -> false }
+            value_t :: lower_expr(value, cx, &env)
+            value_t :: preserve_typed_list_shape(value_t, field_ty, cx)
+            .Assign{place, op, value: value_t, clone_value, line: cx.src_line_col(op_span.start).0 as U32}
+        }
+    }
+}

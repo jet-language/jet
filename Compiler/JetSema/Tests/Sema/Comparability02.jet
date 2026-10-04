@@ -1,0 +1,12 @@
+use jet_foundation.[Type]
+use jet_foundation.Syntax
+use jet_sema.[type_fix_hint]
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:261
+#Test("rng_type_fix_uses_the_bare_type_name") {
+    assert_eq(type_fix_hint(.Named("random.RNG"), .Int), "use RNG here")
+}
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:269
+#Test("decimal_to_float_fix_names_explicit_float_spelling") {
+    assert_eq(type_fix_hint(.Float, .Named(Syntax.TYPE_DECIMAL)), "write the literal as Float{{3.4}}, or keep Decimal on both sides")
+}

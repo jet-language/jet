@@ -1,0 +1,14 @@
+use jet_driver.Entry.run_compiler_work
+use jet_foundation.CompilerStack
+
+// Behavioral control for Rust lib.rs:40; no inline Rust tests.
+#Test("compiler_work_reuses_worker_for_nested_entries") {
+    result :: run_compiler_work(fn() {
+        assert(CompilerStack.on_compiler_worker())
+        run_compiler_work(fn() {
+            assert(CompilerStack.on_compiler_worker())
+            73
+        })
+    })
+    assert_eq(result, 73)
+}

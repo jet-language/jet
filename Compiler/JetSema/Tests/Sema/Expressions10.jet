@@ -1,0 +1,51 @@
+use jet_foundation.[Span, Type]
+use jet_sema.[ViewAccess, ViewFact, ViewKind, ViewOwnerId, ViewOwnerOrigin, ViewPlace, ViewProjection, type_uses_default_int, SharedFlag]
+
+// Rust: crates/jet-sema/src/Sema/mod.rs:1648 (shared original fixture)
+fn expressions10_fact(owner_span: USize, scope_len: USize, kind: ViewKind) -> ViewFact {
+    ViewFact{seq: 0, binding_span: Span.new(owner_span + 10, owner_span + 11), output_path: [String]{}, place: ViewPlace{owner: ViewOwnerId{name: "owner", def_span: Span.new(owner_span, owner_span + 1), origin: ViewOwnerOrigin.Local}, projections: [ViewProjection]{}}, kind: kind, access: ViewAccess.Read, scope_len: scope_len, invalidated: None}
+}
+// Rust: crates/jet-sema/src/Sema/mod.rs:1799
+#Test("inclusive_ranges_sharing_boundary_overlap") {
+    a := expressions10_fact(1, 1, ViewKind.List).place
+    b := ~a
+    &a.projections.push(ViewProjection.Range{start: Val(0), end: Val(1), span: Span.new(20, 24)})
+    &b.projections.push(ViewProjection.Range{start: Val(1), end: Val(2), span: Span.new(30, 34)})
+    assert(a.overlaps(b))
+}
+// Rust: crates/jet-sema/src/Sema/mod.rs:1817
+#Test("fresh_arena_allocations_are_disjoint") {
+    a := expressions10_fact(1, 1, ViewKind.Arena).place
+    b := ~a
+    &a.projections.push(ViewProjection.Fresh{span: Span.new(20, 21)})
+    &b.projections.push(ViewProjection.Fresh{span: Span.new(30, 31)})
+    assert(!a.overlaps(b))
+}
+// Rust: crates/jet-sema/src/Sema/mod.rs:1826
+#Test("buffer_and_matrix_use_named_window_boundary") {
+    assert(ViewKind.Buffer.is_named_window())
+    assert(ViewKind.Matrix.is_named_window())
+    assert(!ViewKind.Arena.is_named_window())
+    assert(!ViewKind.FixedBacking.is_named_window())
+    assert(!ViewKind.String.is_named_window())
+}
+// Rust: crates/jet-sema/src/Sema/mod.rs:1998 (behavioral control)
+#Test("default_int_reachability_recurses_without_confusing_fixed_width") {
+    assert(type_uses_default_int(Type.Int))
+    assert(type_uses_default_int(Type.List{inner: Type.Option{inner: Type.Int}}))
+    assert(type_uses_default_int(Type.Fn{params: [], ret: Val(Type.Int), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}))
+    assert(!type_uses_default_int(Type.IntN{signed: true, bits: 64}))
+    assert(!type_uses_default_int(Type.Named{name: "Int"}))
+    assert(!type_uses_default_int(Type.Float))
+}
+// Rust: crates/jet-sema/src/Sema/mod.rs:1889-1903 (behavioral control)
+#Test("shared_flag_clone_copies_value_without_sharing_storage") {
+    original :: SharedFlag.default()
+    assert(!original.get())
+    original.set(true)
+    copy :: original.clone()
+    assert(copy.get())
+    original.set(false)
+    assert(!original.get())
+    assert(copy.get())
+}

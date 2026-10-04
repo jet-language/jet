@@ -1,1802 +1,406 @@
-// PORT-PENDING 0508 crates-jet-codegen-src-codegen-tir-mod-slice-6829: crates/jet-codegen/src/Codegen/TIR/mod.rs:6829-8626
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS pub enum THelperKind {
-//RS     ClockNew,
-//RS     ClockSystem,
-//RS }
-//RS 
-//RS /// Host/prelude call assembled only in emit — structured pieces, no Rust source text.
-//RS #[derive(Clone)]
-//RS pub enum THostCall {
-//RS     /// A checked helper route. `helper` is retained for the old emitter only.
-//RS     Helper {
-//RS         helper: String,
-//RS         kind: THelperKind,
-//RS         args: Vec<THostArg>,
-//RS     },
-//RS     /// `(recv).{method}({args})`; `method` is a checked Jet identity and the
-//RS     /// MIR lowerer selects its explicit Prelude row from the receiver shape.
-//RS     Method {
-//RS         recv: Box<TExpr>,
-//RS         method: String,
-//RS         args: Vec<TExpr>,
-//RS     },
-//RS     /// D-FAIL-CARRIER1=A: read a middle state off the outcome. `field` is the
-//RS     /// Jet field the error type carries it on, and `notes` picks which prelude
-//RS     /// reader decides what a success answers — `jet_notes` for the words a
-//RS     /// failure had, `jet_partial` for the payload it kept. Every engine reads
-//RS     /// this one node, so the rule is stated once and no Rust text is written
-//RS     /// here.
-//RS     CarrierFact {
-//RS         recv: Box<TExpr>,
-//RS         field: String,
-//RS         notes: bool,
-//RS     },
-//RS     /// `Cell(Read|Edit)Guard.map/split`: sema-proved paths, shared by all tiers.
-//RS     CellGuardProject {
-//RS         recv: Box<TExpr>,
-//RS         paths: Vec<Vec<String>>,
-//RS         result_ty: Type,
-//RS         editable: bool,
-//RS         edit_paths_disjoint: bool,
-//RS     },
-//RS     /// D-OOBPROOF1: sema-proved fixed-list index. Each engine performs a
-//RS     /// direct read; the checked helper remains for unproven indexing.
-//RS     FixedListIndex {
-//RS         base: Box<TExpr>,
-//RS         index: Box<TExpr>,
-//RS         line: u32,
-//RS     },
-//RS     /// Typed-text audited escapes / projections.
-//RS     TypedText {
-//RS         kind: TTypedTextForm,
-//RS         arg: Box<TExpr>,
-//RS     },
-//RS     /// Bare fn name used as a value before FnValue wrapping (Jet name).
-//RS     FnName(String),
-//RS     /// Statistics projection for a sema-proved memoized function.
-//RS     MemoStats { name: String },
-//RS     /// GC edit expression — structured slots; emit formats jet_gc edit wrappers.
-//RS     GcEdit {
-//RS         /// The checked source local owning the GC root. Backend place spellings
-//RS         /// are derived by each adapter, never stored in analytical TIR.
-//RS         root: TLocal,
-//RS         method_span_start: usize,
-//RS         /// Checked source locals whose GC object identities become edge inputs.
-//RS         edges: Vec<TLocal>,
-//RS         edit: Box<TExpr>,
-//RS         index_temp: Option<(String, TExpr)>,
-//RS         kind: TGcEditKind,
-//RS     },
-//RS     /// GC local read. Backend adapters derive the place from this checked slot.
-//RS     GcRead { root: TLocal },
-//RS     /// Option/pattern projection helpers: `(inner).is_some()` / `.unwrap()` / field project.
-//RS     OptionProbe {
-//RS         inner: Box<TExpr>,
-//RS         kind: TOptionProbe,
-//RS     },
-//RS     /// D-PARSESTR1: str-match scan against the lowered subject; emit builds the IIFE.
-//RS     /// Statement switches pass `SwitchSubjectValue`, while value-form dispatch
-//RS     /// passes its own subject local. Keeping the subject in TIR makes the scan
-//RS     /// usable in every expression position without relying on switch ambient.
-//RS     StrMatchScan {
-//RS         subject: Box<TExpr>,
-//RS         parts: Vec<crate::AST::StrMatchPart>,
-//RS         probe: TMatchProbe,
-//RS     },
-//RS     /// D-BINPAT1: binary-pattern scan against the lowered subject.
-//RS     BinMatchScan {
-//RS         subject: Box<TExpr>,
-//RS         parts: Vec<crate::AST::BinMatchPart>,
-//RS         probe: TMatchProbe,
-//RS     },
-//RS     /// Tuple element project: `(base).{index}` (after str/bin-match unwrap).
-//RS     TupleIndex { base: Box<TExpr>, index: usize },
-//RS     /// Struct-pattern subject field: `((*__jet_switch_subject).{field})`
-//RS     SwitchSubjectField { field: String },
-//RS     /// The already-evaluated subject of the enclosing `MixedSwitch`.
-//RS     SwitchSubjectValue,
-//RS     /// Generator `yield e` → `__jet_yield_tx.send(e)`.
-//RS     YieldSend { value: Box<TExpr> },
-//RS     /// SQL/HTML/Sh and URL/Path/DateTime typed constructors from literals + hole exprs.
-//RS     TypedTextInterp {
-//RS         kind: TTypedTextInterpKind,
-//RS         literals: Vec<String>,
-//RS         holes: Vec<TExpr>,
-//RS         /// Sema-proved HTML holes compose as markup; every other hole escapes.
-//RS         trusted_html: Vec<bool>,
-//RS     },
-//RS     /// `expect(x).snapshot()` harness call.
-//RS     ExpectSnapshot {
-//RS         value: Box<TExpr>,
-//RS         snap_path: String,
-//RS     },
-//RS     /// `core.sys.set` with rich panic on invalid runtime strings.
-//RS     EnvSet {
-//RS         name: Box<TExpr>,
-//RS         value: Box<TExpr>,
-//RS         loc: TPanicLoc,
-//RS     },
-//RS     /// Numeric bounds constant: `{rust_type(ty)}::{member}`.
-//RS     NumericBounds { ty: Type, member: String },
-//RS     /// `ExpiringSecret::<T>::new(value, ttl.ms, clock observer)`.
-//RS     ExpiringSecretNew {
-//RS         value: Box<TExpr>,
-//RS         duration: Box<TExpr>,
-//RS         clock: Box<TExpr>,
-//RS         elem: Type,
-//RS     },
-//RS     /// `jet_expiring_new(value, duration_ms, clock_now)`.
-//RS     ExpiringValueNew {
-//RS         value: Box<TExpr>,
-//RS         duration: Box<TExpr>,
-//RS         clock: Box<TExpr>,
-//RS     },
-//RS     /// D-CABI-CALLBACK1: `extern "C" fn` wrapper around a lowered lambda.
-//RS     CCallback {
-//RS         symbol: String,
-//RS         lambda: TLambda,
-//RS         ret: Option<Type>,
-//RS         /// D-FFI-CALLBACK2=A: managed callback transport carries the exact
-//RS         /// generated plan identity through TIR into each target adapter.
-//RS         managed: bool,
-//RS         plan_digest: Option<String>,
-//RS         callback_identity: Option<String>,
-//RS     },
-//RS }
-//RS 
-//RS /// Which jet_gc edit wrapper to emit for a collector-owned method call.
-//RS #[derive(Clone, Copy)]
-//RS pub enum TGcEditKind {
-//RS     Clear,
-//RS     Pop,
-//RS     RemoveIndex,
-//RS     InsertIndex,
-//RS     Prepend,
-//RS     Additive,
-//RS     Plain,
-//RS     EdgeSlot,
-//RS }
-//RS 
-//RS /// Str/bin-match scan result shape: bool test vs unwrap the hole tuple.
-//RS #[derive(Clone, Copy)]
-//RS pub enum TMatchProbe {
-//RS     IsSome,
-//RS     Unwrap,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub enum THostArg {
-//RS     Expr(TExpr),
-//RS     /// Wrap as `&(expr)`
-//RS     Borrow(TExpr),
-//RS     /// Pre-lowered lambda (structured); emit uses TLambda spelling.
-//RS     Lambda(TLambda),
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub enum TOptionProbe {
-//RS     IsSome,
-//RS     Unwrap,
-//RS     /// Project a Jet field after unwrap: `.{field}.clone()`
-//RS     Field(String),
-//RS }
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS pub enum TTypedTextForm {
-//RS     SQLRaw,
-//RS     HTMLRaw,
-//RS     ShRaw,
-//RS     SQLTemplate,
-//RS     SQLParams,
-//RS     HTMLText,
-//RS }
-//RS 
-//RS /// D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: TIR carries the same descriptor as the
-//RS /// source surface. There is no second kind table in an execution tier.
-//RS pub type TTypedTextInterpKind = crate::Syntax::TypedHeadKind;
-//RS 
-//RS /// Let binding type annotation. Emit spells the `: …` clause (I3: no Rust text here).
-//RS #[derive(Clone)]
-//RS pub enum TLetTy {
-//RS     Inferred,
-//RS     /// `: &str` for a string-view binding.
-//RS     StrView,
-//RS     /// Explicit Jet type, optionally wrapped for resources / GC roots.
-//RS     Annotated {
-//RS         ty: Type,
-//RS         wrapper: TLetWrapper,
-//RS     },
-//RS     /// Pattern-binding tuple annotation spelled `(T0, T1, …)`.
-//RS     Tuple(Vec<Type>),
-//RS     /// A function local whose value crosses the native interrupt boundary.
-//RS     /// Emit uses Arc-backed `Send + Sync` storage instead of ordinary `Rc`.
-//RS     SendFn(Type),
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, PartialEq, Eq)]
-//RS pub enum TLetWrapper {
-//RS     None,
-//RS     Resource,
-//RS     AutomaticRoot,
-//RS }
-//RS 
-//RS impl TLetTy {
-//RS     pub fn inferred() -> Self {
-//RS         Self::Inferred
-//RS     }
-//RS 
-//RS     pub fn plain(ty: Type) -> Self {
-//RS         Self::Annotated {
-//RS             ty,
-//RS             wrapper: TLetWrapper::None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn of(ty: Type, wrapper: TLetWrapper) -> Self {
-//RS         Self::Annotated { ty, wrapper }
-//RS     }
-//RS 
-//RS     pub fn resource(ty: Type) -> Self {
-//RS         Self::of(ty, TLetWrapper::Resource)
-//RS     }
-//RS 
-//RS     pub fn automatic_root(ty: Type) -> Self {
-//RS         Self::of(ty, TLetWrapper::AutomaticRoot)
-//RS     }
-//RS }
-//RS 
-//RS /// Source location + locals snapshot for rich require/panic reports.
-//RS /// Emit alone formats `jet_panic_rich` / test-mode `return Err`.
-//RS #[derive(Clone)]
-//RS pub struct TPanicLoc {
-//RS     pub file: String,
-//RS     pub src_line: String,
-//RS     pub line: u32,
-//RS     pub col: u32,
-//RS     pub caret: u32,
-//RS     pub fn_name: String,
-//RS     /// `(display_name, place)` for scalar locals shown in debug panics.
-//RS     pub locals: Vec<(String, TLocal)>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub enum TRequireKind {
-//RS     /// `assert(cond[, msg])`
-//RS     Require {
-//RS         cond: Box<TExpr>,
-//RS         msg: Option<Box<TExpr>>,
-//RS     },
-//RS     /// `assert_eq(left, right)`
-//RS     RequireEq { left: Box<TExpr>, right: Box<TExpr> },
-//RS     /// `panic(msg)` / `?? panic(msg)`
-//RS     Panic { msg: Box<TExpr> },
-//RS }
-//RS 
-//RS /// How a function-body contract scope binds the sema-visible `result`.
-//RS ///
-//RS /// The function ABI may carry a `Result`/`Option` wrapper that is not part of
-//RS /// the source declaration.  Lowering decides whether the scope projects that
-//RS /// successful payload; emitters and the evaluator only consume this fact.
-//RS #[derive(Clone, Copy, PartialEq, Eq)]
-//RS pub enum TContractResultMode {
-//RS     Direct,
-//RS     ResultPayload,
-//RS     OptionPayload,
-//RS }
-//RS 
-//RS /// Typed result binding for a lowered function-body contract scope.
-//RS #[derive(Clone)]
-//RS pub struct TContractResult {
-//RS     /// Effective return type produced by the function body and returned by the
-//RS     /// scope, including its failure carrier when one is present.
-//RS     pub carrier_ty: Type,
-//RS     /// Type sema assigned to the source-level `result` binding.
-//RS     pub binding_ty: Type,
-//RS     /// Local holding the complete return carrier.
-//RS     pub carrier_local: TLocal,
-//RS     /// Local visible to lowered postconditions.
-//RS     pub binding_local: TLocal,
-//RS     /// Whether the successful carrier arm is projected before postconditions.
-//RS     pub mode: TContractResultMode,
-//RS }
-//RS 
-//RS /// A lowered statement. Only the constructs the Phase-1 subset allows.
-//RS #[derive(Clone)]
-//RS pub enum TStmt {
-//RS     /// D-FAIL-TIER1: one executable contract check.  A precondition node is
-//RS     /// placed immediately before the call that supplies its arguments;
-//RS     /// postconditions live in `ContractScope` around the callee body.
-//RS     Contract {
-//RS         contract: TContract,
-//RS     },
-//RS     /// against the sema-visible result binding on successful returns, while a
-//RS     /// failure carrier bypasses postconditions and crosses the scope unchanged.
-//RS     ContractScope {
-//RS         pre: Vec<TContract>,
-//RS         body: Vec<TStmt>,
-//RS         post: Vec<TContract>,
-//RS         result: TContractResult,
-//RS     },
-//RS     /// `let [mut] name[: ty] = init;`. All presentation facts are resolved at
-//RS     /// lowering, reproducing `emit_let` (Source/Codegen/Statement.rs) byte-for-byte:
-//RS     /// `kw` is `"let"` or `"let mut"` (the `mut` accounts for the source `mutable`
-//RS     /// flag AND the forced-mut cases — a handle binding FileReader/FileWriter/
-//RS     /// TcpStream/HTTPRouter/Arena/… needs `let mut` even when bound immutably, an
-//RS     /// escaping FnMut lambda binding, or an owned `ResourceTake`); `let_ty` is the
-//RS     /// structured annotation (emit spells the `: …` clause). The binding's resolved
-//RS     /// type is carried on the `LowerEnv` slot (for downstream facts), so it is not
-//RS     /// duplicated on the node.
-//RS     Let {
-//RS         name: String,
-//RS         kw: &'static str,
-//RS         let_ty: TLetTy,
-//RS         init: TExpr,
-//RS         /// D-OPTGC1=A: sema's complete automatic-promotion decision.
-//RS         gc_promotion: Option<crate::AST::GcPromotion>,
-//RS         gc_transferred: bool,
-//RS     },
-//RS     /// D-CHOOSE-TEST1=A: a subject-first pattern test whose miss route
-//RS     /// diverges. Unlike an `if let`, Rust's `let ... else` keeps every capture
-//RS     /// in the surrounding scope. The same node lets the interpreter bind into
-//RS     /// its current scope before continuing, preserving tier parity.
-//RS     RefutableBind {
-//RS         pattern: TPattern,
-//RS         init: TExpr,
-//RS         fallback: Vec<TStmt>,
-//RS     },
-//RS     /// D-OPTGC1=A: assignment through a collector-owned bare value.
-//RS     GcEdit {
-//RS         root: String,
-//RS         slot: String,
-//RS         edges: Vec<String>,
-//RS         replace_all: bool,
-//RS         index_temp: Option<(String, TExpr)>,
-//RS         stmt: Box<TStmt>,
-//RS     },
-//RS     /// D-SHAPE-PLACE1=A: one acquisition in a sema-proven disjoint constant
-//RS     /// index/range partition. The first acquisition initializes `root`; later
-//RS     /// acquisitions split a retained region at their original statement.
-//RS     SplitViews {
-//RS         owner: Option<TExpr>,
-//RS         root: String,
-//RS         len: String,
-//RS         source: String,
-//RS         source_start: i64,
-//RS         before: String,
-//RS         split_tail: String,
-//RS         segment: String,
-//RS         after: String,
-//RS         name: String,
-//RS         start: i64,
-//RS         end: i64,
-//RS         single: bool,
-//RS         write: bool,
-//RS         elem_ty: Option<Type>,
-//RS         line: usize,
-//RS     },
-//RS     /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,
-//RS     /// `BindPattern::Tuple`). The checked init type supplies the canonical source
-//RS     /// field labels and field types; MIR resolves each projection by position and
-//RS     /// the backend chooses the Rust spelling from the checked field row. `tmp` is
-//RS     /// retained for the legacy TIR shape; `kw` is `"let"`/`"let mut"`.
-//RS     TupleDestructure {
-//RS         tmp: String,
-//RS         init: TExpr,
-//RS         kw: &'static str,
-//RS         /// Non-copyable guard fields must move out of the owned tuple instead
-//RS         /// of borrowing it and accidentally cloning the guarded value.
-//RS         move_fields: bool,
-//RS         /// `(source_binding, checked_field_label)` in canonical source order.
-//RS         binds: Vec<(String, String)>,
-//RS     },
-//RS     /// c109: a STRUCT-destructuring binding `Type.{ x, y } :: <init>` (S74,
-//RS     /// `BindPattern::Struct`). The checked field label is carried unchanged;
-//RS     /// MIR resolves its type and stable field ID before backend spelling.
-//RS     StructDestructure {
-//RS         tmp: String,
-//RS         init: TExpr,
-//RS         kw: &'static str,
-//RS         /// Structs containing a SharedGuard are consumed so the owned guard
-//RS         /// moves into the binding instead of cloning its dereferenced payload.
-//RS         move_fields: bool,
-//RS         /// `(source_binding, checked_field_label)` in source order.
-//RS         binds: Vec<(String, String)>,
-//RS     },
-//RS     /// c109 Phase 26: a LIST-destructuring binding `[a, b, c] :: <init>` (S74,
-//RS     /// `BindPattern::List`). Reproduces `emit_stmt`'s `BindPattern::List` arm
-//RS     /// byte-for-byte: a `let {tmp} = &({init});` borrow temp, then one
-//RS     /// `let[ mut] {elem_rust} = jet_unpack_vec({tmp}, {want}, {i}, {file:?}, {line});`
-//RS     /// per element. `want` is the element count, `i` the position, and `file`/`line`
-//RS     /// the destructure span's source location (resolved at lowering for the
-//RS     /// bounds-mismatch panic). Each element binds a non-deref slot whose type
-//RS     /// reproduces `expr_jet_ty(init)`'s `Some(List(inner))` partiality (a non-`List`
-//RS     /// init — e.g. a `[T#N]` fan-out result — yields `None`, matching the AST).
-//RS     ListDestructure {
-//RS         tmp: String,
-//RS         init: TExpr,
-//RS         kw: &'static str,
-//RS         want: usize,
-//RS         file: String,
-//RS         line: usize,
-//RS         /// `elem_rust_name` per bound element, source order.
-//RS         elems: Vec<String>,
-//RS     },
-//RS     /// `place [op]= value;` to a plain local (subset excludes indexed assigns).
-//RS     /// `op` is the compound-assignment operator (`+=` etc.) or `None` for `=`.
-//RS     Assign {
-//RS         /// The structured target: a local slot, or a place expression (a field
-//RS         /// chain, a `Pool` slot). Every engine reads the structure; only emit
-//RS         /// spells Rust.
-//RS         place: TPlace,
-//RS         op: Option<BinOp>,
-//RS         value: TExpr,
-//RS         /// c150: true when the value is a borrowed non-scalar ident (a `Read`-convention
-//RS         /// non-Copy parameter in deref position). Assigning `(*__jet_s)` directly moves
-//RS         /// out of a shared reference (E0507); emitting `((*__jet_s)).clone()` is correct.
-//RS         /// Mirrors the `lower_enum_arg` clone predicate. False for scalars and owned values.
-//RS         clone_value: bool,
-//RS         /// Source line of the assignment, so a compound operator that traps
-//RS         /// (D-EXPSEM1: `^=`) can name the line the author wrote.
-//RS         line: u32,
-//RS     },
-//RS     Return(Option<TExpr>),
-//RS     /// A call used for effect: `print(x);`, `helper(a);`.
-//RS     ExprStmt(TExpr),
-//RS     /// D-CONC-SPAWN1=D: a lexical structured-concurrency scope. Engines create
-//RS     /// one group, run `body`, and close it on every exit path.
-//RS     TaskGroup {
-//RS         group: TLocal,
-//RS         limit: Option<TExpr>,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// D-SHAPE-RESOURCE2=A: one sema-checked `defer close(^resource)` action.
-//RS     /// MIR lowering emits `close` inline on every exit edge of the enclosing
-//RS     /// scope, where the consuming `^resource` is an ordinary move.
-//RS     DeferClose { close: TExpr, resource: TLocal },
-//RS     /// Statement-form `if`/`else`. `else_body` is `None` for a bare `if`.
-//RS     /// `cond` (c109 Phase 22) is a `TIfCond`: a plain boolean expr, an optional-binding
-//RS     /// `if let <pat> = <subj>` (an `x == value(b)`/`Ok(b)`/`Err(b)`/variant condition),
-//RS     /// or an `<subj>.is_none()` test (`x == null`) — reproducing `emit_if`'s three
-//RS     /// condition shapes (Source/Codegen/Statement.rs).
-//RS     /// `else_is_elseif` distinguishes a nested residual guard arm from the
-//RS     /// explicit `else` body of the canonical subjectless `Switch`: nested arms
-//RS     /// emit as `} else if …`, while the final body stays `} else { … }`.
-//RS     If {
-//RS         cond: TIfCond,
-//RS         then_body: Vec<TStmt>,
-//RS         else_body: Option<Vec<TStmt>>,
-//RS         else_is_elseif: bool,
-//RS     },
-//RS     /// `loop { … }` — an infinite loop (`Stmt::Loop`). `label` is the optional
-//RS     /// `name :: loop` rendered as `'jet_<name>:` (resolved at lowering, never re-derived).
-//RS     Loop {
-//RS         label: Option<String>,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// `loop cond { … }` — the while form (`Stmt::While`). Lowers to Rust `while`.
-//RS     While {
-//RS         label: Option<String>,
-//RS         cond: TExpr,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// D-LOOP-SEMICOLON1=A: `loop init; cond; step { … }` — the three-part counted loop.
-//RS     /// Emitted as `{ let mut init_name = init_val; loop { if !(cond) { break; } body; step; } }`.
-//RS     CountedLoop {
-//RS         label: Option<String>,
-//RS         init: Box<TStmt>,
-//RS         cond: TExpr,
-//RS         step: Option<Box<TStmt>>,
-//RS         /// D-SIMD3=B: preserve sema's complete loop proof when a numeric range
-//RS         /// is canonicalized into this counted shape.  The TIR-to-MIR boundary
-//RS         /// binds it to the emitted header, cursor, body, advance, and access
-//RS         /// identities; consumers never rebind it from source spelling.
-//RS         auto_vectorization: Option<crate::AST::AutoVectorizationFacts>,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// `loop i in start..end [, stride]` — a numeric range loop (`ForKind::Range`).
-//RS     /// Inclusive `..` (S22) lowers to `start..=end`; exclusive `..<`
-//RS     /// (D-RANGE-EXCL1=C) lowers to `start..end`. Optional stride uses `.step_by`.
-//RS     Range {
-//RS         label: Option<String>,
-//RS         var: String,
-//RS         /// D-RANGE-VALUE1=A: `Some` evaluates one Range value once. Literal
-//RS         /// ranges keep `None` and the direct start/end jump lowering.
-//RS         source: Option<TExpr>,
-//RS         start: TExpr,
-//RS         end: TExpr,
-//RS         step: Option<TExpr>,
-//RS         exclusive: bool,
-//RS         /// D-SIMD3=B: sema's complete loop proof for the loop's vectorizable
-//RS         /// shape.  Lowering carries it with the exact emitted MIR scope and
-//RS         /// access identities, rather than reconstructing proof from syntax.
-//RS         auto_vectorization: Option<crate::AST::AutoVectorizationFacts>,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// `break` / `break(name)` (label resolved at lowering).
-//RS     Break(Option<String>),
-//RS     /// `break value` / `break(name, value)`.
-//RS     BreakValue {
-//RS         label: Option<String>,
-//RS         value: TExpr,
-//RS     },
-//RS     /// Source `next` / `next(name)`; internally retained as Continue.
-//RS     Continue(Option<String>),
-//RS     /// c109 Phase 4: an exhaustive `when`/match on an enum subject (`Stmt::Switch`
-//RS     /// whose arms are all variant patterns). Lowers to a Rust `match`, mirroring
-//RS     /// `emit_pattern_match_switch` byte-for-byte. `subject` is the already-lowered
-//RS     /// subject expression; `clone_subject` reproduces the AST path's `(subj).clone()`
-//RS     /// when the subject reads as a borrow (a by-reference enum param), so the match
-//RS     /// owns the value. Each arm carries its resolved Rust pattern string and an
-//RS     /// optional range-guard string (both fully resolved at lowering — emit makes no
-//RS     /// pattern decision). `fallthrough` records whether the AST path appends the
-//RS     /// `_ => unreachable!("jet: exhaustiveness bug")` arm (true when there is no
-//RS     /// explicit `else`); sema already proved exhaustiveness (E0307), so the dead arm
-//RS     /// exists only because rustc cannot see that proof.
-//RS     EnumMatch {
-//RS         /// The matched subject. A by-reference subject sets `clone_subject` so the
-//RS         /// match owns the value; the slot itself is read without its deref.
-//RS         scrutinee: TExpr,
-//RS         clone_subject: bool,
-//RS         arms: Vec<TMatchArm>,
-//RS         else_body: Option<Vec<TStmt>>,
-//RS         fallthrough: bool,
-//RS     },
-//RS     /// c109 Phase 4: a `when`/match whose arms are all arm-head *range* patterns
-//RS     /// (`0..59 -> …`) over a scalar subject, plus a required `else`. The AST path
-//RS     /// (`emit_mixed_switch`) lowers this to an `if/else if … else` chain wrapped in
-//RS     /// a block that binds `__jet_switch_subject` to a borrow of the subject (the
-//RS     /// binding is unused in this form but emitted for parity). Each arm's `(lo, hi)`
-//RS     /// becomes `(subj >= lo && subj <= hi)`, reading the subject's resolved place.
-//RS     RangeSwitch {
-//RS         /// The matched subject expression. Emit borrows it for the
-//RS         /// `__jet_switch_subject` binding and re-emits it in each range test.
-//RS         subject: TExpr,
-//RS         arms: Vec<(i64, i64, Vec<TStmt>)>,
-//RS         else_body: Vec<TStmt>,
-//RS     },
-//RS     /// c109 Phase 5: indexed assignment `coll[i] = value` (`Stmt::Assign` with an
-//RS     /// `LValue::Index`). `is_map` is the resolved `IndexKind` (TOTAL, from sema):
-//RS     /// `true` → `jet_map_insert(&mut (base), (i).clone(), v)`; `false` →
-//RS     /// `(base)[i as usize] = v`. `base` may itself be an index projection: each
-//RS     /// engine must lower that chain as a mutable place, not as a cloned value.
-//RS     /// Both wrap the value in a `{ let __jet_v = …; … }` block, byte-for-byte the
-//RS     /// AST `LValue::Index` form. Compound ops (`+=`) on an index are not a Jet
-//RS     /// construct here (the parser/sema only admit a plain `=` to an index lvalue),
-//RS     /// so no `op` is carried.
-//RS     IndexAssign {
-//RS         /// The base is fixed-list storage created with `Type.{ uninit }`.
-//RS         /// Engines keep the same TIR operation but choose storage-safe writes.
-//RS         uninit: bool,
-//RS         base: TExpr,
-//RS         index: TExpr,
-//RS         is_map: bool,
-//RS         value: TExpr,
-//RS     },
-//RS     /// D-SHAPE-PLACE1: `coll[i].field [op]= value`.
-//RS     IndexFieldAssign(Box<TIndexFieldAssign>),
-//RS     /// D-INDEX-HOOK: `mytype[k] = v` via `IndexMut::set`.
-//RS     IndexHookAssign {
-//RS         type_name: String,
-//RS         base: TExpr,
-//RS         index: TExpr,
-//RS         value: TExpr,
-//RS     },
-//RS     /// D-SWIZZLE1: write swizzle `v.xy = value` — ordered lane assignments into the
-//RS     /// receiver's backing array. Sema rejects overlapping patterns (E3111).
-//RS     MathSwizzleAssign {
-//RS         base: TExpr,
-//RS         type_name: String,
-//RS         lanes: Vec<u8>,
-//RS         value: TExpr,
-//RS         clone_value: bool,
-//RS     },
-//RS     /// c109 Phase 5/22: collection iteration `loop x in coll` / `loop (k, v) in map`
-//RS     /// (`Stmt::For` with `ForKind::In`). `var2` distinguishes the two-binding map
-//RS     /// form (which iterates `(coll).iter()` and clones each key/value) from the
-//RS     /// single-binding form (`(coll).iter().cloned()`), reproducing `emit_for_in`
-//RS     /// exactly. `method_kind` (c109 Phase 22) carries the method-call-collection
-//RS     /// iteration form (`.chars()` char iteration, `.lines()` streaming reads)
-//RS     /// resolved at lowering off the same `emit_for_in` branch; `None` is the plain
-//RS     /// `.iter()` form (incl. a non-special method-call collection like `.split(…)`,
-//RS     /// which the AST routes to the `.iter().cloned()` default). When `method_kind`
-//RS     /// is set `source` holds the method *receiver* (not the whole method call), and
-//RS     /// `var2` is always `None` (a method-call collection is single-binding only).
-//RS     ForIn {
-//RS         label: Option<String>,
-//RS         var: String,
-//RS         var2: Option<String>,
-//RS         /// The expression iterated over: the method receiver for a method-call
-//RS         /// form, otherwise the whole collection (including codec readers).
-//RS         source: TExpr,
-//RS         /// The whole collection expression, whose type carries the element type.
-//RS         collection: TExpr,
-//RS         /// D-LOOP-ADVANCE2=A source stride, evaluated once before the first pull.
-//RS         step: Option<TExpr>,
-//RS         method_kind: Option<TForInMethod>,
-//RS         /// D-SOA1 / D-SOA-TIER1=A: the collection is a `#layout(columnar)` list —
-//RS         /// iterate the gathered record view (`iter_aos()`, owned `S` pulled out of
-//RS         /// the shared column store) instead of `iter().cloned()`. Always `false`
-//RS         /// for the map/method forms.
-//RS         columnar: bool,
-//RS         /// D-ONCE-WORD1 / D-CONC-STREAM1: the collection is a `Stream<T>` —
-//RS         /// iterate it directly BY VALUE; the shared Stream Prelude owns the
-//RS         /// producer task and cancellation at the consumer's wait boundary.
-//RS         by_value: bool,
-//RS         /// #4318 §4 stable loop source: the source is a place (a local or
-//RS         /// parameter through field, payload and list-index projections) and the
-//RS         /// body never mentions any name the source reads, so nothing can change
-//RS         /// it while the loop runs. Lowering then walks it in place
-//RS         /// (`read_list_walk`) instead of iterating a snapshot copy.
-//RS         source_stable: bool,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema picked the
-//RS     /// branch (`selected_then`); the AST `emit_stmts` emits ONLY that branch's
-//RS     /// statements INLINE at the same indent (no `if`, no block — and its `let`s leak
-//RS     /// into the outer scope, exactly like a plain block). The TIR carries the lowered
-//RS     /// statements of the selected branch and emits them with no wrapper. When the
-//RS     /// selected branch is `else` but there is no else-body (or sema didn't resolve),
-//RS     /// this holds an empty vec (emits nothing).
-//RS     Inline(Vec<TStmt>),
-//RS     /// D-CANVASSTATE1=D: `#DebugOnly <stmt>` / `#DebugOnly { … }`.
-//RS     /// AOT emission gates this behind `#[cfg(not(jet_release))]`; dev/JIT tiers
-//RS     /// lower it as ordinary debug code. `#Off` has no TIR node: it lowers to an
-//RS     /// empty `Inline`.
-//RS     DebugOnly(Vec<TStmt>),
-//RS     /// c109 Phase 15: a MIXED comparison/Bool `when` switch (`emit_mixed_switch`,
-//RS     /// Source/Codegen/Statement.rs) — the general `if/else if … else` form used when the
-//RS     /// arms are NOT all-variant (that is shape A, a Rust `match`), NOT all-range (shape
-//RS     /// B, `RangeSwitch`), and NOT all-fallible (shape C). Each arm head is a plain
-//RS     /// comparison/Bool expression. The AST path wraps the chain in a block that binds
-//RS     /// `__jet_switch_subject = &(subject)` (emitted for parity even when unused), then an
-//RS     /// `if/else if …` chain over each arm's condition, with the `else`/fallthrough form
-//RS     /// reproduced exactly. Each arm's condition is resolved to a Rust string at lowering
-//RS     /// (emit makes no decision). `else_body` is the optional `else` arm.
-//RS     MixedSwitch {
-//RS         /// The matched subject. Emit borrows it for the parity binding; arm
-//RS         /// conditions are already structured `TExpr` values.
-//RS         subject: TExpr,
-//RS         class: BranchClass,
-//RS         arms: Vec<(TExpr, Vec<TStmt>)>,
-//RS         else_body: Option<Vec<TStmt>>,
-//RS     },
-//RS     /// c109 Phase 18: an audited `#Unsafe { … }` gate region (`Stmt::Unsafe`, S58,
-//RS     /// E2-M13/D-LL1). The AST `emit_stmts` lowers it straight to a Rust `unsafe { … }`
-//RS     /// block; the `#Audit("…")` annotation (the `audit` field) emits NOTHING (codegen is
-//RS     /// dumb — sema validated the audit). I1: this TIR node exists ONLY for a source
-//RS     /// `#Unsafe` region, so the emitted `unsafe { … }` is always 1:1 with a source gate.
-//RS     /// Body bindings use the `unsafe` block's child lexical env.
-//RS     Unsafe {
-//RS         gate: TUnsafeGate,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// D-MEM-SENTRY1: a source/package sentry policy scope. It changes only
-//RS     /// the Prelude gate bit and preserves the enclosing gate provenance.
-//RS     SentryPolicy {
-//RS         enabled: bool,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// D-CTEFFECT1: an explicit `#Impure("reason") { … }` policy gate.
-//RS     /// AOT/JIT execute a plain lexical block; comptime evaluation raises its
-//RS     /// impurity depth only while evaluating this body.
-//RS     Impure(Vec<TStmt>),
-//RS     /// D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
-//RS     /// The executable body is lowered once into the shared MIR.
-//RS     Reactive {
-//RS         executable: Box<TLambda>,
-//RS     },
-//RS     /// c109 Phase 19: an explicit `region r { … }` (D-REGION1 opt B). Lowers to a plain
-//RS     /// Rust block `{ … }` — a lexical scope. The region's escape bound (E0631) and arena
-//RS     /// drop ordering (S63 RAII) are enforced entirely in sema; codegen is dumb (I3).
-//RS     /// Body bindings live only in the child `LowerEnv` matching that Rust scope.
-//RS     Region(Vec<TStmt>),
-//RS     /// D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` — a Cassowary-style
-//RS     /// constraint block. Unlike `Region`/the `task.group` path, this DOES need a
-//RS     /// real runtime object: `handle` is the slot the fresh `jet_layout::Handle`
-//RS     /// binds into, `label` is the source name (for the
-//RS     /// handle's debug/conflict-report label), and `body` is the block's
-//RS     /// statements lowered on the SAME env the handle was just bound into (the
-//RS     /// parser already desugared every `box.anchor` read to an ordinary
-//RS     /// `NAME.h(box, anchor)`/`NAME.v(box, anchor)` method call, so `body` is
-//RS     /// nothing but plain statements — no layout-specific TIR shape needed
-//RS     /// beyond the handle construction itself).
-//RS     Layout {
-//RS         handle: TLocal,
-//RS         label: String,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// c109 Phase 19: a `#Context(field: value) { … }` smart-context block (D-CTX1). Lowers
-//RS     /// to a plain block with one RAII/no-op guard per field (in declaration order)
-//RS     /// BEFORE the body: `allocator`/`deadline` push a dynamic context guard in
-//RS     /// `jet_mem`; `logger` stays a v1 no-op value bind. Each `(field_name, value)`
-//RS     /// pair is resolved at lowering. The body uses the block's child lexical env.
-//RS     ContextBlock {
-//RS         guards: Vec<(String, TExpr)>,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// D-TERM1 (ratified 2026-06-22): `live { … }` — terminal direct-input block.
-//RS     /// Lowers to:
-//RS     ///   `{ jet_term_enter(); let _live_guard = jet_scope_guard(|| jet_term_leave()); <body> }`
-//RS     /// The scope guard guarantees `jet_term_leave()` runs on every exit path — normal
-//RS     /// fall-through, early `return`, `?` propagation, and panic unwind. Codegen is dumb
-//RS     /// (I3): no decisions here, only emitting the already-checked RAII form.
-//RS     Live {
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// D-SHIELDNAME1=A (ratified 2026-07-11): `#Shield { … }` — a cancellation-shield
-//RS     /// region. Lowers to:
-//RS     ///   `{ jet_scheduler_shield_enter(); let _shield_guard = jet_scope_guard(|| jet_scheduler_shield_leave()); <body> }`
-//RS     /// The scope guard guarantees `jet_scheduler_shield_leave()` runs on every exit
-//RS     /// path (normal, `return`, `?`, panic unwind) so a deferred cancel/deadline lands
-//RS     /// at region exit — deadline first, then cancel (the runtime `_leave` decides the
-//RS     /// order). A no-op outside a task (SHIELD_DEPTH is thread-local). Codegen is dumb
-//RS     /// (I3): only emits the already-checked RAII form.
-//RS     Shield {
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// D-DOTSCOPE1: a `#Test` scope-member region — `.setup` / `.expect_fail` /
-//RS     /// `.timeout(dur)` / `.skip`. Emitted only inside a `jet test` harness fn
-//RS     /// (`fn jet_test_N() -> Result<(), String>`); see `emit_tir_stmt` for the
-//RS     /// per-kind lowering. Whole-test `.skip` (a `.skip` first statement) is
-//RS     /// handled by the harness `main`, not here.
-//RS     ScopeMember {
-//RS         kind: ScopeMemberKind,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` — a transaction
-//RS     /// block. Lowers to:
-//RS     ///   `{ let mut <handle> = jet_transaction(); <body>; <handle>.commit(); }`
-//RS     /// `<handle>.on_commit(() => { … })` inside the body lowers to
-//RS     /// `<handle>.on_commit(Box::new(move || { … }))`. The registered hooks run LIFO
-//RS     /// in `JetTransaction::drop` — but only if `commit()` ran. A `?`-failure or any
-//RS     /// early return skips `commit()`, so the hooks drop un-run (D-TXN3). The
-//RS     /// irreversible-effect rejection (E0746, D-TXN2) and rollback are sema's job;
-//RS     /// codegen is dumb (I3): effects/transaction state are a compile-time fact.
-//RS     Transact {
-//RS         /// The transaction handle's slot, or `None` for a bare `#Transact { … }`
-//RS         /// with no handle (no `on_commit`/`on_rollback` hooks). When `snapshots` is
-//RS         /// non-empty a handle is synthesized even for a bare block, so the
-//RS         /// auto-snapshot has a transaction to register on.
-//RS         handle: Option<TLocal>,
-//RS         /// D-TXN-ROLLBACK layer 1+2: each snapshotted local plus, when the local's
-//RS         /// type implements `Rollback`, that type. Without a type the snapshot is
-//RS         /// clone-based (`jet_txn::snapshot`); with one it uses
-//RS         /// `jet_txn::snapshot_custom` and `<ty>::restore`, so the custom cheap diff
-//RS         /// runs instead of a full clone.
-//RS         snapshots: Vec<(TLocal, Option<Type>)>,
-//RS         /// D-STM1=A (card #506): the compiler-owned mutable STM handle when the
-//RS         /// block touches the `Shared<T>` plane. Its presence means emission wraps
-//RS         /// the body in `jet_stm::begin()` … `.commit()` — the atomic multi-handle
-//RS         /// commit. `None` preserves the plain local-only transaction shape.
-//RS         stm: Option<TLocal>,
-//RS         body: Vec<TStmt>,
-//RS     },
-//RS     /// A checked compile-time-only construct retained as an explicit erasure
-//RS     /// row so no source form disappears from the total program silently.
-//RS     Erased {
-//RS         construct: String,
-//RS         span: crate::Diagnostics::Span,
-//RS         reason: TirErasureReason,
-//RS     },
-//RS     /// A structurally impossible post-sema shape.  Old adapters surface this
-//RS     /// as an ICE; canonical MIR returns a typed lowering error.
-//RS     InvariantViolation {
-//RS         construct: String,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     /// D-DBG3 step 2 (dap-debugger): a source line marker, one per lowered `Stmt`,
-//RS     /// inserted ONLY when `cx.debug_linemap` is set (native `jet debug` builds —
-//RS     /// never a normal build or the JIT tier, so this is invisible to the JIT
-//RS     /// lowering gate and every other TStmt consumer). Emits a `// jet:line N`
-//RS     /// comment immediately before the statement's generated Rust, giving the native
-//RS     /// backend a rust-line -> jet-line table without touching any other TStmt shape.
-//RS     LineMarker(usize),
-//RS     /// Source location for the following statement. Evaluators consume it;
-//RS     /// code generators discard it.
-//RS     SourceSpan(crate::Diagnostics::Span),
-//RS }
-//RS 
-//RS impl TStmt {
-//RS     /// Return the loop proof, if this statement carries one.
-//RS     pub fn fact_channel(&self) -> TFactChannel<'_> {
-//RS         match self {
-//RS             TStmt::Range {
-//RS                 auto_vectorization: Some(facts),
-//RS                 ..
-//RS             }
-//RS             | TStmt::CountedLoop {
-//RS                 auto_vectorization: Some(facts),
-//RS                 ..
-//RS             } => TFactChannel::from_auto_vectorization(facts),
-//RS             _ => TFactChannel::unknown(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-BRANCH-CODEGEN1=B: total lowering classification for one arm table.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum BranchClass {
-//RS     Bool2,
-//RS     Enum,
-//RS     DenseInt,
-//RS     SparseInt,
-//RS     Ordered,
-//RS     Mixed,
-//RS }
-//RS 
-//RS /// c109 Phase 4: one lowered arm of an exhaustive enum match. `pattern` is the
-//RS /// fully-resolved Rust match pattern (`__jet_Light::__jet_Red`,
-//RS /// `__jet_Conn::__jet_Active(user_id) | __jet_Conn::__jet_Reconnecting(user_id)`,
-//RS /// `__jet_Http::__jet_Good(__jet_range_0)`); `guard` is the optional `if …` range
-//RS /// guard. Both are computed once at lowering — emit only formats them.
-//RS #[derive(Clone)]
-//RS pub struct TMatchArm {
-//RS     pub pattern: TPattern,
-//RS     pub body: Vec<TStmt>,
-//RS }
-//RS 
-//RS /// A fully analytical checked pattern.  TIR stores no AST pattern: every
-//RS /// variant, binding, field, interpolation hole, and binary read is copied into
-//RS /// this target-neutral shape before the bundle reaches an adapter.
-//RS #[derive(Clone)]
-//RS pub struct TPattern {
-//RS     pub shape: TPatternShape,
-//RS     /// Canonical owning enum/type key, when the subject has a nominal owner.
-//RS     pub enum_type: Option<String>,
-//RS     pub position: TPatternPosition,
-//RS     /// Whether payload bindings need mutable slots.
-//RS     pub mutable: bool,
-//RS     /// Sema-proved boxed payload representation for enum variants.
-//RS     pub boxed: bool,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub enum TPatternShape {
-//RS     Variant {
-//RS         variant: String,
-//RS         bindings: Vec<TPatternBinding>,
-//RS         leading_dot: bool,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     /// `inner` is an S31 nested payload pattern (`.Val(.Rect(w, h))`).
-//RS     Present {
-//RS         binding: String,
-//RS         binding_span: crate::Diagnostics::Span,
-//RS         inner: Option<Box<TPatternShape>>,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     Absent(crate::Diagnostics::Span),
-//RS     Ok {
-//RS         binding: String,
-//RS         binding_span: crate::Diagnostics::Span,
-//RS         inner: Option<Box<TPatternShape>>,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     Err {
-//RS         binding: String,
-//RS         binding_span: crate::Diagnostics::Span,
-//RS         inner: Option<Box<TPatternShape>>,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     Range {
-//RS         lo: i64,
-//RS         hi: i64,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     Or(Vec<TPatternShape>, crate::Diagnostics::Span),
-//RS     Struct {
-//RS         fields: Vec<TPatternField>,
-//RS         rest: Option<crate::Diagnostics::Span>,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     Text(Vec<TTextPatternPart>, crate::Diagnostics::Span),
-//RS     Binary(Vec<TBinaryPatternPart>, crate::Diagnostics::Span),
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub enum TPatternBinding {
-//RS     Wildcard,
-//RS     Bind {
-//RS         name: String,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     Range {
-//RS         lo: i64,
-//RS         hi: i64,
-//RS     },
-//RS     /// S31: a nested pattern tests this payload slot.
-//RS     Nested(Box<TPatternShape>),
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub enum TPatternField {
-//RS     Bind {
-//RS         field: String,
-//RS         local: String,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     Value {
-//RS         field: String,
-//RS         value: Box<TExpr>,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub enum TTextPatternPart {
-//RS     Literal(String),
-//RS     Hole {
-//RS         name: String,
-//RS         /// Checked capture type. Untyped holes are sema-resolved to String.
-//RS         ty: Type,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub enum TBinaryPatternPart {
-//RS     Literal(Vec<u8>),
-//RS     Bits {
-//RS         name: String,
-//RS         width: u8,
-//RS         big_endian: bool,
-//RS         /// Checked unsigned integer type for this bit capture.
-//RS         ty: Type,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS     Rest {
-//RS         name: String,
-//RS         /// Checked byte-list type for the trailing rest capture.
-//RS         ty: Type,
-//RS         span: crate::Diagnostics::Span,
-//RS     },
-//RS }
-//RS 
-//RS /// Where a `TPattern` is tested.
-//RS #[derive(Debug, Clone)]
-//RS pub enum TPatternPosition {
-//RS     Binding,
-//RS     OptionBinding,
-//RS     Arm,
-//RS     VariantPath,
-//RS     DataEntries { temp: String },
-//RS }
-//RS 
-//RS impl TPattern {
-//RS     pub(crate) fn from_ast(
-//RS         pattern: crate::AST::Pattern,
-//RS         enum_type: Option<String>,
-//RS         position: TPatternPosition,
-//RS         mutable: bool,
-//RS         boxed: bool,
-//RS     ) -> TPattern {
-//RS         assert!(
-//RS             !Self::contains_struct_value(&pattern),
-//RS             "struct-pattern value requires from_ast_with_values"
-//RS         );
-//RS         TPattern {
-//RS             shape: Self::shape_from_ast(&pattern),
-//RS             enum_type,
-//RS             position,
-//RS             mutable,
-//RS             boxed,
-//RS         }
-//RS     }
-//RS 
-//RS     fn invariant_pattern_value(span: crate::Diagnostics::Span) -> Box<TExpr> {
-//RS         Box::new(TExpr {
-//RS             ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-//RS             kind: TExprKind::InvariantViolation {
-//RS                 construct: "unlowered struct-pattern value".to_string(),
-//RS                 span,
-//RS             },
-//RS         })
-//RS     }
-//RS 
-//RS     fn contains_struct_value(pattern: &crate::AST::Pattern) -> bool {
-//RS         match pattern {
-//RS             crate::AST::Pattern::Struct { fields, .. } => fields
-//RS                 .iter()
-//RS                 .any(|field| matches!(field, crate::AST::StructPatField::Value { .. })),
-//RS             crate::AST::Pattern::Or(alternatives, ..) => {
-//RS                 alternatives.iter().any(Self::contains_struct_value)
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn from_ast_with_values<F>(
-//RS         pattern: crate::AST::Pattern,
-//RS         enum_type: Option<String>,
-//RS         position: TPatternPosition,
-//RS         mutable: bool,
-//RS         boxed: bool,
-//RS         mut lower_value: F,
-//RS     ) -> TPattern
-//RS     where
-//RS         F: FnMut(&crate::AST::Expr) -> TExpr,
-//RS     {
-//RS         fn fill_values<F>(
-//RS             shape: &mut TPatternShape,
-//RS             pattern: &crate::AST::Pattern,
-//RS             lower_value: &mut F,
-//RS         ) where
-//RS             F: FnMut(&crate::AST::Expr) -> TExpr,
-//RS         {
-//RS             match (shape, pattern) {
-//RS                 (
-//RS                     TPatternShape::Struct { fields, .. },
-//RS                     crate::AST::Pattern::Struct {
-//RS                         fields: source_fields,
-//RS                         ..
-//RS                     },
-//RS                 ) => {
-//RS                     for (field, source) in fields.iter_mut().zip(source_fields) {
-//RS                         if let (
-//RS                             TPatternField::Value { value, .. },
-//RS                             crate::AST::StructPatField::Value { value: source, .. },
-//RS                         ) = (field, source)
-//RS                         {
-//RS                             *value = Box::new(lower_value(source));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 (
-//RS                     TPatternShape::Or(alternatives, ..),
-//RS                     crate::AST::Pattern::Or(source_alternatives, ..),
-//RS                 ) => {
-//RS                     for (shape, source) in alternatives.iter_mut().zip(source_alternatives) {
-//RS                         fill_values(shape, source, lower_value);
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS 
-//RS         let mut shape = Self::shape_from_ast(&pattern);
-//RS         fill_values(&mut shape, &pattern, &mut lower_value);
-//RS         TPattern {
-//RS             shape,
-//RS             enum_type,
-//RS             position,
-//RS             mutable,
-//RS             boxed,
-//RS         }
-//RS     }
-//RS 
-//RS     fn shape_from_ast(pattern: &crate::AST::Pattern) -> TPatternShape {
-//RS         match pattern {
-//RS             crate::AST::Pattern::Variant {
-//RS                 variant,
-//RS                 bindings,
-//RS                 leading_dot,
-//RS                 span,
-//RS             } => TPatternShape::Variant {
-//RS                 variant: variant.clone(),
-//RS                 bindings: bindings
-//RS                     .iter()
-//RS                     .map(|binding| match binding {
-//RS                         crate::AST::PatSlot::Wildcard => TPatternBinding::Wildcard,
-//RS                         crate::AST::PatSlot::Bind { name, span } => TPatternBinding::Bind {
-//RS                             name: name.clone(),
-//RS                             span: *span,
-//RS                         },
-//RS                         crate::AST::PatSlot::Range { lo, hi } => {
-//RS                             TPatternBinding::Range { lo: *lo, hi: *hi }
-//RS                         }
-//RS                         crate::AST::PatSlot::Nested(inner) => {
-//RS                             TPatternBinding::Nested(Box::new(Self::shape_from_ast(inner)))
-//RS                         }
-//RS                         crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
-//RS                             unreachable!("sema places named payload entries (D-PAT-NAMED-NEST1)")
-//RS                         }
-//RS                     })
-//RS                     .collect(),
-//RS                 leading_dot: *leading_dot,
-//RS                 span: *span,
-//RS             },
-//RS             crate::AST::Pattern::Present {
-//RS                 binding,
-//RS                 binding_span,
-//RS                 inner,
-//RS                 span,
-//RS             } => TPatternShape::Present {
-//RS                 binding: binding.clone(),
-//RS                 binding_span: *binding_span,
-//RS                 inner: inner
-//RS                     .as_deref()
-//RS                     .map(|inner| Box::new(Self::shape_from_ast(inner))),
-//RS                 span: *span,
-//RS             },
-//RS             crate::AST::Pattern::Absent(span) => TPatternShape::Absent(*span),
-//RS             crate::AST::Pattern::Ok {
-//RS                 binding,
-//RS                 binding_span,
-//RS                 inner,
-//RS                 span,
-//RS             } => TPatternShape::Ok {
-//RS                 binding: binding.clone(),
-//RS                 binding_span: *binding_span,
-//RS                 inner: inner
-//RS                     .as_deref()
-//RS                     .map(|inner| Box::new(Self::shape_from_ast(inner))),
-//RS                 span: *span,
-//RS             },
-//RS             crate::AST::Pattern::Err {
-//RS                 binding,
-//RS                 binding_span,
-//RS                 inner,
-//RS                 span,
-//RS             } => TPatternShape::Err {
-//RS                 binding: binding.clone(),
-//RS                 binding_span: *binding_span,
-//RS                 inner: inner
-//RS                     .as_deref()
-//RS                     .map(|inner| Box::new(Self::shape_from_ast(inner))),
-//RS                 span: *span,
-//RS             },
-//RS             crate::AST::Pattern::Range { lo, hi, span } => TPatternShape::Range {
-//RS                 lo: *lo,
-//RS                 hi: *hi,
-//RS                 span: *span,
-//RS             },
-//RS             crate::AST::Pattern::Or(alternatives, span) => TPatternShape::Or(
-//RS                 alternatives.iter().map(Self::shape_from_ast).collect(),
-//RS                 *span,
-//RS             ),
-//RS             crate::AST::Pattern::Struct { fields, rest, span } => TPatternShape::Struct {
-//RS                 fields: fields
-//RS                     .iter()
-//RS                     .map(|field| match field {
-//RS                         crate::AST::StructPatField::Bind {
-//RS                             field,
-//RS                             local,
-//RS                             local_span,
-//RS                             ..
-//RS                         } => TPatternField::Bind {
-//RS                             field: field.clone(),
-//RS                             local: local.clone(),
-//RS                             span: *local_span,
-//RS                         },
-//RS                         crate::AST::StructPatField::Value {
-//RS                             field, field_span, ..
-//RS                         } => TPatternField::Value {
-//RS                             field: field.clone(),
-//RS                             value: Self::invariant_pattern_value(*field_span),
-//RS                             span: *field_span,
-//RS                         },
-//RS                     })
-//RS                     .collect(),
-//RS                 rest: *rest,
-//RS                 span: *span,
-//RS             },
-//RS             crate::AST::Pattern::StrMatch { parts, span } => TPatternShape::Text(
-//RS                 parts
-//RS                     .iter()
-//RS                     .map(|part| match part {
-//RS                         crate::AST::StrMatchPart::Lit(text) => {
-//RS                             TTextPatternPart::Literal(text.clone())
-//RS                         }
-//RS                         crate::AST::StrMatchPart::Hole { name, ty, span } => {
-//RS                             TTextPatternPart::Hole {
-//RS                                 name: name.clone(),
-//RS                                 ty: ty.clone().unwrap_or(Type::String),
-//RS                                 span: *span,
-//RS                             }
-//RS                         }
-//RS                     })
-//RS                     .collect(),
-//RS                 *span,
-//RS             ),
-//RS             crate::AST::Pattern::BinMatch { parts, span } => TPatternShape::Binary(
-//RS                 parts
-//RS                     .iter()
-//RS                     .map(|part| match part {
-//RS                         crate::AST::BinMatchPart::Lit(bytes) => {
-//RS                             TBinaryPatternPart::Literal(bytes.clone())
-//RS                         }
-//RS                         crate::AST::BinMatchPart::Hole { name, spec, span } => match spec {
-//RS                             crate::AST::BinSpec::Bits { width, endian } => {
-//RS                                 TBinaryPatternPart::Bits {
-//RS                                     name: name.clone(),
-//RS                                     width: *width,
-//RS                                     big_endian: matches!(endian, crate::AST::BinEndian::Big),
-//RS                                     ty: Self::binary_bits_type(*width),
-//RS                                     span: *span,
-//RS                                 }
-//RS                             }
-//RS                             crate::AST::BinSpec::Rest => TBinaryPatternPart::Rest {
-//RS                                 name: name.clone(),
-//RS                                 ty: Self::binary_rest_type(),
-//RS                                 span: *span,
-//RS                             },
-//RS                         },
-//RS                     })
-//RS                     .collect(),
-//RS                 *span,
-//RS             ),
-//RS         }
-//RS     }
-//RS 
-//RS     fn binary_bits_type(width: u8) -> Type {
-//RS         let bits = if width <= 8 {
-//RS             8
-//RS         } else if width <= 16 {
-//RS             16
-//RS         } else if width <= 32 {
-//RS             32
-//RS         } else {
-//RS             64
-//RS         };
-//RS         Type::IntN {
-//RS             signed: false,
-//RS             bits,
-//RS         }
-//RS     }
-//RS 
-//RS     fn binary_rest_type() -> Type {
-//RS         Type::List(Box::new(Type::IntN {
-//RS             signed: false,
-//RS             bits: 8,
-//RS         }))
-//RS     }
-//RS 
-//RS     pub fn arm(pattern: crate::AST::Pattern, enum_type: Option<String>) -> TPattern {
-//RS         assert!(
-//RS             !Self::contains_struct_value(&pattern),
-//RS             "struct-pattern value requires from_ast_with_values"
-//RS         );
-//RS         TPattern {
-//RS             shape: Self::shape_from_ast(&pattern),
-//RS             enum_type,
-//RS             position: TPatternPosition::Arm,
-//RS             mutable: false,
-//RS             boxed: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn binding(pattern: crate::AST::Pattern) -> TPattern {
-//RS         assert!(
-//RS             !Self::contains_struct_value(&pattern),
-//RS             "struct-pattern value requires from_ast_with_values"
-//RS         );
-//RS         TPattern {
-//RS             shape: Self::shape_from_ast(&pattern),
-//RS             enum_type: None,
-//RS             position: TPatternPosition::Binding,
-//RS             mutable: false,
-//RS             boxed: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn option_binding(pattern: crate::AST::Pattern) -> TPattern {
-//RS         assert!(
-//RS             !Self::contains_struct_value(&pattern),
-//RS             "struct-pattern value requires from_ast_with_values"
-//RS         );
-//RS         TPattern {
-//RS             shape: Self::shape_from_ast(&pattern),
-//RS             enum_type: None,
-//RS             position: TPatternPosition::OptionBinding,
-//RS             mutable: false,
-//RS             boxed: false,
-//RS         }
-//RS     }
-//RS     pub fn variant(&self) -> Option<&str> {
-//RS         match &self.shape {
-//RS             TPatternShape::Variant { variant, .. } => Some(variant),
-//RS             TPatternShape::Or(alts, _) => match alts.first() {
-//RS                 Some(TPatternShape::Variant { variant, .. }) => Some(variant),
-//RS                 _ => None,
-//RS             },
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn arm_with_values<F>(
-//RS         pattern: crate::AST::Pattern,
-//RS         enum_type: Option<String>,
-//RS         lower_value: F,
-//RS     ) -> TPattern
-//RS     where
-//RS         F: FnMut(&crate::AST::Expr) -> TExpr,
-//RS     {
-//RS         Self::from_ast_with_values(
-//RS             pattern,
-//RS             enum_type,
-//RS             TPatternPosition::Arm,
-//RS             false,
-//RS             false,
-//RS             lower_value,
-//RS         )
-//RS     }
-//RS 
-//RS     pub(crate) fn binding_with_values<F>(pattern: crate::AST::Pattern, lower_value: F) -> TPattern
-//RS     where
-//RS         F: FnMut(&crate::AST::Expr) -> TExpr,
-//RS     {
-//RS         Self::from_ast_with_values(
-//RS             pattern,
-//RS             None,
-//RS             TPatternPosition::Binding,
-//RS             false,
-//RS             false,
-//RS             lower_value,
-//RS         )
-//RS     }
-//RS 
-//RS     pub(crate) fn option_binding_with_values<F>(
-//RS         pattern: crate::AST::Pattern,
-//RS         lower_value: F,
-//RS     ) -> TPattern
-//RS     where
-//RS         F: FnMut(&crate::AST::Expr) -> TExpr,
-//RS     {
-//RS         Self::from_ast_with_values(
-//RS             pattern,
-//RS             None,
-//RS             TPatternPosition::OptionBinding,
-//RS             false,
-//RS             false,
-//RS             lower_value,
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn span(&self) -> crate::Diagnostics::Span {
-//RS         match &self.shape {
-//RS             TPatternShape::Variant { span, .. }
-//RS             | TPatternShape::Present { span, .. }
-//RS             | TPatternShape::Ok { span, .. }
-//RS             | TPatternShape::Err { span, .. }
-//RS             | TPatternShape::Range { span, .. }
-//RS             | TPatternShape::Struct { span, .. }
-//RS             | TPatternShape::Text(_, span)
-//RS             | TPatternShape::Binary(_, span)
-//RS             | TPatternShape::Or(_, span) => *span,
-//RS             TPatternShape::Absent(span) => *span,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Compact, typed bounds carried by a sema proof.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub struct TIntegerBounds {
-//RS     pub lo: i128,
-//RS     pub hi: i128,
-//RS }
-//RS 
-//RS impl TIntegerBounds {
-//RS     pub const fn exact(value: i128) -> Self {
-//RS         Self {
-//RS             lo: value,
-//RS             hi: value,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A fully typed expression. The resolved type is carried on every node,
-//RS /// so codegen never recomputes it.
-//RS #[derive(Clone)]
-//RS pub struct TExpr {
-//RS     pub ty: Type,
-//RS     pub kind: TExprKind,
-//RS }
-//RS 
-//RS /// The semantic operation whose cost can remain after optimization.  These
-//RS /// categories are deliberately small and typed: reporting must consume the
-//RS /// same fact that lowering gave to every backend, not infer a cost from Rust
-//RS /// text.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum TCostKind {
-//RS     /// A read-only view crossed an owning boundary and must be copied.
-//RS     ViewMaterialization,
-//RS     /// A shared map backing store needs `Arc::make_mut` before an edit.
-//RS     CollectionCopyOnWrite,
-//RS     /// An exact `Int` operation may leave the packed signed-63-bit rail.
-//RS     ExactIntSpill,
-//RS     /// A `Result`/`Option` carrier is constructed at a call or explicit
-//RS     /// constructor site.
-//RS     OutcomeConstruction,
-//RS     /// A generic collection representation remains because no shape proof
-//RS     /// selected the direct representation.
-//RS     RepresentationFallback,
-//RS }
-//RS 
-//RS impl TCostKind {
-//RS     pub const fn label(self) -> &'static str {
-//RS         match self {
-//RS             Self::ViewMaterialization => "view materialization",
-//RS             Self::CollectionCopyOnWrite => "map copy-on-write",
-//RS             Self::ExactIntSpill => "exact Int spill",
-//RS             Self::OutcomeConstruction => "outcome construction",
-//RS             Self::RepresentationFallback => "generic representation fallback",
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn operation(self) -> &'static str {
-//RS         match self {
-//RS             Self::ViewMaterialization => "materializing a read-only view",
-//RS             Self::CollectionCopyOnWrite => "editing a shared map backing store",
-//RS             Self::ExactIntSpill => "an exact Int operation may spill to bigint",
-//RS             Self::OutcomeConstruction => "constructing an Outcome carrier",
-//RS             Self::RepresentationFallback => "using a generic collection representation",
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn fix(self) -> &'static str {
-//RS         match self {
-//RS             Self::ViewMaterialization => {
-//RS                 "keep the value in its view form, or make the copy explicit outside the loop"
-//RS             }
-//RS             Self::CollectionCopyOnWrite => {
-//RS                 "mutate an exclusive map place, or move the edit outside the loop"
-//RS             }
-//RS             Self::ExactIntSpill => {
-//RS                 "bound the operands so the result stays on the packed Int rail, or accept exact bigint cost"
-//RS             }
-//RS             Self::OutcomeConstruction => {
-//RS                 "consume the outcome through an immediate fast path when one exists"
-//RS             }
-//RS             Self::RepresentationFallback => {
-//RS                 "provide the collection shape proof that selects the direct representation"
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Whether a typed cost is still present in emitted semantics.  `Removed` is
-//RS /// retained for `jet explain --cost`, while lint consumers only surface
-//RS /// `SemanticRemainder`.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum TCostState {
-//RS     SemanticRemainder,
-//RS     OptimizerRemoved,
-//RS }
-//RS 
-//RS /// One cost fact projected through the same borrowed channel as type, bounds,
-//RS /// access, and purity facts.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub struct TCostFact {
-//RS     pub kind: TCostKind,
-//RS     pub state: TCostState,
-//RS }
-//RS 
-//RS impl TCostFact {
-//RS     pub const fn semantic(kind: TCostKind) -> Self {
-//RS         Self {
-//RS             kind,
-//RS             state: TCostState::SemanticRemainder,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A lowered cost site.  The span is the nearest source marker available in
-//RS /// TIR; function-level attribution remains total when debug line markers are
-//RS /// not present.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct TCostSite {
-//RS     pub function: String,
-//RS     pub span: crate::Diagnostics::Span,
-//RS     pub kind: TCostKind,
-//RS     pub state: TCostState,
-//RS     pub loop_depth: usize,
-//RS }
-//RS 
-//RS /// A cost projection must never turn a filtered TIR program into a green
-//RS /// report.  A lowerer refusal is therefore part of the public projection
-//RS /// result, not an empty report that an adapter can accidentally ignore.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub enum TCostReportError {
-//RS     Lowering { reason: String },
-//RS     Incomplete { surfaces: Vec<String> },
-//RS }
-//RS 
-//RS impl TCostReportError {
-//RS     pub fn message(&self) -> String {
-//RS         match self {
-//RS             Self::Lowering { reason } => {
-//RS                 format!("typed TIR lowering failed for cost projection: {reason}")
-//RS             }
-//RS             Self::Incomplete { surfaces } => format!(
-//RS                 "cost projection is incomplete: reachable sema surface(s) omitted by typed TIR: {}",
-//RS                 surfaces.join(", ")
-//RS             ),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Complete cost projection for one checked program.
-//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
-//RS pub struct TCostReport {
-//RS     pub sites: Vec<TCostSite>,
-//RS }
-//RS 
-//RS /// The access fact available to an optimizer consumer.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum TExclusivity {
-//RS     /// Sema did not prove an access mode at this subject.
-//RS     Unknown,
-//RS     /// A shared/read access. It does not authorize mutation or reordering.
-//RS     Shared,
-//RS     /// A sema-proven exclusive/write access.
-//RS     Exclusive,
-//RS     /// A sema-proven consuming/move access.
-//RS     Move,
-//RS }
-//RS 
-//RS /// Three-state purity fact. `Unknown` is the conservative default.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum TPurity {
-//RS     Unknown,
-//RS     Pure,
-//RS     Impure,
-//RS }
-//RS 
-//RS /// One read-only fact channel shared by TIR optimization consumers.
-//RS ///
-//RS /// This is deliberately a borrowed view over facts already carried by the
-//RS /// frozen TIR (`TExpr.ty`/`CtLit`, `TCallArg` access flags, `TStmt` loop proofs,
-//RS /// and `TFunc.is_pure`). It has no per-node allocation and no parallel schema.
-//RS /// A missing field means sema did not prove that fact; consumers must retain
-//RS /// the checked Prelude operation or other conservative dependency.
-//RS #[derive(Clone, Copy, Debug)]
-//RS pub struct TFactChannel<'a> {
-//RS     pub ty: Option<&'a Type>,
-//RS     pub integer_bounds: Option<TIntegerBounds>,
-//RS     pub exclusivity: TExclusivity,
-//RS     pub purity: TPurity,
-//RS     /// Sema's loop-level proof that one iteration cannot observe another's
-//RS     /// writes. Unknown stays false so vectorizers never infer independence.
-//RS     pub no_cross_iteration_deps: bool,
-//RS     pub comptime_value: Option<&'a crate::AST::CtValue>,
-//RS     /// Typed cost evidence. `SemanticRemainder` is a real cost; `OptimizerRemoved`
-//RS     /// is a proof that the same operation remains semantically available but
-//RS     /// its dynamic fallback is unreachable for the carried bounds.
-//RS     pub cost: Option<TCostFact>,
-//RS }
-//RS 
-//RS impl<'a> TFactChannel<'a> {
-//RS     pub const fn unknown() -> Self {
-//RS         Self {
-//RS             ty: None,
-//RS             integer_bounds: None,
-//RS             exclusivity: TExclusivity::Unknown,
-//RS             purity: TPurity::Unknown,
-//RS             no_cross_iteration_deps: false,
-//RS             comptime_value: None,
-//RS             cost: None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Project the complete sema loop proof into the common channel.
-//RS     pub fn from_auto_vectorization(facts: &'a crate::AST::AutoVectorizationFacts) -> Self {
-//RS         Self {
-//RS             ty: Some(&facts.element_type),
-//RS             integer_bounds: None,
-//RS             exclusivity: if facts.no_aliasing {
-//RS                 TExclusivity::Exclusive
-//RS             } else {
-//RS                 TExclusivity::Unknown
-//RS             },
-//RS             purity: if facts.no_aliasing
-//RS                 && facts.no_early_exit
-//RS                 && facts.effect_free_body
-//RS                 && facts.no_cross_iteration_deps
-//RS             {
-//RS                 TPurity::Pure
-//RS             } else {
-//RS                 TPurity::Unknown
-//RS             },
-//RS             no_cross_iteration_deps: facts.no_cross_iteration_deps,
-//RS             comptime_value: None,
-//RS             cost: None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn integer_bounds_for_type(ty: &Type) -> Option<TIntegerBounds> {
-//RS     ty.integer_range().map(|(lo, hi)| TIntegerBounds { lo, hi })
-//RS }
-//RS 
-//RS /// Project the interval already carried by a TIR expression. This deliberately
-//RS /// admits only literals, locals with a lowering proof, copies, and arithmetic
-//RS /// whose operand intervals are both known. Unknown calls and other effectful
-//RS /// forms stay unproven.
-//RS pub(crate) fn integer_bounds_for_expr(expr: &TExpr) -> Option<TIntegerBounds> {
-//RS     let bounds = match &expr.kind {
-//RS         TExprKind::IntLit(value, _) => Some(TIntegerBounds::exact(*value as i128)),
-//RS         TExprKind::CtLit(crate::AST::CtValue::Int(value)) => {
-//RS             Some(TIntegerBounds::exact(*value as i128))
-//RS         }
-//RS         TExprKind::CtLit(crate::AST::CtValue::BigInt(value)) => {
-//RS             value.try_i128().map(TIntegerBounds::exact)
-//RS         }
-//RS         TExprKind::NumericMethod {
-//RS             op: TNumericOp::InlineRange { lo, hi, .. },
-//RS             ..
-//RS         } => Some(TIntegerBounds {
-//RS             lo: *lo as i128,
-//RS             hi: *hi as i128,
-//RS         }),
-//RS         TExprKind::OrFallback { value, fallback } => {
-//RS             let success = match &value.ty {
-//RS                 Type::Option(inner) => integer_bounds_for_type(inner),
-//RS                 // Result ?? leaves its complete success type intact. Thus a
-//RS                 // Result<Option<Int>, E> has no scalar bounds until a second
-//RS                 // ?? unwraps the Option.
-//RS                 Type::Result { ok, .. } => integer_bounds_for_type(ok.as_ref()),
-//RS                 _ => None,
-//RS             };
-//RS             match fallback {
-//RS                 TOrFallback::Value(fallback) => {
-//RS                     let fallback = integer_bounds_for_expr(fallback)?;
-//RS                     let success = success?;
-//RS                     Some(TIntegerBounds {
-//RS                         lo: success.lo.min(fallback.lo),
-//RS                         hi: success.hi.max(fallback.hi),
-//RS                     })
-//RS                 }
-//RS                 _ => success,
-//RS             }
-//RS         }
-//RS         TExprKind::NumericMethod {
-//RS             recv,
-//RS             op: TNumericOp::CastAs { dst_rust },
-//RS         } if dst_rust == "i64" => {
-//RS             let bounds = integer_bounds_for_expr(recv)?;
-//RS             (bounds.lo >= i64::MIN as i128 && bounds.hi <= i64::MAX as i128).then_some(bounds)
-//RS         }
-//RS         TExprKind::Local(local) => local.integer_bounds,
-//RS         TExprKind::Unary {
-//RS             op: UnOp::Neg,
-//RS             operand,
-//RS         } => integer_bounds_for_expr(operand).and_then(negate_integer_bounds),
-//RS         TExprKind::Binary { op, lhs, rhs, .. } => {
-//RS             let lhs = integer_bounds_for_expr(lhs)?;
-//RS             let rhs = integer_bounds_for_expr(rhs)?;
-//RS             integer_bounds_for_op(*op, lhs, rhs)
-//RS         }
-//RS         _ => None,
-//RS     };
-//RS     bounds.or_else(|| integer_bounds_for_type(&expr.ty))
-//RS }
-//RS 
-//RS fn negate_integer_bounds(bounds: TIntegerBounds) -> Option<TIntegerBounds> {
-//RS     Some(TIntegerBounds {
-//RS         lo: bounds.hi.checked_neg()?,
-//RS         hi: bounds.lo.checked_neg()?,
-//RS     })
-//RS }
-//RS 
-//RS fn floor_div_i128(value: i128, divisor: i128) -> Option<i128> {
-//RS     if divisor == 0 {
-//RS         return None;
-//RS     }
-//RS     let quotient = value.checked_div(divisor)?;
-//RS     let remainder = value.checked_rem(divisor)?;
-//RS     if remainder != 0 && (value < 0) != (divisor < 0) {
-//RS         quotient.checked_sub(1)
-//RS     } else {
-//RS         Some(quotient)
-//RS     }
-//RS }
-//RS 
-//RS fn floor_div_bounds(lhs: TIntegerBounds, rhs: TIntegerBounds) -> Option<TIntegerBounds> {
-//RS     if rhs.lo <= 0 && rhs.hi >= 0 {
-//RS         return None;
-//RS     }
-//RS     let mut rhs_points = [0i128; 4];
-//RS     let mut rhs_len = 0;
-//RS     for point in [rhs.lo, rhs.hi] {
-//RS         if point != 0 {
-//RS             rhs_points[rhs_len] = point;
-//RS             rhs_len += 1;
-//RS         }
-//RS     }
-//RS     // The quotient is monotone on each non-zero-sign side of the divisor.
-//RS     // Include the closest-to-zero point so an interval such as 2..9 also
-//RS     // accounts for the possible divisor 1 when its bound is widened later.
-//RS     if rhs.lo <= -1 && rhs.hi >= -1 {
-//RS         rhs_points[rhs_len] = -1;
-//RS         rhs_len += 1;
-//RS     }
-//RS     if rhs.lo <= 1 && rhs.hi >= 1 {
-//RS         rhs_points[rhs_len] = 1;
-//RS         rhs_len += 1;
-//RS     }
-//RS     let mut values = [0i128; 8];
-//RS     let mut value_len = 0;
-//RS     for value in [lhs.lo, lhs.hi] {
-//RS         for divisor in &rhs_points[..rhs_len] {
-//RS             values[value_len] = floor_div_i128(value, *divisor)?;
-//RS             value_len += 1;
-//RS         }
-//RS     }
-//RS     let values = &values[..value_len];
-//RS     let (&lo, &hi) = (values.iter().min()?, values.iter().max()?);
-//RS     Some(TIntegerBounds { lo, hi })
-//RS }
-//RS 
-//RS fn remainder_bounds(lhs: TIntegerBounds, rhs: TIntegerBounds) -> Option<TIntegerBounds> {
-//RS     if rhs.lo <= 0 && rhs.hi >= 0 {
-//RS         return None;
-//RS     }
-//RS     if lhs.lo == 0 && lhs.hi == 0 {
-//RS         return Some(TIntegerBounds::exact(0));
-//RS     }
-//RS     let max_abs = rhs.lo.checked_abs()?.max(rhs.hi.checked_abs()?);
-//RS     let magnitude = max_abs.checked_sub(1)?;
-//RS     if rhs.hi < 0 {
-//RS         Some(TIntegerBounds {
-//RS             lo: magnitude.checked_neg()?,
-//RS             hi: 0,
-//RS         })
-//RS     } else {
-//RS         Some(TIntegerBounds {
-//RS             lo: 0,
-//RS             hi: magnitude,
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn integer_bounds_for_op(
-//RS     op: BinOp,
-//RS     lhs: TIntegerBounds,
-//RS     rhs: TIntegerBounds,
-//RS ) -> Option<TIntegerBounds> {
-//RS     match op {
-//RS         BinOp::Add | BinOp::Sub | BinOp::Mul => combine_integer_bounds(op, lhs, rhs),
-//RS         BinOp::FloorDiv => floor_div_bounds(lhs, rhs),
-//RS         BinOp::Mod | BinOp::Rem => remainder_bounds(lhs, rhs),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-INTBIG1: the inline rail is a signed 63-bit payload, represented by the
-//RS /// same half-i64 bounds as `Prelude/Core/JetInt`. Keep this projection in TIR
-//RS /// so cost consumers share one proof rather than reading backend constants.
-//RS const INT_SMALL_MIN: i128 = -(1i128 << 62);
-//RS const INT_SMALL_MAX: i128 = (1i128 << 62) - 1;
-//RS 
-//RS pub(crate) fn bounds_fit_inline(bounds: TIntegerBounds) -> bool {
-//RS     bounds.lo >= INT_SMALL_MIN && bounds.hi <= INT_SMALL_MAX
-//RS }
-//RS 
-//RS pub(crate) fn combine_integer_bounds(
-//RS     op: BinOp,
-//RS     lhs: TIntegerBounds,
-//RS     rhs: TIntegerBounds,
-//RS ) -> Option<TIntegerBounds> {
-//RS     let candidates = match op {
-//RS         BinOp::Add => [
-//RS             lhs.lo.checked_add(rhs.lo)?,
-//RS             lhs.hi.checked_add(rhs.hi)?,
-//RS             0,
-//RS             0,
-//RS         ],
-//RS         BinOp::Sub => [
-//RS             lhs.lo.checked_sub(rhs.hi)?,
-//RS             lhs.hi.checked_sub(rhs.lo)?,
-//RS             0,
-//RS             0,
-//RS         ],
-//RS         BinOp::Mul => [
-//RS             lhs.lo.checked_mul(rhs.lo)?,
-//RS             lhs.lo.checked_mul(rhs.hi)?,
-//RS             lhs.hi.checked_mul(rhs.lo)?,
-//RS             lhs.hi.checked_mul(rhs.hi)?,
-//RS         ],
-//RS         _ => return None,
-//RS     };
-//RS     let mut lo = candidates[0];
-//RS     let mut hi = candidates[0];
-//RS     for value in candidates.into_iter().skip(1) {
-//RS         lo = lo.min(value);
-//RS         hi = hi.max(value);
-//RS     }
-//RS     Some(TIntegerBounds { lo, hi })
-//RS }
-//RS 
-// END-PORT-PENDING 0508 crates/jet-codegen/src/Codegen/TIR/mod.rs:6829-8626
+// Checked TIR helpers; nominal nodes remain at their Foundation owner.
+use jet_foundation.[Type, SymbolID, Span, Pattern, PatSlot, StructPatField, StrMatchPart, BinMatchPart, BinSpec, BinEndian, AutoVectorizationFacts, CtValue, THelperKind, THostCall, TGCEditKind, TMatchProbe, THostArg, TOptionProbe, TTypedTextForm, MIRTypedHeadKind, TLetTy, TLetWrapper, TPanicLoc, TRequireKind, TContractResultMode, TContractResult, TStmt, TBranchClass, TMatchArm, TPattern, TPatternShape, TNestedPattern, TPatternBinding, TPatternField, TTextPatternPart, TBinaryPatternPart, TPatternPosition, TIntegerBounds, TExpr, TExprKind, TNumericOp, TOrFallback, TBinaryOp, TUnaryOp, TCostKind, TCostState, TCostFact, TFactExclusivity, TFactPurity, TFactChannel, integer_bounds_exact]
+use jet_foundation.Syntax.[TYPE_NEVER]
+use jet_foundation.Expr
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:6829
+// THelperKind is owned by Foundation.TIR (ClockNew, ClockSystem).
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:6836
+// THostCall is owned by Foundation.TIR; every checked host route lives there.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:6976
+// TGcEditKind maps to Foundation.TIR.TGCEditKind.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:6989
+// TMatchProbe is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:6995
+// THostArg is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7004
+// TOptionProbe is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7012
+// TTypedTextForm is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7023
+// TTypedTextInterpKind uses the canonical MIRTypedHeadKind descriptor.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7027
+// TLetTy is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7044
+// TLetWrapper is owned by Foundation.TIR; Rust None is Jet Plain.
+impl TLetTy {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7051
+    pub fn inferred() -> TLetTy Never! { TLetTy.Inferred }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7055
+    pub fn plain(ty: Type) -> TLetTy Never! { TLetTy.Annotated(ty, TLetWrapper.Plain) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7062
+    pub fn of(ty: Type, wrapper: TLetWrapper) -> TLetTy Never! { TLetTy.Annotated(ty, wrapper) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7066
+    pub fn resource(ty: Type) -> TLetTy Never! { TLetTy.of(ty, TLetWrapper.Resource) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7070
+    pub fn automatic_root(ty: Type) -> TLetTy Never! { TLetTy.of(ty, TLetWrapper.AutomaticRoot) }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7078
+// TPanicLoc is owned by Foundation.TIR (source_line, column, function, TPanicLocal).
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7090
+// TRequireKind is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7108
+// TContractResultMode is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7116
+// TContractResult is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7132
+// TStmt is owned by Foundation.TIR; checked statement facts are not duplicated.
+impl TStmt {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7628
+    pub fn fact_channel(self) -> TFactChannel Never! {
+        if self == {
+            .Range(_, _, _, _, _, _, _, Val(facts), _, _) | .CountedLoop(_, _, _, _, Val(facts), _, _) -> TFactChannel.from_auto_vectorization(facts)
+            else -> TFactChannel.unknown()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7645
+// BranchClass maps to Foundation.TIR.TBranchClass.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7660
+// TMatchArm is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7669
+// TPattern is owned by Foundation.TIR; canonical enum ownership is a SymbolID.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7681
+// TPatternShape is owned by Foundation.TIR; nested shapes retain TNestedPattern ownership.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7724
+// TPatternBinding is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7739
+// TPatternField is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7753
+// TTextPatternPart is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7764
+// TBinaryPatternPart is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7784
+// TPatternPosition is owned by Foundation.TIR.
+impl TPattern {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7793
+    pub fn from_ast(pattern: Pattern, enum_type: SymbolID?, position: TPatternPosition, mutable: Bool, boxed: Bool) -> TPattern Never! {
+        assert(!TPattern.contains_struct_value(pattern), "struct-pattern value requires from_ast_with_values")
+        TPattern{shape: TPattern.shape_from_ast(pattern), bindings: [], enum_type: enum_type, position: position, mutable: mutable, boxed: boxed}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7813
+    fn invariant_pattern_value(span: Span) -> TExpr Never! {
+        TExpr{ty: Type.Named(TYPE_NEVER), kind: TExprKind.InvariantViolation("unlowered struct-pattern value", span), span: span, integer_bounds: None, cost: None}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7823
+    fn contains_struct_value(pattern: Pattern) -> Bool Never! {
+        if pattern == {
+            .Struct(fields, _, _) -> fields.any(fn(field) { if field == { .Value{..} -> true else -> false } })
+            .Or(alternatives, _) -> alternatives.any(fn(alt) { TPattern.contains_struct_value(alt) })
+            else -> false
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7835
+    pub fn from_ast_with_values(pattern: Pattern, enum_type: SymbolID?, position: TPatternPosition, mutable: Bool, boxed: Bool, lower_value: fn(Expr) -> TExpr) -> TPattern Never! {
+        shape := TPattern.shape_from_ast(pattern)
+        &TPattern.fill_values(&shape, pattern, lower_value)
+        TPattern{shape: ^shape, bindings: [], enum_type: enum_type, position: position, mutable: mutable, boxed: boxed}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7846
+    fn fill_values(&shape: TPatternShape, pattern: Pattern, lower_value: fn(Expr) -> TExpr) -> Unit Never! {
+        if (shape, pattern) == {
+            (.Struct(fields, _, _), .Struct(source_fields, _, _)) -> {
+                loop i in 0..<min(fields.len(), source_fields.len()) {
+                    if (fields[i], source_fields[i]) == {
+                        (.Value(field, _, span), .Value{value: source, ..}) -> fields[i] = TPatternField.Value(field, lower_value(source), span)
+                        else -> {}
+                    }
+                }
+            }
+            (.Or(alternatives, _), .Or(source_alternatives, _)) -> {
+                loop i in 0..<min(alternatives.len(), source_alternatives.len()) { &TPattern.fill_values(&alternatives[i], source_alternatives[i], lower_value) }
+            }
+            else -> {}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:7894
+    fn shape_from_ast(pattern: Pattern) -> TPatternShape Never! {
+        if pattern == {
+            .Variant(variant, bindings, leading_dot, span) -> {
+                lowered := [TPatternBinding]{}
+                loop binding in bindings {
+                    &lowered.push(if binding == {
+                        .Wildcard -> TPatternBinding.Wildcard
+                        .Bind(name, span) -> TPatternBinding.Bind(name, span)
+                        .Range(lo, hi) -> TPatternBinding.Range(lo, hi)
+                        .Nested(inner) -> TPatternBinding.Nested(TNestedPattern{shape: TPattern.shape_from_ast(inner), enum_type: None})
+                        .Named{..} | .Rest(_) -> panic("sema places named payload entries (D-PAT-NAMED-NEST1)")
+                    })
+                }
+                TPatternShape.Variant(variant, ^lowered, leading_dot, span)
+            }
+            .Present(binding, binding_span, inner, span) -> TPatternShape.Present(binding, binding_span, inner.map(fn(value) { TNestedPattern{shape: TPattern.shape_from_ast(value), enum_type: None} }), span)
+            .Absent(span) -> TPatternShape.Absent(span)
+            .Ok(binding, binding_span, inner, span) -> TPatternShape.Ok(binding, binding_span, inner.map(fn(value) { TNestedPattern{shape: TPattern.shape_from_ast(value), enum_type: None} }), span)
+            .Err(binding, binding_span, inner, span) -> TPatternShape.Err(binding, binding_span, inner.map(fn(value) { TNestedPattern{shape: TPattern.shape_from_ast(value), enum_type: None} }), span)
+            .Range(lo, hi, span) -> TPatternShape.Range(lo, hi, span)
+            .Or(alternatives, span) -> TPatternShape.Or(alternatives.map(fn(alt) { TPattern.shape_from_ast(alt) }), span)
+            .Struct(fields, rest, span) -> {
+                lowered := [TPatternField]{}
+                loop field in fields {
+                    &lowered.push(if field == {
+                        .Bind{field, local, local_span, ..} -> TPatternField.Bind(field, local, local_span)
+                        .Value{field, field_span, ..} -> TPatternField.Value(field, TPattern.invariant_pattern_value(field_span), field_span)
+                    })
+                }
+                TPatternShape.Struct(^lowered, rest, span)
+            }
+            .StrMatch(parts, span) -> {
+                lowered := [TTextPatternPart]{}
+                loop part in parts {
+                    &lowered.push(if part == {
+                        .Lit(text) -> TTextPatternPart.Literal(text)
+                        .Hole(name, ty, span) -> TTextPatternPart.Hole(name, ty ?? Type.String, span)
+                    })
+                }
+                TPatternShape.Text(^lowered, span)
+            }
+            .BinMatch(parts, span) -> {
+                lowered := [TBinaryPatternPart]{}
+                loop part in parts {
+                    &lowered.push(if part == {
+                        .Lit(bytes) -> TBinaryPatternPart.Literal(bytes)
+                        .Hole(name, spec, span) -> if spec == {
+                            .Bits(width, endian) -> TBinaryPatternPart.Bits(name, width, endian == BinEndian.Big, TPattern.binary_bits_type(width), span)
+                            .Rest -> TBinaryPatternPart.Rest(name, TPattern.binary_rest_type(), span)
+                        }
+                    })
+                }
+                TPatternShape.Binary(^lowered, span)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8048
+    fn binary_bits_type(width: Int) -> Type Never! {
+        bits :: if { width <= 8 -> 8 width <= 16 -> 16 width <= 32 -> 32 else -> 64 }
+        Type.IntN(false, bits)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8064
+    fn binary_rest_type() -> Type Never! { Type.List(Type.IntN(false, 8)) }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8071
+    pub fn arm(pattern: Pattern, enum_type: SymbolID?) -> TPattern Never! {
+        assert(!TPattern.contains_struct_value(pattern), "struct-pattern value requires from_ast_with_values")
+        TPattern{shape: TPattern.shape_from_ast(pattern), bindings: [], enum_type: enum_type, position: TPatternPosition.Arm, mutable: false, boxed: false}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8085
+    pub fn binding(pattern: Pattern) -> TPattern Never! {
+        assert(!TPattern.contains_struct_value(pattern), "struct-pattern value requires from_ast_with_values")
+        TPattern{shape: TPattern.shape_from_ast(pattern), bindings: [], enum_type: None, position: TPatternPosition.Binding, mutable: false, boxed: false}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8099
+    pub fn option_binding(pattern: Pattern) -> TPattern Never! {
+        assert(!TPattern.contains_struct_value(pattern), "struct-pattern value requires from_ast_with_values")
+        TPattern{shape: TPattern.shape_from_ast(pattern), bindings: [], enum_type: None, position: TPatternPosition.OptionBinding, mutable: false, boxed: false}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8112
+    pub fn variant(self) -> String? Never! {
+        if self.shape == {
+            .Variant(variant, _, _, _) -> Val(variant)
+            .Or(alternatives, _) -> if alternatives.first() == { .Val(.Variant(variant, _, _, _)) -> Val(variant) else -> None }
+            else -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8123
+    pub fn arm_with_values(pattern: Pattern, enum_type: SymbolID?, lower_value: fn(Expr) -> TExpr) -> TPattern Never! {
+        TPattern.from_ast_with_values(pattern, enum_type, TPatternPosition.Arm, false, false, lower_value)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8141
+    pub fn binding_with_values(pattern: Pattern, lower_value: fn(Expr) -> TExpr) -> TPattern Never! {
+        TPattern.from_ast_with_values(pattern, None, TPatternPosition.Binding, false, false, lower_value)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8155
+    pub fn option_binding_with_values(pattern: Pattern, lower_value: fn(Expr) -> TExpr) -> TPattern Never! {
+        TPattern.from_ast_with_values(pattern, None, TPatternPosition.OptionBinding, false, false, lower_value)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8172
+    pub fn span(self) -> Span Never! {
+        if self.shape == {
+            .Variant(_, _, _, span) | .Present(_, _, _, span) | .Ok(_, _, _, span) | .Err(_, _, _, span) | .Range(_, _, span) | .Struct(_, _, span) | .Text(_, span) | .Binary(_, span) | .Or(_, span) | .Absent(span) -> span
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8190
+// TIntegerBounds is owned by Foundation.TIR.
+impl TIntegerBounds {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8196
+    pub fn exact(value: Int) -> TIntegerBounds Never! { integer_bounds_exact(value) }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8207
+// TExpr is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8217
+// TCostKind is owned by Foundation.TIR.
+impl TCostKind {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8233
+    pub fn label(self) -> String Never! {
+        if self == { .ViewMaterialization -> "view materialization" .CollectionCopyOnWrite -> "map copy-on-write" .ExactIntSpill -> "exact Int spill" .OutcomeConstruction -> "outcome construction" .RepresentationFallback -> "generic representation fallback" }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8243
+    pub fn operation(self) -> String Never! {
+        if self == { .ViewMaterialization -> "materializing a read-only view" .CollectionCopyOnWrite -> "editing a shared map backing store" .ExactIntSpill -> "an exact Int operation may spill to bigint" .OutcomeConstruction -> "constructing an Outcome carrier" .RepresentationFallback -> "using a generic collection representation" }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8253
+    pub fn fix(self) -> String Never! {
+        if self == {
+            .ViewMaterialization -> "keep the value in its view form, or make the copy explicit outside the loop"
+            .CollectionCopyOnWrite -> "mutate an exclusive map place, or move the edit outside the loop"
+            .ExactIntSpill -> "bound the operands so the result stays on the packed Int rail, or accept exact bigint cost"
+            .OutcomeConstruction -> "consume the outcome through an immediate fast path when one exists"
+            .RepresentationFallback -> "provide the collection shape proof that selects the direct representation"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8278
+// TCostState is owned by Foundation.TIR.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8286
+// TCostFact is owned by Foundation.TIR.
+impl TCostFact {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8292
+    pub fn semantic(kind: TCostKind) -> TCostFact Never! { TCostFact{kind: kind, state: TCostState.SemanticRemainder} }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8304
+pub struct TCostSite {
+    pub function: String
+    pub span: Span
+    pub kind: TCostKind
+    pub state: TCostState
+    pub loop_depth: Int
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8316
+#Error
+pub enum TCostReportError { Lowering(reason: String) Incomplete(surfaces: [String]) }
+impl TCostReportError {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8322
+    pub fn message(self) -> String Never! {
+        if self == {
+            .Lowering(reason) -> "typed TIR lowering failed for cost projection: {reason}"
+            .Incomplete(surfaces) -> "cost projection is incomplete: reachable sema surface(s) omitted by typed TIR: {surfaces.join(", ")}"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8337
+pub struct TCostReport { pub sites: [TCostSite]{[]} }
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8343
+// TExclusivity maps to Foundation.TIR.TFactExclusivity.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8356
+// TPurity maps to Foundation.TIR.TFactPurity.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8370
+// TFactChannel is owned by Foundation.TIR.
+impl TFactChannel {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8386
+    pub fn unknown() -> TFactChannel Never! {
+        TFactChannel{ty: None, integer_bounds: None, exclusivity: TFactExclusivity.Unknown, purity: TFactPurity.Unknown, no_cross_iteration_deps: false, comptime_value: None, cost: None}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8399
+    pub fn from_auto_vectorization(facts: AutoVectorizationFacts) -> TFactChannel Never! {
+        TFactChannel{ty: Val(facts.element_type), integer_bounds: None,
+            exclusivity: if facts.no_aliasing -> TFactExclusivity.Exclusive else -> TFactExclusivity.Unknown,
+            purity: if facts.no_aliasing && facts.no_early_exit && facts.effect_free_body && facts.no_cross_iteration_deps -> TFactPurity.Pure else -> TFactPurity.Unknown,
+            no_cross_iteration_deps: facts.no_cross_iteration_deps, comptime_value: None, cost: None}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8424
+fn integer_bounds_for_type(ty: Type) -> TIntegerBounds? Never! {
+    ty.integer_range().map(fn(range) { TIntegerBounds{lo: range.0, hi: range.1} })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8432
+pub fn integer_bounds_for_expr(expr: TExpr) -> TIntegerBounds? Never! {
+    bounds :: if expr.kind == {
+        .IntLit(value, _) -> Val(TIntegerBounds.exact(value))
+        .CtLit(.Int(value)) -> Val(TIntegerBounds.exact(value))
+        .CtLit(.BigInt(decimal)) -> I128.from_str(decimal).ok().map(fn(value) { TIntegerBounds.exact(Int{value}) })
+        .NumericMethod(_, .InlineRange(lo, hi, _)) -> Val(TIntegerBounds{lo: lo, hi: hi})
+        .OrFallback(value, fallback, _) -> {
+            success :: if value.ty == { .Option(inner) -> integer_bounds_for_type(inner) .Result(ok, _) -> integer_bounds_for_type(ok) else -> None }
+            if fallback == {
+                .Value(fallback) -> {
+                    fallback_bounds :: integer_bounds_for_expr(fallback) ?? return None
+                    success_bounds :: success ?? return None
+                    Val(TIntegerBounds{lo: min(success_bounds.lo, fallback_bounds.lo), hi: max(success_bounds.hi, fallback_bounds.hi)})
+                }
+                else -> success
+            }
+        }
+        .NumericMethod(recv, .CastAs(dst_rust)) -> {
+            if dst_rust != "i64" -> None else -> {
+                recv_bounds :: integer_bounds_for_expr(recv) ?? return None
+                if recv_bounds.lo >= -9223372036854775808 && recv_bounds.hi <= 9223372036854775807 -> Val(recv_bounds) else -> None
+            }
+        }
+        .Local(local) -> local.integer_bounds
+        .Unary(.Neg, operand) -> integer_bounds_for_expr(operand).and_then(fn(bounds) { negate_integer_bounds(bounds) })
+        .Binary(op, _, _, lhs, rhs) -> {
+            lhs_bounds :: integer_bounds_for_expr(lhs) ?? return None
+            rhs_bounds :: integer_bounds_for_expr(rhs) ?? return None
+            integer_bounds_for_op(op, lhs_bounds, rhs_bounds)
+        }
+        else -> None
+    }
+    if bounds == { .Val(value) -> Val(value) else -> integer_bounds_for_type(expr.ty) }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8491
+fn negate_integer_bounds(bounds: TIntegerBounds) -> TIntegerBounds? Never! {
+    lo :: I128{bounds.hi}.checked_neg() ?? return None
+    hi :: I128{bounds.lo}.checked_neg() ?? return None
+    Val(TIntegerBounds{lo: Int{lo}, hi: Int{hi}})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8498
+fn floor_div_i128(value: I128, divisor: I128) -> I128? Never! {
+    if divisor == 0 -> return None
+    quotient :: value.checked_div(divisor) ?? return None
+    remainder :: value.checked_rem(divisor) ?? return None
+    if remainder != 0 && (value < 0) != (divisor < 0) -> quotient.checked_sub(1) else -> Val(quotient)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8511
+fn floor_div_bounds(lhs: TIntegerBounds, rhs: TIntegerBounds) -> TIntegerBounds? Never! {
+    if rhs.lo <= 0 && rhs.hi >= 0 -> return None
+    rhs_points := [I128#4]{0, 0, 0, 0}
+    rhs_len := 0
+    loop point in [I128#2]{I128{rhs.lo}, I128{rhs.hi}} {
+        if point != 0 { rhs_points[rhs_len] = point; rhs_len += 1 }
+    }
+    // Include the closest-to-zero divisor on each nonzero-sign side.
+    if rhs.lo <= -1 && rhs.hi >= -1 { rhs_points[rhs_len] = -1; rhs_len += 1 }
+    if rhs.lo <= 1 && rhs.hi >= 1 { rhs_points[rhs_len] = 1; rhs_len += 1 }
+    values := [I128#8]{0, 0, 0, 0, 0, 0, 0, 0}
+    value_len := 0
+    loop value in [I128#2]{I128{lhs.lo}, I128{lhs.hi}} {
+        loop i in 0..<rhs_len { values[value_len] = floor_div_i128(value, rhs_points[i]) ?? return None; value_len += 1 }
+    }
+    if value_len == 0 -> return None
+    lo := values[0]
+    hi := values[0]
+    loop i in 1..<value_len { lo = min(lo, values[i]); hi = max(hi, values[i]) }
+    Val(TIntegerBounds{lo: Int{lo}, hi: Int{hi}})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8547
+fn remainder_bounds(lhs: TIntegerBounds, rhs: TIntegerBounds) -> TIntegerBounds? Never! {
+    if rhs.lo <= 0 && rhs.hi >= 0 -> return None
+    if lhs.lo == 0 && lhs.hi == 0 -> return Val(TIntegerBounds.exact(0))
+    abs_lo :: I128{rhs.lo}.checked_abs() ?? return None
+    abs_hi :: I128{rhs.hi}.checked_abs() ?? return None
+    magnitude :: max(abs_lo, abs_hi).checked_sub(1) ?? return None
+    if rhs.hi < 0 -> Val(TIntegerBounds{lo: Int{magnitude.checked_neg() ?? return None}, hi: 0}) else -> Val(TIntegerBounds{lo: 0, hi: Int{magnitude}})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8569
+pub fn integer_bounds_for_op(op: TBinaryOp, lhs: TIntegerBounds, rhs: TIntegerBounds) -> TIntegerBounds? Never! {
+    if op == { .Add | .Sub | .Mul -> combine_integer_bounds(op, lhs, rhs) .FloorDiv -> floor_div_bounds(lhs, rhs) .Mod | .Rem -> remainder_bounds(lhs, rhs) else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8585
+INT_SMALL_MIN :: -(I128{1} << 62)
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8586
+INT_SMALL_MAX :: (I128{1} << 62) - 1
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8588
+pub fn bounds_fit_inline(bounds: TIntegerBounds) -> Bool Never! { bounds.lo >= Int{INT_SMALL_MIN} && bounds.hi <= Int{INT_SMALL_MAX} }
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:8592
+pub fn combine_integer_bounds(op: TBinaryOp, lhs: TIntegerBounds, rhs: TIntegerBounds) -> TIntegerBounds? Never! {
+    candidates: [I128#4] :: if op == {
+        .Add -> [I128#4]{I128{lhs.lo}.checked_add(I128{rhs.lo}) ?? return None, I128{lhs.hi}.checked_add(I128{rhs.hi}) ?? return None, 0, 0}
+        .Sub -> [I128#4]{I128{lhs.lo}.checked_sub(I128{rhs.hi}) ?? return None, I128{lhs.hi}.checked_sub(I128{rhs.lo}) ?? return None, 0, 0}
+        .Mul -> [I128#4]{I128{lhs.lo}.checked_mul(I128{rhs.lo}) ?? return None, I128{lhs.lo}.checked_mul(I128{rhs.hi}) ?? return None, I128{lhs.hi}.checked_mul(I128{rhs.lo}) ?? return None, I128{lhs.hi}.checked_mul(I128{rhs.hi}) ?? return None}
+        else -> return None
+    }
+    lo := candidates[0]
+    hi := candidates[0]
+    loop i in 1..<4 { lo = min(lo, candidates[i]); hi = max(hi, candidates[i]) }
+    Val(TIntegerBounds{lo: Int{lo}, hi: Int{hi}})
+}

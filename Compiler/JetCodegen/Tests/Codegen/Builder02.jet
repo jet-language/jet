@@ -1,0 +1,25 @@
+use jet_foundation.MIR.[MirType, MirTypeKind, MirVectorRule]
+use jet_codegen.Codegen.TIR.mir.[LowerCtx]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5827
+#Test("checked_lane_width_keeps_exact_int_out_of_elementwise_packing") {
+    ty :: MirType.from_kind(MirTypeKind.Int)
+    assert(LowerCtx.checked_lane_width(ty, MirVectorRule.Elementwise) == None)
+    assert(LowerCtx.checked_lane_width(ty, MirVectorRule.EarlyExitSearch) == Val(U16{2}))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5827
+#Test("checked_lane_width_preserves_float_and_fixed_integer_lanes") {
+    assert(LowerCtx.checked_lane_width(MirType.from_kind(MirTypeKind.Float), MirVectorRule.Elementwise) == Val(U16{2}))
+    assert(LowerCtx.checked_lane_width(MirType.from_kind(MirTypeKind.Float32), MirVectorRule.Elementwise) == Val(U16{4}))
+    assert(LowerCtx.checked_lane_width(MirType.from_kind(MirTypeKind.IntN(signed: true, bits: U8{32})), MirVectorRule.Elementwise) == Val(U16{4}))
+    assert(LowerCtx.checked_lane_width(MirType.from_kind(MirTypeKind.IntN(signed: false, bits: U8{64})), MirVectorRule.Elementwise) == Val(U16{2}))
+    assert(LowerCtx.checked_lane_width(MirType.from_kind(MirTypeKind.Bool), MirVectorRule.Elementwise) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs:5827
+#Test("checked_lane_width_unwraps_inline_ranges_without_losing_rule") {
+    bounded :: MirType.from_kind(MirTypeKind.InlineRange(base: MirType.from_kind(MirTypeKind.Int), lo: I64{0}, hi: I64{100}))
+    assert(LowerCtx.checked_lane_width(bounded, MirVectorRule.Elementwise) == None)
+    assert(LowerCtx.checked_lane_width(bounded, MirVectorRule.EarlyExitSearch) == Val(U16{2}))
+}

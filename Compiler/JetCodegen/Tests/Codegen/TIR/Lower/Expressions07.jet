@@ -1,0 +1,59 @@
+use jet_foundation.AST.[Type, BinOp]
+use jet_foundation.Diagnostics.[Span]
+use jet_codegen.Codegen.TIR.[TExpr, TExprKind, TStmt, TExternArg, TLocal, unit_type]
+use jet_codegen.Codegen.TIR.Lower.Expressions.[core_call_expr]
+use jet_codegen.Codegen.TIR.Lower.Expressions07.[preserve_source_arg_order]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:9896
+fn int(value: I64) -> TExpr Never! { TExpr(ty: Type.Int, kind: TExprKind.IntLit(value, None)) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:9903
+fn division() -> TExpr Never! {
+    TExpr(ty: Type.Int, kind: TExprKind.Binary(op: BinOp.Div, overflow: true, line: 1, lhs: int(1), rhs: int(0)))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:9916
+fn print() -> TExpr Never! { TExpr(ty: unit_type(), kind: TExprKind.Print(int(1))) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:9923
+fn bump() -> TExpr Never! { TExpr(ty: Type.Int, kind: TExprKind.Call(name: "bump", type_args: [], args: [])) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:9934
+fn assert_division_then_print(lowered: TExpr) -> Unit Never! {
+    stmts :: if lowered.kind == {
+        .InlineBlock(stmts) -> stmts
+        _ -> { panic("reordered call needs argument temporaries") }
+    }
+    assert(stmts[0] is .Let(init: TExpr(kind: .Binary(op: .Div, ..), ..), ..))
+    assert(stmts[1] is .Let(init: TExpr(kind: .Print(_), ..), ..))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:9961
+#Test("core_call_keeps_panicking_arithmetic_in_written_order") {
+    call :: core_call_expr(unit_type(), "core.math", "pow", [print(), division()], Span.new(0, 1), [false, true])
+    assert_division_then_print(preserve_source_arg_order(^call, [1, 0], 2, 7))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:9976
+#Test("extern_call_uses_the_same_written_order_wrapper") {
+    call :: TExpr(ty: unit_type(), kind: TExprKind.ExternCall(symbol: "ordered", c_abi: false, args: [
+        TExternArg(value: print(), clone: false, mut_borrow: false),
+        TExternArg(value: division(), clone: false, mut_borrow: false)]))
+    assert_division_then_print(preserve_source_arg_order(^call, [1, 0], 2, 9))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:10000
+#Test("core_call_pins_a_local_read_after_an_earlier_call") {
+    call :: core_call_expr(unit_type(), "core.math", "pow", [
+        TExpr(ty: Type.Int, kind: TExprKind.Local(TLocal.user("x"))), bump()], Span.new(0, 1), [false, false])
+    lowered :: preserve_source_arg_order(^call, [1, 0], 2, 11)
+    stmts :: if lowered.kind == { .InlineBlock(stmts) -> stmts, _ -> { panic("reordered call needs argument temporaries") } }
+    assert(if stmts[0] == { .Let(init: TExpr(kind: .Call(name, ..), ..), ..) -> name == "bump", _ -> false })
+    assert(stmts[1] is .Let(init: TExpr(kind: .Local(_), ..), ..))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:10037
+#Test("core_call_does_not_move_a_read_borrowed_string_place") {
+    call :: core_call_expr(unit_type(), "core.math", "pow", [
+        TExpr(ty: Type.String, kind: TExprKind.Local(TLocal.user("key"))), bump()], Span.new(0, 1), [false, false])
+    lowered :: preserve_source_arg_order(^call, [1, 0], 2, 13)
+    stmts :: if lowered.kind == { .InlineBlock(stmts) -> stmts, _ -> { panic("earlier call still needs an argument temporary") } }
+    assert(stmts.len() == 2)
+    args :: if stmts[1] == {
+        .ExprStmt(TExpr(kind: .CoreCall(args, ..), ..)) -> args
+        _ -> { panic("last statement must remain the Core call") }
+    }
+    assert(if args[0].kind == { .Local(local) -> local.name == "key", _ -> false })
+}

@@ -242,13 +242,14 @@ fn api_test_family(family: String, member: String) -> UnitFamilyDef Never! {
 // Real-source integrated witness: genuine registration + body/effect finalization,
 // actual embedded Prelude effect declarations, and retained authored entry items.
 // No fake checker, graph, name ledger, or effect inference implementation.
-fn api_test_module(program: ^Program, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
-    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, foreign_handles: []}
+fn api_test_module(program: ^Program, source: String, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, unit_source: source, foreign_handles: []}
 }
 fn api_test_checked(source: String) -[Env, FS]> APIProjection Never! {
     original :: api_test_source(source)
-    effects :: api_test_source(foundation_embedded_core().effect_source())
-    inputs :: [SemaRegistrationModuleInput]{api_test_module(^original, "main", "api.jet", "api"), api_test_module(^effects, "effects", "Prelude/Effects.jet", "jet:canonical-prelude")}
+    effects_source :: foundation_embedded_core().effect_source()
+    effects :: api_test_source(effects_source)
+    inputs :: [SemaRegistrationModuleInput]{api_test_module(^original, source, "main", "api.jet", "api"), api_test_module(^effects, effects_source, "effects", "Prelude/Effects.jet", "jet:canonical-prelude")}
     build :: SemaBuildFacts{package_name: "api", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "api-test", stamp_at: "", artifact_build: false}
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
     registration :: sema_test_prepare_graph(inputs, [], "api", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)

@@ -1,1483 +1,632 @@
-// PORT-PENDING 0505 crates-jet-codegen-src-codegen-tir-mod-slice-1762: crates/jet-codegen/src/Codegen/TIR/mod.rs:1762-3240
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS pub(crate) fn bind_generic_type(
-//RS     template: &Type,
-//RS     actual: &Type,
-//RS     params: &std::collections::HashSet<String>,
-//RS     subst: &mut std::collections::HashMap<String, Type>,
-//RS ) -> bool {
-//RS     match template {
-//RS         Type::Named(name) if params.contains(name) => match subst.get(name).cloned() {
-//RS             Some(bound) if bound == *actual => true,
-//RS             Some(Type::Named(bound_name)) => {
-//RS                 let Type::Named(actual_name) = actual else {
-//RS                     return false;
-//RS                 };
-//RS                 let same_leaf = bound_name.rsplit("::").next() == actual_name.rsplit("::").next();
-//RS                 let one_is_unqualified = !bound_name.contains("::") || !actual_name.contains("::");
-//RS                 if same_leaf && one_is_unqualified {
-//RS                     // Sema may spell an explicit type argument with its source
-//RS                     // leaf while a lowered value carries the canonical module
-//RS                     // path. Keep the resolved value identity for the instance
-//RS                     // key instead of rejecting the already-checked call.
-//RS                     subst.insert(name.clone(), actual.clone());
-//RS                     true
-//RS                 } else {
-//RS                     false
-//RS                 }
-//RS             }
-//RS             Some(_) => false,
-//RS             None => {
-//RS                 subst.insert(name.clone(), actual.clone());
-//RS                 true
-//RS             }
-//RS         },
-//RS         Type::Apply { name, args } => {
-//RS             let Type::Apply {
-//RS                 name: actual_name,
-//RS                 args: actual_args,
-//RS             } = actual
-//RS             else {
-//RS                 return false;
-//RS             };
-//RS             name == actual_name
-//RS                 && args.len() == actual_args.len()
-//RS                 && args
-//RS                     .iter()
-//RS                     .zip(actual_args)
-//RS                     .all(|(left, right)| bind_generic_type(left, right, params, subst))
-//RS         }
-//RS         Type::List(inner) => matches!(actual, Type::List(actual_inner)
-//RS             if bind_generic_type(inner, actual_inner, params, subst)),
-//RS         Type::Option(inner) => matches!(actual, Type::Option(actual_inner)
-//RS             if bind_generic_type(inner, actual_inner, params, subst)),
-//RS         Type::Map { key, value, .. } => matches!(actual, Type::Map {
-//RS             key: actual_key,
-//RS             value: actual_value,
-//RS             ..
-//RS         } if bind_generic_type(key, actual_key, params, subst)
-//RS             && bind_generic_type(value, actual_value, params, subst)),
-//RS         Type::Shared(inner) => matches!(actual, Type::Shared(actual_inner)
-//RS             if bind_generic_type(inner, actual_inner, params, subst)),
-//RS         Type::Tuple(fields) => matches!(actual, Type::Tuple(actual_fields)
-//RS             if fields.len() == actual_fields.len()
-//RS                 && fields.iter().zip(actual_fields).all(|((name, template), (actual_name, actual))| {
-//RS                     name == actual_name && bind_generic_type(template, actual, params, subst)
-//RS                 })),
-//RS         Type::Result { ok, err } => {
-//RS             matches!(actual, Type::Result { ok: actual_ok, err: actual_err }
-//RS             if bind_generic_type(ok, actual_ok, params, subst)
-//RS                 && bind_generic_type(err, actual_err, params, subst))
-//RS         }
-//RS         Type::Fn {
-//RS             params: template_params,
-//RS             ret: template_ret,
-//RS             ..
-//RS         } => {
-//RS             let Type::Fn {
-//RS                 params: actual_params,
-//RS                 ret: actual_ret,
-//RS                 ..
-//RS             } = actual
-//RS             else {
-//RS                 return false;
-//RS             };
-//RS             template_params.len() == actual_params.len()
-//RS                 && template_params
-//RS                     .iter()
-//RS                     .zip(actual_params)
-//RS                     .all(|(template, actual)| bind_generic_type(template, actual, params, subst))
-//RS                 && match (template_ret, actual_ret) {
-//RS                     (Some(template), Some(actual)) => {
-//RS                         // Callable values expose the executable failure carrier
-//RS                         // in sema (`fn(T) U` becomes `fn(T) Result<U, Err>`).
-//RS                         // Generic source signatures still bind against the
-//RS                         // source-level return, so unwrap that carrier only when
-//RS                         // the template is not already a Result.
-//RS                         match (template.as_ref(), actual.as_ref()) {
-//RS                             // A callable that cannot fail (a written or inferred
-//RS                             // `Never!`) fits every failure slot; the MIR fn-value
-//RS                             // adapter supplies the slot's carrier. Its success
-//RS                             // binds as usual, and a generic failure slot binds
-//RS                             // to `Never`.
-//RS                             (
-//RS                                 Type::Result {
-//RS                                     ok: template_ok,
-//RS                                     err: template_err,
-//RS                                 },
-//RS                                 Type::Result {
-//RS                                     ok: actual_ok,
-//RS                                     err: actual_err,
-//RS                                 },
-//RS                             ) if actual_err.is_never() => {
-//RS                                 bind_generic_type(template_ok, actual_ok, params, subst)
-//RS                                     && (!matches!(template_err.as_ref(), Type::Named(name) if params.contains(name))
-//RS                                         || bind_generic_type(template_err, actual_err, params, subst))
-//RS                             }
-//RS                             (Type::Result { .. }, actual) => {
-//RS                                 bind_generic_type(template, actual, params, subst)
-//RS                             }
-//RS                             (_, Type::Result { ok, .. }) => bind_generic_type(template, ok, params, subst),
-//RS                             (_, actual) => bind_generic_type(template, actual, params, subst),
-//RS                         }
-//RS                     }
-//RS                     (None, None) => true,
-//RS                     _ => false,
-//RS                 }
-//RS         }
-//RS         Type::Tagged { inner, .. } => bind_generic_type(inner, actual, params, subst),
-//RS         _ => template == actual,
-//RS     }
-//RS }
-//RS 
-//RS fn generic_call_shape(args: &[TCallArg], type_args: &[Type]) -> Vec<Type> {
-//RS     let mut shape = args
-//RS         .iter()
-//RS         .map(|arg| {
-//RS             if arg.widen_to_vec {
-//RS                 if let Type::FixedList { elem, .. } = &arg.value.ty {
-//RS                     return Type::List(elem.clone());
-//RS                 }
-//RS             }
-//RS             arg.value.ty.clone()
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     shape.extend(type_args.iter().cloned());
-//RS     shape
-//RS }
-//RS 
-//RS /// Recorded shapes contain value types followed by any explicit type arguments.
-//RS fn generic_call_substitution(
-//RS     param_types: &[Type],
-//RS     type_param_names: &[String],
-//RS     actuals: &[Type],
-//RS ) -> Option<std::collections::HashMap<String, Type>> {
-//RS     if type_param_names.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let (param_actuals, explicit_actuals) =
-//RS         if actuals.len() == param_types.len() + type_param_names.len() {
-//RS             actuals.split_at(param_types.len())
-//RS         } else if actuals.len() == param_types.len() {
-//RS             (actuals, &[][..])
-//RS         } else {
-//RS             return None;
-//RS         };
-//RS     let names = type_param_names.iter().cloned().collect();
-//RS     let mut subst = std::collections::HashMap::new();
-//RS     for (param, actual) in type_param_names.iter().zip(explicit_actuals) {
-//RS         subst.insert(param.clone(), actual.clone());
-//RS     }
-//RS     if !param_types
-//RS         .iter()
-//RS         .zip(param_actuals)
-//RS         .all(|(template, actual)| bind_generic_type(template, actual, &names, &mut subst))
-//RS         || subst.len() != names.len()
-//RS     {
-//RS         return None;
-//RS     }
-//RS     Some(subst)
-//RS }
-//RS 
-//RS pub(crate) fn demand_generic_free_function(
-//RS     cx: &Cx,
-//RS     name: &str,
-//RS     args: &[TCallArg],
-//RS     explicit_type_args: &[Type],
-//RS ) -> Option<String> {
-//RS     let type_param_names = cx.fn_type_param_order.get(name)?;
-//RS     if type_param_names.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let sig = cx.sigs.get(name)?;
-//RS     let param_types = sig.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
-//RS     let shape = generic_call_shape(args, explicit_type_args);
-//RS     let subst = generic_call_substitution(&param_types, type_param_names, &shape)?;
-//RS     let type_args = type_param_names
-//RS         .iter()
-//RS         .map(|param| subst.get(param).cloned())
-//RS         .collect::<Option<Vec<_>>>()?;
-//RS     cx.jit_generic_calls
-//RS         .borrow_mut()
-//RS         .entry(name.to_string())
-//RS         .or_default()
-//RS         .push(shape);
-//RS     Some(generic_free_function_instance_key(name, &type_args))
-//RS }
-//RS 
-//RS fn checked_core_source_generic_type_args(
-//RS     signature: &crate::Codegen::CoreSourceFunctionSignature,
-//RS     actuals: &[Type],
-//RS ) -> Option<Vec<Type>> {
-//RS     let param_names = &signature.type_params;
-//RS     if param_names.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let param_types = signature
-//RS         .params
-//RS         .iter()
-//RS         .map(|(_, ty)| ty.clone())
-//RS         .collect::<Vec<_>>();
-//RS     if actuals.len() == param_types.len() + param_names.len() {
-//RS         return Some(actuals[param_types.len()..].to_vec());
-//RS     }
-//RS     let substitutions = generic_call_substitution(&param_types, param_names, actuals)?;
-//RS     param_names
-//RS         .iter()
-//RS         .map(|param| substitutions.get(param).cloned())
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Record a concrete, sema-checked instantiation of an imported source-owned
-//RS /// Core generic function and return its TIR instance name.
-//RS pub(crate) fn demand_core_source_generic_function(
-//RS     cx: &Cx,
-//RS     method: &str,
-//RS     signature: &crate::Codegen::CoreSourceFunctionSignature,
-//RS     args: &[TCallArg],
-//RS     explicit_type_args: &[Type],
-//RS ) -> Option<String> {
-//RS     let module_identity = &signature.module_identity;
-//RS     let shape = generic_call_shape(args, explicit_type_args);
-//RS     let type_args = checked_core_source_generic_type_args(signature, &shape)?
-//RS         .iter()
-//RS         .map(|ty| cx.expand_type_aliases(ty))
-//RS         .collect::<Vec<_>>();
-//RS     cx.jit_core_source_generic_calls
-//RS         .borrow_mut()
-//RS         .entry((module_identity.clone(), method.to_string()))
-//RS         .or_default()
-//RS         .push(type_args.clone());
-//RS     Some(generic_free_function_instance_key(method, &type_args))
-//RS }
-//RS 
-//RS fn generic_free_function_template(items: &[Item], called_name: &str) -> Option<Func> {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) if function.name == called_name => return Some(function.clone()),
-//RS             Item::CodeModule(module) => {
-//RS                 let Some(body) = &module.body else {
-//RS                     continue;
-//RS                 };
-//RS                 for inner in body {
-//RS                     let Item::Func(function) = inner else {
-//RS                         continue;
-//RS                     };
-//RS                     let member = jet_foundation::Names::member_name(&module.name, &function.name);
-//RS                     if member == called_name {
-//RS                         let mut function = function.clone();
-//RS                         function.name = member;
-//RS                         return Some(function);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc>) {
-//RS     loop {
-//RS         let calls = std::mem::take(&mut *cx.jit_generic_calls.borrow_mut());
-//RS         if calls.is_empty() {
-//RS             break;
-//RS         }
-//RS         for (called_name, shapes) in calls {
-//RS             let mut unique = shapes;
-//RS             unique.sort_by_key(|shape| format!("{shape:?}"));
-//RS             unique.dedup();
-//RS             let (template, variadic) = if let Some((base, arity)) = called_name
-//RS                 .rsplit_once("__va")
-//RS                 .and_then(|(base, arity)| arity.parse::<usize>().ok().map(|arity| (base, arity)))
-//RS             {
-//RS                 let Some((_, bounds)) = cx.variadic_bound_fns.get(base) else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(source) = generic_free_function_template(items, base) else {
-//RS                     continue;
-//RS                 };
-//RS                 (
-//RS                     crate::Codegen::VariadicBound::build_variadic_bound_func(
-//RS                         &source, bounds, arity,
-//RS                     ),
-//RS                     true,
-//RS                 )
-//RS             } else {
-//RS                 let Some(source) = generic_free_function_template(items, &called_name) else {
-//RS                     continue;
-//RS                 };
-//RS                 (source, false)
-//RS             };
-//RS             if template.type_params.is_empty() || (variadic && unique.len() != 1) {
-//RS                 continue;
-//RS             }
-//RS             let param_types = template
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|param| param.ty.clone())
-//RS                 .collect::<Vec<_>>();
-//RS             let type_param_names = template
-//RS                 .type_params
-//RS                 .iter()
-//RS                 .map(|param| param.name.clone())
-//RS                 .collect::<Vec<_>>();
-//RS             for actuals in unique {
-//RS                 let Some(subst) =
-//RS                     generic_call_substitution(&param_types, &type_param_names, &actuals)
-//RS                 else {
-//RS                     continue;
-//RS                 };
-//RS                 let type_args = type_param_names
-//RS                     .iter()
-//RS                     .map(|param| subst.get(param).cloned())
-//RS                     .collect::<Option<Vec<_>>>();
-//RS                 let Some(type_args) = type_args else {
-//RS                     continue;
-//RS                 };
-//RS                 let emitted_name = if variadic {
-//RS                     called_name.clone()
-//RS                 } else {
-//RS                     generic_free_function_instance_key(&called_name, &type_args)
-//RS                 };
-//RS                 // Several Core-source generic instances (`sort<String, PriceError>`,
-//RS                 // `sort<String, Never>`) each lower their helpers in a fresh
-//RS                 // imported context, so the same helper instance
-//RS                 // (`copy_values<String>`) is demanded more than once. The
-//RS                 // semantic key is the identity; a prefixed JIT name is not.
-//RS                 let emitted_key = function_semantic_key(&cx.module_identity, &emitted_name);
-//RS                 if funcs
-//RS                     .iter()
-//RS                     .any(|func| func.name == emitted_name || func.key == emitted_key)
-//RS                 {
-//RS                     continue;
-//RS                 }
-//RS                 let mut specialized =
-//RS                     crate::Sema::specialize_function_types(template.clone(), &subst);
-//RS                 let residual_type_params: std::collections::HashSet<String> = specialized
-//RS                     .type_params
-//RS                     .iter()
-//RS                     .map(|param| param.name.clone())
-//RS                     .collect();
-//RS                 specialized.type_params.clear();
-//RS                 // Keep both the enclosing lowering facts and the specialized
-//RS                 // function's source generic identities visible while the
-//RS                 // coverage gate and lowerer inspect bounded operations.
-//RS                 let previous_type_params = cx.current_type_params.borrow().clone();
-//RS                 let mut function_type_params = previous_type_params.clone();
-//RS                 function_type_params.extend(residual_type_params);
-//RS                 cx.current_type_params.replace(function_type_params);
-//RS                 let mut lowered = lower_func(&specialized, cx);
-//RS                 cx.current_type_params.replace(previous_type_params);
-//RS                 lowered.key = function_semantic_key(&lowered.module, &emitted_name);
-//RS                 lowered.name = cx.jit_local_call_prefix.as_ref().map_or_else(
-//RS                     || emitted_name.clone(),
-//RS                     |prefix| format!("{prefix}{}", mangle(&emitted_name)),
-//RS                 );
-//RS                 funcs.push(lowered);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn merge_core_source_generic_calls(target: &Cx, source: &Cx) {
-//RS     let calls = std::mem::take(&mut *source.jit_core_source_generic_calls.borrow_mut());
-//RS     let mut target_calls = target.jit_core_source_generic_calls.borrow_mut();
-//RS     for (key, type_args) in calls {
-//RS         target_calls.entry(key).or_default().extend(type_args);
-//RS     }
-//RS }
-//RS 
-//RS fn build_imported_generic_core_cx(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS     extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
-//RS     debug_linemap: bool,
-//RS     spawn_site_base: usize,
-//RS ) -> Cx {
-//RS     let imported = &bundle.modules[module_idx];
-//RS     let mut imported_cx = build_cx_items(
-//RS         &imported.items,
-//RS         &imported.source,
-//RS         &imported.display,
-//RS         None,
-//RS         extern_funcs,
-//RS         &bundle.edition,
-//RS     );
-//RS     imported_cx.debug_linemap = debug_linemap;
-//RS     populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
-//RS     register_own_struct_shapes(&mut imported_cx, bundle, module_idx);
-//RS     crate::Codegen::Context::collect_iterable_hooks(&mut imported_cx, &imported.items);
-//RS     imported_cx.jit_local_call_prefix = Some(format!("{}::", mangle(&imported.alias)));
-//RS     imported_cx.jit_spawn_site_base = spawn_site_base;
-//RS     imported_cx
-//RS }
-//RS 
-//RS fn checked_imported_core_source_signature<'a>(
-//RS     imported_alias: &str,
-//RS     method: &str,
-//RS     owner: &str,
-//RS     signatures: &'a std::collections::HashMap<
-//RS         (String, String),
-//RS         crate::Codegen::CoreSourceFunctionSignature,
-//RS     >,
-//RS ) -> Option<&'a crate::Codegen::CoreSourceFunctionSignature> {
-//RS     let source = jet_foundation::CoreModuleExports::core_source_module_by_alias(imported_alias)?;
-//RS     signatures
-//RS         .get(&(source.module.to_string(), method.to_string()))
-//RS         .filter(|signature| signature.module_identity == owner)
-//RS }
-//RS 
-//RS fn lower_checked_core_source_generic_instance(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS     imported_cx: &Cx,
-//RS     method: &str,
-//RS     type_args: &[Type],
-//RS     funcs: &mut Vec<TFunc>,
-//RS ) -> Result<(), LowerError> {
-//RS     let imported = &bundle.modules[module_idx];
-//RS     let owner = bundle
-//RS         .name_ledger
-//RS         .module_identity(module_idx)
-//RS         .expect("name ledger must contain every loaded module");
-//RS     let missing_target = || {
-//RS         LowerError::new(
-//RS             crate::Diagnostics::Span::new(0, 0),
-//RS             format!("checked Core source generic target `{owner}::{method}` has no loaded template"),
-//RS         )
-//RS     };
-//RS     let signature = checked_imported_core_source_signature(
-//RS         &imported.alias,
-//RS         method,
-//RS         &owner,
-//RS         &imported_cx.core_source_sigs,
-//RS     )
-//RS     .ok_or_else(missing_target)?;
-//RS     let template = generic_free_function_template(&imported.items, method)
-//RS         .ok_or_else(missing_target)?;
-//RS     let span = template.span;
-//RS     let type_param_names = template
-//RS         .type_params
-//RS         .iter()
-//RS         .map(|param| param.name.clone())
-//RS         .collect::<Vec<_>>();
-//RS     if signature.type_params != type_param_names || type_args.len() != type_param_names.len() {
-//RS         return Err(LowerError::new(
-//RS             span,
-//RS             format!("checked Core source generic target `{owner}::{method}` has inconsistent type parameters"),
-//RS         ));
-//RS     }
-//RS     let emitted_name = generic_free_function_instance_key(method, type_args);
-//RS     let emitted_key = function_semantic_key(&owner, &emitted_name);
-//RS     if funcs.iter().any(|function| function.key == emitted_key) {
-//RS         return Ok(());
-//RS     }
-//RS 
-//RS     let (specialized, mut lowered) =
-//RS         lower_core_source_generic_template(template, type_args, &emitted_name, imported_cx);
-//RS     let binders = qualification_binders(&[], Some(&specialized));
-//RS     for (_, ty, _) in &mut lowered.params {
-//RS         *ty = qualify_imported_type(bundle, module_idx, &owner, &binders, ty);
-//RS     }
-//RS     lowered.ret = lowered
-//RS         .ret
-//RS         .as_ref()
-//RS         .map(|ty| qualify_imported_type(bundle, module_idx, &owner, &binders, ty));
-//RS     lowered.key = emitted_key;
-//RS     lowered.name = format!(
-//RS         "{}::{}",
-//RS         mangle(&imported.alias),
-//RS         mangle(&emitted_name)
-//RS     );
-//RS     funcs.push(lowered);
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Specialize one checked Core source generic template to concrete type
-//RS /// arguments and lower it in its defining module's context. Callers own the
-//RS /// emitted key, the emitted name and any boundary type qualification.
-//RS fn lower_core_source_generic_template(
-//RS     template: Func,
-//RS     type_args: &[Type],
-//RS     emitted_name: &str,
-//RS     cx: &Cx,
-//RS ) -> (Func, TFunc) {
-//RS     let substitutions = template
-//RS         .type_params
-//RS         .iter()
-//RS         .map(|param| param.name.clone())
-//RS         .zip(type_args.iter().cloned())
-//RS         .collect::<std::collections::HashMap<_, _>>();
-//RS     let mut specialized = crate::Sema::specialize_function_types(template, &substitutions);
-//RS     specialized.name = emitted_name.to_string();
-//RS     let residual_type_params = specialized
-//RS         .type_params
-//RS         .iter()
-//RS         .map(|param| param.name.clone())
-//RS         .collect::<std::collections::HashSet<_>>();
-//RS     specialized.type_params.clear();
-//RS     let previous_type_params = cx.current_type_params.borrow().clone();
-//RS     let mut function_type_params = previous_type_params.clone();
-//RS     function_type_params.extend(residual_type_params);
-//RS     cx.current_type_params.replace(function_type_params);
-//RS     let lowered = lower_func(&specialized, cx);
-//RS     cx.current_type_params.replace(previous_type_params);
-//RS     (specialized, lowered)
-//RS }
-//RS 
-//RS fn specialize_checked_core_source_generics(
-//RS     bundle: &ProgramBundle,
-//RS     extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
-//RS     debug_linemap: bool,
-//RS     cx: &Cx,
-//RS     funcs: &mut Vec<TFunc>,
-//RS     spawn_lambdas: &mut Vec<TJitSpawnLambda>,
-//RS ) -> Result<(), LowerError> {
-//RS     let mut processed = std::collections::HashSet::new();
-//RS     loop {
-//RS         let calls = std::mem::take(&mut *cx.jit_core_source_generic_calls.borrow_mut());
-//RS         if calls.is_empty() {
-//RS             return Ok(());
-//RS         }
-//RS         for ((owner, method), mut instantiations) in calls {
-//RS             instantiations.sort_by_key(|types| format!("{types:?}"));
-//RS             instantiations.dedup();
-//RS             let module_idx = (0..bundle.modules.len())
-//RS                 .find(|index| {
-//RS                     bundle.name_ledger.module_identity(*index).as_deref() == Some(owner.as_str())
-//RS                 })
-//RS                 .ok_or_else(|| {
-//RS                     LowerError::new(
-//RS                         crate::Diagnostics::Span::new(0, 0),
-//RS                         format!("checked Core source generic target `{owner}::{method}` has no loaded module"),
-//RS                     )
-//RS                 })?;
-//RS             let imported = &bundle.modules[module_idx];
-//RS             let mut imported_cx = build_imported_generic_core_cx(
-//RS                 bundle,
-//RS                 module_idx,
-//RS                 extern_funcs,
-//RS                 debug_linemap,
-//RS                 spawn_lambdas.len(),
-//RS             );
-//RS             for type_args in instantiations {
-//RS                 let instance = generic_free_function_instance_key(&method, &type_args);
-//RS                 let key = function_semantic_key(&owner, &instance);
-//RS                 if !processed.insert(key.clone()) {
-//RS                     continue;
-//RS                 }
-//RS                 imported_cx.jit_spawn_site_base = spawn_lambdas.len();
-//RS                 lower_checked_core_source_generic_instance(
-//RS                     bundle,
-//RS                     module_idx,
-//RS                     &imported_cx,
-//RS                     &method,
-//RS                     &type_args,
-//RS                     funcs,
-//RS                 )?;
-//RS                 if !funcs.iter().any(|function| function.key == key) {
-//RS                     continue;
-//RS                 }
-//RS                 lower_demanded_generic_methods(&imported.items, &imported_cx, funcs)?;
-//RS                 specialize_generic_free_functions(&imported.items, &imported_cx, funcs);
-//RS                 spawn_lambdas.extend(std::mem::take(
-//RS                     &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
-//RS                 ));
-//RS             }
-//RS             merge_core_source_generic_calls(cx, &imported_cx);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// c139 M3: lower every `tir_covers` top-level function in the entry module so the
-//RS /// JIT can compile multi-function programs (calls between covered helpers).
-//RS fn memo_dependency_facts(
-//RS     cx: &Cx,
-//RS ) -> std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>> {
-//RS     cx.memo_dependencies
-//RS         .iter()
-//RS         .map(|(owner, sources)| {
-//RS             let sources = sources
-//RS                 .iter()
-//RS                 .map(|(source, memo_fields)| {
-//RS                     let mut memo_fields = memo_fields.iter().cloned().collect::<Vec<_>>();
-//RS                     memo_fields.sort();
-//RS                     (source.clone(), memo_fields)
-//RS                 })
-//RS                 .collect();
-//RS             (owner.clone(), sources)
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS /// D-SERDE2=A / I9: lower the compiler-written codecs an IMPORTED module declares.
-//RS ///
-//RS /// A generated codec is a top-level `Item::Impl` carrying the parser-unforgeable
-//RS /// `is_generated_serde` provenance — the same authority the entry-module
-//RS /// `Item::Impl` arm below and `Codegen/Items.rs::emit_trait_method` already treat
-//RS /// as the coverage decision for compiler-written code. The imported-module loop
-//RS /// matches only `Item::Func`, `Item::CodeModule`, `Item::Struct`/`Item::Enum` and
-//RS /// the unit-label `Display` impl, so without this pass AOT emits an imported
-//RS /// type's `Encode`/`Decode` while the JIT program and the interpreter have no
-//RS /// method at all: encoding a struct with an imported field succeeds under
-//RS /// `jet build` and stops at E0956 under the default `jet run`. One program, two
-//RS /// meanings by tier — the I9 split this closes.
-//RS ///
-//RS /// The codec is lowered against its DECLARING context. That context owns
-//RS /// private nominals that an importing context must not expose, while
-//RS /// `register_own_struct_shapes` also registers each local leaf under its
-//RS /// canonical bundle identity. The generated body, its return type, and every
-//RS /// imported call therefore use one nominal identity without making private
-//RS /// declarations visible to consumers.
-//RS fn lower_imported_generated_codecs(
-//RS     bundle: &ProgramBundle,
-//RS     module_idx: usize,
-//RS     core_modules: &std::collections::HashSet<usize>,
-//RS     reachable_bodies: &std::collections::HashSet<(usize, usize, usize)>,
-//RS     cx: &Cx,
-//RS     funcs: &mut Vec<TFunc>,
-//RS ) {
-//RS     if module_idx == bundle.entry {
-//RS         return;
-//RS     }
-//RS     let imported = &bundle.modules[module_idx];
-//RS     for item in &imported.items {
-//RS         let Item::Impl(implementation) = item else {
-//RS             continue;
-//RS         };
-//RS         if !implementation.is_generated_serde {
-//RS             continue;
-//RS         }
-//RS         let Some(trait_name) = &implementation.trait_name else {
-//RS             continue;
-//RS         };
-//RS         // D-PUBSCHEMA: a published schema's unknown-field holder is registered
-//RS         // only in the declaring module's context, so its codec cannot be
-//RS         // reproduced faithfully from here. Leave it refused rather than lower a
-//RS         // codec that silently drops the merge AOT performs.
-//RS         if imported.items.iter().any(|candidate| {
-//RS             matches!(candidate, Item::Struct(definition)
-//RS                 if definition.name == implementation.type_name && published_schema(definition))
-//RS         }) {
-//RS             continue;
-//RS         }
-//RS         let owner_params: &[crate::AST::TypeParam] = imported
-//RS             .items
-//RS             .iter()
-//RS             .find_map(|item| match item {
-//RS                 Item::Struct(definition) if definition.name == implementation.type_name => {
-//RS                     Some(definition.type_params.as_slice())
-//RS                 }
-//RS                 Item::Enum(definition) if definition.name == implementation.type_name => {
-//RS                     Some(definition.type_params.as_slice())
-//RS                 }
-//RS                 _ => None,
-//RS             })
-//RS             .unwrap_or(&[]);
-//RS         for owner in imported_type_owners(bundle, module_idx) {
-//RS             let qualified = imported_type_name(&owner, &implementation.type_name);
-//RS             if !cx.struct_fields.contains_key(&qualified)
-//RS                 && !cx.enum_variants.contains_key(&qualified)
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             for method in &implementation.methods {
-//RS                 if !should_lower_imported_core_body(
-//RS                     core_modules,
-//RS                     reachable_bodies,
-//RS                     module_idx,
-//RS                     method,
-//RS                 ) {
-//RS                     continue;
-//RS                 }
-//RS                 if !method.type_params.is_empty() {
-//RS                     continue;
-//RS                 }
-//RS                 let name = format!("{qualified}::{}", method.name);
-//RS                 let mut lowered = lower_trait_method(
-//RS                     method,
-//RS                     &qualified,
-//RS                     cx,
-//RS                     trait_name,
-//RS                     implementation.is_generated_serde && method.compiler_generated,
-//RS                     implementation.operator_rhs.as_ref(),
-//RS                 );
-//RS                 // `decode` declares `Result<Badge, [FieldError]>` with the
-//RS                 // declaring module's leaf; carry it to the same canonical
-//RS                 // identity the owner and the body already use.
-//RS                 let binders = qualification_binders(owner_params, Some(method));
-//RS                 lowered.ret = lowered
-//RS                     .ret
-//RS                     .as_ref()
-//RS                     .map(|ty| qualify_imported_type(bundle, module_idx, &owner, &binders, ty));
-//RS                 if funcs.iter().any(|function| {
-//RS                     function.key == lowered.key && function.source_span == lowered.source_span
-//RS                 }) {
-//RS                     continue;
-//RS                 }
-//RS                 set_lowered_method_name(&mut lowered, || name);
-//RS                 funcs.push(lowered);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Pre-sema context retained by comptime fragment callers. The fragment is
-//RS /// lowered here once and then consumed only as canonical MIR by MIREval.
-//RS pub struct MirFragmentContext<'a> {
-//RS     pub funcs: &'a std::collections::HashMap<String, &'a crate::AST::Func>,
-//RS     pub binding_types: &'a std::collections::HashMap<String, crate::AST::Type>,
-//RS     pub method_traits: &'a std::collections::HashMap<(String, String), String>,
-//RS     pub error_conversions: &'a [crate::AST::ErrorConvDef],
-//RS     pub methods: &'a std::collections::HashMap<(String, String), &'a crate::AST::Func>,
-//RS     pub extern_names: &'a std::collections::HashSet<String>,
-//RS     pub globals: &'a std::collections::HashMap<String, crate::AST::CtValue>,
-//RS     pub core_imports: &'a std::collections::HashMap<String, String>,
-//RS     pub structs: &'a std::collections::HashMap<String, &'a crate::AST::StructDef>,
-//RS     pub computed_fields: &'a std::collections::HashMap<(String, String), &'a crate::AST::Expr>,
-//RS     pub checked_nominals: Option<&'a crate::Comptime::MirBridge::MirFragmentNominalFacts>,
-//RS     pub distinct_ranges: &'a std::collections::HashMap<String, Option<(i64, i64)>>,
-//RS     pub distinct_bases: &'a std::collections::HashMap<String, crate::AST::Type>,
-//RS     pub unit_families: &'a [crate::AST::UnitFamilyDef],
-//RS     /// Target facts selected by the fragment caller; layout lowering must not
-//RS     /// silently substitute the compiler host profile.
-//RS     pub target_layout: jet_foundation::Layout::TargetLayout,
-//RS }
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS enum FragmentCallable {
-//RS     Function(String),
-//RS     Method { owner: String, name: String },
-//RS     /// A source-owned Core body, keyed by Core module path and function.
-//RS     CoreSource { module: String, name: String },
-//RS }
-//RS 
-//RS fn fragment_function_key(name: &str, context: &MirFragmentContext<'_>) -> Option<String> {
-//RS     // The AST spelling is accepted only after it resolves to a checked
-//RS     // function declaration. The dotted form is the one source-level module
-//RS     // spelling that needs canonicalization for the fragment registry.
-//RS     if context.funcs.contains_key(name) {
-//RS         return Some(name.to_string());
-//RS     }
-//RS     name.split_once('.')
-//RS         .map(|(module, symbol)| format!("{module}::{symbol}"))
-//RS         .filter(|qualified| context.funcs.contains_key(qualified))
-//RS }
-//RS 
-//RS fn fragment_method_key(
-//RS     owner: &str,
-//RS     method: &str,
-//RS     context: &MirFragmentContext<'_>,
-//RS ) -> Option<(String, String)> {
-//RS     let mut owners = vec![owner.to_string()];
-//RS     if let Some((module, leaf)) = owner.split_once('.') {
-//RS         owners.push(format!("{module}::{leaf}"));
-//RS     }
-//RS     if let Some((_, leaf)) = owner.rsplit_once("::") {
-//RS         owners.push(leaf.to_string());
-//RS     }
-//RS     if let Some((_, leaf)) = owner.rsplit_once('.') {
-//RS         owners.push(leaf.to_string());
-//RS     }
-//RS     owners.dedup();
-//RS     owners.into_iter().find_map(|candidate| {
-//RS         let key = (candidate, method.to_string());
-//RS         context.methods.contains_key(&key).then_some(key)
-//RS     })
-//RS }
-//RS 
-//RS fn fragment_type_owner(ty: &crate::AST::Type) -> Option<String> {
-//RS     match ty {
-//RS         crate::AST::Type::Named(name) | crate::AST::Type::Apply { name, .. } => Some(name.clone()),
-//RS         crate::AST::Type::Tagged { inner, .. } => fragment_type_owner(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn fragment_static_method_key(
-//RS     receiver: &crate::AST::Expr,
-//RS     method: &str,
-//RS     locals: Option<&std::collections::HashMap<String, crate::AST::Type>>,
-//RS     context: &MirFragmentContext<'_>,
-//RS ) -> Option<(String, String)> {
-//RS     match receiver {
-//RS         crate::AST::Expr::Ident(name, _)
-//RS             if locals.is_some_and(|locals| locals.contains_key(name)) =>
-//RS         {
-//RS             return None;
-//RS         }
-//RS         crate::AST::Expr::Field(base, _, _)
-//RS             if matches!(
-//RS                 base.as_ref(),
-//RS                 crate::AST::Expr::Ident(name, _)
-//RS                     if locals.is_some_and(|locals| locals.contains_key(name))
-//RS             ) =>
-//RS         {
-//RS             return None;
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS     let owner = static_call_type_name_unchecked(receiver)?;
-//RS     fragment_method_key(&owner, method, context)
-//RS }
-//RS 
-//RS fn collect_fragment_callable(
-//RS     expr: &crate::AST::Expr,
-//RS     context: &MirFragmentContext<'_>,
-//RS     current_owner: Option<&str>,
-//RS     locals: Option<&std::collections::HashMap<String, crate::AST::Type>>,
-//RS     out: &mut std::collections::BTreeSet<FragmentCallable>,
-//RS ) {
-//RS     match expr {
-//RS         crate::AST::Expr::Call(call) => {
-//RS             if let Some(name) = fragment_function_key(&call.name, context) {
-//RS                 out.insert(FragmentCallable::Function(name));
-//RS             }
-//RS         }
-//RS         crate::AST::Expr::Ident(name, _)
-//RS             if !locals.is_some_and(|locals| locals.contains_key(name)) =>
-//RS         {
-//RS             if let Some(name) = fragment_function_key(name, context) {
-//RS                 out.insert(FragmentCallable::Function(name));
-//RS             }
-//RS         }
-//RS         crate::AST::Expr::Field(receiver, member, _) => {
-//RS             let owner = match receiver.as_ref() {
-//RS                 crate::AST::Expr::Ident(name, _) if name == crate::Syntax::KW_SELF => {
-//RS                     current_owner.map(str::to_string)
-//RS                 }
-//RS                 crate::AST::Expr::Ident(name, _) => locals
-//RS                     .and_then(|locals| locals.get(name))
-//RS                     .and_then(fragment_type_owner),
-//RS                 _ => None,
-//RS             };
-//RS             if let Some(owner) = owner {
-//RS                 if context
-//RS                     .computed_fields
-//RS                     .contains_key(&(owner.clone(), member.clone()))
-//RS                 {
-//RS                     if let Some((owner, name)) = fragment_method_key(&owner, member, context) {
-//RS                         out.insert(FragmentCallable::Method { owner, name });
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         crate::AST::Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             recv_type,
-//RS             ..
-//RS         } => {
-//RS             // An unchecked helper body has no `recv_type`; a receiver that is
-//RS             // `self` or a typed parameter still names its owner exactly.
-//RS             let key = recv_type
-//RS                 .as_deref()
-//RS                 .and_then(|owner| fragment_method_key(owner, method, context))
-//RS                 .or_else(|| {
-//RS                     let crate::AST::Expr::Ident(name, _) = receiver.as_ref() else {
-//RS                         return None;
-//RS                     };
-//RS                     let owner = if name == crate::Syntax::KW_SELF {
-//RS                         current_owner.map(str::to_string)
-//RS                     } else {
-//RS                         locals
-//RS                             .and_then(|locals| locals.get(name))
-//RS                             .and_then(fragment_type_owner)
-//RS                     }?;
-//RS                     fragment_method_key(&owner, method, context)
-//RS                 })
-//RS                 .or_else(|| fragment_static_method_key(receiver, method, locals, context));
-//RS             if let Some((owner, name)) = key {
-//RS                 out.insert(FragmentCallable::Method { owner, name });
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS /// Record a source-owned Core body the fragment reaches: `alias.member(...)`
-//RS /// through a Core import, or, inside a Core body, a plain call to a function
-//RS /// of the same Core module (private helpers included). A Core body's calls
-//RS /// into its own module through an alias stay on the ordinary Core route, as
-//RS /// they do in runtime lowering.
-//RS fn collect_fragment_core_callable(
-//RS     expr: &crate::AST::Expr,
-//RS     context: &MirFragmentContext<'_>,
-//RS     core_imports: &std::collections::HashMap<String, String>,
-//RS     current_module: Option<&str>,
-//RS     locals: Option<&std::collections::HashMap<String, crate::AST::Type>>,
-//RS     out: &mut std::collections::BTreeSet<FragmentCallable>,
-//RS ) {
-//RS     let Some(facts) = context.checked_nominals else {
-//RS         return;
-//RS     };
-//RS     let is_local = |name: &str| locals.is_some_and(|locals| locals.contains_key(name));
-//RS     let (module, name) = match expr {
-//RS         crate::AST::Expr::MethodCall {
-//RS             receiver, method, ..
-//RS         } => {
-//RS             let crate::AST::Expr::Ident(alias, _) = receiver.as_ref() else {
-//RS                 return;
-//RS             };
-//RS             if is_local(alias.as_str()) {
-//RS                 return;
-//RS             }
-//RS             let Some(module) = core_imports.get(alias) else {
-//RS                 return;
-//RS             };
-//RS             if current_module == Some(module.as_str())
-//RS                 || !jet_foundation::CoreModuleExports::core_source_owns(module, method)
-//RS             {
-//RS                 return;
-//RS             }
-//RS             (module.as_str(), method.as_str())
-//RS         }
-//RS         crate::AST::Expr::Call(call) if !is_local(call.name.as_str()) => {
-//RS             let Some(module) = current_module else {
-//RS                 return;
-//RS             };
-//RS             (module, call.name.as_str())
-//RS         }
-//RS         _ => return,
-//RS     };
-//RS     if facts
-//RS         .core_source_bodies
-//RS         .get(module)
-//RS         .is_some_and(|source| source.functions.contains_key(name))
-//RS     {
-//RS         out.insert(FragmentCallable::CoreSource {
-//RS             module: module.to_string(),
-//RS             name: name.to_string(),
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS /// Record a user file module body the fragment reaches: `alias.f(...)`
-//RS /// through one of the calling module's `use` aliases, or `f(...)` through a
-//RS /// member import (`use b.[f]`). Same-module calls inside a loaded user body
-//RS /// take the ordinary loaded-module route of `collect_fragment_core_callable`.
-//RS fn collect_fragment_module_callable(
-//RS     expr: &crate::AST::Expr,
-//RS     facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
-//RS     module_imports: &std::collections::HashMap<String, String>,
-//RS     imported_functions: &std::collections::HashMap<String, (String, String)>,
-//RS     locals: Option<&std::collections::HashMap<String, crate::AST::Type>>,
-//RS     out: &mut std::collections::BTreeSet<FragmentCallable>,
-//RS ) {
-//RS     let is_local = |name: &str| locals.is_some_and(|locals| locals.contains_key(name));
-//RS     let (module, name) = match expr {
-//RS         crate::AST::Expr::MethodCall {
-//RS             receiver, method, ..
-//RS         } => {
-//RS             let crate::AST::Expr::Ident(alias, _) = receiver.as_ref() else {
-//RS                 return;
-//RS             };
-//RS             if is_local(alias.as_str()) {
-//RS                 return;
-//RS             }
-//RS             let Some(module) = module_imports.get(alias) else {
-//RS                 return;
-//RS             };
-//RS             (module.as_str(), method.as_str())
-//RS         }
-//RS         crate::AST::Expr::Call(call) if !is_local(call.name.as_str()) => {
-//RS             let Some((module, name)) = imported_functions.get(&call.name) else {
-//RS                 return;
-//RS             };
-//RS             (module.as_str(), name.as_str())
-//RS         }
-//RS         _ => return,
-//RS     };
-//RS     if facts
-//RS         .core_source_bodies
-//RS         .get(module)
-//RS         .is_some_and(|source| source.functions.contains_key(name))
-//RS     {
-//RS         out.insert(FragmentCallable::CoreSource {
-//RS             module: module.to_string(),
-//RS             name: name.to_string(),
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS /// Give the cross-module calls of an unchecked fragment body the return type
-//RS /// sema records on a checked call: the callee's declared return, or the
-//RS /// default carrier when it declares none. Module-level `prep` evaluation runs
-//RS /// before function bodies are checked, so reached bodies carry no call facts.
-//RS fn annotate_fragment_module_calls(
-//RS     function: &mut crate::AST::Func,
-//RS     signatures: &std::collections::HashMap<
-//RS         (String, String),
-//RS         crate::Comptime::MirBridge::MirFragmentCoreSourceSignature,
-//RS     >,
-//RS     imported_functions: &std::collections::HashMap<String, (String, String)>,
-//RS ) {
-//RS     if signatures.is_empty() {
-//RS         return;
-//RS     }
-//RS     let checked_return = |signature: &crate::Comptime::MirBridge::MirFragmentCoreSourceSignature| {
-//RS         signature.return_type.clone().unwrap_or_else(|| {
-//RS             jet_foundation::AST::FailureContract::from_return_type(None).effective_type()
-//RS         })
-//RS     };
-//RS     for statement in &mut function.body {
-//RS         statement.for_each_expr_mut(|expr| match expr {
-//RS             crate::AST::Expr::MethodCall {
-//RS                 receiver,
-//RS                 method,
-//RS                 resolved_ret,
-//RS                 ..
-//RS             } if resolved_ret.is_none() => {
-//RS                 let crate::AST::Expr::Ident(alias, _) = receiver.as_ref() else {
-//RS                     return;
-//RS                 };
-//RS                 if let Some(signature) = signatures.get(&(alias.clone(), method.clone())) {
-//RS                     *resolved_ret = Some(checked_return(signature));
-//RS                 }
-//RS             }
-//RS             crate::AST::Expr::Call(call) if call.resolved_ret.is_none() => {
-//RS                 let Some((_, name)) = imported_functions.get(&call.name) else {
-//RS                     return;
-//RS                 };
-//RS                 if let Some(signature) = signatures.get(&(call.name.clone(), name.clone())) {
-//RS                     call.resolved_ret = Some(checked_return(signature));
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS fn collect_fragment_function_dependencies(
-//RS     function: &crate::AST::Func,
-//RS     current_owner: Option<&str>,
-//RS     core_scope: Option<(&str, &crate::Comptime::MirBridge::MirFragmentCoreSourceModule)>,
-//RS     context: &MirFragmentContext<'_>,
-//RS     out: &mut std::collections::BTreeSet<FragmentCallable>,
-//RS ) {
-//RS     let locals = function
-//RS         .params
-//RS         .iter()
-//RS         .map(|param| (param.name.clone(), param.ty.clone()))
-//RS         .collect::<std::collections::HashMap<_, _>>();
-//RS     let mut collect = |candidate: &crate::AST::Expr| match core_scope {
-//RS         // A loaded body resolves names in its own module, never the caller's.
-//RS         Some((module, source)) => {
-//RS             collect_fragment_core_callable(
-//RS                 candidate,
-//RS                 context,
-//RS                 &source.core_imports,
-//RS                 Some(module),
-//RS                 Some(&locals),
-//RS                 out,
-//RS             );
-//RS             if let Some(facts) = context.checked_nominals {
-//RS                 collect_fragment_module_callable(
-//RS                     candidate,
-//RS                     facts,
-//RS                     &source.module_imports,
-//RS                     &source.imported_functions,
-//RS                     Some(&locals),
-//RS                     out,
-//RS                 );
-//RS             }
-//RS         }
-//RS         None => {
-//RS             collect_fragment_callable(candidate, context, current_owner, Some(&locals), out);
-//RS             collect_fragment_core_callable(
-//RS                 candidate,
-//RS                 context,
-//RS                 context.core_imports,
-//RS                 None,
-//RS                 Some(&locals),
-//RS                 out,
-//RS             );
-//RS             if let Some(facts) = context.checked_nominals {
-//RS                 collect_fragment_module_callable(
-//RS                     candidate,
-//RS                     facts,
-//RS                     &facts.import_modules,
-//RS                     &facts.imported_functions,
-//RS                     Some(&locals),
-//RS                     out,
-//RS                 );
-//RS             }
-//RS         }
-//RS     };
-//RS     for statement in &function.body {
-//RS         statement.for_each_expr(&mut collect);
-//RS     }
-//RS     for clause in function.pre.iter().chain(&function.post) {
-//RS         clause.cond.for_each_expr(&mut collect);
-//RS         clause.message_expr.for_each_expr(&mut collect);
-//RS     }
-//RS     for param in &function.params {
-//RS         if let Some(default) = &param.default {
-//RS             default.for_each_expr(&mut collect);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn fragment_callable_closure(
-//RS     expr: &crate::AST::Expr,
-//RS     stmts: &[crate::AST::Stmt],
-//RS     context: &MirFragmentContext<'_>,
-//RS ) -> std::collections::BTreeSet<FragmentCallable> {
-//RS     let mut reachable = std::collections::BTreeSet::new();
-//RS     let mut collect = |candidate: &crate::AST::Expr| {
-//RS         collect_fragment_callable(
-//RS             candidate,
-//RS             context,
-//RS             None,
-//RS             Some(context.binding_types),
-//RS             &mut reachable,
-//RS         );
-//RS         collect_fragment_core_callable(
-//RS             candidate,
-//RS             context,
-//RS             context.core_imports,
-//RS             None,
-//RS             Some(context.binding_types),
-//RS             &mut reachable,
-//RS         );
-//RS         if let Some(facts) = context.checked_nominals {
-//RS             collect_fragment_module_callable(
-//RS                 candidate,
-//RS                 facts,
-//RS                 &facts.import_modules,
-//RS                 &facts.imported_functions,
-//RS                 Some(context.binding_types),
-//RS                 &mut reachable,
-//RS             );
-//RS         }
-//RS     };
-//RS     expr.for_each_expr(&mut collect);
-//RS     for statement in stmts {
-//RS         statement.for_each_expr(&mut collect);
-//RS     }
-//RS 
-//RS     let mut pending = reachable.iter().cloned().collect::<Vec<_>>();
-//RS     while let Some(callable) = pending.pop() {
-//RS         let mut owner = None;
-//RS         let mut core_scope = None;
-//RS         let (function, current_owner) = match &callable {
-//RS             FragmentCallable::Function(name) => {
-//RS                 let Some(function) = context.funcs.get(name).copied() else {
-//RS                     continue;
-//RS                 };
-//RS                 (function, owner)
-//RS             }
-//RS             FragmentCallable::Method {
-//RS                 owner: method_owner,
-//RS                 name,
-//RS             } => {
-//RS                 let Some(function) = context
-//RS                     .methods
-//RS                     .get(&(method_owner.clone(), name.clone()))
-//RS                     .copied()
-//RS                 else {
-//RS                     continue;
-//RS                 };
-//RS                 owner = Some(method_owner.as_str());
-//RS                 (function, owner)
-//RS             }
-//RS             FragmentCallable::CoreSource { module, name } => {
-//RS                 let Some(source) = context
-//RS                     .checked_nominals
-//RS                     .and_then(|facts| facts.core_source_bodies.get(module))
-//RS                 else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(function) = source.functions.get(name) else {
-//RS                     continue;
-//RS                 };
-//RS                 core_scope = Some((module.as_str(), source));
-//RS                 (function, owner)
-//RS             }
-//RS         };
-//RS         let mut dependencies = std::collections::BTreeSet::new();
-//RS         collect_fragment_function_dependencies(
-//RS             function,
-//RS             current_owner,
-//RS             core_scope,
-//RS             context,
-//RS             &mut dependencies,
-//RS         );
-//RS         for dependency in dependencies {
-//RS             if reachable.insert(dependency.clone()) {
-//RS                 pending.push(dependency);
-//RS             }
-//RS         }
-//RS     }
-//RS     reachable
-//RS }
-//RS 
-//RS fn fragment_declaration_items(
-//RS     items: &[crate::AST::Item],
-//RS     reachable: &std::collections::BTreeSet<FragmentCallable>,
-//RS ) -> Vec<crate::AST::Item> {
-//RS     // A type row names every method whose body the fragment emits. Only
-//RS     // reachable callables are lowered, so inherent and trait methods alike
-//RS     // must be pruned to that set or the row points at an absent target.
-//RS     let retain_reachable = |owner: &str, methods: &mut Vec<crate::AST::Func>| {
-//RS         methods.retain(|method| {
-//RS             reachable.contains(&FragmentCallable::Method {
-//RS                 owner: owner.to_string(),
-//RS                 name: method.name.clone(),
-//RS             })
-//RS         });
-//RS     };
-//RS     items
-//RS         .iter()
-//RS         .map(|item| match item {
-//RS             crate::AST::Item::Impl(definition) => {
-//RS                 let mut definition = definition.clone();
-//RS                 retain_reachable(&definition.type_name, &mut definition.methods);
-//RS                 crate::AST::Item::Impl(definition)
-//RS             }
-//RS             crate::AST::Item::Struct(definition) => {
-//RS                 let mut definition = definition.clone();
-//RS                 retain_reachable(&definition.name, &mut definition.methods);
-//RS                 for implementation in &mut definition.trait_impls {
-//RS                     retain_reachable(&definition.name, &mut implementation.methods);
-//RS                 }
-//RS                 crate::AST::Item::Struct(definition)
-//RS             }
-//RS             crate::AST::Item::Enum(definition) => {
-//RS                 let mut definition = definition.clone();
-//RS                 retain_reachable(&definition.name, &mut definition.methods);
-//RS                 for implementation in &mut definition.trait_impls {
-//RS                     retain_reachable(&definition.name, &mut implementation.methods);
-//RS                 }
-//RS                 crate::AST::Item::Enum(definition)
-//RS             }
-//RS             _ => item.clone(),
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Lower one comptime expression through the analytical TIR/MIR path.
-//RS pub fn lower_mir_fragment_expr(
-//RS     expr: &crate::AST::Expr,
-//RS     context: &MirFragmentContext<'_>,
-//RS ) -> Result<
-//RS     (
-//RS         jet_foundation::MIR::MirProgram,
-//RS         jet_foundation::MIR::MirFunctionId,
-//RS     ),
-//RS     LowerError,
-//RS > {
-//RS     lower_mir_fragment(expr, &[], context)
-//RS }
-//RS 
-//RS /// Lower one comptime statement block through the analytical TIR/MIR path.
-//RS pub fn lower_mir_fragment_block(
-//RS     stmts: &[crate::AST::Stmt],
-//RS     context: &MirFragmentContext<'_>,
-//RS ) -> Result<
-//RS     (
-//RS         jet_foundation::MIR::MirProgram,
-//RS         jet_foundation::MIR::MirFunctionId,
-//RS     ),
-//RS     LowerError,
-//RS > {
-//RS     lower_mir_fragment(
-//RS         &crate::AST::Expr::Unit(crate::Diagnostics::Span::new(0, 0)),
-//RS         stmts,
-//RS         context,
-//RS     )
-//RS }
-//RS 
-//RS fn fragment_host_field_type(owner: &str, field: &str) -> crate::AST::Type {
-//RS     match (owner, field) {
-//RS         (crate::Syntax::TYPE_BUILD_CONTEXT, "program") => {
-//RS             crate::AST::Type::Named(crate::Syntax::TYPE_PROGRAM_INFO.to_string())
-//RS         }
-//RS         (crate::Syntax::TYPE_BUILD_CONTEXT, "__session") => crate::AST::Type::Int,
-//RS         (crate::Syntax::TYPE_PROGRAM_INFO, "types") => crate::AST::Type::List(Box::new(
-//RS             crate::AST::Type::Named(crate::Syntax::TYPE_TYPE_INFO.to_string()),
-//RS         )),
-//RS         (crate::Syntax::TYPE_TYPE_INFO, "span") => {
-//RS             crate::AST::Type::Named(crate::Syntax::TYPE_SOURCE_SPAN.to_string())
-//RS         }
-//RS         (crate::Syntax::TYPE_TYPE_INFO, "markers" | "expanded_markers" | "implements") => {
-//RS             crate::AST::Type::List(Box::new(crate::AST::Type::String))
-//RS         }
-//RS         (crate::Syntax::TYPE_SOURCE_SPAN, "start" | "end") => crate::AST::Type::Int,
-//RS         _ => crate::AST::Type::String,
-//RS     }
-//RS }
-//RS 
-//RS /// D-CAP-RECEIVER1=D: sema lifts a written receiver mark (`&buf.push(x)`,
-//RS /// `^buf.seal()`) off the place it marks before resolving the call
-//RS /// (`Sema::ReceiverMarks`), so checked bodies carry the unmarked call. A
-//RS /// module `prep` constant is evaluated at registration, before function bodies
-//RS /// are checked, so its fragment still sees the marks; lift them the same way.
-//RS /// A write window receiver (`&values[0..1].sort()`) keeps its mark.
-//RS fn lift_receiver_mark(expr: &mut crate::AST::Expr) {
-//RS     use crate::AST::{Expr, PlaceAccess};
-//RS     let Expr::MethodCall { receiver, .. } = expr else {
-//RS         return;
-//RS     };
-//RS     let place = match receiver.as_mut() {
-//RS         Expr::Place(inner, PlaceAccess::Write | PlaceAccess::Take, span)
-//RS             if !matches!(inner.as_ref(), Expr::Slice { .. }) =>
-//RS         {
-//RS             std::mem::replace(inner.as_mut(), Expr::Unit(*span))
-//RS         }
-//RS         _ => return,
-//RS     };
-//RS     **receiver = place;
-//RS }
-//RS 
-//RS fn lift_body_receiver_marks(body: &mut [crate::AST::Stmt]) {
-//RS     for stmt in body {
-//RS         stmt.for_each_expr_mut(lift_receiver_mark);
-//RS     }
-//RS }
-//RS 
-//RS fn lift_func_receiver_marks(function: &crate::AST::Func) -> crate::AST::Func {
-//RS     let mut function = function.clone();
-//RS     lift_body_receiver_marks(&mut function.body);
-//RS     function
-//RS }
-//RS 
-//RS /// Visit the body of every function an item carries: a free function, or the
-//RS /// inherent and trait-impl methods of an impl, struct or enum.
-//RS fn for_each_item_body(
-//RS     item: &mut crate::AST::Item,
-//RS     mut visit: impl FnMut(&mut [crate::AST::Stmt]),
-//RS ) {
-//RS     use crate::AST::Item;
-//RS     let (methods, trait_impls) = match item {
-//RS         Item::Func(function) => {
-//RS             visit(function.body.as_mut_slice());
-//RS             return;
-//RS         }
-//RS         Item::Impl(implementation) => (&mut implementation.methods, None),
-//RS         Item::Struct(structure) => (&mut structure.methods, Some(&mut structure.trait_impls)),
-//RS         Item::Enum(enumeration) => (&mut enumeration.methods, Some(&mut enumeration.trait_impls)),
-//RS         _ => return,
-//RS     };
-//RS     let trait_methods = trait_impls
-//RS         .into_iter()
-//RS         .flatten()
-//RS         .flat_map(|block| block.methods.iter_mut());
-//RS     for method in methods.iter_mut().chain(trait_methods) {
-//RS         visit(method.body.as_mut_slice());
-//RS     }
-//RS }
-//RS 
-//RS /// Every variant name a fragment enum declares. A dotted `.Val(x)` / `.None`
-//RS /// pattern names that variant when one exists (sema resolves it against the
-//RS /// subject's enum), so the fragment normalization below leaves it alone.
-//RS fn fragment_declared_variants(items: &[crate::AST::Item]) -> std::collections::HashSet<String> {
-//RS     items
-//RS         .iter()
-//RS         .filter_map(|item| match item {
-//RS             crate::AST::Item::Enum(definition) => Some(&definition.variants),
-//RS             _ => None,
-//RS         })
-//RS         .flatten()
-//RS         .map(|variant| variant.name.clone())
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Sema rewrites a contextual `Val(x)` / `None` pattern to the optional
-//RS /// carrier's `Present` / `Absent` test (`normalize_contextual_pattern`). A
-//RS /// module `prep` constant lowers helper bodies before they are checked, so the
-//RS /// fragment applies the same rewrite: the undotted spelling always names the
-//RS /// optional state, and the dotted spelling does unless a fragment enum declares
-//RS /// a variant of that name. Without it `.Val(c)` reached MIR as a variant of
-//RS /// whichever enum owns a `Val` case (the unit `RemoveBy.Val`).
-//RS fn normalize_fragment_optional_pattern(
-//RS     pattern: &mut crate::AST::Pattern,
-//RS     declared: &std::collections::HashSet<String>,
-//RS ) {
-//RS     use crate::AST::{PatSlot, Pattern};
-//RS     fn normalize_slot(slot: &mut PatSlot, declared: &std::collections::HashSet<String>) {
-//RS         match slot {
-//RS             PatSlot::Nested(inner) => normalize_fragment_optional_pattern(inner, declared),
-//RS             PatSlot::Named { slot, .. } => normalize_slot(slot, declared),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     let replacement = match pattern {
-//RS         Pattern::Or(alternatives, _) => {
-//RS             for alternative in alternatives {
-//RS                 normalize_fragment_optional_pattern(alternative, declared);
-//RS             }
-//RS             return;
-//RS         }
-//RS         Pattern::Present {
-//RS             inner: Some(inner), ..
-//RS         }
-//RS         | Pattern::Ok {
-//RS             inner: Some(inner), ..
-//RS         }
-//RS         | Pattern::Err {
-//RS             inner: Some(inner), ..
-//RS         } => {
-//RS             normalize_fragment_optional_pattern(inner, declared);
-//RS             return;
-//RS         }
-//RS         Pattern::Variant {
-//RS             variant,
-//RS             bindings,
-//RS             leading_dot,
-//RS             span,
-//RS         } => {
-//RS             for slot in bindings.iter_mut() {
-//RS                 normalize_slot(slot, declared);
-//RS             }
-//RS             if *leading_dot && declared.contains(variant.as_str()) {
-//RS                 return;
-//RS             }
-//RS             match bindings.as_mut_slice() {
-//RS                 [] if variant.as_str() == crate::Syntax::LIT_NULL => Pattern::Absent(*span),
-//RS                 [slot] if variant.as_str() == crate::Syntax::LIT_VALUE => {
-//RS                     let (binding, binding_span, inner) =
-//RS                         match std::mem::replace(slot, PatSlot::Wildcard) {
-//RS                             PatSlot::Nested(inner) => (
-//RS                                 crate::Syntax::PAT_WILDCARD_SLOT.to_string(),
-//RS                                 inner.span(),
-//RS                                 Some(inner),
-//RS                             ),
-//RS                             slot => (
-//RS                                 slot.as_bind()
-//RS                                     .unwrap_or(crate::Syntax::PAT_WILDCARD_SLOT)
-//RS                                     .to_string(),
-//RS                                 slot.binding_span().unwrap_or(*span),
-//RS                                 None,
-//RS                             ),
-//RS                         };
-//RS                     Pattern::Present {
-//RS                         binding,
-//RS                         binding_span,
-//RS                         inner,
-//RS                         span: *span,
-//RS                     }
-//RS                 }
-//RS                 _ => return,
-//RS             }
-//RS         }
-//RS         _ => return,
-//RS     };
-//RS     *pattern = replacement;
-//RS }
-//RS 
-//RS fn normalize_fragment_body_patterns(
-//RS     body: &mut [crate::AST::Stmt],
-//RS     declared: &std::collections::HashSet<String>,
-//RS ) {
-//RS     for stmt in body {
-//RS         stmt.for_each_expr_mut(|expr| {
-//RS             if let crate::AST::Expr::PatternTest { pattern, .. } = expr {
-//RS                 normalize_fragment_optional_pattern(pattern, declared);
-//RS             }
-//RS         });
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 0505 crates/jet-codegen/src/Codegen/TIR/mod.rs:1762-3240
+use jet_foundation.[Type, Func, Item, Expr, Stmt, Pattern, PatSlot, PlaceAccess, Span, StructDef, TypeParam, ErrorConvDef, CtValue, UnitFamilyDef, FailureContract]
+use jet_foundation.Layout.[TargetLayout]
+use jet_foundation.MIR.[MirProgram, MirFunctionId]
+use jet_foundation.Names.[member_name]
+use jet_foundation.CoreModuleExports.[core_source_module_by_alias, core_source_owns]
+use jet_codegen.Codegen.Context.[Cx, build_cx_items, collect_iterable_hooks]
+use jet_codegen.Codegen.[ProgramBundle, ExternFn, CoreSourceFunctionSignature, mangle]
+use jet_codegen.TIR.[TCallArg, TFunc, TJitSpawnLambda, LowerError, lower_func, lower_trait_method, static_call_type_name_unchecked]
+use jet_codegen.Codegen.Functions.[generic_free_function_instance_key, function_semantic_key, populate_cx_from_bundle, register_own_struct_shapes, qualification_binders, qualify_imported_type, lower_demanded_generic_methods, published_schema, imported_type_owners, imported_type_name, should_lower_imported_core_body, set_lowered_method_name, lower_mir_fragment]
+use jet_codegen.Codegen.VariadicBound.[build_variadic_bound_func]
+use jet_sema.[specialize_function_types]
+use jet_comptime.MirBridge.[MirFragmentNominalFacts, MirFragmentCoreSourceSignature, MirFragmentCoreSourceModule]
+use jet_syntax as Syntax
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1762
+pub fn bind_generic_type(template: Type, actual: Type, params: Set<String>, subst: &[String: Type]) -> Bool Never! {
+    if template == {
+        .Named(name) if params.contains(name) -> {
+            if subst.get(name) == {
+                Val(bound) if bound == actual -> true
+                Val(.Named(bound_name)) -> {
+                    if actual != .Named(actual_name) -> return false
+                    same_leaf :: bound_name.rsplit("::").next() == actual_name.rsplit("::").next()
+                    one_is_unqualified :: !bound_name.contains("::") || !actual_name.contains("::")
+                    if same_leaf && one_is_unqualified {
+                        &subst.insert(~name, ~actual)
+                        true
+                    } else -> false
+                }
+                Val(_) -> false
+                None -> { &subst.insert(~name, ~actual); true }
+            }
+        }
+        .Apply{name, args} -> {
+            if actual != .Apply{name: actual_name, args: actual_args} -> return false
+            name == actual_name && args.len() == actual_args.len() && args.zip(actual_args).all(fn(pair) { bind_generic_type(pair.0, pair.1, params, &subst) })
+        }
+        .List(inner) -> if actual == { .List(actual_inner) -> bind_generic_type(inner, actual_inner, params, &subst); else -> false }
+        .Option(inner) -> if actual == { .Option(actual_inner) -> bind_generic_type(inner, actual_inner, params, &subst); else -> false }
+        .Map{key, value, ..} -> if actual == { .Map{key: actual_key, value: actual_value, ..} -> bind_generic_type(key, actual_key, params, &subst) && bind_generic_type(value, actual_value, params, &subst); else -> false }
+        .Shared(inner) -> if actual == { .Shared(actual_inner) -> bind_generic_type(inner, actual_inner, params, &subst); else -> false }
+        .Tuple(fields) -> if actual == { .Tuple(actual_fields) -> fields.len() == actual_fields.len() && fields.zip(actual_fields).all(fn(pair) { pair.0.0 == pair.1.0 && bind_generic_type(pair.0.1, pair.1.1, params, &subst) }); else -> false }
+        .Result{ok, err} -> if actual == { .Result{ok: actual_ok, err: actual_err} -> bind_generic_type(ok, actual_ok, params, &subst) && bind_generic_type(err, actual_err, params, &subst); else -> false }
+        .Fn{params: template_params, ret: template_ret, ..} -> {
+            if actual != .Fn{params: actual_params, ret: actual_ret, ..} -> return false
+            template_params.len() == actual_params.len() && template_params.zip(actual_params).all(fn(pair) { bind_generic_type(pair.0, pair.1, params, &subst) })
+                && (if (template_ret, actual_ret) == {
+                    (Val(template), Val(actual)) -> if (template, actual) == {
+                        (.Result{ok: template_ok, err: template_err}, .Result{ok: actual_ok, err: actual_err}) if actual_err.is_never() ->
+                            bind_generic_type(template_ok, actual_ok, params, &subst)
+                            && (!(if template_err == { .Named(name) -> params.contains(name); else -> false }) || bind_generic_type(template_err, actual_err, params, &subst))
+                        (.Result{..}, actual) -> bind_generic_type(template, actual, params, &subst)
+                        (_, .Result{ok, ..}) -> bind_generic_type(template, ok, params, &subst)
+                        (_, actual) -> bind_generic_type(template, actual, params, &subst)
+                    }
+                    (None, None) -> true
+                    else -> false
+                })
+        }
+        .Tagged{inner, ..} -> bind_generic_type(inner, actual, params, &subst)
+        else -> template == actual
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1892
+fn generic_call_shape(args: [TCallArg], type_args: [Type]) -> [Type] Never! {
+    shape := loop arg in args {
+        if arg.widen_to_vec && arg.value.ty == .FixedList{elem, ..} -> Type.List(~elem) else -> ~arg.value.ty
+    }
+    &shape.extend(type_args)
+    ^shape
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1909
+fn generic_call_substitution(param_types: [Type], type_param_names: [String], actuals: [Type]) -> [String: Type]? Never! {
+    if type_param_names.is_empty() -> return None
+    (param_actuals, explicit_actuals) :: if actuals.len() == param_types.len() + type_param_names.len() -> actuals.split_at(param_types.len())
+        else if actuals.len() == param_types.len() -> (actuals, []) else -> return None
+    names :: Set<String>.from(type_param_names)
+    subst := [String: Type]{}
+    loop (param, actual) in type_param_names.zip(explicit_actuals) -> &subst.insert(~param, ~actual)
+    if !param_types.zip(param_actuals).all(fn(pair) { bind_generic_type(pair.0, pair.1, names, &subst) }) || subst.len() != names.len() -> return None
+    Val(^subst)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1941
+pub fn demand_generic_free_function(cx: Cx, name: String, args: [TCallArg], explicit_type_args: [Type]) -> String? Never! {
+    type_param_names :: cx.fn_type_param_order.get(name)?
+    if type_param_names.is_empty() -> return None
+    sig :: cx.sigs.get(name)?
+    param_types :: loop (_, ty) in sig -> ~ty
+    shape :: generic_call_shape(args, explicit_type_args)
+    subst :: generic_call_substitution(param_types, type_param_names, shape)?
+    type_args := [Type].with_capacity(type_param_names.len())
+    loop param in type_param_names -> &type_args.push(~subst.get(param)?)
+    &cx.jit_generic_calls.borrow_mut().entry(name).or_default().push(shape)
+    Val(generic_free_function_instance_key(name, type_args))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1967
+fn checked_core_source_generic_type_args(signature: CoreSourceFunctionSignature, actuals: [Type]) -> [Type]? Never! {
+    param_names :: signature.type_params
+    if param_names.is_empty() -> return None
+    param_types :: loop (_, ty) in signature.params -> ~ty
+    if actuals.len() == param_types.len() + param_names.len() -> return Val(actuals[param_types.len()..].to_vec())
+    substitutions :: generic_call_substitution(param_types, param_names, actuals)?
+    result := [Type].with_capacity(param_names.len())
+    loop param in param_names -> &result.push(~substitutions.get(param)?)
+    Val(^result)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1992
+pub fn demand_core_source_generic_function(cx: Cx, method: String, signature: CoreSourceFunctionSignature, args: [TCallArg], explicit_type_args: [Type]) -> String? Never! {
+    shape :: generic_call_shape(args, explicit_type_args)
+    type_args :: loop ty in checked_core_source_generic_type_args(signature, shape)? -> cx.expand_type_aliases(ty)
+    // GATE #4499: exact tuple-key equality/hash.
+    &cx.jit_core_source_generic_calls.borrow_mut().entry((~signature.module_identity, method)).or_default().push(~type_args)
+    Val(generic_free_function_instance_key(method, type_args))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2013
+fn generic_free_function_template(items: [Item], called_name: String) -> Func? Never! {
+    loop item in items {
+        if item == {
+            .Func(function) if function.name == called_name -> return Val(~function)
+            .CodeModule(module) -> {
+                body :: module.body ?? continue
+                loop inner in body {
+                    if inner != .Func(function) -> continue
+                    member :: member_name(module.name, function.name)
+                    if member == called_name {
+                        function := ~function
+                        function.name = member
+                        return Val(^function)
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2039
+fn specialize_generic_free_functions(items: [Item], cx: Cx, funcs: &[TFunc]) -> Unit Never! {
+    loop {
+        calls :: &cx.jit_generic_calls.borrow_mut().take()
+        if calls.is_empty() -> break
+        loop (called_name, shapes) in calls {
+            unique := ^shapes
+            &unique.sort_by_key(fn(shape) { "{shape:?}" })
+            &unique.dedup()
+            variadic_shape :: called_name.rsplit_once("__va").and_then(fn(pair) { USize.parse(pair.1).ok().map(fn(arity) { (pair.0, arity) }) })
+            (template, variadic) :: if variadic_shape == Val((base, arity)) -> {
+                (_, bounds) :: cx.variadic_bound_fns.get(base) ?? continue
+                source :: generic_free_function_template(items, base) ?? continue
+                (build_variadic_bound_func(source, bounds, arity), true)
+            } else -> (generic_free_function_template(items, called_name) ?? continue, false)
+            if template.type_params.is_empty() || (variadic && unique.len() != 1) -> continue
+            param_types :: loop param in template.params -> ~param.ty
+            type_param_names :: loop param in template.type_params -> ~param.name
+            loop actuals in unique {
+                subst :: generic_call_substitution(param_types, type_param_names, actuals) ?? continue
+                type_args := [Type].with_capacity(type_param_names.len())
+                all_bound := true
+                loop param in type_param_names {
+                    if subst.get(param) == Val(ty) -> &type_args.push(~ty) else -> { all_bound = false; break }
+                }
+                if !all_bound -> continue
+                emitted_name :: if variadic -> ~called_name else -> generic_free_function_instance_key(called_name, type_args)
+                emitted_key :: function_semantic_key(cx.module_identity, emitted_name)
+                if funcs.any(fn(func) { func.name == emitted_name || func.key == emitted_key }) -> continue
+                specialized := specialize_function_types(~template, subst)
+                residual_type_params :: Set<String>.from(loop param in specialized.type_params -> ~param.name)
+                &specialized.type_params.clear()
+                previous_type_params :: ~cx.current_type_params.borrow()
+                function_type_params := ~previous_type_params
+                &function_type_params.extend(residual_type_params)
+                _ :: cx.current_type_params.replace(^function_type_params)
+                lowered := lower_func(specialized, cx)
+                _ :: cx.current_type_params.replace(^previous_type_params)
+                lowered.key = function_semantic_key(lowered.module, emitted_name)
+                lowered.name = if cx.jit_local_call_prefix == Val(prefix) -> "{prefix}{mangle(emitted_name)}" else -> ~emitted_name
+                &funcs.push(^lowered)
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2142
+fn merge_core_source_generic_calls(target: Cx, source: Cx) -> Unit Never! {
+    calls :: &source.jit_core_source_generic_calls.borrow_mut().take()
+    target_calls := target.jit_core_source_generic_calls.borrow_mut()
+    loop (key, type_args) in calls -> &target_calls.entry(key).or_default().extend(type_args)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2150
+fn build_imported_generic_core_cx(bundle: ProgramBundle, module_idx: USize, extern_funcs: [String: ExternFn], debug_linemap: Bool, spawn_site_base: USize) -> Cx Never! {
+    imported :: bundle.modules[module_idx]
+    imported_cx := build_cx_items(imported.items, imported.source, imported.display, None, extern_funcs, bundle.edition)
+    imported_cx.debug_linemap = debug_linemap
+    populate_cx_from_bundle(&imported_cx, bundle, module_idx)
+    register_own_struct_shapes(&imported_cx, bundle, module_idx)
+    collect_iterable_hooks(&imported_cx, imported.items)
+    imported_cx.jit_local_call_prefix = Val("{mangle(imported.alias)}::")
+    imported_cx.jit_spawn_site_base = spawn_site_base
+    ^imported_cx
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2175
+fn checked_imported_core_source_signature(imported_alias: String, method: String, owner: String, signatures: [(String, String): CoreSourceFunctionSignature]) -> CoreSourceFunctionSignature? Never! {
+    source :: core_source_module_by_alias(imported_alias)?
+    signatures.get((source.module.to_string(), method)).filter(fn(signature) { signature.module_identity == owner })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2190
+fn lower_checked_core_source_generic_instance(bundle: ProgramBundle, module_idx: USize, imported_cx: Cx, method: String, type_args: [Type], funcs: &[TFunc]) -> Unit LowerError! {
+    imported :: bundle.modules[module_idx]
+    owner :: bundle.name_ledger.module_identity(module_idx).expect("name ledger must contain every loaded module")
+    missing_target :: fn() { LowerError.new(Span.new(0, 0), "checked Core source generic target `{owner}::{method}` has no loaded template") }
+    signature :: checked_imported_core_source_signature(imported.alias, method, owner, imported_cx.core_source_sigs) ?? return Err(missing_target())
+    template :: generic_free_function_template(imported.items, method) ?? return Err(missing_target())
+    span :: template.span
+    type_param_names :: loop param in template.type_params -> ~param.name
+    if signature.type_params != type_param_names || type_args.len() != type_param_names.len() -> return Err(LowerError.new(span, "checked Core source generic target `{owner}::{method}` has inconsistent type parameters"))
+    emitted_name :: generic_free_function_instance_key(method, type_args)
+    emitted_key :: function_semantic_key(owner, emitted_name)
+    if funcs.any(fn(function) { function.key == emitted_key }) -> return Ok(())
+    (specialized, lowered) := lower_core_source_generic_template(template, type_args, emitted_name, imported_cx)
+    binders :: qualification_binders([], Val(specialized))
+    loop (_, ty, _) in &lowered.params -> ty = qualify_imported_type(bundle, module_idx, owner, binders, ty)
+    lowered.ret = lowered.ret.map(fn(ty) { qualify_imported_type(bundle, module_idx, owner, binders, ty) })
+    lowered.key = emitted_key
+    lowered.name = "{mangle(imported.alias)}::{mangle(emitted_name)}"
+    &funcs.push(^lowered)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2259
+fn lower_core_source_generic_template(template: Func, type_args: [Type], emitted_name: String, cx: Cx) -> (Func, TFunc) Never! {
+    substitutions := [String: Type]{}
+    loop (param, actual) in template.type_params.zip(type_args) -> &substitutions.insert(~param.name, ~actual)
+    specialized := specialize_function_types(^template, substitutions)
+    specialized.name = emitted_name
+    residual_type_params :: Set<String>.from(loop param in specialized.type_params -> ~param.name)
+    &specialized.type_params.clear()
+    previous_type_params :: ~cx.current_type_params.borrow()
+    function_type_params := ~previous_type_params
+    &function_type_params.extend(residual_type_params)
+    _ :: cx.current_type_params.replace(^function_type_params)
+    lowered :: lower_func(specialized, cx)
+    _ :: cx.current_type_params.replace(^previous_type_params)
+    (^specialized, ^lowered)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2288
+fn specialize_checked_core_source_generics(bundle: ProgramBundle, extern_funcs: [String: ExternFn], debug_linemap: Bool, cx: Cx, funcs: &[TFunc], spawn_lambdas: &[TJitSpawnLambda]) -> Unit LowerError! {
+    processed := Set<String>.new()
+    loop {
+        calls :: &cx.jit_core_source_generic_calls.borrow_mut().take()
+        if calls.is_empty() -> return Ok(())
+        loop ((owner, method), instantiations) in calls {
+            instantiations := ^instantiations
+            &instantiations.sort_by_key(fn(types) { "{types:?}" })
+            &instantiations.dedup()
+            module_idx :: (0..bundle.modules.len()).find(fn(index) { bundle.name_ledger.module_identity(index) == Val(owner) })
+                ?? return Err(LowerError.new(Span.new(0, 0), "checked Core source generic target `{owner}::{method}` has no loaded module"))
+            imported :: bundle.modules[module_idx]
+            imported_cx := build_imported_generic_core_cx(bundle, module_idx, extern_funcs, debug_linemap, spawn_lambdas.len())
+            loop type_args in instantiations {
+                instance :: generic_free_function_instance_key(method, type_args)
+                key :: function_semantic_key(owner, instance)
+                if !&processed.insert(~key) -> continue
+                imported_cx.jit_spawn_site_base = spawn_lambdas.len()
+                lower_checked_core_source_generic_instance(bundle, module_idx, imported_cx, method, type_args, &funcs)?
+                if !funcs.any(fn(function) { function.key == key }) -> continue
+                lower_demanded_generic_methods(imported.items, imported_cx, &funcs)?
+                specialize_generic_free_functions(imported.items, imported_cx, &funcs)
+                &spawn_lambdas.extend(&imported_cx.jit_spawn_lambdas.borrow_mut().take())
+            }
+            merge_core_source_generic_calls(cx, imported_cx)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2354
+fn memo_dependency_facts(cx: Cx) -> [String: [String: [String]]] Never! {
+    result := [String: [String: [String]]]{}
+    loop (owner, sources) in cx.memo_dependencies {
+        source_facts := [String: [String]]{}
+        loop (source, memo_fields) in sources {
+            fields := memo_fields.to_list()
+            &fields.sort()
+            &source_facts.insert(~source, ^fields)
+        }
+        &result.insert(~owner, ^source_facts)
+    }
+    ^result
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2392
+fn lower_imported_generated_codecs(bundle: ProgramBundle, module_idx: USize, core_modules: Set<USize>, reachable_bodies: Set<(USize, USize, USize)>, cx: Cx, funcs: &[TFunc]) -> Unit Never! {
+    if module_idx == bundle.entry -> return
+    imported :: bundle.modules[module_idx]
+    loop item in imported.items {
+        if item != .Impl(implementation) -> continue
+        if !implementation.is_generated_serde -> continue
+        trait_name :: implementation.trait_name ?? continue
+        if imported.items.any(fn(candidate) { if candidate == { .Struct(definition) -> definition.name == implementation.type_name && published_schema(definition); else -> false } }) -> continue
+        owner_params :: imported.items.find_map(fn(item) { if item == {
+            .Struct(definition) if definition.name == implementation.type_name -> Val(definition.type_params)
+            .Enum(definition) if definition.name == implementation.type_name -> Val(definition.type_params)
+            else -> None
+        } }) ?? []
+        loop owner in imported_type_owners(bundle, module_idx) {
+            qualified :: imported_type_name(owner, implementation.type_name)
+            if !cx.struct_fields.contains_key(qualified) && !cx.enum_variants.contains_key(qualified) -> continue
+            loop method in implementation.methods {
+                if !should_lower_imported_core_body(core_modules, reachable_bodies, module_idx, method) || !method.type_params.is_empty() -> continue
+                name :: "{qualified}::{method.name}"
+                lowered := lower_trait_method(method, qualified, cx, trait_name, implementation.is_generated_serde && method.compiler_generated, implementation.operator_rhs)
+                binders :: qualification_binders(owner_params, Val(method))
+                lowered.ret = lowered.ret.map(fn(ty) { qualify_imported_type(bundle, module_idx, owner, binders, ty) })
+                if funcs.any(fn(function) { function.key == lowered.key && function.source_span == lowered.source_span }) -> continue
+                set_lowered_method_name(&lowered, fn() { ^name })
+                &funcs.push(^lowered)
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2487
+// All maps and declarations are borrowed from the fragment caller, not copied.
+pub struct MirFragmentContext {
+    pub funcs: [String: Func]
+    pub binding_types: [String: Type]
+    pub method_traits: [(String, String): String]
+    pub error_conversions: [ErrorConvDef]
+    pub methods: [(String, String): Func]
+    pub extern_names: Set<String>
+    pub globals: [String: CtValue]
+    pub core_imports: [String: String]
+    pub structs: [String: StructDef]
+    pub computed_fields: [(String, String): Expr]
+    pub checked_nominals: MirFragmentNominalFacts?
+    pub distinct_ranges: [String: (I64, I64)?]
+    pub distinct_bases: [String: Type]
+    pub unit_families: [UnitFamilyDef]
+    // GATE #4483: selected target profile, never compiler-host layout facts.
+    pub target_layout: TargetLayout
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2507
+// GATE #4499: exact enum equality/hash/order; do not encode these keys as strings.
+enum FragmentCallable {
+    Function(String)
+    Method(owner: String, name: String)
+    CoreSource(module: String, name: String)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2514
+fn fragment_function_key(name: String, context: MirFragmentContext) -> String? Never! {
+    if context.funcs.contains_key(name) -> return Val(~name)
+    name.split_once('.').map(fn(pair) { "{pair.0}::{pair.1}" }).filter(fn(qualified) { context.funcs.contains_key(qualified) })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2526
+fn fragment_method_key(owner: String, method: String, context: MirFragmentContext) -> (String, String)? Never! {
+    owners := [String]{~owner}
+    if owner.split_once('.') == Val((module, leaf)) -> &owners.push("{module}::{leaf}")
+    if owner.rsplit_once("::") == Val((_, leaf)) -> &owners.push(leaf.to_string())
+    if owner.rsplit_once('.') == Val((_, leaf)) -> &owners.push(leaf.to_string())
+    &owners.dedup()
+    owners.find_map(fn(candidate) {
+        key :: (candidate, method)
+        if context.methods.contains_key(key) -> Val(key) else -> None
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2548
+fn fragment_type_owner(ty: Type) -> String? Never! {
+    if ty == { .Named(name) | .Apply{name, ..} -> Val(~name); .Tagged{inner, ..} -> fragment_type_owner(inner); else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2556
+fn fragment_static_method_key(receiver: Expr, method: String, locals: [String: Type]?, context: MirFragmentContext) -> (String, String)? Never! {
+    if receiver == {
+        .Ident(name, _) if locals.is_some_and(fn(locals) { locals.contains_key(name) }) -> return None
+        .Field(base, _, _) if (if base == { .Ident(name, _) -> locals.is_some_and(fn(locals) { locals.contains_key(name) }); else -> false }) -> return None
+        else -> {}
+    }
+    owner :: static_call_type_name_unchecked(receiver)?
+    fragment_method_key(owner, method, context)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2583
+fn collect_fragment_callable(expr: Expr, context: MirFragmentContext, current_owner: String?, locals: [String: Type]?, out: &Set<FragmentCallable>) -> Unit Never! {
+    if expr == {
+        .Call(call) -> { if fragment_function_key(call.name, context) == Val(name) -> &out.insert(FragmentCallable.Function(name)) }
+        .Ident(name, _) if !locals.is_some_and(fn(locals) { locals.contains_key(name) }) -> { if fragment_function_key(name, context) == Val(name) -> &out.insert(FragmentCallable.Function(name)) }
+        .Field(receiver, member, _) -> {
+            owner :: if receiver == {
+                .Ident(name, _) if name == Syntax.KW_SELF -> current_owner
+                .Ident(name, _) -> locals.and_then(fn(locals) { locals.get(name) }).and_then(fragment_type_owner)
+                else -> None
+            }
+            if owner == Val(owner) && context.computed_fields.contains_key((owner, member)) {
+                if fragment_method_key(owner, member, context) == Val((owner, name)) -> &out.insert(FragmentCallable.Method(owner: owner, name: name))
+            }
+        }
+        .MethodCall{receiver, method, recv_type, ..} -> {
+            key :: recv_type.and_then(fn(owner) { fragment_method_key(owner, method, context) }).or_else(fn() {
+                if receiver != .Ident(name, _) -> return None
+                owner :: (if name == Syntax.KW_SELF -> current_owner else -> locals.and_then(fn(locals) { locals.get(name) }).and_then(fragment_type_owner))?
+                fragment_method_key(owner, method, context)
+            }).or_else(fn() { fragment_static_method_key(receiver, method, locals, context) })
+            if key == Val((owner, name)) -> &out.insert(FragmentCallable.Method(owner: owner, name: name))
+        }
+        else -> {}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2662
+fn collect_fragment_core_callable(expr: Expr, context: MirFragmentContext, core_imports: [String: String], current_module: String?, locals: [String: Type]?, out: &Set<FragmentCallable>) -> Unit Never! {
+    facts :: context.checked_nominals ?? return
+    is_local :: fn(name) { locals.is_some_and(fn(locals) { locals.contains_key(name) }) }
+    (module, name) :: if expr == {
+        .MethodCall{receiver, method, ..} -> {
+            if receiver != .Ident(alias, _) -> return
+            if is_local(alias) -> return
+            module :: core_imports.get(alias) ?? return
+            if current_module == Val(module) || !core_source_owns(module, method) -> return
+            (module, method)
+        }
+        .Call(call) if !is_local(call.name) -> (current_module ?? return, call.name)
+        else -> return
+    }
+    if facts.core_source_bodies.get(module).is_some_and(fn(source) { source.functions.contains_key(name) }) -> &out.insert(FragmentCallable.CoreSource(module: module, name: name))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2718
+fn collect_fragment_module_callable(expr: Expr, facts: MirFragmentNominalFacts, module_imports: [String: String], imported_functions: [String: (String, String)], locals: [String: Type]?, out: &Set<FragmentCallable>) -> Unit Never! {
+    is_local :: fn(name) { locals.is_some_and(fn(locals) { locals.contains_key(name) }) }
+    (module, name) :: if expr == {
+        .MethodCall{receiver, method, ..} -> {
+            if receiver != .Ident(alias, _) -> return
+            if is_local(alias) -> return
+            (module_imports.get(alias) ?? return, method)
+        }
+        .Call(call) if !is_local(call.name) -> imported_functions.get(call.name) ?? return
+        else -> return
+    }
+    if facts.core_source_bodies.get(module).is_some_and(fn(source) { source.functions.contains_key(name) }) -> &out.insert(FragmentCallable.CoreSource(module: module, name: name))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2766
+fn annotate_fragment_module_calls(function: &Func, signatures: [(String, String): MirFragmentCoreSourceSignature], imported_functions: [String: (String, String)]) -> Unit Never! {
+    if signatures.is_empty() -> return
+    checked_return :: fn(signature) { signature.return_type ?? FailureContract.from_return_type(None).effective_type() }
+    loop statement in &function.body {
+        &statement.for_each_expr_mut(fn(expr) {
+            if expr == {
+                .MethodCall{receiver, method, resolved_ret, ..} if resolved_ret == None -> {
+                    if receiver != .Ident(alias, _) -> return
+                    if signatures.get((alias, method)) == Val(signature) -> resolved_ret = Val(checked_return(signature))
+                }
+                .Call(call) if call.resolved_ret == None -> {
+                    (_, name) :: imported_functions.get(call.name) ?? return
+                    if signatures.get((call.name, name)) == Val(signature) -> call.resolved_ret = Val(checked_return(signature))
+                }
+                else -> {}
+            }
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2810
+fn collect_fragment_function_dependencies(function: Func, current_owner: String?, core_scope: (String, MirFragmentCoreSourceModule)?, context: MirFragmentContext, out: &Set<FragmentCallable>) -> Unit Never! {
+    locals := [String: Type]{}
+    loop param in function.params -> &locals.insert(~param.name, ~param.ty)
+    collect :: fn(candidate) {
+        if core_scope == {
+            Val((module, source)) -> {
+                collect_fragment_core_callable(candidate, context, source.core_imports, Val(module), Val(locals), &out)
+                if context.checked_nominals == Val(facts) -> collect_fragment_module_callable(candidate, facts, source.module_imports, source.imported_functions, Val(locals), &out)
+            }
+            None -> {
+                collect_fragment_callable(candidate, context, current_owner, Val(locals), &out)
+                collect_fragment_core_callable(candidate, context, context.core_imports, None, Val(locals), &out)
+                if context.checked_nominals == Val(facts) -> collect_fragment_module_callable(candidate, facts, facts.import_modules, facts.imported_functions, Val(locals), &out)
+            }
+        }
+    }
+    loop statement in function.body -> statement.for_each_expr(collect)
+    loop clause in function.pre.chain(function.post) {
+        clause.cond.for_each_expr(collect)
+        clause.message_expr.for_each_expr(collect)
+    }
+    loop param in function.params { if param.default == Val(default) -> default.for_each_expr(collect) }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2880
+fn fragment_callable_closure(expr: Expr, stmts: [Stmt], context: MirFragmentContext) -> Set<FragmentCallable> Never! {
+    reachable := Set<FragmentCallable>.new()
+    collect :: fn(candidate) {
+        collect_fragment_callable(candidate, context, None, Val(context.binding_types), &reachable)
+        collect_fragment_core_callable(candidate, context, context.core_imports, None, Val(context.binding_types), &reachable)
+        if context.checked_nominals == Val(facts) -> collect_fragment_module_callable(candidate, facts, facts.import_modules, facts.imported_functions, Val(context.binding_types), &reachable)
+    }
+    expr.for_each_expr(collect)
+    loop statement in stmts -> statement.for_each_expr(collect)
+    pending := reachable.to_list()
+    &pending.sort() // Preserve Rust BTreeSet's initial stack order.
+    loop {
+        callable :: &pending.pop() ?? break
+        owner := None
+        core_scope := None
+        function :: if callable == {
+            .Function(name) -> context.funcs.get(name) ?? continue
+            .Method{owner: method_owner, name} -> {
+                function :: context.methods.get((method_owner, name)) ?? continue
+                owner = Val(method_owner)
+                function
+            }
+            .CoreSource{module, name} -> {
+                source :: context.checked_nominals.and_then(fn(facts) { facts.core_source_bodies.get(module) }) ?? continue
+                function :: source.functions.get(name) ?? continue
+                core_scope = Val((module, source))
+                function
+            }
+        }
+        dependencies := Set<FragmentCallable>.new()
+        collect_fragment_function_dependencies(function, owner, core_scope, context, &dependencies)
+        ordered := dependencies.to_list()
+        &ordered.sort()
+        loop dependency in ordered { if &reachable.insert(~dependency) -> &pending.push(^dependency) }
+    }
+    ^reachable
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:2974
+fn fragment_declaration_items(items: [Item], reachable: Set<FragmentCallable>) -> [Item] Never! {
+    retain_reachable :: fn(owner, methods) { &methods.retain(fn(method) { reachable.contains(FragmentCallable.Method(owner: owner, name: method.name)) }) }
+    loop item in items {
+        if item == {
+            .Impl(definition) -> {
+                definition := ~definition
+                retain_reachable(definition.type_name, &definition.methods)
+                Item.Impl(^definition)
+            }
+            .Struct(definition) -> {
+                definition := ~definition
+                retain_reachable(definition.name, &definition.methods)
+                loop implementation in &definition.trait_impls -> retain_reachable(definition.name, &implementation.methods)
+                Item.Struct(^definition)
+            }
+            .Enum(definition) -> {
+                definition := ~definition
+                retain_reachable(definition.name, &definition.methods)
+                loop implementation in &definition.trait_impls -> retain_reachable(definition.name, &implementation.methods)
+                Item.Enum(^definition)
+            }
+            else -> ~item
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3019
+pub fn lower_mir_fragment_expr(expr: Expr, context: MirFragmentContext) -> (MirProgram, MirFunctionId) LowerError! {
+    lower_mir_fragment(expr, [], context)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3033
+pub fn lower_mir_fragment_block(stmts: [Stmt], context: MirFragmentContext) -> (MirProgram, MirFunctionId) LowerError! {
+    lower_mir_fragment(Expr.Unit(Span.new(0, 0)), stmts, context)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3050
+fn fragment_host_field_type(owner: String, field: String) -> Type Never! {
+    if (owner, field) == {
+        (Syntax.TYPE_BUILD_CONTEXT, "program") -> Type.Named(Syntax.TYPE_PROGRAM_INFO)
+        (Syntax.TYPE_BUILD_CONTEXT, "__session") -> Type.Int
+        (Syntax.TYPE_PROGRAM_INFO, "types") -> Type.List(Type.Named(Syntax.TYPE_TYPE_INFO))
+        (Syntax.TYPE_TYPE_INFO, "span") -> Type.Named(Syntax.TYPE_SOURCE_SPAN)
+        (Syntax.TYPE_TYPE_INFO, "markers" | "expanded_markers" | "implements") -> Type.List(Type.String)
+        (Syntax.TYPE_SOURCE_SPAN, "start" | "end") -> Type.Int
+        else -> Type.String
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3076
+fn lift_receiver_mark(expr: &Expr) -> Unit Never! {
+    if expr != .MethodCall{receiver, ..} -> return
+    if receiver == .Place(inner, .Write | .Take, span) && !(inner is .Slice{..}) {
+        place :: &inner.replace(Expr.Unit(span))
+        receiver = ^place
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3092
+fn lift_body_receiver_marks(body: &[Stmt]) -> Unit Never! {
+    loop stmt in &body -> &stmt.for_each_expr_mut(lift_receiver_mark)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3098
+fn lift_func_receiver_marks(function: Func) -> Func Never! {
+    function := ~function
+    lift_body_receiver_marks(&function.body)
+    ^function
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3106
+fn for_each_item_body(item: &Item, visit: fn(&[Stmt]) -> Unit Never!) -> Unit Never! {
+    if item == {
+        .Func(function) -> visit(&function.body)
+        .Impl(implementation) -> { loop method in &implementation.methods -> visit(&method.body) }
+        .Struct(structure) -> {
+            loop method in &structure.methods -> visit(&method.body)
+            loop block in &structure.trait_impls { loop method in &block.methods -> visit(&method.body) }
+        }
+        .Enum(enumeration) -> {
+            loop method in &enumeration.methods -> visit(&method.body)
+            loop block in &enumeration.trait_impls { loop method in &block.methods -> visit(&method.body) }
+        }
+        else -> {}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3133
+fn fragment_declared_variants(items: [Item]) -> Set<String> Never! {
+    declared := Set<String>.new()
+    loop item in items { if item == .Enum(definition) { loop variant in definition.variants -> &declared.insert(~variant.name) } }
+    ^declared
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3152
+fn normalize_fragment_optional_pattern(pattern: &Pattern, declared: Set<String>) -> Unit Never! {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3157
+    fn normalize_slot(slot: &PatSlot, declared: Set<String>) -> Unit Never! {
+        if slot == { .Nested(inner) -> normalize_fragment_optional_pattern(&inner, declared); .Named{slot, ..} -> normalize_slot(&slot, declared); else -> {} }
+    }
+    replacement :: if pattern == {
+        .Or(alternatives, _) -> { loop alternative in &alternatives -> normalize_fragment_optional_pattern(&alternative, declared); return }
+        .Present{inner: Val(inner), ..} | .Ok{inner: Val(inner), ..} | .Err{inner: Val(inner), ..} -> { normalize_fragment_optional_pattern(&inner, declared); return }
+        .Variant{variant, bindings, leading_dot, span} -> {
+            loop slot in &bindings -> normalize_slot(&slot, declared)
+            if leading_dot && declared.contains(variant) -> return
+            if bindings.is_empty() && variant == Syntax.LIT_NULL -> Pattern.Absent(span)
+            else if bindings.len() == 1 && variant == Syntax.LIT_VALUE -> {
+                slot :: &bindings[0].replace(PatSlot.Wildcard)
+                (binding, binding_span, inner) :: if slot == {
+                    .Nested(inner) -> (Syntax.PAT_WILDCARD_SLOT.to_string(), inner.span(), Val(^inner))
+                    else -> (slot.as_bind() ?? Syntax.PAT_WILDCARD_SLOT, slot.binding_span() ?? span, None)
+                }
+                Pattern.Present{binding: binding.to_string(), binding_span: binding_span, inner: inner, span: span}
+            } else -> return
+        }
+        else -> return
+    }
+    pattern = ^replacement
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3228
+fn normalize_fragment_body_patterns(body: &[Stmt], declared: Set<String>) -> Unit Never! {
+    loop stmt in &body {
+        &stmt.for_each_expr_mut(fn(expr) { if expr == .PatternTest{pattern, ..} -> normalize_fragment_optional_pattern(&pattern, declared) })
+    }
+}

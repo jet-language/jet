@@ -1,1826 +1,749 @@
-// PORT-PENDING 0539 crates-jet-codegen-src-codegen-tir-tir-to-mir-types-slice-1: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1-1822
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Semantic projections shared by the checked TIR and canonical MIR.
-//RS //!
-//RS //! This module deliberately contains no executable lowering.  It snapshots the
-//RS //! checked type/foreign/erasure facts that the canonical MIR owner can project
-//RS //! without looking back at the AST.  Runtime representation is constructed
-//RS //! here from checked source facts; MIR itself remains frontend-neutral.
-//RS 
-//RS #![allow(dead_code)]
-//RS use super::{TirErasure, TirErasureReason};
-//RS use crate::AST::{
-//RS     AccessConvention, CLICommandBinding, ConstDef, CtValue, CEnumTag, Dimension, DistinctDef, EnumDef,
-//RS     Expr,
-//RS     Field, Func, FunctionCallMetadata, ImplDef, InternalTag, Item, Marker, Measure, MeasureRule,
-//RS     Param, ParamZone, ProgramBundle, StructDef, StructLayout, TagMarker, TraitDef, TraitImplBlock,
-//RS     Type, TypeAliasDef, UnitFamilyDef, Variant, VariantPayload, ViewProvenanceMap, ViewSource,
-//RS     ViewSourceProjection,
-//RS };
-//RS use crate::Diagnostics::Span;
-//RS use jet_foundation::CanonicalPass;
-//RS use jet_foundation::Layout::{LayoutAlignmentFact, LayoutFacts, TargetLayout, TargetLayoutEngine};
-//RS use jet_foundation::MIR::{
-//RS     MirAccess, MirCallContractRow, MirCallMetadata, MirCallablePolicy, MirCallablePolicyChain,
-//RS     MirCEnumTag, MirCliBinding, MirCliCommand, MirCliEntry, MirCompilerBuiltin, MirCoreOwner,
-//RS     MirDimension, MirDropKind, MirErasureReason, MirField, MirFieldId, MirFunctionId,
-//RS     MirFunctionSignature, MirGenericParam,
-//RS     MirInternalTag, MirMeasure, MirMeasureRule, MirModuleId, MirNominalRef, MirOwnership,
-//RS     MirOwnershipMode,
-//RS     MirParam, MirParamZone, MirSerdeAttribute, MirSerdeAttributeKind, MirStructLayout,
-//RS     MirTagMarker, MirTraitId, MirTraitRef, MirType, MirTypeDef, MirTypeDefKind, MirTypeId,
-//RS     MirVariant, MirVariantPayload, MirViewProjection, MirViewProvenance, MirViewSource,
-//RS     MirViewSourcePath, stable_id,
-//RS };
-//RS use jet_foundation::Shape::ShapeFieldNames;
-//RS use std::collections::{BTreeMap, HashMap, HashSet};
-//RS 
-//RS /// All declaration rows projected from one checked program.  The executable
-//RS /// function table remains owned by the sibling TIR lowering.
-//RS #[derive(Debug, Clone, Default)]
-//RS pub(super) struct TirDeclarations {
-//RS     pub type_defs: Vec<TirTypeDef>,
-//RS     pub traits: Vec<TirTraitDef>,
-//RS     pub impls: Vec<TirImplDef>,
-//RS     pub constants: Vec<TirConstantDef>,
-//RS }
-//RS 
-//RS /// Canonicalize the one source spelling whose meaning depends on checked
-//RS /// namespace facts: a bare trait name is a trait object unless a nominal or
-//RS /// active generic binder owns that name.
-//RS pub(crate) fn canonicalize_checked_trait_types(
-//RS     ty: &Type,
-//RS     trait_names: &HashSet<String>,
-//RS     nominal_names: &HashSet<String>,
-//RS     binders: &HashSet<String>,
-//RS ) -> Type {
-//RS     fn visit(
-//RS         ty: &Type,
-//RS         trait_names: &HashSet<String>,
-//RS         nominal_names: &HashSet<String>,
-//RS         binders: &HashSet<String>,
-//RS     ) -> Type {
-//RS         match ty {
-//RS             Type::Named(name)
-//RS                 if trait_names.contains(name)
-//RS                     && !nominal_names.contains(name)
-//RS                     && !binders.contains(name) =>
-//RS             {
-//RS                 Type::TraitObject(vec![name.clone()])
-//RS             }
-//RS             Type::List(inner) => {
-//RS                 Type::List(Box::new(visit(inner, trait_names, nominal_names, binders)))
-//RS             }
-//RS             Type::Map {
-//RS                 key,
-//RS                 key_span,
-//RS                 value,
-//RS             } => Type::Map {
-//RS                 key: Box::new(visit(key, trait_names, nominal_names, binders)),
-//RS                 key_span: *key_span,
-//RS                 value: Box::new(visit(value, trait_names, nominal_names, binders)),
-//RS             },
-//RS             Type::Shared(inner) => {
-//RS                 Type::Shared(Box::new(visit(inner, trait_names, nominal_names, binders)))
-//RS             }
-//RS             Type::Option(inner) => {
-//RS                 Type::Option(Box::new(visit(inner, trait_names, nominal_names, binders)))
-//RS             }
-//RS             Type::Result { ok, err } => Type::Result {
-//RS                 ok: Box::new(visit(ok, trait_names, nominal_names, binders)),
-//RS                 err: Box::new(visit(err, trait_names, nominal_names, binders)),
-//RS             },
-//RS             Type::Fn {
-//RS                 params,
-//RS                 ret,
-//RS                 effect_bound,
-//RS                 param_contract,
-//RS                 call_metadata,
-//RS                 return_view_provenance,
-//RS             } => Type::Fn {
-//RS                 params: params
-//RS                     .iter()
-//RS                     .map(|param| visit(param, trait_names, nominal_names, binders))
-//RS                     .collect(),
-//RS                 ret: ret
-//RS                     .as_ref()
-//RS                     .map(|ret| Box::new(visit(ret, trait_names, nominal_names, binders))),
-//RS                 effect_bound: effect_bound.clone(),
-//RS                 param_contract: param_contract.clone(),
-//RS                 call_metadata: call_metadata.clone(),
-//RS                 return_view_provenance: return_view_provenance.clone(),
-//RS             },
-//RS             Type::Apply { name, args } => Type::Apply {
-//RS                 name: name.clone(),
-//RS                 args: args
-//RS                     .iter()
-//RS                     .map(|arg| visit(arg, trait_names, nominal_names, binders))
-//RS                     .collect(),
-//RS             },
-//RS             Type::Tuple(fields) => Type::Tuple(
-//RS                 fields
-//RS                     .iter()
-//RS                     .map(|(name, ty)| {
-//RS                         (
-//RS                             name.clone(),
-//RS                             Box::new(visit(ty, trait_names, nominal_names, binders)),
-//RS                         )
-//RS                     })
-//RS                     .collect(),
-//RS             ),
-//RS             Type::FixedList { elem, len } => Type::FixedList {
-//RS                 elem: Box::new(visit(elem, trait_names, nominal_names, binders)),
-//RS                 len: len.clone(),
-//RS             },
-//RS             Type::InlineRange { base, lo, hi } => Type::InlineRange {
-//RS                 base: Box::new(visit(base, trait_names, nominal_names, binders)),
-//RS                 lo: *lo,
-//RS                 hi: *hi,
-//RS             },
-//RS             Type::Tagged { marker, inner } => Type::Tagged {
-//RS                 marker: marker.clone(),
-//RS                 inner: Box::new(visit(inner, trait_names, nominal_names, binders)),
-//RS             },
-//RS             Type::Union(members) => Type::Union(
-//RS                 members
-//RS                     .iter()
-//RS                     .map(|member| visit(member, trait_names, nominal_names, binders))
-//RS                     .collect(),
-//RS             ),
-//RS             Type::Quantity { base, dimension } => Type::Quantity {
-//RS                 base: Box::new(visit(base, trait_names, nominal_names, binders)),
-//RS                 dimension: dimension.clone(),
-//RS             },
-//RS             _ => ty.clone(),
-//RS         }
-//RS     }
-//RS 
-//RS     visit(ty, trait_names, nominal_names, binders)
-//RS }
-//RS 
-//RS /// Access selected by sema for a parameter or call slot.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub(super) enum TirAccess {
-//RS     Read,
-//RS     Write,
-//RS     Move,
-//RS }
-//RS 
-//RS /// Ownership mode before the canonical MIR projection.
-//RS ///
-//RS /// Keeping this small semantic enum in TIR avoids making analytical TIR depend
-//RS /// on MIR's storage details.  The MIR owner maps it one-for-one to
-//RS /// `MirOwnershipMode` and supplies drop/last-use bits from executable facts.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub(super) enum TirOwnership {
-//RS     Owned,
-//RS     ReadBorrow,
-//RS     WriteBorrow,
-//RS     Move,
-//RS }
-//RS 
-//RS /// Visibility is a checked declaration fact, not an emitter choice.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub(super) enum TirVisibility {
-//RS     Private,
-//RS     Package,
-//RS     Public,
-//RS }
-//RS 
-//RS /// Checked nominal type definition.  Method names are semantic keys; the MIR
-//RS /// owner derives IDs from them only after all function rows have been collected.
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirTypeDef {
-//RS     pub module: String,
-//RS     pub key: String,
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     pub public: bool,
-//RS     pub package_public: bool,
-//RS     pub generic_params: Vec<super::TGenericParam>,
-//RS     pub derives: Vec<String>,
-//RS     pub auto_derive_default: bool,
-//RS     pub auto_printable: bool,
-//RS     pub published_schema: bool,
-//RS     pub single_use: bool,
-//RS     pub must_use: bool,
-//RS     pub layout: Option<StructLayout>,
-//RS     pub layout_alignment: Option<LayoutAlignmentFact>,
-//RS     /// Exact checked C enum tag representation; absent for non-C enums.
-//RS     pub c_layout_tag: Option<CEnumTag>,
-//RS     /// Exact target-layout facts for a checked C enum, including payload offsets.
-//RS     pub enum_layout: Option<LayoutFacts>,
-//RS     pub serde: Vec<TirSerdeAttribute>,
-//RS     pub cli_bindings: Vec<TirCliBinding>,
-//RS     /// D-SHAPE-PROJECT1: `#CLI` input rows derived by the same entry schema
-//RS     /// builder `fn run(args: T)` uses. `None` for every non-CLI type.
-//RS     pub cli: Option<super::artifact_plan::TirCliEntry>,
-//RS     pub ownership: TirOwnership,
-//RS     /// Checked recursive-layout edge keys owned by this declaration.  The
-//RS     /// producer is `Cx.boxed_edges`; declaration lowering carries the exact
-//RS     /// owner-local keys to MIR without recomputing them.
-//RS     pub boxed_edges: Vec<String>,
-//RS     /// Exact compiler-owned marker carried from native registration.
-//RS     pub compiler_builtin: Option<MirCompilerBuiltin>,
-//RS     pub kind: TirTypeDefKind,
-//RS }
-//RS fn lower_c_enum_tag(tag: CEnumTag) -> MirCEnumTag {
-//RS     match tag {
-//RS         CEnumTag::CInt => MirCEnumTag::CInt,
-//RS         CEnumTag::U8 => MirCEnumTag::U8,
-//RS         CEnumTag::I8 => MirCEnumTag::I8,
-//RS         CEnumTag::U16 => MirCEnumTag::U16,
-//RS         CEnumTag::I16 => MirCEnumTag::I16,
-//RS         CEnumTag::U32 => MirCEnumTag::U32,
-//RS         CEnumTag::I32 => MirCEnumTag::I32,
-//RS         CEnumTag::U64 => MirCEnumTag::U64,
-//RS         CEnumTag::I64 => MirCEnumTag::I64,
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirSerdeAttribute {
-//RS     pub kind: TirSerdeAttributeKind,
-//RS     pub value: Option<String>,
-//RS     pub span: Span,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(super) enum TirSerdeAttributeKind {
-//RS     RenameAll,
-//RS     Tag,
-//RS     Untagged,
-//RS     DenyUnknownFields,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirCliBinding {
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     pub function_key: String,
-//RS     pub markers: Vec<String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirTraitDef {
-//RS     pub module: String,
-//RS     pub key: String,
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     pub visibility: TirVisibility,
-//RS     pub associated_types: Vec<TirAssociatedTypeDecl>,
-//RS     pub methods: Vec<TirTraitMethod>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirAssociatedTypeDecl {
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirAssociatedTypeValue {
-//RS     pub name: String,
-//RS     pub ty: Type,
-//RS     pub span: Span,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirTraitMethod {
-//RS     pub key: String,
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     /// The checked receiver convention, if this signature declares `self`.
-//RS     /// Implementations consume the same fact; adapters must not rediscover it
-//RS     /// from parameter names.
-//RS     pub self_access: Option<TirAccess>,
-//RS     /// Trait method parameters exclude the receiver.  The ordinary default
-//RS     /// function row retains the complete declared parameter contract.
-//RS     pub params: Vec<TirParam>,
-//RS     pub declared_return: Option<Type>,
-//RS     pub return_type: Type,
-//RS     pub failure: super::TFailureCarrier,
-//RS     pub is_pure: bool,
-//RS     pub declared_effects: Option<Vec<(String, Span)>>,
-//RS     pub return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
-//RS     pub declared_return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
-//RS     pub default_function_key: Option<String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirImplDef {
-//RS     pub module: String,
-//RS     pub key: String,
-//RS     pub span: Span,
-//RS     pub self_type: Type,
-//RS     pub trait_name: Option<String>,
-//RS     pub trait_ref: Option<String>,
-//RS     pub associated_types: Vec<TirAssociatedTypeValue>,
-//RS     pub methods: Vec<String>,
-//RS     pub delegation_field: Option<String>,
-//RS     pub compiler_generated: bool,
-//RS     pub serde: Option<TirSerdeCodec>,
-//RS     pub operator_rhs: Option<Type>,
-//RS     pub operator_marker: Option<crate::AST::OperatorMarker>,
-//RS     pub target_os: Option<crate::OSTarget::OSTarget>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub(super) enum TirSerdeCodec {
-//RS     Encode,
-//RS     Decode,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirConstantDef {
-//RS     pub module: String,
-//RS     pub key: String,
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     pub visibility: TirVisibility,
-//RS     pub ty: Type,
-//RS     /// Compile-time bindings are folded at use sites and have no runtime
-//RS     /// representation in the target artifact.
-//RS     pub is_comptime: bool,
-//RS     /// Mutable and persisted module bindings need owning runtime storage.
-//RS     pub is_storage: bool,
-//RS     /// D-CONSTMARK1: `#Static` keeps one addressable item; reads then never
-//RS     /// copy the value into the use site. (`rust_kind` is not used: sema's
-//RS     /// address-taken walk marks every plain read of a local constant.)
-//RS     pub addressable: bool,
-//RS     /// D-CONSTMARK1: `#Inline` copies the value into every use site, tables
-//RS     /// included.
-//RS     pub force_inline: bool,
-//RS     pub value: CtValue,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) enum TirTypeDefKind {
-//RS     Struct {
-//RS         fields: Vec<TirField>,
-//RS         methods: Vec<String>,
-//RS     },
-//RS     Enum {
-//RS         variants: Vec<TirVariant>,
-//RS         methods: Vec<String>,
-//RS     },
-//RS     Distinct {
-//RS         base: Type,
-//RS         range: Option<(i64, i64)>,
-//RS     },
-//RS     Alias {
-//RS         target: Type,
-//RS     },
-//RS     UnitFamily {
-//RS         members: Vec<String>,
-//RS     },
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirField {
-//RS     pub name: String,
-//RS     /// Canonical per-projection names from the sema ShapeFact.
-//RS     pub shape_names: ShapeFieldNames,
-//RS     /// True when the field is absent from the checked wire shape.
-//RS     pub skip: bool,
-//RS     pub ty: Type,
-//RS     pub span: Span,
-//RS     pub public: bool,
-//RS     pub package_public: bool,
-//RS     pub computed: bool,
-//RS     pub has_default: bool,
-//RS     pub redact: bool,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirVariant {
-//RS     pub name: String,
-//RS     /// Checked Codable wire name; adapters must not derive it from `name`.
-//RS     pub wire_name: String,
-//RS     pub span: Span,
-//RS     pub payload: TirVariantPayload,
-//RS     pub discriminant: Option<i64>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub(super) enum TirVariantPayload {
-//RS     Unit,
-//RS     Single(Type),
-//RS     Named(Vec<TirField>),
-//RS }
-//RS 
-//RS /// Checked parameter metadata for foreign declarations.  The same shape is
-//RS /// useful to the MIR owner for signature projection without retaining AST
-//RS /// `Param` nodes.
-//RS #[derive(Debug, Clone)]
-//RS pub(super) struct TirParam {
-//RS     pub index: usize,
-//RS     pub name: String,
-//RS     pub span: Span,
-//RS     pub ty: Type,
-//RS     pub access: TirAccess,
-//RS     pub ownership: TirOwnership,
-//RS     pub public_label: String,
-//RS     pub variadic: bool,
-//RS     pub default_present: bool,
-//RS }
-//RS 
-//RS /// Native TIR nominal references use the registered `mir-type` identity. Keep
-//RS /// this constructor shared by ordinary Apply lowering and metadata rows that
-//RS /// link to those exact emitted references.
-//RS fn lower_nominal_ref(name: &str) -> MirNominalRef {
-//RS     MirNominalRef {
-//RS         id: MirTypeId(stable_id("mir-type", name)),
-//RS         name: name.to_string(),
-//RS     }
-//RS }
-//RS 
-//RS /// Project one checked source type into the canonical ABI-bearing type carrier.
-//RS /// The semantic type key is deterministic and remains present on every MIR
-//RS pub(super) fn lower_type(ty: &Type) -> MirType {
-//RS     if let Type::Named(name) = ty {
-//RS         if let Some(carrier) = core_term_stream_carrier(name) {
-//RS             return lower_type(&Type::Named(carrier.to_string()));
-//RS         }
-//RS     }
-//RS     let lowered = {
-//RS         let kind = lower_type_kind(ty);
-//RS         MirType::from_kind(kind).with_identity(MirTypeId(stable_id(
-//RS             "mir-type",
-//RS             &super::mir::type_identity_key(ty),
-//RS         )))
-//RS     };
-//RS     if CanonicalPass::enabled() {
-//RS         CanonicalPass::record(
-//RS             "lowering",
-//RS             "mir.lower-type",
-//RS             "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs",
-//RS             "tir",
-//RS             CanonicalPass::debug_payload("tir", "mir.lower-type", ty),
-//RS             CanonicalPass::debug_identity("tir", "mir.lower-type", ty),
-//RS             "mir",
-//RS             CanonicalPass::debug_payload("mir", "mir.lower-type", &lowered),
-//RS             CanonicalPass::debug_identity("mir", "mir.lower-type", &lowered),
-//RS             "preserve",
-//RS         );
-//RS     }
-//RS     lowered
-//RS }
-//RS 
-//RS fn lower_type_kind(ty: &Type) -> jet_foundation::MIR::MirTypeKind {
-//RS     use jet_foundation::MIR::MirTypeKind;
-//RS 
-//RS     match ty {
-//RS         Type::Int => MirTypeKind::Int,
-//RS         Type::Float => MirTypeKind::Float,
-//RS         Type::Bool => MirTypeKind::Bool,
-//RS         Type::String => MirTypeKind::String,
-//RS         Type::Char => MirTypeKind::Char,
-//RS         Type::List(inner) => MirTypeKind::List(Box::new(lower_type(inner))),
-//RS         Type::Map { key, value, .. } => MirTypeKind::Map {
-//RS             key: Box::new(lower_type(key)),
-//RS             value: Box::new(lower_type(value)),
-//RS         },
-//RS         Type::Shared(inner) => MirTypeKind::Shared(Box::new(lower_type(inner))),
-//RS         Type::Option(inner) => MirTypeKind::Option(Box::new(lower_type(inner))),
-//RS         Type::Result { ok, err } => MirTypeKind::Result {
-//RS             ok: Box::new(lower_type(ok)),
-//RS             err: Box::new(lower_type(err)),
-//RS         },
-//RS         Type::Fn {
-//RS             params,
-//RS             ret,
-//RS             effect_bound,
-//RS             param_contract,
-//RS             call_metadata,
-//RS             return_view_provenance,
-//RS         } => MirTypeKind::Fn(MirFunctionSignature {
-//RS             params: params.iter().map(lower_type).collect(),
-//RS             ret: ret.as_ref().map(|ty| Box::new(lower_type(ty))),
-//RS             effect_bound: effect_bound
-//RS                 .as_ref()
-//RS                 .map(|row| row.iter().map(|(name, _)| name.clone()).collect()),
-//RS             param_contract: param_contract.as_ref().map(|rows| {
-//RS                 rows.iter()
-//RS                     .map(|(label, zone)| MirCallContractRow {
-//RS                         label: label.clone(),
-//RS                         zone: lower_param_zone(*zone),
-//RS                     })
-//RS                     .collect()
-//RS             }),
-//RS             call_metadata: call_metadata.as_ref().map(lower_call_metadata),
-//RS             return_view_provenance: return_view_provenance.as_ref().map(lower_view_provenance),
-//RS         }),
-//RS         Type::Named(name) if crate::AST::numeric_type_from_name(name).is_some() => lower_type_kind(
-//RS             &crate::AST::numeric_type_from_name(name).expect("numeric type name was checked"),
-//RS         ),
-//RS         Type::Named(name) => MirTypeKind::Apply {
-//RS             name: lower_nominal_ref(name),
-//RS             args: Vec::new(),
-//RS         },
-//RS         Type::Apply { name, args } => MirTypeKind::Apply {
-//RS             name: lower_nominal_ref(name),
-//RS             args: args.iter().map(lower_type).collect(),
-//RS         },
-//RS         Type::TraitObject(bounds) => MirTypeKind::TraitObject(
-//RS             bounds
-//RS                 .iter()
-//RS                 .map(|name| MirNominalRef {
-//RS                     id: MirTypeId(stable_id("mir-trait", name)),
-//RS                     name: name.clone(),
-//RS                 })
-//RS                 .collect(),
-//RS         ),
-//RS         Type::Tuple(fields) => MirTypeKind::Tuple(
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|(name, ty)| (name.clone(), lower_type(ty)))
-//RS                 .collect(),
-//RS         ),
-//RS         Type::FixedList { elem, len } => MirTypeKind::FixedList {
-//RS             elem: Box::new(lower_type(elem)),
-//RS             len: lower_measure(len),
-//RS         },
-//RS         Type::IntN { signed, bits } => MirTypeKind::IntN {
-//RS             signed: *signed,
-//RS             bits: *bits,
-//RS         },
-//RS         Type::InlineRange { base, lo, hi } => MirTypeKind::InlineRange {
-//RS             base: Box::new(lower_type(base)),
-//RS             lo: *lo,
-//RS             hi: *hi,
-//RS         },
-//RS         Type::Float32 => MirTypeKind::Float32,
-//RS         Type::Tagged { marker, inner } => MirTypeKind::Tagged {
-//RS             marker: lower_tag_marker(marker),
-//RS             inner: Box::new(lower_type(inner)),
-//RS         },
-//RS         Type::Union(members) => MirTypeKind::Union(members.iter().map(lower_type).collect()),
-//RS         Type::Quantity { base, dimension } => MirTypeKind::Quantity {
-//RS             base: Box::new(lower_type(base)),
-//RS             dimension: lower_dimension(dimension),
-//RS         },
-//RS         Type::Measure(measure) => MirTypeKind::Measure(lower_measure(measure)),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn lower_mir_access(access: TirAccess) -> MirAccess {
-//RS     match access {
-//RS         TirAccess::Read => MirAccess::Read,
-//RS         TirAccess::Write => MirAccess::Write,
-//RS         TirAccess::Move => MirAccess::Move,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn lower_mir_convention(access: AccessConvention) -> MirAccess {
-//RS     match access {
-//RS         AccessConvention::Read => MirAccess::Read,
-//RS         AccessConvention::Write => MirAccess::Write,
-//RS         AccessConvention::Move => MirAccess::Move,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn mir_access(access: TirAccess) -> MirAccess {
-//RS     lower_mir_access(access)
-//RS }
-//RS 
-//RS pub(super) fn lower_param_zone(zone: ParamZone) -> MirParamZone {
-//RS     match zone {
-//RS         ParamZone::PositionalOnly => MirParamZone::PositionalOnly,
-//RS         ParamZone::Either => MirParamZone::Either,
-//RS         ParamZone::LabelOnly => MirParamZone::LabelOnly,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn lower_view_provenance(
-//RS     provenance: &ViewProvenanceMap,
-//RS ) -> BTreeMap<Vec<String>, MirViewProvenance> {
-//RS     provenance
-//RS         .iter()
-//RS         .map(|(path, view)| (path.clone(), lower_view_slot(view)))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn lower_view_slot(view: &crate::AST::ViewProvenance) -> MirViewProvenance {
-//RS     MirViewProvenance {
-//RS         sources: view.sources.iter().map(lower_view_source_path).collect(),
-//RS         mutable: view.mutable,
-//RS     }
-//RS }
-//RS 
-//RS fn lower_view_source_path(path: &crate::AST::ViewSourcePath) -> MirViewSourcePath {
-//RS     MirViewSourcePath {
-//RS         source: match &path.source {
-//RS             ViewSource::Receiver => MirViewSource::Receiver,
-//RS             ViewSource::Parameter(index) => MirViewSource::Parameter(*index),
-//RS             ViewSource::Static { module_path, name } => MirViewSource::Static {
-//RS                 module_path: module_path.clone(),
-//RS                 name: name.clone(),
-//RS             },
-//RS         },
-//RS         projections: path
-//RS             .projections
-//RS             .iter()
-//RS             .map(|projection| match projection {
-//RS                 ViewSourceProjection::Field(name) => MirViewProjection::Field(name.clone()),
-//RS                 ViewSourceProjection::Index => MirViewProjection::Index,
-//RS                 ViewSourceProjection::Range => MirViewProjection::Range,
-//RS             })
-//RS             .collect(),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_call_metadata(metadata: &FunctionCallMetadata) -> MirCallMetadata {
-//RS     MirCallMetadata {
-//RS         names: metadata.names.clone(),
-//RS         defaults: metadata.defaults.iter().map(Option::is_some).collect(),
-//RS         variadic: metadata.variadic.clone(),
-//RS         conventions: metadata
-//RS             .conventions
-//RS             .iter()
-//RS             .copied()
-//RS             .map(lower_access_convention)
-//RS             .map(lower_mir_access)
-//RS             .collect(),
-//RS         policies: MirCallablePolicyChain {
-//RS             policies: metadata
-//RS                 .policies
-//RS                 .policies
-//RS                 .iter()
-//RS                 .map(|policy| MirCallablePolicy {
-//RS                     name: policy.name.clone(),
-//RS                     arguments: policy.arguments.clone(),
-//RS                 })
-//RS                 .collect(),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn lower_measure(measure: &Measure) -> MirMeasure {
-//RS     match measure {
-//RS         Measure::Literal { kind, value } => MirMeasure::Literal {
-//RS             kind: kind.clone(),
-//RS             value: *value,
-//RS         },
-//RS         Measure::SignedLiteral { kind, value } => MirMeasure::SignedLiteral {
-//RS             kind: kind.clone(),
-//RS             value: *value,
-//RS         },
-//RS         Measure::Symbol { kind, name } => MirMeasure::Symbol {
-//RS             kind: kind.clone(),
-//RS             name: name.clone(),
-//RS         },
-//RS         Measure::Combined {
-//RS             kind,
-//RS             rule,
-//RS             left,
-//RS             right,
-//RS         } => MirMeasure::Combined {
-//RS             kind: kind.clone(),
-//RS             rule: match rule {
-//RS                 MeasureRule::Add => MirMeasureRule::Add,
-//RS                 MeasureRule::Mul => MirMeasureRule::Mul,
-//RS                 MeasureRule::Match => MirMeasureRule::Match,
-//RS             },
-//RS             left: Box::new(lower_measure(left)),
-//RS             right: Box::new(lower_measure(right)),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn lower_dimension(dimension: &Dimension) -> MirDimension {
-//RS     MirDimension {
-//RS         axes: dimension
-//RS             .measure_exponents()
-//RS             .map(|(axis, exponent)| (axis.to_string(), lower_measure(&exponent)))
-//RS             .collect(),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_tag_marker(marker: &TagMarker) -> MirTagMarker {
-//RS     match marker {
-//RS         TagMarker::User(name) => MirTagMarker::User(name.clone()),
-//RS         TagMarker::Internal(tag) => MirTagMarker::Internal(match tag {
-//RS             InternalTag::CoreCryptoNominal => MirInternalTag::CoreCryptoNominal,
-//RS             InternalTag::DeterministicClock => MirInternalTag::DeterministicClock,
-//RS             InternalTag::SystemClock => MirInternalTag::SystemClock,
-//RS             InternalTag::ExpiringSecretLoan => MirInternalTag::ExpiringSecretLoan,
-//RS             InternalTag::SharedGuardRead => MirInternalTag::SharedGuardRead,
-//RS             InternalTag::SharedGuardEdit => MirInternalTag::SharedGuardEdit,
-//RS             InternalTag::TerminalFactSet => MirInternalTag::TerminalFactSet,
-//RS             InternalTag::CppCallbackAbi => MirInternalTag::CppCallbackAbi,
-//RS             InternalTag::AllocatorView => MirInternalTag::AllocatorView,
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS fn lower_access_convention(convention: AccessConvention) -> TirAccess {
-//RS     match convention {
-//RS         AccessConvention::Read => TirAccess::Read,
-//RS         AccessConvention::Write => TirAccess::Write,
-//RS         AccessConvention::Move => TirAccess::Move,
-//RS     }
-//RS }
-//RS 
-//RS fn ownership_mode(ownership: TirOwnership) -> MirOwnershipMode {
-//RS     match ownership {
-//RS         TirOwnership::Owned => MirOwnershipMode::Owned,
-//RS         TirOwnership::ReadBorrow => MirOwnershipMode::ReadBorrow,
-//RS         TirOwnership::WriteBorrow => MirOwnershipMode::WriteBorrow,
-//RS         TirOwnership::Move => MirOwnershipMode::Move,
-//RS     }
-//RS }
-//RS 
-//RS fn ownership_from_tir(ownership: TirOwnership) -> MirOwnership {
-//RS     match ownership {
-//RS         TirOwnership::Owned => MirOwnership::Owned,
-//RS         TirOwnership::ReadBorrow => MirOwnership {
-//RS             mode: MirOwnershipMode::ReadBorrow,
-//RS             drop: MirDropKind::None,
-//RS             moved: false,
-//RS             last_use: false,
-//RS             gc_root: false,
-//RS         },
-//RS         TirOwnership::WriteBorrow => MirOwnership {
-//RS             mode: MirOwnershipMode::WriteBorrow,
-//RS             drop: MirDropKind::None,
-//RS             moved: false,
-//RS             last_use: false,
-//RS             gc_root: false,
-//RS         },
-//RS         TirOwnership::Move => MirOwnership {
-//RS             mode: MirOwnershipMode::Move,
-//RS             drop: MirDropKind::Value,
-//RS             moved: false,
-//RS             last_use: false,
-//RS             gc_root: false,
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn ownership_for_definition(single_use: bool) -> TirOwnership {
-//RS     if single_use {
-//RS         TirOwnership::Move
-//RS     } else {
-//RS         TirOwnership::Owned
-//RS     }
-//RS }
-//RS 
-//RS fn qualified_key(module: &str, name: &str) -> String {
-//RS     if module.is_empty() {
-//RS         name.to_string()
-//RS     } else {
-//RS         format!("{module}::{name}")
-//RS     }
-//RS }
-//RS 
-//RS fn is_auto_printable(auto_printable: &HashSet<String>, module: &str, name: &str) -> bool {
-//RS     auto_printable.contains(name) || auto_printable.contains(&qualified_key(module, name))
-//RS }
-//RS 
-//RS fn is_auto_debug(auto_debug: &HashSet<String>, module: &str, name: &str) -> bool {
-//RS     auto_debug.contains(name) || auto_debug.contains(&qualified_key(module, name))
-//RS }
-//RS 
-//RS fn lower_generic_params(params: &[crate::AST::TypeParam]) -> Vec<super::TGenericParam> {
-//RS     params
-//RS         .iter()
-//RS         .map(|param| super::TGenericParam {
-//RS             name: param.name.clone(),
-//RS             bounds: param.bounds.clone(),
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Sema attaches its structural `Equatable` provider (never a user impl) as a
-//RS /// compiler-generated impl. That checked fact reaches MIR as the `Equatable`
-//RS /// derive, which the Rust printer lowers to the native `PartialEq` that
-//RS /// `jet_eq` (behind `assert_eq`) requires.
-//RS fn lower_derive_names(
-//RS     derives: &[(String, Span)],
-//RS     auto_debug: bool,
-//RS     generated_equatable: bool,
-//RS ) -> Vec<String> {
-//RS     let mut names = derives
-//RS         .iter()
-//RS         .filter(|(name, _)| name != jet_foundation::Syntax::MARKER_CLI)
-//RS         .map(|(name, _)| name.clone())
-//RS         .collect::<Vec<_>>();
-//RS     if auto_debug && !names.iter().any(|name| name == crate::Generics::DEBUG) {
-//RS         names.push(crate::Generics::DEBUG.to_string());
-//RS     }
-//RS     if generated_equatable && !names.iter().any(|name| name == crate::Generics::EQUATABLE) {
-//RS         names.push(crate::Generics::EQUATABLE.to_string());
-//RS     }
-//RS     names
-//RS }
-//RS 
-//RS /// Struct and enum providers ride on the type as a compiler-generated block.
-//RS fn has_generated_equatable_block(trait_impls: &[TraitImplBlock]) -> bool {
-//RS     trait_impls
-//RS         .iter()
-//RS         .any(|block| block.compiler_generated && block.trait_name == crate::Generics::EQUATABLE)
-//RS }
-//RS 
-//RS fn marker_arg_text(marker: &Marker) -> Option<String> {
-//RS     marker
-//RS         .args
-//RS         .first()
-//RS         .and_then(|arg| arg.as_expr())
-//RS         .and_then(|expr| match expr {
-//RS             Expr::Ident(name, _) => Some(name.clone()),
-//RS             _ => None,
-//RS         })
-//RS }
-//RS 
-//RS fn lower_serde_markers(markers: &[Marker]) -> Vec<TirSerdeAttribute> {
-//RS     markers
-//RS         .iter()
-//RS         .filter_map(|marker| {
-//RS             let kind = match marker.name.as_str() {
-//RS                 "RenameAll" => TirSerdeAttributeKind::RenameAll,
-//RS                 "Discriminant" | "Tag" => TirSerdeAttributeKind::Tag,
-//RS                 "Untagged" => TirSerdeAttributeKind::Untagged,
-//RS                 "DenyUnknownFields" => TirSerdeAttributeKind::DenyUnknownFields,
-//RS                 _ => return None,
-//RS             };
-//RS             Some(TirSerdeAttribute {
-//RS                 kind,
-//RS                 value: marker_arg_text(marker),
-//RS                 span: marker.span,
-//RS             })
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn field_is_skipped(field: &Field) -> bool {
-//RS     field
-//RS         .serde_markers
-//RS         .iter()
-//RS         .any(|marker| marker.name == "Skip" || marker.name == crate::Syntax::MARKER_SKIP)
-//RS }
-//RS 
-//RS fn function_name_from_expr(expr: &Expr) -> Option<String> {
-//RS     match expr {
-//RS         Expr::Ident(name, _) => Some(name.clone()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn lower_cli_bindings(bindings: &[CLICommandBinding], module: &str) -> Vec<TirCliBinding> {
-//RS     bindings
-//RS         .iter()
-//RS         .map(|binding| TirCliBinding {
-//RS             name: binding.name.clone(),
-//RS             span: binding.name_span,
-//RS             function_key: function_name_from_expr(&binding.target)
-//RS                 .map(|name| qualified_key(module, &name))
-//RS                 .unwrap_or_else(|| qualified_key(module, &binding.name)),
-//RS             markers: binding
-//RS                 .markers
-//RS                 .iter()
-//RS                 .map(|marker| marker.name.clone())
-//RS                 .collect(),
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn lower_field(
-//RS     field: &Field,
-//RS     shape_names: ShapeFieldNames,
-//RS     qualify_type: &impl Fn(&Type, &[String]) -> Type,
-//RS     binders: &[String],
-//RS ) -> TirField {
-//RS     TirField {
-//RS         name: field.name.clone(),
-//RS         shape_names,
-//RS         skip: field_is_skipped(field),
-//RS         ty: qualify_type(&field.ty, binders),
-//RS         span: field.name_span,
-//RS         public: field.is_pub,
-//RS         package_public: field.is_package_pub,
-//RS         computed: field.computed.is_some(),
-//RS         has_default: field.default.is_some(),
-//RS         redact: field.redact,
-//RS     }
-//RS }
-//RS 
-//RS fn container_rename_all(markers: &[Marker]) -> Option<String> {
-//RS     crate::Codegen::Items::container_rename_all(markers)
-//RS }
-//RS 
-//RS fn lower_variant_field(
-//RS     field: &crate::AST::VariantField,
-//RS     qualify_type: &impl Fn(&Type, &[String]) -> Type,
-//RS     binders: &[String],
-//RS ) -> TirField {
-//RS     TirField {
-//RS         name: field.name.clone(),
-//RS         shape_names: ShapeFieldNames::from_source(&field.name),
-//RS         skip: false,
-//RS         ty: qualify_type(&field.ty, binders),
-//RS         span: field.name_span,
-//RS         public: true,
-//RS         package_public: false,
-//RS         computed: false,
-//RS         has_default: false,
-//RS         redact: false,
-//RS     }
-//RS }
-//RS 
-//RS fn lower_variant(
-//RS     variant: &Variant,
-//RS     style: Option<&str>,
-//RS     qualify_type: &impl Fn(&Type, &[String]) -> Type,
-//RS     binders: &[String],
-//RS ) -> TirVariant {
-//RS     let wire_name = crate::Codegen::Items::variant_wire_key(style, variant);
-//RS     TirVariant {
-//RS         name: variant.name.clone(),
-//RS         wire_name,
-//RS         span: variant.name_span,
-//RS         payload: match &variant.payload {
-//RS             VariantPayload::Unit => TirVariantPayload::Unit,
-//RS             VariantPayload::Single(ty, _) => TirVariantPayload::Single(qualify_type(ty, binders)),
-//RS             VariantPayload::Named(fields) => TirVariantPayload::Named(
-//RS                 fields
-//RS                     .iter()
-//RS                     .map(|field| lower_variant_field(field, qualify_type, binders))
-//RS                     .collect(),
-//RS             ),
-//RS         },
-//RS         discriminant: variant.discriminant,
-//RS     }
-//RS }
-//RS 
-//RS fn owner_boxed_edges(owner: &str, boxed_edges: &HashSet<(String, String)>) -> Vec<String> {
-//RS     let mut keys = boxed_edges
-//RS         .iter()
-//RS         .filter(|(candidate, _)| candidate == owner)
-//RS         .map(|(_, key)| key.clone())
-//RS         .collect::<Vec<_>>();
-//RS     keys.sort_unstable();
-//RS     keys
-//RS }
-//RS 
-//RS fn type_names_owner(ty: &Type, owner_key: &str, owner_name: &str) -> bool {
-//RS     match ty {
-//RS         Type::Named(name) => name == owner_key || name == owner_name,
-//RS         Type::Apply { name, args } if args.is_empty() => name == owner_key || name == owner_name,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn lower_type_for_owner(ty: &Type, owner_key: &str, owner_name: &str) -> MirType {
-//RS     let lowered = lower_type(ty);
-//RS     if type_names_owner(ty, owner_key, owner_name) {
-//RS         lowered.with_identity(MirTypeId(stable_id("mir-type", owner_key)))
-//RS     } else {
-//RS         lowered
-//RS     }
-//RS }
-//RS 
-//RS fn lower_mir_field(owner: &str, field: &TirField) -> MirField {
-//RS     lower_mir_field_for_owner(owner, field, None, None)
-//RS }
-//RS 
-//RS fn lower_mir_field_for_owner(
-//RS     owner: &str,
-//RS     field: &TirField,
-//RS     identity_key: Option<&str>,
-//RS     identity_name: Option<&str>,
-//RS ) -> MirField {
-//RS     let ty = match (identity_key, identity_name) {
-//RS         (Some(key), Some(name)) => lower_type_for_owner(&field.ty, key, name),
-//RS         // A struct field that stores a callable holds the effective `Result`
-//RS         // carrier, the same slot shape as a `fn` parameter or list element;
-//RS         // TIR field reads (`struct_field_type`) and struct literals agree.
-//RS         _ => lower_type(&field.ty.with_effective_fn_returns()),
-//RS     };
-//RS     MirField {
-//RS         id: MirFieldId(stable_id("mir-field", &format!("{owner}::{}", field.name))),
-//RS         name: field.name.clone(),
-//RS         shape_names: field.shape_names.clone(),
-//RS         skip: field.skip,
-//RS         ty,
-//RS         span: field.span,
-//RS         public: field.public,
-//RS         package_public: field.package_public,
-//RS         computed: field.computed,
-//RS         has_default: field.has_default,
-//RS         redact: field.redact,
-//RS     }
-//RS }
-//RS 
-//RS fn resolve_function_id(
-//RS     registry: &super::mir::FunctionRegistry,
-//RS     key: &str,
-//RS     module: &str,
-//RS     span: Span,
-//RS ) -> Result<MirFunctionId, super::LowerError> {
-//RS     registry.resolve(key, module, span)
-//RS }
-//RS 
-//RS fn lower_type_cli_entry(
-//RS     entry: &super::artifact_plan::TirCliEntry,
-//RS     registry: &super::mir::FunctionRegistry,
-//RS ) -> Result<MirCliEntry, super::LowerError> {
-//RS     let commands = entry
-//RS         .commands
-//RS         .iter()
-//RS         .filter_map(|command| {
-//RS             command
-//RS                 .function
-//RS                 .as_ref()
-//RS                 .map(|function| (command, function))
-//RS         })
-//RS         .map(|(command, function)| {
-//RS             Ok(MirCliCommand {
-//RS                 name: command.name.clone(),
-//RS                 description: command.description.clone(),
-//RS                 function: resolve_function_id(
-//RS                     registry,
-//RS                     &function.key,
-//RS                     &function.module,
-//RS                     function.span,
-//RS                 )?,
-//RS                 receiver: command
-//RS                     .receiver
-//RS                     .as_ref()
-//RS                     .map(|receiver| MirTypeId(stable_id("mir-type", receiver))),
-//RS                 inputs: command
-//RS                     .inputs
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .map(|(ordinal, input)| super::mir::lower_cli_input(input, ordinal, None))
-//RS                     .collect(),
-//RS             })
-//RS         })
-//RS         .collect::<Result<Vec<_>, super::LowerError>>()?;
-//RS     Ok(MirCliEntry {
-//RS         record_inputs: entry.record_inputs,
-//RS         description: entry.description.clone(),
-//RS         inputs: entry
-//RS             .inputs
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(ordinal, input)| super::mir::lower_cli_input(input, ordinal, None))
-//RS             .collect(),
-//RS         commands,
-//RS         standard: entry.standard,
-//RS         version: entry.version.clone(),
-//RS     })
-//RS }
-//RS 
-//RS /// Project the native checker’s canonical Core owner registry into MIR.
-//RS ///
-//RS /// The three names are registered by the native Syntax/Collections checking
-//RS /// surface (and match Source `BuiltinOwners.jet`). `id` is the registered
-//RS /// `mir-type` row identity; `nominal_id` is taken from the same native nominal
-//RS /// constructor used by ordinary Apply lowering and is intentionally separate.
-//RS pub(super) fn lower_core_builtin_owners() -> Vec<MirCoreOwner> {
-//RS     [
-//RS         crate::Syntax::TYPE_TASK,
-//RS         crate::Syntax::TYPE_RECEIVER,
-//RS         crate::Syntax::TYPE_SENDER,
-//RS     ]
-//RS     .into_iter()
-//RS     .map(|name| MirCoreOwner {
-//RS         id: MirTypeId(stable_id("mir-type", name)),
-//RS         nominal_id: lower_nominal_ref(name).id,
-//RS         module_id: None,
-//RS         key: name.to_string(),
-//RS         name: name.to_string(),
-//RS         ownership: MirOwnershipMode::Owned,
-//RS     })
-//RS     .collect()
-//RS }
-//RS 
-//RS pub(super) fn lower_type_defs(
-//RS     definitions: &[TirTypeDef],
-//RS     registry: &super::mir::FunctionRegistry,
-//RS ) -> Result<Vec<MirTypeDef>, super::LowerError> {
-//RS     let mut seen = std::collections::HashSet::with_capacity(definitions.len());
-//RS     let mut rows = Vec::with_capacity(definitions.len());
-//RS     for definition in definitions {
-//RS         if !seen.insert(definition.key.clone()) {
-//RS             return Err(super::LowerError::new(
-//RS                 definition.span,
-//RS                 format!("duplicate checked type definition `{}`", definition.key),
-//RS             ));
-//RS         }
-//RS         rows.push(definition.to_mir(registry)?);
-//RS     }
-//RS     Ok(rows)
-//RS }
-//RS 
-//RS fn resolve_type_methods(
-//RS     definition: &TirTypeDef,
-//RS     methods: &[String],
-//RS     registry: &super::mir::FunctionRegistry,
-//RS ) -> Result<Vec<MirFunctionId>, super::LowerError> {
-//RS     methods
-//RS         .iter()
-//RS         .filter_map(|key| {
-//RS             match resolve_function_id(registry, key, &definition.module, definition.span) {
-//RS                 Ok(id) => Some(Ok(id)),
-//RS                 // Imported Core type metadata retains all declared methods,
-//RS                 // but only reachable bodies are emitted. A generic owner's
-//RS                 // declared method is a template: it lowers once per demanded
-//RS                 // instance (`Box<Int>::new`), never under its unspecialized
-//RS                 // key. Calls to an omitted method or instance still fail at
-//RS                 // their checked callsite.
-//RS                 Err(error)
-//RS                     if (definition.key.starts_with("<corelib>/")
-//RS                         || !definition.generic_params.is_empty())
-//RS                         && error.message.starts_with("missing checked function target") =>
-//RS                 {
-//RS                     None
-//RS                 }
-//RS                 Err(error) => Some(Err(error)),
-//RS             }
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS impl TirTypeDef {
-//RS     pub(super) fn to_mir(
-//RS         &self,
-//RS         registry: &super::mir::FunctionRegistry,
-//RS     ) -> Result<MirTypeDef, super::LowerError> {
-//RS         let kind = match &self.kind {
-//RS             TirTypeDefKind::Struct { fields, methods } => MirTypeDefKind::Struct {
-//RS                 fields: fields
-//RS                     .iter()
-//RS                     .map(|field| lower_mir_field(&self.key, field))
-//RS                     .collect(),
-//RS                 methods: resolve_type_methods(self, methods, registry)?,
-//RS             },
-//RS             TirTypeDefKind::Enum { variants, methods } => MirTypeDefKind::Enum {
-//RS                 // `#Layout(c)`: an omitted discriminant follows declaration
-//RS                 // order as in C, one past the previous variant (zero first).
-//RS                 variants: variants
-//RS                     .iter()
-//RS                     .scan(Some(0i64), |next, variant| {
-//RS                         let discriminant = if self.c_layout_tag.is_some() {
-//RS                             variant.discriminant.or(*next)
-//RS                         } else {
-//RS                             variant.discriminant
-//RS                         };
-//RS                         *next = discriminant.and_then(|value| value.checked_add(1));
-//RS                         Some((variant, discriminant))
-//RS                     })
-//RS                     .map(|(variant, discriminant)| MirVariant {
-//RS                         name: variant.name.clone(),
-//RS                         wire_name: variant.wire_name.clone(),
-//RS                         span: variant.span,
-//RS                         payload: match &variant.payload {
-//RS                             TirVariantPayload::Unit => MirVariantPayload::Unit,
-//RS                             TirVariantPayload::Single(ty) => MirVariantPayload::Single(
-//RS                                 lower_type_for_owner(ty, &self.key, &self.name),
-//RS                             ),
-//RS                             TirVariantPayload::Named(fields) => MirVariantPayload::Named(
-//RS                                 fields
-//RS                                     .iter()
-//RS                                     .map(|field| {
-//RS                                         lower_mir_field_for_owner(
-//RS                                             &format!("{}::{}", self.key, variant.name),
-//RS                                             field,
-//RS                                             Some(&self.key),
-//RS                                             Some(&self.name),
-//RS                                         )
-//RS                                     })
-//RS                                     .collect(),
-//RS                             ),
-//RS                         },
-//RS                         discriminant,
-//RS                     })
-//RS                     .collect(),
-//RS                 methods: resolve_type_methods(self, methods, registry)?,
-//RS             },
-//RS             TirTypeDefKind::Distinct { base, range } => MirTypeDefKind::Distinct {
-//RS                 base: lower_type(base),
-//RS                 range: *range,
-//RS             },
-//RS             TirTypeDefKind::Alias { target } => MirTypeDefKind::Alias {
-//RS                 target: lower_type(target),
-//RS             },
-//RS             TirTypeDefKind::UnitFamily { members } => MirTypeDefKind::UnitFamily {
-//RS                 members: members.clone(),
-//RS             },
-//RS         };
-//RS         Ok(MirTypeDef {
-//RS             id: MirTypeId(stable_id("mir-type", &self.key)),
-//RS             module: MirModuleId(stable_id("mir-module", &self.module)),
-//RS             key: self.key.clone(),
-//RS             name: self.name.clone(),
-//RS             span: self.span,
-//RS             public: self.public,
-//RS             package_public: self.package_public,
-//RS             generic_params: self
-//RS                 .generic_params
-//RS                 .iter()
-//RS                 .map(|parameter| MirGenericParam {
-//RS                     name: parameter.name.clone(),
-//RS                     bounds: parameter
-//RS                         .bounds
-//RS                         .iter()
-//RS                         .map(|bound| MirTraitRef {
-//RS                             id: MirTraitId(stable_id("mir-trait", bound)),
-//RS                             name: bound.clone(),
-//RS                         })
-//RS                         .collect(),
-//RS                 })
-//RS                 .collect(),
-//RS             derives: self
-//RS                 .derives
-//RS                 .iter()
-//RS                 .map(|name| MirTraitId(stable_id("mir-trait", name)))
-//RS                 .collect(),
-//RS             auto_derive_default: self.auto_derive_default,
-//RS             auto_printable: self.auto_printable,
-//RS             published_schema: self.published_schema,
-//RS             single_use: self.single_use,
-//RS             must_use: self.must_use,
-//RS             compiler_builtin: self.compiler_builtin,
-//RS             layout: self.layout.as_ref().map(|layout| match layout {
-//RS                 StructLayout::C => MirStructLayout::C,
-//RS                 StructLayout::CAligned { alignment, target } => MirStructLayout::CAligned {
-//RS                     alignment: *alignment,
-//RS                     target: *target,
-//RS                 },
-//RS                 StructLayout::Columnar => MirStructLayout::Columnar,
-//RS             }),
-//RS             c_layout_tag: self.c_layout_tag.map(lower_c_enum_tag),
-//RS             enum_layout: self.enum_layout.clone(),
-//RS             layout_alignment: self.layout_alignment.clone(),
-//RS             serde: self
-//RS                 .serde
-//RS                 .iter()
-//RS                 .map(|attribute| MirSerdeAttribute {
-//RS                     kind: match attribute.kind {
-//RS                         TirSerdeAttributeKind::RenameAll => MirSerdeAttributeKind::RenameAll,
-//RS                         TirSerdeAttributeKind::Tag => MirSerdeAttributeKind::Tag,
-//RS                         TirSerdeAttributeKind::Untagged => MirSerdeAttributeKind::Untagged,
-//RS                         TirSerdeAttributeKind::DenyUnknownFields => {
-//RS                             MirSerdeAttributeKind::DenyUnknownFields
-//RS                         }
-//RS                     },
-//RS                     value: attribute.value.clone(),
-//RS                     span: attribute.span,
-//RS                 })
-//RS                 .collect(),
-//RS             cli_bindings: self
-//RS                 .cli_bindings
-//RS                 .iter()
-//RS                 .map(|binding| {
-//RS                     Ok::<_, super::LowerError>(MirCliBinding {
-//RS                         name: binding.name.clone(),
-//RS                         function: resolve_function_id(
-//RS                             registry,
-//RS                             &binding.function_key,
-//RS                             &self.module,
-//RS                             binding.span,
-//RS                         )?,
-//RS                         span: binding.span,
-//RS                         markers: binding.markers.clone(),
-//RS                     })
-//RS                 })
-//RS                 .collect::<Result<Vec<_>, _>>()?,
-//RS             cli: self
-//RS                 .cli
-//RS                 .as_ref()
-//RS                 .map(|entry| lower_type_cli_entry(entry, registry))
-//RS                 .transpose()?,
-//RS             ownership: ownership_mode(self.ownership),
-//RS             boxed_edges: self.boxed_edges.clone(),
-//RS             kind,
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS impl TirParam {
-//RS     pub(super) fn to_mir(&self) -> MirParam {
-//RS         MirParam {
-//RS             index: self.index,
-//RS             name: self.name.clone(),
-//RS             span: self.span,
-//RS             ty: lower_type(&self.ty),
-//RS             access: lower_mir_access(self.access),
-//RS             ownership: ownership_from_tir(self.ownership),
-//RS             public_label: self.public_label.clone(),
-//RS             variadic: self.variadic,
-//RS             default_present: self.default_present,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl TirErasure {
-//RS     pub(super) fn to_mir(&self) -> jet_foundation::MIR::MirUnreachable {
-//RS         jet_foundation::MIR::MirUnreachable {
-//RS             construct: self.construct.clone(),
-//RS             span: self.span,
-//RS             reason: match self.reason {
-//RS                 TirErasureReason::CompileTimeOnly => MirErasureReason::CompileTimeOnly,
-//RS                 TirErasureReason::Disabled => MirErasureReason::Disabled,
-//RS                 TirErasureReason::ExpandedBeforeLowering => {
-//RS                     MirErasureReason::ExpandedBeforeLowering
-//RS                 }
-//RS                 TirErasureReason::SemanticIndexOnly => MirErasureReason::SemanticIndexOnly,
-//RS             },
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn lower_erasure(
-//RS     construct: impl Into<String>,
-//RS     span: Span,
-//RS     reason: TirErasureReason,
-//RS ) -> TirErasure {
-//RS     TirErasure {
-//RS         construct: construct.into(),
-//RS         span,
-//RS         reason,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn lower_tir_declarations(
-//RS     bundle: &ProgramBundle,
-//RS     boxed_edges_by_module: &BTreeMap<String, HashSet<(String, String)>>,
-//RS     auto_printable_by_module: &BTreeMap<String, HashSet<String>>,
-//RS     auto_debug_by_module: &BTreeMap<String, HashSet<String>>,
-//RS ) -> TirDeclarations {
-//RS     let mut out = TirDeclarations::default();
-//RS     let target_layout = TargetLayout::from_build_facts(&bundle.build_facts);
-//RS     let empty_boxed_edges = HashSet::new();
-//RS     let empty_auto_printable = HashSet::new();
-//RS     let empty_auto_debug = HashSet::new();
-//RS     for (index, module) in bundle.modules.iter().enumerate() {
-//RS         let module_name = crate::Codegen::Context::module_identity(bundle, index);
-//RS         let boxed_edges = boxed_edges_by_module
-//RS             .get(&module_name)
-//RS             .unwrap_or(&empty_boxed_edges);
-//RS         let auto_printable = auto_printable_by_module
-//RS             .get(&module_name)
-//RS             .unwrap_or(&empty_auto_printable);
-//RS         let auto_debug = auto_debug_by_module
-//RS             .get(&module_name)
-//RS             .unwrap_or(&empty_auto_debug);
-//RS         let seed_parse_error =
-//RS             !super::module_owned_type_names(&module.items).contains("ParseError");
-//RS         let layout_engine = TargetLayoutEngine::new(&module.items, target_layout.clone());
-//RS         collect_items(
-//RS             &mut out,
-//RS             &module.items,
-//RS             &module_name,
-//RS             &layout_engine,
-//RS             boxed_edges,
-//RS             auto_printable,
-//RS             auto_debug,
-//RS             &|ty, binders| super::qualify_imported_type(bundle, index, &module_name, binders, ty),
-//RS             &|type_name| {
-//RS                 crate::Codegen::Context::module_identity(
-//RS                     bundle,
-//RS                     super::impl_owner_module(bundle, index, type_name),
-//RS                 )
-//RS             },
-//RS             seed_parse_error,
-//RS             None,
-//RS         );
-//RS     }
-//RS     discard_duplicate_core_enum_fallbacks(&mut out);
-//RS     discard_core_term_stream_carriers(&mut out);
-//RS     ensure_builtin_debug_trait(&mut out);
-//RS     out
-//RS }
-//RS pub(super) fn lower_declarations_from_items(
-//RS     items: &[Item],
-//RS     module: &str,
-//RS     target_layout: &TargetLayout,
-//RS ) -> TirDeclarations {
-//RS     lower_declarations_from_items_with_boxed_edges(
-//RS         items,
-//RS         module,
-//RS         target_layout,
-//RS         &HashSet::new(),
-//RS         &HashSet::new(),
-//RS         &HashSet::new(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn lower_declarations_from_items_with_boxed_edges(
-//RS     items: &[Item],
-//RS     module: &str,
-//RS     target_layout: &TargetLayout,
-//RS     boxed_edges: &HashSet<(String, String)>,
-//RS     auto_printable: &HashSet<String>,
-//RS     auto_debug: &HashSet<String>,
-//RS     checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
-//RS ) -> TirDeclarations {
-//RS     let mut out = TirDeclarations::default();
-//RS     let layout_engine = TargetLayoutEngine::new(items, target_layout.clone());
-//RS     let owned = super::module_owned_type_names(items);
-//RS     // Rows are keyed `module::Name`. Field and payload types that name a
-//RS     // sibling row must spell that same key, or a comptime fragment's payload
-//RS     // type (`Box2`) and its constructed value (`__comptime::Box2`) disagree.
-//RS     let qualify_owned = |ty: &Type, binders: &[String]| {
-//RS         ty.map_named_types(&|name| {
-//RS             (owned.contains(name) && !binders.iter().any(|binder| binder == name))
-//RS                 .then(|| qualified_key(module, name))
-//RS         })
-//RS     };
-//RS     collect_items(
-//RS         &mut out,
-//RS         items,
-//RS         module,
-//RS         &layout_engine,
-//RS         boxed_edges,
-//RS         auto_printable,
-//RS         auto_debug,
-//RS         &qualify_owned,
-//RS         &|_| module.to_string(),
-//RS         !owned.contains("ParseError"),
-//RS         checked_nominals,
-//RS     );
-//RS     discard_duplicate_core_enum_fallbacks(&mut out);
-//RS     discard_core_term_stream_carriers(&mut out);
-//RS     ensure_builtin_debug_trait(&mut out);
-//RS     out
-//RS }
-//RS 
-//RS // Loaded Core source enums own their canonical identity. A synthetic plain
-//RS // Core export row is needed only when no source declaration is available;
-//RS // otherwise it shadows the checked enum in MIR and creates a second Rust type.
-//RS fn discard_duplicate_core_enum_fallbacks(declarations: &mut TirDeclarations) {
-//RS     let mut source_enum_counts = HashMap::<String, usize>::new();
-//RS     for row in &declarations.type_defs {
-//RS         if row.key.starts_with("<corelib>/")
-//RS             && row.key != row.name
-//RS             && matches!(&row.kind, TirTypeDefKind::Enum { .. })
-//RS         {
-//RS             *source_enum_counts.entry(row.name.clone()).or_default() += 1;
-//RS         }
-//RS     }
-//RS     declarations.type_defs.retain(|row| {
-//RS         row.key != row.name
-//RS             || !matches!(&row.kind, TirTypeDefKind::Enum { .. })
-//RS             || compiler_owned_enum_variants(&row.name).is_some()
-//RS             || source_enum_counts.get(&row.name) != Some(&1)
-//RS     });
-//RS }
-//RS 
-//RS /// `core.term` declares `Stdout`, `Stderr`, and `StdinHandle` so Jet code can
-//RS /// name them, but their values are the Prelude's native stream carriers
-//RS /// (`core.term.stdout()` and friends), not records. MIR therefore types every
-//RS /// spelling of these handles as the one native nominal, exactly like the bare
-//RS /// host signature; a record row here would make the JIT drop a record the
-//RS /// value never was.
-//RS pub(crate) fn core_term_stream_carrier(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "<corelib>/Core/term::Core/term/term.jet::Stdout" => Some("Stdout"),
-//RS         "<corelib>/Core/term::Core/term/term.jet::Stderr" => Some("Stderr"),
-//RS         "<corelib>/Core/term::Core/term/term.jet::StdinHandle" => Some("StdinHandle"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn discard_core_term_stream_carriers(declarations: &mut TirDeclarations) {
-//RS     declarations
-//RS         .type_defs
-//RS         .retain(|row| core_term_stream_carrier(&row.key).is_none());
-//RS }
-//RS 
-//RS fn collect_items(
-//RS     out: &mut TirDeclarations,
-//RS     items: &[Item],
-//RS     module: &str,
-//RS     layout_engine: &TargetLayoutEngine<'_>,
-//RS     boxed_edges: &HashSet<(String, String)>,
-//RS     auto_printable: &HashSet<String>,
-//RS     auto_debug: &HashSet<String>,
-//RS     qualify_type: &impl Fn(&Type, &[String]) -> Type,
-//RS     impl_owner: &impl Fn(&str) -> String,
-//RS     seed_parse_error: bool,
-//RS     checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
-//RS ) {
-//RS     // A bare trait name in a declared field, payload, or trait signature is
-//RS     // the trait value, the same canonical type every checked body and impl
-//RS     // signature carries. Keeping it `Named` makes a `-> Cloner` trait method
-//RS     // disagree with its impl at MIR validation and lets a struct holding an
-//RS     // `Adapter?` claim a derived Clone its boxed trait value cannot provide.
-//RS     let trait_names = items
-//RS         .iter()
-//RS         .filter_map(|item| match item {
-//RS             Item::Trait(candidate) => Some(candidate.name.clone()),
-//RS             _ => None,
-//RS         })
-//RS         .collect::<HashSet<_>>();
-//RS     let nominal_names = super::module_owned_type_names(items);
-//RS     let canonical = |ty: &Type, binders: &[String]| {
-//RS         canonicalize_checked_trait_types(
-//RS             &qualify_type(ty, binders),
-//RS             &trait_names,
-//RS             &nominal_names,
-//RS             &binders.iter().cloned().collect(),
-//RS         )
-//RS     };
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Struct(definition) => {
-//RS                 out.type_defs.push(lower_struct(
-//RS                     definition,
-//RS                     module,
-//RS                     &canonical,
-//RS                     layout_engine,
-//RS                     boxed_edges,
-//RS                     is_auto_printable(auto_printable, module, &definition.name),
-//RS                     is_auto_debug(auto_debug, module, &definition.name),
-//RS                 ));
-//RS                 push_nested_trait_impls(out, &definition.name, &definition.trait_impls, module);
-//RS             }
-//RS             Item::Enum(definition) => {
-//RS                 out.type_defs.push(lower_enum(
-//RS                     definition,
-//RS                     module,
-//RS                     &canonical,
-//RS                     definition.c_layout_tag().map(|_| layout_engine.enum_facts(definition)),
-//RS                     boxed_edges,
-//RS                     is_auto_printable(auto_printable, module, &definition.name),
-//RS                     is_auto_debug(auto_debug, module, &definition.name),
-//RS                 ));
-//RS                 push_nested_trait_impls(out, &definition.name, &definition.trait_impls, module);
-//RS             }
-//RS             Item::Distinct(definition) => out.type_defs.push(lower_distinct(
-//RS                 definition,
-//RS                 module,
-//RS                 qualify_type,
-//RS                 is_auto_printable(auto_printable, module, &definition.name),
-//RS             )),
-//RS             Item::TypeAlias(definition) => out.type_defs.push(lower_alias(
-//RS                 definition,
-//RS                 module,
-//RS                 qualify_type,
-//RS                 is_auto_printable(auto_printable, module, &definition.name),
-//RS             )),
-//RS             Item::UnitFamily(definition) => {
-//RS                 out.type_defs.push(lower_unit_family(
-//RS                     definition,
-//RS                     module,
-//RS                     is_auto_printable(auto_printable, module, &definition.family),
-//RS                 ));
-//RS                 for member in definition.distinct_defs() {
-//RS                     out.type_defs.push(lower_distinct(
-//RS                         &member,
-//RS                         module,
-//RS                         qualify_type,
-//RS                         is_auto_printable(auto_printable, module, &member.name),
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             Item::Trait(definition) => {
-//RS                 out.traits.push(lower_trait(definition, module, &canonical))
-//RS             }
-//RS             Item::Impl(definition) => out.impls.push(lower_impl(
-//RS                 definition,
-//RS                 module,
-//RS                 &impl_owner(&definition.type_name),
-//RS             )),
-//RS             Item::Const(definition) => out.constants.push(lower_constant(definition, module)),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     for row in compiler_owned_type_defs(module, seed_parse_error, checked_nominals) {
-//RS         if !out.type_defs.iter().any(|existing| existing.key == row.key) {
-//RS             out.type_defs.push(row);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn ensure_builtin_debug_trait(out: &mut TirDeclarations) {
-//RS     let Some(module) = out
-//RS         .type_defs
-//RS         .iter()
-//RS         .find(|definition| {
-//RS             definition
-//RS                 .derives
-//RS                 .iter()
-//RS                 .any(|name| name == crate::Generics::DEBUG)
-//RS         })
-//RS         .map(|definition| definition.module.clone())
-//RS     else {
-//RS         return;
-//RS     };
-//RS     if out
-//RS         .traits
-//RS         .iter()
-//RS         .any(|definition| definition.name == crate::Generics::DEBUG)
-//RS     {
-//RS         return;
-//RS     }
-//RS     out.traits.push(TirTraitDef {
-//RS         module,
-//RS         key: crate::Generics::DEBUG.to_string(),
-//RS         name: crate::Generics::DEBUG.to_string(),
-//RS         span: Span::new(0, 0),
-//RS         visibility: TirVisibility::Public,
-//RS         associated_types: Vec::new(),
-//RS         methods: Vec::new(),
-//RS     });
-//RS }
-//RS 
-//RS // TIR rewrites every method implementation to a module-qualified semantic key.
-//RS // Trait methods retain the trait identity; operator methods retain their concrete
-//RS // RHS identity, including the owner type for a bare same-type implementation.
-//RS fn method_keys(
-//RS     module: &str,
-//RS     type_name: &str,
-//RS     trait_name: Option<&str>,
-//RS     operator_rhs: Option<&Type>,
-//RS     methods: &[Func],
-//RS ) -> Vec<String> {
-//RS     methods
-//RS         .iter()
-//RS         .map(|method| {
-//RS             let name = match trait_name {
-//RS                 Some(trait_name)
-//RS                     if matches!(
-//RS                         trait_name,
-//RS                         crate::Syntax::TRAIT_ADD
-//RS                             | crate::Syntax::TRAIT_SUB
-//RS                             | crate::Syntax::TRAIT_MUL
-//RS                             | crate::Syntax::TRAIT_DIV
-//RS                             | crate::Syntax::TRAIT_EQUATABLE
-//RS                             | crate::Syntax::TRAIT_COMPARABLE
-//RS                     ) =>
-//RS                 {
-//RS                     crate::Traits::operator_method_identity(
-//RS                         type_name,
-//RS                         trait_name,
-//RS                         &method.name,
-//RS                         operator_rhs.unwrap_or(&Type::Named(type_name.to_string())),
-//RS                     )
-//RS                 }
-//RS                 Some(trait_name) => {
-//RS                     format!("{type_name}::{trait_name}::{}", method.name)
-//RS                 }
-//RS                 None => format!("{type_name}::{}", method.name),
-//RS             };
-//RS             qualified_key(module, &name)
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn lower_struct(
-//RS     definition: &StructDef,
-//RS     module: &str,
-//RS     qualify_type: &impl Fn(&Type, &[String]) -> Type,
-//RS     layout_engine: &TargetLayoutEngine<'_>,
-//RS     boxed_edges: &HashSet<(String, String)>,
-//RS     auto_printable: bool,
-//RS     auto_debug: bool,
-//RS ) -> TirTypeDef {
-//RS     let layout_alignment = layout_engine
-//RS         .checked_struct_facts(definition)
-//RS         .ok()
-//RS         .and_then(|facts| facts.alignment);
-//RS     let shape_fact = crate::Sema::Schema::shape_fact_from_struct(module, definition).ok();
-//RS     let binders = definition
-//RS         .type_params
-//RS         .iter()
-//RS         .map(|param| param.name.clone())
-//RS         .collect::<Vec<_>>();
-//RS     TirTypeDef {
-//RS         module: module.to_string(),
-//RS         key: qualified_key(module, &definition.name),
-//RS         name: definition.name.clone(),
-//RS         span: definition.span,
-//RS         public: definition.is_pub,
-//RS         package_public: definition.is_package_pub,
-//RS         generic_params: lower_generic_params(&definition.type_params),
-//RS         derives: lower_derive_names(
-//RS             &definition.derives,
-//RS             auto_debug,
-//RS             has_generated_equatable_block(&definition.trait_impls),
-//RS         ),
-//RS         auto_derive_default: definition.auto_derive_default,
-//RS         auto_printable,
-//RS         published_schema: definition.is_published_schema,
-//RS         single_use: definition.is_single_use,
-//RS         must_use: definition.is_must_use,
-//RS         layout: definition.layout.clone(),
-//RS         layout_alignment,
-//RS         serde: lower_serde_markers(&definition.serde_markers),
-//RS         c_layout_tag: None,
-//RS         enum_layout: None,
-//RS         cli_bindings: lower_cli_bindings(&definition.cli_bindings, module),
-//RS         cli: None,
-//RS         ownership: ownership_for_definition(definition.is_single_use),
-//RS         boxed_edges: owner_boxed_edges(&definition.name, boxed_edges),
-//RS         compiler_builtin: None,
-//RS         kind: TirTypeDefKind::Struct {
-//RS             fields: definition
-//RS                 .fields
-//RS                 .iter()
-//RS                 .map(|field| {
-//RS                     let shape_names = shape_fact
-//RS                         .as_ref()
-//RS                         .and_then(|fact| {
-//RS                             fact.fields
-//RS                                 .iter()
-//RS                                 .find(|candidate| candidate.name == field.name)
-//RS                                 .map(|candidate| candidate.names.clone())
-//RS                         })
-//RS                         .unwrap_or_else(|| ShapeFieldNames::from_source(&field.name));
-//RS                     {
-//RS                         let mut field = field.clone();
-//RS                         let mut params = std::collections::HashMap::new();
-//RS                         params.insert(
-//RS                             definition.name.clone(),
-//RS                             definition
-//RS                                 .type_params
-//RS                                 .iter()
-//RS                                 .map(|param| param.name.clone())
-//RS                                 .collect(),
-//RS                         );
-//RS                         let owner = if definition.type_params.is_empty() {
-//RS                             Type::Named(definition.name.clone())
-//RS                         } else {
-//RS                             Type::Apply {
-//RS                                 name: definition.name.clone(),
-//RS                                 args: definition
-//RS                                     .type_params
-//RS                                     .iter()
-//RS                                     .map(|param| Type::Named(param.name.clone()))
-//RS                                     .collect(),
-//RS                             }
-//RS                         };
-//RS                         field.ty = super::substitute_reflect_field_type(&params, &owner, &field.ty);
-//RS                         lower_field(&field, shape_names, qualify_type, &binders)
-//RS                     }
-//RS                 })
-//RS                 .collect(),
-//RS             methods: method_keys(module, &definition.name, None, None, &definition.methods),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn lower_enum(
-//RS     definition: &EnumDef,
-//RS     module: &str,
-//RS     qualify_type: &impl Fn(&Type, &[String]) -> Type,
-//RS     enum_layout: Option<LayoutFacts>,
-//RS     boxed_edges: &HashSet<(String, String)>,
-//RS     auto_printable: bool,
-//RS     auto_debug: bool,
-//RS ) -> TirTypeDef {
-//RS     let style = container_rename_all(&definition.serde_markers);
-//RS     let binders = definition
-//RS         .type_params
-//RS         .iter()
-//RS         .map(|param| param.name.clone())
-//RS         .collect::<Vec<_>>();
-//RS     TirTypeDef {
-//RS         module: module.to_string(),
-//RS         key: qualified_key(module, &definition.name),
-//RS         name: definition.name.clone(),
-//RS         span: definition.span,
-//RS         public: definition.is_pub,
-//RS         package_public: definition.is_package_pub,
-//RS         generic_params: lower_generic_params(&definition.type_params),
-//RS         derives: lower_derive_names(
-//RS             &definition.derives,
-//RS             auto_debug,
-//RS             has_generated_equatable_block(&definition.trait_impls),
-//RS         ),
-//RS         auto_derive_default: definition.auto_derive_default,
-//RS         auto_printable,
-//RS         published_schema: false,
-//RS         single_use: definition.is_single_use,
-//RS         must_use: definition.is_must_use,
-//RS         layout: definition
-//RS             .c_layout_tag()
-//RS             .map(|_| StructLayout::C),
-//RS         c_layout_tag: definition.c_layout_tag(),
-//RS         enum_layout,
-//RS         layout_alignment: None,
-//RS         serde: lower_serde_markers(&definition.serde_markers),
-//RS         cli_bindings: Vec::new(),
-//RS         cli: None,
-//RS         ownership: ownership_for_definition(definition.is_single_use),
-//RS         boxed_edges: owner_boxed_edges(&definition.name, boxed_edges),
-//RS         compiler_builtin: None,
-//RS         kind: TirTypeDefKind::Enum {
-//RS             variants: definition
-//RS                 .variants
-//RS                 .iter()
-//RS                 .map(|variant| lower_variant(variant, style.as_deref(), qualify_type, &binders))
-//RS                 .collect(),
-//RS             methods: method_keys(module, &definition.name, None, None, &definition.methods),
-//RS         },
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 0539 crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1-1822
+// Semantic projections shared by checked TIR and canonical MIR.
+// Fragment of Codegen/Types.jet; no executable lowering or AST retained in MIR.
+use jet_foundation.[Type, TypeTupleField, TypeParam, AccessConvention, ParamZone, Span, CtValue, Expr, Field, VariantField, Func, Item, Marker, StructDef, EnumDef, Variant, VariantPayload, TraitImplBlock, ProgramBundle, StructLayout, CEnumTag, OperatorMarker, OSTarget, CLICommandBinding, ShapeFieldNames, LayoutAlignmentFact, LayoutFacts, TargetLayout, TargetLayoutEngine, TGenericParam, TFailureCarrier, ViewProvenanceMap, MIRType, MIRTypeKind, MIRTypeID, MIRNominalRef, MIRFunctionSignature, MIRTupleField, MIRAccess, MIROwnership, MIROwnershipMode, MIRDropKind, MIRField, MIRFieldID, MIRFunctionID, MIRModuleID, MIRTraitID, MIRTraitRef, MIRGenericParam, MIRTypeDef, MIRTypeDefKind, MIRVariant, MIRVariantPayload, MIRIntegerRange, MIRStructLayout, MIRCEnumTag, MIRCompilerBuiltin, MIRSerdeAttribute, MIRSerdeAttributeKind, MIRCLIBinding, MIRCLIEntry, MIRCLICommand, MIRCoreOwner, MIRParam, MIRUnreachable, MIRErasureReason, CanonicalPass, mir_type_id, mir_trait_id, mir_nominal_ref, mir_module_id, mir_field_id, mir_type_from_kind, mir_type_with_identity, type_identity_key, numeric_type_from_name]
+use jet_codegen.[TirAccess, TirErasure, TirErasureReason, TirCliEntry, FunctionRegistry, LowerError, module_owned_type_names, qualify_imported_type, impl_owner_module, module_identity, substitute_reflect_field_type, lower_cli_input, push_nested_trait_impls, lower_distinct, lower_alias, lower_unit_family, lower_trait, lower_impl, lower_constant, compiler_owned_type_defs, compiler_owned_enum_variants, container_rename_all, variant_wire_key, operator_method_identity]
+use jet_comptime.MirFragmentNominalFacts
+use jet_sema.shape_fact_from_struct
+use core.collections.Set
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:39
+struct TirDeclarations {
+    pub type_defs: [TirTypeDef] = []
+    pub traits: [TirTraitDef] = []
+    pub impls: [TirImplDef] = []
+    pub constants: [TirConstantDef] = []
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:49
+fn canonicalize_checked_trait_types(ty: Type, trait_names: Set<String>, nominal_names: Set<String>, binders: Set<String>) -> Type {
+    canonicalize_checked_trait_types_visit(ty, trait_names, nominal_names, binders)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:55
+fn canonicalize_checked_trait_types_visit(ty: Type, trait_names: Set<String>, nominal_names: Set<String>, binders: Set<String>) -> Type {
+    if ty == {
+        .Named(name) -> {
+            if trait_names.contains(name) && !nominal_names.contains(name) && !binders.contains(name) -> return Type.TraitObject{bounds: [name]}
+            ty
+        }
+        .List(inner) -> Type.List{element: canonicalize_checked_trait_types_visit(inner, trait_names, nominal_names, binders)}
+        .Map(key, key_span, value) -> Type.Map{key: canonicalize_checked_trait_types_visit(key, trait_names, nominal_names, binders), key_span: key_span, value: canonicalize_checked_trait_types_visit(value, trait_names, nominal_names, binders)}
+        .Shared(inner) -> Type.Shared{inner: canonicalize_checked_trait_types_visit(inner, trait_names, nominal_names, binders)}
+        .Option(inner) -> Type.Option{inner: canonicalize_checked_trait_types_visit(inner, trait_names, nominal_names, binders)}
+        .Result(ok, err) -> Type.Result{ok: canonicalize_checked_trait_types_visit(ok, trait_names, nominal_names, binders), err: canonicalize_checked_trait_types_visit(err, trait_names, nominal_names, binders)}
+        .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
+            projected := [Type]{}
+            loop param in params -> &projected.push(canonicalize_checked_trait_types_visit(param, trait_names, nominal_names, binders))
+            projected_ret := Type?{None}
+            if ret == .Val(value) -> projected_ret = Val(canonicalize_checked_trait_types_visit(value, trait_names, nominal_names, binders))
+            Type.Fn{params: projected, ret: projected_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
+        }
+        .Apply(name, args) -> {
+            projected := [Type]{}
+            loop arg in args -> &projected.push(canonicalize_checked_trait_types_visit(arg, trait_names, nominal_names, binders))
+            Type.Apply{name: name, args: projected}
+        }
+        .Tuple(fields) -> {
+            projected := [TypeTupleField]{}
+            loop field in fields -> &projected.push(TypeTupleField{name: field.name, ty: canonicalize_checked_trait_types_visit(field.ty, trait_names, nominal_names, binders)})
+            Type.Tuple{fields: projected}
+        }
+        .FixedList(elem, len) -> Type.FixedList{elem: canonicalize_checked_trait_types_visit(elem, trait_names, nominal_names, binders), len: len}
+        .InlineRange(base, lo, hi) -> Type.InlineRange{base: canonicalize_checked_trait_types_visit(base, trait_names, nominal_names, binders), lo: lo, hi: hi}
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: canonicalize_checked_trait_types_visit(inner, trait_names, nominal_names, binders)}
+        .Union(members) -> {
+            projected := [Type]{}
+            loop member in members -> &projected.push(canonicalize_checked_trait_types_visit(member, trait_names, nominal_names, binders))
+            Type.Union{members: projected}
+        }
+        .Quantity(base, dimension) -> Type.Quantity{base: canonicalize_checked_trait_types_visit(base, trait_names, nominal_names, binders), dimension: dimension}
+        else -> ty
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:161
+// TirAccess is owned by Codegen/TIR/ArtifactPlan.jet (Read, Write, Move).
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:173
+pub enum TirOwnership { Owned, ReadBorrow, WriteBorrow, Move }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:182
+pub enum TirVisibility { Private, Package, Public }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:191
+struct TirTypeDef {
+    pub module: String
+    pub key: String
+    pub name: String
+    pub span: Span
+    pub public: Bool
+    pub package_public: Bool
+    pub generic_params: [TGenericParam]
+    pub derives: [String]
+    pub auto_derive_default: Bool
+    pub auto_printable: Bool
+    pub published_schema: Bool
+    pub single_use: Bool
+    pub must_use: Bool
+    pub layout: StructLayout?
+    pub layout_alignment: LayoutAlignmentFact?
+    pub c_layout_tag: CEnumTag?
+    pub enum_layout: LayoutFacts?
+    pub serde: [TirSerdeAttribute]
+    pub cli_bindings: [TirCliBinding]
+    pub cli: TirCliEntry?
+    pub ownership: TirOwnership
+    pub boxed_edges: [String]
+    pub compiler_builtin: MIRCompilerBuiltin?
+    pub kind: TirTypeDefKind
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:225
+fn lower_c_enum_tag(tag: CEnumTag) -> MIRCEnumTag {
+    if tag == {
+        .CInt -> MIRCEnumTag.CInt
+        .U8 -> MIRCEnumTag.U8
+        .I8 -> MIRCEnumTag.I8
+        .U16 -> MIRCEnumTag.U16
+        .I16 -> MIRCEnumTag.I16
+        .U32 -> MIRCEnumTag.U32
+        .I32 -> MIRCEnumTag.I32
+        .U64 -> MIRCEnumTag.U64
+        .I64 -> MIRCEnumTag.I64
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:241
+struct TirSerdeAttribute { pub kind: TirSerdeAttributeKind, pub value: String?, pub span: Span }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:248
+pub enum TirSerdeAttributeKind { RenameAll, Tag, Untagged, DenyUnknownFields }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:256
+struct TirCliBinding { pub name: String, pub span: Span, pub function_key: String, pub markers: [String] }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:264
+struct TirTraitDef {
+    pub module: String
+    pub key: String
+    pub name: String
+    pub span: Span
+    pub visibility: TirVisibility
+    pub associated_types: [TirAssociatedTypeDecl]
+    pub methods: [TirTraitMethod]
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:276
+struct TirAssociatedTypeDecl { pub name: String, pub span: Span }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:283
+struct TirAssociatedTypeValue { pub name: String, pub ty: Type, pub span: Span }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:290
+struct TirTraitMethod {
+    pub key: String
+    pub name: String
+    pub span: Span
+    pub self_access: TirAccess?
+    pub params: [TirParam]
+    pub declared_return: Type?
+    pub return_type: Type
+    pub failure: TFailureCarrier
+    pub is_pure: Bool
+    pub declared_effects: [(String, Span)]?
+    pub return_view_provenance: ViewProvenanceMap?
+    pub declared_return_view_provenance: ViewProvenanceMap?
+    pub default_function_key: String?
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:311
+struct TirImplDef {
+    pub module: String
+    pub key: String
+    pub span: Span
+    pub self_type: Type
+    pub trait_name: String?
+    pub trait_ref: String?
+    pub associated_types: [TirAssociatedTypeValue]
+    pub methods: [String]
+    pub delegation_field: String?
+    pub compiler_generated: Bool
+    pub serde: TirSerdeCodec?
+    pub operator_rhs: Type?
+    pub operator_marker: OperatorMarker?
+    pub target_os: OSTarget?
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:329
+pub enum TirSerdeCodec { Encode, Decode }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:335
+struct TirConstantDef {
+    pub module: String
+    pub key: String
+    pub name: String
+    pub span: Span
+    pub visibility: TirVisibility
+    pub ty: Type
+    pub is_comptime: Bool
+    pub is_storage: Bool
+    pub addressable: Bool
+    pub force_inline: Bool
+    pub value: CtValue
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:357
+pub enum TirTypeDefKind {
+    Struct(fields: [TirField], methods: [String])
+    Enum(variants: [TirVariant], methods: [String])
+    Distinct(base: Type, range: MIRIntegerRange?)
+    Alias(target: Type)
+    UnitFamily(members: [String])
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:379
+struct TirField {
+    pub name: String
+    pub shape_names: ShapeFieldNames
+    pub skip: Bool
+    pub ty: Type
+    pub span: Span
+    pub public: Bool
+    pub package_public: Bool
+    pub computed: Bool
+    pub has_default: Bool
+    pub redact: Bool
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:396
+struct TirVariant { pub name: String, pub wire_name: String, pub span: Span, pub payload: TirVariantPayload, pub discriminant: I64? }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:405
+pub enum TirVariantPayload { Unit, Single(ty: Type), Named(fields: [TirField]) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:415
+struct TirParam {
+    pub index: Int
+    pub name: String
+    pub span: Span
+    pub ty: Type
+    pub access: TirAccess
+    pub ownership: TirOwnership
+    pub public_label: String
+    pub variadic: Bool
+    pub default_present: Bool
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:430
+// lower_nominal_ref is the canonical jet_foundation.mir_nominal_ref constructor.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:439
+fn lower_type(ty: Type) -> MIRType {
+    if ty == .Named(name) {
+        if core_term_stream_carrier(name) == .Val(carrier) -> return lower_type(Type.Named{name: carrier})
+    }
+    lowered :: mir_type_with_identity(mir_type_from_kind(lower_type_kind(ty)), mir_type_id(type_identity_key(ty)))
+    if CanonicalPass.enabled() {
+        CanonicalPass.record("lowering", "mir.lower-type", "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs", "tir", CanonicalPass.debug_payload("tir", "mir.lower-type", ty), CanonicalPass.debug_identity("tir", "mir.lower-type", ty), "mir", CanonicalPass.debug_payload("mir", "mir.lower-type", lowered), CanonicalPass.debug_identity("mir", "mir.lower-type", lowered), "preserve")
+    }
+    lowered
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:469
+fn lower_type_kind(ty: Type) -> MIRTypeKind {
+    if ty == {
+        .Int -> MIRTypeKind.Int
+        .Float -> MIRTypeKind.Float
+        .Bool -> MIRTypeKind.Bool
+        .String -> MIRTypeKind.String
+        .Char -> MIRTypeKind.Char
+        .List(inner) -> MIRTypeKind.List{inner: lower_type(inner)}
+        .Map(key, _, value) -> MIRTypeKind.Map{key: lower_type(key), value: lower_type(value)}
+        .Shared(inner) -> MIRTypeKind.Shared{inner: lower_type(inner)}
+        .Option(inner) -> MIRTypeKind.Option{inner: lower_type(inner)}
+        .Result(ok, err) -> MIRTypeKind.Result{ok: lower_type(ok), err: lower_type(err)}
+        .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
+            lowered_params := [MIRType]{}
+            loop param in params -> &lowered_params.push(lower_type(param))
+            lowered_ret := MIRType?{None}
+            if ret == .Val(value) -> lowered_ret = Val(lower_type(value))
+            MIRTypeKind.Fn{signature: MIRFunctionSignature{params: lowered_params, ret: lowered_ret, effect_bound: jet_codegen_lower_effect_bound(effect_bound), param_contract: jet_codegen_lower_call_contract(param_contract), call_metadata: jet_codegen_lower_function_call_metadata(call_metadata), return_view_provenance: jet_codegen_lower_view_provenance_map(return_view_provenance)}}
+        }
+        .Named(name) -> {
+            if numeric_type_from_name(name) == .Val(numeric) -> return lower_type_kind(numeric)
+            MIRTypeKind.Apply{name: mir_nominal_ref(name), args: []}
+        }
+        .Apply(name, args) -> {
+            lowered_args := [MIRType]{}
+            loop arg in args -> &lowered_args.push(lower_type(arg))
+            MIRTypeKind.Apply{name: mir_nominal_ref(name), args: lowered_args}
+        }
+        .TraitObject(bounds) -> {
+            lowered_bounds := [MIRTraitRef]{}
+            loop name in bounds -> &lowered_bounds.push(MIRTraitRef{id: mir_trait_id(name), name: name})
+            MIRTypeKind.TraitObject{bounds: lowered_bounds}
+        }
+        .Tuple(fields) -> {
+            lowered_fields := [MIRTupleField]{}
+            loop field in fields -> &lowered_fields.push(MIRTupleField{name: field.name, ty: lower_type(field.ty)})
+            MIRTypeKind.Tuple{fields: lowered_fields}
+        }
+        .FixedList(elem, len) -> MIRTypeKind.FixedList{elem: lower_type(elem), len: jet_codegen_lower_measure(len)}
+        .IntN(signed, bits) -> MIRTypeKind.IntN{signed: signed, bits: bits}
+        .InlineRange(base, lo, hi) -> MIRTypeKind.InlineRange{base: lower_type(base), lo: lo, hi: hi}
+        .Float32 -> MIRTypeKind.Float32
+        .Tagged(marker, inner) -> MIRTypeKind.Tagged{marker: jet_codegen_lower_tag_marker(marker), inner: lower_type(inner)}
+        .Union(members) -> {
+            lowered := [MIRType]{}
+            loop member in members -> &lowered.push(lower_type(member))
+            MIRTypeKind.Union{members: lowered}
+        }
+        .Quantity(base, dimension) -> MIRTypeKind.Quantity{base: lower_type(base), dimension: jet_codegen_lower_dimension(dimension)}
+        .Measure(measure) -> MIRTypeKind.Measure{value: jet_codegen_lower_measure(measure)}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:566
+fn lower_mir_access(access: TirAccess) -> MIRAccess {
+    if access == { .Read -> MIRAccess.Read .Write -> MIRAccess.Write .Move -> MIRAccess.Move }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:574
+// lower_mir_convention maps to Types.jet::jet_codegen_lower_access.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:582
+// mir_access uses lower_mir_access directly; no duplicate forwarding entrypoint.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:586
+fn lower_param_zone(zone: ParamZone) -> ParamZone {
+    if zone == { .PositionalOnly -> ParamZone.PositionalOnly .Either -> ParamZone.Either .LabelOnly -> ParamZone.LabelOnly }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:594
+// lower_view_provenance maps to Types.jet::jet_codegen_lower_view_provenance_map.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:603
+// lower_view_slot is its MIRViewProvenance construction at Types.jet:587.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:610
+// lower_view_source_path is its full source/projection dispatch at Types.jet:570-585.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:632
+// lower_call_metadata maps to Types.jet::jet_codegen_lower_function_call_metadata.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:658
+// lower_measure maps to Types.jet::jet_codegen_lower_measure (all four variants).
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:690
+// lower_dimension maps to Types.jet::jet_codegen_lower_dimension.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:699
+// lower_tag_marker maps to Types.jet::jet_codegen_lower_tag_marker (both variants, all nine internal tags).
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:716
+// lower_access_convention maps to Codegen/TIR/ArtifactPlan.jet::lower_access.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:724
+fn ownership_mode(ownership: TirOwnership) -> MIROwnershipMode {
+    if ownership == { .Owned -> MIROwnershipMode.Owned .ReadBorrow -> MIROwnershipMode.ReadBorrow .WriteBorrow -> MIROwnershipMode.WriteBorrow .Move -> MIROwnershipMode.Move }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:733
+fn ownership_from_tir(ownership: TirOwnership) -> MIROwnership {
+    if ownership == .Owned -> return MIROwnership.Owned
+    MIROwnership{mode: ownership_mode(ownership), drop: if ownership == .Move -> MIRDropKind.Value else -> MIRDropKind.None, moved: false, last_use: false, gc_root: false}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:760
+fn ownership_for_definition(single_use: Bool) -> TirOwnership {
+    if single_use -> TirOwnership.Move else -> TirOwnership.Owned
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:768
+// qualified_key maps to Types.jet::jet_codegen_qualified_type_key.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:776
+fn is_auto_printable(auto_printable: Set<String>, module: String, name: String) -> Bool {
+    auto_printable.contains(name) || auto_printable.contains(jet_codegen_qualified_type_key(module, name))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:780
+fn is_auto_debug(auto_debug: Set<String>, module: String, name: String) -> Bool {
+    auto_debug.contains(name) || auto_debug.contains(jet_codegen_qualified_type_key(module, name))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:784
+fn lower_generic_params(params: [TypeParam]) -> [TGenericParam] {
+    out := [TGenericParam]{}
+    loop param in params -> &out.push(TGenericParam{name: param.name, bounds: param.bounds})
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:798
+fn lower_derive_names(derives: [(String, Span)], auto_debug: Bool, generated_equatable: Bool) -> [String] {
+    names := [String]{}
+    loop (name, _) in derives { if name != "CLI" -> &names.push(name) }
+    if auto_debug && !names.contains("Debug") -> &names.push("Debug")
+    if generated_equatable && !names.contains("Equatable") -> &names.push("Equatable")
+    names
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:818
+fn has_generated_equatable_block(trait_impls: [TraitImplBlock]) -> Bool {
+    loop block in trait_impls { if block.compiler_generated && block.trait_name == "Equatable" -> return true }
+    false
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:824
+fn marker_arg_text(marker: Marker) -> String? {
+    arg :: marker.args.first() ?? return None
+    expr :: arg.as_expr() ?? return None
+    if expr == { .Ident(name, _) -> Val(name) else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:835
+fn lower_serde_markers(markers: [Marker]) -> [TirSerdeAttribute] {
+    out := [TirSerdeAttribute]{}
+    loop marker in markers {
+        kind :: if marker.name == {
+            "RenameAll" -> TirSerdeAttributeKind.RenameAll
+            "Discriminant" -> TirSerdeAttributeKind.Tag
+            "Tag" -> TirSerdeAttributeKind.Tag
+            "Untagged" -> TirSerdeAttributeKind.Untagged
+            "DenyUnknownFields" -> TirSerdeAttributeKind.DenyUnknownFields
+            else -> next
+        }
+        &out.push(TirSerdeAttribute{kind: kind, value: marker_arg_text(marker), span: marker.span})
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:855
+fn field_is_skipped(field: Field) -> Bool {
+    loop marker in field.serde_markers { if marker.name == "Skip" -> return true }
+    false
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:862
+fn function_name_from_expr(expr: Expr) -> String? {
+    if expr == { .Ident(name, _) -> Val(name) else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:869
+fn lower_cli_bindings(bindings: [CLICommandBinding], module: String) -> [TirCliBinding] {
+    out := [TirCliBinding]{}
+    loop binding in bindings {
+        names := [String]{}
+        loop marker in binding.markers -> &names.push(marker.name)
+        &out.push(TirCliBinding{name: binding.name, span: binding.name_span, function_key: jet_codegen_qualified_type_key(module, function_name_from_expr(binding.target) ?? binding.name), markers: names})
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:887
+fn lower_field(field: Field, shape_names: ShapeFieldNames, qualify_type: fn(Type, [String]) -> Type, binders: [String]) -> TirField {
+    TirField{name: field.name, shape_names: shape_names, skip: field_is_skipped(field), ty: qualify_type(field.ty, binders), span: field.name_span, public: field.is_pub, package_public: field.is_package_pub, computed: field.computed != None, has_default: field.default != None, redact: field.redact}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:907
+// container_rename_all is the canonical Codegen/Items owner; callers use it directly.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:911
+fn lower_variant_field(field: VariantField, qualify_type: fn(Type, [String]) -> Type, binders: [String]) -> TirField {
+    TirField{name: field.name, shape_names: ShapeFieldNames.from_source(field.name), skip: false, ty: qualify_type(field.ty, binders), span: field.name_span, public: true, package_public: false, computed: false, has_default: false, redact: false}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:930
+fn lower_variant(variant: Variant, style: String?, qualify_type: fn(Type, [String]) -> Type, binders: [String]) -> TirVariant {
+    payload :: if variant.payload == {
+        .Unit -> TirVariantPayload.Unit
+        .Single(ty, _) -> TirVariantPayload.Single{ty: qualify_type(ty, binders)}
+        .Named(fields) -> {
+            rows := [TirField]{}
+            loop field in fields -> &rows.push(lower_variant_field(field, qualify_type, binders))
+            TirVariantPayload.Named{fields: rows}
+        }
+    }
+    TirVariant{name: variant.name, wire_name: variant_wire_key(style, variant), span: variant.name_span, payload: payload, discriminant: variant.discriminant}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:955
+fn owner_boxed_edges(owner: String, boxed_edges: Set<(String, String)>) -> [String] {
+    // GATE #4499: native equality/hash for tuple keys, never string-encoded keys.
+    keys := [String]{}
+    loop (candidate, key) in boxed_edges { if candidate == owner -> &keys.push(key) }
+    &keys.sort()
+    keys
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:965
+fn type_names_owner(ty: Type, owner_key: String, owner_name: String) -> Bool {
+    if ty == {
+        .Named(name) -> name == owner_key || name == owner_name
+        .Apply(name, args) -> args.is_empty() && (name == owner_key || name == owner_name)
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:973
+fn lower_type_for_owner(ty: Type, owner_key: String, owner_name: String) -> MIRType {
+    lowered :: lower_type(ty)
+    if type_names_owner(ty, owner_key, owner_name) -> mir_type_with_identity(lowered, mir_type_id(owner_key)) else -> lowered
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:982
+fn lower_mir_field(owner: String, field: TirField) -> MIRField {
+    lower_mir_field_for_owner(owner, field, None, None)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:986
+fn lower_mir_field_for_owner(owner: String, field: TirField, identity_key: String?, identity_name: String?) -> MIRField {
+    ty :: if identity_key != None && identity_name != None -> lower_type_for_owner(field.ty, identity_key ?? "", identity_name ?? "") else -> lower_type(field.ty.with_effective_fn_returns())
+    MIRField{id: mir_field_id("{owner}::{field.name}"), name: field.name, shape_names: field.shape_names, skip: field.skip, ty: ty, span: field.span, public: field.public, package_public: field.package_public, computed: field.computed, has_default: field.has_default, redact: field.redact}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1014
+fn resolve_function_id(registry: FunctionRegistry, key: String, module: String, span: Span) -> MIRFunctionID LowerError! {
+    registry.resolve(key, module, span)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1023
+fn lower_type_cli_entry(entry: TirCliEntry, registry: FunctionRegistry) -> MIRCLIEntry LowerError! {
+    commands := [MIRCLICommand]{}
+    loop command in entry.commands {
+        function :: command.function ?? next
+        receiver := MIRTypeID?{None}
+        if command.receiver == .Val(value) -> receiver = Val(mir_type_id(value))
+        inputs := []
+        loop (ordinal, input) in command.inputs.iter().enumerate() -> &inputs.push(lower_cli_input(input, ordinal, None))
+        &commands.push(MIRCLICommand{name: command.name, description: command.description, function: resolve_function_id(registry, function.key, function.module, function.span)!, receiver: receiver, inputs: inputs})
+    }
+    inputs := []
+    loop (ordinal, input) in entry.inputs.iter().enumerate() -> &inputs.push(lower_cli_input(input, ordinal, None))
+    MIRCLIEntry{record_inputs: entry.record_inputs, description: entry.description, inputs: inputs, commands: commands, standard: entry.standard, version: entry.version}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1080
+fn lower_core_builtin_owners() -> [MIRCoreOwner] {
+    out := [MIRCoreOwner]{}
+    loop name in ["Task", "Receiver", "Sender"] -> &out.push(MIRCoreOwner{id: mir_type_id(name), nominal_id: mir_nominal_ref(name).id, module_id: None, key: name, name: name, ownership: MIROwnershipMode.Owned})
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1098
+fn lower_type_defs(definitions: [TirTypeDef], registry: FunctionRegistry) -> [MIRTypeDef] LowerError! {
+    seen := Set<String>{}
+    rows := [MIRTypeDef]{}
+    loop definition in definitions {
+        if !&seen.insert(definition.key) -> fail LowerError.new(definition.span, "duplicate checked type definition `{definition.key}`")
+        &rows.push(definition.to_mir(registry)!)
+    }
+    rows
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1116
+fn resolve_type_methods(definition: TirTypeDef, methods: [String], registry: FunctionRegistry) -> [MIRFunctionID] LowerError! {
+    out := [MIRFunctionID]{}
+    loop key in methods {
+        id :: resolve_function_id(registry, key, definition.module, definition.span) catch error {
+            if (definition.key.starts_with("<corelib>/") || !definition.generic_params.is_empty()) && error.message.starts_with("missing checked function target") -> next
+            fail error
+        }
+        &out.push(id)
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1146
+impl TirTypeDef {
+    fn to_mir(self, registry: FunctionRegistry) -> MIRTypeDef LowerError! {
+        kind :: if self.kind == {
+            .Struct(fields, methods) -> {
+                rows := [MIRField]{}
+                loop field in fields -> &rows.push(lower_mir_field(self.key, field))
+                MIRTypeDefKind.Struct{fields: rows, methods: resolve_type_methods(self, methods, registry)!}
+            }
+            .Enum(variants, methods) -> {
+                rows := [MIRVariant]{}
+                next_discriminant := I64?{Val(0)}
+                loop variant in variants {
+                    discriminant :: if self.c_layout_tag != None -> variant.discriminant.or(next_discriminant) else -> variant.discriminant
+                    next_discriminant = None
+                    if discriminant == .Val(value) -> next_discriminant = value.checked_add(1)
+                    payload :: if variant.payload == {
+                        .Unit -> MIRVariantPayload.Unit
+                        .Single(ty) -> MIRVariantPayload.Single{value: lower_type_for_owner(ty, self.key, self.name)}
+                        .Named(fields) -> {
+                            projected := [MIRField]{}
+                            loop field in fields -> &projected.push(lower_mir_field_for_owner("{self.key}::{variant.name}", field, Val(self.key), Val(self.name)))
+                            MIRVariantPayload.Named{fields: projected}
+                        }
+                    }
+                    &rows.push(MIRVariant{name: variant.name, wire_name: variant.wire_name, span: variant.span, payload: payload, discriminant: discriminant})
+                }
+                MIRTypeDefKind.Enum{variants: rows, methods: resolve_type_methods(self, methods, registry)!}
+            }
+            .Distinct(base, range) -> MIRTypeDefKind.Distinct{base: lower_type(base), range: range}
+            .Alias(target) -> MIRTypeDefKind.Alias{target: lower_type(target)}
+            .UnitFamily(members) -> MIRTypeDefKind.UnitFamily{members: members}
+        }
+        generic_params := [MIRGenericParam]{}
+        loop parameter in self.generic_params {
+            bounds := [MIRTraitRef]{}
+            loop bound in parameter.bounds -> &bounds.push(MIRTraitRef{id: mir_trait_id(bound), name: bound})
+            &generic_params.push(MIRGenericParam{name: parameter.name, bounds: bounds})
+        }
+        derives := [MIRTraitID]{}
+        loop name in self.derives -> &derives.push(mir_trait_id(name))
+        layout := MIRStructLayout?{None}
+        if self.layout == .Val(value) {
+            layout = Val(if value == {
+                .C -> MIRStructLayout.C
+                .CAligned(alignment, target) -> MIRStructLayout.CAligned{alignment: alignment, target: target}
+                .Columnar -> MIRStructLayout.Columnar
+            })
+        }
+        tag := MIRCEnumTag?{None}
+        if self.c_layout_tag == .Val(value) -> tag = Val(lower_c_enum_tag(value))
+        serde := [MIRSerdeAttribute]{}
+        loop attribute in self.serde {
+            attribute_kind :: if attribute.kind == {
+                .RenameAll -> MIRSerdeAttributeKind.RenameAll
+                .Tag -> MIRSerdeAttributeKind.Tag
+                .Untagged -> MIRSerdeAttributeKind.Untagged
+                .DenyUnknownFields -> MIRSerdeAttributeKind.DenyUnknownFields
+            }
+            &serde.push(MIRSerdeAttribute{kind: attribute_kind, value: attribute.value, span: attribute.span})
+        }
+        cli_bindings := [MIRCLIBinding]{}
+        loop binding in self.cli_bindings -> &cli_bindings.push(MIRCLIBinding{name: binding.name, function: resolve_function_id(registry, binding.function_key, self.module, binding.span)!, span: binding.span, markers: binding.markers})
+        cli := MIRCLIEntry?{None}
+        if self.cli == .Val(entry) -> cli = Val(lower_type_cli_entry(entry, registry)!)
+        MIRTypeDef{id: mir_type_id(self.key), module_id: mir_module_id(self.module), key: self.key, name: self.name, span: self.span, public: self.public, package_public: self.package_public, generic_params: generic_params, derives: derives, auto_derive_default: self.auto_derive_default, auto_printable: self.auto_printable, published_schema: self.published_schema, single_use: self.single_use, must_use: self.must_use, compiler_builtin: self.compiler_builtin, layout: layout, c_layout_tag: tag, enum_layout: self.enum_layout, layout_alignment: self.layout_alignment, serde: serde, cli_bindings: cli_bindings, cli: cli, ownership: ownership_mode(self.ownership), boxed_edges: self.boxed_edges, kind: kind}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1302
+impl TirParam {
+    fn to_mir(self) -> MIRParam {
+        MIRParam{index: self.index, name: self.name, span: self.span, ty: lower_type(self.ty), access: lower_mir_access(self.access), ownership: ownership_from_tir(self.ownership), public_label: self.public_label, variadic: self.variadic, default_present: self.default_present}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1318
+impl TirErasure {
+    fn to_mir(self) -> MIRUnreachable {
+        reason :: if self.reason == {
+            .CompileTimeOnly -> MIRErasureReason.CompileTimeOnly
+            .Disabled -> MIRErasureReason.Disabled
+            .ExpandedBeforeLowering -> MIRErasureReason.ExpandedBeforeLowering
+            .SemanticIndexOnly -> MIRErasureReason.SemanticIndexOnly
+        }
+        MIRUnreachable{construct: self.construct, span: self.span, reason: reason}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1334
+fn lower_erasure(construct: String, span: Span, reason: TirErasureReason) -> TirErasure {
+    TirErasure{construct: construct, span: span, reason: reason}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1346
+fn lower_tir_declarations(bundle: ProgramBundle, boxed_edges_by_module: [String:Set<(String, String)>], auto_printable_by_module: [String:Set<String>], auto_debug_by_module: [String:Set<String>]) -> TirDeclarations {
+    out := TirDeclarations{}
+    // GATE #4483: layout comes from selected build facts, not host pointer facts.
+    target_layout :: TargetLayout.from_build_facts(bundle.build_facts)
+    loop (index, module) in bundle.modules.iter().enumerate() {
+        module_name :: module_identity(bundle, index)
+        boxed_edges :: boxed_edges_by_module.get(module_name) ?? Set<(String, String)>{}
+        auto_printable :: auto_printable_by_module.get(module_name) ?? Set<String>{}
+        auto_debug :: auto_debug_by_module.get(module_name) ?? Set<String>{}
+        seed_parse_error :: !module_owned_type_names(module.items).contains("ParseError")
+        layout_engine :: TargetLayoutEngine.new(module.items, target_layout)
+        collect_items(&out, module.items, module_name, layout_engine, boxed_edges, auto_printable, auto_debug, fn(ty, binders) { qualify_imported_type(bundle, index, module_name, binders, ty) }, fn(type_name) { module_identity(bundle, impl_owner_module(bundle, index, type_name)) }, seed_parse_error, None)
+    }
+    discard_duplicate_core_enum_fallbacks(&out)
+    discard_core_term_stream_carriers(&out)
+    ensure_builtin_debug_trait(&out)
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1395
+fn lower_declarations_from_items(items: [Item], module: String, target_layout: TargetLayout) -> TirDeclarations {
+    lower_declarations_from_items_with_boxed_edges(items, module, target_layout, Set<(String, String)>{}, Set<String>{}, Set<String>{}, None)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1411
+fn lower_declarations_from_items_with_boxed_edges(items: [Item], module: String, target_layout: TargetLayout, boxed_edges: Set<(String, String)>, auto_printable: Set<String>, auto_debug: Set<String>, checked_nominals: MirFragmentNominalFacts?) -> TirDeclarations {
+    out := TirDeclarations{}
+    layout_engine :: TargetLayoutEngine.new(items, target_layout)
+    owned :: module_owned_type_names(items)
+    qualify_owned :: fn(ty: Type, binders: [String]) -> Type {
+        ty.map_named_types(fn(name: String) -> String? {
+            if owned.contains(name) && !binders.contains(name) -> Val(jet_codegen_qualified_type_key(module, name)) else -> None
+        })
+    }
+    collect_items(&out, items, module, layout_engine, boxed_edges, auto_printable, auto_debug, qualify_owned, fn(_) { module }, !owned.contains("ParseError"), checked_nominals)
+    discard_duplicate_core_enum_fallbacks(&out)
+    discard_core_term_stream_carriers(&out)
+    ensure_builtin_debug_trait(&out)
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1454
+fn discard_duplicate_core_enum_fallbacks(declarations: &TirDeclarations) {
+    source_enum_counts := [String:Int]{}
+    loop row in declarations.type_defs {
+        if row.key.starts_with("<corelib>/") && row.key != row.name && row.kind == .Enum(_, _) -> source_enum_counts[row.name] = (source_enum_counts.get(row.name) ?? 0) + 1
+    }
+    &declarations.type_defs.retain(fn(row) { row.key != row.name || !(row.kind == .Enum(_, _)) || compiler_owned_enum_variants(row.name) != None || source_enum_counts.get(row.name) != Val(1) })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1478
+fn core_term_stream_carrier(name: String) -> String? {
+    if name == {
+        "<corelib>/Core/term::Core/term/term.jet::Stdout" -> Val("Stdout")
+        "<corelib>/Core/term::Core/term/term.jet::Stderr" -> Val("Stderr")
+        "<corelib>/Core/term::Core/term/term.jet::StdinHandle" -> Val("StdinHandle")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1487
+fn discard_core_term_stream_carriers(declarations: &TirDeclarations) {
+    &declarations.type_defs.retain(fn(row) { core_term_stream_carrier(row.key) == None })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1493
+fn collect_items(out: &TirDeclarations, items: [Item], module: String, layout_engine: TargetLayoutEngine, boxed_edges: Set<(String, String)>, auto_printable: Set<String>, auto_debug: Set<String>, qualify_type: fn(Type, [String]) -> Type, impl_owner: fn(String) -> String, seed_parse_error: Bool, checked_nominals: MirFragmentNominalFacts?) {
+    trait_names := Set<String>{}
+    loop item in items { if item == .Trait(candidate) -> _ :: &trait_names.insert(candidate.name) }
+    nominal_names :: module_owned_type_names(items)
+    canonical :: fn(ty: Type, binders: [String]) -> Type {
+        binder_set := Set<String>{}
+        loop binder in binders -> _ :: &binder_set.insert(binder)
+        canonicalize_checked_trait_types(qualify_type(ty, binders), trait_names, nominal_names, binder_set)
+    }
+    loop item in items {
+        if item == {
+            .Struct(definition) -> {
+                &out.type_defs.push(lower_struct(definition, module, canonical, layout_engine, boxed_edges, is_auto_printable(auto_printable, module, definition.name), is_auto_debug(auto_debug, module, definition.name)))
+                push_nested_trait_impls(out, definition.name, definition.trait_impls, module)
+            }
+            .Enum(definition) -> {
+                enum_layout := LayoutFacts?{None}
+                if definition.c_layout_tag() != None -> enum_layout = Val(layout_engine.enum_facts(definition))
+                &out.type_defs.push(lower_enum(definition, module, canonical, enum_layout, boxed_edges, is_auto_printable(auto_printable, module, definition.name), is_auto_debug(auto_debug, module, definition.name)))
+                push_nested_trait_impls(out, definition.name, definition.trait_impls, module)
+            }
+            .Distinct(definition) -> &out.type_defs.push(lower_distinct(definition, module, qualify_type, is_auto_printable(auto_printable, module, definition.name)))
+            .TypeAlias(definition) -> &out.type_defs.push(lower_alias(definition, module, qualify_type, is_auto_printable(auto_printable, module, definition.name)))
+            .UnitFamily(definition) -> {
+                &out.type_defs.push(lower_unit_family(definition, module, is_auto_printable(auto_printable, module, definition.family)))
+                loop member in definition.distinct_defs() -> &out.type_defs.push(lower_distinct(member, module, qualify_type, is_auto_printable(auto_printable, module, member.name)))
+            }
+            .Trait(definition) -> &out.traits.push(lower_trait(definition, module, canonical))
+            .Impl(definition) -> &out.impls.push(lower_impl(definition, module, impl_owner(definition.type_name)))
+            .Const(definition) -> &out.constants.push(lower_constant(definition, module))
+            else -> {}
+        }
+    }
+    known := Set<String>{}
+    loop row in out.type_defs -> _ :: &known.insert(row.key)
+    loop row in compiler_owned_type_defs(module, seed_parse_error, checked_nominals) {
+        if &known.insert(row.key) -> &out.type_defs.push(row)
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1599
+fn ensure_builtin_debug_trait(out: &TirDeclarations) {
+    module := String?{None}
+    loop definition in out.type_defs {
+        if definition.derives.contains("Debug") { module = Val(definition.module); break }
+    }
+    owner :: module ?? return
+    loop definition in out.traits { if definition.name == "Debug" -> return }
+    &out.traits.push(TirTraitDef{module: owner, key: "Debug", name: "Debug", span: Span.new(0, 0), visibility: TirVisibility.Public, associated_types: [], methods: []})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1634
+fn method_keys(module: String, type_name: String, trait_name: String?, operator_rhs: Type?, methods: [Func]) -> [String] {
+    keys := [String]{}
+    loop method in methods {
+        name :: if trait_name == {
+            Val(trait_name) -> {
+                if ["Add", "Sub", "Mul", "Div", "Equatable", "Comparable"].contains(trait_name) -> operator_method_identity(type_name, trait_name, method.name, operator_rhs ?? Type.Named{name: type_name}) else -> "{type_name}::{trait_name}::{method.name}"
+            }
+            None -> "{type_name}::{method.name}"
+        }
+        &keys.push(jet_codegen_qualified_type_key(module, name))
+    }
+    keys
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1673
+fn lower_struct(definition: StructDef, module: String, qualify_type: fn(Type, [String]) -> Type, layout_engine: TargetLayoutEngine, boxed_edges: Set<(String, String)>, auto_printable: Bool, auto_debug: Bool) -> TirTypeDef {
+    layout_alignment := LayoutAlignmentFact?{None}
+    if layout_engine.checked_struct_facts(definition).ok() == .Val(facts) -> layout_alignment = facts.alignment
+    shape_fact :: shape_fact_from_struct(module, definition).ok()
+    binders := [String]{}
+    loop param in definition.type_params -> &binders.push(param.name)
+    // Index once; preserves the first matching ShapeFact field without quadratic scans.
+    shape_names_by_field := [String:ShapeFieldNames]{}
+    if shape_fact == .Val(fact) {
+        loop field in fact.fields {
+            if !shape_names_by_field.contains_key(field.name) -> shape_names_by_field[field.name] = field.names
+        }
+    }
+    params := [String:[String]]{}
+    params[definition.name] = binders
+    owner := Type.Named{name: definition.name}
+    if !definition.type_params.is_empty() {
+        args := [Type]{}
+        loop param in definition.type_params -> &args.push(Type.Named{name: param.name})
+        owner = Type.Apply{name: definition.name, args: args}
+    }
+    fields := [TirField]{}
+    loop field in definition.fields {
+        names :: shape_names_by_field.get(field.name) ?? ShapeFieldNames.from_source(field.name)
+        projected := field
+        projected.ty = substitute_reflect_field_type(params, owner, field.ty)
+        &fields.push(lower_field(projected, names, qualify_type, binders))
+    }
+    TirTypeDef{module: module, key: jet_codegen_qualified_type_key(module, definition.name), name: definition.name, span: definition.span, public: definition.is_pub, package_public: definition.is_package_pub, generic_params: lower_generic_params(definition.type_params), derives: lower_derive_names(definition.derives, auto_debug, has_generated_equatable_block(definition.trait_impls)), auto_derive_default: definition.auto_derive_default, auto_printable: auto_printable, published_schema: definition.is_published_schema, single_use: definition.is_single_use, must_use: definition.is_must_use, layout: definition.layout, layout_alignment: layout_alignment, serde: lower_serde_markers(definition.serde_markers), c_layout_tag: None, enum_layout: None, cli_bindings: lower_cli_bindings(definition.cli_bindings, module), cli: None, ownership: ownership_for_definition(definition.is_single_use), boxed_edges: owner_boxed_edges(definition.name, boxed_edges), compiler_builtin: None, kind: TirTypeDefKind.Struct{fields: fields, methods: method_keys(module, definition.name, None, None, definition.methods)}}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1767
+fn lower_enum(definition: EnumDef, module: String, qualify_type: fn(Type, [String]) -> Type, enum_layout: LayoutFacts?, boxed_edges: Set<(String, String)>, auto_printable: Bool, auto_debug: Bool) -> TirTypeDef {
+    style :: container_rename_all(definition.serde_markers)
+    binders := [String]{}
+    loop param in definition.type_params -> &binders.push(param.name)
+    variants := [TirVariant]{}
+    loop variant in definition.variants -> &variants.push(lower_variant(variant, style, qualify_type, binders))
+    layout := StructLayout?{None}
+    if definition.c_layout_tag() != None -> layout = Val(StructLayout.C)
+    TirTypeDef{module: module, key: jet_codegen_qualified_type_key(module, definition.name), name: definition.name, span: definition.span, public: definition.is_pub, package_public: definition.is_package_pub, generic_params: lower_generic_params(definition.type_params), derives: lower_derive_names(definition.derives, auto_debug, has_generated_equatable_block(definition.trait_impls)), auto_derive_default: definition.auto_derive_default, auto_printable: auto_printable, published_schema: false, single_use: definition.is_single_use, must_use: definition.is_must_use, layout: layout, c_layout_tag: definition.c_layout_tag(), enum_layout: enum_layout, layout_alignment: None, serde: lower_serde_markers(definition.serde_markers), cli_bindings: [], cli: None, ownership: ownership_for_definition(definition.is_single_use), boxed_edges: owner_boxed_edges(definition.name, boxed_edges), compiler_builtin: None, kind: TirTypeDefKind.Enum{variants: variants, methods: method_keys(module, definition.name, None, None, definition.methods)}}
+}

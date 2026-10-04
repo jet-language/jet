@@ -1,0 +1,42 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:1376-1484 (behavioral control)
+#Test("direct_print_accepts_variadic_values_but_not_empty_call") {
+    valid :: statements05_diagnostics("fn run() {{ print(1, true, \"text\") }}\n")
+    assert(!valid.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{valid:?}")
+    invalid :: statements05_diagnostics("fn run() {{ print() }}\n")
+    assert(invalid.any(fn(d: Diagnostic) { d.code == "E0103" }))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:1212-1271 (behavioral control)
+#Test("foreign_builtin_spellings_keep_separate_diagnostics") {
+    println :: statements05_diagnostics("fn run() {{ println(\"text\") }}\n")
+    assert(println.any(fn(d: Diagnostic) { d.code == "E0037" }))
+    getenv :: statements05_diagnostics("fn run() {{ _ :: getenv(\"HOME\") }}\n")
+    assert(getenv.any(fn(d: Diagnostic) { d.code == "E0039" }))
+    open :: statements05_diagnostics("fn run() {{ _ :: open(\"file.txt\") }}\n")
+    assert(open.any(fn(d: Diagnostic) { d.code == "E0038" }))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:1376-1484 (behavioral control)
+#Test("user_print_shadows_the_prelude_variadic_builtin") {
+    valid :: statements05_diagnostics("fn print() {{ }}\nfn run() {{ print() }}\n")
+    assert(!valid.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{valid:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:1769-1830 (behavioral control)
+#Test("math_constructor_checks_component_width_and_arity") {
+    valid :: statements05_diagnostics("fn run() {{ v :: Vec3(1.0, 2.0, 3.0)\n _ :: v }}\n")
+    assert(!valid.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{valid:?}")
+    arity :: statements05_diagnostics("fn run() {{ v :: Vec3(1.0, 2.0)\n _ :: v }}\n")
+    assert(arity.any(fn(d: Diagnostic) { d.code == "E0103" }))
+    component :: statements05_diagnostics("fn run() {{ v :: Vec3(1.0, true, 3.0)\n _ :: v }}\n")
+    assert(component.any(fn(d: Diagnostic) { d.code == "E0128" }))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:1931-1950 (behavioral control)
+#Test("retired_assertion_name_is_rejected_not_aliased") {
+    diagnostics :: statements05_diagnostics("fn run() {{ require(true) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0102" }))
+}

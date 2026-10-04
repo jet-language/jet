@@ -1,500 +1,174 @@
-// PORT-PENDING 0591 crates-jet-comptime-src-comptime-methods-core-calls-impure-module-group: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:1-496
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! `core.regex` evaluator, kept separate from the Core call registry.
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::CtValue;
-//RS 
-//RS use super::super::super::Builtins::{as_bool, as_int};
-//RS use super::super::super::Diagnostics::unsupported;
-//RS use super::as_string;
-//RS 
-//RS pub(in super::super::super) fn apply_regex_method(
-//RS     recv: &CtValue,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     if !matches!(
-//RS         recv,
-//RS         CtValue::Struct { type_name, .. } if type_name == "__JetRegex"
-//RS     ) {
-//RS         return None;
-//RS     }
-//RS     // Keep the two allocation-free scalar operations on the receiver path.
-//RS     // The general adapter below still serves capture-producing methods.
-//RS     if method == "is_match" {
-//RS         return Some(regex_is_match_method(recv, args, span));
-//RS     }
-//RS     if method == "find" {
-//RS         return Some(regex_find_method(recv, args, span));
-//RS     }
-//RS     let mut call_args = Vec::with_capacity(args.len() + 1);
-//RS     call_args.push(recv.clone());
-//RS     call_args.extend_from_slice(args);
-//RS     Some(match method {
-//RS         "pattern" | "source" | "flags" | "options" | "names" | "count" => {
-//RS             regex_metadata(call_args, method, span)
-//RS         }
-//RS         "full_match" => regex_full_match(call_args, span),
-//RS         "find_all" => regex_find_all(call_args, span),
-//RS         "matches" => regex_matches(call_args, span),
-//RS         "split" => regex_split(call_args, span),
-//RS         "split_limit" => regex_split_limit(call_args, span),
-//RS         "replace" | "replace_first" => regex_replace_method(recv, method, args, span),
-//RS         "match" => regex_match(call_args, span),
-//RS         _ => return None,
-//RS     })
-//RS }
-//RS 
-//RS fn regex_is_match_method(
-//RS     recv: &CtValue,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern_value(recv, span)?;
-//RS     let text = as_string(
-//RS         args.first()
-//RS             .ok_or_else(|| unsupported("regex.is_match: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(CtValue::Bool(re.is_match(text)))
-//RS }
-//RS 
-//RS fn regex_find_method(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern_value(recv, span)?;
-//RS     let text = as_string(
-//RS         args.first()
-//RS             .ok_or_else(|| unsupported("regex.find: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(match re.find(text).ok() {
-//RS         Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
-//RS         None => CtValue::absent(crate::AST::Type::String),
-//RS     })
-//RS }
-//RS pub(super) fn regex_pattern(
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<super::super::super::regex_kernel::JetRegex, Diagnostic> {
-//RS     let value = args
-//RS         .first()
-//RS         .ok_or_else(|| unsupported("regex call: missing pattern argument", span))?;
-//RS     regex_pattern_value(value, span)
-//RS }
-//RS 
-//RS fn regex_pattern_value(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<super::super::super::regex_kernel::JetRegex, Diagnostic> {
-//RS     let (pat, flags) = match value {
-//RS         CtValue::Str(pattern) => (
-//RS             pattern.as_str(),
-//RS             super::super::super::regex_kernel::RegexFlags::default(),
-//RS         ),
-//RS         CtValue::Struct { type_name, fields } if type_name == "__JetRegex" => {
-//RS             let pattern = fields
-//RS                 .iter()
-//RS                 .find_map(|(name, value)| match (name.as_str(), value) {
-//RS                     ("pattern", CtValue::Str(pattern)) => Some(pattern.as_str()),
-//RS                     _ => None,
-//RS                 })
-//RS                 .ok_or_else(|| unsupported("Regex literal value", span))?;
-//RS             let flags = fields
-//RS                 .iter()
-//RS                 .find(|(name, _)| name == "flags")
-//RS                 .map(|(_, value)| regex_flags_value(value, span))
-//RS                 .transpose()?
-//RS                 .unwrap_or_default();
-//RS             (pattern, flags)
-//RS         }
-//RS         _ => return Err(unsupported("Regex pattern value", span)),
-//RS     };
-//RS     super::super::super::regex_kernel::jet_regex_compile_with(pat, &flags).map_err(|e| {
-//RS         Diagnostic::error(
-//RS             "E0956",
-//RS             format!("bad regex pattern: {}", e),
-//RS             "the pattern could not be compiled".to_string(),
-//RS             "fix the pattern syntax".to_string(),
-//RS             Some(span),
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn regex_metadata(args: Vec<CtValue>, method: &str, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     match method {
-//RS         "pattern" | "source" => Ok(CtValue::Str(re.pattern())),
-//RS         "flags" | "options" => Ok(CtValue::Str(re.flags())),
-//RS         "names" => Ok(CtValue::List(
-//RS             re.names().into_iter().map(CtValue::Str).collect(),
-//RS         )),
-//RS         "count" => Ok(CtValue::Int(
-//RS             re.count(as_string(
-//RS                 args.get(1)
-//RS                     .ok_or_else(|| unsupported("regex.count: missing text argument", span))?,
-//RS                 span,
-//RS             )?),
-//RS         )),
-//RS         _ => unreachable!("guarded regex metadata method"),
-//RS     }
-//RS }
-//RS 
-//RS pub fn eval_regex_replace_all_with(
-//RS     recv: &CtValue,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS     invoke: &mut impl FnMut(CtValue, Vec<CtValue>) -> Result<CtValue, Diagnostic>,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     if !matches!(
-//RS         recv,
-//RS         CtValue::Struct { type_name, .. } if type_name == "__JetRegex"
-//RS     ) {
-//RS         return None;
-//RS     }
-//RS     Some((|| {
-//RS         let re = regex_pattern(std::slice::from_ref(recv), span)?;
-//RS         let text = as_string(
-//RS             args.first().ok_or_else(|| {
-//RS                 unsupported("regex.replace_all_with: missing text argument", span)
-//RS             })?,
-//RS             span,
-//RS         )?;
-//RS         let callback = args.get(1).ok_or_else(|| {
-//RS             unsupported("regex.replace_all_with: missing callback argument", span)
-//RS         })?;
-//RS         let replaced = re.replace_all_with_result(text, |found| {
-//RS             let value = invoke(callback.clone(), vec![regex_match_value(text, found)])?;
-//RS             Ok::<String, Diagnostic>(as_string(&value, span)?.to_string())
-//RS         })?;
-//RS         Ok(CtValue::Str(replaced))
-//RS     })())
-//RS }
-//RS 
-//RS fn regex_flags_value(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<super::super::super::regex_kernel::RegexFlags, Diagnostic> {
-//RS     let CtValue::Struct { type_name, fields } = value else {
-//RS         return Err(unsupported("RegexFlags value", span));
-//RS     };
-//RS     if type_name != "__JetRegexFlags" {
-//RS         return Err(unsupported("RegexFlags value", span));
-//RS     }
-//RS     let field = |name: &str| {
-//RS         fields
-//RS             .iter()
-//RS             .find(|(field, _)| field == name)
-//RS             .map(|(_, value)| as_bool(value, span))
-//RS             .transpose()
-//RS     };
-//RS     Ok(super::super::super::regex_kernel::RegexFlags {
-//RS         case_insensitive: field("case_insensitive")?.unwrap_or(false),
-//RS         multiline: field("multiline")?.unwrap_or(false),
-//RS         dotall: field("dotall")?.unwrap_or(false),
-//RS     })
-//RS }
-//RS 
-//RS pub(super) fn regex_flags(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let field = |index: usize, name: &str| {
-//RS         as_bool(
-//RS             args.get(index)
-//RS                 .ok_or_else(|| unsupported(&format!("regex.flags: missing {name}"), span))?,
-//RS             span,
-//RS         )
-//RS     };
-//RS     Ok(CtValue::Struct {
-//RS         type_name: "__JetRegexFlags".to_string(),
-//RS         fields: vec![
-//RS             (
-//RS                 "case_insensitive".to_string(),
-//RS                 CtValue::Bool(field(0, "case_insensitive")?),
-//RS             ),
-//RS             (
-//RS                 "multiline".to_string(),
-//RS                 CtValue::Bool(field(1, "multiline")?),
-//RS             ),
-//RS             ("dotall".to_string(), CtValue::Bool(field(2, "dotall")?)),
-//RS         ],
-//RS     })
-//RS }
-//RS 
-//RS pub(super) fn regex_compile(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let pattern = as_string(
-//RS         args.first()
-//RS             .ok_or_else(|| unsupported("regex.compile: missing pattern", span))?,
-//RS         span,
-//RS     )?;
-//RS     let flags = args
-//RS         .get(1)
-//RS         .map(|value| regex_flags_value(value, span))
-//RS         .transpose()?
-//RS         .unwrap_or_default();
-//RS     match super::super::super::regex_kernel::jet_regex_compile_with(pattern, &flags) {
-//RS         Ok(_) => Ok(CtValue::Present(Box::new(CtValue::Struct {
-//RS             type_name: "__JetRegex".to_string(),
-//RS             fields: vec![
-//RS                 ("pattern".to_string(), CtValue::Str(pattern.to_string())),
-//RS                 (
-//RS                     "flags".to_string(),
-//RS                     CtValue::Struct {
-//RS                         type_name: "__JetRegexFlags".to_string(),
-//RS                         fields: vec![
-//RS                             (
-//RS                                 "case_insensitive".to_string(),
-//RS                                 CtValue::Bool(flags.case_insensitive),
-//RS                             ),
-//RS                             ("multiline".to_string(), CtValue::Bool(flags.multiline)),
-//RS                             ("dotall".to_string(), CtValue::Bool(flags.dotall)),
-//RS                         ],
-//RS                     },
-//RS                 ),
-//RS             ],
-//RS         }))),
-//RS         Err(error) => Ok(CtValue::failed(Box::new(CtValue::Str(error)))),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn regex_escape(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let text = as_string(
-//RS         args.first()
-//RS             .ok_or_else(|| unsupported("regex.escape: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(CtValue::Str(escape_regex_text(text)))
-//RS }
-//RS 
-//RS fn escape_regex_text(text: &str) -> String {
-//RS     let mut out = String::with_capacity(text.len());
-//RS     for ch in text.chars() {
-//RS         let meta = ch == '\\'
-//RS             || ch == '.'
-//RS             || ch == '+'
-//RS             || ch == '*'
-//RS             || ch == '?'
-//RS             || ch == '('
-//RS             || ch == ')'
-//RS             || ch == '['
-//RS             || ch == ']'
-//RS             || ch == '{'
-//RS             || ch == '}'
-//RS             || ch == '^'
-//RS             || ch == '\u{24}'
-//RS             || ch == '\u{7c}';
-//RS         if meta {
-//RS             out.push('\\');
-//RS         }
-//RS         out.push(ch);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub(super) fn regex_is_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     let text = as_string(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("regex.is_match: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(CtValue::Bool(re.is_match(text)))
-//RS }
-//RS 
-//RS pub(super) fn regex_full_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     let text = as_string(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("regex.full_match: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(CtValue::Bool(re.full_match(text)))
-//RS }
-//RS 
-//RS pub(super) fn regex_find(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     let text = as_string(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("regex.find: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(match re.find(text).ok() {
-//RS         Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
-//RS         None => CtValue::absent(crate::AST::Type::String),
-//RS     })
-//RS }
-//RS 
-//RS pub(super) fn regex_find_all(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     let text = as_string(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("regex.find_all: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     let items: Vec<CtValue> = re.find_all(text).into_iter().map(CtValue::Str).collect();
-//RS     Ok(CtValue::List(items))
-//RS }
-//RS 
-//RS pub(super) fn regex_matches(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     let text = as_string(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("regex.matches: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(CtValue::List(
-//RS         re.matches(text)
-//RS             .into_iter()
-//RS             .map(|found| regex_match_value(text, found))
-//RS             .collect(),
-//RS     ))
-//RS }
-//RS 
-//RS pub(super) fn regex_split(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     let text = as_string(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("regex.split: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     let items: Vec<CtValue> = re.split(text).into_iter().map(CtValue::Str).collect();
-//RS     Ok(CtValue::List(items))
-//RS }
-//RS 
-//RS pub(super) fn regex_split_limit(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     let text = as_string(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("regex.split_limit: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     let limit = as_int(
-//RS         args.get(2)
-//RS             .ok_or_else(|| unsupported("regex.split_limit: missing limit argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(CtValue::List(
-//RS         re.split_limit(text, limit)
-//RS             .into_iter()
-//RS             .map(CtValue::Str)
-//RS             .collect(),
-//RS     ))
-//RS }
-//RS fn regex_replace_impl(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     let rep = as_string(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("regex.replace: missing replacement argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     let text = as_string(
-//RS         args.get(2)
-//RS             .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     let replaced = re.replace(text, rep);
-//RS     Ok(CtValue::Str(replaced))
-//RS }
-//RS 
-//RS pub(super) fn regex_replace(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     regex_replace_impl(args, span)
-//RS }
-//RS 
-//RS pub(super) fn regex_replace_first(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     let rep = as_string(
-//RS         args.get(1).ok_or_else(|| {
-//RS             unsupported("regex.replace_first: missing replacement argument", span)
-//RS         })?,
-//RS         span,
-//RS     )?;
-//RS     let text = as_string(
-//RS         args.get(2)
-//RS             .ok_or_else(|| unsupported("regex.replace_first: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(CtValue::Str(re.replace_first(text, rep)))
-//RS }
-//RS 
-//RS fn regex_replace_method(
-//RS     recv: &CtValue,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(std::slice::from_ref(recv), span)?;
-//RS     let text = as_string(
-//RS         args.first()
-//RS             .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     let rep = as_string(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("regex.replace: missing replacement argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     let replaced = if method == "replace" {
-//RS         re.replace(text, rep)
-//RS     } else {
-//RS         re.replace_first(text, rep)
-//RS     };
-//RS     Ok(CtValue::Str(replaced))
-//RS }
-//RS 
-//RS pub(super) fn regex_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let re = regex_pattern(&args, span)?;
-//RS     let text = as_string(
-//RS         args.get(1)
-//RS             .ok_or_else(|| unsupported("regex.match: missing text argument", span))?,
-//RS         span,
-//RS     )?;
-//RS     Ok(match re.match_value(text).ok() {
-//RS         Some(found) => CtValue::Present(Box::new(regex_match_value(text, found))),
-//RS         None => CtValue::absent(crate::AST::Type::Named("Match".to_string())),
-//RS     })
-//RS }
-//RS 
-//RS pub(super) fn regex_match_value(
-//RS     _text: &str,
-//RS     found: super::super::super::regex_kernel::JetRegexMatch,
-//RS ) -> CtValue {
-//RS     let groups = (0..=found.group_count())
-//RS         .map(|index| match found.group(index as i64) {
-//RS             Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
-//RS             Err(_) => CtValue::absent(crate::AST::Type::String),
-//RS         })
-//RS         .collect();
-//RS     let spans = (0..=found.group_count())
-//RS         .map(|index| {
-//RS             match (
-//RS                 found.group_start(index as i64),
-//RS                 found.group_end(index as i64),
-//RS             ) {
-//RS                 (Ok(start), Ok(end)) => CtValue::Present(Box::new(CtValue::Struct {
-//RS                     type_name: "__RegexSpan".to_string(),
-//RS                     fields: vec![
-//RS                         ("start".to_string(), CtValue::Int(start)),
-//RS                         ("end".to_string(), CtValue::Int(end)),
-//RS                     ],
-//RS                 })),
-//RS                 _ => CtValue::absent(crate::AST::Type::Named("__RegexSpan".to_string())),
-//RS             }
-//RS         })
-//RS         .collect();
-//RS     let names = found
-//RS         .capture_names()
-//RS         .into_iter()
-//RS         .map(|name| {
-//RS             name.map(|name| CtValue::Present(Box::new(CtValue::Str(name))))
-//RS                 .unwrap_or_else(|| CtValue::absent(crate::AST::Type::String))
-//RS         })
-//RS         .collect();
-//RS     CtValue::Struct {
-//RS         type_name: "Match".to_string(),
-//RS         fields: vec![
-//RS             ("groups".to_string(), CtValue::List(groups)),
-//RS             ("spans".to_string(), CtValue::List(spans)),
-//RS             ("names".to_string(), CtValue::List(names)),
-//RS         ],
-//RS     }
-//RS }
-// END-PORT-PENDING 0591 crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:1-496
-
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.AST.[CtValue, Type]
+use jet_comptime.Comptime.Builtins.[as_bool, as_int]
+use jet_comptime.Comptime.Diagnostics.unsupported
+use jet_comptime.Comptime.Methods.CoreCalls.Values.as_string
+use jet_comptime.Comptime.regex_kernel.[JetRegex, RegexFlags, JetRegexMatch, jet_regex_compile_with]
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:10
+pub fn apply_regex_method(recv: &CtValue, method: String, args: &[CtValue], span: Span) -> (CtValue Diagnostic!)? {
+    if !(recv == { Struct { type_name, .. } if type_name == "__JetRegex" -> true; _ -> false }) { return None }
+    // Scalar receiver paths avoid allocating/copying an argument vector.
+    if method == "is_match" { return Val(try { Ok(regex_is_match_method(recv, args, span)?) } catch(e) { Err(e) }) }
+    if method == "find" { return Val(try { Ok(regex_find_method(recv, args, span)?) } catch(e) { Err(e) }) }
+    call_args: [CtValue] := [].with_capacity(args.len() + 1); call_args.push(recv.clone()); call_args.extend_from_slice(args)
+    try {
+        result := method == {
+            "pattern" | "source" | "flags" | "options" | "names" | "count" -> regex_metadata(call_args, method, span)?
+            "full_match" -> regex_full_match(call_args, span)?; "find_all" -> regex_find_all(call_args, span)?; "matches" -> regex_matches(call_args, span)?
+            "split" -> regex_split(call_args, span)?; "split_limit" -> regex_split_limit(call_args, span)?
+            "replace" | "replace_first" -> regex_replace_method(recv, method, args, span)?; "match" -> regex_match(call_args, span)?
+            _ -> { return None }
+        }; Val(Ok(result))
+    } catch(e) { Val(Err(e)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:48
+fn regex_is_match_method(recv: &CtValue, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern_value(recv, span)?
+    text := as_string(args.first().ok_or_else(fn() { unsupported("regex.is_match: missing text argument", span) })?, span)?
+    CtValue.Bool(re.is_match(text))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:62
+fn regex_find_method(recv: &CtValue, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern_value(recv, span)?
+    text := as_string(args.first().ok_or_else(fn() { unsupported("regex.find: missing text argument", span) })?, span)?
+    re.find(text).ok() == { Val(v) -> CtValue.Present(Box.new(CtValue.Str(v))); None -> CtValue.absent(Type.String) }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:74
+pub fn regex_pattern(args: &[CtValue], span: Span) -> JetRegex Diagnostic! {
+    value := args.first().ok_or_else(fn() { unsupported("regex call: missing pattern argument", span) })?; regex_pattern_value(value, span)?
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:84
+fn regex_pattern_value(value: &CtValue, span: Span) -> JetRegex Diagnostic! {
+    (pat, flags) := value == {
+        Str(pattern) -> (pattern, RegexFlags.default())
+        Struct { type_name, fields } if type_name == "__JetRegex" -> {
+            pattern := fields.iter().find_map(fn(e) { (e.0, e.1) == { ("pattern", Str(p)) -> Val(p); _ -> None } }).ok_or_else(fn() { unsupported("Regex literal value", span) })?
+            flags := fields.iter().find(fn(e) { e.0 == "flags" }).map(fn(e) { regex_flags_value(e.1, span) }).transpose()?.unwrap_or_default()
+            (pattern, flags)
+        }
+        _ -> { fail unsupported("Regex pattern value", span) }
+    }
+    jet_regex_compile_with(pat, &flags).map_err(fn(e) { Diagnostic.error("E0956", "bad regex pattern: {e}", "the pattern could not be compiled", "fix the pattern syntax", Val(span)) })?
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:122
+fn regex_metadata(args: [CtValue], method: String, span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?
+    method == {
+        "pattern" | "source" -> CtValue.Str(re.pattern()); "flags" | "options" -> CtValue.Str(re.flags())
+        "names" -> CtValue.List(re.names().into_iter().map(CtValue.Str).collect())
+        "count" -> CtValue.Int(re.count(as_string(args.get(1).ok_or_else(fn() { unsupported("regex.count: missing text argument", span) })?, span)?))
+        _ -> unreachable("guarded regex metadata method")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:141
+pub fn eval_regex_replace_all_with(recv: &CtValue, args: &[CtValue], span: Span, invoke: &fn(CtValue, [CtValue]) -> CtValue Diagnostic!) -> (CtValue Diagnostic!)? {
+    if !(recv == { Struct { type_name, .. } if type_name == "__JetRegex" -> true; _ -> false }) { return None }
+    try {
+        re := regex_pattern(std.slice.from_ref(recv), span)?
+        text := as_string(args.first().ok_or_else(fn() { unsupported("regex.replace_all_with: missing text argument", span) })?, span)?
+        callback := args.get(1).ok_or_else(fn() { unsupported("regex.replace_all_with: missing callback argument", span) })?
+        replaced := re.replace_all_with_result(text, fn(found) { value := invoke(callback.clone(), [regex_match_value(text, found)])?; as_string(&value, span)?.to_string() })?
+        Val(Ok(CtValue.Str(replaced)))
+    } catch(e) { Val(Err(e)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:172
+fn regex_flags_value(value: &CtValue, span: Span) -> RegexFlags Diagnostic! {
+    (type_name, fields) := value == { Struct { type_name, fields } -> (type_name, fields); _ -> { fail unsupported("RegexFlags value", span) } }
+    if type_name != "__JetRegexFlags" { fail unsupported("RegexFlags value", span) }
+    field := fn(name) { fields.iter().find(fn(e) { e.0 == name }).map(fn(e) { as_bool(e.1, span) }).transpose() }
+    RegexFlags { case_insensitive: field("case_insensitive")?.unwrap_or(false), multiline: field("multiline")?.unwrap_or(false), dotall: field("dotall")?.unwrap_or(false) }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:196
+pub fn regex_flags(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    field := fn(index: USize, name: String) { as_bool(args.get(index).ok_or_else(fn() { unsupported("regex.flags: missing {name}", span) })?, span) }
+    CtValue.Struct { type_name: "__JetRegexFlags", fields: [("case_insensitive", CtValue.Bool(field(0, "case_insensitive")?)), ("multiline", CtValue.Bool(field(1, "multiline")?)), ("dotall", CtValue.Bool(field(2, "dotall")?))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:220
+pub fn regex_compile(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    pattern := as_string(args.first().ok_or_else(fn() { unsupported("regex.compile: missing pattern", span) })?, span)?
+    flags := args.get(1).map(fn(v) { regex_flags_value(v, span) }).transpose()?.unwrap_or_default()
+    jet_regex_compile_with(pattern, &flags) == {
+        Ok(_) -> CtValue.Present(Box.new(CtValue.Struct { type_name: "__JetRegex", fields: [
+            ("pattern", CtValue.Str(pattern.to_string())),
+            ("flags", CtValue.Struct { type_name: "__JetRegexFlags", fields: [("case_insensitive", CtValue.Bool(flags.case_insensitive)), ("multiline", CtValue.Bool(flags.multiline)), ("dotall", CtValue.Bool(flags.dotall))] })
+        ] }))
+        Err(error) -> CtValue.failed(Box.new(CtValue.Str(error)))
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:256
+pub fn regex_escape(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    text := as_string(args.first().ok_or_else(fn() { unsupported("regex.escape: missing text argument", span) })?, span)?; CtValue.Str(escape_regex_text(text))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:265
+fn escape_regex_text(text: String) -> String {
+    out := String.with_capacity(text.len())
+    for ch in text.chars() { meta := ch == { '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '\u{24}' | '\u{7c}' -> true; _ -> false }; if meta { out.push('\\') }; out.push(ch) }
+    out
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:290
+pub fn regex_is_match(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?; text := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.is_match: missing text argument", span) })?, span)?; CtValue.Bool(re.is_match(text))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:300
+pub fn regex_full_match(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?; text := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.full_match: missing text argument", span) })?, span)?; CtValue.Bool(re.full_match(text))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:310
+pub fn regex_find(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?; text := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.find: missing text argument", span) })?, span)?
+    re.find(text).ok() == { Val(v) -> CtValue.Present(Box.new(CtValue.Str(v))); None -> CtValue.absent(Type.String) }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:323
+pub fn regex_find_all(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?; text := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.find_all: missing text argument", span) })?, span)?
+    items: [CtValue] := re.find_all(text).into_iter().map(CtValue.Str).collect(); CtValue.List(items)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:334
+pub fn regex_matches(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?; text := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.matches: missing text argument", span) })?, span)?
+    CtValue.List(re.matches(text).into_iter().map(fn(found) { regex_match_value(text, found) }).collect())
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:349
+pub fn regex_split(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?; text := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.split: missing text argument", span) })?, span)?
+    items: [CtValue] := re.split(text).into_iter().map(CtValue.Str).collect(); CtValue.List(items)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:360
+pub fn regex_split_limit(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?; text := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.split_limit: missing text argument", span) })?, span)?
+    limit := as_int(args.get(2).ok_or_else(fn() { unsupported("regex.split_limit: missing limit argument", span) })?, span)?
+    CtValue.List(re.split_limit(text, limit).into_iter().map(CtValue.Str).collect())
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:379
+fn regex_replace_impl(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?; rep := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.replace: missing replacement argument", span) })?, span)?
+    text := as_string(args.get(2).ok_or_else(fn() { unsupported("regex.replace: missing text argument", span) })?, span)?; CtValue.Str(re.replace(text, rep))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:395
+pub fn regex_replace(args: [CtValue], span: Span) -> CtValue Diagnostic! { regex_replace_impl(args, span)? }
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:399
+pub fn regex_replace_first(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?; rep := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.replace_first: missing replacement argument", span) })?, span)?
+    text := as_string(args.get(2).ok_or_else(fn() { unsupported("regex.replace_first: missing text argument", span) })?, span)?; CtValue.Str(re.replace_first(text, rep))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:415
+fn regex_replace_method(recv: &CtValue, method: String, args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(std.slice.from_ref(recv), span)?; text := as_string(args.first().ok_or_else(fn() { unsupported("regex.replace: missing text argument", span) })?, span)?
+    rep := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.replace: missing replacement argument", span) })?, span)?
+    replaced := if method == "replace" { re.replace(text, rep) } else { re.replace_first(text, rep) }; CtValue.Str(replaced)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:440
+pub fn regex_match(args: [CtValue], span: Span) -> CtValue Diagnostic! {
+    re := regex_pattern(&args, span)?; text := as_string(args.get(1).ok_or_else(fn() { unsupported("regex.match: missing text argument", span) })?, span)?
+    re.match_value(text).ok() == { Val(found) -> CtValue.Present(Box.new(regex_match_value(text, found))); None -> CtValue.absent(Type.Named("Match")) }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/regex.rs:453
+pub fn regex_match_value(_text: String, found: JetRegexMatch) -> CtValue {
+    groups := (0..=found.group_count()).map(fn(index) { found.group(index as I64) == { Ok(v) -> CtValue.Present(Box.new(CtValue.Str(v))); Err(_) -> CtValue.absent(Type.String) } }).collect()
+    spans := (0..=found.group_count()).map(fn(index) { (found.group_start(index as I64), found.group_end(index as I64)) == {
+        (Ok(start), Ok(end)) -> CtValue.Present(Box.new(CtValue.Struct { type_name: "__RegexSpan", fields: [("start", CtValue.Int(start)), ("end", CtValue.Int(end))] }))
+        _ -> CtValue.absent(Type.Named("__RegexSpan"))
+    } }).collect()
+    names := found.capture_names().into_iter().map(fn(name) { name.map(fn(n) { CtValue.Present(Box.new(CtValue.Str(n))) }).unwrap_or_else(fn() { CtValue.absent(Type.String) }) }).collect()
+    CtValue.Struct { type_name: "Match", fields: [("groups", CtValue.List(groups)), ("spans", CtValue.List(spans)), ("names", CtValue.List(names))] }
+}

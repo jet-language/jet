@@ -1,0 +1,51 @@
+use jet_foundation.[Type, TypeTupleField, CtValue, CtFloat, TMethodRef, SymbolID, TEXT_NUL]
+use jet_codegen.Codegen.Data03.[typed_codec_target, builtin_codec_kind, data_tree_encode_variant, instance_method_lookup, method_key, default_constant]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:10057-10094; no original inline tests.
+#Test("typed_codec_target_accepts_only_string_key_maps_and_closed_nominal_targets") {
+    assert(typed_codec_target(Type.Int))
+    assert(typed_codec_target(Type.List(Type.Int)))
+    assert(typed_codec_target(Type.Map{key: Type.String, key_span: None, value: Type.Int}))
+    assert(!typed_codec_target(Type.Map{key: Type.Int, key_span: None, value: Type.String}))
+    assert(typed_codec_target(Type.Named("Secret")))
+    assert(typed_codec_target(Type.Named("core.crypto.Secret")))
+    assert(!typed_codec_target(Type.Named("SecretValue")))
+    assert(!typed_codec_target(Type.Named("Date")))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:10192-10202,10689-10698
+#Test("builtin_codec_kinds_and_tree_variants_keep_exact_numeric_identity") {
+    assert_eq(builtin_codec_kind(Type.Named("Date")), Val(I64{0}))
+    assert_eq(builtin_codec_kind(Type.Named("LocalDate")), Val(I64{1}))
+    assert_eq(builtin_codec_kind(Type.Named("LocalTime")), Val(I64{2}))
+    assert_eq(builtin_codec_kind(Type.Named("DateTime")), Val(I64{3}))
+    assert_eq(builtin_codec_kind(Type.Named("Duration")), Val(I64{4}))
+    assert_eq(builtin_codec_kind(Type.Named("Decimal")), Val(I64{5}))
+    assert_eq(builtin_codec_kind(Type.Int), None)
+    assert_eq(data_tree_encode_variant(Type.IntN{signed: false, bits: 64}), Val("Int"))
+    assert_eq(data_tree_encode_variant(Type.Float32), Val("Float"))
+    assert_eq(data_tree_encode_variant(Type.Char), Val("Text"))
+    assert_eq(data_tree_encode_variant(Type.Named("Unknown")), None)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:10700-10735
+#Test("instance_method_lookup_preserves_checked_operator_identity_and_trait_owner") {
+    method :: TMethodRef{symbol: SymbolID{key: "show"}, name: "show", mangled: false, trait_owner: Val(SymbolID{key: "Show"}), operator_identity: None}
+    assert_eq(method_key(method), "Show::show")
+    assert_eq(instance_method_lookup(method, Type.Named("module::Row")), "module::Row::Show::show")
+    operator := method
+    operator.operator_identity = Val("canonical::Row::Add::add::Int")
+    assert_eq(instance_method_lookup(operator, Type.Named("Row")), "canonical::Row::Add::add::Int")
+    inherent :: TMethodRef{symbol: SymbolID{key: "Row::read"}, name: "Row::read", mangled: true, trait_owner: None, operator_identity: None}
+    assert_eq(instance_method_lookup(inherent, Type.Named("Row")), "Row::read")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:11011-11041
+#Test("default_constants_preserve_float_width_option_payload_and_tuple_names") {
+    assert_eq(default_constant(Type.Int), CtValue.Int(0))
+    assert_eq(default_constant(Type.Float), CtValue.Float(CtFloat.f64(0.0)))
+    assert_eq(default_constant(Type.Float32), CtValue.Float(CtFloat.f32(0.0)))
+    assert_eq(default_constant(Type.Char), CtValue.Char(TEXT_NUL.chars()[0]))
+    assert_eq(default_constant(Type.Option(Type.Int)), CtValue.absent(Type.Int))
+    assert_eq(default_constant(Type.Result{ok: Type.Bool, err: Type.String}), CtValue.Present(CtValue.Bool(false)))
+    tuple :: Type.Tuple([TypeTupleField{name: "x", ty: Type.Int}, TypeTupleField{name: "flag", ty: Type.Bool}])
+    assert_eq(default_constant(tuple), CtValue.Struct{type_name: "Tuple", fields: [String:CtValue]{"x": CtValue.Int(0), "flag": CtValue.Bool(false)}})
+    assert_eq(default_constant(Type.Named("UserType")), CtValue.Unit)
+}

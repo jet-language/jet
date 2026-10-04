@@ -1,0 +1,45 @@
+use jet_comptime.Comptime.Build.Context.[BuildContext, parse_packaged_action_kind, parse_packaged_target_kind, parse_packaged_legacy_wrapper, parse_packaged_resource_pool]
+use jet_comptime.Comptime.Build.ActionsPolicy.[ActionKind, BuildResourcePool, LegacyWrapperKind]
+use jet_comptime.Comptime.Build.Targets.TargetKind
+use jet_comptime.Comptime.Build.ErrorsKeys.BuildError
+
+// Rust: crates/jet-comptime/src/Comptime/Build/context.rs:1141,1165,1178 (controls; no original inline tests)
+#Test("packaged_build_kind_parsers_are_exact_and_reject_unknown_values") {
+    assert(parse_packaged_action_kind("compile")! == ActionKind.Compile)
+    assert(parse_packaged_action_kind("source-archive")! == ActionKind.SourceArchive)
+    assert(parse_packaged_target_kind("asset-bundle")! == TargetKind.AssetBundle)
+    assert(parse_packaged_target_kind("publish")! == TargetKind.Publish)
+    assert(parse_packaged_legacy_wrapper("cmake")! == LegacyWrapperKind.CMake)
+    assert(parse_packaged_legacy_wrapper("cargo")! == LegacyWrapperKind.Cargo)
+    assert(parse_packaged_action_kind("Compile") == Err(BuildError.PackagedPlugin("unknown action kind Compile")))
+    assert(parse_packaged_target_kind("unknown") == Err(BuildError.PackagedPlugin("unknown target kind unknown")))
+    assert(parse_packaged_legacy_wrapper("CMake") == Err(BuildError.PackagedPlugin("unknown legacy wrapper CMake")))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/context.rs:1154 (control; no original inline tests)
+#Test("packaged_build_resource_pool_preserves_custom_names") {
+    assert(parse_packaged_resource_pool("cpu") == BuildResourcePool.CPU)
+    assert(parse_packaged_resource_pool("memory") == BuildResourcePool.Memory)
+    assert(parse_packaged_resource_pool("linker") == BuildResourcePool.Linker)
+    assert(parse_packaged_resource_pool("console") == BuildResourcePool.Console)
+    assert(parse_packaged_resource_pool("gpu") == BuildResourcePool.GPU)
+    assert(parse_packaged_resource_pool("CPU") == BuildResourcePool.Custom("CPU"))
+    assert(parse_packaged_resource_pool("my-pool") == BuildResourcePool.Custom("my-pool"))
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Build/context.rs:63,1103 (control; no original inline tests)
+#Test("build_context_handles_are_scoped_to_their_session") {
+    left :: BuildContext.new()
+    right :: BuildContext.new()
+    left_host :: left.default_host_toolchain()
+    right_host :: right.default_host_toolchain()
+    assert(left_host.id == right_host.id)
+    assert(left_host.context != right_host.context)
+    left.check_toolchain_ref(left_host)!
+    assert(right.check_toolchain_ref(left_host) == Err(BuildError.UnknownToolchain(left_host.id)))
+    plan :: left.plan()!
+    assert(plan.toolchains.len() == 1)
+    assert(plan.toolchains[0].name == "host")
+    assert(plan.actions.is_empty())
+    assert(plan.targets.is_empty())
+}

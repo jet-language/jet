@@ -1,0 +1,21 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5482-5533 (behavioral controls; no inline Rust tests)
+#Test("regex_chained_match_retains_exact_return") {
+    diagnostics :: statements05_diagnostics("use core.regex.[Regex]\nfn run(re: Regex) {{ n: Int :: re.count(\"xxx\")\n _ :: n + 1 }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+}
+#Test("regex_count_requires_text") {
+    diagnostics :: statements05_diagnostics("use core.regex.[Regex]\nfn run(re: Regex) {{ _ :: re.count(42) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:5876-5982
+#Test("fixed_new_positive_compile_time_size") {
+    diagnostics :: statements05_diagnostics("use core.mem\nfn run() {{ fixed :: mem.Fixed.new(size: 0)\n close(^fixed) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0103" }))
+}
+#Test("fixed_new_cannot_escape_lexical_initialization") {
+    diagnostics :: statements05_diagnostics("use core.mem\nfn run() {{ _ :: mem.Fixed.new(size: 4096) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0103" }))
+}

@@ -1,0 +1,26 @@
+use jet_comptime.Comptime.Methods.CoreCalls.Data.[data_summary_value, data_error_value]
+use jet_codegen.Prelude.CoreLib.Top.DataStats.[DataSummary, DataError, DataErrorKind]
+use jet_foundation.AST.[CtValue, CtFloat]
+use jet_foundation.Outcome.JetAbsent
+
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:243
+#Test("data_summary_marshals_every_stat_in_declared_order") {
+    value := data_summary_value(DataSummary{count: 2, sum: 8.0, mean: 4.0, min: 3.0, max: 5.0, median: 4.0, variance: 1.0, stddev: 1.0})
+    assert(value is .Struct{type_name, fields})
+    assert(type_name == "DataSummary")
+    assert(fields.len() == 8)
+    assert(fields[0] == ("count", CtValue.Int(2)))
+    assert(fields[1] == ("sum", CtValue.Float(CtFloat.f64(8.0))))
+    assert(fields[7] == ("stddev", CtValue.Float(CtFloat.f64(1.0))))
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/core_calls/data.rs:179
+#Test("data_error_keeps_kernel_reason_and_present_index") {
+    error := DataError{kind: DataErrorKind.NonFinite, operation: "line_svg", row: Err(JetAbsent), column: Err(JetAbsent), index: Ok(7), reason: "kernel reason", cause: Err(JetAbsent)}
+    value := data_error_value(&error)
+    assert(value is .Struct{type_name, fields})
+    assert(type_name == "DataError")
+    assert(fields.len() == 7)
+    assert(fields[1] == ("operation", CtValue.Str("line_svg")))
+    assert(fields[4] == ("index", CtValue.Present(CtValue.Int(7))))
+    assert(fields[5] == ("reason", CtValue.Str("kernel reason")))
+}

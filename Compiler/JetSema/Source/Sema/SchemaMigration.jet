@@ -1,1120 +1,249 @@
-// PORT-PENDING 0443 crates-jet-sema-src-sema-schemamigration: crates/jet-sema/src/Sema/SchemaMigration.rs:1-1116
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-MIGRATE1 / D-MIGRATE2 (ratified 2026-06-22): sema diff pass for
-//RS //! `#PublishedSchema` structs.
-//RS //!
-//RS //! After struct registration, for each `#PublishedSchema` struct:
-//RS //! 1. Load the prior snapshot from `.jet/cache/schema/<TypeName>.snapshot` (if any).
-//RS //! 2. Diff old vs new field layout (keyed by name, so field *order* is ignored —
-//RS //!    D-MIGRATE2F: reordering is never a breaking change).
-//RS //! 3. Collect declared `migration <Type> { … }` ops for this type.
-//RS //! 4. Refuse a breaking data-shape change unless a migration declares the intent:
-//RS //!    - a field removed from old, not bridged by `rename old -> new` or `remove old`;
-//RS //!    - a field whose type changed, not bridged by a `change f: Old -> New [via …]`;
-//RS //!    - a field added in the new shape that old data can't supply (no `add` op).
-//RS //!    Every such case is the single umbrella code E0910 with case-specific text.
-//RS //! 5. Validate the declared ops against reality too (e.g. `remove f` where `f`
-//RS //!    still exists, `add f` where `f` isn't actually new), so a nonsensical
-//RS //!    migration teaches rather than silently passing.
-//RS //!
-//RS //! D-MIGRATE4 (ratified 2026-07-03): the runtime half lives in two places —
-//RS //! `desugar_migrations` below rewrites `via { … }` converters and `add`
-//RS //! defaults into synthetic top-level functions (type-checked and lowered
-//RS //! through the normal pipeline), and codegen
-//RS //! (`Codegen/Items.rs::emit_struct_migration`) emits per-block step functions
-//RS //! plus a silent migration chain-walker for each decodable
-//RS //! `#PublishedSchema` type with migration blocks.
-//RS //!
-//RS //! I3: all checking here; codegen only performs the mechanical lowering.
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::Sema::Schema::load_snapshot;
-//RS use crate::Traits::TraitRegistry;
-//RS use crate::AST::{
-//RS     AccessConvention, Expr, Func, Item, LambdaBody, MigrationOp, Param, ProgramBundle, Stmt, Type,
-//RS };
-//RS use jet_foundation::Names::mangle;
-//RS use std::collections::{HashMap, HashSet};
-//RS use std::path::Path;
-//RS 
-//RS /// D-MIGRATE4: the mangled name of the synthetic converter function a `change …
-//RS /// via { … }` op lowers to. Deterministic from the type, the migration block's
-//RS /// index (source order, per type), and the field — so codegen and this desugar
-//RS /// agree without a shared side-table.
-//RS fn converter_fn_name(type_name: &str, block_idx: usize, field: &str) -> String {
-//RS     mangle(&format!("migrate_conv_{type_name}_{block_idx}_{field}"))
-//RS }
-//RS 
-//RS /// D-MIGRATE4: the mangled name of the synthetic zero-arg default function an
-//RS /// `add f: T = val` op lowers to. Same determinism contract as
-//RS /// `converter_fn_name`.
-//RS fn add_default_fn_name(type_name: &str, block_idx: usize, field: &str) -> String {
-//RS     mangle(&format!("migrate_add_{type_name}_{block_idx}_{field}"))
-//RS }
-//RS 
-//RS /// D-MIGRATE4: rewrite each runtime-relevant migration op on a decodable
-//RS /// `#PublishedSchema` type into synthetic top-level `fn`s so the runtime step
-//RS /// functions (codegen, `Codegen/Items.rs::emit_struct_migration`) can call
-//RS /// them, and so the op expressions are type-checked and lowered through the
-//RS /// normal pipeline:
-//RS ///   - `change … via { (old) -> body }` → `fn __jet_migrate_conv_<T>_<i>_<f>(old: Old) -> New -> body`
-//RS ///   - `add f: T = val`                 → `fn __jet_migrate_add_<T>_<i>_<f>() -> T -> body`
-//RS /// The op's `conv_fn`/`default_fn` is set to the synthetic name. Types that
-//RS /// never decode at runtime (no `Decode` derive, or generic) get nothing — the
-//RS /// migration stays a compile-time intent check only, and codegen emits nothing
-//RS /// (zero cost).
-//RS pub fn desugar_migrations(bundle: &mut ProgramBundle) {
-//RS     for module in &mut bundle.modules {
-//RS         let auto_derives = TraitRegistry::auto_derives_for_items(&module.items);
-//RS         // Types that have a runtime decode path: `#PublishedSchema` + `Decode`,
-//RS         // concrete (a generic published schema has no single runtime shape).
-//RS         let mut decodable_published: HashSet<String> = HashSet::new();
-//RS         for item in &module.items {
-//RS             if let Item::Struct(s) = item {
-//RS                 // `#PublishedSchema struct` sets the flag; the grouped
-//RS                 // `#[PublishedSchema, Codable]` spelling leaves the marker in
-//RS                 // `derives` — accept both.
-//RS                 let published = s.is_published_schema
-//RS                     || s.derives
-//RS                         .iter()
-//RS                         .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
-//RS                 if published
-//RS                     && s.type_params.is_empty()
-//RS                     && (s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
-//RS                         || auto_derives.auto_decode.contains(&s.name))
-//RS                 {
-//RS                     decodable_published.insert(s.name.clone());
-//RS                 }
-//RS             }
-//RS         }
-//RS         if decodable_published.is_empty() {
-//RS             continue;
-//RS         }
-//RS 
-//RS         // D-MIGRATE2B: a `change` without `via` converts through the
-//RS         // `impl Old -> New` in scope; its lowered function is the converter.
-//RS         let conversions: HashSet<(String, String)> = module
-//RS             .items
-//RS             .iter()
-//RS             .filter_map(|item| match item {
-//RS                 Item::ErrorConv(conversion) => {
-//RS                     Some((conversion.from_ty.clone(), conversion.to_ty.clone()))
-//RS                 }
-//RS                 _ => None,
-//RS             })
-//RS             .collect();
-//RS 
-//RS         // Per-type migration-block counter (source order defines the chain).
-//RS         let mut block_of_type: HashMap<String, usize> = HashMap::new();
-//RS         let mut synthetic: Vec<Item> = Vec::new();
-//RS         for item in &mut module.items {
-//RS             let Item::Migration(m) = item else { continue };
-//RS             if !decodable_published.contains(&m.type_name) {
-//RS                 continue;
-//RS             }
-//RS             let block_idx = {
-//RS                 let c = block_of_type.entry(m.type_name.clone()).or_insert(0);
-//RS                 let v = *c;
-//RS                 *c += 1;
-//RS                 v
-//RS             };
-//RS             for op in &mut m.ops {
-//RS                 match op {
-//RS                     MigrationOp::Change {
-//RS                         field,
-//RS                         from_ty,
-//RS                         to_ty,
-//RS                         converter: Some(conv),
-//RS                         converter_span,
-//RS                         conv_fn,
-//RS                         ..
-//RS                     } => {
-//RS                         let name = converter_fn_name(&m.type_name, block_idx, field);
-//RS                         let span = converter_span.unwrap_or(m.span);
-//RS                         let f = build_converter_func(&name, from_ty, to_ty, conv, span);
-//RS                         synthetic.push(Item::Func(f));
-//RS                         *conv_fn = Some(name);
-//RS                     }
-//RS                     MigrationOp::Change {
-//RS                         from_ty,
-//RS                         to_ty,
-//RS                         converter: None,
-//RS                         conv_fn,
-//RS                         ..
-//RS                     } => {
-//RS                         let (from, to) = (from_ty.name(), to_ty.name());
-//RS                         if conversions.contains(&(from.clone(), to.clone())) {
-//RS                             *conv_fn = Some(crate::Sema::error_conv_fn_name(&from, &to));
-//RS                         }
-//RS                     }
-//RS                     MigrationOp::Add {
-//RS                         field,
-//RS                         ty,
-//RS                         default,
-//RS                         default_span,
-//RS                         default_fn,
-//RS                         ..
-//RS                     } => {
-//RS                         let name = add_default_fn_name(&m.type_name, block_idx, field);
-//RS                         let f = build_default_func(&name, ty, default, *default_span);
-//RS                         synthetic.push(Item::Func(f));
-//RS                         *default_fn = Some(name);
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS         }
-//RS         module.items.extend(synthetic);
-//RS     }
-//RS }
-//RS 
-//RS /// Build `fn <name>() T -> { return <default expr> }` for an `add` op.
-//RS fn build_default_func(name: &str, ty: &Type, default: &Expr, span: Span) -> Func {
-//RS     Func {
-//RS         span,
-//RS         is_pub: false,
-//RS         is_comptime: false,
-//RS         is_package_pub: false,
-//RS         external_type: None,
-//RS         name: name.to_string(),
-//RS         name_span: span,
-//RS         meta: None,
-//RS         type_params: Vec::new(),
-//RS         head_pattern: None,
-//RS         params: Vec::new(),
-//RS         return_type: Some(ty.clone()),
-//RS         return_type_span: Some(span),
-//RS         return_view_provenance: None,
-//RS         declared_return_view_provenance: None,
-//RS         gc_return: false,
-//RS         diverges: false,
-//RS         gc_scope: false,
-//RS         is_unsafe: false,
-//RS         unsafe_reason: None,
-//RS         unsafe_span: None,
-//RS         is_pure: false,
-//RS         is_reactive: false,
-//RS         reactive_upgrades: Vec::new(),
-//RS         is_replayable: false,
-//RS         replayable_span: None,
-//RS         is_job: false,
-//RS         job_span: None,
-//RS         every: None,
-//RS         job_metadata: None,
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         maturity: None,
-//RS         maturity_span: None,
-//RS         kernel: None,
-//RS         is_inline: false,
-//RS         is_inline_always: false,
-//RS         inline_span: None,
-//RS         is_sanitizer: false,
-//RS         scrub_tag: None,
-//RS         declared_effects: None,
-//RS         effect_via: None,
-//RS         state_requires: None,
-//RS         state_transition: None,
-//RS         web_marker: None,
-//RS         pre: Vec::new(),
-//RS         post: Vec::new(),
-//RS         inline_foreign: None,
-//RS         undo: None,
-//RS         markers: Vec::new(),
-//RS         compiler_generated: false,
-//RS         body: vec![Stmt::Return(Some(default.clone()), span)],
-//RS     }
-//RS }
-//RS 
-//RS /// Build `fn <name>(<param>: Old) New -> { <converter body> }` from a `change`
-//RS /// op's inline converter. The canonical converter is a one-parameter lambda
-//RS /// `(old) -> expr`; anything else is treated as a callable applied to the old
-//RS /// value.
-//RS fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, span: Span) -> Func {
-//RS     let (param_name, body): (String, Vec<Stmt>) = match conv {
-//RS         Expr::Lambda(l) if l.params.len() == 1 => {
-//RS             let pname = l.params[0].name.clone();
-//RS             let body = match &l.body {
-//RS                 LambdaBody::Expr(e) => vec![Stmt::Return(Some((**e).clone()), span)],
-//RS                 LambdaBody::Block(stmts) => stmts.clone(),
-//RS             };
-//RS             (pname, body)
-//RS         }
-//RS         other => {
-//RS             // Non-lambda converter (a function value written inline): apply it
-//RS             // to the old value.
-//RS             let arg = crate::AST::CallArg {
-//RS                 convention: AccessConvention::Move,
-//RS                 expr: Expr::Ident("__old".to_string(), span),
-//RS                 span,
-//RS                 flags: crate::AST::CallArgFlags::default(),
-//RS                 label: None,
-//RS                 spread: false,
-//RS             };
-//RS             let call = Expr::CallValue {
-//RS                 callee: Box::new(other.clone()),
-//RS                 args: vec![arg],
-//RS                 span,
-//RS             };
-//RS             ("__old".to_string(), vec![Stmt::Return(Some(call), span)])
-//RS         }
-//RS     };
-//RS     Func {
-//RS         span,
-//RS         is_pub: false,
-//RS         is_comptime: false,
-//RS         is_package_pub: false,
-//RS         external_type: None,
-//RS         name: name.to_string(),
-//RS         name_span: span,
-//RS         meta: None,
-//RS         type_params: Vec::new(),
-//RS         head_pattern: None,
-//RS         params: vec![Param {
-//RS             name: param_name,
-//RS             name_span: span,
-//RS             ty: old_ty.clone(),
-//RS             ty_span: span,
-//RS             convention: AccessConvention::Move,
-//RS             root: false,
-//RS             default: None,
-//RS             variadic: false,
-//RS             variadic_bound_list: None,
-//RS             declared_view_from_names: None,
-//RS             public_label: None,
-//RS             zone: crate::AST::ParamZone::Either,
-//RS         }],
-//RS         return_type: Some(new_ty.clone()),
-//RS         return_type_span: Some(span),
-//RS         return_view_provenance: None,
-//RS         declared_return_view_provenance: None,
-//RS         gc_return: false,
-//RS         diverges: false,
-//RS         gc_scope: false,
-//RS         is_unsafe: false,
-//RS         unsafe_reason: None,
-//RS         unsafe_span: None,
-//RS         is_pure: false,
-//RS         is_reactive: false,
-//RS         reactive_upgrades: Vec::new(),
-//RS         is_replayable: false,
-//RS         replayable_span: None,
-//RS         is_job: false,
-//RS         job_span: None,
-//RS         every: None,
-//RS         job_metadata: None,
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         maturity: None,
-//RS         maturity_span: None,
-//RS         kernel: None,
-//RS         is_inline: false,
-//RS         is_inline_always: false,
-//RS         inline_span: None,
-//RS         is_sanitizer: false,
-//RS         scrub_tag: None,
-//RS         declared_effects: None,
-//RS         effect_via: None,
-//RS         state_requires: None,
-//RS         state_transition: None,
-//RS         web_marker: None,
-//RS         pre: Vec::new(),
-//RS         post: Vec::new(),
-//RS         inline_foreign: None,
-//RS         undo: None,
-//RS         markers: Vec::new(),
-//RS         compiler_generated: false,
-//RS         body,
-//RS     }
-//RS }
-//RS 
-//RS /// A declared migration op for one type, flattened for diffing.
-//RS enum DeclaredOp {
-//RS     Rename {
-//RS         from: String,
-//RS         to: String,
-//RS     },
-//RS     Add {
-//RS         field: String,
-//RS         ty: String,
-//RS     },
-//RS     Remove {
-//RS         field: String,
-//RS     },
-//RS     Change {
-//RS         field: String,
-//RS         from_ty: String,
-//RS         to_ty: String,
-//RS         has_converter: bool,
-//RS     },
-//RS }
-//RS 
-//RS /// True when `s` derives `Decode` but NOT `Encode` — a struct that only ever
-//RS /// deserializes (reads published data back), never serializes. Guards the
-//RS /// `add` op check: an added field on a Decode-only record must itself satisfy
-//RS /// Decode (see the call site in `check_schema_migrations`).
-//RS fn is_decode_only(s: &crate::AST::StructDef, reg: &TraitRegistry) -> bool {
-//RS     let decode = s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
-//RS         || reg.auto_decode.contains(&s.name);
-//RS     let encode = s.derives.iter().any(|(t, _)| t == crate::Generics::ENCODE)
-//RS         || reg.auto_encode.contains(&s.name);
-//RS     decode && !encode
-//RS }
-//RS 
-//RS /// Run the schema migration diff pass over the items in a single module.
-//RS /// `project_root` is the root of the Jet project (the dir containing `.jet/`).
-//RS /// Returns any E0910 diagnostics.
-//RS pub fn check_schema_migrations(
-//RS     items: &[Item],
-//RS     project_root: &Path,
-//RS     reg: &TraitRegistry,
-//RS ) -> Vec<Diagnostic> {
-//RS     let mut diags = Vec::new();
-//RS 
-//RS     // Collect declared migration ops keyed by type name.
-//RS     let mut migrations: HashMap<String, Vec<DeclaredOp>> = HashMap::new();
-//RS     for item in items {
-//RS         if let Item::Migration(m) = item {
-//RS             let entry = migrations.entry(m.type_name.clone()).or_default();
-//RS             for op in &m.ops {
-//RS                 match op {
-//RS                     MigrationOp::Rename { from, to, .. } => {
-//RS                         entry.push(DeclaredOp::Rename {
-//RS                             from: from.clone(),
-//RS                             to: to.clone(),
-//RS                         });
-//RS                     }
-//RS                     MigrationOp::Add { field, ty, .. } => {
-//RS                         entry.push(DeclaredOp::Add {
-//RS                             field: field.clone(),
-//RS                             ty: ty.name(),
-//RS                         });
-//RS                     }
-//RS                     MigrationOp::Remove { field, .. } => {
-//RS                         entry.push(DeclaredOp::Remove {
-//RS                             field: field.clone(),
-//RS                         });
-//RS                     }
-//RS                     MigrationOp::Change {
-//RS                         field,
-//RS                         from_ty,
-//RS                         to_ty,
-//RS                         converter,
-//RS                         ..
-//RS                     } => {
-//RS                         entry.push(DeclaredOp::Change {
-//RS                             field: field.clone(),
-//RS                             from_ty: from_ty.name(),
-//RS                             to_ty: to_ty.name(),
-//RS                             has_converter: converter.is_some(),
-//RS                         });
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     // D-MIGRATE2B: an `impl Old -> New` in scope is a fallback converter source.
-//RS     // Collect declared error-conversion-style impls as (from, to) type-name pairs.
-//RS     let mut conv_impls: Vec<(String, String)> = Vec::new();
-//RS     for item in items {
-//RS         if let Item::ErrorConv(ec) = item {
-//RS             conv_impls.push((ec.from_ty.clone(), ec.to_ty.clone()));
-//RS         }
-//RS     }
-//RS 
-//RS     // Check each #PublishedSchema struct.
-//RS     for item in items {
-//RS         let Item::Struct(s) = item else {
-//RS             continue;
-//RS         };
-//RS         let published = s.is_published_schema
-//RS             || s.derives
-//RS                 .iter()
-//RS                 .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
-//RS         if !published {
-//RS             continue;
-//RS         }
-//RS 
-//RS         let Some(prior) = load_snapshot(project_root, &s.name) else {
-//RS             // No prior snapshot → first release; nothing to diff.
-//RS             continue;
-//RS         };
-//RS 
-//RS         let span = s.published_schema_span.unwrap_or(s.name_span);
-//RS 
-//RS         // New field map: name → type string.
-//RS         let new_fields: HashMap<String, String> = s
-//RS             .fields
-//RS             .iter()
-//RS             .map(|f| (f.name.clone(), f.ty.name()))
-//RS             .collect();
-//RS         // Old field map: name → type string.
-//RS         let old_fields: HashMap<String, String> = prior
-//RS             .fields
-//RS             .iter()
-//RS             .map(|f| (f.name.clone(), f.ty.clone()))
-//RS             .collect();
-//RS 
-//RS         let ops = migrations.get(&s.name).map(|v| v.as_slice()).unwrap_or(&[]);
-//RS 
-//RS         // ---- validate declared ops against reality -----------------------
-//RS         for op in ops {
-//RS             match op {
-//RS                 DeclaredOp::Remove { field } => {
-//RS                     if new_fields.contains_key(field) {
-//RS                         diags.push(e0910_remove_still_present(&s.name, field, span));
-//RS                     } else if !old_fields.contains_key(field) {
-//RS                         diags.push(e0910_op_unknown_field(&s.name, field, "remove", span));
-//RS                     }
-//RS                 }
-//RS                 DeclaredOp::Add { field, ty } => {
-//RS                     if old_fields.contains_key(field) {
-//RS                         diags.push(e0910_add_not_new(&s.name, field, span));
-//RS                     } else if let Some(new_ty) = new_fields.get(field) {
-//RS                         // The declared `add f: T` type must match the struct field's type.
-//RS                         if new_ty != ty {
-//RS                             diags.push(e0910_add_type_mismatch(&s.name, field, ty, new_ty, span));
-//RS                         } else if is_decode_only(s, reg) {
-//RS                             // Currently unreachable in any shape codegen/parsing can
-//RS                             // produce today (a Decode-only `#PublishedSchema` struct
-//RS                             // with an `add` op is not yet a shipped combination), but
-//RS                             // guard it explicitly rather than let a future shape emit
-//RS                             // rejected Rust (I2): a Decode-only record only ever
-//RS                             // DEserializes, so the field it adds must itself satisfy
-//RS                             // Decode — Encode-only would build a `decode` impl that
-//RS                             // calls a nonexistent (or half-built) decoder for the
-//RS                             // field's type.
-//RS                             if let Some(added_field) = s.fields.iter().find(|f| f.name == *field) {
-//RS                                 if !super::CheckerCoreLib::is_decodable_ty(&added_field.ty, reg) {
-//RS                                     diags.push(e0910_add_field_not_decodable(
-//RS                                         &s.name, field, new_ty, span,
-//RS                                     ));
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                     } else {
-//RS                         diags.push(e0910_op_unknown_field(&s.name, field, "add", span));
-//RS                     }
-//RS                 }
-//RS                 DeclaredOp::Change {
-//RS                     field,
-//RS                     from_ty,
-//RS                     to_ty,
-//RS                     ..
-//RS                 } => {
-//RS                     // The field must exist in both shapes, and the declared
-//RS                     // from/to must match the snapshot/current types.
-//RS                     match (old_fields.get(field), new_fields.get(field)) {
-//RS                         (Some(old_ty), Some(new_ty)) => {
-//RS                             if old_ty != from_ty || new_ty != to_ty {
-//RS                                 diags.push(e0910_change_type_mismatch(
-//RS                                     &s.name, field, from_ty, to_ty, old_ty, new_ty, span,
-//RS                                 ));
-//RS                             }
-//RS                         }
-//RS                         _ => diags.push(e0910_op_unknown_field(&s.name, field, "change", span)),
-//RS                     }
-//RS                 }
-//RS                 DeclaredOp::Rename { .. } => {}
-//RS             }
-//RS         }
-//RS 
-//RS         // ---- removed fields ---------------------------------------------
-//RS         for old_field in &prior.fields {
-//RS             if new_fields.contains_key(&old_field.name) {
-//RS                 continue; // still present (handled by type-change check below)
-//RS             }
-//RS             // Bridged by a type-matching `rename old -> new`?
-//RS             let renamed = ops.iter().any(|op| match op {
-//RS                 DeclaredOp::Rename { from, to } => {
-//RS                     from == &old_field.name
-//RS                         && new_fields
-//RS                             .get(to.as_str())
-//RS                             .map_or(false, |t| t == &old_field.ty)
-//RS                 }
-//RS                 _ => false,
-//RS             });
-//RS             // Or by an explicit `remove old`?
-//RS             let removed = ops
-//RS                 .iter()
-//RS                 .any(|op| matches!(op, DeclaredOp::Remove { field } if field == &old_field.name));
-//RS             if renamed || removed {
-//RS                 continue;
-//RS             }
-//RS             diags.push(e0910_dropped(
-//RS                 &s.name,
-//RS                 &old_field.name,
-//RS                 &prior.published_version,
-//RS                 span,
-//RS             ));
-//RS         }
-//RS 
-//RS         // ---- type-changed fields ----------------------------------------
-//RS         for f in &s.fields {
-//RS             let Some(old_ty) = old_fields.get(&f.name) else {
-//RS                 continue; // not in old shape — handled by added-field check
-//RS             };
-//RS             let new_ty = f.ty.name();
-//RS             if old_ty == &new_ty {
-//RS                 continue; // unchanged
-//RS             }
-//RS             // A `change f: old -> new` op declares intent. The converter is the
-//RS             // inline `via { … }` (D-MIGRATE2B step 1) OR an `impl Old -> New`
-//RS             // in scope (step 2). Without either → ask for a converter (step 3).
-//RS             let change_op = ops.iter().find_map(|op| match op {
-//RS                 DeclaredOp::Change {
-//RS                     field,
-//RS                     from_ty,
-//RS                     to_ty,
-//RS                     has_converter,
-//RS                 } if field == &f.name && from_ty == old_ty && to_ty == &new_ty => {
-//RS                     Some(*has_converter)
-//RS                 }
-//RS                 _ => None,
-//RS             });
-//RS             match change_op {
-//RS                 Some(true) => {} // inline converter present → OK
-//RS                 Some(false) => {
-//RS                     // No inline `via`; look for an `impl Old -> New` fallback.
-//RS                     let has_impl = conv_impls
-//RS                         .iter()
-//RS                         .any(|(from, to)| from == old_ty && to == &new_ty);
-//RS                     if !has_impl {
-//RS                         diags.push(e0910_change_no_converter(
-//RS                             &s.name, &f.name, old_ty, &new_ty, span,
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 None => {
-//RS                     diags.push(e0910_changed_type(&s.name, &f.name, old_ty, &new_ty, span));
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         // ---- added fields -----------------------------------------------
-//RS         // A field in the new shape absent from old data needs a default to read
-//RS         // old records. Struct-field defaults don't exist in this AST yet, so the
-//RS         // bridge is an `add f: T = default` migration op (D-MIGRATE2A).
-//RS         for f in &s.fields {
-//RS             if old_fields.contains_key(&f.name) {
-//RS                 continue; // existed before
-//RS             }
-//RS             // Bridged by `rename old -> f` (the new name of a renamed field)?
-//RS             let from_rename = ops
-//RS                 .iter()
-//RS                 .any(|op| matches!(op, DeclaredOp::Rename { to, .. } if to == &f.name));
-//RS             // Or declared `add f: T = default`?
-//RS             let added = ops
-//RS                 .iter()
-//RS                 .any(|op| matches!(op, DeclaredOp::Add { field, .. } if field == &f.name));
-//RS             if from_rename || added {
-//RS                 continue;
-//RS             }
-//RS             diags.push(e0910_added_required(&s.name, &f.name, span));
-//RS         }
-//RS     }
-//RS 
-//RS     diags
-//RS }
-//RS 
-//RS /// E0910: a published field was dropped with no migration to bridge it.
-//RS fn e0910_dropped(type_name: &str, field: &str, version: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0910",
-//RS         format!(
-//RS             "the published record `{}` dropped `{}` since version `{}`, with no migration to bridge it",
-//RS             type_name, field, version
-//RS         ),
-//RS         format!(
-//RS             "`#PublishedSchema` pins a record's saved shape at release; old data written with `{}` could no longer be read",
-//RS             field
-//RS         ),
-//RS         format!(
-//RS             "add `migration {} {{ remove {} }}` to delete it, `migration {} {{ rename {} -> <new> }}` if you renamed it, or bump the major version",
-//RS             type_name, field, type_name, field
-//RS         ),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0910: a published field changed type, with no `change` op declaring intent.
-//RS fn e0910_changed_type(
-//RS     type_name: &str,
-//RS     field: &str,
-//RS     old_ty: &str,
-//RS     new_ty: &str,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0910",
-//RS         format!(
-//RS             "the published record `{}` changed `{}` from `{}` to `{}`, with no migration to bridge it",
-//RS             type_name, field, old_ty, new_ty
-//RS         ),
-//RS         "`#PublishedSchema` pins a record's saved shape at release; old data stored at the previous type could no longer be read".to_string(),
-//RS         format!(
-//RS             "add `migration {} {{ change {}: {} -> {} via {{ (old) -> … }} }}`, or bump the major version",
-//RS             type_name, field, old_ty, new_ty
-//RS         ),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0910: a `change` op is declared but no converter (neither inline `via` nor
-//RS /// an `impl Old -> New` in scope) is available.
-//RS fn e0910_change_no_converter(
-//RS     type_name: &str,
-//RS     field: &str,
-//RS     old_ty: &str,
-//RS     new_ty: &str,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0910",
-//RS         format!(
-//RS             "the `change {}: {} -> {}` migration on `{}` has no converter",
-//RS             field, old_ty, new_ty, type_name
-//RS         ),
-//RS         "a type change needs a way to turn an old value into a new one — old data already on disk is read through it".to_string(),
-//RS         format!(
-//RS             "add an inline `via {{ (old) -> … }}` to the `change` op, or declare `impl {} -> {} {{ … }}` in scope",
-//RS             old_ty, new_ty
-//RS         ),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0910: a new field was added with nothing for old data to supply.
-//RS fn e0910_added_required(type_name: &str, field: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0910",
-//RS         format!(
-//RS             "the published record `{}` added `{}`, but old data has no value for it",
-//RS             type_name, field
-//RS         ),
-//RS         "`#PublishedSchema` records already written without this field can't be read unless there's a default to fill it in".to_string(),
-//RS         format!(
-//RS             "add `migration {} {{ add {}: <Type> = <default> }}` to supply the value, or bump the major version",
-//RS             type_name, field
-//RS         ),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0910: `remove f` declared, but `f` still exists in the current struct.
-//RS fn e0910_remove_still_present(type_name: &str, field: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0910",
-//RS         format!(
-//RS             "the migration removes `{}`, but `{}` still has that field",
-//RS             field, type_name
-//RS         ),
-//RS         "a `remove` op declares a field is gone, but the current `#PublishedSchema` struct still defines it".to_string(),
-//RS         format!("delete the field from `struct {}`, or drop the `remove {}` line", type_name, field),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0910: `add f` declared, but `f` already existed in the prior snapshot.
-//RS fn e0910_add_not_new(type_name: &str, field: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0910",
-//RS         format!(
-//RS             "the migration adds `{}`, but `{}` already had that field",
-//RS             field, type_name
-//RS         ),
-//RS         "an `add` op declares a brand-new field, but the prior published snapshot already records this one".to_string(),
-//RS         format!("drop the `add {}` line; if its type changed, use `change` instead", field),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0910: a `change` op's declared from/to types don't match the real shapes.
-//RS fn e0910_change_type_mismatch(
-//RS     type_name: &str,
-//RS     field: &str,
-//RS     decl_from: &str,
-//RS     decl_to: &str,
-//RS     real_from: &str,
-//RS     real_to: &str,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0910",
-//RS         format!(
-//RS             "the `change {}: {} -> {}` migration on `{}` doesn't match the real shapes (`{}` -> `{}`)",
-//RS             field, decl_from, decl_to, type_name, real_from, real_to
-//RS         ),
-//RS         "the `from` type must be the field's published type and the `to` type must be its current type".to_string(),
-//RS         format!("write `change {}: {} -> {} …`", field, real_from, real_to),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0910: an `add f: T` op's declared type doesn't match the struct field's type.
-//RS fn e0910_add_type_mismatch(
-//RS     type_name: &str,
-//RS     field: &str,
-//RS     decl_ty: &str,
-//RS     real_ty: &str,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0910",
-//RS         format!(
-//RS             "the `add {}: {}` migration on `{}` declares a type the field doesn't have (`{}`)",
-//RS             field, decl_ty, type_name, real_ty
-//RS         ),
-//RS         "the type in an `add` op must match the field's type in the struct".to_string(),
-//RS         format!("write `add {}: {} = <default>`", field, real_ty),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0910: an `add f: T` op on a Decode-only `#PublishedSchema` record names a
-//RS /// type `T` that doesn't itself satisfy `Decode`. A Decode-only record only
-//RS /// ever deserializes; a field it can't decode would make the generated
-//RS /// `decode` impl call a decoder that doesn't exist for `T`.
-//RS fn e0910_add_field_not_decodable(type_name: &str, field: &str, ty: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0910",
-//RS         format!(
-//RS             "the `add {}: {}` migration on `{}` needs `{}` to support `Decode`",
-//RS             field, ty, type_name, ty
-//RS         ),
-//RS         format!(
-//RS             "`{}` derives `Decode` but not `Encode` — it only ever reads data back, so every field, including one added by a migration, must itself be decodable",
-//RS             type_name
-//RS         ),
-//RS         format!("derive `Decode` on `{}`, or give `{}` a decodable type", ty, field),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0910: an `add`/`remove`/`change` op names a field that's in neither shape.
-//RS fn e0910_op_unknown_field(type_name: &str, field: &str, verb: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0910",
-//RS         format!(
-//RS             "the `{} {}` migration on `{}` names a field that doesn't exist",
-//RS             verb, field, type_name
-//RS         ),
-//RS         "a migration op must reference a field of this record — either its published shape or its current one".to_string(),
-//RS         format!("check the spelling of `{}`, or remove the `{}` op", field, verb),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // Unit tests — exercise the diff against a temp snapshot via JET_SCHEMA_CACHE_DIR.
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS     use crate::AST::{Field, MigrationDecl, StructDef, Type};
-//RS     use std::sync::Mutex;
-//RS 
-//RS     // The diff reads a process-global env var; serialize tests that set it.
-//RS     static ENV_LOCK: Mutex<()> = Mutex::new(());
-//RS 
-//RS     fn zero() -> Span {
-//RS         Span::new(0, 0)
-//RS     }
-//RS 
-//RS     fn field(name: &str, ty: Type) -> Field {
-//RS         Field {
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             name: name.to_string(),
-//RS             name_span: zero(),
-//RS             ty,
-//RS             ty_span: zero(),
-//RS             serde_markers: Vec::new(),
-//RS             redact: false,
-//RS             computed: None,
-//RS             default: None,
-//RS             default_ct: None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn published_struct(name: &str, fields: Vec<Field>) -> Item {
-//RS         Item::Struct(StructDef {
-//RS             span: zero(),
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             name: name.to_string(),
-//RS             name_span: zero(),
-//RS             type_params: vec![],
-//RS             fields,
-//RS             state: None,
-//RS             methods: vec![],
-//RS             cli_bindings: vec![],
-//RS             trait_impls: vec![],
-//RS             derives: vec![],
-//RS             auto_derive_default: true,
-//RS             is_published_schema: true,
-//RS             published_schema_span: Some(zero()),
-//RS             is_single_use: false,
-//RS             single_use_span: None,
-//RS             is_must_use: false,
-//RS             must_use_span: None,
-//RS             layout: None,
-//RS             layout_span: None,
-//RS             serde_markers: Vec::new(),
-//RS             type_markers: Vec::new(),
-//RS             validate_block: Vec::new(),
-//RS             validate_span: None,
-//RS         })
-//RS     }
-//RS 
-//RS     fn migration(type_name: &str, ops: Vec<MigrationOp>) -> Item {
-//RS         Item::Migration(MigrationDecl {
-//RS             type_name: type_name.to_string(),
-//RS             type_span: zero(),
-//RS             ops,
-//RS             span: zero(),
-//RS         })
-//RS     }
-//RS 
-//RS     /// Run the diff with a snapshot written into a temp dir pointed at by the
-//RS     /// env override. Returns the diagnostic codes produced.
-//RS     fn run_with_snapshot(snapshot: &str, items: &[Item]) -> Vec<String> {
-//RS         run_with_snapshot_and_registry(snapshot, items, &TraitRegistry::default())
-//RS     }
-//RS 
-//RS     /// Same as `run_with_snapshot`, but with a caller-supplied `TraitRegistry` —
-//RS     /// needed to exercise the Decode/Encode-aware `add`-op guard, which reads
-//RS     /// `reg.local_types`/`implements_trait`.
-//RS     fn run_with_snapshot_and_registry(
-//RS         snapshot: &str,
-//RS         items: &[Item],
-//RS         reg: &TraitRegistry,
-//RS     ) -> Vec<String> {
-//RS         let _guard = ENV_LOCK.lock().unwrap();
-//RS         let dir = std::env::temp_dir().join(format!(
-//RS             "jet_schema_unit_{}_{}",
-//RS             std::process::id(),
-//RS             // a cheap unique-ish suffix
-//RS             snapshot.len()
-//RS         ));
-//RS         std::fs::create_dir_all(&dir).unwrap();
-//RS         // The snapshot's type name keys the file.
-//RS         let type_name = snapshot
-//RS             .lines()
-//RS             .find_map(|l| l.strip_prefix("type = "))
-//RS             .unwrap()
-//RS             .trim();
-//RS         std::fs::write(dir.join(format!("{}.snapshot", type_name)), snapshot).unwrap();
-//RS         std::env::set_var("JET_SCHEMA_CACHE_DIR", &dir);
-//RS         let diags = check_schema_migrations(items, std::path::Path::new("."), reg);
-//RS         std::env::remove_var("JET_SCHEMA_CACHE_DIR");
-//RS         std::fs::remove_dir_all(&dir).ok();
-//RS         diags.into_iter().map(|d| d.code).collect()
-//RS     }
-//RS 
-//RS     const SNAP_ONE: &str =
-//RS         "schema_version = 1\ntype = Rec\npublished_version = 1.0.0\nfield name: String\n";
-//RS 
-//RS     #[test]
-//RS     fn unchanged_struct_is_clean() {
-//RS         let items = [published_struct("Rec", vec![field("name", Type::String)])];
-//RS         assert!(run_with_snapshot(SNAP_ONE, &items).is_empty());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn reorder_is_not_a_break() {
-//RS         // Snapshot is name then age; struct is age then name. Order ignored.
-//RS         let snap = "schema_version = 1\ntype = Rec\npublished_version = 1.0.0\nfield name: String\nfield age: Int\n";
-//RS         let items = [published_struct(
-//RS             "Rec",
-//RS             vec![field("age", Type::Int), field("name", Type::String)],
-//RS         )];
-//RS         assert!(run_with_snapshot(snap, &items).is_empty());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn dropped_field_without_migration_is_e0910() {
-//RS         // Struct drops `name`.
-//RS         let items = [published_struct("Rec", vec![field("kept", Type::Int)])];
-//RS         let snap = "schema_version = 1\ntype = Rec\npublished_version = 1.0.0\nfield name: String\nfield kept: Int\n";
-//RS         assert_eq!(run_with_snapshot(snap, &items), vec!["E0910"]);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn remove_op_bridges_a_drop() {
-//RS         let items = [
-//RS             published_struct("Rec", vec![]),
-//RS             migration(
-//RS                 "Rec",
-//RS                 vec![MigrationOp::Remove {
-//RS                     field: "name".into(),
-//RS                     field_span: zero(),
-//RS                 }],
-//RS             ),
-//RS         ];
-//RS         assert!(run_with_snapshot(SNAP_ONE, &items).is_empty());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn added_field_needs_add_op() {
-//RS         // Struct adds `extra` not in the snapshot.
-//RS         let items = [published_struct(
-//RS             "Rec",
-//RS             vec![field("name", Type::String), field("extra", Type::Bool)],
-//RS         )];
-//RS         assert_eq!(run_with_snapshot(SNAP_ONE, &items), vec!["E0910"]);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn add_op_bridges_a_new_field() {
-//RS         let items = [
-//RS             published_struct(
-//RS                 "Rec",
-//RS                 vec![field("name", Type::String), field("extra", Type::Bool)],
-//RS             ),
-//RS             migration(
-//RS                 "Rec",
-//RS                 vec![MigrationOp::Add {
-//RS                     field: "extra".into(),
-//RS                     field_span: zero(),
-//RS                     ty: Type::Bool,
-//RS                     ty_span: zero(),
-//RS                     default: crate::AST::Expr::Bool(false, zero()),
-//RS                     default_span: zero(),
-//RS                     default_fn: None,
-//RS                 }],
-//RS             ),
-//RS         ];
-//RS         assert!(run_with_snapshot(SNAP_ONE, &items).is_empty());
-//RS     }
-//RS 
-//RS     /// D-MIGRATE1 (I2 guard, bug #185/4): a Decode-only `#PublishedSchema` struct
-//RS     /// (derives `Decode`, not `Encode`) adds a field whose type is registered as
-//RS     /// local but does NOT implement `Decode` — currently unreachable in any
-//RS     /// shape parsing/codegen produce today, but guarded explicitly so a future
-//RS     /// shape can't silently emit rejected Rust (I2) instead of an E0910.
-//RS     #[test]
-//RS     fn add_op_on_decode_only_struct_needs_decodable_field_type() {
-//RS         let mut s = match published_struct(
-//RS             "Rec",
-//RS             vec![
-//RS                 field("name", Type::String),
-//RS                 field("payload", Type::Named("EncodeOnlyType".to_string())),
-//RS             ],
-//RS         ) {
-//RS             Item::Struct(s) => s,
-//RS             _ => unreachable!(),
-//RS         };
-//RS         s.derives = vec![(crate::Generics::DECODE.to_string(), zero())];
-//RS         let items = [
-//RS             Item::Struct(s),
-//RS             migration(
-//RS                 "Rec",
-//RS                 vec![MigrationOp::Add {
-//RS                     field: "payload".into(),
-//RS                     field_span: zero(),
-//RS                     ty: Type::Named("EncodeOnlyType".to_string()),
-//RS                     ty_span: zero(),
-//RS                     default: crate::AST::Expr::Bool(false, zero()),
-//RS                     default_span: zero(),
-//RS                     default_fn: None,
-//RS                 }],
-//RS             ),
-//RS         ];
-//RS         // A registry where `EncodeOnlyType` is local but never implements Decode.
-//RS         let mut reg = TraitRegistry::default();
-//RS         reg.local_types.insert("EncodeOnlyType".to_string());
-//RS         assert_eq!(
-//RS             run_with_snapshot_and_registry(SNAP_ONE, &items, &reg),
-//RS             vec!["E0910"]
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn type_change_without_op_is_e0910() {
-//RS         // `name` goes String -> Int with no change op.
-//RS         let items = [published_struct("Rec", vec![field("name", Type::Int)])];
-//RS         assert_eq!(run_with_snapshot(SNAP_ONE, &items), vec!["E0910"]);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn change_op_with_inline_via_bridges() {
-//RS         let items = [
-//RS             published_struct("Rec", vec![field("name", Type::Int)]),
-//RS             migration(
-//RS                 "Rec",
-//RS                 vec![MigrationOp::Change {
-//RS                     field: "name".into(),
-//RS                     field_span: zero(),
-//RS                     from_ty: Type::String,
-//RS                     from_span: zero(),
-//RS                     to_ty: Type::Int,
-//RS                     to_span: zero(),
-//RS                     converter: Some(crate::AST::Expr::Int(0, zero(), None, None)),
-//RS                     converter_span: Some(zero()),
-//RS                     conv_fn: None,
-//RS                 }],
-//RS             ),
-//RS         ];
-//RS         assert!(run_with_snapshot(SNAP_ONE, &items).is_empty());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn change_op_without_converter_is_e0910() {
-//RS         // change op present, no inline via, no impl in scope.
-//RS         let items = [
-//RS             published_struct("Rec", vec![field("name", Type::Int)]),
-//RS             migration(
-//RS                 "Rec",
-//RS                 vec![MigrationOp::Change {
-//RS                     field: "name".into(),
-//RS                     field_span: zero(),
-//RS                     from_ty: Type::String,
-//RS                     from_span: zero(),
-//RS                     to_ty: Type::Int,
-//RS                     to_span: zero(),
-//RS                     converter: None,
-//RS                     converter_span: None,
-//RS                     conv_fn: None,
-//RS                 }],
-//RS             ),
-//RS         ];
-//RS         assert_eq!(run_with_snapshot(SNAP_ONE, &items), vec!["E0910"]);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn remove_op_on_present_field_is_e0910() {
-//RS         // remove `name` but the struct still has it.
-//RS         let items = [
-//RS             published_struct("Rec", vec![field("name", Type::String)]),
-//RS             migration(
-//RS                 "Rec",
-//RS                 vec![MigrationOp::Remove {
-//RS                     field: "name".into(),
-//RS                     field_span: zero(),
-//RS                 }],
-//RS             ),
-//RS         ];
-//RS         assert_eq!(run_with_snapshot(SNAP_ONE, &items), vec!["E0910"]);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn no_prior_snapshot_is_clean() {
-//RS         // First release: no snapshot file → nothing to diff.
-//RS         let _guard = ENV_LOCK.lock().unwrap();
-//RS         let dir =
-//RS             std::env::temp_dir().join(format!("jet_schema_unit_empty_{}", std::process::id()));
-//RS         std::fs::create_dir_all(&dir).unwrap();
-//RS         std::env::set_var("JET_SCHEMA_CACHE_DIR", &dir);
-//RS         let items = [published_struct("Brand", vec![field("x", Type::Int)])];
-//RS         let reg = TraitRegistry::default();
-//RS         let diags = check_schema_migrations(&items, std::path::Path::new("."), &reg);
-//RS         std::env::remove_var("JET_SCHEMA_CACHE_DIR");
-//RS         std::fs::remove_dir_all(&dir).ok();
-//RS         assert!(diags.is_empty());
-//RS     }
-//RS }
-// END-PORT-PENDING 0443 crates/jet-sema/src/Sema/SchemaMigration.rs:1-1116
-
+// Published-schema diff and migration expression desugaring. Field order is not a break.
+use jet_foundation.[Diagnostic, Span, AccessConvention, Expr, Func, Item, LambdaBody, MigrationOp, Param, ProgramBundle, Stmt, Type, StructDef, CallArg, CallArgFlags, ParamZone, mangle]
+use jet_foundation.Syntax as Syntax
+use jet_sema.Generics.[DECODE, ENCODE]
+use jet_sema.Traits.[TraitRegistry]
+use jet_sema.Sema.[error_conv_fn_name]
+use jet_sema.Sema.Schema.[load_snapshot]
+use jet_sema.Sema.CheckerCoreLib.[is_decodable_ty]
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:42
+fn converter_fn_name(type_name: String, block_idx: Int, field: String) -> String Never! { mangle("migrate_conv_{type_name}_{block_idx}_{field}") }
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:49
+fn add_default_fn_name(type_name: String, block_idx: Int, field: String) -> String Never! { mangle("migrate_add_{type_name}_{block_idx}_{field}") }
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:64
+pub fn desugar_migrations(bundle: &ProgramBundle) Never! {
+    loop &module in &bundle.modules {
+        auto_derives :: TraitRegistry.auto_derives_for_items(module.items)
+        decodable_published := [String:Bool]{}
+        loop item in module.items {
+            if item == .Struct(s) {
+                published :: s.is_published_schema || s.derives.any(fn(row) { row.0 == Syntax.MARKER_PUBLISHED_SCHEMA })
+                if published && s.type_params.is_empty() && (s.derives.any(fn(row) { row.0 == DECODE }) || auto_derives.auto_decode.contains(s.name)) -> decodable_published[s.name] = true
+            }
+        }
+        if decodable_published.is_empty() -> next
+        // GATE #4499: exact tuple equality/hash for conversion pairs.
+        conversions := [(String, String):Bool]{}
+        loop item in module.items {
+            if item == .ErrorConv(conversion) -> conversions[(conversion.from_ty, conversion.to_ty)] = true
+        }
+        block_of_type := [String:Int]{}
+        synthetic := [Item]{}
+        loop &item in &module.items {
+            if item == .Migration(m) {
+                if !decodable_published.contains(m.type_name) -> next
+                block_idx :: block_of_type.get(m.type_name) ?? 0
+                block_of_type[m.type_name] = block_idx + 1
+                loop &op in &m.ops {
+                    if op == {
+                        .Change{field, from_ty, to_ty, converter: .Val(conv), converter_span, conv_fn, ..} -> {
+                            name :: converter_fn_name(m.type_name, block_idx, field)
+                            span :: converter_span ?? m.span
+                            &synthetic.push(Item.Func(build_converter_func(name, from_ty, to_ty, conv, span)))
+                            conv_fn = Val(name)
+                        }
+                        .Change{from_ty, to_ty, converter: .None, conv_fn, ..} -> {
+                            from :: from_ty.name()
+                            to :: to_ty.name()
+                            if conversions.contains((from, to)) -> conv_fn = Val(error_conv_fn_name(from, to))
+                        }
+                        .Add{field, ty, default, default_span, default_fn, ..} -> {
+                            name :: add_default_fn_name(m.type_name, block_idx, field)
+                            &synthetic.push(Item.Func(build_default_func(name, ty, default, default_span)))
+                            default_fn = Val(name)
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        }
+        &module.items.extend(^synthetic)
+    }
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:170
+fn build_default_func(name: String, ty: Type, default: Expr, span: Span) -> Func Never! {
+    Func{
+        span: span, is_pub: false, is_comptime: false, is_package_pub: false, external_type: None,
+        name: name, name_span: span, meta: None, type_params: [], head_pattern: None, params: [],
+        return_type: Val(ty), return_type_span: Val(span), return_view_provenance: None, declared_return_view_provenance: None,
+        gc_return: false, diverges: false, gc_scope: false, is_unsafe: false, unsafe_reason: None, unsafe_span: None,
+        is_pure: false, is_reactive: false, reactive_upgrades: [], is_replayable: false, replayable_span: None,
+        is_job: false, job_span: None, every: None, job_metadata: None, is_must_use: false, must_use_span: None,
+        maturity: None, maturity_span: None, kernel: None, is_inline: false, is_inline_always: false, inline_span: None,
+        is_sanitizer: false, scrub_tag: None, declared_effects: None, effect_via: None, state_requires: None, state_transition: None,
+        web_marker: None, pre: [], post: [], inline_foreign: None, undo: None, markers: [], compiler_generated: false,
+        body: [Stmt.Return(Val(~default), span)]
+    }
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:231
+fn build_converter_func(name: String, old_ty: Type, new_ty: Type, conv: Expr, span: Span) -> Func Never! {
+    param_name := "__old"
+    body := [Stmt]{}
+    if conv == .Lambda(lambda) && lambda.params.len() == 1 {
+        param_name = lambda.params[0].name
+        if lambda.body == {
+            .Expr(expression) -> &body.push(Stmt.Return(Val(~expression), span))
+            .Block(statements) -> body = ~statements
+        }
+    } else {
+        arg :: CallArg{convention: AccessConvention.Move, expr: Expr.Ident("__old", span), span: span, flags: CallArgFlags.default(), label: None, spread: false}
+        call :: Expr.CallValue{callee: ~conv, args: [arg], span: span}
+        &body.push(Stmt.Return(Val(call), span))
+    }
+    Func{
+        span: span, is_pub: false, is_comptime: false, is_package_pub: false, external_type: None,
+        name: name, name_span: span, meta: None, type_params: [], head_pattern: None,
+        params: [Param{name: param_name, name_span: span, ty: ~old_ty, ty_span: span, convention: AccessConvention.Move, root: false, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}],
+        return_type: Val(new_ty), return_type_span: Val(span), return_view_provenance: None, declared_return_view_provenance: None,
+        gc_return: false, diverges: false, gc_scope: false, is_unsafe: false, unsafe_reason: None, unsafe_span: None,
+        is_pure: false, is_reactive: false, reactive_upgrades: [], is_replayable: false, replayable_span: None,
+        is_job: false, job_span: None, every: None, job_metadata: None, is_must_use: false, must_use_span: None,
+        maturity: None, maturity_span: None, kernel: None, is_inline: false, is_inline_always: false, inline_span: None,
+        is_sanitizer: false, scrub_tag: None, declared_effects: None, effect_via: None, state_requires: None, state_transition: None,
+        web_marker: None, pre: [], post: [], inline_foreign: None, undo: None, markers: [], compiler_generated: false,
+        body: ^body
+    }
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:330
+enum DeclaredOp {
+    Rename(from: String, to: String)
+    Add(field: String, ty: String)
+    Remove(field: String)
+    Change(field: String, from_ty: String, to_ty: String, has_converter: Bool)
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:354
+fn is_decode_only(s: StructDef, reg: TraitRegistry) -> Bool Never! {
+    decode :: s.derives.any(fn(row) { row.0 == DECODE }) || reg.auto_decode.contains(s.name)
+    encode :: s.derives.any(fn(row) { row.0 == ENCODE }) || reg.auto_encode.contains(s.name)
+    decode && !encode
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:365
+pub fn check_schema_migrations(items: [Item], project_root: OSPath, reg: TraitRegistry) -> [Diagnostic] -[Env, FS.Read]> {
+    diags := [Diagnostic]{}
+    migrations := [String:[DeclaredOp]]{}
+    loop item in items {
+        if item == .Migration(m) {
+            if !migrations.contains(m.type_name) -> migrations[m.type_name] = []
+            loop op in m.ops {
+                declared :: if op == {
+                    .Rename{from, to, ..} -> DeclaredOp.Rename(from, to)
+                    .Add{field, ty, ..} -> DeclaredOp.Add(field, ty.name())
+                    .Remove{field, ..} -> DeclaredOp.Remove(field)
+                    .Change{field, from_ty, to_ty, converter, ..} -> DeclaredOp.Change(field, from_ty.name(), to_ty.name(), converter != None)
+                }
+                &migrations[m.type_name].push(declared)
+            }
+        }
+    }
+    conv_impls := [(String, String)]{}
+    loop item in items { if item == .ErrorConv(ec) -> &conv_impls.push((ec.from_ty, ec.to_ty)) }
+    loop item in items {
+        if item != .Struct(s) -> next
+        published :: s.is_published_schema || s.derives.any(fn(row) { row.0 == Syntax.MARKER_PUBLISHED_SCHEMA })
+        if !published -> next
+        prior :: load_snapshot(project_root, s.name) ?? next
+        span :: s.published_schema_span ?? s.name_span
+        new_fields := [String:String]{}
+        loop field in s.fields -> new_fields[field.name] = field.ty.name()
+        old_fields := [String:String]{}
+        loop field in prior.fields -> old_fields[field.name] = field.ty
+        ops :: migrations.get(s.name) ?? []
+        loop op in ops {
+            if op == {
+                .Remove(field) -> {
+                    if new_fields.contains(field) -> &diags.push(e0910_remove_still_present(s.name, field, span))
+                    else if !old_fields.contains(field) -> &diags.push(e0910_op_unknown_field(s.name, field, "remove", span))
+                }
+                .Add(field, ty) -> {
+                    if old_fields.contains(field) -> &diags.push(e0910_add_not_new(s.name, field, span))
+                    else if new_fields.get(field) == .Val(new_ty) {
+                        if new_ty != ty -> &diags.push(e0910_add_type_mismatch(s.name, field, ty, new_ty, span))
+                        else if is_decode_only(s, reg) {
+                            if s.fields.find(fn(f) { f.name == field }) == .Val(added_field) {
+                                if !is_decodable_ty(added_field.ty, reg) -> &diags.push(e0910_add_field_not_decodable(s.name, field, new_ty, span))
+                            }
+                        }
+                    } else -> &diags.push(e0910_op_unknown_field(s.name, field, "add", span))
+                }
+                .Change(field, from_ty, to_ty, _) -> {
+                    if (old_fields.get(field), new_fields.get(field)) == {
+                        (.Val(old_ty), .Val(new_ty)) -> {
+                            if old_ty != from_ty || new_ty != to_ty -> &diags.push(e0910_change_type_mismatch(s.name, field, from_ty, to_ty, old_ty, new_ty, span))
+                        }
+                        else -> &diags.push(e0910_op_unknown_field(s.name, field, "change", span))
+                    }
+                }
+                .Rename(..) -> {}
+            }
+        }
+        loop old_field in prior.fields {
+            if new_fields.contains(old_field.name) -> next
+            renamed :: ops.any(fn(op) { if op == { .Rename(from, to) -> from == old_field.name && (new_fields.get(to).map(fn(ty) { ty == old_field.ty }) ?? false); else -> false } })
+            removed :: ops.any(fn(op) { if op == { .Remove(field) -> field == old_field.name; else -> false } })
+            if renamed || removed -> next
+            &diags.push(e0910_dropped(s.name, old_field.name, prior.published_version, span))
+        }
+        loop f in s.fields {
+            old_ty :: old_fields.get(f.name) ?? next
+            new_ty :: f.ty.name()
+            if old_ty == new_ty -> next
+            change_op :: ops.find_map(fn(op) { if op == { .Change(field, from_ty, to_ty, has_converter) -> if field == f.name && from_ty == old_ty && to_ty == new_ty -> Val(has_converter) else -> None; else -> None } })
+            if change_op == {
+                .Val(true) -> {}
+                .Val(false) -> {
+                    has_impl :: conv_impls.any(fn(pair) { pair.0 == old_ty && pair.1 == new_ty })
+                    if !has_impl -> &diags.push(e0910_change_no_converter(s.name, f.name, old_ty, new_ty, span))
+                }
+                .None -> &diags.push(e0910_changed_type(s.name, f.name, old_ty, new_ty, span))
+            }
+        }
+        loop f in s.fields {
+            if old_fields.contains(f.name) -> next
+            from_rename :: ops.any(fn(op) { if op == { .Rename(_, to) -> to == f.name; else -> false } })
+            added :: ops.any(fn(op) { if op == { .Add(field, _) -> field == f.name; else -> false } })
+            if from_rename || added -> next
+            &diags.push(e0910_added_required(s.name, f.name, span))
+        }
+    }
+    diags
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:620
+fn e0910_dropped(type_name: String, field: String, version: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0910", "the published record `{type_name}` dropped `{field}` since version `{version}`, with no migration to bridge it", "`#PublishedSchema` pins a record's saved shape at release; old data written with `{field}` could no longer be read", "add `migration {type_name} {{ remove {field} }}` to delete it, `migration {type_name} {{ rename {field} -> <new> }}` if you renamed it, or bump the major version", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:640
+fn e0910_changed_type(type_name: String, field: String, old_ty: String, new_ty: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0910", "the published record `{type_name}` changed `{field}` from `{old_ty}` to `{new_ty}`, with no migration to bridge it", "`#PublishedSchema` pins a record's saved shape at release; old data stored at the previous type could no longer be read", "add `migration {type_name} {{ change {field}: {old_ty} -> {new_ty} via {{ (old) -> … }} }}`, or bump the major version", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:664
+fn e0910_change_no_converter(type_name: String, field: String, old_ty: String, new_ty: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0910", "the `change {field}: {old_ty} -> {new_ty}` migration on `{type_name}` has no converter", "a type change needs a way to turn an old value into a new one — old data already on disk is read through it", "add an inline `via {{ (old) -> … }}` to the `change` op, or declare `impl {old_ty} -> {new_ty} {{ … }}` in scope", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:687
+fn e0910_added_required(type_name: String, field: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0910", "the published record `{type_name}` added `{field}`, but old data has no value for it", "`#PublishedSchema` records already written without this field can't be read unless there's a default to fill it in", "add `migration {type_name} {{ add {field}: <Type> = <default> }}` to supply the value, or bump the major version", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:704
+fn e0910_remove_still_present(type_name: String, field: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0910", "the migration removes `{field}`, but `{type_name}` still has that field", "a `remove` op declares a field is gone, but the current `#PublishedSchema` struct still defines it", "delete the field from `struct {type_name}`, or drop the `remove {field}` line", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:718
+fn e0910_add_not_new(type_name: String, field: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0910", "the migration adds `{field}`, but `{type_name}` already had that field", "an `add` op declares a brand-new field, but the prior published snapshot already records this one", "drop the `add {field}` line; if its type changed, use `change` instead", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:732
+fn e0910_change_type_mismatch(type_name: String, field: String, decl_from: String, decl_to: String, real_from: String, real_to: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0910", "the `change {field}: {decl_from} -> {decl_to}` migration on `{type_name}` doesn't match the real shapes (`{real_from}` -> `{real_to}`)", "the `from` type must be the field's published type and the `to` type must be its current type", "write `change {field}: {real_from} -> {real_to} …`", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:754
+fn e0910_add_type_mismatch(type_name: String, field: String, decl_ty: String, real_ty: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0910", "the `add {field}: {decl_ty}` migration on `{type_name}` declares a type the field doesn't have (`{real_ty}`)", "the type in an `add` op must match the field's type in the struct", "write `add {field}: {real_ty} = <default>`", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:777
+fn e0910_add_field_not_decodable(type_name: String, field: String, ty: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0910", "the `add {field}: {ty}` migration on `{type_name}` needs `{ty}` to support `Decode`", "`{type_name}` derives `Decode` but not `Encode` — it only ever reads data back, so every field, including one added by a migration, must itself be decodable", "derive `Decode` on `{ty}`, or give `{field}` a decodable type", Val(span))
+}
+// Rust: crates/jet-sema/src/Sema/SchemaMigration.rs:794
+fn e0910_op_unknown_field(type_name: String, field: String, verb: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0910", "the `{verb} {field}` migration on `{type_name}` names a field that doesn't exist", "a migration op must reference a field of this record — either its published shape or its current one", "check the spelling of `{field}`, or remove the `{verb}` op", Val(span))
+}

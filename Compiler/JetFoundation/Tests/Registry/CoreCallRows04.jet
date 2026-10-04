@@ -1,0 +1,29 @@
+use jet_foundation.AST.[Expr, Type, Item]
+use jet_foundation.Diagnostics.Span
+use jet_foundation.MIR.MirCopyFact
+use jet_foundation.Syntax
+use jet_codegen.Codegen.Context.[build_cx_items, ExternFn]
+use jet_codegen.Codegen.TIR.[TExprKind, TLocal]
+use jet_codegen.Codegen.TIR.Lower.LowerEnv
+use jet_codegen.Codegen.TIR.Lower.MethodCalls.lower_method_call
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:5205-5211
+#Test("html_text_projection_materializes_the_checked_string") {
+    cx :: build_cx_items([Item]{}, "", "html.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("projection")
+    env.bind("html", TLocal.user("html"), Val(Type.Named("HTML")))
+    span :: Span.new(0, 1)
+    value :: lower_method_call(Expr.Ident("html", span), "text", span, [], [], [], Val("HTML"), None, Val(Type.String), false, cx, &env, None)
+    assert(value.ty == Type.String)
+    assert(if value.kind == { .Clone(_, fact) -> fact == MirCopyFact.Materialize else -> false })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:5685-5702
+#Test("clock_system_retains_the_host_helper_and_checked_type") {
+    cx :: build_cx_items([Item]{}, "", "clock.jet", None, [String:ExternFn]{}, "")
+    env := LowerEnv.new("clock")
+    span :: Span.new(0, 1)
+    value :: lower_method_call(Expr.Ident(Syntax.CLOCK_TYPE, span), "system", span, [], [], [], None, None, Val(Type.Named(Syntax.CLOCK_TYPE)), false, cx, &env, None)
+    assert(value.ty == Type.Named(Syntax.CLOCK_TYPE))
+    assert(if value.kind == { .HostCall(.Helper{helper, kind, args}) -> helper == "{cx.root_prefix}jet_std_clock_system" && kind == .ClockSystem && args.is_empty() else -> false })
+}

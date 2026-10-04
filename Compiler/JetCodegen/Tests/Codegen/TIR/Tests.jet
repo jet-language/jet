@@ -1,0 +1,889 @@
+use JetCodegen.Codegen.TIR.*
+use JetCodegen.Codegen.TIR.Tests.*
+use JetSema.AST.[Type, Expr, Item, Pattern, Stmt, CtValue, BinOp, Measure, LoadedModule, ProgramBundle, DevtoolsRegistry, CFfi, NameLedger]
+use JetFoundation.Diagnostics.Span
+use JetFoundation.CompilerStack
+use JetFoundation.CoreModuleExports
+use JetFoundation.Layout.TargetLayout
+use JetFoundation.MIR.[MirProgram, MirOperation, MirArtifactRequest, MirArtifactTarget, MirArtifactKind, MirArtifactBuildMode]
+use JetSema.Syntax.*
+use JetLexer.Lexer.lex
+use JetParser.Parser.[parse, parse_for_check_with_source]
+use JetCodegen.Codegen.MIREval.install_mir_bridge
+use JetCodegen.Codegen.[core_source_sig_map, core_ui_rust_type_name]
+use JetCodegen.Codegen.TIR.TirToMirTypes.*
+use JetSema.Comptime.MirBridge.MirFragmentNominalFacts
+use JetSema.CoreSources.core_source_text
+use JetPkgModel.Package.mask_inline_package_source
+use JetSema.Collections.iter_ty
+use std.mem
+use std.collections.Set
+use JetSema.Sema.[check_bundle, CompileMode]
+use JetCodegen.Codegen.Context.populate_cx_from_bundle
+use JetCodegen.Codegen.MIRRust.[MirRustExecutionConfig, MirRustConfig, MirRustTarget, emit_mir_program]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:106
+// Direct gate helpers sit below the public compiler-stack funnels. Hop through
+// the same re-entrant boundary before recursive structural lowering.
+pub fn covers(src: String, fn_name: String) -> Bool {
+    return CompilerStack.run_on_compiler_stack(fn() {
+        (toks, lex_diags) :: lex(src)
+        assert(lex_diags.is_empty(), "lex errors: {lex_diags:?}")
+        prog :: parse(toks).expect("parse failed")
+        cx :: build_cx(prog, src, "test.jet")
+        f :: prog.items.iter().find_map(fn(i) {
+            if i == { .Func(f) -> { if f.name == fn_name { return Val(f) } }; else -> {} }
+            return None
+        }).expect("no fn {fn_name}")
+        return tir_covers(f, cx)
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:132
+pub fn refusal_for(src: String, fn_name: String) -> String {
+    return CompilerStack.run_on_compiler_stack(fn() {
+        (toks, lex_diags) :: lex(src)
+        assert(lex_diags.is_empty(), "lex errors: {lex_diags:?}")
+        prog :: parse(toks).expect("parse failed")
+        cx :: build_cx(prog, src, "test.jet")
+        f :: prog.items.iter().find_map(fn(i) {
+            if i == { .Func(f) -> { if f.name == fn_name { return Val(f) } }; else -> {} }
+            return None
+        }).expect("no fn {fn_name}")
+        assert(!tir_covers(f, cx), "fn {fn_name} is covered, so there is no refusal to report")
+        return refusal.describe(cx)
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:236
+pub fn checked_bundle(src: String) -> ProgramBundle {
+    (toks, lex_diags) :: lex(src)
+    assert(lex_diags.is_empty(), "lex errors: {lex_diags:?}")
+    prog := parse(toks).expect("parse failed")
+    bundle := ProgramBundle{
+        entry: 0, project_root: OSPath.from("."),
+        modules: [LoadedModule{
+            path: OSPath.from("test.jet"), display: "test.jet", alias: "main",
+            imports: mem.take(&prog.imports), items: mem.take(&prog.items),
+            script_body: mem.take(&prog.script_body), block_spans: mem.take(&prog.block_spans),
+            source: src, web_target_ceiling: prog.web_target_ceiling,
+            pub_file: prog.pub_file, no_prelude: prog.no_prelude,
+            default_target: prog.default_target, html_path: prog.html_path,
+            policy_declarations: prog.policy_declarations,
+            user_policy_declarations: prog.user_policy_declarations,
+            rule_facts: mem.take(&prog.rule_facts)
+        }],
+        devtools_registry: DevtoolsRegistry.default(), parse_teaching: [],
+        used_core: Set.new(), ffi_callback_fns: Set.new(), cffi: CFfi.default(),
+        comptime_inputs: [], name_ledger: NameLedger.default(), layer_ceiling: None,
+        inferred_layer: RuntimeLayer.Core, web_partitions: [:],
+        web_partition_enforced: false, web_partition_report: None, dep_roots: [:],
+        package_guarantees: Default.default(), program_allocator: Default.default(),
+        active_os: OSTarget.host(), build_facts: Default.default(), edition: "2027"
+    }
+    // Install the production MIR comptime bridge; fragments need Check, not Run.
+    install_mir_bridge()
+    diags :: check_bundle(&bundle, CompileMode.Check)
+    assert(!diags.iter().any(fn(d) { d.severity == JetFoundation.Diagnostics.Severity.Error }), "sema errors: {diags:?}")
+    return bundle
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:300
+pub fn covers_after_sema(src: String, fn_name: String) -> Bool {
+    return CompilerStack.run_on_compiler_stack(fn() {
+        bundle :: checked_bundle(src)
+        module :: bundle.modules[bundle.entry]
+        cx := build_cx_items(module.items, src, "test.jet", None, [:], bundle.edition)
+        populate_cx_from_bundle(&cx, bundle, bundle.entry)
+        f :: module.items.iter().find_map(fn(i) {
+            if i == { .Func(f) -> { if f.name == fn_name { return Val(f) } }; else -> {} }
+            return None
+        }).expect("no fn {fn_name}")
+        return tir_covers(f, cx)
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:325
+pub fn refusal_after_sema(src: String, fn_name: String) -> String {
+    return CompilerStack.run_on_compiler_stack(fn() {
+        bundle :: checked_bundle(src)
+        module :: bundle.modules[bundle.entry]
+        cx := build_cx_items(module.items, src, "test.jet", None, [:], bundle.edition)
+        populate_cx_from_bundle(&cx, bundle, bundle.entry)
+        f :: module.items.iter().find_map(fn(i) {
+            if i == { .Func(f) -> { if f.name == fn_name { return Val(f) } }; else -> {} }
+            return None
+        }).expect("no fn {fn_name}")
+        covered :: tir_covers(f, cx)
+        detail :: refusal.describe(cx)
+        return "covered={covered}; core_imports={cx.core_imports:?}; {detail}"
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:356
+pub fn lower_after_sema(src: String, fn_name: String) -> TFunc {
+    return CompilerStack.run_on_compiler_stack(fn() {
+        bundle :: checked_bundle(src)
+        module :: bundle.modules[bundle.entry]
+        cx := build_cx_items(module.items, src, "test.jet", None, [:], bundle.edition)
+        populate_cx_from_bundle(&cx, bundle, bundle.entry)
+        f :: module.items.iter().find_map(fn(item) {
+            if item == { .Func(f) -> { if f.name == fn_name { return Val(f) } }; else -> {} }
+            return None
+        }).expect("no fn {fn_name}")
+        return lower_func(f, cx)
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:784
+pub fn covers_method(src: String, type_name: String, method: String) -> Bool {
+    return CompilerStack.run_on_compiler_stack(fn() {
+        (toks, lex_diags) :: lex(src)
+        assert(lex_diags.is_empty(), "lex errors: {lex_diags:?}")
+        prog :: parse(toks).expect("parse failed")
+        cx :: build_cx(prog, src, "test.jet")
+        methods :: prog.items.iter().find_map(fn(i) {
+            if i == {
+                .Struct(s) -> { if s.name == type_name { return Val(s.methods) } }
+                .Enum(e) -> { if e.name == type_name { return Val(e.methods) } }
+                else -> {}
+            }
+            return None
+        }).expect("no type {type_name}")
+        f :: methods.iter().find(fn(m) { m.name == method }).expect("no method {type_name}{method}")
+        return tir_covers_method(f, type_name, cx)
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:893
+pub fn covers_with_mem(src: String, fn_name: String) -> Bool {
+    return covers_with_core_import(src, fn_name, "mem", "core.mem")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:897
+pub fn covers_with_core_import(src: String, fn_name: String, alias: String, module: String) -> Bool {
+    return CompilerStack.run_on_compiler_stack(fn() {
+        (toks, lex_diags) :: lex(src)
+        assert(lex_diags.is_empty(), "lex errors: {lex_diags:?}")
+        prog :: parse(toks).expect("parse failed")
+        cx := build_cx(prog, src, "test.jet")
+        cx.core_imports.insert(alias, module)
+        f :: prog.items.iter().find_map(fn(i) {
+            if i == { .Func(f) -> { if f.name == fn_name { return Val(f) } }; else -> {} }
+            return None
+        }).expect("no fn {fn_name}")
+        return tir_covers(f, cx)
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:962
+pub fn covers_with_foreign(src: String, fn_name: String, foreign: [(String, String)]) -> Bool {
+    return CompilerStack.run_on_compiler_stack(fn() {
+        (toks, lex_diags) :: lex(src)
+        assert(lex_diags.is_empty(), "lex errors: {lex_diags:?}")
+        prog :: parse(toks).expect("parse failed")
+        cx := build_cx(prog, src, "test.jet")
+        for (ty, module) in foreign { cx.foreign_types.insert(ty, module) }
+        f :: prog.items.iter().find_map(fn(i) {
+            if i == { .Func(f) -> { if f.name == fn_name { return Val(f) } }; else -> {} }
+            return None
+        }).expect("no fn {fn_name}")
+        return tir_covers(f, cx)
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1762
+pub fn stable_loop_probe(src: String) -> ([String: USize], USize) {
+    (mir, rust) :: emitted_rust(src)
+    cursors: [String: USize] := [:]
+    for function in mir.functions {
+        count: USize := 0
+        for block in function.blocks {
+            for instruction in block.instructions {
+                if instruction.operation == { .LoopIterInit(..) -> { count += 1 }; else -> {} }
+            }
+        }
+        cursors.insert(function.name, count)
+    }
+    return (cursors, non_scalar_clone_count(rust))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1786
+pub fn emitted_rust(src: String) -> (MirProgram, String) {
+    bundle :: checked_bundle(src)
+    request :: MirArtifactRequest.new(MirArtifactTarget.RustAot, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev)
+    (mir, artifact) :: lower_checked_mir_program_for(bundle, request).unwrap_or_else(fn(err) { panic("probe failed to lower: {err:?}") })
+    mir.validate().unwrap_or_else(fn(err) { panic("probe failed validation: {err}") })
+    execution := MirRustExecutionConfig.for_artifact(artifact)
+    execution.emit_types = false
+    execution.emit_runtime = false
+    rust :: emit_mir_program(mir, MirRustConfig{
+        target: TargetLayout.host(), target_kind: MirRustTarget.Native,
+        root_prefix: "", execution: execution
+    })
+    return (mir, rust)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:6
+#Test("fact_channel_prefers_exact_literal_bounds_over_carrier_range") {
+    expr :: TExpr{ty: Type.InlineRange{base: Type.Int, lo: 1, hi: 10}, kind: TExprKind.IntLit(7, None)}
+    assert(expr.fact_channel().integer_bounds == Val(TIntegerBounds.exact(7)))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:22
+#Test("outcome_cost_facts_distinguish_carriers_and_fast_paths") {
+    int_expr :: fn() { TExpr{ty: Type.Int, kind: TExprKind.IntLit(1, None)} }
+    result_ty :: Type.Result{ok: Type.Int, err: Type.String}
+    explicit :: TExpr{ty: result_ty, kind: TExprKind.Ok(int_expr())}
+    assert(explicit.fact_channel().cost == Val(TCostFact.semantic(TCostKind.OutcomeConstruction)))
+    call :: TExpr{ty: result_ty, kind: TExprKind.Call{name: "load", type_args: [], args: []}}
+    assert(call.fact_channel().cost == Val(TCostFact.semantic(TCostKind.OutcomeConstruction)))
+    fast :: TExpr{ty: Type.Option(Type.Int), kind: TExprKind.BuiltinMethod{
+        recv: TExpr{ty: Type.Named("Bytes"), kind: TExprKind.Unit},
+        op: TBuiltinOp.ByteBufferMethod{method: "next"}, args: []
+    }}
+    assert(fast.fact_channel().cost == Val(TCostFact.semantic(TCostKind.OutcomeConstruction)))
+    fallback :: TExpr{ty: Type.Int, kind: TExprKind.OrFallback{value: fast, fallback: TOrFallback.Value(int_expr())}}
+    sites := []
+    collect_cost_expr(fallback, "run", Span.new(0, 0), 0, &sites)
+    assert(sites.len() == 1)
+    assert(sites[0].kind == TCostKind.OutcomeConstruction)
+    assert(sites[0].state == TCostState.OptimizerRemoved)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:125
+#Test("shield_block_is_covered_by_tir") {
+    assert(covers("fn guarded() {{ #Shield {{ value :: 1 }} }}", "guarded"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:159
+#Test("gate_refusal_names_an_uncovered_parameter_type") {
+    detail :: refusal_for("fn build(b: BuildContext) -> Int {{\n    return 1\n}}\n", "build")
+    assert(detail.contains("the parameter type `BuildContext`"), "refusal must name the parameter type, got: {detail}")
+    assert(detail.contains("test.jet:1:13"), "refusal must carry file:line:column, got: {detail}")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:178
+#Test("gate_refusal_names_the_innermost_uncovered_expression") {
+    detail :: refusal_for("fn run() {{\n    total :: mystery\n}}\n", "run")
+    assert(detail.contains("the expression `mystery`"), "refusal must name the expression, not the binding around it, got: {detail}")
+    assert(detail.contains("test.jet:2:14"), "refusal must carry file:line:column, got: {detail}")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:191
+#Test("compiler_fact_pattern_fold_does_not_claim_user_enums") {
+    span :: Span.new(0, 0)
+    fact_value :: Expr.ComptimeName{name: "method_maturity", span: span,
+        value: Val(CtValue.Enum{type_name: "Maturity", variant: "Experimental", args: []})}
+    pattern :: Pattern.Variant{variant: "Experimental", bindings: [], leading_dot: true, span: span}
+    assert(fold_typed_fact_enum_pattern(fact_value, pattern) == Val(true))
+    user_value :: Expr.EnumLit{type_name: "Maturity", variant: "Experimental", variant_span: None,
+        args: [], leading_dot: false, span: span}
+    assert(fold_typed_fact_enum_pattern(user_value, pattern).is_none(), "a user enum must not be folded as a compiler fact")
+    assert(fold_typed_fact_enum_equality(BinOp.Eq, user_value, user_value).is_none(), "the binary route must preserve the same user-enum ownership wall")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:383
+#Test("loaded_core_source_signatures_include_transitive_files_calls") {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:384
+    fn loaded_module(alias: String, source: String) -> LoadedModule {
+        (tokens, diagnostics) :: lex(source)
+        assert(diagnostics.is_empty(), "lex errors: {diagnostics:?}")
+        program := parse(tokens).expect("parse failed")
+        return LoadedModule{
+            path: OSPath.from("{alias}.jet"), display: "{alias}.jet", source: source, alias: alias,
+            imports: mem.take(&program.imports), items: mem.take(&program.items),
+            script_body: mem.take(&program.script_body), block_spans: mem.take(&program.block_spans),
+            web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
+            no_prelude: program.no_prelude, default_target: program.default_target,
+            html_path: program.html_path, policy_declarations: program.policy_declarations,
+            user_policy_declarations: program.user_policy_declarations, rule_facts: mem.take(&program.rule_facts)
+        }
+    }
+    files :: CoreModuleExports.core_source_module("core.files").expect("core.files source module")
+    files_path :: CoreModuleExports.core_source_module("core.files.path").expect("core.files.path source module")
+    modules :: [loaded_module("caller", "use core.files.path.[Path]\nfn run() {{}}"),
+        loaded_module(files_path.alias, "use core.files as files"),
+        loaded_module(files.alias, "pub fn read_lines(path: String) -> [String] {{ [String]{{}} }}\npub fn write_lines(path: String, lines: [String]) {{}}")]
+    bundle :: ProgramBundle{
+        entry: 0, project_root: OSPath.new(), modules: modules,
+        devtools_registry: DevtoolsRegistry.default(), parse_teaching: [], used_core: Set.new(),
+        ffi_callback_fns: Set.new(), cffi: CFfi.default(), comptime_inputs: [], name_ledger: NameLedger.default(),
+        layer_ceiling: None, inferred_layer: RuntimeLayer.Core, web_partitions: [:],
+        web_partition_enforced: false, web_partition_report: None, dep_roots: [:],
+        package_guarantees: Default.default(), program_allocator: Default.default(),
+        active_os: OSTarget.host(), build_facts: Default.default(), edition: "2026"
+    }
+    signatures :: core_source_sig_map(bundle)
+    read :: signatures.get(("core.files", "read_lines")).expect("loaded core.files.read_lines signature")
+    assert(read.params.len() == 1)
+    assert(read.params[0].1 == Type.String)
+    assert(read.return_type == Val(Type.List(Type.String)))
+    write :: signatures.get(("core.files", "write_lines")).expect("loaded core.files.write_lines signature")
+    assert(write.params.len() == 2)
+    assert(write.params[0].1 == Type.String)
+    assert(write.params[1].1 == Type.List(Type.String))
+    assert(write.return_type.is_none())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:467
+#Test("default_parameter_call_sites_are_tir_covered") {
+    CompilerStack.run_on_compiler_stack(fn() {
+        install_mir_bridge()
+        source :: include_str("Examples/features/basics/default_refs.jet") // GATE #4494: compile-time source inclusion.
+        bundle :: checked_bundle(source)
+        module :: bundle.modules[bundle.entry]
+        cx :: build_cx_items(module.items, source, "default_refs.jet", None, [:], bundle.edition)
+        function :: module.items.iter().find_map(fn(item) {
+            if item == { .Func(function) -> { if function.name == "run" { return Val(function) } }; else -> {} }
+            return None
+        }).expect("default_refs must define run")
+        assert(tir_covers(function, cx))
+        _ :: lower_func(function, cx)
+    })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:499
+#Test("explicit_run_is_lowered_as_the_canonical_run_function") {
+    source :: "fn run() {{ print(\"script\") }}\nfn helper() {{}}\n"
+    bundle :: checked_bundle(source)
+    module :: bundle.modules[bundle.entry]
+    assert(module.script_body.is_empty())
+    runs :: module.items.iter().filter_map(fn(item) {
+        if item == { .Func(function) -> { if function.name == "run" { return Val(function) } }; else -> {} }
+        return None
+    }).collect()
+    assert(runs.len() == 1, "the explicit run must be the sole ordinary run")
+    run :: runs[0]
+    assert(run.params.is_empty(), "run must have no parameters")
+    assert(!run.is_job && !run.is_unsafe && !run.is_reactive)
+    assert(run.return_type == Val(Type.Result{ok: Type.Named(INTERNAL_UNIT_TYPE), err: Type.Named(TYPE_NEVER)}))
+    prints :: run.body.iter().filter(fn(stmt) {
+        return if stmt == { .Expr(.Call(call)) -> call.name == "print"; else -> false }
+    }).count()
+    assert(prints == 1, "the explicit run operation must enter run exactly once")
+    helpers :: module.items.iter().filter_map(fn(item) {
+        if item == { .Func(function) -> { if function.name == "helper" { return Val(function) } }; else -> {} }
+        return None
+    }).collect()
+    assert(helpers.len() == 1, "same-line declarations stay file-wide")
+    assert(helpers[0].span.start >= run.span.end)
+    assert(helpers[0].body.is_empty())
+    lowered :: lower_after_sema(source, "run")
+    assert(lowered.name == "run")
+    assert(lowered.kind == TFuncKind.TopLevel)
+    assert(lowered.ret == Val(Type.Result{ok: Type.Named(INTERNAL_UNIT_TYPE), err: Type.Named(TYPE_ERR)}), "canonical fallible unit return must survive TIR lowering")
+    markers :: lowered.body.iter().filter(fn(stmt) { return if stmt == { .SourceSpan(_) -> true; else -> false } }).count()
+    assert(markers == 1, "TIR must retain one source statement marker for the explicit run operation")
+    printed :: lowered.body.iter().filter_map(fn(stmt) {
+        if stmt == { .ExprStmt(expr) -> { if expr.kind == { .Print(value) -> { return Val(value) }; else -> {} } }; else -> {} }
+        return None
+    }).collect()
+    assert(printed.len() == 1, "the explicit run operation must lower exactly once")
+    assert(printed[0].kind == TExprKind.StrLit([TStrPart.Lit("script")]))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:595
+#Test("comptime_float_and_string_constants_lower_to_typed_literals") {
+    install_mir_bridge()
+    lowered :: lower_after_sema("\nfn run() {{\n    narrow :: prep {{ F32{{16777217.0}} }}\n    wide :: prep {{ Float{{2.5}} }}\n    label :: prep {{ \"ready\" }}\n\n    print(narrow)\n    print(wide)\n    print(label)\n}}\n", "run")
+    literals :: lowered.body.iter().filter_map(fn(stmt) {
+        if stmt == { .Let(init: init, ..) -> { return Val(init) }; else -> {} }
+        return None
+    }).collect()
+    assert(literals.len() == 3)
+    assert(literals[0].ty == Type.Float32)
+    assert(literals[0].kind == TExprKind.FloatLit(16777216.0))
+    assert(literals[1].ty == Type.Float)
+    assert(literals[1].kind == TExprKind.FloatLit(2.5))
+    assert(literals[2].ty == Type.String)
+    assert(literals[2].kind == TExprKind.StrLit([TStrPart.Lit("ready")]))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:642
+#Test("regex_find_all_counts_chain_preserves_receiver_result") {
+    lowered :: lower_after_sema("fn scan(text: String) {{\n    counts :: Regex{{\"[A-Za-z]+\"}}.find_all(text).counts()\n}}\n", "scan")
+    init :: lowered.body.iter().find_map(fn(stmt) {
+        if stmt == { .Let(name: name, init: init, ..) -> { if name == "counts" { return Val(init) } }; else -> {} }
+        return None
+    }).expect("counts binding should lower as a let")
+    // Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:658
+    fn strip_ownership(expr: TExpr) -> TExpr {
+        if expr.kind == {
+            .Clone(inner, _) | .ExplicitCopy(inner) | .MaterializeView(inner) -> { return strip_ownership(inner) }
+            else -> { return expr }
+        }
+    }
+    if strip_ownership(init).kind == {
+        .BuiltinMethod(op: .Counts, ..) -> {}
+        .BuiltinMethod(..) -> panic("counts chain lowered to another builtin")
+        .MethodCall(..) -> panic("counts chain remained a user method call")
+        .CoreCall(..) -> panic("counts chain lowered to a core call")
+        .Call(..) -> panic("counts chain lowered to a plain call")
+        .InlineBlock(_) -> panic("counts chain lowered inside an inline block")
+        else -> panic("counts chain lowered to an unrelated expression")
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:681
+#Test("refined_collection_results_have_exact_tir_types") {
+    src :: "fn run() {{\n    folded := [1, 2].fold(0.5, (a: Decimal, n: Int) -> a + 0.5)\n    reduced := [1, 2].reduce(0.5, (a: Decimal, n: Int) -> a + 0.5)\n    scanned := [1, 2].scan(0.5, (a: Decimal, n: Int) -> a + 0.5)\n    mapped := [1, 2].map((n: Int) -> 1.5)\n    filtered := [\"1.5\", \"bad\"].filter_map((s: String) -> Decimal(s))\n    flattened := [1, 2].flat_map((n: Int) -> [1.5])\n    grouped := [1, 2].group_by((n: Int) -> n % 2 == 0)\n    counted := [1, 2].count_by((n: Int) -> n % 2)\n    parallel := [1, 2].para_fold(() -> 0.5, (a: Decimal, n: Int) -> a + 0.5, (left: Decimal, right: Decimal) -> left + right)\n    grouped_string_get := [1, 2].group_by((n: Int) -> \"x\").get(\"x\")\n    counted_string_get := [1, 2].count_by((n: Int) -> \"x\").get(\"x\")\n}}\n"
+    lowered :: lower_after_sema(src, "run")
+    lets :: lowered.body.iter().filter(fn(stmt) { return if stmt == { .Let(..) -> true; else -> false } }).collect()
+    actual :: lets.iter().filter_map(fn(stmt) {
+        if stmt == { .Let(init: init, ..) -> { return Val(init.ty) }; else -> {} }
+        return None
+    }).collect()
+    decimal :: Type.Named(TYPE_DECIMAL)
+    assert(actual == [decimal, decimal, iter_ty(decimal), Type.List(decimal), iter_ty(decimal), Type.List(decimal),
+        Type.Map{key: Type.Bool, key_span: None, value: Type.List(Type.Int)},
+        Type.Map{key: Type.Int, key_span: None, value: Type.Int}, decimal,
+        Type.Option(Type.List(Type.Int)), Type.Option(Type.Int)])
+    // Non-Let statements must not shift the final two GetMap pins.
+    assert(if lets[9] == { .Let(init: init, ..) -> if init.kind == { .BuiltinMethod(op: .GetMap, ..) -> true; else -> false }; else -> false })
+    assert(if lets[10] == { .Let(init: init, ..) -> if init.kind == { .BuiltinMethod(op: .GetMap, ..) -> true; else -> false }; else -> false })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:809
+#Test("covers_simple_arithmetic_fn") {
+    assert(covers("fn add(a: Int, b: Int) -> Int {{\n return (a + b)\n}}\n", "add"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:817
+#Test("covers_print_and_string_param") {
+    assert(covers("fn greet(s: String) {{\n print(\"hi {{s}}\")\n}}\n", "greet"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:825
+#Test("covers_if_else_chain") {
+    src :: "fn f(n: Int) -> Int {{\n if (n > 0) {{\n return 1\n }} else {{\n return 0\n }}\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:831
+#Test("covers_bare_or_return_in_unit_fn") {
+    src :: "fn f(xs: [Int]) {{\n x := xs.first() ?? return\n print(x)\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:840
+#Test("covers_struct_lit_with_string_field_value") {
+    src :: "struct Person {{\n    name: String\n}}\nfn make(n: String) -> Person {{\n    return Person{{ name: n }}\n}}\n"
+    assert(covers(src, "make"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:859
+#Test("covers_is_empty_bool") {
+    src :: "fn f(xs: [Int]) {{\n if xs.is_empty() {{\n print(\"e\")\n }}\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:868
+#Test("covers_generic_fn") {
+    assert(covers("fn id<T>(x: T) -> T {{\n return x\n}}\n", "id"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:878
+#Test("covers_generic_struct_fn") {
+    src :: "struct Pair<T> {{\n first: T\n second: T\n}}\nfn mk<T>(a: T, b: T) -> Pair<T> {{\n return Pair<T>{{first: a, second: b}}\n}}\n"
+    assert(covers(src, "mk"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:919
+#Test("covers_core_tasks_spawn_alias") {
+    assert(covers_with_core_import("use core.tasks as tasks\nfn run() {{\n _ :: tasks.spawn(() -> 42)\n}}\n", "run", "tasks", "core.tasks"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:929
+#Test("covers_core_math_pi_field") {
+    assert(covers_with_core_import("fn angle(x: Float) -> Float {{\n return -math.pi / x\n}}\n", "angle", "math", "core.math"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:941
+#Test("covers_core_math_pi_field_after_sema") {
+    src :: "use core.math as math\nfn angle(x: Float) -> Float {{\n return -math.pi / x\n}}\nfn run() {{ print(angle(2.0)) }}\n"
+    if !covers_after_sema(src, "angle") { panic("angle was uncovered after sema: {refusal_after_sema(src, "angle")}") }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:952
+#Test("covers_float_is_finite_after_sema") {
+    src :: "fn checked(x: Float) -> Bool {{\n return x.is_finite()\n}}\nfn run() {{ print(checked(1.0)) }}\n"
+    assert(covers_after_sema(src, "checked"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:985
+#Test("covers_unqualified_foreign_struct_literal") {
+    src :: "fn mk() {{\n    n :: Note{{ text: \"hi\" }}\n    print(n.text)\n}}\n"
+    assert(covers_with_foreign(src, "mk", [("Note", mangle("notes"))]))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1005
+#Test("covers_unsafe_fn_with_ptr_ops") {
+    src :: "use core.mem\n#Unsafe(\"reads register\")\nfn read_reg(addr: Int) -> Int {{\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}}\n"
+    assert(covers_with_mem(src, "read_reg"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1013
+#Test("covers_unsafe_block_and_address_of") {
+    src :: "use core.mem\nfn run() {{\n cell :: 7\n addr :: mem.address_of(cell)\n #Unsafe(\"live\") {{\n p :: mem.Ptr<Int>.from_addr(addr)\n seen :: mem.volatile_read(p)\n print(\"{{seen}}\")\n }}\n}}\n"
+    assert(covers_with_mem(src, "run"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1021
+#Test("covers_list_param") {
+    assert(covers("fn sum(xs: [Int]) -> Int {{\n return 0\n}}\n", "sum"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1028
+#Test("covers_fixed_list_param_and_field") {
+    mk :: fn(src: String) {
+        (toks, _) :: lex(src)
+        prog :: parse(toks).expect("parse")
+        return build_cx(prog, src, "test.jet")
+    }
+    fl :: Type.FixedList{elem: Type.Int, len: Measure.literal("length", 3)}
+    assert(is_subset_param_ty(fl, mk("fn f(){{}}")))
+    assert(is_covered_collection_ty(fl, mk("fn f(){{}}")))
+    assert(collection_elem_covered(fl, mk("fn f(){{}}")))
+    src :: "struct Grid {{ row: [Int#3] }}\nfn f(){{}}"
+    assert(is_covered_struct_ty(Type.Named("Grid"), mk(src)))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1057
+#Test("rejects_list_of_tuple_with_unsupported_nested_option") {
+    mk :: fn(src: String) {
+        (toks, _) :: lex(src)
+        prog :: parse(toks).expect("parse")
+        return build_cx(prog, src, "test.jet")
+    }
+    good_tuple :: Type.Tuple([("x", Type.Int), ("y", Type.Float)])
+    good_list :: Type.List(good_tuple)
+    cx :: mk("fn f(){{}}")
+    assert(is_covered_collection_ty(good_list, cx))
+    tuple :: Type.Tuple([("ok", Type.Int), ("bad", Type.List(Type.Option(Type.Int)))])
+    list :: Type.List(tuple)
+    if list == {
+        .List(inner) -> { assert(!collection_elem_covered(inner, cx)) }
+        else -> panic("test list is constructed as Type.List")
+    }
+    assert(!is_covered_collection_ty(list, cx))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1090
+#Test("covers_option_param") {
+    assert(covers("fn f(p: Int?) -> Int {{\n return 0\n}}\n", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1097
+#Test("rejects_list_of_option_param_still") {
+    assert(!covers("fn f(xs: [Int?]) -> Int {{\n return 0\n}}\n", "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1105
+#Test("rejects_method_call_in_body") {
+    src :: "struct C {{ n: Int }}\nimpl C {{\n fn bumped(self) -> Int {{\n return (self.n + 1)\n }}\n}}\nfn use_it(c: Int) -> Int {{\n return c\n}}\nfn caller() -> Int {{\n x :: C{{ n: 1 }}\n return x.bumped()\n}}\n"
+    assert(!covers(src, "caller"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1114
+#Test("covers_struct_param_and_scalar_field_read") {
+    src :: "struct Point {{ x: Int\n y: Int }}\nfn sum_pt(p: Point) -> Int {{\n return (p.x + p.y)\n}}\nfn origin() -> Point {{\n return Point{{ x: 0, y: 0 }}\n}}\n"
+    assert(covers(src, "sum_pt"))
+    assert(covers(src, "origin"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1123
+#Test("covers_nested_struct") {
+    src :: "struct Inner {{ v: Int }}\nstruct Outer {{ inner: Inner\n label: Int }}\nfn deep(o: Outer) -> Int {{\n return (o.inner.v + o.label)\n}}\n"
+    assert(covers(src, "deep"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1131
+#Test("covers_recursive_boxed_struct") {
+    src :: "struct Node {{ value: Int\n next: Node }}\nfn val(n: Node) -> Int {{\n return n.value\n}}\n"
+    assert(covers(src, "val"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1141
+#Test("covers_struct_with_list_field") {
+    src :: "struct Tally {{ items: [Int] }}\nfn first_tag(b: Tally) -> Int {{\n return 0\n}}\n"
+    assert(covers(src, "first_tag"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1150
+#Test("covers_generic_struct_literal") {
+    src :: "struct Pair<T> {{ first: T\n second: T }}\nfn mk() -> Pair<Int> {{\n return Pair<Int>{{ first: 1, second: 2 }}\n}}\n"
+    assert(covers(src, "mk"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1161
+#Test("covers_range_loop") {
+    src :: "fn f() {{\n loop n in 1..3 {{\n print(n)\n }}\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1167
+#Test("covers_range_loop_with_step") {
+    src :: "fn f() {{\n loop n in 0..10, 2 {{\n print(n)\n }}\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1173
+#Test("covers_infinite_loop_with_break") {
+    src :: "fn f() {{\n x :: 0\n loop {{\n x = (x + 1)\n if (x > 3) {{\n break\n }}\n }}\n print(x)\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1180
+#Test("covers_while_form") {
+    src :: "fn f() {{\n x :: 0\n loop x < 3 {{\n x = (x + 1)\n }}\n print(x)\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1186
+#Test("covers_labeled_loops") {
+    src :: "fn f() {{\n outer :: loop {{\n loop n in 1..3 {{\n if (n == 2) {{\n break(outer)\n }}\n }}\n break\n }}\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1192
+#Test("covers_collection_loop_over_literal") {
+    src :: "fn f() {{\n loop x in [1, 2, 3] {{\n print(x)\n }}\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1202
+#Test("covers_enum_unit_match") {
+    src :: "enum Light {{\n Red\n Yellow\n Green\n}}\nfn next(light: Light) -> Light {{\n if light == {{\n .Red -> {{ return Light.Yellow }}\n .Yellow -> {{ return Light.Green }}\n .Green -> {{ return Light.Red }}\n }}\n}}\n"
+    assert(covers(src, "next"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1209
+#Test("covers_enum_payload_or_and_wildcard") {
+    src :: "enum Conn {{\n Active(Int)\n Reconnecting(Int)\n Idle(Int)\n Closed\n}}\nfn d(c: Conn) -> String {{\n if c == {{\n .Active(id) | .Reconnecting(id) -> {{ return \"live:{{id}}\" }}\n .Idle(_) -> {{ return \"idle\" }}\n .Closed -> {{ return \"closed\" }}\n }}\n return \"unknown\"\n}}\n"
+    assert(covers(src, "d"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1216
+#Test("covers_enum_payload_range_pattern") {
+    src :: "enum HTTP {{\n Good(Int)\n Fail(Int)\n}}\nfn classify(r: HTTP) -> String {{\n if r == {{\n .Good(200..299) -> {{ return \"ok\" }}\n .Good(_) -> {{ return \"other\" }}\n .Fail(_) -> {{ return \"err\" }}\n }}\n return \"unknown\"\n}}\n"
+    assert(covers(src, "classify"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1223
+#Test("covers_arm_head_range_switch") {
+    src :: "fn grade(score: Int) -> String {{\n if score == {{\n 0..59 -> {{ return \"F\" }}\n 60..100 -> {{ return \"P\" }}\n else -> {{ return \"?\" }}\n }}\n}}\n"
+    assert(covers(src, "grade"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1230
+#Test("covers_mixed_switch_non_ident_subject") {
+    variant :: "enum Light {{ Red Green Yellow }}\nfn pick() -> Light {{ return Light.Red }}\nfn classify() -> Int {{\n if pick() == {{\n .Red -> {{ return 1 }}\n .Green -> {{ return 2 }}\n else -> {{ return 0 }}\n }}\n}}\n"
+    assert(covers(variant, "classify"))
+    payload :: "struct Holder {{ val: Int? }}\nfn f(h: Holder) -> Int {{\n if h.val == {{\n .Val(c) -> {{ return c }}\n else -> {{ return 0 }}\n }}\n}}\n"
+    assert(covers(payload, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1242
+#Test("covers_enum_local_and_literal_in_main") {
+    src :: "enum Light {{\n Red\n Yellow\n Green\n}}\nfn label(l: Light) -> String {{\n if l == {{\n .Red -> {{ return \"r\" }}\n .Yellow -> {{ return \"y\" }}\n .Green -> {{ return \"g\" }}\n }}\n}}\nfn run() {{\n start :: Light.Red\n print(label(start))\n}}\n"
+    assert(covers(src, "run"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1249
+#Test("covers_string_payload_enum") {
+    src :: "enum Msg {{\n Text(String)\n Ping\n}}\nfn show(m: Msg) -> String {{\n if m == {{\n .Text(s) -> {{ return s }}\n .Ping -> {{ return \"ping\" }}\n }}\n return \"\"\n}}\n"
+    assert(covers(src, "show"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1258
+#Test("covers_recursive_enum") {
+    src :: "enum Tree {{\n Leaf(Int)\n Node(Tree)\n}}\nfn depth(t: Tree) -> Int {{\n if t == {{\n .Leaf(n) -> {{ return n }}\n .Node(inner) -> {{ return 1 }}\n }}\n return 0\n}}\n"
+    assert(covers(src, "depth"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1267
+#Test("covers_recursive_enum_construction_with_clone_box") {
+    src :: "enum Tree {{\n Leaf(Int)\n Node(Tree)\n}}\nfn wrap(inner: Tree) -> Tree {{\n return Tree.Node(inner)\n}}\n"
+    assert(covers(src, "wrap"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1279
+#Test("covers_struct_payload_enum") {
+    src :: "struct Point {{ x: Int\n y: Int }}\nenum Shape {{\n Dot(Point)\n Line(Int)\n}}\nfn area(s: Shape) -> Int {{\n if s == {{\n .Dot(p) -> {{ return p.x }}\n .Line(n) -> {{ return n }}\n }}\n return 0\n}}\n"
+    assert(covers(src, "area"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1289
+#Test("covers_collection_payload_enum") {
+    src :: "enum Holder {{\n Nums([Int])\n One(Int)\n}}\nfn mk(xs: [Int]) -> Holder {{\n return Holder.Nums(xs)\n}}\n"
+    assert(covers(src, "mk"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1298
+#Test("rejects_range_switch_over_non_ident_subject") {
+    // The range switch repeats its textual subject; admitting calls would evaluate
+    // them twice per arm. Non-ident subjects without range arms remain covered.
+    src :: "fn pick() -> Int {{ return 5 }}\nfn f() -> String {{\n if pick() == {{\n 0 -> {{ return \"zero\" }}\n 1..10 -> {{ return \"low\" }}\n else -> {{ return \"mid\" }}\n }}\n}}\n"
+    assert(!covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1327
+#Test("covers_list_literal_and_param") {
+    src :: "fn build() -> [Int] {{\n return [1, 2, 3]\n}}\nfn accept(xs: [Int]) -> Int {{\n return 0\n}}\n"
+    assert(covers(src, "build"))
+    assert(covers(src, "accept"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1335
+#Test("covers_map_literal_and_param") {
+    src :: "fn empty() -> [String:Int] {{\n return []\n}}\nfn one() -> [String:Int] {{\n return [\"a\": 1]\n}}\nfn accept(m: [String:Int]) -> Int {{\n return 0\n}}\n"
+    assert(covers(src, "empty"))
+    assert(covers(src, "one"))
+    assert(covers(src, "accept"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1344
+#Test("covers_single_binding_iteration") {
+    src :: "fn f(xs: [Int]) {{\n loop x in xs {{\n print(x)\n }}\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1351
+#Test("covers_two_binding_map_iteration") {
+    src :: "fn f(m: [String:Int]) {{\n loop (k, v) in m {{\n print(\"{{k}}={{v}}\")\n }}\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1358
+#Test("covers_method_call_collection_iteration") {
+    chars :: "fn f(s: String) {{\n loop c in s.chars() {{\n print(c)\n }}\n}}\n"
+    assert(covers(chars, "f"))
+    split :: "fn f(s: String) {{\n loop w in s.split(\",\") {{\n print(w)\n }}\n}}\n"
+    assert(covers(split, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1369
+#Test("covers_optional_binding_if_condition") {
+    src :: "fn f(x: Int?) {{\n if x == .Val(n) {{\n print(\"{{n}}\")\n }}\n}}\n"
+    assert(covers(src, "f"))
+    isnone :: "fn f(x: Int?) {{\n if x == .None {{\n print(\"none\")\n }}\n}}\n"
+    assert(covers(isnone, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1379
+#Test("covers_user_enum_variant_if_let_condition") {
+    src :: "enum Msg {{ Ping(Int) Pong }}\nfn f(m: Msg) -> Int {{\n if m == .Ping(n) {{\n return n\n }} else {{\n return -1\n }}\n}}\n"
+    assert(covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1387
+#Test("rejects_list_of_option_param") {
+    src :: "fn f(xs: [Int?]) -> Int {{\n return 0\n}}\n"
+    assert(!covers(src, "f"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1402
+#Test("covers_struct_param_with_method_caller") {
+    src :: "struct Calc {{\n base: Int\n fn add(self, x: Int) -> Int {{\n return (self.base + x)\n }}\n}}\nfn peek(c: Calc) -> Int {{\n return c.base\n}}\n"
+    assert(covers(src, "peek"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1411
+#Test("builtin_method_names_are_excluded") {
+    for name in ["len", "push", "pop", "get", "map", "filter", "each", "find", "sort", "join", "to_string", "clone", "raw", "snapshot", "new", "is_nan", "chars", "trim", "keys", "values"] {
+        assert(is_intercepted_method_name(name), "{name} should be excluded (AST builtin/special lowering)")
+    }
+    assert(!is_intercepted_method_name("bumped"))
+    assert(!is_intercepted_method_name("combine"))
+    assert(!is_intercepted_method_name("code"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1453
+#Test("covers_user_method_shadowing_builtin_name") {
+    src :: "struct Tally {{\n items: [Int]\n fn get(self) -> Int {{\n return 1\n }}\n fn len(self) -> Int {{\n return 2\n }}\n}}\n"
+    (toks, _) :: lex(src)
+    prog :: parse(toks).expect("parse failed")
+    cx :: build_cx(prog, src, "test.jet")
+    sp :: Span{start: 0, end: 0}
+    mk :: fn(method: String) {
+        return Expr.MethodCall{receiver: Expr.Ident("b", sp), method: method, method_span: sp,
+            owner_type_args: [], type_args: [], args: [], recv_type: Val(TYPE_TALLY),
+            resolved_ret: None, operator_rhs: None, checked_widen: false}
+    }
+    locals: Set<String> := Set.new()
+    locals.insert("b")
+    for m in ["get", "len"] {
+        if mk(m) == {
+            .MethodCall(receiver: receiver, method: method, args: args, recv_type: recv_type, ..) -> {
+                assert(method_call_in_subset(receiver, method, args, recv_type, None, cx, locals), "user method `{m}` shadowing a builtin name should be covered")
+            }
+            else -> {}
+        }
+    }
+    if mk("push") == {
+        .MethodCall(receiver: receiver, method: method, args: args, recv_type: recv_type, ..) -> {
+            assert(!method_call_in_subset(receiver, method, args, recv_type, None, cx, locals), "a builtin name with no user method must stay excluded")
+        }
+        else -> {}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1518
+#Test("covers_instance_method_body") {
+    src :: "struct Cell {{\n n: Int\n fn value(self) -> Int {{\n return self.n\n }}\n}}\n"
+    assert(covers_method(src, "Cell", "value"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1526
+#Test("covers_mut_self_method_body") {
+    src :: "struct Acc {{\n total: Int\n fn doubled(&self) -> Int {{\n return (self.total + self.total)\n }}\n}}\n"
+    assert(covers_method(src, "Acc", "doubled"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1533
+#Test("covers_static_constructor") {
+    src :: "struct Cell {{\n n: Int\n fn make(v: Int) -> Cell {{\n return Cell{{ n: v }}\n }}\n}}\n"
+    assert(covers_method(src, "Cell", "make"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1540
+#Test("covers_enum_instance_method") {
+    src :: "enum Dir {{\n North\n South\n fn code(self) -> Int {{\n if self == {{\n .North -> {{ return 0 }}\n .South -> {{ return 1 }}\n }}\n }}\n}}\n"
+    assert(covers_method(src, "Dir", "code"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1547
+#Test("covers_self_reassignment_method") {
+    src :: "struct Acc {{\n n: Int\n fn reset(&self) {{\n self = Acc{{ n: 0 }}\n }}\n}}\n"
+    assert(covers_method(src, "Acc", "reset"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1556
+#Test("covers_self_field_assign_method") {
+    src :: "struct Acc {{\n n: Int\n fn bump(&self) {{\n self.n = self.n + 1\n }}\n}}\n"
+    assert(covers_method(src, "Acc", "bump"))
+    compound :: "struct Acc {{\n n: Int\n fn bump(&self) {{\n self.n += 1\n }}\n}}\n"
+    assert(covers_method(compound, "Acc", "bump"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1566
+#Test("covers_generic_method") {
+    src :: "struct Box<T> {{\n v: T\n fn get(self) -> T {{\n return self.v\n }}\n}}\n"
+    assert(covers_method(src, "Box", "get"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1574
+#Test("rejects_intercepted_static_name") {
+    assert(is_intercepted_method_name("new"))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1587
+#Test("covers_fallible_return_and_try") {
+    src :: "fn f(x: Int) -> Int Err! {{\n if x == 0 {{\n return Err(\"bad\")\n }}\n return Ok(x)\n}}\nfn g(x: Int) -> Int Err! {{\n n :: f(x)\n return Ok((n + 1))\n}}\nfn run() {{}}\n"
+    assert(covers_after_sema(src, "f"))
+    assert(covers_after_sema(src, "g"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1603
+#Test("compiler_owned_core_enum_rows_reuse_checked_source_payloads") {
+    source :: CoreModuleExports.core_source_module("core.http").expect("Core HTTP source module")
+    body :: core_source_text(source.module).expect("Core HTTP body")
+    source_for_parse :: mask_inline_package_source(body).expect("Core HTTP package header").0
+    (tokens, lex_diags) :: lex(source_for_parse)
+    assert(lex_diags.is_empty(), "Core HTTP lex errors: {lex_diags:?}")
+    (program, _) :: parse_for_check_with_source(tokens, source_for_parse).expect("Core HTTP source parses")
+    method := program.items.into_iter().find_map(fn(item) {
+        if item == { .Enum(definition) -> { if definition.name == "Method" { return Val(definition) } }; else -> {} }
+        return None
+    }).expect("Core HTTP Method declaration")
+    path :: source.path.strip_suffix(".jet").expect("Core source path suffix")
+    identity :: "<corelib>/{path}::Method"
+    method.name = identity
+    checked_nominals := MirFragmentNominalFacts.default()
+    checked_nominals.foreign_modules.insert(identity, source.alias)
+    checked_nominals.enums.insert(identity, method)
+    declarations :: lower_declarations_from_items_with_boxed_edges([], "", TargetLayout.host(), Set.new(), Set.new(), Set.new(), Val(checked_nominals))
+    method :: declarations.type_defs.iter().find(fn(definition) { definition.key == "Method" }).expect("compiler-owned Core Method type row")
+    if method.kind == {
+        .Enum(variants: variants, ..) -> {
+            expected :: CoreModuleExports.core_enum_variants("Method").expect("Core Method variant export names")
+            assert(variants.iter().map(fn(variant) { variant.name }).collect() == expected)
+            custom :: variants.iter().find(fn(variant) { variant.name == "Custom" }).expect("Method.Custom variant")
+            assert(custom.payload == TirVariantPayload.Single(Type.String))
+            assert(variants.iter().filter(fn(variant) { variant.name != "Custom" }).all(fn(variant) { variant.payload == TirVariantPayload.Unit }), "only Method.Custom has a payload")
+        }
+        else -> panic("Core Method must be an enum row")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1682
+#Test("compiler_owned_default_err_is_a_struct_row") {
+    declarations :: lower_declarations_from_items([], "", TargetLayout.host())
+    err :: declarations.type_defs.iter().find(fn(ty) { ty.key == TYPE_ERR }).expect("default Err must be a compiler-owned type row")
+    kind :: "{err.kind:?}"
+    assert(kind.starts_with("Struct"), "default Err must be a struct, got {kind}")
+    for field in ["message", "code", "cause"] {
+        assert(kind.contains(field), "default Err missing field {field} in {kind}")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1706
+#Test("compiler_owned_core_ui_registry_has_nominal_rows") {
+    declarations :: lower_declarations_from_items([], "", TargetLayout.host())
+    for entry in CoreModuleExports.core_modules().iter().filter(fn(entry) { entry.module == "core.ui" || entry.module == "core.ui.host" }) {
+        for (name, _) in entry.type_exports {
+            if core_ui_rust_type_name(name).is_some() {
+                assert(declarations.type_defs.iter().any(fn(row) { row.key == name }), "Core UI type {name} must have a canonical TIR declaration row")
+            }
+        }
+    }
+    shortcut :: declarations.type_defs.iter().find(fn(row) { row.key == "UIShortcut" }).expect("UIShortcut must have a canonical declaration row")
+    if shortcut.kind == {
+        .Struct(fields: fields, ..) -> { assert(fields.iter().map(fn(field) { field.name }).collect() == ["key", "modifiers"]) }
+        else -> panic("UIShortcut must lower as a struct row")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tests.rs:1744
+#Test("mir_lowers_default_err_return") {
+    CompilerStack.run_on_compiler_stack(fn() {
+        src :: "fn f(x: Int) -> Int Err! {{\n if x == 0 {{\n return Err(\"bad\")\n }}\n return Ok(x)\n}}\nfn run() {{}}\n"
+        bundle :: checked_bundle(src)
+        request :: MirArtifactRequest.new(MirArtifactTarget.RustAot, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev)
+        _ :: lower_checked_mir_program_for(bundle, request).unwrap_or_else(fn(err) { panic("default Err return failed to lower to MIR: {err:?}") })
+    })
+}

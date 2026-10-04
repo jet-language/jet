@@ -1,1425 +1,533 @@
-// PORT-PENDING 0531 crates-jet-codegen-src-codegen-tir-tir-to-mir-expr-slice-3163: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:3163-4583
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         TExprKind::BuiltinMethod { recv, op, args } => {
-//RS             if let TBuiltinOp::OptionZip { elem_ty, .. } = op {
-//RS                 return lower_option_zip(ctx, expr, recv, args, elem_ty);
-//RS             }
-//RS             if matches!(op, TBuiltinOp::Zip { .. }) {
-//RS                 return lower_zip(ctx, expr, recv, op, args);
-//RS             }
-//RS             if matches!(op, TBuiltinOp::Unzip { .. }) {
-//RS                 return lower_unzip(ctx, expr, recv);
-//RS             }
-//RS             if matches!(op, TBuiltinOp::Indexes) {
-//RS                 return lower_indexes(ctx, expr, recv, args, &carrier);
-//RS             }
-//RS             if matches!(
-//RS                 op,
-//RS                 TBuiltinOp::Indexed { .. } | TBuiltinOp::IterSplit { .. }
-//RS             ) {
-//RS                 return lower_tuple_builtin(ctx, expr, recv, op, args, &carrier);
-//RS             }
-//RS             if matches!(op, TBuiltinOp::ListMinMax { .. }) {
-//RS                 return lower_list_min_max(ctx, expr, recv, op, args, &carrier);
-//RS             }
-//RS             // #4009: `to_string()` on a non-numeric receiver (String, Bool, ...)
-//RS             // is the value's Display rendering, the same build numeric
-//RS             // `to_string` (TNumericOp::ToShow) and string interpolation use.
-//RS             if matches!(op, TBuiltinOp::ToString) {
-//RS                 let receiver = ctx.lower_child(recv)?;
-//RS                 return lower_direct_string_format(
-//RS                     ctx,
-//RS                     receiver,
-//RS                     &recv.ty,
-//RS                     &crate::AST::StrFormat::Display,
-//RS                     &expr.ty,
-//RS                 );
-//RS             }
-//RS             let (mut receiver, receiver_place) = if matches!(op, TBuiltinOp::AtomicMethod { .. }) {
-//RS                 if let Some(place) = lower_receiver_place(ctx, recv, MirAccess::Write)? {
-//RS                     let receiver = ctx.emit(
-//RS                         "atomic-receiver-place",
-//RS                         Some(recv.ty.clone()),
-//RS                         MirOperation::ReadPlace(place),
-//RS                     )?;
-//RS                     (receiver, None)
-//RS                 } else {
-//RS                     lower_builtin_receiver(ctx, recv, op.needs_mut_receiver_place())?
-//RS                 }
-//RS             } else {
-//RS                 lower_builtin_receiver(ctx, recv, op.needs_mut_receiver_place())?
-//RS             };
-//RS             let mut lowered_args = lower_values(ctx, args)?;
-//RS             if matches!(op, TBuiltinOp::ByteBufferWithCapacity) {
-//RS                 receiver = lower_builtin_native_int(ctx, receiver, &recv.ty)?;
-//RS             }
-//RS             if matches!(op, TBuiltinOp::ListReplace | TBuiltinOp::MatchGroup) {
-//RS                 let Some(arg) = args.first() else {
-//RS                     return Err(ctx.error(ctx.span(), "checked builtin requires an index operand"));
-//RS                 };
-//RS                 lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
-//RS             }
-//RS             if matches!(op, TBuiltinOp::GetList | TBuiltinOp::DequeGet) {
-//RS                 let Some(arg) = args.first() else {
-//RS                     return Err(ctx.error(ctx.span(), "checked builtin requires an index operand"));
-//RS                 };
-//RS                 lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
-//RS             }
-//RS             if matches!(op, TBuiltinOp::Repeat) {
-//RS                 let Some(arg) = args.first() else {
-//RS                     return Err(ctx.error(ctx.span(), "checked builtin requires a repeat count"));
-//RS                 };
-//RS                 lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
-//RS             }
-//RS             let route_receiver_ty = super::builtin_dispatch_ty(recv.ty.clone());
-//RS             let route = op
-//RS                 .prelude_route(&route_receiver_ty, &expr.ty, &carrier)
-//RS                 .map_err(|error| {
-//RS                     ctx.error(ctx.span(), format!("builtin method {op:?}: {error:?}"))
-//RS                 })?;
-//RS             if matches!(op, TBuiltinOp::MapFromKeys)
-//RS                 && matches!(recv.ty.without_user_tags(), Type::FixedList { .. })
-//RS             {
-//RS                 let mut operands = vec![mir_value_arg_with_access(
-//RS                     ctx,
-//RS                     receiver,
-//RS                     ctx.call_value_access(receiver, false)?,
-//RS                 )];
-//RS                 operands[0].widen_fixed_to_list = true;
-//RS                 for value in lowered_args {
-//RS                     operands.push(mir_value_arg_with_access(
-//RS                         ctx,
-//RS                         value,
-//RS                         ctx.call_value_access(value, false)?,
-//RS                     ));
-//RS                 }
-//RS                 let call = ctx.intern_prelude_route(route)?;
-//RS                 return ctx.emit(
-//RS                     "map-from-fixed-keys",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-//RS                         call,
-//RS                         args: operands,
-//RS                         owner_type_args: Vec::new(),
-//RS                         type_args: Vec::new(),
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             let call = ctx.intern_prelude_route(route)?;
-//RS             ctx.emit(
-//RS                 "builtin-method",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
-//RS                     call,
-//RS                     receiver,
-//RS                     receiver_place,
-//RS                     args: lowered_args,
-//RS                     aggregate_fields: None,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         TExprKind::CoreCall {
-//RS             record,
-//RS             args,
-//RS             source_span: _,
-//RS             type_args,
-//RS             widen_to_vec,
-//RS             data_plan,
-//RS             fallibility,
-//RS         } => {
-//RS             if record.module == "core.reflect" && record.member == "of" {
-//RS                 let [arg] = args.as_slice() else {
-//RS                     return Err(ctx.error(
-//RS                         ctx.span(),
-//RS                         "reflection MIR projection requires one value operand",
-//RS                     ));
-//RS                 };
-//RS                 let value = ctx.lower_core_call_arg(arg, 0, record, false)?.value;
-//RS                 let value_ty = ctx.mir_type(&arg.ty)?;
-//RS                 let type_identity = value_ty
-//RS                     .nominal_name()
-//RS                     .map(str::to_owned)
-//RS                     .unwrap_or_else(|| value_ty.display_name());
-//RS                 let source_path = ctx.reflect_paths.get(&type_identity).or_else(|| {
-//RS                     ctx.nominal_identities
-//RS                         .iter()
-//RS                         .find_map(|(source, identity)| {
-//RS                             (identity == &type_identity)
-//RS                                 .then(|| ctx.reflect_paths.get(source))
-//RS                                 .flatten()
-//RS                         })
-//RS                 });
-//RS                 let path = source_path
-//RS                     .cloned()
-//RS                     .or_else(|| ctx.nominal_identities.get(&type_identity).cloned())
-//RS                     .unwrap_or_else(|| type_identity.clone());
-//RS                 let type_name = source_path
-//RS                     .map(|path| {
-//RS                         path.rsplit_once('.')
-//RS                             .map_or(path.as_str(), |(_, leaf)| leaf)
-//RS                             .to_owned()
-//RS                     })
-//RS                     .unwrap_or_else(|| type_identity.clone());
-//RS                 let display = lower_direct_string_format(
-//RS                     ctx,
-//RS                     value,
-//RS                     &arg.ty,
-//RS                     &crate::AST::StrFormat::Display,
-//RS                     &Type::String,
-//RS                 )?;
-//RS                 let owner = ctx.field_owner_id_for_type(&arg.ty)?;
-//RS                 let fields = match ctx
-//RS                     .type_defs
-//RS                     .iter()
-//RS                     .find(|definition| definition.id == owner)
-//RS                 {
-//RS                     Some(jet_foundation::MIR::MirTypeDef {
-//RS                         kind: jet_foundation::MIR::MirTypeDefKind::Struct { fields, .. },
-//RS                         ..
-//RS                     }) => fields.clone(),
-//RS                     _ => Vec::new(),
-//RS                 };
-//RS                 let fields = fields
-//RS                     .into_iter()
-//RS                     .filter(|field| !field.computed)
-//RS                     .map(|field| {
-//RS                         let stored_ty = ctx.checked_field_type(&arg.ty, &field.name)?;
-//RS                         let stored_mir = ctx.mir_type(&stored_ty)?;
-//RS                         let field_value = ctx.emit_mir_type(
-//RS                             "reflect-field",
-//RS                             Some(stored_mir.clone()),
-//RS                             MirOperation::Field {
-//RS                                 base: value,
-//RS                                 field: field.id,
-//RS                             },
-//RS                         )?;
-//RS                         let field_type_identity = stored_mir
-//RS                             .nominal_name()
-//RS                             .map(str::to_owned)
-//RS                             .unwrap_or_else(|| stored_mir.display_name());
-//RS                         let source_path =
-//RS                             ctx.reflect_paths.get(&field_type_identity).or_else(|| {
-//RS                                 ctx.nominal_identities
-//RS                                     .iter()
-//RS                                     .find_map(|(source, identity)| {
-//RS                                         (identity == &field_type_identity)
-//RS                                             .then(|| ctx.reflect_paths.get(source))
-//RS                                             .flatten()
-//RS                                     })
-//RS                             });
-//RS                         let field_path = source_path
-//RS                             .cloned()
-//RS                             .or_else(|| ctx.nominal_identities.get(&field_type_identity).cloned())
-//RS                             .unwrap_or_else(|| field_type_identity.clone());
-//RS                         let field_type_name = source_path
-//RS                             .map(|path| {
-//RS                                 path.rsplit_once('.')
-//RS                                     .map_or(path.as_str(), |(_, leaf)| leaf)
-//RS                                     .to_owned()
-//RS                             })
-//RS                             .unwrap_or_else(|| field_type_identity.clone());
-//RS                         Ok(MirReflectField {
-//RS                             name: field.name,
-//RS                             type_name: field_type_name,
-//RS                             path: field_path,
-//RS                             value: field_value,
-//RS                         })
-//RS                     })
-//RS                     .collect::<Result<Vec<_>, LowerError>>()?;
-//RS                 return ctx.emit(
-//RS                     "reflect-of",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::ReflectOf {
-//RS                         type_name,
-//RS                         path,
-//RS                         display,
-//RS                         fields,
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             if record.module == "core.http" && record.member == "router" {
-//RS                 if !args.is_empty() {
-//RS                     return Err(ctx.error(
-//RS                         ctx.span(),
-//RS                         "HTTPRouter constructor MIR projection received arguments",
-//RS                     ));
-//RS                 }
-//RS                 let route = ctx.intern_core_route(record, fallibility)?;
-//RS                 return ctx.emit(
-//RS                     "http-router-new",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-//RS                         call: route,
-//RS                         args: Vec::new(),
-//RS                         owner_type_args: Vec::new(),
-//RS                         type_args: Vec::new(),
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             if record.module == "core.web" && record.member == "openapi" {
-//RS                 let receiver = args.first().ok_or_else(|| {
-//RS                     ctx.error(
-//RS                         ctx.span(),
-//RS                         "HTTPRouter OpenAPI MIR projection requires one router operand",
-//RS                     )
-//RS                 })?;
-//RS                 if args.len() != 1 {
-//RS                     return Err(ctx.error(
-//RS                         ctx.span(),
-//RS                         "HTTPRouter OpenAPI MIR projection received unexpected arguments",
-//RS                     ));
-//RS                 }
-//RS                 let receiver = ctx.lower_core_call_arg(receiver, 0, record, false)?.value;
-//RS                 let route = ctx.intern_core_route(record, fallibility)?;
-//RS                 return ctx.emit(
-//RS                     "http-router-openapi",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::HandleMethod {
-//RS                         frame_schedule: None,
-//RS                         frame_schedule_derivation: None,
-//RS                         call: route,
-//RS                         receiver,
-//RS                         args: Vec::new(),
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             if record.module == "core.http.server" && record.member == "json" {
-//RS                 let [status, value] = args.as_slice() else {
-//RS                     return Err(ctx.error(
-//RS                         ctx.span(),
-//RS                         "HTTP server JSON MIR projection requires status and body operands",
-//RS                     ));
-//RS                 };
-//RS                 let status = ctx.lower_core_call_arg(status, 0, record, false)?;
-//RS                 let encoded = TExpr {
-//RS                     ty: Type::Named(crate::Syntax::TYPE_DATA.to_string()),
-//RS                     kind: value.kind.clone(),
-//RS                 };
-//RS                 let body = lower_serde_encode(ctx, &encoded, value)?;
-//RS                 let mut body = mir_value_arg(ctx, body);
-//RS                 body.source_index = Some(1);
-//RS                 let call = MirCoreCall::from_record(record).id;
-//RS                 let route = ctx.intern_core_route(record, fallibility)?;
-//RS                 let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
-//RS                 return ctx.emit(
-//RS                     "http-server-json",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::CoreCall {
-//RS                         call,
-//RS                         route,
-//RS                         args: vec![status, body],
-//RS                         type_args: Vec::new(),
-//RS                         fallibility: lowered_fallibility,
-//RS                         data_plan: None,
-//RS                     },
-//RS                 );
-//RS             }
-//RS             let data_plan = data_plan
-//RS                 .as_ref()
-//RS                 .map(|plan| lower_data_plan(ctx, plan))
-//RS                 .transpose()?;
-//RS             let call = MirCoreCall::from_record(record).id;
-//RS             fn fmt_exact_int(ty: &Type) -> bool {
-//RS                 match ty.without_user_tags() {
-//RS                     Type::Int | Type::IntN { .. } => true,
-//RS                     Type::InlineRange { base, .. } => fmt_exact_int(base),
-//RS                     Type::Named(name) if name == "Int" => true,
-//RS                     Type::Tagged { inner, .. } => fmt_exact_int(inner),
-//RS                     _ => false,
-//RS                 }
-//RS             }
-//RS             // Core decimal/grouped signatures accept both Float and exact Int,
-//RS             // but their legacy CoreCall route is Float-only. Keep the checked
-//RS             // source type at this seam and reuse the canonical format route so
-//RS             // AOT/JIT receive the exact-int ABI instead of a Float call with a
-//RS             // JetInt operand.
-//RS             let route = if record.module == "core.text.fmt"
-//RS                 && matches!(record.member, "decimal" | "grouped")
-//RS                 && args.first().is_some_and(|arg| fmt_exact_int(&arg.ty))
-//RS             {
-//RS                 let format = if record.member == "decimal" {
-//RS                     crate::AST::StrFormat::Fixed(0)
-//RS                 } else {
-//RS                     crate::AST::StrFormat::Grouped(0)
-//RS                 };
-//RS                 let mut format_route =
-//RS                     super::string_format_route(&format, &args[0].ty, &expr.ty, &carrier)?;
-//RS                 // Keep the CoreCall semantic member for the interpreter/comptime
-//RS                 // dispatcher; only the native symbol and ABI come from the
-//RS                 // typed format route.
-//RS                 if record.member == "decimal" {
-//RS                     format_route.member = "decimal".to_string();
-//RS                 }
-//RS                 ctx.intern_prelude_route(format_route)?
-//RS             } else {
-//RS                 ctx.intern_core_route(record, fallibility)?
-//RS             };
-//RS             let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
-//RS             let lowered = args
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .map(|(index, arg)| {
-//RS                     let widen = widen_to_vec.get(index).copied().unwrap_or(false);
-//RS                     let mut lowered = ctx.lower_core_call_arg(arg, index, record, widen)?;
-//RS                     if record.signature.borrow_mask.get(index).copied() == Some(false)
-//RS                         && matches!(arg.ty.without_user_tags(), Type::Int)
-//RS                     {
-//RS                         lowered.value = lower_builtin_native_int(ctx, lowered.value, &arg.ty)?;
-//RS                     }
-//RS                     Ok(lowered)
-//RS                 })
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             let type_args = if !type_args.is_empty() {
-//RS                 type_args
-//RS                     .iter()
-//RS                     .map(|ty| ctx.mir_type(ty))
-//RS                     .collect::<Result<Vec<_>, _>>()?
-//RS             } else if record.module.is_empty() && record.member == "query" {
-//RS                 let row = args
-//RS                     .first()
-//RS                     .and_then(|arg| match &arg.ty {
-//RS                         Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-//RS                             Some((**inner).clone())
-//RS                         }
-//RS                         Type::Apply { name, args } if name == "DataStream" && args.len() == 1 => {
-//RS                             Some(args[0].clone())
-//RS                         }
-//RS                         _ => None,
-//RS                     })
-//RS                     .ok_or_else(|| {
-//RS                         ctx.error(
-//RS                             ctx.span(),
-//RS                             "list query MIR projection needs a retained row type",
-//RS                         )
-//RS                     })?;
-//RS                 vec![ctx.mir_type(&row)?]
-//RS             } else if record.module == "core.encoding.csv" && record.member == "query" {
-//RS                 let row = csv_query_row_type(&expr.ty).ok_or_else(|| {
-//RS                     ctx.error(
-//RS                         ctx.span(),
-//RS                         "CSV query MIR projection needs Result<Query<T>, List<FieldError>>",
-//RS                     )
-//RS                 })?;
-//RS                 vec![ctx.mir_type(&row)?]
-//RS             } else if (record.module == "core.data"
-//RS                 && matches!(
-//RS                     record.member,
-//RS                     "load"
-//RS                         | "load_default"
-//RS                         | "file"
-//RS                         | "file_member"
-//RS                         | "url"
-//RS                         | "database"
-//RS                         | "value"
-//RS                         | "snapshot"
-//RS                 ))
-//RS                 || (record.module == "core.data.loader" && record.member == "stream")
-//RS                 || (record.module == "core.data.stream"
-//RS                     && matches!(record.member, "next" | "collect"))
-//RS             {
-//RS                 let row = if record.module == "core.data.stream"
-//RS                     && matches!(record.member, "next" | "collect")
-//RS                 {
-//RS                     // A stream row may itself be a list.  For `collect`, the
-//RS                     // result's outer list is the materialized output, not the
-//RS                     // stream's retained `T`; read the handle first.
-//RS                     args.first()
-//RS                         .and_then(|arg| data_row_type(&arg.ty))
-//RS                         .or_else(|| data_row_type(&expr.ty))
-//RS                 } else {
-//RS                     data_row_type(&expr.ty)
-//RS                         .or_else(|| args.first().and_then(|arg| data_row_type(&arg.ty)))
-//RS                 }
-//RS                 .ok_or_else(|| {
-//RS                     ctx.error(
-//RS                         ctx.span(),
-//RS                         "typed data CoreCall MIR projection needs one retained row type",
-//RS                     )
-//RS                 })?;
-//RS                 vec![ctx.mir_type(&row)?]
-//RS             } else if (record.module == "core.args" && matches!(record.member, "decode" | "merge"))
-//RS                 || (record.module == "core.sys" && record.member == "decode")
-//RS                 || (record.module == "core.db" && record.member == "decode")
-//RS                 || (record.module == "core.encoding.json"
-//RS                     && record.member == "decode"
-//RS                     && matches!(&expr.ty, Type::Result { err, .. }
-//RS                         if **err == Type::List(Box::new(Type::Named("FieldError".to_string())))))
-//RS             {
-//RS                 let target = match &expr.ty {
-//RS                     Type::Result { ok, .. } => ok.as_ref(),
-//RS                     _ => {
-//RS                         return Err(ctx.error(
-//RS                             ctx.span(),
-//RS                             "typed shape decode/merge MIR projection needs Result<T, List<FieldError>>",
-//RS                         ));
-//RS                     }
-//RS                 };
-//RS                 vec![ctx.mir_type(target)?]
-//RS             } else {
-//RS                 Vec::new()
-//RS             };
-//RS 
-//RS             if (record.module == "core.sys" && record.member == "stop")
-//RS                 || (record.module == "core.process" && record.member == "exit")
-//RS             {
-//RS                 ctx.emit_explicit_stop_cleanups()?;
-//RS             }
-//RS             // Exact Int uses the typed format ABI (`jet_fmt_decimal_int` /
-//RS             // `jet_fmt_grouped_int`). That row is not the Float CoreCall
-//RS             // record, so project it as a Prelude call instead of pairing the
-//RS             // two signatures on one CoreCall instruction.
-//RS             if record.module == "core.text.fmt"
-//RS                 && matches!(record.member, "decimal" | "grouped")
-//RS                 && args.first().is_some_and(|arg| fmt_exact_int(&arg.ty))
-//RS             {
-//RS                 return ctx.emit(
-//RS                     "core-call-fmt-int",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-//RS                         call: route,
-//RS                         args: lowered,
-//RS                         owner_type_args: Vec::new(),
-//RS                         type_args: Vec::new(),
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             ctx.emit(
-//RS                 "core-call",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::CoreCall {
-//RS                     call,
-//RS                     route,
-//RS                     args: lowered,
-//RS                     type_args,
-//RS                     fallibility: lowered_fallibility,
-//RS                     data_plan,
-//RS                 },
-//RS             )
-//RS         }
-//RS         TExprKind::CoreClosureCall { kind } => lower_core_closure_call(ctx, expr, kind),
-//RS         TExprKind::IfExpr {
-//RS             cond,
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS         } => lower_if_expr(
-//RS             ctx, expr, cond, then_body, then_value, else_body, else_value,
-//RS         ),
-//RS         TExprKind::ResultHandler {
-//RS             subject, ok_pattern, ok_body, ok_value,
-//RS             err_pattern, err_body, err_value, terminal,
-//RS         } => lower_result_handler(
-//RS             ctx, expr, subject, ok_pattern, ok_body, ok_value,
-//RS             err_pattern, err_body, err_value, terminal,
-//RS         ),
-//RS         TExprKind::InvariantViolation { construct, span } => {
-//RS             Err(ctx.error(*span, construct.clone()))
-//RS         }
-//RS         TExprKind::Unreachable { line } => {
-//RS             let value = ctx.emit(
-//RS                 "exhaustive-dispatch-end",
-//RS                 Some(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
-//RS                 MirOperation::Constant(MirConstant::Unit),
-//RS             )?;
-//RS             ctx.terminate(MirTerminator::Unreachable {
-//RS                 reason: format!("checked exhaustive dispatch at line {line}"),
-//RS             });
-//RS             Ok(value)
-//RS         }
-//RS         TExprKind::Todo { line } => {
-//RS             let call = ctx.intern_prelude_route(super::todo_route(&expr.ty, &carrier)?)?;
-//RS             let location = panic_location(ctx, *line);
-//RS             let expected_type = Some(ctx.mir_type(&expr.ty)?);
-//RS             ctx.emit(
-//RS                 "todo",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Todo {
-//RS                     call,
-//RS                     location,
-//RS                     expected_type,
-//RS                 },
-//RS             )
-//RS         }
-//RS         TExprKind::DistinctRaw(inner) => {
-//RS             let value = ctx.lower_child(inner)?;
-//RS             let target = ctx.mir_type(&expr.ty)?;
-//RS             ctx.emit(
-//RS                 "distinct-raw",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Convert {
-//RS                     value,
-//RS                     parameters: Vec::new(),
-//RS                     target,
-//RS                     conversion: MirConversion::Transparent,
-//RS                 },
-//RS             )
-//RS         }
-//RS         TExprKind::Present(inner) => {
-//RS             let expected = match expr.ty.without_user_tags() {
-//RS                 Type::Option(inner) => Some(inner.as_ref()),
-//RS                 _ => None,
-//RS             };
-//RS             let value = lower_carrier_payload(ctx, inner, expected)?;
-//RS             if ctx.is_terminated() {
-//RS                 return Ok(value);
-//RS             }
-//RS             ctx.emit(
-//RS                 "present",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Present { value },
-//RS             )
-//RS         }
-//RS         TExprKind::Absent => ctx.emit("absent", Some(expr.ty.clone()), MirOperation::Absent),
-//RS         TExprKind::Ok(inner) => {
-//RS             let expected = match expr.ty.without_user_tags() {
-//RS                 Type::Result { ok, .. } => Some(ok.as_ref()),
-//RS                 _ => None,
-//RS             };
-//RS             let value = lower_carrier_payload(ctx, inner, expected)?;
-//RS             if ctx.is_terminated() {
-//RS                 return Ok(value);
-//RS             }
-//RS             ctx.emit(
-//RS                 "result-ok",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::ResultOk { value },
-//RS             )
-//RS         }
-//RS         TExprKind::Err(inner, origin) => {
-//RS             let expected = match expr.ty.without_user_tags() {
-//RS                 Type::Result { err, .. } => Some(err.as_ref()),
-//RS                 _ => None,
-//RS             };
-//RS             let value = lower_carrier_payload(ctx, inner, expected)?;
-//RS             if ctx.is_terminated() {
-//RS                 return Ok(value);
-//RS             }
-//RS             if let Some(origin) = origin {
-//RS                 let values = lower_try_context_values(
-//RS                     ctx,
-//RS                     &origin.file,
-//RS                     origin.line,
-//RS                     origin.column,
-//RS                     &origin.fn_name,
-//RS                 )?;
-//RS                 let route = super::journey_origin_route()?;
-//RS                 let unit_ty = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
-//RS                 let _ = emit_static_call(ctx, &unit_ty, route, values)?;
-//RS             }
-//RS             ctx.emit(
-//RS                 "result-err",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::ResultErr { value },
-//RS             )
-//RS         }
-//RS         TExprKind::Try {
-//RS             inner,
-//RS             note,
-//RS             convert,
-//RS             file,
-//RS             line,
-//RS             column,
-//RS             fn_name,
-//RS         } => {
-//RS             // #3740: a plain-return call directly under this `Try` hands
-//RS             // over its success value; there is no carrier to test.
-//RS             let previous_operand =
-//RS                 std::mem::replace(&mut ctx.plain_try_operand, plain_try_call_root(inner));
-//RS             let previous_taken = std::mem::replace(&mut ctx.plain_try_taken, false);
-//RS             let input = ctx.lower_child(inner);
-//RS             let taken = std::mem::replace(&mut ctx.plain_try_taken, previous_taken);
-//RS             ctx.plain_try_operand = previous_operand;
-//RS             let input = input?;
-//RS             if taken || try_child_already_propagated(inner) {
-//RS                 Ok(input)
-//RS             } else {
-//RS                 let input_type = ctx.value_source_type(input)?;
-//RS                 lower_try_value(
-//RS                     ctx,
-//RS                     input,
-//RS                     &expr.ty,
-//RS                     &input_type,
-//RS                     note.as_deref(),
-//RS                     convert,
-//RS                     Some(TryJourneySite {
-//RS                         file,
-//RS                         line: *line,
-//RS                         column: *column,
-//RS                         fn_name,
-//RS                         fresh_failure: try_operand_starts_failure(inner),
-//RS                     }),
-//RS                 )
-//RS             }
-//RS         }
-//RS         TExprKind::OrFallback { value, fallback } => {
-//RS             lower_or_fallback_expr(ctx, expr, value, fallback)
-//RS         }
-//RS         TExprKind::OptField {
-//RS             base,
-//RS             member,
-//RS             flatten,
-//RS         } => lower_optional_field(ctx, expr, base, member, *flatten),
-//RS         TExprKind::Lambda(lambda) => ctx.lower_lambda(lambda),
-//RS         TExprKind::PatternMatches { subj, pattern } => {
-//RS             let subject = ctx.lower_pattern_subject(subj)?;
-//RS             let pattern = lower_pattern(ctx, pattern)?;
-//RS             // A Bool-valued test keeps none of its bindings past itself.
-//RS             let shadow_mark = ctx.shadow_mark();
-//RS             let matched = ctx.lower_pattern_condition(subject, &pattern);
-//RS             ctx.restore_shadowed_locals(shadow_mark);
-//RS             matched
-//RS         }
-//RS         TExprKind::OptionLift2 { f, a, b } => lower_option_lift2(ctx, expr, f, a, b),
-//RS         TExprKind::TaskGroupAll { tasks } => {
-//RS             let call = ctx.intern_prelude_route(task_group_route(
-//RS                 MirTaskGroupKind::All,
-//RS                 &tasks.ty,
-//RS                 &carrier,
-//RS             ))?;
-//RS             let tasks = vec![lower_consuming_task_value(ctx, tasks)?];
-//RS             ctx.emit(
-//RS                 "task-group-all",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::TaskGroup {
-//RS                     call,
-//RS                     kind: MirTaskGroupKind::All,
-//RS                     tasks,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         TExprKind::TaskGroupRace { tasks } => {
-//RS             let call = ctx.intern_prelude_route(task_group_route(
-//RS                 MirTaskGroupKind::Race,
-//RS                 &tasks.ty,
-//RS                 &carrier,
-//RS             ))?;
-//RS             let tasks = vec![lower_consuming_task_value(ctx, tasks)?];
-//RS             ctx.emit(
-//RS                 "task-group-race",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::TaskGroup {
-//RS                     call,
-//RS                     kind: MirTaskGroupKind::Race,
-//RS                     tasks,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         TExprKind::TaskGroupAny { tasks } => {
-//RS             let call = ctx.intern_prelude_route(task_group_route(
-//RS                 MirTaskGroupKind::Any,
-//RS                 &tasks.ty,
-//RS                 &carrier,
-//RS             ))?;
-//RS             let tasks = vec![lower_consuming_task_value(ctx, tasks)?];
-//RS             ctx.emit(
-//RS                 "task-group-any",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::TaskGroup {
-//RS                     call,
-//RS                     kind: MirTaskGroupKind::Any,
-//RS                     tasks,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         TExprKind::SelectStart | TExprKind::SelectRecv { .. } | TExprKind::SelectAfter { .. } => {
-//RS             Err(ctx.error(
-//RS                 ctx.span(),
-//RS                 "readiness-table construction is only valid as the operand of select wait",
-//RS             ))
-//RS         }
-//RS         TExprKind::SelectWait {
-//RS             builder,
-//RS             nonblocking,
-//RS         } => lower_select_wait(ctx, expr, builder, *nonblocking, &carrier),
-//RS         TExprKind::ClosureMethod { recv, op, args } => {
-//RS             let default_para_limit = matches!(op, super::TClosureOp::ParaMap) && args.len() == 1;
-//RS             let route_receiver = if matches!(op, super::TClosureOp::OptionMap)
-//RS                 && !matches!(&recv.ty, Type::Option(_) | Type::Tagged { .. })
-//RS             {
-//RS                 Type::Option(Box::new(expr.ty.clone()))
-//RS             } else {
-//RS                 recv.ty.clone()
-//RS             };
-//RS             let route = op.prelude_route(&route_receiver, &expr.ty, &carrier)?;
-//RS             let mutating = matches!(
-//RS                 op,
-//RS                 super::TClosureOp::EditDisjoint
-//RS                     | super::TClosureOp::SortBy
-//RS                     | super::TClosureOp::SortByDesc
-//RS                     | super::TClosureOp::TrySortBy
-//RS                     | super::TClosureOp::TrySortByDesc
-//RS                     | super::TClosureOp::SortByCompare
-//RS                     | super::TClosureOp::UpdateFirst
-//RS             );
-//RS             let (receiver, _) = lower_builtin_receiver(ctx, recv, mutating)?;
-//RS             let mut args = args
-//RS                 .iter()
-//RS                 .map(|arg| ctx.lower_plain_arg(arg))
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             if default_para_limit {
-//RS                 let limit = ctx.emit(
-//RS                     "para-map-default-limit",
-//RS                     Some(Type::Int),
-//RS                     MirOperation::Constant(MirConstant::Int {
-//RS                         value: i64::MAX,
-//RS                         width: None,
-//RS                         spelling: None,
-//RS                     }),
-//RS                 )?;
-//RS                 args.push(mir_value_arg_with_access(ctx, limit, MirAccess::Read));
-//RS             }
-//RS             let operand_count = args.len() + 1;
-//RS             if operand_count != route.signature.arity {
-//RS                 return Err(ctx.error(
-//RS                     ctx.span(),
-//RS                     format!(
-//RS                         "checked closure method has {} operands, route requires {}",
-//RS                         operand_count, route.signature.arity
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             for (index, arg) in args.iter_mut().enumerate() {
-//RS                 arg.access = ctx.call_value_access(
-//RS                     arg.value,
-//RS                     route
-//RS                         .signature
-//RS                         .borrow_mask
-//RS                         .get(index + 1)
-//RS                         .copied()
-//RS                         .unwrap_or(false),
-//RS                 )?;
-//RS             }
-//RS             let call = ctx.intern_prelude_route(route)?;
-//RS             ctx.emit(
-//RS                 "closure-method",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::ClosureMethod {
-//RS                     receiver,
-//RS                     args,
-//RS                     call,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         TExprKind::HostBorrowCallback { callable, params } => {
-//RS             let callable = ctx.lower_child(callable)?;
-//RS             let params = lower_mir_types(ctx, params)?;
-//RS             ctx.emit(
-//RS                 "host-borrow-callback",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::HostBorrowCallback { callable, params }),
-//RS             )
-//RS         }
-//RS         TExprKind::NumericMethod { recv, op } => lower_numeric_method(ctx, expr, recv, op),
-//RS         TExprKind::NumericBinaryMethod { recv, op, arg } => {
-//RS             let receiver = ctx.lower_child(recv)?;
-//RS             let argument = ctx.lower_child(arg)?;
-//RS             let call = ctx.intern_prelude_route(op.prelude_route(&expr.ty, &carrier)?)?;
-//RS             ctx.emit(
-//RS                 "numeric-binary-method",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::NumericBinaryMethod {
-//RS                     call,
-//RS                     receiver,
-//RS                     argument,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         TExprKind::OverflowOpt {
-//RS             prefix,
-//RS             op,
-//RS             line,
-//RS             policy: _,
-//RS             lhs,
-//RS             rhs,
-//RS         } => {
-//RS             let left = ctx.lower_child(lhs)?;
-//RS             let right = ctx.lower_child(rhs)?;
-//RS             let result_ty = expr.ty.without_user_tags();
-//RS             let unbounded_int =
-//RS                 matches!(result_ty, Type::Int) && super::fixed_width_name(&lhs.ty).is_none();
-//RS             if unbounded_int && matches!(prefix.as_ref(), "wrapping" | "saturating") {
-//RS                 let binop = match op.as_ref() {
-//RS                     "add" => BinOp::Add,
-//RS                     "sub" => BinOp::Sub,
-//RS                     "mul" => BinOp::Mul,
-//RS                     "div" => BinOp::Div,
-//RS                     "rem" => BinOp::Rem,
-//RS                     other => {
-//RS                         return Err(ctx.error(
-//RS                             ctx.span(),
-//RS                             format!("overflow option `{prefix}_{other}` has no Int route"),
-//RS                         ));
-//RS                     }
-//RS                 };
-//RS                 return ctx.emit(
-//RS                     "overflow-int",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Binary {
-//RS                         op: super::mir_binary_op(binop),
-//RS                         left,
-//RS                         right,
-//RS                         dispatch: MirBinaryDispatch::Primitive,
-//RS                     },
-//RS                 );
-//RS             }
-//RS             let route = super::overflow_opt_route(prefix, op, *line, &lhs.ty, &expr.ty, &carrier)?;
-//RS             let location = if route.signature.arity == 4 && route.signature.max_arity == 4 {
-//RS                 Some(ctx.panic_location_at(*line))
-//RS             } else {
-//RS                 None
-//RS             };
-//RS             let call = ctx.intern_prelude_route(route)?;
-//RS             ctx.emit(
-//RS                 "overflow-option",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::OverflowOption {
-//RS                     call,
-//RS                     left,
-//RS                     right,
-//RS                     location,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         TExprKind::HandleMethod { recv, op, args } => {
-//RS             if matches!(op, super::THandleOp::EventMethod { .. })
-//RS                 || matches!(
-//RS                     op,
-//RS                     super::THandleOp::WatchMethod { method, .. }
-//RS                         if matches!(method.as_str(), "on" | "once")
-//RS                 )
-//RS             {
-//RS                 let route = op.prelude_route(&recv.ty, &carrier)?;
-//RS                 let operand_count = args.len() + 1;
-//RS                 if operand_count < route.signature.arity
-//RS                     || operand_count > route.signature.max_arity
-//RS                 {
-//RS                     return Err(ctx.error(
-//RS                         ctx.span(),
-//RS                         format!(
-//RS                             "checked event method has {operand_count} operands, route requires {}..={}",
-//RS                             route.signature.arity, route.signature.max_arity
-//RS                         ),
-//RS                     ));
-//RS                 }
-//RS                 let receiver = ctx.lower_child(recv)?;
-//RS                 let mut lowered_args = args
-//RS                     .iter()
-//RS                     .map(|arg| ctx.lower_plain_arg(arg))
-//RS                     .collect::<Result<Vec<_>, _>>()?;
-//RS                 if matches!(
-//RS                     &op,
-//RS                     super::THandleOp::EventMethod { method }
-//RS                         if method == "on_priority"
-//RS                 ) {
-//RS                     let priority = args.get(1).ok_or_else(|| {
-//RS                         ctx.error(
-//RS                             ctx.span(),
-//RS                             "checked event on_priority is missing its priority operand",
-//RS                         )
-//RS                     })?;
-//RS                     let lowered_priority = lowered_args.get_mut(1).ok_or_else(|| {
-//RS                         ctx.error(
-//RS                             ctx.span(),
-//RS                             "checked event on_priority priority operand was not lowered",
-//RS                         )
-//RS                     })?;
-//RS                     lowered_priority.value =
-//RS                         lower_builtin_native_int(ctx, lowered_priority.value, &priority.ty)?;
-//RS                 }
-//RS                 for (index, arg) in lowered_args.iter_mut().enumerate() {
-//RS                     arg.access = ctx.call_value_access(
-//RS                         arg.value,
-//RS                         route
-//RS                             .signature
-//RS                             .borrow_mask
-//RS                             .get(index + 1)
-//RS                             .copied()
-//RS                             .unwrap_or(false),
-//RS                     )?;
-//RS                 }
-//RS                 let call = ctx.intern_prelude_route(route)?;
-//RS                 return ctx.emit(
-//RS                     "event-method",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::ClosureMethod {
-//RS                         receiver,
-//RS                         args: lowered_args,
-//RS                         call,
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             if let super::THandleOp::Hardware(hardware_op) = op {
-//RS                 let receiver = match hardware_op {
-//RS                     super::THardwareCall::DmaWait { .. } => Some(ctx.lower_child(recv)?),
-//RS                     super::THardwareCall::RegisterRead { .. }
-//RS                     | super::THardwareCall::RegisterWrite { .. }
-//RS                     | super::THardwareCall::DmaStart { .. } => None,
-//RS                 };
-//RS                 let source_args: &[TExpr] = match hardware_op {
-//RS                     super::THardwareCall::DmaStart { .. } => args.get(1..).ok_or_else(|| {
-//RS                         ctx.error(
-//RS                             ctx.span(),
-//RS                             "DMA start MIR projection requires a checked buffer operand",
-//RS                         )
-//RS                     })?,
-//RS                     _ => args,
-//RS                 };
-//RS                 let mut lowered_args = Vec::with_capacity(source_args.len());
-//RS                 for (index, arg) in source_args.iter().enumerate() {
-//RS                     let mut lowered = ctx.lower_plain_arg(arg)?;
-//RS                     if matches!(hardware_op, super::THardwareCall::DmaStart { .. }) && index == 0 {
-//RS                         lowered.access = MirAccess::Move;
-//RS                         lowered.owned_last_use = true;
-//RS                     }
-//RS                     lowered_args.push(lowered);
-//RS                 }
-//RS                 let call = ctx.intern_prelude_route(op.prelude_route(&recv.ty, &carrier)?)?;
-//RS                 let hardware_op = lower_hardware_op(ctx, hardware_op)?;
-//RS                 return ctx.emit(
-//RS                     "hardware-call",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::HardwareCall {
-//RS                         call,
-//RS                         op: hardware_op,
-//RS                         receiver,
-//RS                         args: lowered_args,
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             if let super::THandleOp::CursorTakePattern { parts, .. } = op {
-//RS                 let (receiver, receiver_place) = lower_builtin_receiver(ctx, recv, true)?;
-//RS                 let Some(receiver_place) = receiver_place else {
-//RS                     return Err(ctx.error(
-//RS                         ctx.span(),
-//RS                         "Cursor.take_pattern requires a writable receiver place",
-//RS                     ));
-//RS                 };
-//RS                 let parts = parts
-//RS                     .iter()
-//RS                     .map(|part| match part {
-//RS                         crate::AST::StrMatchPart::Lit(text) => {
-//RS                             Ok(MirTextPatternPart::Literal(text.clone()))
-//RS                         }
-//RS                         crate::AST::StrMatchPart::Hole { ty, span, .. } => {
-//RS                             let ty = ty.clone().unwrap_or(Type::String);
-//RS                             Ok(MirTextPatternPart::Hole {
-//RS                                 kind: lower_text_hole_kind(ctx, &ty, *span)?,
-//RS                                 ty: lower_pattern_type(ctx, &ty)?,
-//RS                                 span: *span,
-//RS                             })
-//RS                         }
-//RS                     })
-//RS                     .collect::<Result<Vec<_>, LowerError>>()?;
-//RS                 return ctx.emit(
-//RS                     "cursor-take-pattern",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::CursorTakePattern {
-//RS                         receiver,
-//RS                         receiver_place,
-//RS                         parts,
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             if let super::THandleOp::ReaderTakePattern { parts, .. } = op {
-//RS                 let (receiver, receiver_place) = lower_builtin_receiver(ctx, recv, true)?;
-//RS                 let Some(receiver_place) = receiver_place else {
-//RS                     return Err(ctx.error(
-//RS                         ctx.span(),
-//RS                         "Reader.take_pattern requires a writable receiver place",
-//RS                     ));
-//RS                 };
-//RS                 let parts = parts
-//RS                     .iter()
-//RS                     .map(|part| match part {
-//RS                         crate::AST::BinMatchPart::Lit(bytes) => {
-//RS                             Ok(MirBinaryPatternPart::Literal(bytes.clone()))
-//RS                         }
-//RS                         crate::AST::BinMatchPart::Hole { spec, span, .. } => match spec {
-//RS                             crate::AST::BinSpec::Bits { width, endian } => {
-//RS                                 let ty = Type::IntN {
-//RS                                     signed: false,
-//RS                                     bits: *width,
-//RS                                 };
-//RS                                 Ok(MirBinaryPatternPart::Bits {
-//RS                                     width: *width,
-//RS                                     ty: lower_pattern_type(ctx, &ty)?,
-//RS                                     little: matches!(endian, crate::AST::BinEndian::Little),
-//RS                                     span: *span,
-//RS                                 })
-//RS                             }
-//RS                             crate::AST::BinSpec::Rest => Ok(MirBinaryPatternPart::Rest {
-//RS                                 ty: lower_pattern_type(
-//RS                                     ctx,
-//RS                                     &Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
-//RS                                 )?,
-//RS                                 span: *span,
-//RS                             }),
-//RS                         },
-//RS                     })
-//RS                     .collect::<Result<Vec<_>, LowerError>>()?;
-//RS                 return ctx.emit(
-//RS                     "reader-take-pattern",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::ReaderTakePattern {
-//RS                         receiver,
-//RS                         receiver_place,
-//RS                         parts,
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             if matches!(op, super::THandleOp::ReceiptAttach) {
-//RS                 let record = crate::Syntax::core_receiver_method(
-//RS                     crate::Syntax::INTERNAL_RECEIPT_HANDLE,
-//RS                     crate::Syntax::METHOD_RECEIPT_ATTACH,
-//RS                 )
-//RS                 .ok_or_else(|| {
-//RS                     ctx.error(ctx.span(), "receipt.attach Core row is not registered")
-//RS                 })?;
-//RS                 if args.len() != 4 {
-//RS                     return Err(ctx.error(
-//RS                         ctx.span(),
-//RS                         "receipt.attach MIR projection requires payload and three metadata operands",
-//RS                     ));
-//RS                 }
-//RS                 let call = MirCoreCall::from_record(record).id;
-//RS                 let route = ctx.intern_core_route(record, &carrier)?;
-//RS                 let lowered_fallibility = ctx.lower_call_fallibility(&carrier)?;
-//RS                 let lowered = args
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .map(|(index, arg)| ctx.lower_core_call_arg(arg, index, record, false))
-//RS                     .collect::<Result<Vec<_>, _>>()?;
-//RS                 let payload_ty = ctx.mir_type(&args[0].ty)?;
-//RS                 return ctx.emit(
-//RS                     "receipt-attach",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::CoreCall {
-//RS                         call,
-//RS                         route,
-//RS                         args: lowered,
-//RS                         // Preserve the checked payload type for interpreter
-//RS                         // receipt encoding; AOT uses it as the generic argument.
-//RS                         type_args: vec![payload_ty],
-//RS                         fallibility: lowered_fallibility,
-//RS                         data_plan: None,
-//RS                     },
-//RS                 );
-//RS             }
-//RS             if let THandleOp::HTTPRouterRegister {
-//RS                 verb: method,
-//RS                 handler,
-//RS                 file,
-//RS                 line,
-//RS                 handler_param_names,
-//RS                 contract_json,
-//RS             } = op
-//RS             {
-//RS                 if args.len() != 1 {
-//RS                     return Err(ctx.error(
-//RS                         ctx.span(),
-//RS                         "HTTP route registration MIR projection requires one path operand",
-//RS                     ));
-//RS                 }
-//RS                 let receiver = ctx.lower_child(recv)?;
-//RS                 let path = ctx.lower_child(&args[0])?;
-//RS                 let handler = ctx.lower_child(handler)?;
-//RS                 let call = ctx.intern_prelude_route(op.prelude_route(&recv.ty, &carrier)?)?;
-//RS                 let location = MirPanicLoc {
-//RS                     file: ctx.source_file_id_for(file),
-//RS                     line: *line as u32,
-//RS                     column: 0,
-//RS                 };
-//RS                 return ctx.emit(
-//RS                     "http-route-register",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::HttpRouterRegister {
-//RS                         call,
-//RS                         receiver,
-//RS                         path,
-//RS                         handler,
-//RS                         method: *method,
-//RS                         handler_param_names: handler_param_names.clone(),
-//RS                         contract_json: contract_json.clone(),
-//RS                         location,
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             if let super::THandleOp::PluginInvoke {
-//RS                 export_name,
-//RS                 signature,
-//RS             } = op
-//RS             {
-//RS                 let handle = ctx.lower_child(recv)?;
-//RS                 let args = lower_values(ctx, args)?;
-//RS                 let call = ctx.intern_prelude_route(op.prelude_route(&recv.ty, &carrier)?)?;
-//RS                 return ctx.emit(
-//RS                     "plugin-invoke",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::PluginInvoke {
-//RS                         call,
-//RS                         handle,
-//RS                         export_name: export_name.clone(),
-//RS                         signature: signature.clone(),
-//RS                         args,
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             if datatree_access_route(op, &carrier).is_some() {
-//RS                 return lower_datatree_access(ctx, expr, recv, args, op, &carrier);
-//RS             }
-//RS 
-//RS             if matches!(op, super::THandleOp::SerdeEncode) {
-//RS                 return lower_serde_encode(ctx, expr, recv);
-//RS             }
-//RS             if let super::THandleOp::DataTreeDecode(target) = op {
-//RS                 return lower_datatree_decode(ctx, expr, recv, target);
-//RS             }
-//RS             if matches!(op, super::THandleOp::HTTPRespHeader) {
-//RS                 return lower_http_response_header(ctx, expr, recv, args);
-//RS             }
-//RS             if matches!(
-//RS                 op,
-//RS                 super::THandleOp::HTTPServerMethod { kind, method }
-//RS                     if kind == "HTTPResponse" && method == "header"
-//RS             ) {
-//RS                 return lower_http_response_header_builder(ctx, expr, recv, args);
-//RS             }
-//RS 
-//RS             if let Some(field) = http_field_projection(&recv.ty, op, args) {
-//RS                 return lower_http_field(ctx, expr, recv, field, args);
-//RS             }
-//RS             if let Some(receiver) = http_text_method_receiver(&recv.ty, op) {
-//RS                 return lower_http_text_method(ctx, expr, recv, args, receiver);
-//RS             }
-//RS             if http_json_request_builder(recv, op, args, &expr.ty) {
-//RS                 return lower_http_request_builder(ctx, expr, recv, args);
-//RS             }
-//RS 
-//RS             if let Some(receiver) = http_json_method_receiver(&recv.ty, op) {
-//RS                 return lower_http_json_method(ctx, expr, recv, args, receiver);
-//RS             }
-//RS             if matches!(
-//RS                 op,
-//RS                 super::THandleOp::TaskJoin | super::THandleOp::TaskDetach
-//RS             ) {
-//RS                 if !args.is_empty() {
-//RS                     return Err(ctx.error(
-//RS                         ctx.span(),
-//RS                         "checked consuming task operation takes no arguments",
-//RS                     ));
-//RS                 }
-//RS                 let call = ctx.intern_prelude_route(op.prelude_route(&recv.ty, &carrier)?)?;
-//RS                 let receiver = lower_consuming_task_value(ctx, recv)?;
-//RS                 return ctx.emit(
-//RS                     "task-consume",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::HandleMethod {
-//RS                         call,
-//RS                         receiver,
-//RS                         args: Vec::new(),
-//RS                         frame_schedule: None,
-//RS                         frame_schedule_derivation: None,
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             if matches!(
-//RS                 op,
-//RS                 THandleOp::TLSClientConfigDefault
-//RS                     | THandleOp::TLSRootCertificatesFromPem
-//RS                     | THandleOp::TLSClientIdentityFromPem
-//RS                     | THandleOp::HTTPClientNew
-//RS             ) {
-//RS                 let args = lower_handle_method_args(ctx, args)?
-//RS                     .into_iter()
-//RS                     .map(|value| mir_value_arg(ctx, value))
-//RS                     .collect();
-//RS                 let call = ctx.intern_prelude_route(op.prelude_route(&recv.ty, &carrier)?)?;
-//RS                 return ctx.emit(
-//RS                     "static-handle-constructor",
-//RS                     Some(expr.ty.clone()),
-//RS                     MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-//RS                         call,
-//RS                         args,
-//RS                         owner_type_args: Vec::new(),
-//RS                         type_args: Vec::new(),
-//RS                     }),
-//RS                 );
-//RS             }
-//RS             let frame_schedule = match op {
-//RS                 super::THandleOp::GameSceneOnFrame { schedule, .. } => schedule.clone(),
-//RS                 _ => None,
-//RS             };
-//RS             let frame_schedule_derivation = match op {
-//RS                 super::THandleOp::GameSceneOnFrame { derivation, .. } => derivation.clone(),
-//RS                 _ => None,
-//RS             };
-//RS             let (receiver, _) = lower_builtin_receiver(
-//RS                 ctx,
-//RS                 recv,
-//RS                 matches!(
-//RS                     op,
-//RS                     THandleOp::FileReaderReadLine
-//RS                         | THandleOp::AllocReset
-//RS                         | THandleOp::FileWriterWriteLine
-//RS                         | THandleOp::FileWriterFlush
-//RS                         | THandleOp::CSVWriterWrite
-//RS                         | THandleOp::CSVWriterFlush
-//RS                         | THandleOp::CSVWriterFinish
-//RS                         | THandleOp::ClockTick
-//RS                         | THandleOp::ClockAdvance
-//RS                         | THandleOp::ClockWait
-//RS                         | THandleOp::FakeName
-//RS                         | THandleOp::FakeEmail
-//RS                         | THandleOp::FakeHost
-//RS                         | THandleOp::FakeAddress
-//RS                         | THandleOp::TcpStreamRead
-//RS                         | THandleOp::TcpStreamWrite
-//RS                         | THandleOp::TcpStreamClose
-//RS                         | THandleOp::TcpStreamReadBytes
-//RS                         | THandleOp::TcpStreamReadBytesDeadline
-//RS                         | THandleOp::TcpStreamReadText
-//RS                         | THandleOp::TcpStreamReadTextDeadline
-//RS                         | THandleOp::TcpStreamWriteBytes
-//RS                         | THandleOp::TcpStreamWriteBytesDeadline
-//RS                         | THandleOp::TcpStreamWriteAllBytes
-//RS                         | THandleOp::TcpStreamWriteAllBytesDeadline
-//RS                         | THandleOp::TcpStreamWriteText
-//RS                         | THandleOp::TcpStreamWriteTextDeadline
-//RS                         | THandleOp::TcpStreamShutdown
-//RS                         | THandleOp::TcpStreamReady
-//RS                         | THandleOp::UnixStreamReadDeadline
-//RS                         | THandleOp::UnixStreamWriteAllDeadline
-//RS                         | THandleOp::UnixStreamClose
-//RS                         | THandleOp::UnixStreamSetTimeout
-//RS                         | THandleOp::TLSStreamReadDeadline
-//RS                         | THandleOp::TLSStreamWriteAllDeadline
-//RS                         | THandleOp::TLSStreamClose
-//RS                         | THandleOp::TLSStreamCloseWrite
-//RS                 ),
-//RS             )?;
-//RS             let source_args = args;
-//RS             let mut args = lower_handle_method_args(ctx, source_args)?;
-//RS             if matches!(
-//RS                 op,
-//RS                 THandleOp::TcpStreamReadBytes
-//RS                     | THandleOp::TcpStreamReadBytesDeadline
-//RS                     | THandleOp::TcpStreamReadText
-//RS                     | THandleOp::TcpStreamReadTextDeadline
-//RS                     | THandleOp::UdpSocketReceiveDeadline
-//RS                     | THandleOp::UnixStreamReadDeadline
-//RS                     | THandleOp::TLSStreamReadDeadline
-//RS             ) {
-//RS                 args[0] = lower_builtin_native_int(ctx, args[0], &source_args[0].ty)?;
-//RS             }
-//RS 
-//RS             if let THandleOp::DurationNew { unit, .. } = op {
-//RS                 let type_id = ctx.type_id_for(crate::Syntax::DURATION_UNIT_TYPE)?;
-//RS                 args.push(ctx.emit(
-//RS                     "duration-constructor-unit",
-//RS                     Some(Type::Named(crate::Syntax::DURATION_UNIT_TYPE.to_string())),
-//RS                     MirOperation::Enum {
-//RS                         type_id,
-//RS                         variant: (*unit).to_string(),
-//RS                         args: Vec::new(),
-//RS                     },
-//RS                 )?);
-//RS             }
-//RS             let route = op.prelude_route(&recv.ty, &carrier)?;
-//RS             let call = ctx.intern_prelude_route(route)?;
-//RS             ctx.emit(
-//RS                 "handle-method",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Semantic(MirSemanticOp::HandleMethod {
-//RS                     call,
-//RS                     receiver,
-//RS                     args,
-//RS                     frame_schedule,
-//RS                     frame_schedule_derivation,
-//RS                 }),
-//RS             )
-//RS         }
-//RS         TExprKind::FnValue { kind } => lower_fn_value(ctx, expr, kind),
-//RS         TExprKind::ModuleCall {
-//RS             form,
-//RS             target_return,
-//RS             type_args,
-//RS             args,
-//RS         } => {
-//RS             let name = match form {
-//RS                 super::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
-//RS                     format!("{rust_mod}::{rust_fn}")
-//RS                 }
-//RS                 super::TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
-//RS             };
-//RS             let function = ctx.function_id_for(&name)?;
-//RS             let args = lower_call_args(ctx, args)?;
-//RS             // #3740: the registry holds the callee's executable return. A
-//RS             // plain-return callee (`T Never!`, written or inferred after this
-//RS             // call was checked) is reconciled exactly like a direct call. A
-//RS             // `??` or `?` subject has its adapter cleared
-//RS             // (`suppress_module_call_target_return`) and names the checked
-//RS             // carrier on the expression itself.
-//RS             let plain_return = ctx
-//RS                 .function_registry
-//RS                 .call_return_type_for(function, type_args)
-//RS                 .ok()
-//RS                 .flatten()
-//RS                 .filter(|returned| match target_return {
-//RS                     Some(target) if super::mir::is_plain_return(returned) => {
-//RS                         !super::mir::is_plain_return(target)
-//RS                     }
-//RS                     Some(target) => super::mir::is_plain_call_return(returned, target),
-//RS                     None => super::mir::is_plain_call_return(returned, &expr.ty),
-//RS                 });
-//RS             let type_args = lower_mir_types(ctx, type_args)?;
-//RS             let value = ctx.emit(
-//RS                 "module-call",
-//RS                 Some(
-//RS                     plain_return
-//RS                         .clone()
-//RS                         .or_else(|| target_return.clone())
-//RS                         .unwrap_or_else(|| expr.ty.clone()),
-//RS                 ),
-//RS                 MirOperation::Call {
-//RS                     callee: MirCallee::User(function),
-//RS                     args,
-//RS                     type_args,
-//RS                 },
-//RS             )?;
-//RS             if let Some(returned) = plain_return {
-//RS                 ctx.reconcile_plain_call_return(expr, value, &returned)
-//RS             } else {
-//RS                 match target_return {
-//RS                     Some(target @ (Type::Result { .. } | Type::Option(_))) if target != &expr.ty => {
-//RS                         lower_try_value(ctx, value, &expr.ty, target, None, &TTryConvert::None, None)
-//RS                     }
-//RS                     Some(target) => ctx.trait_box_value(value, target, &expr.ty),
-//RS                     None => Ok(value),
-//RS                 }
-//RS             }
-//RS         }
-//RS         TExprKind::ExternCall { symbol, args, .. } => {
-//RS             let args = args
-//RS                 .iter()
-//RS                 .map(|arg| lower_extern_arg(ctx, arg))
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             ctx.emit(
-//RS                 "extern-call",
-//RS                 Some(expr.ty.clone()),
-//RS                 MirOperation::Call {
-//RS                     callee: MirCallee::Foreign(ctx.foreign_id_for(symbol)?),
-//RS                     args,
-//RS                     type_args: Vec::new(),
-//RS                 },
-//RS             )
-//RS         }
-//RS     };
-//RS     let value = value?;
-//RS     record_lowered_expression(expr, &value);
-//RS     Ok(value)
-//RS }
-//RS 
-//RS /// The canonical-pass row of one lowered expression.
-// END-PORT-PENDING 0531 crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:3163-4583
+use jet_foundation.[TExpr, TExprKind, Type, BinOp, StrFormat, StrMatchPart, BinMatchPart, BinSpec, BinEndian, TBuiltinOp, THandleOp, TClosureOp, THardwareCall, TFailureCarrier, TTryConvert, TModuleCallForm]
+use jet_foundation.MIR.[MirValueId, MirCallArg, MirOperation, MirSemanticOp, MirAccess, MirCoreCall, MirReflectField, MirTypeDefKind, MirConstant, MirTerminator, MirConversion, MirTaskGroupKind, MirBinaryDispatch, MirTextPatternPart, MirBinaryPatternPart, MirPanicLoc, MirCallee]
+use jet_codegen.Codegen.TIR.[LowerCtx, LowerError, TryJourneySite]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:3482
+fn fmt_exact_int(ty: Type) -> Bool Never! {
+    if ty.without_user_tags() == {
+        .Int | .IntN(_, _) -> true
+        .InlineRange(base, _, _) -> fmt_exact_int(base)
+        .Named(name) -> name == "Int"
+        .Tagged(_, inner) -> fmt_exact_int(inner)
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:3163
+// Direct tail dispatch for lower_expr (1370), sharing its exact mutable LowerCtx.
+// The parent directly returns this tail; normal arms record once, early returns do not.
+fn lower_expr_3163(ctx: &LowerCtx, expr: TExpr, carrier: TFailureCarrier) -> MirValueId LowerError! {
+    value :: if expr.kind == {
+        .BuiltinMethod(recv, op, args) -> {
+            if op == .OptionZip(elem_ty, _) -> return lower_option_zip(ctx, expr, recv, args, elem_ty)!
+            if op == .Zip(_) -> return lower_zip(ctx, expr, recv, op, args)!
+            if op == .Unzip(_) -> return lower_unzip(ctx, expr, recv)!
+            if op == .Indexes -> return lower_indexes(ctx, expr, recv, args, carrier)!
+            if op == .Indexed(_) || op == .IterSplit(_) -> return lower_tuple_builtin(ctx, expr, recv, op, args, carrier)!
+            if op == .ListMinMax(_) -> return lower_list_min_max(ctx, expr, recv, op, args, carrier)!
+            if op == .ToString {
+                receiver :: ctx.lower_child(recv)!
+                return lower_direct_string_format(ctx, receiver, recv.ty, StrFormat.Display, expr.ty)!
+            }
+            (receiver_value, receiver_place) :: if op == .AtomicMethod(_) {
+                if lower_receiver_place(ctx, recv, MirAccess.Write)! == Val(place) {
+                    receiver :: ctx.emit("atomic-receiver-place", Val(recv.ty), MirOperation.ReadPlace(place))!
+                    (receiver, None)
+                } else -> lower_builtin_receiver(ctx, recv, op.needs_mut_receiver_place())!
+            } else -> lower_builtin_receiver(ctx, recv, op.needs_mut_receiver_place())!
+            receiver := receiver_value
+            lowered_args := lower_values(ctx, args)!
+            if op == .ByteBufferWithCapacity -> receiver = lower_builtin_native_int(ctx, receiver, recv.ty)!
+            if op == .ListReplace || op == .MatchGroup {
+                arg :: args.first() ?? fail ctx.error(ctx.span(), "checked builtin requires an index operand")
+                lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], arg.ty)!
+            }
+            if op == .GetList || op == .DequeGet {
+                arg :: args.first() ?? fail ctx.error(ctx.span(), "checked builtin requires an index operand")
+                lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], arg.ty)!
+            }
+            if op == .Repeat {
+                arg :: args.first() ?? fail ctx.error(ctx.span(), "checked builtin requires a repeat count")
+                lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], arg.ty)!
+            }
+            route_receiver_ty :: builtin_dispatch_ty(recv.ty)
+            route :: op.prelude_route(route_receiver_ty, expr.ty, carrier).map_err(|error| ctx.error(ctx.span(), "builtin method {op:?}: {error:?}"))!
+            if op == .MapFromKeys && recv.ty.without_user_tags() == .FixedList(_, _) {
+                operands := [mir_value_arg_with_access(ctx, receiver, ctx.call_value_access(receiver, false)!)]
+                operands[0].widen_fixed_to_list = true
+                loop value in lowered_args -> &operands.push(mir_value_arg_with_access(ctx, value, ctx.call_value_access(value, false)!))
+                call :: ctx.intern_prelude_route(route)!
+                return ctx.emit("map-from-fixed-keys", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(call, operands, [], [])))!
+            }
+            call :: ctx.intern_prelude_route(route)!
+            ctx.emit("builtin-method", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.BuiltinMethod(call, receiver, receiver_place, lowered_args, None)))!
+        }
+        // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:3281
+        .CoreCall(record, args, _, type_args, widen_to_vec, source_data_plan, fallibility) -> {
+            if record.module == "core.reflect" && record.member == "of" {
+                if args.len() != 1 -> fail ctx.error(ctx.span(), "reflection MIR projection requires one value operand")
+                arg :: args[0]
+                value :: ctx.lower_core_call_arg(arg, 0, record, false)!.value
+                value_ty :: ctx.mir_type(arg.ty)!
+                type_identity :: value_ty.nominal_name() ?? value_ty.display_name()
+                source_path := ctx.reflect_paths.get(type_identity)
+                if source_path == None {
+                    loop (source, identity) in ctx.nominal_identities {
+                        if identity == type_identity && ctx.reflect_paths.get(source) == Val(path) {
+                            source_path = Val(path)
+                            break
+                        }
+                    }
+                }
+                path :: source_path ?? ctx.nominal_identities.get(type_identity) ?? type_identity
+                type_name :: if source_path == Val(source) {
+                    if source.rsplit_once('.') == Val((_, leaf)) -> leaf.to_string() else -> source
+                } else -> type_identity
+                display :: lower_direct_string_format(ctx, value, arg.ty, StrFormat.Display, Type.String)!
+                owner :: ctx.field_owner_id_for_type(arg.ty)!
+                fields := []
+                loop definition in ctx.type_defs {
+                    if definition.id == owner {
+                        if definition.kind == .Struct(stored_fields, _) -> fields = stored_fields
+                        break
+                    }
+                }
+                reflected := [MirReflectField]{}
+                loop field in fields {
+                    if field.computed -> next
+                    stored_ty :: ctx.checked_field_type(arg.ty, field.name)!
+                    stored_mir :: ctx.mir_type(stored_ty)!
+                    field_value :: ctx.emit_mir_type("reflect-field", Val(stored_mir), MirOperation.Field(value, field.id))!
+                    field_type_identity :: stored_mir.nominal_name() ?? stored_mir.display_name()
+                    field_source_path := ctx.reflect_paths.get(field_type_identity)
+                    if field_source_path == None {
+                        loop (source, identity) in ctx.nominal_identities {
+                            if identity == field_type_identity && ctx.reflect_paths.get(source) == Val(found) {
+                                field_source_path = Val(found)
+                                break
+                            }
+                        }
+                    }
+                    field_path :: field_source_path ?? ctx.nominal_identities.get(field_type_identity) ?? field_type_identity
+                    field_type_name :: if field_source_path == Val(source) {
+                        if source.rsplit_once('.') == Val((_, leaf)) -> leaf.to_string() else -> source
+                    } else -> field_type_identity
+                    &reflected.push(MirReflectField{name: field.name, type_name: field_type_name, path: field_path, value: field_value})
+                }
+                return ctx.emit("reflect-of", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.ReflectOf(type_name, path, display, reflected)))!
+            }
+            if record.module == "core.http" && record.member == "router" {
+                if !args.is_empty() -> fail ctx.error(ctx.span(), "HTTPRouter constructor MIR projection received arguments")
+                route :: ctx.intern_core_route(record, fallibility)!
+                return ctx.emit("http-router-new", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(route, [], [], [])))!
+            }
+            if record.module == "core.web" && record.member == "openapi" {
+                source_receiver :: args.first() ?? fail ctx.error(ctx.span(), "HTTPRouter OpenAPI MIR projection requires one router operand")
+                if args.len() != 1 -> fail ctx.error(ctx.span(), "HTTPRouter OpenAPI MIR projection received unexpected arguments")
+                receiver :: ctx.lower_core_call_arg(source_receiver, 0, record, false)!.value
+                route :: ctx.intern_core_route(record, fallibility)!
+                return ctx.emit("http-router-openapi", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.HandleMethod(route, receiver, [], None, None)))!
+            }
+            if record.module == "core.http.server" && record.member == "json" {
+                if args.len() != 2 -> fail ctx.error(ctx.span(), "HTTP server JSON MIR projection requires status and body operands")
+                status :: ctx.lower_core_call_arg(args[0], 0, record, false)!
+                value :: args[1]
+                encoded := value
+                encoded.ty = Type.Named(TYPE_DATA)
+                encoded_body :: lower_serde_encode(ctx, encoded, value)!
+                body := mir_value_arg(ctx, encoded_body)
+                body.source_index = Val(1)
+                call :: MirCoreCall.from_record(record).id
+                route :: ctx.intern_core_route(record, fallibility)!
+                lowered_fallibility :: ctx.lower_call_fallibility(fallibility)!
+                return ctx.emit("http-server-json", Val(expr.ty), MirOperation.CoreCall(call, route, [status, body], [], lowered_fallibility, None))!
+            }
+            data_plan := None
+            if source_data_plan == Val(plan) -> data_plan = Val(lower_data_plan(ctx, plan)!)
+            call :: MirCoreCall.from_record(record).id
+            exact_format :: record.module == "core.text.fmt" && (record.member == "decimal" || record.member == "grouped") && args.first().is_some_and(|arg| fmt_exact_int(arg.ty))
+            route :: if exact_format {
+                format :: if record.member == "decimal" -> StrFormat.Fixed(0) else -> StrFormat.Grouped(0)
+                format_route := string_format_route(format, args[0].ty, expr.ty, carrier)!
+                // The semantic dispatcher still sees decimal; native ABI remains exact Int.
+                if record.member == "decimal" -> format_route.member = "decimal"
+                ctx.intern_prelude_route(format_route)!
+            } else -> ctx.intern_core_route(record, fallibility)!
+            lowered_fallibility :: ctx.lower_call_fallibility(fallibility)!
+            lowered := [MirCallArg]{}
+            loop (index, arg) in args.enumerate() {
+                widen :: widen_to_vec.get(index) ?? false
+                operand := ctx.lower_core_call_arg(arg, index, record, widen)!
+                if record.signature.borrow_mask.get(index) == Val(false) && arg.ty.without_user_tags() == .Int -> operand.value = lower_builtin_native_int(ctx, operand.value, arg.ty)!
+                &lowered.push(^operand)
+            }
+            lowered_type_args := []
+            if !type_args.is_empty() {
+                lowered_type_args = lower_mir_types(ctx, type_args)!
+            } else if record.module.is_empty() && record.member == "query" {
+                row := None
+                if args.first() == Val(arg) {
+                    if arg.ty == {
+                        .List(inner) | .FixedList(inner, _) -> row = Val(inner)
+                        .Apply(name, arguments) -> if name == "DataStream" && arguments.len() == 1 -> row = Val(arguments[0])
+                        _ -> {}
+                    }
+                }
+                row_ty :: row ?? fail ctx.error(ctx.span(), "list query MIR projection needs a retained row type")
+                &lowered_type_args.push(ctx.mir_type(row_ty)!)
+            } else if record.module == "core.encoding.csv" && record.member == "query" {
+                row :: csv_query_row_type(expr.ty) ?? fail ctx.error(ctx.span(), "CSV query MIR projection needs Result<Query<T>, List<FieldError>>")
+                &lowered_type_args.push(ctx.mir_type(row)!)
+            } else if (record.module == "core.data" && (record.member == "load" || record.member == "load_default" || record.member == "file" || record.member == "file_member" || record.member == "url" || record.member == "database" || record.member == "value" || record.member == "snapshot")) || (record.module == "core.data.loader" && record.member == "stream") || (record.module == "core.data.stream" && (record.member == "next" || record.member == "collect")) {
+                first_row :: args.first().and_then(|arg| data_row_type(arg.ty))
+                row :: if record.module == "core.data.stream" && (record.member == "next" || record.member == "collect") -> first_row.or_else(|| data_row_type(expr.ty))
+                    else -> data_row_type(expr.ty).or_else(|| first_row)
+                row_ty :: row ?? fail ctx.error(ctx.span(), "typed data CoreCall MIR projection needs one retained row type")
+                &lowered_type_args.push(ctx.mir_type(row_ty)!)
+            } else {
+                json_shape :: if expr.ty == .Result(_, err) -> err == Type.List(Type.Named("FieldError")) else -> false
+                shape_decode :: (record.module == "core.args" && (record.member == "decode" || record.member == "merge")) || (record.module == "core.sys" && record.member == "decode") || (record.module == "core.db" && record.member == "decode") || (record.module == "core.encoding.json" && record.member == "decode" && json_shape)
+                if shape_decode {
+                    target :: if expr.ty == .Result(ok, _) -> ok else -> fail ctx.error(ctx.span(), "typed shape decode/merge MIR projection needs Result<T, List<FieldError>>")
+                    &lowered_type_args.push(ctx.mir_type(target)!)
+                }
+            }
+            if (record.module == "core.sys" && record.member == "stop") || (record.module == "core.process" && record.member == "exit") -> ctx.emit_explicit_stop_cleanups()!
+            if exact_format -> return ctx.emit("core-call-fmt-int", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(route, lowered, [], [])))!
+            ctx.emit("core-call", Val(expr.ty), MirOperation.CoreCall(call, route, lowered, lowered_type_args, lowered_fallibility, data_plan))!
+        }
+        // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:3659
+        .CoreClosureCall(kind) -> lower_core_closure_call(ctx, expr, kind)!
+        .IfExpr(cond, then_body, then_value, else_body, else_value) -> lower_if_expr(ctx, expr, cond, then_body, then_value, else_body, else_value)!
+        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> lower_result_handler(ctx, expr, subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal)!
+        .InvariantViolation(construct, span) -> fail ctx.error(span, construct)
+        .Unreachable(line) -> {
+            value :: ctx.emit("exhaustive-dispatch-end", Val(Type.Named(INTERNAL_UNIT_TYPE)), MirOperation.Constant(MirConstant.Unit))!
+            ctx.terminate(MirTerminator.Unreachable("checked exhaustive dispatch at line {line}"))
+            value
+        }
+        .Todo(line) -> {
+            call :: ctx.intern_prelude_route(todo_route(expr.ty, carrier)!)!
+            location :: panic_location(ctx, line)
+            expected_type :: Val(ctx.mir_type(expr.ty)!)
+            ctx.emit("todo", Val(expr.ty), MirOperation.Todo(call, location, expected_type))!
+        }
+        .DistinctRaw(inner) -> {
+            value :: ctx.lower_child(inner)!
+            target :: ctx.mir_type(expr.ty)!
+            ctx.emit("distinct-raw", Val(expr.ty), MirOperation.Convert(value, [], target, MirConversion.Transparent))!
+        }
+        .Present(inner) -> {
+            expected :: if expr.ty.without_user_tags() == .Option(payload) -> Val(payload) else -> None
+            value :: lower_carrier_payload(ctx, inner, expected)!
+            if ctx.is_terminated() -> return value
+            ctx.emit("present", Val(expr.ty), MirOperation.Present(value))!
+        }
+        .Absent -> ctx.emit("absent", Val(expr.ty), MirOperation.Absent)!
+        .Ok(inner) -> {
+            expected :: if expr.ty.without_user_tags() == .Result(ok, _) -> Val(ok) else -> None
+            value :: lower_carrier_payload(ctx, inner, expected)!
+            if ctx.is_terminated() -> return value
+            ctx.emit("result-ok", Val(expr.ty), MirOperation.ResultOk(value))!
+        }
+        .Err(inner, origin) -> {
+            expected :: if expr.ty.without_user_tags() == .Result(_, err) -> Val(err) else -> None
+            value :: lower_carrier_payload(ctx, inner, expected)!
+            if ctx.is_terminated() -> return value
+            if origin == Val(site) {
+                values :: lower_try_context_values(ctx, site.file, site.line, site.column, site.fn_name)!
+                route :: journey_origin_route()!
+                _ :: emit_static_call(ctx, Type.Named(INTERNAL_UNIT_TYPE), route, values)!
+            }
+            ctx.emit("result-err", Val(expr.ty), MirOperation.ResultErr(value))!
+        }
+        .TryWithContext(inner, note, convert, file, line, column, fn_name) -> {
+            previous_operand :: ctx.plain_try_operand
+            ctx.plain_try_operand = plain_try_call_root(inner)
+            previous_taken :: ctx.plain_try_taken
+            ctx.plain_try_taken = false
+            // Restore the direct-Try handshake even if the child lowering fails.
+            input_result :: ctx.lower_child(inner)
+            taken :: ctx.plain_try_taken
+            ctx.plain_try_taken = previous_taken
+            ctx.plain_try_operand = previous_operand
+            input :: input_result!
+            if taken || try_child_already_propagated(inner) -> input else {
+                input_type :: ctx.value_source_type(input)!
+                lower_try_value(ctx, input, expr.ty, input_type, note, convert, Val(TryJourneySite{file: file, line: line, column: column, fn_name: fn_name, fresh_failure: try_operand_starts_failure(inner)}))!
+            }
+        }
+        .OrFallback(value, fallback, _) -> lower_or_fallback_expr(ctx, expr, value, fallback)!
+        .OptField(base, member, flatten) -> lower_optional_field(ctx, expr, base, member, flatten)!
+        .Lambda(lambda) -> ctx.lower_lambda(lambda)!
+        .PatternMatches(subj, pattern) -> {
+            subject :: ctx.lower_pattern_subject(subj)!
+            lowered_pattern :: lower_pattern(ctx, pattern)!
+            shadow_mark :: ctx.shadow_mark()
+            matched :: ctx.lower_pattern_condition(subject, lowered_pattern)
+            ctx.restore_shadowed_locals(shadow_mark)
+            matched!
+        }
+        .OptionLift2(f, a, b) -> lower_option_lift2(ctx, expr, f, a, b)!
+        .TaskGroupAll(tasks) -> {
+            call :: ctx.intern_prelude_route(task_group_route(MirTaskGroupKind.All, tasks.ty, carrier))!
+            values :: [lower_consuming_task_value(ctx, tasks)!]
+            ctx.emit("task-group-all", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.TaskGroup(call, MirTaskGroupKind.All, values)))!
+        }
+        .TaskGroupRace(tasks) -> {
+            call :: ctx.intern_prelude_route(task_group_route(MirTaskGroupKind.Race, tasks.ty, carrier))!
+            values :: [lower_consuming_task_value(ctx, tasks)!]
+            ctx.emit("task-group-race", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.TaskGroup(call, MirTaskGroupKind.Race, values)))!
+        }
+        .TaskGroupAny(tasks) -> {
+            call :: ctx.intern_prelude_route(task_group_route(MirTaskGroupKind.Any, tasks.ty, carrier))!
+            values :: [lower_consuming_task_value(ctx, tasks)!]
+            ctx.emit("task-group-any", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.TaskGroup(call, MirTaskGroupKind.Any, values)))!
+        }
+        .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) -> fail ctx.error(ctx.span(), "readiness-table construction is only valid as the operand of select wait")
+        .SelectWait(builder, nonblocking) -> lower_select_wait(ctx, expr, builder, nonblocking, carrier)!
+        // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:3895
+        .ClosureMethod(recv, op, source_args) -> {
+            default_para_limit :: op == .ParaMap && source_args.len() == 1
+            route_receiver :: if op == .OptionMap && !(recv.ty == .Option(_) || recv.ty == .Tagged(_, _)) -> Type.Option(expr.ty) else -> recv.ty
+            route :: op.prelude_route(route_receiver, expr.ty, carrier)!
+            mutating :: if op == {
+                .EditDisjoint | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .UpdateFirst -> true
+                _ -> false
+            }
+            (receiver, _) :: lower_builtin_receiver(ctx, recv, mutating)!
+            args := [MirCallArg]{}
+            loop arg in source_args -> &args.push(ctx.lower_plain_arg(arg)!)
+            if default_para_limit {
+                limit :: ctx.emit("para-map-default-limit", Val(Type.Int), MirOperation.Constant(MirConstant.Int(9223372036854775807, None, None)))!
+                &args.push(mir_value_arg_with_access(ctx, limit, MirAccess.Read))
+            }
+            operand_count :: args.len() + 1
+            if operand_count != route.signature.arity -> fail ctx.error(ctx.span(), "checked closure method has {operand_count} operands, route requires {route.signature.arity}")
+            loop (index, arg) in (&args).enumerate() -> arg.access = ctx.call_value_access(arg.value, route.signature.borrow_mask.get(index + 1) ?? false)!
+            call :: ctx.intern_prelude_route(route)!
+            ctx.emit("closure-method", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.ClosureMethod(receiver, args, call)))!
+        }
+        .HostBorrowCallback(callable, params) -> {
+            lowered_callable :: ctx.lower_child(callable)!
+            lowered_params :: lower_mir_types(ctx, params)!
+            ctx.emit("host-borrow-callback", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.HostBorrowCallback(lowered_callable, lowered_params)))!
+        }
+        .NumericMethod(recv, op) -> lower_numeric_method(ctx, expr, recv, op)!
+        .NumericBinaryMethod(recv, op, arg) -> {
+            receiver :: ctx.lower_child(recv)!
+            argument :: ctx.lower_child(arg)!
+            call :: ctx.intern_prelude_route(op.prelude_route(expr.ty, carrier)!)!
+            ctx.emit("numeric-binary-method", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.NumericBinaryMethod(call, receiver, argument)))!
+        }
+        .OverflowOpt(prefix, op, line, _, lhs, rhs) -> {
+            left :: ctx.lower_child(lhs)!
+            right :: ctx.lower_child(rhs)!
+            result_ty :: expr.ty.without_user_tags()
+            unbounded_int :: result_ty == .Int && fixed_width_name(lhs.ty) == None
+            if unbounded_int && (prefix == "wrapping" || prefix == "saturating") {
+                binop :: if op == {
+                    "add" -> BinOp.Add
+                    "sub" -> BinOp.Sub
+                    "mul" -> BinOp.Mul
+                    "div" -> BinOp.Div
+                    "rem" -> BinOp.Rem
+                    other -> fail ctx.error(ctx.span(), "overflow option `{prefix}_{other}` has no Int route")
+                }
+                return ctx.emit("overflow-int", Val(expr.ty), MirOperation.Binary(mir_binary_op(binop), left, right, MirBinaryDispatch.Primitive))!
+            }
+            route :: overflow_opt_route(prefix, op, line, lhs.ty, expr.ty, carrier)!
+            location :: if route.signature.arity == 4 && route.signature.max_arity == 4 -> Val(ctx.panic_location_at(line)) else -> None
+            call :: ctx.intern_prelude_route(route)!
+            ctx.emit("overflow-option", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.OverflowOption(call, left, right, location)))!
+        }
+        // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:4044
+        .HandleMethod(recv, op, args) -> {
+            event_method :: if op == {
+                .EventMethod(_) -> true
+                .WatchMethod(method, _) -> method == "on" || method == "once"
+                _ -> false
+            }
+            if event_method {
+                route :: op.prelude_route(recv.ty, carrier)!
+                operand_count :: args.len() + 1
+                if operand_count < route.signature.arity || operand_count > route.signature.max_arity -> fail ctx.error(ctx.span(), "checked event method has {operand_count} operands, route requires {route.signature.arity}..={route.signature.max_arity}")
+                receiver :: ctx.lower_child(recv)!
+                lowered_args := [MirCallArg]{}
+                loop arg in args -> &lowered_args.push(ctx.lower_plain_arg(arg)!)
+                if op == .EventMethod("on_priority") {
+                    priority :: args.get(1) ?? fail ctx.error(ctx.span(), "checked event on_priority is missing its priority operand")
+                    if lowered_args.len() <= 1 -> fail ctx.error(ctx.span(), "checked event on_priority priority operand was not lowered")
+                    lowered_args[1].value = lower_builtin_native_int(ctx, lowered_args[1].value, priority.ty)!
+                }
+                loop (index, arg) in (&lowered_args).enumerate() -> arg.access = ctx.call_value_access(arg.value, route.signature.borrow_mask.get(index + 1) ?? false)!
+                call :: ctx.intern_prelude_route(route)!
+                return ctx.emit("event-method", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.ClosureMethod(receiver, lowered_args, call)))!
+            }
+            if op == .Hardware(hardware_op) {
+                receiver :: if hardware_op == {
+                    .DmaWait(_) -> Val(ctx.lower_child(recv)!)
+                    .RegisterRead(_) | .RegisterWrite(_) | .DmaStart(_) -> None
+                }
+                source_args :: if hardware_op == .DmaStart(_) {
+                    if args.len() < 1 -> fail ctx.error(ctx.span(), "DMA start MIR projection requires a checked buffer operand")
+                    args.slice(1, args.len())
+                } else -> args.view()
+                lowered_args := [MirCallArg]{}
+                loop (index, arg) in source_args.enumerate() {
+                    lowered := ctx.lower_plain_arg(arg)!
+                    if hardware_op == .DmaStart(_) && index == 0 {
+                        lowered.access = MirAccess.Move
+                        lowered.owned_last_use = true
+                    }
+                    &lowered_args.push(^lowered)
+                }
+                call :: ctx.intern_prelude_route(op.prelude_route(recv.ty, carrier)!)!
+                lowered_hardware_op :: lower_hardware_op(ctx, hardware_op)!
+                return ctx.emit("hardware-call", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.HardwareCall(call, lowered_hardware_op, receiver, lowered_args)))!
+            }
+            if op == .CursorTakePattern(parts, _) {
+                (receiver, place) :: lower_builtin_receiver(ctx, recv, true)!
+                receiver_place :: place ?? fail ctx.error(ctx.span(), "Cursor.take_pattern requires a writable receiver place")
+                lowered_parts := [MirTextPatternPart]{}
+                loop part in parts {
+                    if part == {
+                        .Lit(text) -> &lowered_parts.push(MirTextPatternPart.Literal(text))
+                        .Hole(ty, span, _) -> {
+                            hole_ty :: ty ?? Type.String
+                            kind :: lower_text_hole_kind(ctx, hole_ty, span)!
+                            pattern_ty :: lower_pattern_type(ctx, hole_ty)!
+                            &lowered_parts.push(MirTextPatternPart.Hole(kind, pattern_ty, span))
+                        }
+                    }
+                }
+                return ctx.emit("cursor-take-pattern", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.CursorTakePattern(receiver, receiver_place, lowered_parts)))!
+            }
+            if op == .ReaderTakePattern(parts, _) {
+                (receiver, place) :: lower_builtin_receiver(ctx, recv, true)!
+                receiver_place :: place ?? fail ctx.error(ctx.span(), "Reader.take_pattern requires a writable receiver place")
+                lowered_parts := [MirBinaryPatternPart]{}
+                loop part in parts {
+                    if part == {
+                        .Lit(bytes) -> &lowered_parts.push(MirBinaryPatternPart.Literal(bytes))
+                        .Hole(spec, span, _) -> if spec == {
+                            .Bits(width, endian) -> {
+                                ty :: lower_pattern_type(ctx, Type.IntN(false, width))!
+                                &lowered_parts.push(MirBinaryPatternPart.Bits(width, ty, endian == BinEndian.Little, span))
+                            }
+                            .Rest -> {
+                                ty :: lower_pattern_type(ctx, Type.Named(TYPE_BYTES))!
+                                &lowered_parts.push(MirBinaryPatternPart.Rest(ty, span))
+                            }
+                        }
+                    }
+                }
+                return ctx.emit("reader-take-pattern", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.ReaderTakePattern(receiver, receiver_place, lowered_parts)))!
+            }
+            if op == .ReceiptAttach {
+                record :: core_receiver_method(INTERNAL_RECEIPT_HANDLE, METHOD_RECEIPT_ATTACH) ?? fail ctx.error(ctx.span(), "receipt.attach Core row is not registered")
+                if args.len() != 4 -> fail ctx.error(ctx.span(), "receipt.attach MIR projection requires payload and three metadata operands")
+                call :: MirCoreCall.from_record(record).id
+                route :: ctx.intern_core_route(record, carrier)!
+                lowered_fallibility :: ctx.lower_call_fallibility(carrier)!
+                lowered := [MirCallArg]{}
+                loop (index, arg) in args.enumerate() -> &lowered.push(ctx.lower_core_call_arg(arg, index, record, false)!)
+                payload_ty :: ctx.mir_type(args[0].ty)!
+                return ctx.emit("receipt-attach", Val(expr.ty), MirOperation.CoreCall(call, route, lowered, [payload_ty], lowered_fallibility, None))!
+            }
+            if op == .HTTPRouterRegister(method, handler, file, line, handler_param_names, contract_json) {
+                if args.len() != 1 -> fail ctx.error(ctx.span(), "HTTP route registration MIR projection requires one path operand")
+                receiver :: ctx.lower_child(recv)!
+                path :: ctx.lower_child(args[0])!
+                lowered_handler :: ctx.lower_child(handler)!
+                call :: ctx.intern_prelude_route(op.prelude_route(recv.ty, carrier)!)!
+                location :: MirPanicLoc{file: ctx.source_file_id_for(file), line: line as U32, column: 0}
+                return ctx.emit("http-route-register", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.HttpRouterRegister(call, receiver, path, lowered_handler, method, handler_param_names, contract_json, location)))!
+            }
+            if op == .PluginInvoke(export_name, signature) {
+                handle :: ctx.lower_child(recv)!
+                lowered_args :: lower_values(ctx, args)!
+                call :: ctx.intern_prelude_route(op.prelude_route(recv.ty, carrier)!)!
+                return ctx.emit("plugin-invoke", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.PluginInvoke(call, handle, export_name, signature, lowered_args)))!
+            }
+            if datatree_access_route(op, carrier) != None -> return lower_datatree_access(ctx, expr, recv, args, op, carrier)!
+            if op == .SerdeEncode -> return lower_serde_encode(ctx, expr, recv)!
+            if op == .DataTreeDecode(target) -> return lower_datatree_decode(ctx, expr, recv, target)!
+            if op == .HTTPRespHeader -> return lower_http_response_header(ctx, expr, recv, args)!
+            if op == .HTTPServerMethod("HTTPResponse", "header") -> return lower_http_response_header_builder(ctx, expr, recv, args)!
+            if http_field_projection(recv.ty, op, args) == Val(field) -> return lower_http_field(ctx, expr, recv, field, args)!
+            if http_text_method_receiver(recv.ty, op) == Val(receiver) -> return lower_http_text_method(ctx, expr, recv, args, receiver)!
+            if http_json_request_builder(recv, op, args, expr.ty) -> return lower_http_request_builder(ctx, expr, recv, args)!
+            if http_json_method_receiver(recv.ty, op) == Val(receiver) -> return lower_http_json_method(ctx, expr, recv, args, receiver)!
+            if op == .TaskJoin || op == .TaskDetach {
+                if !args.is_empty() -> fail ctx.error(ctx.span(), "checked consuming task operation takes no arguments")
+                call :: ctx.intern_prelude_route(op.prelude_route(recv.ty, carrier)!)!
+                receiver :: lower_consuming_task_value(ctx, recv)!
+                return ctx.emit("task-consume", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.HandleMethod(call, receiver, [], None, None)))!
+            }
+            if op == .TLSClientConfigDefault || op == .TLSRootCertificatesFromPem || op == .TLSClientIdentityFromPem || op == .HTTPClientNew {
+                values :: lower_handle_method_args(ctx, args)!
+                lowered := [MirCallArg]{}
+                loop value in values -> &lowered.push(mir_value_arg(ctx, value))
+                call :: ctx.intern_prelude_route(op.prelude_route(recv.ty, carrier)!)!
+                return ctx.emit("static-handle-constructor", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(call, lowered, [], [])))!
+            }
+            frame_schedule :: if op == .GameSceneOnFrame(schedule, _) -> schedule else -> None
+            frame_schedule_derivation :: if op == .GameSceneOnFrame(_, derivation) -> derivation else -> None
+            mutating :: if op == {
+                .FileReaderReadLine | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TcpStreamRead | .TcpStreamWrite | .TcpStreamClose | .TcpStreamReadBytes | .TcpStreamReadBytesDeadline | .TcpStreamReadText | .TcpStreamReadTextDeadline | .TcpStreamWriteBytes | .TcpStreamWriteBytesDeadline | .TcpStreamWriteAllBytes | .TcpStreamWriteAllBytesDeadline | .TcpStreamWriteText | .TcpStreamWriteTextDeadline | .TcpStreamShutdown | .TcpStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
+                _ -> false
+            }
+            (receiver, _) :: lower_builtin_receiver(ctx, recv, mutating)!
+            lowered_args := lower_handle_method_args(ctx, args)!
+            native_count :: if op == {
+                .TcpStreamReadBytes | .TcpStreamReadBytesDeadline | .TcpStreamReadText | .TcpStreamReadTextDeadline | .UdpSocketReceiveDeadline | .UnixStreamReadDeadline | .TLSStreamReadDeadline -> true
+                _ -> false
+            }
+            if native_count -> lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], args[0].ty)!
+            if op == .DurationNew(unit, _) {
+                type_id :: ctx.type_id_for(DURATION_UNIT_TYPE)!
+                unit_value :: ctx.emit("duration-constructor-unit", Val(Type.Named(DURATION_UNIT_TYPE)), MirOperation.Enum(type_id, unit.to_string(), []))!
+                &lowered_args.push(unit_value)
+            }
+            route :: op.prelude_route(recv.ty, carrier)!
+            call :: ctx.intern_prelude_route(route)!
+            ctx.emit("handle-method", Val(expr.ty), MirOperation.Semantic(MirSemanticOp.HandleMethod(call, receiver, lowered_args, frame_schedule, frame_schedule_derivation)))!
+        }
+        // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:4502
+        .FnValue(kind) -> lower_fn_value(ctx, expr, kind)!
+        .ModuleCall(_, form, target_return, type_args, source_args) -> {
+            name :: if form == {
+                .Qualified(rust_mod, rust_fn) -> "{rust_mod}::{rust_fn}"
+                .InlineMangled(mangled) -> mangled
+            }
+            function :: ctx.function_id_for(name)!
+            args :: lower_call_args(ctx, source_args)!
+            plain_return :: ctx.function_registry.call_return_type_for(function, type_args).ok().flatten().filter(|returned| {
+                if target_return == Val(target) {
+                    if is_plain_return(returned) -> !is_plain_return(target) else -> is_plain_call_return(returned, target)
+                } else -> is_plain_call_return(returned, expr.ty)
+            })
+            lowered_type_args :: lower_mir_types(ctx, type_args)!
+            emitted_ty :: plain_return ?? target_return ?? expr.ty
+            value :: ctx.emit("module-call", Val(emitted_ty), MirOperation.Call(MirCallee.User(function), args, lowered_type_args))!
+            if plain_return == Val(returned) -> ctx.reconcile_plain_call_return(expr, value, returned)!
+            else if target_return == Val(target) {
+                if (target == .Result(_, _) || target == .Option(_)) && target != expr.ty -> lower_try_value(ctx, value, expr.ty, target, None, TTryConvert.NoConversion, None)!
+                else -> ctx.trait_box_value(value, target, expr.ty)!
+            } else -> value
+        }
+        .ExternCall(symbol, _, source_args) -> {
+            args := [MirCallArg]{}
+            loop arg in source_args -> &args.push(lower_extern_arg(ctx, arg)!)
+            foreign :: ctx.foreign_id_for(symbol)!
+            ctx.emit("extern-call", Val(expr.ty), MirOperation.Call(MirCallee.Foreign(foreign), args, []))!
+        }
+        _ -> panic("lower_expr_3163 received a variant owned by the leading lower_expr dispatch")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:4578
+    record_lowered_expression(expr, value)
+    value
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:4583
+// The following packet owns the canonical-pass row helper for lowered expressions.

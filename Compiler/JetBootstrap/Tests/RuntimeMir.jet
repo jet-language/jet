@@ -1,0 +1,15 @@
+use jet_bootstrap.RuntimeMir.SourceMirExecutionError
+
+// Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:94
+#Test("source_mir_carrier_error_retains_message") {
+    assert(SourceMirExecutionError.Carrier("bad binding").to_string() == "Source MIR carrier conversion failed: bad binding")
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:94
+#Test("source_mir_identity_error_is_distinct") {
+    assert(SourceMirExecutionError.Identity("wrong artifact").to_string() == "Source MIR execution identity failed: wrong artifact")
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMir.rs:94
+#Test("source_mir_resource_and_backend_errors_remain_separate") {
+    assert(SourceMirExecutionError.Resource("closed arena").to_string() == "Source resource activation failed: closed arena")
+    assert(SourceMirExecutionError.Backend("handoff refused").to_string() == "Source MIR backend handoff failed: handoff refused")
+}

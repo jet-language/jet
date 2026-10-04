@@ -889,10 +889,10 @@ fn sema_function_check_uncached(func: &Func, owner_id: SymbolID, function_kind: 
         pass_comptime_requests := [SemaComptimeRequest]{}
         pass_name_references := [SemaNameReferenceFact]{}
         share_found := [SemaOwnershipShareSite]{}
+        rechecks := false
         mark :: sema_scope_mark(&module_scopes)
-        checked := sema_function_check_pass(&func, owner_id, function_kind, raw_protocol_return, &environment, &module_scopes, share_known, &share_found, &pass_diagnostics, &pass_call_facts, &pass_comptime_requests, &pass_name_references)
+        checked := sema_function_check_pass(&func, owner_id, function_kind, raw_protocol_return, &environment, &module_scopes, &share_known, &share_found, &rechecks, &pass_diagnostics, &pass_call_facts, &pass_comptime_requests, &pass_name_references)
         sema_scope_rollback(&module_scopes, mark)
-        rechecks :: sema_function_accept_share_sites(&share_known, share_found, environment)
         environment.generic_params = ~base_generic_params
         if !rechecks {
             loop diagnostic in pass_diagnostics -> &diagnostics.push(diagnostic)
@@ -943,7 +943,7 @@ fn sema_function_resolve_declared(environment: SemaScopeEnvironment, ty: Type, m
     ~ty
 }
 
-fn sema_function_check_pass(func: &Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, updated: &SemaScopeEnvironment, scopes: &SemaScopeTable, share_known: [Span], share_found: &[SemaOwnershipShareSite], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+fn sema_function_check_pass(func: &Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, updated: &SemaScopeEnvironment, scopes: &SemaScopeTable, share_known: &[Span], share_found: &[SemaOwnershipShareSite], rechecks: &Bool, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     callable_name :: sema_function_callable_name(func, owner_id, updated)
     if function_kind == TFuncKind.TopLevel {
         registered :: sema_scope_resolve(scopes, callable_name) ?? return sema_function_check_unavailable(owner_id.key, "the module scope has no registered function `{callable_name}`")
@@ -960,7 +960,7 @@ fn sema_function_check_pass(func: &Func, owner_id: SymbolID, function_kind: TFun
     sema_function_apply_scope_policies(updated, &scopes, func.span, func.markers)
     state := sema_ownership_state_init()
     state.fixed_length_write_params = updated.fixed_length_write_params
-    state.share_known = share_known
+    state.share_known = ~share_known
     state.static_roots = sema_function_static_roots(updated, module_identity)
     tail_store := sema_statement_tail_store_init()
     // A raw protocol impl method (Comparable.compare, Display.to_string, …)
@@ -1110,13 +1110,17 @@ fn sema_function_check_pass(func: &Func, owner_id: SymbolID, function_kind: TFun
     context.lost_tail_span = None
     context.value_tail_span = None
     loop site in state.share_found -> &share_found.push(site)
+    // The existing ownership fixed point can discard this body pass. Admit
+    // its new sites here, once, before deciding whether to publish Every.
+    rechecks = sema_function_accept_share_sites(&share_known, share_found, updated)
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, scopes, &diagnostics) -> complete = false
     // Rust BodyCheck::check_fn calls check_every_marker after typed marker
     // validation, even when another body error prevents a TIR function.
-    // Signature/return-view probes do not publish a disposable schedule.
-    // The genuine body pass invokes the writer on its original Func here.
-    if !updated.incremental_probe {
+    // Signature/return-view and non-final ownership passes never publish a
+    // disposable schedule. Only the genuine final body pass invokes this
+    // writer once on the original Func.
+    if !updated.incremental_probe && !rechecks {
         job_schedule :: sema_check_every_marker(&func, updated, context)
         loop diagnostic in job_schedule.diagnostics -> &diagnostics.push(diagnostic)
         if !job_schedule.complete -> complete = false
@@ -1196,7 +1200,7 @@ fn sema_function_check_pass(func: &Func, owner_id: SymbolID, function_kind: TFun
         kind: function_kind,
     }
     job := TJobFact?{None}
-    if !updated.incremental_probe {
+    if !updated.incremental_probe && !rechecks {
         job_artifact :: sema_check_job_artifact(func, tir, updated)
         loop diagnostic in job_artifact.diagnostics -> &diagnostics.push(diagnostic)
         if !job_artifact.complete -> return sema_function_check_incomplete(owner_id.key, context)
@@ -3469,6 +3473,12 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
     app_check := sema_extract_app_graph(resolved_graph, effects.solved, checked_types, project_root)
     &diagnostics.extend(app_check.diagnostics)
     if sema_has_error_since(diagnostics, 0) -> complete = false
+    {
+        permit := graph.bundle.guard_edit()
+        permit.value.used_core = Set.from(core_usage.used_core)
+        permit.value.ffi_callback_fns = Set.from(core_usage.ffi_callback_keys)
+        permit.value.inferred_layer = core_usage.inferred_layer
+    }
     effect_facts := SemIndexEffectFacts{
         summaries: effects.summaries, solved: effects.solved,
         reachability: reachability,

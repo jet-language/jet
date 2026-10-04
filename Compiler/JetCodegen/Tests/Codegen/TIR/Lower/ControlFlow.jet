@@ -1,0 +1,22 @@
+use JetFoundation.AST.Expr
+use JetFoundation.Diagnostics.Span
+use JetCodegen.Codegen.TIR.[LowerEnv, TLocal]
+use JetCodegen.Codegen.TIR.Lower.ControlFlow.pattern_subject_is_borrowed
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs:397
+fn nested_self() -> Expr Never! {
+    Expr.Field(Expr.Field(Expr.Ident("self", Span.new(0, 0)), "inner", Span.new(0, 0)), "optional", Span.new(0, 0))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs:410
+#Test("nested_read_self_pattern_subject_retains_borrow_provenance") {
+    env := LowerEnv.new("encode")
+    env.bind("self", TLocal.generated("self"), None)
+    env.mark_borrowed("self")
+    assert(pattern_subject_is_borrowed(&nested_self(), &env))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs:418
+#Test("nested_take_self_pattern_subject_stays_owned") {
+    env := LowerEnv.new("consume")
+    env.bind("self", TLocal.generated("self"), None)
+    assert(!pattern_subject_is_borrowed(&nested_self(), &env))
+}

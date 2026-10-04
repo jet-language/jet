@@ -1,0 +1,67 @@
+use jet_foundation.[Type, Span, Stmt, Expr, Pattern, StrPart, VariantPayload]
+use jet_foundation.[CtValue, CtReport]
+use JetSema.Sema.Registration.Checked04.[payload_bindings, option_switch, result_switch, serde_ct_expr, serde_zero_expr, method, ident, string_expr, static_string_expr, serde_rename_all_name]
+
+// Rust: crates/jet-sema/src/Sema/Registration/Serde/Ast.rs:36 (behavioral control; no inline Rust tests)
+#Test("serde_payload_binding_count_preserves_unit_and_single_cases") {
+    assert(payload_bindings(VariantPayload.Unit, "payload").is_empty())
+    names :: payload_bindings(VariantPayload.Single(Type.Int, Span.new(0, 1)), "payload")
+    assert(names == [String]{"payload0"})
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Serde/Ast.rs:99-167 (behavioral control)
+#Test("serde_result_and_optional_switches_keep_distinct_variant_routes") {
+    span :: Span.new(0, 1)
+    result :: result_switch(ident("value", span), "success", [Stmt]{}, "failure", [Stmt]{}, span)
+    assert(result == .Switch)
+    assert(result.arms.len() == 2)
+    assert(result.arms[0].cond == .PatternTest && result.arms[0].cond.pattern == .Variant)
+    assert(result.arms[0].cond.pattern.variant == "Ok")
+    assert(result.arms[1].cond.pattern.variant == "Err")
+    optional :: option_switch(ident("value", span), "present", [Stmt]{}, [Stmt]{}, span)
+    assert(optional == .Switch && optional.arms.len() == 1)
+    assert(optional.arms[0].cond.pattern.variant == "Val")
+    assert(optional.else_body.is_some())
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Serde/Ast.rs:458-477 (behavioral control)
+#Test("serde_encode_method_preserves_the_dispatch_receiver_fact") {
+    span :: Span.new(0, 1)
+    encoded :: method(ident("value", span), "encode", [Expr]{}, span)
+    assert(encoded == .MethodCall && encoded.recv_type == Val("__SerdeEncode__"))
+    ordinary :: method(ident("value", span), "len", [Expr]{}, span)
+    assert(ordinary == .MethodCall && ordinary.recv_type.is_none())
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Serde/Ast.rs:595-670 (behavioral control)
+#Test("serde_comptime_defaults_preserve_nested_values_and_clean_miss") {
+    span :: Span.new(0, 1)
+    generated :: serde_ct_expr(CtValue.List([CtValue]{CtValue.Int(4), CtValue.Str("text")}), span)
+    assert(generated == .Val(.ListLit))
+    if generated == .Val(.ListLit(values, _)) {
+        assert(values.len() == 2)
+        assert(values[0] == .Int(4, span, None, None))
+        assert(static_string_expr(values[1]) == Val("text"))
+    }
+    assert(serde_ct_expr(CtValue.Unit, span).is_none())
+    clean :: serde_ct_expr(CtValue.Failed(CtReport.Clean(Type.Int)), span)
+    assert(clean == Val(Expr.Absent(span)))
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Serde/Ast.rs:560-573 (behavioral control)
+#Test("serde_zero_keeps_optional_and_integer_carriers") {
+    span :: Span.new(0, 1)
+    assert(serde_zero_expr(Type.Option(Type.Int), span) == Expr.Absent(span))
+    assert(serde_zero_expr(Type.Int, span) == Expr.Int(0, span, None, None))
+    assert(static_string_expr(serde_zero_expr(Type.String, span)) == Val(""))
+}
+
+// Rust: crates/jet-sema/src/Sema/Registration/Serde/Ast.rs:704-735 (behavioral control)
+#Test("serde_rename_style_and_static_text_preserve_authored_defaults") {
+    span :: Span.new(0, 1)
+    assert(static_string_expr(string_expr("wire_name", span)) == Val("wire_name"))
+    assert(static_string_expr(ident("dynamic", span)).is_none())
+    assert(serde_rename_all_name(None, "HTTPServer") == "HTTPServer")
+    assert(serde_rename_all_name(Val("snake"), "HTTPServer") == "http_server")
+    assert(serde_rename_all_name(Val("kebab"), "HTTPServer") == "http-server")
+}

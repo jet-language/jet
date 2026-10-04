@@ -1,0 +1,27 @@
+use JetSema.Sema.Statements08.*
+use JetCodegen.Codegen.TIR.[TExpr, TExprKind, TFnValueKind, TLocal, unit_type]
+use JetSema.AST.[Expr, Type]
+use JetFoundation.Diagnostics.Span
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1408
+#Test("string_bytes_source_requires_strict_from_bytes_panic_shape") {
+    value := TExpr{ty: Type.String, kind: TExprKind.Local(TLocal.user("bytes"))}
+    assert(string_bytes_source(value) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1437
+#Test("stable_loop_source_root_unwraps_fields_and_parentheses") {
+    span := Span{start: 0, end: 1}
+    root := Expr.Ident("xs", span)
+    field := Expr.Field(root.clone(), "items", span)
+    assert(stable_loop_source_root(Expr.Paren(field, span)) == Val("xs"))
+    assert(stable_loop_source_root(Expr.Copy(root.clone(), span)) == Val("xs"))
+    assert(stable_loop_source_root(Expr.Copy(root, Span{start: 0, end: 2})) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:1789
+#Test("return_todo_annotation_ignores_ordinary_expressions") {
+    expr := Expr.Ident("x", Span{start: 0, end: 1})
+    assert(annotate_return_todo(expr, None) == None)
+    assert(annotate_return_todo(expr, Val(Type.Int)) == None)
+}

@@ -1,0 +1,82 @@
+// Tests for the canonical WorkspaceCatalog fragment.
+// Rust: Compiler/Bootstrap/Tests.rs:3615
+// Prefix fixture/read/error helpers retain their canonical CompilerImage test owner.
+#Test("compiler_image_envelope_reads_only_the_checked_prefix") {
+    digest :: compiler_image_test_digest(U8{7})
+    zero :: compiler_image_test_digest(U8{0})
+    bytes :: compiler_image_test_archive(MIR_SCHEMA_VERSION) ?? panic(err.message)
+    envelope :: read_compiler_image_envelope(bytes[0..<bytes.len()], digest[0..<digest.len()], MIRArtifactID{value: U64{11}}, MIRFunctionID{value: U64{13}}, compiler_image_test_host()) ?? panic("envelope rejected a well-formed prefix: {err.message}")
+    assert_eq(envelope.source_authority_digest, digest)
+    assert_eq(envelope.artifact, MIRArtifactID{value: U64{11}})
+    assert_eq(envelope.entry_function, MIRFunctionID{value: U64{13}})
+    assert_eq(compiler_image_test_restore_error(bytes[0..<bytes.len()], digest[0..<digest.len()]), "compiler-image archive checksum mismatch")
+    loop (expected_digest, artifact, entry, message) in [(zero, U64{11}, U64{13}, "compiler-image source authority does not match the authorized source snapshot"), (digest, U64{12}, U64{13}, "compiler-image artifact identity does not match the requested artifact"), (digest, U64{11}, U64{14}, "compiler-image entry function does not match the requested entry")] {
+        assert_eq(compiler_image_test_envelope_error(bytes[0..<bytes.len()], expected_digest[0..<expected_digest.len()], artifact, entry), message)
+    }
+    stale_schema :: compiler_image_test_archive((MIR_SCHEMA_VERSION + 1) & 65535) ?? panic(err.message)
+    assert(compiler_image_test_envelope_error(stale_schema[0..<stale_schema.len()], digest[0..<digest.len()], U64{11}, U64{13}).starts_with("compiler-image MIR schema "))
+    bad_magic := ~bytes
+    bad_magic[0] = bad_magic[0] ~| U8{1}
+    assert_eq(compiler_image_test_envelope_error(bad_magic[0..<bad_magic.len()], digest[0..<digest.len()], U64{11}, U64{13}), "invalid compiler-image magic")
+    assert_eq(compiler_image_test_envelope_error(bytes[0..<40], digest[0..<digest.len()], U64{11}, U64{13}), "truncated compiler-image archive")
+}
+
+// Rust: Compiler/Bootstrap/Tests.rs:3686
+#Test("backend_workspace_orders_units_and_merges_cycles") {
+    source :: "#![allow(warnings)]\n// jet:cached-runtime-begin\npub(crate) fn runtime_item() {{}}\n// jet:cached-runtime-end\n{UNIT_BEGIN_MARKER}base\nfn __jet_base_item() {{}}\ntrait __jet_BaseStore {{\n    fn __jet_gamma_field(&self);\n}}\n{UNIT_END_MARKER}base\n{UNIT_BEGIN_MARKER}Alpha\nfn __jet_alpha() {{ __jet_base_item(); __jet_beta(); }}\n{UNIT_END_MARKER}Alpha\n{UNIT_BEGIN_MARKER}Beta\nfn __jet_beta() {{ __jet_alpha(); }}\n{UNIT_END_MARKER}Beta\n{UNIT_BEGIN_MARKER}Gamma\nstruct __jet_Gamma {{ __jet_gamma_field: i64 }}\nfn __jet_gamma() {{ __jet_beta(); }}\n{UNIT_END_MARKER}Gamma\nfn main() {{ __jet_gamma(); }}\n"
+    workspace :: split_backend_workspace(source) ?? panic("unit sections split")
+    rows := [(String, String)]{}
+    loop unit in workspace.units -> &rows.push((unit.crate_name, unit.deps.join(",")))
+    assert_eq(rows, [("jetc_base", ""), ("jetc_alpha_beta", "jetc_base"), ("jetc_gamma", "jetc_alpha_beta")])
+    merged :: workspace.units[1].source
+    assert(merged.starts_with("#![allow(warnings)]\nuse jet_runtime::*;\nuse jetc_base::*;\n"))
+    assert(merged.contains("pub fn __jet_alpha()") && merged.contains("pub fn __jet_beta()"))
+    assert(workspace.runtime_lib.contains("pub fn runtime_item()"))
+    assert(workspace.main.contains("use jet_runtime::*;\nuse jetc_base::*;\nuse jetc_alpha_beta::*;\nuse jetc_gamma::*;\n"))
+    assert(workspace.main.ends_with("fn main() {{ __jet_gamma(); }}\n"))
+    assert(!workspace.main.contains("__jet_alpha"))
+}
+
+// Rust: Compiler/Bootstrap/Tests.rs:3737
+#Test("backend_workspace_splits_runtime_without_unit_sections") {
+    workspace :: split_backend_workspace("// jet:cached-runtime-begin\nfn f() {{}}\n// jet:cached-runtime-end\nfn main() {{ f(); }}\n") ?? panic("runtime block split")
+    assert(workspace.units.is_empty())
+    assert(workspace.runtime_lib.contains("pub fn f()"))
+    assert(workspace.main.contains("use jet_runtime::*;\n"))
+    assert(workspace.main.ends_with("fn main() {{ f(); }}\n"))
+    assert(!workspace.main.contains("fn f()"))
+    assert_eq(split_backend_workspace("fn main() {{}}\n"), None)
+}
+
+// Rust: Compiler/Bootstrap/Tests.rs:3752
+#Test("backend_shards_separate_cold_code") {
+    steps :: "    __jet_n += 1;\n".repeat(200)
+    giant :: "    __jet_n += 1;\n".repeat(BACKEND_COLD_FUNCTION_BYTES / 16)
+    text :: "pub struct __jet_T {{ __jet_n: i64 }}\npub fn __jet_hot(__jet_x: i64) -> i64 {{ __jet_x + 1 }}\npub fn __jet_list(__jet_x: i64) -> Vec<i64> {{ vec![__jet_x] }}\n#[inline] pub fn __jet_TABLE() -> Vec<i64> {{ vec![1, 2, 3] }}\npub fn __jet_ROWS_rows_0(rows: &mut Vec<i64>) {{\n    rows.push(1);\n    rows.push(2);\n}}\nimpl __jet_Decode for __jet_T {{\n    fn jet_decode(__jet_tree: &i64) -> i64 {{\n        let mut __jet_n = *__jet_tree;\n{steps}        __jet_n\n    }}\n}}\nimpl __jet_Equatable for __jet_T {{\n    fn equals(&self, __jet_other: &__jet_T) -> bool {{\n        let mut __jet_n = self.__jet_n;\n{steps}        __jet_n == __jet_other.__jet_n\n    }}\n}}\npub fn __jet_giant(mut __jet_n: i64) -> i64 {{\n{giant}    __jet_n\n}}\n"
+    sharded :: shard_unit(text, 64 << 10) ?? panic("a unit over the shard size shards")
+    hot :: sharded.shards.join("")
+    cold :: sharded.cold_shards.join("")
+    loop name in ["fn __jet_hot(", "fn __jet_list(", "fn __jet_impl___jet_T___jet_Equatable_equals("] -> assert(hot.contains(name) && !cold.contains(name), "`{name}` is hot")
+    loop name in ["fn __jet_TABLE(", "fn __jet_ROWS_rows_0(", "fn __jet_giant(", "fn __jet_impl___jet_T___jet_Decode_jet_decode("] -> assert(cold.contains(name) && !hot.contains(name), "`{name}` is cold")
+    // Tables and decoder share one cold shard; the giant fills its own.
+    assert_eq(sharded.cold_shards.len(), 2)
+}
+
+// Rust: Compiler/Bootstrap/Tests.rs:3785
+#Test("backend_unit_profiles_leave_only_cold_shards_unoptimized") {
+    shard :: |name: String, cold: Bool| BackendShard{name: name, source: "", cold: cold}
+    workspace :: BackendWorkspace{runtime_lib: "", units: [BackendUnit{crate_name: "jetc_sema", deps: [String]{}, source: "", shards: [shard("jetc_sema_s0", false), shard("jetc_sema_cold0", true)]}], main: ""}
+    tables :: |profiles: String| {
+        rows := [String]{}
+        loop line in profiles.lines() { if line.starts_with("[") -> &rows.push(line.to_string()) }
+        rows
+    }
+    release :: backend_unit_profiles(workspace, Val(BACKEND_RELEASE_PROFILE_NAME))
+    assert_eq(tables(release), ["[profile.jet-stage-release.package.jetc_sema_cold0]"])
+    assert(release.contains("\nopt-level = 0\n"))
+    dev :: backend_unit_profiles(workspace, None)
+    expected := [String]{}
+    loop name in ["jet_runtime", "jetc_sema", "jetc_sema_s0", "jetc_sema_cold0"] -> &expected.push("[profile.dev.package.{name}]")
+    assert_eq(tables(dev), expected)
+    assert(!dev.contains("opt-level"))
+}

@@ -1,313 +1,152 @@
-// PORT-PENDING 0521 crates-jet-codegen-src-codegen-tir-subset-core-calls-module-group: crates/jet-codegen/src/Codegen/TIR/subset/entry.rs:1-309
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::refusal;
-//RS use crate::AST::{Func, Stmt, Type};
-//RS use crate::Codegen::Cx;
-//RS use crate::Codegen::TIR::is_covered_enum_ty;
-//RS use crate::Codegen::TIR::is_covered_struct_ty;
-//RS use crate::Codegen::TIR::is_subset_param_ty;
-//RS use crate::Codegen::TIR::is_subset_return_ty;
-//RS use crate::Codegen::TIR::resolve_self_ty;
-//RS use crate::Codegen::TIR::stmt_in_subset;
-//RS use crate::Codegen::TIR::struct_is_generic;
-//RS use crate::Syntax;
-//RS use std::collections::HashSet;
-//RS 
-//RS /// Conservative structural test: `true` only if `f` is a top-level plain
-//RS /// function whose entire body is inside the Phase-1 subset. The rule is
-//RS /// **exclude on any doubt** — a false negative just keeps the function on the
-//RS /// existing AST path (always safe), while a false positive risks an I2 bug. So
-//RS /// every check below bails to `false` the moment it sees anything unrecognised.
-//RS ///
-//RS /// `cx` is consulted to exclude functions that reference program-level names the
-//RS /// subset does not lower — a comptime `const` (inlined at use) or a bare
-//RS /// function-as-value ident. Those use sites need codegen the TIR omits in Phase 1.
-//RS pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
-//RS     refusal::begin();
-//RS     // c109 Phase 18: an `#Unsafe fn` (S58) IS covered — it lowers to a Rust `unsafe fn`
-//RS     // (the `is_unsafe` flag drives the signature prefix), and its gated body ops are
-//RS     // covered below.
-//RS     // c109 Phase 23: a `#Pure fn` (S60, E2-M16) IS covered — purity is a sema-only
-//RS     // check (E3401: a `#Pure fn` may only call other `#Pure fn`s), validated entirely
-//RS     // in sema; codegen erases the annotation (no codegen path reads `f.is_pure` outside
-//RS     // these gates). So a `#Pure fn` lowers + emits byte-identically to a plain fn — the
-//RS     // body's calls are ordinary `Call`/`MethodCall` nodes covered by earlier phases.
-//RS     // c109 Phase 17/19: GENERIC free functions are covered when every type parameter is a
-//RS     // plain `<T>` / bounded `<T: Trait>` form (the clause renders via `render_generics`),
-//RS     // the body uses only covered values, and any generic struct application is admitted by
-//RS     // the same `is_subset_param_ty`/`is_covered_generic_struct_ty` shape used by lowering.
-//RS     if f.type_params.is_empty() {
-//RS         // Non-generic: no type-var should appear (defensive — sema wouldn't allow it).
-//RS     }
-//RS     // A method always has a `self` first parameter; the subset is top-level
-//RS     // functions only. (Top-level funcs never have `self`, but check anyway.)
-//RS     if let Some(p) = f.params.iter().find(|p| p.name == Syntax::KW_SELF) {
-//RS         refusal::note(refusal::SELF_PARAM, p.name_span);
-//RS         return false;
-//RS     }
-//RS     // Params must be scalars, String, or a covered value type. c109 Phase 23: a
-//RS     // DEFAULT parameter value (`h: Int{w}`, S61/D-NARG-D2) is covered — sema fills
-//RS     // omitted trailing args at every CALL SITE (`CheckerItems::default-value filling`,
-//RS     // substituting earlier-param refs with the supplied arg), so by codegen the call's
-//RS     // args are complete and the default expr is GONE from the AST. Codegen never reads
-//RS     // `p.default` (the signature emits the same `name: ty` regardless), so a defaulted
-//RS     // param lowers byte-identically — the only thing the default touches is the call,
-//RS     // already handled. No `p.default` exclusion needed.
-//RS     for p in &f.params {
-//RS         let param_ty = if p.variadic {
-//RS             Type::List(Box::new(p.ty.clone()))
-//RS         } else {
-//RS             p.ty.clone()
-//RS         };
-//RS         if !is_subset_param_ty(&param_ty, cx) {
-//RS             refusal::note(refusal::PARAM_TY, p.ty_span);
-//RS             return false;
-//RS         }
-//RS     }
-//RS     // Return type, if present, must be a scalar, String, or a covered struct type.
-//RS     if let Some(rt) = &f.return_type {
-//RS         if !is_subset_return_ty(rt, cx) {
-//RS             if let Some(span) = f.return_type_span {
-//RS                 refusal::note(refusal::RETURN_TY, span);
-//RS             }
-//RS             return false;
-//RS         }
-//RS     }
-//RS     // Track parameter names so identifier references can be classified: a name
-//RS     // that is neither a local/param binding nor a builtin is a program-level
-//RS     // reference (const or fn-value), which the subset excludes.
-//RS     let mut locals: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
-//RS     f.body
-//RS         .iter()
-//RS         .all(|statement| stmt_in_subset(statement, cx, &mut locals))
-//RS }
-//RS 
-//RS /// c109: is an error-conversion `impl Old -> New { … }` body fully inside the TIR subset?
-//RS /// The body has the Old value bound as `self`, returns the New type, and is emitted at
-//RS /// indent 1 inside the `pub fn <conv>(user_self: Old) -> New` `emit_error_conv` opens.
-//RS /// The signature/braces are fixed by `emit_error_conv`; only the body statements gate.
-//RS pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
-//RS     refusal::begin();
-//RS     let mut locals: HashSet<String> = HashSet::new();
-//RS     locals.insert(Syntax::KW_SELF.to_string());
-//RS     body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
-//RS }
-//RS 
-//RS /// c109 Phase 7: is this method (an inherent method of `type_name`) fully inside
-//RS /// the TIR subset? Covers two method classes:
-//RS ///   - **instance methods** — a `self` first parameter (`self`/`mut self`/`view
-//RS ///     self`/… via any convention), where `self.field` reads and covered-subset
-//RS ///     constructs (Phases 1–6) make up the body. The `self` slot lowers to the
-//RS ///     correct Rust receiver (`&self`/`&mut self`/`self`).
-//RS ///   - **static methods** — no `self` parameter; an associated function on the
-//RS ///     type (`Type.make(x) -> Type`). The body + every static call site
-//RS ///     (`Type.make(x)` → `__jet_Type::__jet_make(x)`) are covered.
-//RS ///
-//RS /// The owning `type_name` must itself be a covered struct or enum (so the receiver
-//RS /// place + field reads emit exactly as `emit_method` does). This is a coverage
-//RS /// report (`validate_tir_support`), not a lowering filter: program lowering
-//RS /// lowers every inherent method, as it lowers every free function, so a refusal
-//RS /// here can never drop a method its callers still name (I2).
-//RS pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
-//RS     refusal::begin();
-//RS     // Method-owned type parameters are in scope while the structural gate walks
-//RS     // the signature and body. This keeps generic methods on the same TIR path as
-//RS     // generic free functions without leaking their names into the enclosing item.
-//RS     let previous_type_params = cx.current_type_params.borrow().clone();
-//RS     let mut method_type_params = previous_type_params.clone();
-//RS     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
-//RS     cx.current_type_params.replace(method_type_params);
-//RS     let covered = tir_covers_method_inner(f, type_name, cx);
-//RS     cx.current_type_params.replace(previous_type_params);
-//RS     covered
-//RS }
-//RS 
-//RS fn tir_covers_method_inner(f: &Func, type_name: &str, cx: &Cx) -> bool {
-//RS     // c109 Phase 18: an `#Unsafe fn` method IS covered
-//RS     // (it lowers to an `unsafe fn`, the `is_unsafe` flag driving the prefix). c109
-//RS     // Phase 23: a `#Pure fn` method IS covered (purity is sema-only; codegen erases it).
-//RS     // The owning type must be a covered struct or enum (the receiver place and
-//RS     // every `self.field` read then emit exactly as `emit_method` produces them).
-//RS     let generic_owner = struct_is_generic(type_name, cx);
-//RS     let owner_ty = Type::Named(type_name.to_string());
-//RS     if !generic_owner && !is_covered_struct_ty(&owner_ty, cx) && !is_covered_enum_ty(&owner_ty, cx)
-//RS     {
-//RS         refusal::note(refusal::UNCOVERED_OWNER, f.name_span);
-//RS         return false;
-//RS     }
-//RS     // The self parameter (if any) must be the FIRST parameter, per the method
-//RS     // calling convention. A `self`-bearing method is an instance method; a method
-//RS     // with no `self` is a static (associated) function. Any non-first `self` is
-//RS     // malformed (sema rejects it) — exclude defensively.
-//RS     if let Some(p) = f.params.iter().skip(1).find(|p| p.name == Syntax::KW_SELF) {
-//RS         refusal::note(refusal::EXTRA_SELF_PARAM, p.name_span);
-//RS         return false;
-//RS     }
-//RS     // D-MUTSELF1: self-mutation in a `mut self` method is now FULLY lowered — the
-//RS     // `mut self` slot derefs (`(*self)`), so whole-`self` `self = New{}` emits
-//RS     // `(*self) = New{}` and `self.field = v` emits `((*self)).field = v`, both
-//RS     // byte-for-byte with the AST path (the prior I2 hole is closed). The covered
-//RS     // subset therefore admits both, and the old `stmt_assigns_self` exclusion is gone.
-//RS     //
-//RS     // Non-self params + the return type must be covered value types (Self resolves
-//RS     // to the owning type). c109 Phase 23: a default param value is covered (sema fills
-//RS     // call-site args; codegen never reads `p.default`) — same as the free-fn gate.
-//RS     for p in f.params.iter().filter(|p| p.name != Syntax::KW_SELF) {
-//RS         if !is_subset_param_ty(&resolve_self_ty(&p.ty, type_name), cx) {
-//RS             refusal::note(refusal::PARAM_TY, p.ty_span);
-//RS             return false;
-//RS         }
-//RS     }
-//RS     if let Some(rt) = &f.return_type {
-//RS         if !is_subset_return_ty(&resolve_self_ty(rt, type_name), cx) {
-//RS             if let Some(span) = f.return_type_span {
-//RS                 refusal::note(refusal::RETURN_TY, span);
-//RS             }
-//RS             return false;
-//RS         }
-//RS     }
-//RS     // `self` is a binding in scope for the body (its field reads + the implicit
-//RS     // match subject). Non-self params join it.
-//RS     let mut locals: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
-//RS     f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
-//RS }
-//RS 
-//RS /// c109 Phase 12: is this TRAIT-IMPL method (a method of `impl Trait for type_name`)
-//RS /// fully inside the TIR subset? Distinct from `tir_covers_method` because the trait
-//RS /// method emits via a different function (`emit_trait_method`): bare name, no `pub`,
-//RS /// receiver per convention (D-MUTSELF1), self slot `jet_ty: Some(Type::Named(type_name))`. Same rule —
-//RS /// **exclude on any doubt**. The owning type must be a covered struct/enum; the body
-//RS /// must be in-subset and never reassign `self`.
-//RS ///
-//RS /// Conservative exclusions beyond the inherent-method gate:
-//RS ///  - `is_unsafe` (`#Unsafe fn`) is excluded — its body may use gated pointer ops the
-//RS ///    subset does not lower, and the `unsafe fn` prefix is a separate emit concern.
-//RS ///  - a trait method normally has a `self` receiver (a trait method without `self` is a
-//RS ///    static trait method, rare; the ordinary `CheckedText` contract is the explicit
-//RS ///    exception because both methods are static).
-//RS pub(crate) fn tir_covers_trait_method(
-//RS     f: &Func,
-//RS     type_name: &str,
-//RS     cx: &Cx,
-//RS     trait_name: &str,
-//RS ) -> bool {
-//RS     refusal::begin();
-//RS     if !trait_method_binders_lower_in_place(f, type_name, cx, trait_name) {
-//RS         refusal::note(refusal::TYPE_PARAMS, f.name_span);
-//RS         return false;
-//RS     }
-//RS     let serde_generic_owner = matches!(
-//RS         trait_name,
-//RS         crate::Generics::ENCODE | crate::Generics::DECODE
-//RS     ) && struct_is_generic(type_name, cx);
-//RS     let is_literal = crate::Generics::is_literal_capability(trait_name);
-//RS     let is_checked_text = trait_name == crate::Generics::CHECKED_TEXT;
-//RS     // c109 Phase 18: an `#Unsafe fn` trait method IS
-//RS     // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
-//RS     // in `emit_tir_trait_method`).
-//RS     // c109 Phase 23: a `#Pure` trait method is covered (purity is sema-only; erased).
-//RS     // The owning type must be a covered struct, enum, or distinct type.
-//RS     // D-OPMIX1: `impl Int.Mul(Price)` is a user operator hook on a builtin
-//RS     // scalar. Admit it so mixed arithmetic lowers instead of vanishing from
-//RS     // the TIR function table.
-//RS     let owner_ty = Type::Named(type_name.to_string());
-//RS     let operator_on_builtin = matches!(
-//RS         trait_name,
-//RS         crate::Syntax::TRAIT_ADD
-//RS             | crate::Syntax::TRAIT_SUB
-//RS             | crate::Syntax::TRAIT_MUL
-//RS             | crate::Syntax::TRAIT_DIV
-//RS     ) && crate::AST::numeric_type_from_name(type_name).is_some();
-//RS     if !serde_generic_owner
-//RS         && !is_covered_struct_ty(&owner_ty, cx)
-//RS         && !is_covered_enum_ty(&owner_ty, cx)
-//RS         && !cx.distinct_types.contains_key(type_name)
-//RS         && !operator_on_builtin
-//RS     {
-//RS         refusal::note(refusal::UNCOVERED_OWNER, f.name_span);
-//RS         return false;
-//RS     }
-//RS     // Typed derive methods use the same generic-owner scope as hand-written
-//RS     // trait impls. Keep the owner generic in the TIR lowering rather than
-//RS     // falling back to a second code-generation path.
-//RS     // D-SERDE2 (card #131 S1-bridge): a hand `impl T.Decode` `decode` is a STATIC trait
-//RS     // method (no `self`) — the codec bridge in `emit_tir_trait_method` renders it as
-//RS     // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<FieldError>>` with no
-//RS     // receiver. Admit it (the general "static trait fn" exclusion below does not apply).
-//RS     let is_decode = trait_name == crate::Generics::DECODE;
-//RS     if !is_decode && !is_checked_text && !is_literal {
-//RS         // A trait method must have `self` as its FIRST parameter (the receiver `&self`/
-//RS         // `&mut self`/`self` per convention). A trait method with no `self` (static trait
-//RS         // fn) emits no receiver — exclude it except for the static CheckedText contract.
-//RS         let Some(first) = f.params.first() else {
-//RS             refusal::note(refusal::MISSING_SELF_PARAM, f.name_span);
-//RS             return false;
-//RS         };
-//RS         if first.name != Syntax::KW_SELF {
-//RS             refusal::note(refusal::MISSING_SELF_PARAM, first.name_span);
-//RS             return false;
-//RS         }
-//RS     }
-//RS     // No further `self` parameters (malformed — sema rejects, but be defensive).
-//RS     if let Some(p) = f.params.iter().skip(1).find(|p| p.name == Syntax::KW_SELF) {
-//RS         refusal::note(refusal::EXTRA_SELF_PARAM, p.name_span);
-//RS         return false;
-//RS     }
-//RS     // Non-self params + the return type must be covered value types (Self resolves
-//RS     // to the owning type). No defaults on a trait method (sema enforces it).
-//RS     for p in f.params.iter().filter(|p| p.name != Syntax::KW_SELF) {
-//RS         if p.default.is_some() {
-//RS             refusal::note(refusal::DEFAULTED_TRAIT_PARAM, p.name_span);
-//RS             return false;
-//RS         }
-//RS         if !is_subset_param_ty(&resolve_self_ty(&p.ty, type_name), cx) {
-//RS             refusal::note(refusal::PARAM_TY, p.ty_span);
-//RS             return false;
-//RS         }
-//RS     }
-//RS     if let Some(rt) = &f.return_type {
-//RS         if !is_subset_return_ty(&resolve_self_ty(rt, type_name), cx) {
-//RS             if let Some(span) = f.return_type_span {
-//RS                 refusal::note(refusal::RETURN_TY, span);
-//RS             }
-//RS             return false;
-//RS         }
-//RS     }
-//RS     let mut locals: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
-//RS     // D-MUTSELF1: self-mutation is fully lowered (the `mut self` slot derefs), so a
-//RS     // trait method that assigns `self` / `self.field` is now covered like any other.
-//RS     f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
-//RS }
-//RS 
-//RS /// The one lowering-route fact for a trait-impl method: whether its own type
-//RS /// parameters lower with the declaration. Codec methods on a generic owner, the
-//RS /// CheckedText contract, and literal capabilities keep their binders in scope;
-//RS /// any other method-owned binder has no in-place route, exactly like a generic
-//RS /// free function. Program lowering asks only this — never the structural
-//RS /// coverage gate above — so a method whose body the gate would refuse still
-//RS /// lowers, and an unsupported construct stops at its own MIR lowering site
-//RS /// with its name instead of vanishing from the function table (I2).
-//RS pub(crate) fn trait_method_binders_lower_in_place(
-//RS     f: &Func,
-//RS     type_name: &str,
-//RS     cx: &Cx,
-//RS     trait_name: &str,
-//RS ) -> bool {
-//RS     f.type_params.is_empty()
-//RS         || (matches!(
-//RS             trait_name,
-//RS             crate::Generics::ENCODE | crate::Generics::DECODE
-//RS         ) && struct_is_generic(type_name, cx))
-//RS         || trait_name == crate::Generics::CHECKED_TEXT
-//RS         || crate::Generics::is_literal_capability(trait_name)
-//RS }
-//RS 
-//RS /// Compiler-generated structural derives are emitted entirely by the derive
-//RS /// builder from TIR-supported nodes. The retained, parser-unforgeable block
-//RS /// provenance is the coverage authority; the conservative source-method gate
-//RS /// must not reinterpret the synthetic signature or body.
-//RS pub(crate) fn tir_covers_compiler_derive_method(f: &Func, _cx: &Cx) -> bool {
-//RS     f.type_params.is_empty()
-//RS }
-// END-PORT-PENDING 0521 crates/jet-codegen/src/Codegen/TIR/subset/entry.rs:1-309
+use JetSema.AST.[Func, Stmt, Type, numeric_type_from_name]
+use JetSema.[Syntax, Generics]
+use JetCodegen.Codegen.Cx
+use JetCodegen.Codegen.TIR.*
+use JetCodegen.Codegen.TIR.Subset.Refusal as refusal
+use core.collections.Set
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/entry.rs:23
+// Conservative structural coverage: exclude on any doubt. Sema owns purity,
+// unsafe admission, generic bounds and default-argument filling.
+pub fn tir_covers(f: Func, cx: Cx) -> Bool {
+    refusal.begin()
+    if f.params.iter().find(fn(p) { p.name == Syntax.KW_SELF }) == {
+        Val(p) -> { refusal.note(refusal.SELF_PARAM, p.name_span); return false }
+        else -> {}
+    }
+    for p in f.params {
+        param_ty := if p.variadic { Type.List(p.ty.clone()) } else { p.ty.clone() }
+        if !is_subset_param_ty(param_ty, cx) {
+            refusal.note(refusal.PARAM_TY, p.ty_span)
+            return false
+        }
+    }
+    if f.return_type == { Val(rt) -> {
+        if !is_subset_return_ty(rt, cx) {
+            if f.return_type_span == { Val(span) -> refusal.note(refusal.RETURN_TY, span); else -> {} }
+            return false
+        }
+    }; else -> {} }
+    locals: Set<String> := f.params.iter().map(fn(p) { p.name.clone() }).collect()
+    f.body.iter().all(fn(statement) { stmt_in_subset(statement, cx, &locals) })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/entry.rs:87
+pub fn tir_covers_error_conv_body(body: [Stmt], cx: Cx) -> Bool {
+    refusal.begin()
+    locals: Set<String> := Set.new()
+    _ :: locals.insert(Syntax.KW_SELF.to_string())
+    body.iter().all(fn(s) { stmt_in_subset(s, cx, &locals) })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/entry.rs:109
+// Restore the enclosing type-parameter scope after checking a method.
+pub fn tir_covers_method(f: Func, type_name: String, cx: Cx) -> Bool {
+    refusal.begin()
+    previous_type_params := cx.current_type_params.borrow().clone()
+    method_type_params := previous_type_params.clone()
+    method_type_params.extend(f.type_params.iter().map(fn(param) { param.name.clone() }))
+    _ :: cx.current_type_params.replace(^method_type_params)
+    covered := tir_covers_method_inner(f, type_name, cx)
+    _ :: cx.current_type_params.replace(^previous_type_params)
+    covered
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/entry.rs:123
+fn tir_covers_method_inner(f: Func, type_name: String, cx: Cx) -> Bool {
+    generic_owner := struct_is_generic(type_name, cx)
+    owner_ty := Type.Named(type_name.to_string())
+    if !generic_owner && !is_covered_struct_ty(owner_ty, cx) && !is_covered_enum_ty(owner_ty, cx) {
+        refusal.note(refusal.UNCOVERED_OWNER, f.name_span)
+        return false
+    }
+    if f.params.iter().skip(1).find(fn(p) { p.name == Syntax.KW_SELF }) == {
+        Val(p) -> { refusal.note(refusal.EXTRA_SELF_PARAM, p.name_span); return false }
+        else -> {}
+    }
+    // Mutable-self assignments lower through the dereferenced receiver slot.
+    for p in f.params.iter().filter(fn(p) { p.name != Syntax.KW_SELF }) {
+        if !is_subset_param_ty(resolve_self_ty(p.ty, type_name), cx) {
+            refusal.note(refusal.PARAM_TY, p.ty_span)
+            return false
+        }
+    }
+    if f.return_type == { Val(rt) -> {
+        if !is_subset_return_ty(resolve_self_ty(rt, type_name), cx) {
+            if f.return_type_span == { Val(span) -> refusal.note(refusal.RETURN_TY, span); else -> {} }
+            return false
+        }
+    }; else -> {} }
+    locals: Set<String> := f.params.iter().map(fn(p) { p.name.clone() }).collect()
+    f.body.iter().all(fn(s) { stmt_in_subset(s, cx, &locals) })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/entry.rs:186
+pub fn tir_covers_trait_method(f: Func, type_name: String, cx: Cx, trait_name: String) -> Bool {
+    refusal.begin()
+    if !trait_method_binders_lower_in_place(f, type_name, cx, trait_name) {
+        refusal.note(refusal.TYPE_PARAMS, f.name_span)
+        return false
+    }
+    serde_generic_owner := (trait_name == Generics.ENCODE || trait_name == Generics.DECODE)
+        && struct_is_generic(type_name, cx)
+    is_literal := Generics.is_literal_capability(trait_name)
+    is_checked_text := trait_name == Generics.CHECKED_TEXT
+    owner_ty := Type.Named(type_name.to_string())
+    operator_on_builtin := (trait_name == Syntax.TRAIT_ADD || trait_name == Syntax.TRAIT_SUB
+        || trait_name == Syntax.TRAIT_MUL || trait_name == Syntax.TRAIT_DIV)
+        && numeric_type_from_name(type_name).is_some()
+    if !serde_generic_owner && !is_covered_struct_ty(owner_ty, cx)
+        && !is_covered_enum_ty(owner_ty, cx) && !cx.distinct_types.contains_key(type_name)
+        && !operator_on_builtin {
+        refusal.note(refusal.UNCOVERED_OWNER, f.name_span)
+        return false
+    }
+    // Decode, CheckedText and literal contracts admit static trait methods.
+    is_decode := trait_name == Generics.DECODE
+    if !is_decode && !is_checked_text && !is_literal {
+        first := f.params.first() ?? {
+            refusal.note(refusal.MISSING_SELF_PARAM, f.name_span)
+            return false
+        }
+        if first.name != Syntax.KW_SELF {
+            refusal.note(refusal.MISSING_SELF_PARAM, first.name_span)
+            return false
+        }
+    }
+    if f.params.iter().skip(1).find(fn(p) { p.name == Syntax.KW_SELF }) == {
+        Val(p) -> { refusal.note(refusal.EXTRA_SELF_PARAM, p.name_span); return false }
+        else -> {}
+    }
+    for p in f.params.iter().filter(fn(p) { p.name != Syntax.KW_SELF }) {
+        if p.default.is_some() {
+            refusal.note(refusal.DEFAULTED_TRAIT_PARAM, p.name_span)
+            return false
+        }
+        if !is_subset_param_ty(resolve_self_ty(p.ty, type_name), cx) {
+            refusal.note(refusal.PARAM_TY, p.ty_span)
+            return false
+        }
+    }
+    if f.return_type == { Val(rt) -> {
+        if !is_subset_return_ty(resolve_self_ty(rt, type_name), cx) {
+            if f.return_type_span == { Val(span) -> refusal.note(refusal.RETURN_TY, span); else -> {} }
+            return false
+        }
+    }; else -> {} }
+    locals: Set<String> := f.params.iter().map(fn(p) { p.name.clone() }).collect()
+    f.body.iter().all(fn(s) { stmt_in_subset(s, cx, &locals) })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/entry.rs:288
+// Program lowering asks only this route fact, never the body coverage gate.
+pub fn trait_method_binders_lower_in_place(f: Func, type_name: String, cx: Cx, trait_name: String) -> Bool {
+    f.type_params.is_empty()
+        || ((trait_name == Generics.ENCODE || trait_name == Generics.DECODE) && struct_is_generic(type_name, cx))
+        || trait_name == Generics.CHECKED_TEXT
+        || Generics.is_literal_capability(trait_name)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/entry.rs:307
+// Parser-unforgeable derive provenance, not the source-method gate, owns coverage.
+pub fn tir_covers_compiler_derive_method(f: Func, _cx: Cx) -> Bool { f.type_params.is_empty() }

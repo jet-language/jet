@@ -34,7 +34,7 @@ fn jet_driver_program_snapshot(bundle: ProgramBundle, row: JetDriverModuleFacts)
 // another parsed Program or an owned item list.
 pub fn jet_driver_loaded_bundle(load: JetDriverLoadResult) -> Shared<ProgramBundle> Never! { load.bundle }
 
-fn jet_driver_empty_bundle(request: JetDriverCompileRequest, project_root: compiler_driver_os_path.OsPath) -> Shared<ProgramBundle> Never! {
+fn jet_driver_empty_bundle(request: JetDriverCompileRequest, project_root: compiler_driver_os_path.OSPath) -> Shared<ProgramBundle> Never! {
     os :: request.host_facts.loader_host_os ?? panic("native capture omitted the original Loader host OS")
     triple :: request.host_facts.loader_host_triple ?? panic("native capture omitted the original Loader host triple")
     shared ProgramBundle.new(project_root, os, BuildFactSnapshot.for_host(os, triple), JET_DRIVER_LATEST_EDITION)
@@ -47,6 +47,9 @@ fn jet_driver_seed_bundle(load: JetDriverLoadResult, roots: View<JetDriverAuthor
         if row.module_identity == load.entry_module_identity -> permit.value.entry = index
         name_ledger_set_module(&permit.value.name_ledger, index, unit.alias, unit.path, row.package_identity)
         if load.package_namespaces.get(row.module_identity) == .Val(root) -> name_ledger_set_module_namespace(&permit.value.name_ledger, index, compiler_driver_os_path.display(root))
+    }
+    if permit.value.modules.len() > 0 {
+        permit.value.build_facts = BuildFactSnapshot.script_for_host(permit.value.modules[permit.value.entry].path, permit.value.active_os, permit.value.build_facts.target_triple, "dev")
     }
     indices := [String:Int]{}
     loop row in load.modules { if row.bundle_index == .Val(index) -> indices[row.module_identity] = index }
@@ -78,7 +81,11 @@ fn jet_driver_seed_bundle(load: JetDriverLoadResult, roots: View<JetDriverAuthor
         guarantees.dependency_names = Rank.from(names)
         guarantees.memory_denials = loop right in package.authority_deny ?? [String]{} { if right == "Mem.Rc" || jet_driver_is_allocation_denial(right) -> right }
         guarantees.authority_needs = package.authority_needs
-        guarantees.application_authority = if package.manifest_path == None -> ApplicationAuthority.ambient_basics() else -> ApplicationAuthority.from_policy(package.authority_allow, package.authority_deny, "package.jet")
+        guarantees.application_authority = if {
+            package.manifest_facts == .Val(manifest) -> ApplicationAuthority.from_policy(package.authority_allow, package.authority_deny, "{manifest.origin} authority.holds")
+            package.manifest_path == .Val(path) -> ApplicationAuthority.from_policy(package.authority_allow, package.authority_deny, "{path} authority.holds")
+            else -> ApplicationAuthority.ambient_basics()
+        }
         permit.value.package_guarantees = guarantees
         break
     }

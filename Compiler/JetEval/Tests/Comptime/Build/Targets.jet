@@ -1,0 +1,20 @@
+use jet_comptime.Comptime.Build.Targets.[BuildPath, TargetSpec]
+use jet_comptime.Comptime.Build.ErrorsKeys.BuildError
+
+// Rust: crates/jet-comptime/src/Comptime/Build/targets.rs:25
+#Test("build_path_rejects_empty_and_parent_components") {
+    assert(BuildPath.new(" \t ") is .Err(BuildError.EmptyPath))
+    assert(BuildPath.new("a/../b") is .Err(BuildError.InvalidPath("a/../b")))
+    path := BuildPath.new("./src/main.jet")?
+    assert(path.as_str() == "./src/main.jet")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/targets.rs:66
+#Test("target_spec_builders_defer_path_validation_and_replace_metadata") {
+    spec := TargetSpec.new().with_source("../later-validation").with_input("in.txt").with_output("out.txt").with_metadata("a", "first").with_metadata("a", "last")
+    assert(spec.sources[0].as_str() == "../later-validation")
+    assert(spec.inputs[0].as_str() == "in.txt")
+    assert(spec.outputs[0].as_str() == "out.txt")
+    assert(spec.metadata["a"] == "last")
+    assert(spec.toolchain.is_none())
+    assert(spec.signing_identity.is_none())
+}

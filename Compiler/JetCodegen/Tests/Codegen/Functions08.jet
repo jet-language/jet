@@ -1,0 +1,9 @@
+use jet_foundation.[NameReference, Span]
+use jet_codegen.[checked_function_reference_identity, is_checked_function_reference]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:10414
+#Test("core_module_function_reference_is_a_reachability_edge") {
+    reference :: NameReference{module_path: "Core/http/http.jet", kind: "semantic", def_span: Span.new(1, 2), semantic_identity: Val("fn:<corelib>/Core/http::Core/http/client.jet::request")}
+    assert(checked_function_reference_identity(@reference) == Val("<corelib>/Core/http::Core/http/client.jet::request"))
+    assert(is_checked_function_reference(@reference))
+}

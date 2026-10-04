@@ -1,0 +1,63 @@
+use jet_foundation.AST.Type
+use jet_foundation.Syntax as Syntax
+use jet_foundation.MIR.MirLoopSourceKind
+use jet_codegen.Codegen.TIR.[TExpr, TExprKind, TForInMethod, TLocal, TMethodRef]
+use jet_codegen.Codegen.TIR.tir_to_mir_stmt.[loop_source_kind, for_item_type, rollback_method_lookup, rollback_method_call, transaction_restore_call_arg]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:2239 (behavioral control; no inline tests)
+#Test("loop_source_kind_preserves_every_checked_adapter") {
+    assert(loop_source_kind(None) == MirLoopSourceKind.Plain)
+    assert(loop_source_kind(Val(TForInMethod.Chars)) == MirLoopSourceKind.Chars)
+    assert(loop_source_kind(Val(TForInMethod.LinesFile)) == MirLoopSourceKind.LinesFile)
+    assert(loop_source_kind(Val(TForInMethod.LinesStdin)) == MirLoopSourceKind.LinesStdin)
+    assert(loop_source_kind(Val(TForInMethod.LinesProcessStream)) == MirLoopSourceKind.LinesProcessStream)
+    assert(loop_source_kind(Val(TForInMethod.ChannelReceiver)) == MirLoopSourceKind.ChannelReceiver)
+    assert(loop_source_kind(Val(TForInMethod.EncodingReader{reader_type: "CSVReader"})) == MirLoopSourceKind.EncodingReader{reader_type: "CSVReader"})
+    iterable :: TForInMethod.Iterable{coll_type: Type.Named("Rows"), iter_type: Type.Named("RowIter"), iter_symbol: "Rows::iter", next_symbol: "RowIter::next", item_type: Type.Int}
+    assert(loop_source_kind(Val(iterable)) == MirLoopSourceKind.Iterable{coll_type: Type.Named("Rows"), iter_type: Type.Named("RowIter"), iter_symbol: "Rows::iter", next_symbol: "RowIter::next"})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:2265 (behavioral control)
+#Test("for_item_type_unwraps_carriers_and_preserves_named_pair_fields") {
+    expr :: fn(ty: Type) { TExpr{ty: ty, kind: TExprKind.Unit} }
+    assert(for_item_type(expr(Type.Apply(Syntax.TYPE_RECEIVER, [Type.Int])), Val(TForInMethod.ChannelReceiver)) == Type.Int)
+    assert(for_item_type(expr(Type.Apply("Iter", [Type.String])), None) == Type.String)
+    assert(for_item_type(expr(Type.List(Type.Int)), None) == Type.Int)
+    assert(for_item_type(expr(Type.Map{key: Type.String, key_span: None, value: Type.Bool}), None) == Type.Tuple([("key", Type.String), ("value", Type.Bool)]))
+    for carrier in ["View", "ViewMut", "ComputeViewMut", Syntax.TYPE_STREAM] {
+        assert(for_item_type(expr(Type.Apply(carrier, [Type.String])), None) == Type.String)
+    }
+    assert(for_item_type(expr(Type.String), Val(TForInMethod.Chars)) == Type.Char)
+    for adapter in [TForInMethod.LinesFile, TForInMethod.LinesStdin, TForInMethod.LinesProcessStream] {
+        assert(for_item_type(expr(Type.Named("LineSource")), Val(adapter)) == Type.String)
+    }
+    assert(for_item_type(expr(Type.Named("Unknown")), None) == Type.Named("Unknown"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:2702 (behavioral control)
+#Test("rollback_lookup_keeps_trait_owner_qualification") {
+    assert(rollback_method_lookup(Type.Named("State"), "snapshot") == "State::{Syntax.TRAIT_ROLLBACK}::snapshot")
+    assert(rollback_method_lookup(Type.Apply("State", [Type.Int]), "restore") == "State::{Syntax.TRAIT_ROLLBACK}::restore")
+    assert(rollback_method_lookup(Type.Named(Syntax.TRAIT_ROLLBACK), "snapshot") == "{Syntax.TRAIT_ROLLBACK}::snapshot")
+    assert(rollback_method_lookup(Type.Int, "restore") == "{Syntax.TRAIT_ROLLBACK}::restore")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:2716,2739 (behavioral control)
+#Test("rollback_call_retains_checked_return_and_restore_argument_ownership") {
+    value :: TExpr{ty: Type.Int, kind: TExprKind.IntLit(3, None)}
+    arg :: transaction_restore_call_arg(value)
+    assert(arg.value == value)
+    assert(arg.template_items == None && !arg.borrow && !arg.mut_borrow && !arg.clone && !arg.arc_clone)
+    assert(arg.fn_coerce == None && !arg.widen_to_vec && arg.widen_to_union == None && arg.box_as_trait == None)
+    local :: TLocal.user("state")
+    call :: rollback_method_call(local, Type.Named("State"), "restore", Type.Named(Syntax.INTERNAL_UNIT_TYPE), [arg])
+    assert(call.ty == Type.Named(Syntax.INTERNAL_UNIT_TYPE))
+    if call.kind == {
+        .MethodCall(recv: recv, method: method, args: args, type_args: type_args, source_first_string_literal: first, operator_line: line) -> {
+            assert(recv.ty == Type.Named("State") && recv.kind == TExprKind.Local(local))
+            assert(method == TMethodRef.trait_method(Syntax.TRAIT_ROLLBACK, "restore"))
+            assert(args == [arg] && type_args.is_empty() && first == None && line == None)
+        }
+        else -> panic("rollback restore must remain a checked method call")
+    }
+}

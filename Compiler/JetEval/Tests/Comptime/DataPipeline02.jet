@@ -1,0 +1,43 @@
+use jet_comptime.Comptime.DataPipeline02.[data_dynamic_scalar_type, data_dynamic_merge_type, data_dynamic_canonical, data_state_plain_tree, data_state_decode_tree, data_state_encode_tree, data_stream_row_type, data_stream_next]
+use jet_comptime.Comptime.DataPipeline.[ComptimeStream, data_dynamic_object, data_dynamic_array]
+use jet_comptime.Comptime.JSONInterp.json_variant
+use jet_foundation.AST.[CtValue, CtFloat, Type]
+
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:1858
+#Test("loader_dynamic_types_and_numeric_null_merges") {
+    assert(data_dynamic_scalar_type(&CtValue.Int(7)) == ("int", false))
+    assert(data_dynamic_scalar_type(&json_variant("Null", None)) == ("null", true))
+    assert(data_dynamic_merge_type("int", "float") == ("float", false))
+    assert(data_dynamic_merge_type("null", "text") == ("text", true))
+    assert(data_dynamic_merge_type("bytes", "null") == ("bytes", true))
+    assert(data_dynamic_merge_type("text", "int") == ("Any", false))
+}
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:2072
+#Test("loader_dynamic_canonical_sorts_object_fields_recursively") {
+    input := data_dynamic_object([("z", json_variant("Number", Val(CtValue.Str("1")))), ("a", data_dynamic_object([("y", CtValue.Str("y")), ("b", CtValue.Str("b"))]))])
+    expected := data_dynamic_object([("a", data_dynamic_object([("b", CtValue.Str("b")), ("y", CtValue.Str("y"))])), ("z", json_variant("Number", Val(CtValue.Str("1"))))])
+    assert(data_dynamic_canonical(&input) == expected)
+}
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:2301
+#Test("loader_plain_number_prefers_int_then_float_then_text") {
+    assert(data_state_plain_tree(&json_variant("Number", Val(CtValue.Str("42")))) == CtValue.Int(42))
+    assert(data_state_plain_tree(&json_variant("Number", Val(CtValue.Str("1.5")))) == CtValue.Float(CtFloat.f64(1.5)))
+    assert(data_state_plain_tree(&json_variant("Number", Val(CtValue.Str("not-number")))) == CtValue.Str("not-number"))
+}
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:2369
+#Test("loader_state_decode_list_and_single_unicode_character") {
+    ty := Type.List(Box.new(Type.Int))
+    tree := data_dynamic_array([json_variant("Number", Val(CtValue.Str("12"))), json_variant("Text", Val(CtValue.Str("13")))])
+    assert(data_state_decode_tree(&ty, &tree)? == CtValue.List([CtValue.Int(12), CtValue.Int(13)]))
+    assert(data_state_decode_tree(&Type.Char, &CtValue.Str("é"))? == CtValue.Char('é'))
+    assert(data_stream_row_type(&ty) == Type.Int)
+    assert(data_stream_row_type(&Type.String) == Type.String)
+}
+// Rust: crates/jet-comptime/src/Comptime/DataPipeline.rs:2287
+#Test("loader_stream_next_has_nested_present_and_typed_exhaustion") {
+    stream := ComptimeStream { rows: [CtValue.Int(9)], cursor: 0, cancelled: false, row_ty: Val(Type.Int) }
+    assert(data_stream_next(&stream) == CtValue.Present(Box.new(CtValue.Present(Box.new(CtValue.Int(9))))))
+    assert(stream.cursor == 1)
+    assert(data_stream_next(&stream) == CtValue.Present(Box.new(CtValue.absent(Type.Int))))
+    assert(stream.cursor == 1)
+}

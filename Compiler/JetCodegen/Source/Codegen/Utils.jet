@@ -1,40 +1,24 @@
-// PORT-PENDING 0541 crates-jet-codegen-src-codegen-utils-module-group: crates/jet-codegen/src/Codegen/Utils.rs:1-36
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS 
-//RS 
-//RS // D-ENC-DYN1=A+: the dynamic `Data` value's public variants plus the
-//RS // compiler-only typed-JSON numeric carrier.
-//RS pub(crate) fn is_json_variant(variant: &str) -> bool {
-//RS     crate::Syntax::is_data_variant(variant) || variant == "Number"
-//RS }
-//RS 
-//RS // D-DBDRIVER1: the `DBValue` dynamic tagged SQL value's variants.
-//RS pub(crate) fn is_db_value_variant(variant: &str) -> bool {
-//RS     crate::Syntax::is_db_value_variant(variant)
-//RS }
-//RS 
-//RS /// D-TERM1 (ratified 2026-06-22): is this variant name a `Key` enum variant?
-//RS pub(crate) fn is_key_variant(variant: &str) -> bool {
-//RS     matches!(
-//RS         variant,
-//RS         "Char"
-//RS             | "Enter"
-//RS             | "Escape"
-//RS             | "Backspace"
-//RS             | "Tab"
-//RS             | "Delete"
-//RS             | "Up"
-//RS             | "Down"
-//RS             | "Left"
-//RS             | "Right"
-//RS             | "F"
-//RS             | "Ctrl"
-//RS             | "Unknown"
-//RS     )
-//RS }
-//RS 
-//RS pub(crate) fn escape_rust_str(s: &str) -> String {
-//RS     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
-//RS }
-// END-PORT-PENDING 0541 crates/jet-codegen/src/Codegen/Utils.rs:1-36
+use jet_foundation.Syntax as Syntax
 
+// Rust: crates/jet-codegen/src/Codegen/Utils.rs:5
+// Dynamic Data variants plus the compiler-only typed-JSON numeric carrier.
+fn is_json_variant(variant: String) -> Bool Never! {
+    Syntax.is_data_variant(variant) || variant == "Number"
+}
+// Rust: crates/jet-codegen/src/Codegen/Utils.rs:10
+fn is_db_value_variant(variant: String) -> Bool Never! {
+    Syntax.is_db_value_variant(variant)
+}
+// Rust: crates/jet-codegen/src/Codegen/Utils.rs:15
+fn is_key_variant(variant: String) -> Bool Never! {
+    if variant == {
+        "Char" | "Enter" | "Escape" | "Backspace" | "Tab" | "Delete" |
+        "Up" | "Down" | "Left" | "Right" | "F" | "Ctrl" | "Unknown" -> true
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/Utils.rs:34
+fn escape_rust_str(s: String) -> String Never! {
+    escaped :: s.replace("\\", "\\\\").replace("\"", "\\\"")
+    "\"{escaped}\""
+}

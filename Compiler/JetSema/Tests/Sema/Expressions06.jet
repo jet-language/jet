@@ -1,0 +1,105 @@
+// method_calls.rs:1032-3484 has no inline Rust tests. Real parser/sema controls
+// below exercise the existing program provider; pure controls use the production
+// head helpers, not a simulated method registry or runtime provider.
+use jet_foundation.[AccessConvention, CallArg, CallLabel, CtBigInt, Diagnostic, Expr, InternalTag, Span, StrPart, TYPE_VALIDATE_BUILDER, TagMarker, Type, ast_empty_call_arg_flags]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:2705-2770
+#Test("method conversion raw integer evidence retains the full unsigned width") {
+    exact :: sema_expr_method_exact_integer(9223372036854775807, Val("18446744073709551615"))
+    assert(exact == CtBigInt.from_u64(U64{18446744073709551615}))
+    assert(sema_expr_method_literal_in_bounds(exact, I128{0}, I128{18446744073709551615}))
+    assert(!sema_expr_method_literal_in_bounds(exact, I128{0}, I128{9223372036854775807}))
+    negative :: sema_expr_method_exact_integer(-7, Val("-0x7"))
+    assert(negative == CtBigInt.from_int(I64{-7}))
+    assert(!sema_expr_method_literal_in_bounds(negative, I128{0}, I128{255}))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:2716-2737
+#Test("method conversion truncates finite float evidence before range proof") {
+    span :: Span{start: 3, end: 6}
+    source :: Expr.Float{value: 3.9, span: span, is_f32: false, raw: None}
+    result :: sema_expr_method_converted_literal(source, Type.Float, Type.Int, None) ?? panic("finite in-range Float literal lost")
+    assert(result.value == CtBigInt.from_int(I64{3}) && result.span == span)
+    too_large :: Expr.Float{value: 256.0, span: span, is_f32: false, raw: None}
+    assert(sema_expr_method_converted_literal(too_large, Type.Float, Type.IntN{signed: false, bits: 8}, Val((lo: I128{0}, hi: I128{255}))) == None)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:3456-3487
+#Test("method policy-bearing tags survive the one transparency boundary") {
+    underlying :: Type.Named{name: "Secret"}
+    loop tag in [InternalTag]{InternalTag.SharedGuardRead, InternalTag.SharedGuardEdit, InternalTag.TerminalFactSet, InternalTag.CoreCryptoNominal, InternalTag.SystemClock} {
+        wrapped :: Type.Tagged{marker: TagMarker.Internal{internal_tag: tag}, inner: underlying}
+        assert(sema_expr_method_receiver_type(wrapped) == wrapped)
+    }
+    transparent :: Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.DeterministicClock}, inner: underlying}
+    assert(sema_expr_method_receiver_type(transparent) == underlying)
+    assert(sema_expr_method_receiver_type(underlying) == underlying)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:2253-2306
+#Test("contextual shortcut literal rejection keeps label expression empty precedence") {
+    span :: Span{start: 4, end: 9}
+    argument := CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: "key", span: span}, span: span, flags: ast_empty_call_arg_flags(), label: Val(CallLabel{name: "key", span: span}), spread: false}
+    assert(sema_expr_method_shortcut_reason(argument) == Val("the key must be positional"))
+    argument.label = None
+    assert(sema_expr_method_shortcut_reason(argument) == Val("the key must be one plain string literal"))
+    argument.expr = Expr.Str{parts: [StrPart]{StrPart.Lit{text: "   "}}, span: span}
+    assert(sema_expr_method_shortcut_reason(argument) == Val("the key must not be empty"))
+    argument.expr = Expr.Paren{value: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "s"}}, span: span}, span: span}
+    assert(sema_expr_method_shortcut_reason(argument) == None)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:1082-1096,2309-2352
+#Test("Validate materialization preserves ordinary builder and copy AST shapes") {
+    span :: Span{start: 2, end: 8}
+    value :: Expr.Ident{name: "record", span: span}
+    builder :: sema_expr_method_validate_over_ast(value, Type.Named{name: "Record"}, span)
+    ty :: Type.Apply{name: TYPE_VALIDATE_BUILDER, args: [Type]{Type.Named{name: "Record"}}}
+    assert(sema_expr_method_validate_over_idempotent(builder, "over", [], Val(jet_foundation.INTERNAL_VALIDATE_OVER), Val(ty)) == Val(ty))
+    assert(sema_expr_method_validate_over_idempotent(builder, "over", [], None, Val(ty)) == None)
+    assert(builder == .StructLit(name, _, _, _, fields, _, _) && name == TYPE_VALIDATE_BUILDER && fields.len() == 2)
+    if builder == .StructLit(_, _, _, _, fields, _, _) {
+        assert(fields[0].name == "value" && fields[0].value == Expr.Copy{value: value, span: span})
+        assert(fields[1].name == "errors" && fields[1].value == Expr.ListLit{elements: [], span: span})
+    }
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:3018-3028,3075-3082
+#Test("Shared and Cell static construction publish their exact memory events") {
+    events := [MemoryEvent]{}
+    span :: Span{start: 1, end: 5}
+    sema_expr_method_storage_events("Shared", "new", span, &events)
+    sema_expr_method_storage_events("Cell", "new", span, &events)
+    assert(events.len() == 3)
+    assert(events[0].kind == MemoryEventKind.Allocation && events[0].source == "`shared` allocates shared storage")
+    assert(events[1].kind == MemoryEventKind.RetainRelease)
+    assert(events[2].kind == MemoryEventKind.Allocation && events[2].source == "`Cell.new` allocates local storage")
+    sema_expr_method_storage_events("Cell", "other", span, &events)
+    assert(events.len() == 3)
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:1205-1222,1276-1290,1368-1385
+#Test("retired method heads teach the exact replacement instead of generic lookup") {
+    view :: statements05_diagnostics("fn run() {{ xs :: [1, 2]\n _ :: xs.view(0..1) }}\n")
+    assert(view.any(fn(d: Diagnostic) { d.code == "E0214" }))
+    directory :: statements05_diagnostics("fn run() {{ _ :: \"path\".read_dir() }}\n")
+    assert(directory.any(fn(d: Diagnostic) { d.code == "E0340" }))
+    file :: statements05_diagnostics("fn run() {{ _ :: File.open(\"path\") }}\n")
+    assert(file.any(fn(d: Diagnostic) { d.code == "E0038" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:1157-1204,1340-1367
+#Test("receipt payload and snapshot receiver errors retain their teaching codes") {
+    receipt :: statements05_diagnostics("fn run() {{ receipt.attach(1) }}\n")
+    assert(receipt.any(fn(d: Diagnostic) { d.code == "E2411" }))
+    snapshot :: statements05_diagnostics("fn run() {{ _ :: 1.snapshot() }}\n")
+    assert(snapshot.any(fn(d: Diagnostic) { d.code == "E2901" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:1658-1678,2424-2443
+#Test("retired entropy constructor has no generate alias") {
+    diagnostics :: statements05_diagnostics("use core.crypto as crypto\nfn run() {{ _ :: crypto.SigningKey.generate() }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E1004" }))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:1351-1353
+#Test("accepted void snapshot retains its checked payload and deterministic source path") {
+    span :: Span{start: 1, end: 4}
+    payload :: sema_tir_expr(Type.String, jet_foundation.TExprKind.StrLit{parts: [jet_foundation.TStrPart]{jet_foundation.TStrPart.Literal{text: "result"}}}, span)
+    value :: sema_expr_method_snapshot_value(payload, "tests\\sample.jet", 9, span)
+    assert(value.ty == Type.Named{name: "Unit"})
+    assert(value.kind == .HostCall(.ExpectSnapshot(inner, path)) && inner == payload && path == "snapshots/tests_sample_jet_9.snap")
+}

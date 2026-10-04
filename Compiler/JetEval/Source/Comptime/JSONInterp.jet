@@ -1,517 +1,182 @@
-// PORT-PENDING 0587 crates-jet-comptime-src-comptime-jsoninterp-module-group: crates/jet-comptime/src/Comptime/JSONInterp.rs:1-513
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! JSON rendering and value conversion for the comptime/REPL interpreter.
-//RS //! Parsing uses the same foundation-backed Prelude kernel as AOT and JIT.
-//RS 
-//RS use crate::Comptime::Builtins::exact_int_value;
-//RS use crate::AST::{CtFloat, CtKey, CtValue};
-//RS 
-//RS fn from_json_int(value: i64) -> CtValue {
-//RS     exact_int_value(crate::Numeric::CtBigInt::from_int(value))
-//RS }
-//RS 
-//RS fn from_json_number(value: String) -> CtValue {
-//RS     let number = crate::Numeric::CtBigInt::from_str(&value)
-//RS         .expect("dynamic JSON integer token must be valid exact integer text");
-//RS     exact_int_value(number)
-//RS }
-//RS 
-//RS fn from_json(value: jet_foundation::DataTree::DataTree) -> CtValue {
-//RS     match value {
-//RS         jet_foundation::DataTree::DataTree::Null => json_variant("Null", None),
-//RS         jet_foundation::DataTree::DataTree::Bool(value) => {
-//RS             json_variant("Bool", Some(CtValue::Bool(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::Int(value) => {
-//RS             json_variant("Int", Some(from_json_int(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::Float(value) => {
-//RS             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::Number(value) => {
-//RS             json_variant("Int", Some(from_json_number(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::TypedText(value)
-//RS         | jet_foundation::DataTree::DataTree::Text(value) => {
-//RS             json_variant("Text", Some(CtValue::Str(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::Array(values) => json_variant(
-//RS             "Array",
-//RS             Some(CtValue::List(values.into_iter().map(from_json).collect())),
-//RS         ),
-//RS         jet_foundation::DataTree::DataTree::Object(fields) => json_object(
-//RS             fields
-//RS                 .into_iter()
-//RS                 .map(|(key, value)| (key, from_json(value)))
-//RS                 .collect(),
-//RS         ),
-//RS         jet_foundation::DataTree::DataTree::Bytes(_) => {
-//RS             unreachable!("JSON parser does not produce byte nodes")
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn from_ordered_json(value: jet_foundation::DataTree::DataTree) -> CtValue {
-//RS     match value {
-//RS         jet_foundation::DataTree::DataTree::Object(fields) => json_object(
-//RS             fields
-//RS                 .into_iter()
-//RS                 .map(|(key, value)| (key, from_ordered_json(value)))
-//RS                 .collect(),
-//RS         ),
-//RS         jet_foundation::DataTree::DataTree::Null => json_variant("Null", None),
-//RS         jet_foundation::DataTree::DataTree::Bool(value) => {
-//RS             json_variant("Bool", Some(CtValue::Bool(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::Int(value) => {
-//RS             json_variant("Int", Some(from_json_int(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::Float(value) => {
-//RS             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::Number(value) => {
-//RS             json_variant("Int", Some(from_json_number(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::TypedText(value)
-//RS         | jet_foundation::DataTree::DataTree::Text(value) => {
-//RS             json_variant("Text", Some(CtValue::Str(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::Array(values) => json_variant(
-//RS             "Array",
-//RS             Some(CtValue::List(
-//RS                 values.into_iter().map(from_ordered_json).collect(),
-//RS             )),
-//RS         ),
-//RS         jet_foundation::DataTree::DataTree::Bytes(_) => {
-//RS             unreachable!("JSON parser does not produce byte nodes")
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn from_typed_ordered_json(value: jet_foundation::DataTree::DataTree) -> CtValue {
-//RS     match value {
-//RS         jet_foundation::DataTree::DataTree::Object(fields) => json_object(
-//RS             fields
-//RS                 .into_iter()
-//RS                 .map(|(key, value)| (key, from_typed_ordered_json(value)))
-//RS                 .collect(),
-//RS         ),
-//RS         jet_foundation::DataTree::DataTree::Null => json_variant("Null", None),
-//RS         jet_foundation::DataTree::DataTree::Bool(value) => {
-//RS             json_variant("Bool", Some(CtValue::Bool(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::Number(value) => {
-//RS             json_variant("Number", Some(CtValue::Str(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::TypedText(value)
-//RS         | jet_foundation::DataTree::DataTree::Text(value) => {
-//RS             json_variant("TypedText", Some(CtValue::Str(value)))
-//RS         }
-//RS         jet_foundation::DataTree::DataTree::Array(values) => json_variant(
-//RS             "Array",
-//RS             Some(CtValue::List(
-//RS                 values.into_iter().map(from_typed_ordered_json).collect(),
-//RS             )),
-//RS         ),
-//RS         jet_foundation::DataTree::DataTree::Int(_)
-//RS         | jet_foundation::DataTree::DataTree::Float(_)
-//RS         | jet_foundation::DataTree::DataTree::Bytes(_) => {
-//RS             unreachable!("lossless JSON parsing projected a number early")
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn json_object(fields: Vec<(String, CtValue)>) -> CtValue {
-//RS     json_variant(
-//RS         "Object",
-//RS         Some(CtValue::Struct {
-//RS             type_name: "JSONObject".to_string(),
-//RS             fields,
-//RS         }),
-//RS     )
-//RS }
-//RS 
-//RS /// D-SERDE-ACCESS=B / D-DYNAMIC-TYPE1=A: build one node of the canonical
-//RS /// `DataTree` dynamic-value tree — a `CtValue::Enum` so it round-trips through
-//RS /// the exact same pattern-matching (`data == .Object(entries)`, S31) and
-//RS /// explicit construction (`DataTree.Text("jet")`) machinery a user enum already
-//RS /// gets, with no interpreter-specific special case needed on either path.
-//RS pub(super) fn json_variant(variant: &str, payload: Option<CtValue>) -> CtValue {
-//RS     CtValue::Enum {
-//RS         type_name: "DataTree".to_string(),
-//RS         variant: variant.to_string(),
-//RS         args: match payload {
-//RS             Some(v) => vec![(None, v)],
-//RS             None => Vec::new(),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS /// The payload of a `DataTree`-tagged `CtValue` with the given variant name, or
-//RS /// `None` if `v` isn't that shape (used by the `.field`/`.at`/`.int`/`.text`/
-//RS /// `.bool`/`.float` accessor methods in `Builtins.rs`).
-//RS pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtValue> {
-//RS     match v {
-//RS         CtValue::Enum {
-//RS             type_name,
-//RS             variant: vname,
-//RS             args,
-//RS         } if type_name == "DataTree" && vname == variant => args.first().map(|(_, v)| v),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn parse_json(text: &str) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-//RS     jet_foundation::EncodingJson::parse_json(text, true).map(from_json)
-//RS }
-//RS 
-//RS pub(super) fn parse_json_ordered(
-//RS     text: &str,
-//RS ) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-//RS     jet_foundation::EncodingJson::parse_json(text, true).map(from_ordered_json)
-//RS }
-//RS 
-//RS pub(super) fn parse_json_typed_ordered(
-//RS     text: &str,
-//RS ) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-//RS     jet_foundation::EncodingJson::parse_json_typed(text, true).map(from_typed_ordered_json)
-//RS }
-//RS 
-//RS pub(super) fn encoding_error_value(e: jet_foundation::EncodingJson::Error) -> CtValue {
-//RS     super::EncodingLite::encoding_error_value_at(
-//RS         "JSON",
-//RS         "Syntax",
-//RS         e.line,
-//RS         1,
-//RS         e.message,
-//RS     )
-//RS }
-//RS 
-//RS /// `core.encoding.jsonl.parse` (`EncodingLite.rs`) reports a JSON parse error
-//RS /// on line `idx` of the JSONL document at `idx + e.line` — mirrors AOT's
-//RS /// `jet_std_jsonl_parse` (`MathRandomTime.rs`), which adds the 0-based JSONL
-//RS /// line index to the per-line JSON parser's own line number.
-//RS /// parity: guard tests/encoding_parity.rs::jsonl_csv_xml_cbor_streams_match_aot_and_default_dev
-//RS pub(super) fn encoding_error_value_at_line(
-//RS     e: jet_foundation::EncodingJson::Error,
-//RS     line_offset: i64,
-//RS ) -> CtValue {
-//RS     super::EncodingLite::encoding_error_value_at(
-//RS         "JSONL",
-//RS         "Syntax",
-//RS         line_offset + e.line,
-//RS         1,
-//RS         e.message,
-//RS     )
-//RS }
-//RS 
-//RS /// Render the ordered `DataTree` representation used by typed codecs. Dynamic
-//RS /// values use the same canonical tree; published-schema output retains the
-//RS /// wire order stored in `JSONObject`.
-//RS pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -> String {
-//RS     match v {
-//RS         CtValue::Enum {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS         } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") =>
-//RS         {
-//RS             match variant.as_str() {
-//RS                 "Null" => "null".to_string(),
-//RS                 // Typed JSON keeps a lexical Number payload so published-schema
-//RS                 // unknown fields can round-trip without turning `2` into `"2"`.
-//RS                 "Number" => args
-//RS                     .first()
-//RS                     .and_then(|(_, payload)| match payload {
-//RS                         CtValue::Str(value) => Some(value.clone()),
-//RS                         _ => None,
-//RS                     })
-//RS                     .unwrap_or_else(|| "null".to_string()),
-//RS                 "Object" => args
-//RS                     .first()
-//RS                     .map(|(_, payload)| render_ordered_object_payload(payload, pretty, depth))
-//RS                     .unwrap_or_else(|| "{}".to_string()),
-//RS                 _ => args
-//RS                     .first()
-//RS                     .map(|(_, payload)| render_ordered_datatree(payload, pretty, depth))
-//RS                     .unwrap_or_else(|| "null".to_string()),
-//RS             }
-//RS         }
-//RS         CtValue::List(items) => {
-//RS             if items.is_empty() {
-//RS                 return "[]".to_string();
-//RS             }
-//RS             if !pretty {
-//RS                 return format!(
-//RS                     "[{}]",
-//RS                     items
-//RS                         .iter()
-//RS                         .map(|item| render_ordered_datatree(item, false, depth))
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(",")
-//RS                 );
-//RS             }
-//RS             let pad = "  ".repeat(depth + 1);
-//RS             let end = "  ".repeat(depth);
-//RS             let parts = items
-//RS                 .iter()
-//RS                 .map(|item| format!("{}{}", pad, render_ordered_datatree(item, true, depth + 1)))
-//RS                 .collect::<Vec<_>>();
-//RS             format!("[\n{}\n{}]", parts.join(",\n"), end)
-//RS         }
-//RS         CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
-//RS             render_ordered_object(fields, pretty, depth)
-//RS         }
-//RS         _ => render_json_pretty(v, pretty, depth),
-//RS     }
-//RS }
-//RS 
-//RS fn render_ordered_object_payload(payload: &CtValue, pretty: bool, depth: usize) -> String {
-//RS     let fields = match payload {
-//RS         CtValue::Map(entries) => entries
-//RS             .iter()
-//RS             .map(|(key, value)| match key {
-//RS                 CtKey::Str(key) => Some((key.clone(), value.clone())),
-//RS                 _ => None,
-//RS             })
-//RS             .collect::<Option<Vec<_>>>(),
-//RS         CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
-//RS             return render_ordered_object(fields, pretty, depth);
-//RS         }
-//RS         CtValue::List(values) => values
-//RS             .iter()
-//RS             .map(|value| {
-//RS                 let CtValue::Struct { fields, .. } = value else {
-//RS                     return None;
-//RS                 };
-//RS                 let key = fields
-//RS                     .iter()
-//RS                     .find(|(name, _)| name == "key")
-//RS                     .map(|(_, value)| value)?;
-//RS                 let value = fields
-//RS                     .iter()
-//RS                     .find(|(name, _)| name == "value")
-//RS                     .map(|(_, value)| value)?;
-//RS                 let CtValue::Str(key) = key else {
-//RS                     return None;
-//RS                 };
-//RS                 Some((key.clone(), value.clone()))
-//RS             })
-//RS             .collect::<Option<Vec<_>>>(),
-//RS         _ => None,
-//RS     };
-//RS     fields
-//RS         .map(|fields| render_ordered_object(&fields, pretty, depth))
-//RS         .unwrap_or_else(|| render_json_pretty(payload, pretty, depth))
-//RS }
-//RS 
-//RS fn render_ordered_object(fields: &[(String, CtValue)], pretty: bool, depth: usize) -> String {
-//RS     if fields.is_empty() {
-//RS         return "{}".to_string();
-//RS     }
-//RS     if !pretty {
-//RS         return format!(
-//RS             "{{{}}}",
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|(key, value)| {
-//RS                     format!(
-//RS                         "{}:{}",
-//RS                         quote_json(key),
-//RS                         render_ordered_datatree(value, false, depth)
-//RS                     )
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         );
-//RS     }
-//RS     let pad = "  ".repeat(depth + 1);
-//RS     let end = "  ".repeat(depth);
-//RS     let parts = fields
-//RS         .iter()
-//RS         .map(|(key, value)| {
-//RS             format!(
-//RS                 "{}{}: {}",
-//RS                 pad,
-//RS                 quote_json(key),
-//RS                 render_ordered_datatree(value, true, depth + 1)
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     format!("{{\n{}\n{}}}", parts.join(",\n"), end)
-//RS }
-//RS 
-//RS pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> String {
-//RS     match v {
-//RS         // D-SERDE-ACCESS=B: a `DataTree` value (from `.parse()`, or built by
-//RS         // hand with `DataTree.Text(…)`/`DataTree.Object(…)`) — unwrap the tag
-//RS         // and render its payload the same way the untagged shapes below do.
-//RS         CtValue::Enum {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS         } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") =>
-//RS         {
-//RS             match variant.as_str() {
-//RS                 "Null" => "null".to_string(),
-//RS                 _ => match args.first() {
-//RS                     Some((_, payload)) => render_json_pretty(payload, pretty, depth),
-//RS                     None => "null".to_string(),
-//RS                 },
-//RS             }
-//RS         }
-//RS         CtValue::Unit => "null".to_string(),
-//RS         CtValue::Bool(b) => b.to_string(),
-//RS         CtValue::Int(n) => n.to_string(),
-//RS         CtValue::Float(f) => {
-//RS             assert!(
-//RS                 f.as_f64().is_finite(),
-//RS                 "JSON cannot encode a non-finite Float"
-//RS             );
-//RS             format!("{:?}", f)
-//RS         }
-//RS         CtValue::BigInt(value) => value.to_string_rep(),
-//RS         CtValue::Str(s) => quote_json(s),
-//RS         CtValue::List(xs) => {
-//RS             if xs.is_empty() {
-//RS                 return "[]".to_string();
-//RS             }
-//RS             if !pretty {
-//RS                 let parts: Vec<String> = xs
-//RS                     .iter()
-//RS                     .map(|x| render_json_pretty(x, false, depth))
-//RS                     .collect();
-//RS                 return format!("[{}]", parts.join(","));
-//RS             }
-//RS             let pad = "  ".repeat(depth + 1);
-//RS             let end = "  ".repeat(depth);
-//RS             let parts: Vec<String> = xs
-//RS                 .iter()
-//RS                 .map(|x| format!("{}{}", pad, render_json_pretty(x, true, depth + 1)))
-//RS                 .collect();
-//RS             format!("[\n{}\n{}]", parts.join(",\n"), end)
-//RS         }
-//RS         CtValue::Map(m) => {
-//RS             if m.is_empty() {
-//RS                 return "{}".to_string();
-//RS             }
-//RS             if !pretty {
-//RS                 let parts: Vec<String> = m
-//RS                     .iter()
-//RS                     .map(|(k, v)| {
-//RS                         format!(
-//RS                             "{}:{}",
-//RS                             quote_json(&match k {
-//RS                                 CtKey::Str(s) => s.clone(),
-//RS                                 other => other.to_value().jet_show(),
-//RS                             }),
-//RS                             render_json_pretty(v, false, depth)
-//RS                         )
-//RS                     })
-//RS                     .collect();
-//RS                 return format!("{{{}}}", parts.join(","));
-//RS             }
-//RS             let pad = "  ".repeat(depth + 1);
-//RS             let end = "  ".repeat(depth);
-//RS             let parts: Vec<String> = m
-//RS                 .iter()
-//RS                 .map(|(k, v)| {
-//RS                     let key = match k {
-//RS                         CtKey::Str(s) => quote_json(s),
-//RS                         other => quote_json(&other.to_value().jet_show()),
-//RS                     };
-//RS                     format!("{}{}: {}", pad, key, render_json_pretty(v, true, depth + 1))
-//RS                 })
-//RS                 .collect();
-//RS             format!("{{\n{}\n{}}}", parts.join(",\n"), end)
-//RS         }
-//RS         // EncodingLite Object payload: insertion-ordered `Struct` (AOT DataTree).
-//RS         // Sort keys so `json.canonical` matches BTreeMap / AOT sorted form.
-//RS         CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
-//RS             let mut fields = fields.clone();
-//RS             fields.sort_by(|a, b| a.0.cmp(&b.0));
-//RS             if fields.is_empty() {
-//RS                 return "{}".to_string();
-//RS             }
-//RS             if !pretty {
-//RS                 let parts: Vec<String> = fields
-//RS                     .iter()
-//RS                     .map(|(k, v)| {
-//RS                         format!("{}:{}", quote_json(k), render_json_pretty(v, false, depth))
-//RS                     })
-//RS                     .collect();
-//RS                 return format!("{{{}}}", parts.join(","));
-//RS             }
-//RS             let pad = "  ".repeat(depth + 1);
-//RS             let end = "  ".repeat(depth);
-//RS             let parts: Vec<String> = fields
-//RS                 .iter()
-//RS                 .map(|(k, v)| {
-//RS                     format!(
-//RS                         "{}{}: {}",
-//RS                         pad,
-//RS                         quote_json(k),
-//RS                         render_json_pretty(v, true, depth + 1)
-//RS                     )
-//RS                 })
-//RS                 .collect();
-//RS             format!("{{\n{}\n{}}}", parts.join(",\n"), end)
-//RS         }
-//RS         other => other.to_json(),
-//RS     }
-//RS }
-//RS 
-//RS fn quote_json(s: &str) -> String {
-//RS     let mut out = String::from("\"");
-//RS     for c in s.chars() {
-//RS         match c {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\u{0008}' => out.push_str("\\b"),
-//RS             '\u{000c}' => out.push_str("\\f"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-//RS             _ => out.push(c),
-//RS         }
-//RS     }
-//RS     out.push('"');
-//RS     out
-//RS }
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn nested_json(depth: usize) -> String {
-//RS         format!("{}{}", "[".repeat(depth), "]".repeat(depth))
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn comptime_json_routes_share_the_depth_boundary() {
-//RS         type ParseRoute = fn(&str) -> Result<CtValue, jet_foundation::EncodingJson::Error>;
-//RS         let routes: &[(&str, ParseRoute)] = &[
-//RS             ("parse_json", parse_json),
-//RS             ("parse_json_ordered", parse_json_ordered),
-//RS             ("parse_json_typed_ordered", parse_json_typed_ordered),
-//RS         ];
-//RS 
-//RS         for (name, parse) in routes {
-//RS             let boundary = nested_json(jet_foundation::EncodingJson::MAX_JSON_DEPTH);
-//RS             assert!(
-//RS                 parse(&boundary).is_ok(),
-//RS                 "{name} must accept the maximum JSON nesting depth"
-//RS             );
-//RS 
-//RS             let too_deep = nested_json(jet_foundation::EncodingJson::MAX_JSON_DEPTH + 1);
-//RS             let error = parse(&too_deep).expect_err("{name} must reject excessive nesting");
-//RS             assert_eq!(error.line, 1, "{name} reported the wrong error line");
-//RS             assert_eq!(
-//RS                 error.message, "JSON value is nested too deeply",
-//RS                 "{name} changed the shared depth-limit error"
-//RS             );
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0587 crates/jet-comptime/src/Comptime/JSONInterp.rs:1-513
+// JSON adapters use the same Foundation parser as the other evaluator tiers.
+use jet_foundation.[CtFloat, CtKey, CtValue, CtEnumArg, NamedCtValue]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.[EncodingJson]
+use jet_comptime.Builtins.[exact_int_value]
+use jet_comptime.Numeric.[CtBigInt]
+use jet_comptime.Comptime.[EncodingLite]
 
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:7
+fn from_json_int(value: Int) -> CtValue Never! { exact_int_value(CtBigInt.from_int(value)) }
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:11
+fn from_json_number(value: String) -> CtValue Never! {
+    number :: CtBigInt.from_str(value).expect("dynamic JSON integer token must be valid exact integer text")
+    exact_int_value(number)
+}
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:17
+fn from_json(value: DataTree) -> CtValue Never! {
+    if value == {
+        .Null -> json_variant("Null", None)
+        .Bool(v) -> json_variant("Bool", Val(CtValue.Bool{value: v}))
+        .Int(v) -> json_variant("Int", Val(from_json_int(v)))
+        .Float(v) -> json_variant("Float", Val(CtValue.Float{value: CtFloat.f64(v)}))
+        .Number(v) -> json_variant("Int", Val(from_json_number(v)))
+        .TypedText(v) | .Text(v) -> json_variant("Text", Val(CtValue.Str{value: v}))
+        .Array(values) -> { out := [CtValue]{}; loop v in values { out.push(from_json(^v)) }; json_variant("Array", Val(CtValue.List{values: ^out})) }
+        .Object(fields) -> { out := [NamedCtValue]{}; loop (name, v) in fields { out.push(NamedCtValue{name: name, value: from_json(^v)}) }; json_object(^out) }
+        .Bytes(_) -> panic("JSON parser does not produce byte nodes")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:52
+fn from_ordered_json(value: DataTree) -> CtValue Never! {
+    if value == {
+        .Object(fields) -> { out := [NamedCtValue]{}; loop (name, v) in fields { out.push(NamedCtValue{name: name, value: from_ordered_json(^v)}) }; json_object(^out) }
+        .Null -> json_variant("Null", None)
+        .Bool(v) -> json_variant("Bool", Val(CtValue.Bool{value: v}))
+        .Int(v) -> json_variant("Int", Val(from_json_int(v)))
+        .Float(v) -> json_variant("Float", Val(CtValue.Float{value: CtFloat.f64(v)}))
+        .Number(v) -> json_variant("Int", Val(from_json_number(v)))
+        .TypedText(v) | .Text(v) -> json_variant("Text", Val(CtValue.Str{value: v}))
+        .Array(values) -> { out := [CtValue]{}; loop v in values { out.push(from_ordered_json(^v)) }; json_variant("Array", Val(CtValue.List{values: ^out})) }
+        .Bytes(_) -> panic("JSON parser does not produce byte nodes")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:89
+fn from_typed_ordered_json(value: DataTree) -> CtValue Never! {
+    if value == {
+        .Object(fields) -> { out := [NamedCtValue]{}; loop (name, v) in fields { out.push(NamedCtValue{name: name, value: from_typed_ordered_json(^v)}) }; json_object(^out) }
+        .Null -> json_variant("Null", None)
+        .Bool(v) -> json_variant("Bool", Val(CtValue.Bool{value: v}))
+        .Number(v) -> json_variant("Number", Val(CtValue.Str{value: v}))
+        .TypedText(v) | .Text(v) -> json_variant("TypedText", Val(CtValue.Str{value: v}))
+        .Array(values) -> { out := [CtValue]{}; loop v in values { out.push(from_typed_ordered_json(^v)) }; json_variant("Array", Val(CtValue.List{values: ^out})) }
+        .Int(_) | .Float(_) | .Bytes(_) -> panic("lossless JSON parsing projected a number early")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:122
+fn json_object(fields: [NamedCtValue]) -> CtValue Never! { json_variant("Object", Val(CtValue.Struct{type_name: "JSONObject", fields: ^fields})) }
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:137
+pub fn json_variant(variant: String, payload: CtValue?) -> CtValue Never! {
+    args :: if payload == { Val(v) -> [CtEnumArg]{CtEnumArg{label: None, value: ^v}} None -> [CtEnumArg]{} }
+    CtValue.Enum{type_name: "DataTree", variant: variant, args: args}
+}
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:151
+pub fn json_payload(v: &CtValue, variant: String) -> CtValue? {
+    if v == { .Enum(type_name, vname, args) -> if type_name == "DataTree" && vname == variant && !args.is_empty() -> Val(args[0].value) else -> None else -> None }
+}
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:162
+pub fn parse_json(text: String) -> CtValue EncodingJson.Error! { from_json(EncodingJson.parse_json(text, true)!) }
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:166
+pub fn parse_json_ordered(text: String) -> CtValue EncodingJson.Error! { from_ordered_json(EncodingJson.parse_json(text, true)!) }
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:172
+pub fn parse_json_typed_ordered(text: String) -> CtValue EncodingJson.Error! { from_typed_ordered_json(EncodingJson.parse_json_typed(text, true)!) }
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:178
+pub fn encoding_error_value(e: EncodingJson.Error) -> CtValue Never! { EncodingLite.encoding_error_value_at("JSON", "Syntax", e.line, 1, e.message) }
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:193
+pub fn encoding_error_value_at_line(e: EncodingJson.Error, line_offset: Int) -> CtValue Never! { EncodingLite.encoding_error_value_at("JSONL", "Syntax", line_offset + e.line, 1, e.message) }
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:209
+pub fn render_ordered_datatree(v: &CtValue, pretty: Bool, depth: Int) -> String Never! {
+    if v == {
+        .Enum(type_name, variant, args) -> if type_name == "DataTree" || type_name == "TOML" || type_name == "YAML" || type_name == "CSV" {
+            if variant == {
+                "Null" -> return "null"
+                "Number" -> return if !args.is_empty() -> (if args[0].value == { .Str(value) -> value.clone() else -> "null" }) else -> "null"
+                "Object" -> return if args.is_empty() -> "{}" else -> render_ordered_object_payload(&args[0].value, pretty, depth)
+                else -> return if args.is_empty() -> "null" else -> render_ordered_datatree(&args[0].value, pretty, depth)
+            }
+        }
+        .List(items) -> {
+            if items.is_empty() -> return "[]"
+            parts := [String]{}
+            pad :: if pretty -> "  ".repeat(depth + 1) else -> ""; end :: if pretty -> "  ".repeat(depth) else -> ""
+            loop item in items { parts.push(if pretty -> "{pad}{render_ordered_datatree(&item, true, depth + 1)}" else -> render_ordered_datatree(&item, false, depth)) }
+            return if pretty -> "[\n{parts.join(",\n")}\n{end}]" else -> "[{parts.join(",")}]"
+        }
+        .Struct(type_name, fields) -> if type_name == "JSONObject" -> return render_ordered_object(&fields, pretty, depth)
+        else -> {}
+    }
+    render_json_pretty(v, pretty, depth)
+}
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:267
+fn render_ordered_object_payload(payload: &CtValue, pretty: Bool, depth: Int) -> String Never! {
+    fields := [NamedCtValue]{}
+    if payload == {
+        .Map(entries) -> loop entry in entries {
+            if entry.key == { .Str(key) -> fields.push(NamedCtValue{name: key.clone(), value: entry.value.clone()}) else -> return render_json_pretty(payload, pretty, depth) }
+        }
+        .Struct(type_name, members) -> if type_name == "JSONObject" -> return render_ordered_object(&members, pretty, depth) else -> return render_json_pretty(payload, pretty, depth)
+        .List(values) -> loop value in values {
+            members :: if value == { .Struct(_, members) -> members else -> return render_json_pretty(payload, pretty, depth) }
+            key := None; found := None
+            loop field in members { if field.name == "key" && key.is_none() -> key = Val(field.value); if field.name == "value" && found.is_none() -> found = Val(field.value) }
+            name :: if key == { Val(.Str(name)) -> name else -> return render_json_pretty(payload, pretty, depth) }
+            value :: found ?? return render_json_pretty(payload, pretty, depth)
+            fields.push(NamedCtValue{name: name.clone(), value: value.clone()})
+        }
+        else -> return render_json_pretty(payload, pretty, depth)
+    }
+    render_ordered_object(&fields, pretty, depth)
+}
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:306
+fn render_ordered_object(fields: &[NamedCtValue], pretty: Bool, depth: Int) -> String Never! {
+    if fields.is_empty() -> return "{}"
+    parts := [String]{}; pad :: if pretty -> "  ".repeat(depth + 1) else -> ""; end :: if pretty -> "  ".repeat(depth) else -> ""
+    loop field in fields { parts.push(if pretty -> "{pad}{quote_json(field.name)}: {render_ordered_datatree(&field.value, true, depth + 1)}" else -> "{quote_json(field.name)}:{render_ordered_datatree(&field.value, false, depth)}") }
+    if pretty -> "\u{007b}\n{parts.join(",\n")}\n{end}\u{007d}" else -> "\u{007b}{parts.join(",")}\u{007d}"
+}
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:342
+pub fn render_json_pretty(v: &CtValue, pretty: Bool, depth: Int) -> String Never! {
+    if v == {
+        .Enum(type_name, variant, args) -> if type_name == "DataTree" || type_name == "TOML" || type_name == "YAML" || type_name == "CSV" {
+            return if variant == "Null" || args.is_empty() -> "null" else -> render_json_pretty(&args[0].value, pretty, depth)
+        }
+        .Unit -> return "null"
+        .Bool(b) -> return b.to_string()
+        .Int(n) -> return n.to_string()
+        .Float(f) -> { assert(f.as_f64().is_finite(), "JSON cannot encode a non-finite Float"); return f.debug() }
+        .BigInt(value) -> return value.clone()
+        .Str(s) -> return quote_json(s)
+        .List(xs) -> {
+            if xs.is_empty() -> return "[]"
+            parts := [String]{}; pad :: if pretty -> "  ".repeat(depth + 1) else -> ""; end :: if pretty -> "  ".repeat(depth) else -> ""
+            loop x in xs { parts.push(if pretty -> "{pad}{render_json_pretty(&x, true, depth + 1)}" else -> render_json_pretty(&x, false, depth)) }
+            return if pretty -> "[\n{parts.join(",\n")}\n{end}]" else -> "[{parts.join(",")}]"
+        }
+        .Map(entries) -> {
+            if entries.is_empty() -> return "{}"
+            parts := [String]{}; pad :: if pretty -> "  ".repeat(depth + 1) else -> ""; end :: if pretty -> "  ".repeat(depth) else -> ""
+            loop entry in entries {
+                key :: if entry.key == { .Str(s) -> quote_json(s) else -> quote_json(entry.key.to_value().jet_show()) }
+                parts.push(if pretty -> "{pad}{key}: {render_json_pretty(&entry.value, true, depth + 1)}" else -> "{key}:{render_json_pretty(&entry.value, false, depth)}")
+            }
+            return if pretty -> "\u{007b}\n{parts.join(",\n")}\n{end}\u{007d}" else -> "\u{007b}{parts.join(",")}\u{007d}"
+        }
+        .Struct(type_name, members) -> if type_name == "JSONObject" {
+            fields := members.clone(); fields.sort_by(fn(a: NamedCtValue, b: NamedCtValue) -> Ordering Never! { a.name.compare(b.name) })
+            if fields.is_empty() -> return "{}"
+            parts := [String]{}; pad :: if pretty -> "  ".repeat(depth + 1) else -> ""; end :: if pretty -> "  ".repeat(depth) else -> ""
+            loop field in fields { parts.push(if pretty -> "{pad}{quote_json(field.name)}: {render_json_pretty(&field.value, true, depth + 1)}" else -> "{quote_json(field.name)}:{render_json_pretty(&field.value, false, depth)}") }
+            return if pretty -> "\u{007b}\n{parts.join(",\n")}\n{end}\u{007d}" else -> "\u{007b}{parts.join(",")}\u{007d}"
+        }
+        else -> {}
+    }
+    v.to_json()
+}
+// Rust: crates/jet-comptime/src/Comptime/JSONInterp.rs:462
+fn quote_json(s: String) -> String Never! {
+    out := "\""
+    loop c in s.chars() {
+        if c == {
+            '"' -> out.push_str("\\\"")
+            '\\' -> out.push_str("\\\\")
+            '\u{0008}' -> out.push_str("\\b")
+            '\u{000c}' -> out.push_str("\\f")
+            '\n' -> out.push_str("\\n")
+            '\r' -> out.push_str("\\r")
+            '\t' -> out.push_str("\\t")
+            else -> if U32{c} < 0x20 -> out.push_str("\\u{U32{c}.to_radix(16).pad_start(4, "0")}") else -> out.push(c)
+        }
+    }
+    out.push('"')
+    ^out
+}

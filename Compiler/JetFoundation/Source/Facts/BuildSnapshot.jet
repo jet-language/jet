@@ -1,6 +1,7 @@
 // Rust Facts.rs::BuildFactSnapshot / BuildSettingFact / BuildFactValue.
 // One Driver contribution fold creates the canonical native facts. Sema's
 // Type/TComptimeValue settings are a checker projection, not their identity.
+use core.files.runtime.kernel_path_components as build_snapshot_path
 pub enum BuildFactValue {
     Text(value: String)
     OptionalText(value: String?)
@@ -154,5 +155,18 @@ impl BuildFactSnapshot {
     // Cross-target selected facts replace this snapshot before checking.
     pub fn for_host(os: MIROSTarget, host_triple: String) -> BuildFactSnapshot Never! {
         BuildFactSnapshot{package_name: "script", package_version: "0.0.0", os: os, target_triple: host_triple, target_dossier: MIRTargetDossier.default(), profile: "dev", artifact_build: false, stamp: BuildStamp.default(), contributions: [:], settings: [:], setting_provenance: [:]}
+    }
+    // Rust Facts.rs:250-269. Decode only the native filename stem: an invalid
+    // ancestor must not turn a valid filename into the manifest-less fallback.
+    pub fn script_for_host(file: build_snapshot_path.OSPath, os: MIROSTarget, host_triple: String, profile: String) -> BuildFactSnapshot Never! {
+        package_name := "script"
+        if build_snapshot_path.file_stem_span(file) == .Val(extent) {
+            stem :: String.from_bytes(file.encoded[extent.start..<extent.end])
+            if stem == .Val(name) && name != "" -> package_name = name
+        }
+        snapshot := BuildFactSnapshot.for_host(os, host_triple)
+        snapshot.package_name = package_name
+        snapshot.profile = profile
+        snapshot
     }
 }

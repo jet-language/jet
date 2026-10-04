@@ -1,0 +1,90 @@
+use jet_sema.Sema.Schema.[SchemaSnapshot, SnapshotField, SNAPSHOT_VERSION, snapshot_from_struct]
+use jet_foundation.[Span, Field, StructDef, Type]
+// Rust: crates/jet-sema/src/Sema/Schema.rs:463
+fn make_snap(type_name: String, version: String, fields: [(String, String)]) -> SchemaSnapshot Never! {
+    SchemaSnapshot{schema_version: SNAPSHOT_VERSION, type_name: type_name, published_version: version, squashed_before: None, fields: loop (name, ty) in fields -> SnapshotField{name: name, ty: ty}}
+}
+// Rust: crates/jet-sema/src/Sema/Schema.rs:480
+#Test("schema_round_trip") {
+    snap :: make_snap("UserRecord", "1.2.0", [("name", "String"), ("age", "Int")])
+    text :: snap.write()
+    parsed :: SchemaSnapshot.parse(text).expect("should parse")
+    assert(parsed == snap)
+}
+// Rust: crates/jet-sema/src/Sema/Schema.rs:488
+#Test("schema_parse_known_text") {
+    text :: "schema_version = 1\ntype = Foo\npublished_version = 0.1.0\nfield x: Int\n"
+    snap :: SchemaSnapshot.parse(text).unwrap()
+    assert(snap.type_name == "Foo")
+    assert(snap.published_version == "0.1.0")
+    assert(snap.fields.len() == 1)
+    assert(snap.fields[0].name == "x")
+    assert(snap.fields[0].ty == "Int")
+}
+// Rust: crates/jet-sema/src/Sema/Schema.rs:499
+#Test("schema_diff_detects_removed_field") {
+    old :: make_snap("T", "1.0.0", [("name", "String"), ("age", "Int")])
+    new :: make_snap("T", "1.1.0", [("display_name", "String"), ("age", "Int")])
+    removed :: old.fields.filter(fn(field) { !new.fields.any(fn(new_field) { new_field.name == field.name }) }).to_array()
+    assert(removed.len() == 1)
+    assert(removed[0].name == "name")
+}
+// Rust: crates/jet-sema/src/Sema/Schema.rs:512
+#Test("schema_rename_with_type_match_unblocks") {
+    old :: make_snap("T", "1.0.0", [("name", "String")])
+    new_fields :: [SnapshotField{name: "display_name", ty: "String"}]
+    old_field :: old.fields.find(fn(field) { field.name == "name" }).unwrap()
+    new_field :: new_fields.find(fn(field) { field.name == "display_name" }).unwrap()
+    assert(old_field.ty == new_field.ty, "type must match for rename to unblock")
+}
+// Rust: crates/jet-sema/src/Sema/Schema.rs:531
+#Test("schema_rename_with_type_mismatch_stays_blocked") {
+    old :: make_snap("T", "1.0.0", [("name", "String")])
+    new_field :: SnapshotField{name: "display_name", ty: "Int"}
+    old_field :: old.fields.find(fn(field) { field.name == "name" }).unwrap()
+    assert(old_field.ty != new_field.ty, "type mismatch — rename does not unblock")
+}
+// Rust: crates/jet-sema/src/Sema/Schema.rs:545
+#Test("schema_empty_snapshot_parses") {
+    snap :: SchemaSnapshot.parse("schema_version = 1\ntype = Empty\npublished_version = 1.0.0\n").unwrap()
+    assert(snap.fields.is_empty())
+}
+// Rust: crates/jet-sema/src/Sema/Schema.rs:552
+#Test("schema_squashed_before_round_trips") {
+    snap := make_snap("Rec", "2.0.0", [("name", "String")])
+    snap.squashed_before = Val("2.0.0")
+    text :: snap.write()
+    assert(text.contains("squashed_before = 2.0.0\n"), "got:\n{text}")
+    parsed :: SchemaSnapshot.parse(text).unwrap()
+    assert(parsed.squashed_before == Val("2.0.0"))
+    assert(parsed == snap)
+}
+// Rust: crates/jet-sema/src/Sema/Schema.rs:564
+#Test("schema_no_squash_omits_line") {
+    snap :: make_snap("Rec", "1.0.0", [("name", "String")])
+    text :: snap.write()
+    assert(!text.contains("squashed_before"), "ordinary snapshot must omit the line")
+    assert(SchemaSnapshot.parse(text).unwrap().squashed_before == None)
+}
+// Rust: crates/jet-sema/src/Sema/Schema.rs:578
+#Test("snapshot_from_struct_writes_canonical_type_names") {
+    zero :: Span.new(0, 0)
+    structure :: StructDef{
+        span: zero, is_pub: false, is_package_pub: false, name: "Rec", name_span: zero, type_params: [],
+        fields: [
+            Field{is_pub: false, is_package_pub: false, name: "label", name_span: zero, ty: Type.String, ty_span: zero, serde_markers: [], redact: false, computed: None, default: None, default_ct: None},
+            Field{is_pub: false, is_package_pub: false, name: "count", name_span: zero, ty: Type.Int, ty_span: zero, serde_markers: [], redact: false, computed: None, default: None, default_ct: None}
+        ],
+        state: None, methods: [], cli_bindings: [], trait_impls: [], derives: [], auto_derive_default: true,
+        is_published_schema: true, published_schema_span: None, is_single_use: false, single_use_span: None,
+        is_must_use: false, must_use_span: None, layout: None, layout_span: None, serde_markers: [], type_markers: [],
+        validate_block: [], validate_span: None
+    }
+    snap :: snapshot_from_struct(structure, "2.0.0")
+    text :: snap.write()
+    assert(text.contains("field label: String\n"), "expected `field label: String` in snapshot, got:\n{text}")
+    assert(text.contains("field count: Int\n"), "expected `field count: Int` in snapshot, got:\n{text}")
+    parsed :: SchemaSnapshot.parse(text).unwrap()
+    assert(parsed.fields[0].ty == "String")
+    assert(parsed.fields[1].ty == "Int")
+}

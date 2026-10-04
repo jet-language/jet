@@ -1,0 +1,54 @@
+use jet_foundation.[Type, TExpr, TExprKind]
+use jet_lexer.lex
+use jet_parser.parse
+use JetCodegen.Codegen.Context.[Cx, build_cx]
+use JetCodegen.Codegen.TIR.Lower.Statements.[range_iteration_bounds, preserve_typed_list_shape]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2467
+fn range_bound_literal(value: I64) -> TExpr {
+    return TExpr.{ty: .Int, kind: .IntLit(value, None)}
+}
+
+// Behavioral control for the original range_iteration_bounds; no inline Rust tests in this slice.
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2482
+#Test("range_iteration_bounds_excludes_ascending_endpoint") {
+    bounds :: range_iteration_bounds(range_bound_literal(2), range_bound_literal(7), None, true).expect("ascending bounds")
+    assert(bounds.lo == 2 && bounds.hi == 6)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2491
+#Test("range_iteration_bounds_excludes_descending_endpoint") {
+    bounds :: range_iteration_bounds(range_bound_literal(7), range_bound_literal(2), Val(range_bound_literal(-1)), true).expect("descending bounds")
+    assert(bounds.lo == 3 && bounds.hi == 7)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2499
+#Test("range_iteration_bounds_rejects_zero_and_empty_ranges") {
+    assert(range_iteration_bounds(range_bound_literal(2), range_bound_literal(7), Val(range_bound_literal(0)), false).is_none())
+    assert(range_iteration_bounds(range_bound_literal(2), range_bound_literal(2), None, true).is_none())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2460
+#Test("range_iteration_bounds_keeps_small_integer_limits") {
+    edge: I64 :: (1 as I64 << 62) - 1
+    assert(range_iteration_bounds(range_bound_literal(edge), range_bound_literal(edge), None, false).is_some())
+    assert(range_iteration_bounds(range_bound_literal(edge), range_bound_literal(edge + 1), None, false).is_none())
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:2278
+#Test("typed_list_shape_preserves_width_and_carrier") {
+    src :: "fn run() {}\n"
+    (tokens, diagnostics) :: lex(src)
+    assert(diagnostics.is_empty())
+    program :: parse(tokens).expect("parse failed")
+    cx :: build_cx(program, src, "test.jet")
+    expected :: Type.List(Type.IntN{signed: false, bits: 8})
+    literal :: TExpr.{ty: .List(.Int), kind: .ListLit([range_bound_literal(104)])}
+    lowered :: preserve_typed_list_shape(literal, expected, cx)
+    assert(lowered.ty == expected)
+    assert(if lowered.kind == { .ListLit(elems) -> elems.len() == 1 && elems[0].ty == .IntN{signed: false, bits: 8} && elems[0].kind == .IntLit(104, Val((false, 8))); _ -> false })
+    carrier_ty :: Type.Result{ok: expected, err: .String}
+    carrier :: TExpr.{ty: carrier_ty, kind: .Ok(lowered)}
+    retained :: preserve_typed_list_shape(carrier, expected, cx)
+    assert(retained.ty == carrier_ty && retained.kind == .Ok(_))
+}

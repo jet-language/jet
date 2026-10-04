@@ -1,0 +1,53 @@
+use jet_comptime.Comptime.TypedDecode.*
+use jet_comptime.Comptime.JSONInterp.[json_variant]
+use jet_foundation.AST.[CtValue, CtReport, CtFloat, Type, NamedCtValue]
+
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:49-103
+#Test("typed_decode_field_error_paths") {
+    original :: decode_error_at("[2].leaf", "bad value")
+    nested :: decode_error_under("items", original)
+    assert_eq(nested, decode_error_at("items[2].leaf", "bad value"))
+    assert_eq(decode_error_under("field", decode_error("bad")), decode_error_at("field", "bad"))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:404-459
+#Test("typed_decode_lossless_text_policy") {
+    text :: json_variant("Text", Val(CtValue.Str{value: " true "}))
+    typed_text :: json_variant("TypedText", Val(CtValue.Str{value: "true"}))
+    assert_eq(typed_decode_builtin_value(&Type.Bool, &text), Val(Ok(CtValue.Bool{value: true})))
+    assert_eq(typed_decode_builtin_value(&Type.Bool, &typed_text), Val(Err(decode_error("expected Bool, found text \"true\""))))
+    number :: json_variant("Number", Val(CtValue.Str{value: "12"}))
+    assert_eq(typed_decode_builtin_value(&Type.String, &number), Val(Err(decode_error("expected Text, found number 12"))))
+    assert_eq(typed_decode_builtin_value(&Type.Float, &number), Val(Ok(CtValue.Float{value: CtFloat.f64(12.0)})))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:739-887
+#Test("typed_decode_aggregates_list_errors") {
+    tree :: json_variant("Array", Val(CtValue.List{values: [CtValue]{
+        json_variant("Text", Val(CtValue.Str{value: "wrong"})),
+        json_variant("Text", Val(CtValue.Str{value: "also wrong"}))
+    }}))
+    ty :: Type.List{element: Type.Bool}
+    result :: typed_decode_builtin_value(&ty, &tree)
+    assert_eq(result, Val(Err(CtValue.List{values: [CtValue]{
+        CtValue.Struct{type_name: "FieldError", fields: [NamedCtValue]{NamedCtValue{name: "path", value: CtValue.Str{value: "[0]"}}, NamedCtValue{name: "reason", value: CtValue.Str{value: "expected Bool, found text \"wrong\""}}}},
+        CtValue.Struct{type_name: "FieldError", fields: [NamedCtValue]{NamedCtValue{name: "path", value: CtValue.Str{value: "[1]"}}, NamedCtValue{name: "reason", value: CtValue.Str{value: "expected Bool, found text \"also wrong\""}}}}
+    }})))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:923-1043
+#Test("typed_encode_byte_range_and_absence") {
+    ty :: Type.List{element: Type.Named{name: "U8"}}
+    values :: CtValue.List{values: [CtValue]{CtValue.Int{value: 0}, CtValue.Int{value: 255}}}
+    assert_eq(encode_typed_builtin_value(&ty, &values), Val(Ok(CtValue.Bytes{value: [U8]{0, 255}})))
+    invalid :: CtValue.List{values: [CtValue]{CtValue.Int{value: 256}}}
+    assert_eq(encode_typed_builtin_value(&ty, &invalid), Val(Err("typed codec [U8] contains an out-of-range byte")))
+    option :: Type.Option{inner: Type.Int}
+    assert_eq(encode_typed_builtin_value(&option, &CtValue.absent(Type.Int)), Val(Ok(json_variant("Null", None))))
+}
+// Rust: crates/jet-comptime/src/Comptime/TypedDecode.rs:1769-1798
+#Test("typed_decode_parser_error_projection") {
+    error :: CtValue.Struct{type_name: "EncodingError", fields: [NamedCtValue]{
+        NamedCtValue{name: "line", value: CtValue.Present{value: CtValue.Int{value: 7}}},
+        NamedCtValue{name: "reason", value: CtValue.Str{value: "unexpected token"}}
+    }}
+    assert_eq(json_parse_err_to_decode("JSON", error), decode_error("invalid JSON (line 7): unexpected token"))
+    assert_eq(json_parse_err_to_decode("YAML", CtValue.Unit), decode_error("invalid YAML (line 0): "))
+}

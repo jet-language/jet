@@ -1,1352 +1,302 @@
-// PORT-PENDING 0513 crates-jet-codegen-src-codegen-tir-routes-slice-1: crates/jet-codegen/src/Codegen/TIR/routes.rs:1-1348
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Total checked operation routes shared by every TIR consumer.
-//RS //!
-//RS //! A route is selected from the checked operation and its checked result facts.
-//RS //! This module intentionally contains no backend spelling decisions: symbols are
-//RS //! the existing Prelude/runtime entry points, and primitive plans are reserved
-//RS //! for operations that the TIR-to-MIR projection expands structurally.
-//RS 
-//RS #![allow(dead_code)]
-//RS use super::{
-//RS     ListRemoveMode, LowerError, TBuiltinOp, TClosureOp, TFailureCarrier, TGcEditKind, THandleOp,
-//RS     THelperKind, TNumericOp, TPreludeRoute, TRoutePlan, TTryConvert, TTypedTextForm,
-//RS     TTypedTextInterpKind,
-//RS };
-//RS use crate::AST::{BinOp, Type};
-//RS use jet_foundation::Diagnostics::Span;
-//RS use jet_foundation::Effects::Effect;
-//RS use jet_foundation::MIR::{
-//RS     MirAccess, MirAuthorityDecision, MirCallSignature, MirCoreClosureKind, MirIndexKind,
-//RS     MirLayoutCompareOp, MirPreludeAbi, MirPreludeFamily, MirSymbol,
-//RS };
-//RS use jet_foundation::UnitRoundingMode;
-//RS 
-//RS fn route_error(message: impl Into<String>) -> LowerError {
-//RS     LowerError::new(Span::new(0, 0), message)
-//RS }
-//RS /// One checked route bundle for the canonical MIR loop protocol.
-//RS ///
-//RS /// TIR selects these rows once; the MIR projection interns each row and stores
-//RS /// only its `MirPreludeCallId` on the loop operation.  The execution adapters
-//RS /// consume those rows and never infer loop semantics from the operation kind.
-//RS #[derive(Clone, Debug)]
-//RS pub(super) struct TLoopRouteBundle {
-//RS     pub range_init: TPreludeRoute,
-//RS     pub range_has_next: TPreludeRoute,
-//RS     pub range_value: TPreludeRoute,
-//RS     pub range_advance: TPreludeRoute,
-//RS     pub iter_init: TPreludeRoute,
-//RS     pub iter_has_next: TPreludeRoute,
-//RS     pub iter_value: TPreludeRoute,
-//RS     pub iter_advance: TPreludeRoute,
-//RS }
-//RS 
-//RS /// Return the eight internal, infallible loop Prelude rows.
-//RS ///
-//RS /// `core.prelude` is the existing compiler-owned module.  These members are
-//RS /// not user-facing Core syntax; they are the shared carrier protocol for the
-//RS /// canonical MIR loop operations.
-//RS pub(super) fn loop_route_bundle() -> TLoopRouteBundle {
-//RS     let carrier = TFailureCarrier::Infallible;
-//RS     let row = |member: &str, symbol: &str, arity: usize, borrow_mask: &[bool]| TPreludeRoute {
-//RS         family: MirPreludeFamily::StaticPrelude,
-//RS         module: "core.prelude".to_string(),
-//RS         member: member.to_string(),
-//RS         symbol: MirSymbol::Prelude(symbol.to_string()),
-//RS         signature: MirCallSignature {
-//RS             arity,
-//RS             max_arity: arity,
-//RS             borrow_mask: borrow_mask.to_vec(),
-//RS         },
-//RS         effect: None,
-//RS         fallibility: carrier.clone(),
-//RS         abi: MirPreludeAbi::Value,
-//RS         authority: None,
-//RS         db_metadata: None,
-//RS     };
-//RS     TLoopRouteBundle {
-//RS         range_init: row(
-//RS             "loop_range_init",
-//RS             "jet_loop_range_init",
-//RS             5,
-//RS             &[false, false, false, false, false],
-//RS         ),
-//RS         range_has_next: row("loop_range_has_next", "jet_loop_range_has_next", 1, &[true]),
-//RS         range_value: row("loop_range_value", "jet_loop_range_value", 1, &[true]),
-//RS         range_advance: row("loop_range_advance", "jet_loop_range_advance", 1, &[true]),
-//RS         iter_init: row(
-//RS             "loop_iter_init",
-//RS             "jet_loop_iter_init",
-//RS             5,
-//RS             &[false, false, false, false, false],
-//RS         ),
-//RS         iter_has_next: row("loop_iter_has_next", "jet_loop_iter_has_next", 1, &[true]),
-//RS         iter_value: row("loop_iter_value", "jet_loop_iter_value", 1, &[true]),
-//RS         iter_advance: row("loop_iter_advance", "jet_loop_iter_advance", 1, &[true]),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn zip_closure_route(mode: super::TZipMode) -> TPreludeRoute {
-//RS     let (member, symbol, arity, borrow_mask) = match mode {
-//RS         super::TZipMode::Short => ("zip", "jet_iter_zip", 3, vec![false; 3]),
-//RS         super::TZipMode::Strict => ("zip_strict", "jet_iter_zip_strict", 10, vec![false; 10]),
-//RS         super::TZipMode::Pad => ("zip_pad", "jet_iter_zip_pad", 5, vec![false; 5]),
-//RS     };
-//RS     TPreludeRoute {
-//RS         family: MirPreludeFamily::ClosureMethod,
-//RS         module: "core.iter".to_string(),
-//RS         member: member.to_string(),
-//RS         symbol: MirSymbol::Prelude(symbol.to_string()),
-//RS         signature: MirCallSignature {
-//RS             arity,
-//RS             max_arity: arity,
-//RS             borrow_mask,
-//RS         },
-//RS         effect: None,
-//RS         fallibility: TFailureCarrier::Infallible,
-//RS         abi: MirPreludeAbi::Value,
-//RS         authority: None,
-//RS         db_metadata: None,
-//RS     }
-//RS }
-//RS 
-//RS fn prelude(
-//RS     family: MirPreludeFamily,
-//RS     module: &str,
-//RS     member: &str,
-//RS     symbol: &str,
-//RS     arity: usize,
-//RS     max_arity: usize,
-//RS     borrow_mask: &[bool],
-//RS     effect: Option<Effect>,
-//RS     carrier: &TFailureCarrier,
-//RS     abi: MirPreludeAbi,
-//RS ) -> TRoutePlan {
-//RS     TRoutePlan::Prelude(TPreludeRoute {
-//RS         family,
-//RS         module: module.to_string(),
-//RS         member: member.to_string(),
-//RS         symbol: MirSymbol::Prelude(symbol.to_string()),
-//RS         signature: MirCallSignature {
-//RS             arity,
-//RS             max_arity,
-//RS             borrow_mask: borrow_mask.to_vec(),
-//RS         },
-//RS         effect,
-//RS         fallibility: carrier.clone(),
-//RS         abi,
-//RS         authority: None,
-//RS         db_metadata: None,
-//RS     })
-//RS }
-//RS 
-//RS fn primitive() -> TRoutePlan {
-//RS     TRoutePlan::Primitive
-//RS }
-//RS 
-//RS fn as_prelude(plan: TRoutePlan, name: &str) -> Result<TPreludeRoute, LowerError> {
-//RS     match plan {
-//RS         TRoutePlan::Prelude(route) => Ok(route),
-//RS         TRoutePlan::Primitive => Err(route_error(format!(
-//RS             "checked operation `{name}` requires structural MIR lowering"
-//RS         ))),
-//RS     }
-//RS }
-//RS fn closure_receiver_kind(receiver: &Type) -> Option<&'static str> {
-//RS     match receiver {
-//RS         Type::Tagged { inner, .. } => closure_receiver_kind(inner),
-//RS         Type::List(_) | Type::FixedList { .. } => Some("list"),
-//RS         Type::Apply { name, args }
-//RS             if args.len() == 1 && matches!(name.as_str(), "Iter" | "ViewIter") =>
-//RS         {
-//RS             Some("iter")
-//RS         }
-//RS         Type::Apply { name, args }
-//RS             if args.len() == 1
-//RS                 && matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
-//RS         {
-//RS             Some("view")
-//RS         }
-//RS         Type::Option(_) => Some("option"),
-//RS         Type::Map { .. } => Some("map"),
-//RS         Type::Apply { name, .. } if name == crate::Syntax::TYPE_TALLY => Some("bag"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn collection_closure_route(
-//RS     op: &TClosureOp,
-//RS     receiver: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     use TClosureOp::*;
-//RS     let kind = closure_receiver_kind(receiver).ok_or_else(|| {
-//RS         route_error(format!(
-//RS             "checked closure operation `{op:?}` has an unsupported receiver type"
-//RS         ))
-//RS     })?;
-//RS     let (module, member, symbol, arity, borrow_mask) = match (op, kind) {
-//RS         (Map, "list") => ("core.list", "map", "jet_list_map", 2, &[false, false][..]),
-//RS         (Map, "iter") => ("core.iter", "map", "jet_iter_map", 2, &[false, false][..]),
-//RS         (MapMut, "list") => (
-//RS             "core.list",
-//RS             "map_mut",
-//RS             "jet_list_map_mut",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (MapMut, "iter") => (
-//RS             "core.iter",
-//RS             "map_mut",
-//RS             "jet_iter_map_mut",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (TryMap, "list") => (
-//RS             "core.list",
-//RS             "try_map",
-//RS             "jet_list_try_map",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (TryMap, "iter") => (
-//RS             "core.iter",
-//RS             "try_map",
-//RS             "jet_iter_try_map",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (TryMap, "view") => (
-//RS             "core.view",
-//RS             "try_map",
-//RS             "jet_view_try_map",
-//RS             2,
-//RS             &[true, false][..],
-//RS         ),
-//RS         (Filter, "list") => (
-//RS             "core.list",
-//RS             "filter",
-//RS             "jet_list_filter",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (Filter, "iter") => (
-//RS             "core.iter",
-//RS             "filter",
-//RS             "jet_iter_filter",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (FilterMap, "list") => (
-//RS             "core.list",
-//RS             "filter_map",
-//RS             "jet_list_filter_map_iter",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (FilterMap, "iter") => (
-//RS             "core.iter",
-//RS             "filter_map",
-//RS             "jet_iter_filter_map",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (TryFilter, "list") => (
-//RS             "core.list",
-//RS             "try_filter",
-//RS             "jet_list_try_filter",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (TryFilter, "iter") => (
-//RS             "core.iter",
-//RS             "try_filter",
-//RS             "jet_iter_try_filter",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (TryFilter, "view") => (
-//RS             "core.view",
-//RS             "try_filter",
-//RS             "jet_view_try_filter",
-//RS             2,
-//RS             &[true, false][..],
-//RS         ),
-//RS         (Each | EachMut, "list" | "iter") => {
-//RS             if matches!(op, Each) {
-//RS                 ("core.list", "each", "jet_list_each", 2, &[false, false][..])
-//RS             } else {
-//RS                 (
-//RS                     "core.list",
-//RS                     "each_mut",
-//RS                     "jet_list_each_mut",
-//RS                     2,
-//RS                     &[false, false][..],
-//RS                 )
-//RS             }
-//RS         }
-//RS         (Find, "list" | "iter") => ("core.list", "find", "jet_list_find", 2, &[false, false][..]),
-//RS         (Any, "list" | "iter") => ("core.list", "any", "jet_list_any", 2, &[false, false][..]),
-//RS         (All, "list" | "iter") => ("core.list", "all", "jet_list_all", 2, &[false, false][..]),
-//RS         (Reduce, "list" | "iter") => (
-//RS             "core.list",
-//RS             "reduce",
-//RS             "jet_list_reduce",
-//RS             3,
-//RS             &[false, false, false][..],
-//RS         ),
-//RS         (TakeWhile, "list") => (
-//RS             "core.list",
-//RS             "take_while",
-//RS             "jet_list_take_while_iter",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (TakeWhile, "iter") => (
-//RS             "core.iter",
-//RS             "take_while",
-//RS             "jet_iter_take_while",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (SkipWhile, "list") => (
-//RS             "core.list",
-//RS             "skip_while",
-//RS             "jet_list_skip_while_iter",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (SkipWhile, "iter") => (
-//RS             "core.iter",
-//RS             "skip_while",
-//RS             "jet_iter_skip_while",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (FlatMap, "list") => (
-//RS             "core.list",
-//RS             "flat_map",
-//RS             "jet_list_flat_map",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (FlatMap, "iter") => (
-//RS             "core.iter",
-//RS             "flat_map",
-//RS             "jet_iter_flat_map",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (Position, "list" | "iter") => (
-//RS             "core.list",
-//RS             "position",
-//RS             "jet_list_position",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (MinBy, "list" | "iter") => (
-//RS             "core.list",
-//RS             "min_by",
-//RS             "jet_list_min_by",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (MaxBy, "list" | "iter") => (
-//RS             "core.list",
-//RS             "max_by",
-//RS             "jet_list_max_by",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (GroupBy, "list" | "iter") => (
-//RS             "core.list",
-//RS             "group_by",
-//RS             "jet_list_group_by",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (CountBy, "list" | "iter") => (
-//RS             "core.list",
-//RS             "count_by",
-//RS             "jet_list_count_by",
-//RS             2,
-//RS             &[false, false][..],
-//RS         ),
-//RS         (Scan, "list") => (
-//RS             "core.list",
-//RS             "scan",
-//RS             "jet_list_scan_iter",
-//RS             3,
-//RS             &[false, false, false][..],
-//RS         ),
-//RS         (Scan, "iter") => (
-//RS             "core.iter",
-//RS             "scan",
-//RS             "jet_iter_scan",
-//RS             3,
-//RS             &[false, false, false][..],
-//RS         ),
-//RS         (OptionMap, "option") => (
-//RS             "core.option",
-//RS             "map",
-//RS             "jet_option_map_ref",
-//RS             2,
-//RS             &[true, false][..],
-//RS         ),
-//RS         (BagAny, "bag") => ("core.bag", "any", "jet_bag_any", 2, &[true, false][..]),
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "checked closure operation `{op:?}` has no Prelude route for receiver `{kind}`"
-//RS             )));
-//RS         }
-//RS     };
-//RS     Ok(prelude(
-//RS         MirPreludeFamily::ClosureMethod,
-//RS         module,
-//RS         member,
-//RS         symbol,
-//RS         arity,
-//RS         arity,
-//RS         borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS     ))
-//RS }
-//RS 
-//RS impl TClosureOp {
-//RS     pub(super) fn route_plan(
-//RS         &self,
-//RS         receiver: &Type,
-//RS         _result: &Type,
-//RS         carrier: &TFailureCarrier,
-//RS     ) -> Result<TRoutePlan, LowerError> {
-//RS         use TClosureOp::*;
-//RS         let plan = match self {
-//RS             EditDisjoint => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.collections",
-//RS                 "edit_disjoint",
-//RS                 "jet_edit_disjoint",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             EachRef => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.collections",
-//RS                 "each_ref",
-//RS                 "jet_list_each_ref",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             EachMap => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.map",
-//RS                 "each",
-//RS                 "jet_map_each",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             MapAny => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.map",
-//RS                 "any",
-//RS                 "jet_map_any",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             MapAll => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.map",
-//RS                 "all",
-//RS                 "jet_map_all",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             MapFilter => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.map",
-//RS                 "filter",
-//RS                 "jet_map_filter",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             MapMap => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.map",
-//RS                 "map",
-//RS                 "jet_map_map_values",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             MapFold => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.map",
-//RS                 "fold",
-//RS                 "jet_map_fold",
-//RS                 3,
-//RS                 3,
-//RS                 &[false, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             MapFlatMap => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.map",
-//RS                 "flat_map",
-//RS                 "jet_map_flat_map",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             ListBinarySearchBy => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "binary_search_by",
-//RS                 "jet_list_binary_search_by",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             ListMinMaxBy { .. } => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "min_max_by",
-//RS                 "jet_list_min_max_by",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Aggregate,
-//RS             ),
-//RS             CountWhere => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "count_where",
-//RS                 "jet_list_count_where",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             SortBy => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "sort_by",
-//RS                 "jet_list_sort_by",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             SortByDesc => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "sort_by_desc",
-//RS                 "jet_list_sort_by_desc",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             TrySortBy => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "try_sort_by",
-//RS                 "jet_list_try_sort_by",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             TrySortByDesc => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "try_sort_by_desc",
-//RS                 "jet_list_try_sort_by_desc",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             SortByCompare => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "sort_by_compare",
-//RS                 "jet_list_sort_by_compare",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             ParaMap => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "para_map",
-//RS                 "jet_list_para_map",
-//RS                 3,
-//RS                 3,
-//RS                 &[false, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             ParaFilter => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "para_filter",
-//RS                 "jet_list_para_filter",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             ParaPartition { .. } => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "para_partition",
-//RS                 "jet_list_para_partition",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Aggregate,
-//RS             ),
-//RS             FloatAddFold { f32 } => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 if *f32 {
-//RS                     "fold_add_fixed_f32"
-//RS                 } else {
-//RS                     "fold_add_fixed_f64"
-//RS                 },
-//RS                 if *f32 {
-//RS                     "jet_list_fold_add_fixed_f32"
-//RS                 } else {
-//RS                     "jet_list_fold_add_fixed_f64"
-//RS                 },
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             FloatAddParaFold { f32 } => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 if *f32 {
-//RS                     "para_fold_add_fixed_f32"
-//RS                 } else {
-//RS                     "para_fold_add_fixed_f64"
-//RS                 },
-//RS                 if *f32 {
-//RS                     "jet_list_para_fold_add_fixed_f32"
-//RS                 } else {
-//RS                     "jet_list_para_fold_add_fixed_f64"
-//RS                 },
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             ParaFold => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "para_fold",
-//RS                 "jet_list_para_fold",
-//RS                 4,
-//RS                 4,
-//RS                 &[false, false, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             FilterMap => return collection_closure_route(self, receiver, carrier),
-//RS             DedupBy => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.iter",
-//RS                 "dedup_by",
-//RS                 "jet_iter_dedup_by",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             IsSortedBy => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.iter",
-//RS                 "is_sorted_by",
-//RS                 "jet_iter_is_sorted_by",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             ChunkWhile => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.iter",
-//RS                 "chunk_while",
-//RS                 "jet_iter_chunk_while",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             Scan => return collection_closure_route(self, receiver, carrier),
-//RS             Fold => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "fold",
-//RS                 "jet_list_fold",
-//RS                 3,
-//RS                 3,
-//RS                 &[false, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             ViewFold => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.view",
-//RS                 "fold",
-//RS                 "jet_view_fold",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             ViewMap => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.view",
-//RS                 "map",
-//RS                 "jet_view_map",
-//RS                 2,
-//RS                 2,
-//RS                 &[true, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             UpdateFirst => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "update_first",
-//RS                 "jet_list_update_first",
-//RS                 3,
-//RS                 3,
-//RS                 &[true, false, false],
-//RS                 Some(Effect::Mem),
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             Partition { .. } => prelude(
-//RS                 MirPreludeFamily::ClosureMethod,
-//RS                 "core.list",
-//RS                 "partition",
-//RS                 "jet_list_partition",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Aggregate,
-//RS             ),
-//RS             // These operations select a List, Iter, View, or Option implementation
-//RS             // from the receiver type. The checked projection expands that choice
-//RS             // before MIR; no route may guess a helper from the enum alone.
-//RS             Map | MapMut | TryMap | Filter | TryFilter | Each | EachMut | Find | Any | BagAny
-//RS             | All | Reduce | TakeWhile | SkipWhile | FlatMap | Position | MinBy | MaxBy
-//RS             | GroupBy | CountBy | OptionMap => {
-//RS                 return collection_closure_route(self, receiver, carrier);
-//RS             }
-//RS         };
-//RS         Ok(plan)
-//RS     }
-//RS 
-//RS     pub(super) fn prelude_route(
-//RS         &self,
-//RS         receiver: &Type,
-//RS         result: &Type,
-//RS         carrier: &TFailureCarrier,
-//RS     ) -> Result<TPreludeRoute, LowerError> {
-//RS         as_prelude(
-//RS             self.route_plan(receiver, result, carrier)?,
-//RS             "closure method",
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl TNumericOp {
-//RS     pub(super) fn route_plan(
-//RS         &self,
-//RS         _result: &Type,
-//RS         carrier: &TFailureCarrier,
-//RS     ) -> Result<TRoutePlan, LowerError> {
-//RS         use TNumericOp::*;
-//RS         let plan = match self {
-//RS             EuclideanDiv { .. } => prelude(
-//RS                 MirPreludeFamily::Overflow,
-//RS                 "core.numeric",
-//RS                 "div_euclid",
-//RS                 "jet_std::jet_int_div_euclid",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             EuclideanRem { .. } => prelude(
-//RS                 MirPreludeFamily::Overflow,
-//RS                 "core.numeric",
-//RS                 "rem_euclid",
-//RS                 "jet_std::jet_int_rem_euclid",
-//RS                 2,
-//RS                 2,
-//RS                 &[false, false],
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS             ),
-//RS             Predicate(method) => {
-//RS                 let (member, symbol) = match method.as_str() {
-//RS                     "is_nan" => ("is_nan", "jet_std_math_is_nan"),
-//RS                     "is_infinite" => ("is_infinite", "jet_std_math_is_infinite"),
-//RS                     "is_finite" => ("is_finite", "jet_std_math_is_finite"),
-//RS                     _ => return Err(route_error(format!("unknown numeric predicate `{method}`"))),
-//RS                 };
-//RS                 prelude(
-//RS                     MirPreludeFamily::BuiltinMethod,
-//RS                     "core.math",
-//RS                     member,
-//RS                     symbol,
-//RS                     1,
-//RS                     1,
-//RS                     &[false],
-//RS                     None,
-//RS                     carrier,
-//RS                     MirPreludeAbi::Value,
-//RS                 )
-//RS             }
-//RS             _ => primitive(),
-//RS         };
-//RS         Ok(plan)
-//RS     }
-//RS 
-//RS     pub(super) fn prelude_route(
-//RS         &self,
-//RS         result: &Type,
-//RS         carrier: &TFailureCarrier,
-//RS     ) -> Result<TPreludeRoute, LowerError> {
-//RS         as_prelude(self.route_plan(result, carrier)?, "numeric method")
-//RS     }
-//RS }
-//RS 
-//RS fn watch_receiver_kind(receiver: &Type) -> Option<&str> {
-//RS     match receiver {
-//RS         Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. } => {
-//RS             watch_receiver_kind(inner)
-//RS         }
-//RS         Type::Named(name) if matches!(name.as_str(), "WatchHandle" | "WatchSet") => {
-//RS             Some(name.as_str())
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn watch_route(
-//RS     receiver: &Type,
-//RS     method: &str,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let kind = watch_receiver_kind(receiver).ok_or_else(|| {
-//RS         route_error(format!(
-//RS             "checked watch method `{method}` has an unsupported receiver type"
-//RS         ))
-//RS     })?;
-//RS     Ok(match (kind, method) {
-//RS         ("WatchHandle", "poll" | "events") => h(
-//RS             "watch.poll",
-//RS             "jet_jit_watch_poll",
-//RS             1,
-//RS             1,
-//RS             &[true],
-//RS             Some(Effect::IO),
-//RS             carrier,
-//RS         ),
-//RS         ("WatchHandle", "cancel") => h(
-//RS             "watch.cancel",
-//RS             "jet_jit_watch_cancel",
-//RS             1,
-//RS             1,
-//RS             &[true],
-//RS             Some(Effect::IO),
-//RS             carrier,
-//RS         ),
-//RS         ("WatchHandle", "is_active") => h(
-//RS             "watch.is_active",
-//RS             "jet_jit_watch_is_active",
-//RS             1,
-//RS             1,
-//RS             &[true],
-//RS             None,
-//RS             carrier,
-//RS         ),
-//RS         ("WatchHandle", "summary") => h(
-//RS             "watch.summary",
-//RS             "jet_jit_watch_summary",
-//RS             1,
-//RS             1,
-//RS             &[true],
-//RS             None,
-//RS             carrier,
-//RS         ),
-//RS         ("WatchHandle", "on") => prelude(
-//RS             MirPreludeFamily::ClosureMethod,
-//RS             "core.watcher",
-//RS             "on",
-//RS             "jet_jit_watch_on",
-//RS             3,
-//RS             3,
-//RS             &[true, true, false],
-//RS             Some(Effect::IO),
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS         ),
-//RS         ("WatchHandle", "once") => prelude(
-//RS             MirPreludeFamily::ClosureMethod,
-//RS             "core.watcher",
-//RS             "once",
-//RS             "jet_jit_watch_once",
-//RS             3,
-//RS             3,
-//RS             &[true, true, false],
-//RS             Some(Effect::IO),
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS         ),
-//RS         ("WatchSet", "add") => h(
-//RS             "watchset.add",
-//RS             "jet_jit_watchset_add",
-//RS             2,
-//RS             2,
-//RS             &[true, true],
-//RS             Some(Effect::IO),
-//RS             carrier,
-//RS         ),
-//RS         ("WatchSet", "poll" | "events") => h(
-//RS             "watchset.poll",
-//RS             "jet_jit_watchset_poll",
-//RS             1,
-//RS             1,
-//RS             &[true],
-//RS             Some(Effect::IO),
-//RS             carrier,
-//RS         ),
-//RS         ("WatchSet", "summary") => h(
-//RS             "watchset.summary",
-//RS             "jet_jit_watchset_summary",
-//RS             1,
-//RS             1,
-//RS             &[true],
-//RS             None,
-//RS             carrier,
-//RS         ),
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "unknown checked watch method `{kind}.{method}`"
-//RS             )));
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn event_receiver_kind(receiver: &Type) -> Option<&str> {
-//RS     match receiver {
-//RS         Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. } => {
-//RS             event_receiver_kind(inner)
-//RS         }
-//RS         Type::Apply { name, .. } | Type::Named(name)
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 "Event"
-//RS                     | "AsyncEvent"
-//RS                     | "Hook"
-//RS                     | "DecisionHook"
-//RS                     | "Subscription"
-//RS                     | "EventScope"
-//RS                     | "EventTrace"
-//RS                     | "DispatchReport"
-//RS             ) =>
-//RS         {
-//RS             Some(name.as_str())
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn event_route(
-//RS     receiver: &Type,
-//RS     method: &str,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let kind = event_receiver_kind(receiver).ok_or_else(|| {
-//RS         route_error(format!(
-//RS             "checked event method `{method}` has an unsupported receiver type"
-//RS         ))
-//RS     })?;
-//RS     let (symbol, arity, max_arity, borrow_mask) = match (kind, method) {
-//RS         ("Event", "on") => ("jet_std::JetEvent::on", 3, 3, &[true, true, false][..]),
-//RS         ("Event", "once") => ("jet_std::JetEvent::once", 3, 3, &[true, true, false][..]),
-//RS         ("Event", "on_priority") => (
-//RS             "jet_std::JetEvent::on_priority",
-//RS             4,
-//RS             4,
-//RS             &[true, true, false, false][..],
-//RS         ),
-//RS         ("Event", "emit") => ("jet_std::JetEvent::emit", 2, 2, &[true, false][..]),
-//RS         ("Event", "listener_count") => ("jet_std::JetEvent::listener_count", 1, 1, &[true][..]),
-//RS         ("Event", "trace") => ("jet_std::JetEvent::trace", 1, 1, &[true][..]),
-//RS         ("AsyncEvent", "on") => ("jet_std::JetAsyncEvent::on", 3, 3, &[true, true, false][..]),
-//RS         ("AsyncEvent", "once") => (
-//RS             "jet_std::JetAsyncEvent::once",
-//RS             3,
-//RS             3,
-//RS             &[true, true, false][..],
-//RS         ),
-//RS         ("AsyncEvent", "on_priority") => (
-//RS             "jet_std::JetAsyncEvent::on_priority",
-//RS             4,
-//RS             4,
-//RS             &[true, true, false, false][..],
-//RS         ),
-//RS         ("AsyncEvent", "emit_async") => {
-//RS             let symbol = if matches!(carrier, TFailureCarrier::Result { .. }) {
-//RS                 "jet_std::JetAsyncEvent::emit_async_result"
-//RS             } else {
-//RS                 "jet_std::JetAsyncEvent::emit_async"
-//RS             };
-//RS             (symbol, 2, 2, &[true, false][..])
-//RS         }
-//RS         ("AsyncEvent", "close") => ("jet_std::JetAsyncEvent::close", 1, 1, &[true][..]),
-//RS         ("AsyncEvent", "listener_count") => {
-//RS             ("jet_std::JetAsyncEvent::listener_count", 1, 1, &[true][..])
-//RS         }
-//RS         ("AsyncEvent", "queued_count") => {
-//RS             ("jet_std::JetAsyncEvent::queued_count", 1, 1, &[true][..])
-//RS         }
-//RS         ("AsyncEvent", "running_count") => {
-//RS             ("jet_std::JetAsyncEvent::running_count", 1, 1, &[true][..])
-//RS         }
-//RS         ("AsyncEvent", "blocked_count") => {
-//RS             ("jet_std::JetAsyncEvent::blocked_count", 1, 1, &[true][..])
-//RS         }
-//RS         ("Hook", "on") => ("jet_std::JetHook::on", 3, 3, &[true, true, false][..]),
-//RS         ("Hook", "once") => ("jet_std::JetHook::once", 3, 3, &[true, true, false][..]),
-//RS         ("Hook", "on_priority") => (
-//RS             "jet_std::JetHook::on_priority",
-//RS             4,
-//RS             4,
-//RS             &[true, true, false, false][..],
-//RS         ),
-//RS         ("Hook", "run") => ("jet_std::JetHook::run", 3, 3, &[true, false, false][..]),
-//RS         ("Hook", "listener_count") => ("jet_std::JetHook::listener_count", 1, 1, &[true][..]),
-//RS         ("Hook", "trace") => ("jet_std::JetHook::trace", 1, 1, &[true][..]),
-//RS         ("DecisionHook", "on") => (
-//RS             "jet_std::JetDecisionHook::on",
-//RS             3,
-//RS             3,
-//RS             &[true, true, false][..],
-//RS         ),
-//RS         ("DecisionHook", "once") => (
-//RS             "jet_std::JetDecisionHook::once",
-//RS             3,
-//RS             3,
-//RS             &[true, true, false][..],
-//RS         ),
-//RS         ("DecisionHook", "on_priority") => (
-//RS             "jet_std::JetDecisionHook::on_priority",
-//RS             4,
-//RS             4,
-//RS             &[true, true, false, false][..],
-//RS         ),
-//RS         ("DecisionHook", "run") => ("jet_std::JetDecisionHook::run", 2, 2, &[true, false][..]),
-//RS         ("DecisionHook", "listener_count") => (
-//RS             "jet_std::JetDecisionHook::listener_count",
-//RS             1,
-//RS             1,
-//RS             &[true][..],
-//RS         ),
-//RS         ("Subscription", "unsubscribe") => {
-//RS             ("jet_std::JetSubscription::unsubscribe", 1, 1, &[true][..])
-//RS         }
-//RS         ("Subscription", "is_active") => ("jet_std::JetSubscription::active", 1, 1, &[true][..]),
-//RS         ("EventScope", "cancel") => ("jet_std::JetEventScope::cancel", 1, 1, &[true][..]),
-//RS         ("EventScope", "active_count") => {
-//RS             ("jet_std::JetEventScope::active_count", 1, 1, &[true][..])
-//RS         }
-//RS         ("EventTrace", "summary") => ("jet_std::JetEventTrace::summary", 1, 1, &[true][..]),
-//RS         ("EventTrace", "delivered") => ("jet_std::JetEventTrace::delivered", 1, 1, &[true][..]),
-//RS         ("EventTrace", "queued") => ("jet_std::JetEventTrace::queued", 1, 1, &[true][..]),
-//RS         ("EventTrace", "dropped") => ("jet_std::JetEventTrace::dropped", 1, 1, &[true][..]),
-//RS         ("DispatchReport", "state") => ("jet_std::JetDispatchReport::state", 1, 1, &[true][..]),
-//RS         ("DispatchReport", "accepted") => {
-//RS             ("jet_std::JetDispatchReport::accepted", 1, 1, &[true][..])
-//RS         }
-//RS         ("DispatchReport", "delivered_handlers") => (
-//RS             "jet_std::JetDispatchReport::delivered_handlers",
-//RS             1,
-//RS             1,
-//RS             &[true][..],
-//RS         ),
-//RS         ("DispatchReport", "failures") => {
-//RS             ("jet_std::JetDispatchReport::failures", 1, 1, &[true][..])
-//RS         }
-//RS         ("DispatchReport", "trace") => ("jet_std::JetDispatchReport::trace", 1, 1, &[true][..]),
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "unknown checked event method `{kind}.{method}`"
-//RS             )));
-//RS         }
-//RS     };
-//RS     Ok(prelude(
-//RS         MirPreludeFamily::ClosureMethod,
-//RS         "core.event",
-//RS         method,
-//RS         symbol,
-//RS         arity,
-//RS         max_arity,
-//RS         borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS     ))
-//RS }
-//RS fn task_receiver_args(receiver: &Type) -> Option<&[Type]> {
-//RS     match receiver {
-//RS         Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. } => {
-//RS             task_receiver_args(inner)
-//RS         }
-//RS         Type::Apply { name, args } if name == "Task" => Some(args.as_slice()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn task_route(receiver: &Type, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
-//RS     let args = task_receiver_args(receiver)
-//RS         .ok_or_else(|| route_error("checked task join has an unsupported receiver type"))?;
-//RS     let task_value = args
-//RS         .first()
-//RS         .ok_or_else(|| route_error("checked task join is missing its value type"))?;
-//RS     // `Task<Result<T, E>>` is the private carrier used by fallible task
-//RS     // bodies. The shared Prelude helper removes that carrier before exposing
-//RS     // the public `Result<T, TaskFailure>` join surface.
-//RS     let symbol = if matches!(task_value, Type::Result { .. }) {
-//RS         "jet_std::jet_task_join_result"
-//RS     } else {
-//RS         "jet_std::JetTask::join"
-//RS     };
-//RS     Ok(prelude(
-//RS         MirPreludeFamily::HandleMethod,
-//RS         "core.tasks",
-//RS         "join",
-//RS         symbol,
-//RS         1,
-//RS         1,
-//RS         &[false],
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS     ))
-//RS }
-//RS fn http_client_request_route(
-//RS     kind: &str,
-//RS     method: &str,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let (member, symbol, arity, borrow_mask): (&str, &str, usize, &[bool]) = match (kind, method) {
-//RS         ("HTTPRequest" | "HTTPClient", "send") => (
-//RS             "http.request_send",
-//RS             "jet_http_client_request_send",
-//RS             1,
-//RS             &[false],
-//RS         ),
-//RS         ("Body", "bytes") => ("http.body_bytes", "jet_http_body_bytes", 2, &[true, false]),
-//RS         ("Body", "chunks") => (
-//RS             "http.body_chunks",
-//RS             "jet_http_body_chunks",
-//RS             2,
-//RS             &[true, false],
-//RS         ),
-//RS         ("HTTPRequest", "body") => (
-//RS             "http.request_body",
-//RS             "jet_http_client_request_body",
-//RS             2,
-//RS             &[false, true],
-//RS         ),
-//RS         ("HTTPRequest", "header") => (
-//RS             "http.request_header",
-//RS             "jet_http_client_request_header",
-//RS             3,
-//RS             &[false, true, true],
-//RS         ),
-//RS         ("HTTPRequest", "timeout") => (
-//RS             "http.request_timeout",
-//RS             "jet_http_client_request_timeout",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         ("HTTPRequest", "connect_timeout") => (
-//RS             "http.request_connect_timeout",
-//RS             "jet_http_client_request_connect_timeout",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         ("HTTPRequest", "read_timeout") => (
-//RS             "http.request_read_timeout",
-//RS             "jet_http_client_request_read_timeout",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         ("HTTPRequest", "total_timeout") => (
-//RS             "http.request_total_timeout",
-//RS             "jet_http_client_request_total_timeout",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         ("HTTPRequest", "dns_timeout") => (
-//RS             "http.request_dns_timeout",
-//RS             "jet_http_client_request_dns_timeout",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         ("HTTPRequest", "tls_timeout") => (
-//RS             "http.request_tls_timeout",
-//RS             "jet_http_client_request_tls_timeout",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         ("HTTPRequest", "write_timeout") => (
-//RS             "http.request_write_timeout",
-//RS             "jet_http_client_request_write_timeout",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         ("HTTPRequest", "first_byte_timeout") => (
-//RS             "http.request_first_byte_timeout",
-//RS             "jet_http_client_request_first_byte_timeout",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         ("HTTPRequest", "redirects") => (
-//RS             "http.request_redirects",
-//RS             "jet_http_client_request_redirects",
-//RS             2,
-//RS             &[false, false],
-//RS         ),
-//RS         ("HTTPRequest", "proxy") => (
-//RS             "http.request_proxy",
-//RS             "jet_http_client_request_proxy",
-//RS             2,
-//RS             &[false, true],
-//RS         ),
-//RS         ("HTTPRequest", "cookie") => (
-//RS             "http.request_cookie",
-//RS             "jet_http_client_request_cookie",
-//RS             3,
-//RS             &[false, true, true],
-//RS         ),
-//RS         ("HTTPRequest", "form") => (
-//RS             "http.request_form",
-//RS             "jet_http_client_request_form",
-//RS             3,
-//RS             &[false, true, true],
-//RS         ),
-//RS         ("HTTPRequest", "multipart_text") => (
-//RS             "http.request_multipart_text",
-//RS             "jet_http_client_request_multipart_text",
-//RS             3,
-//RS             &[false, true, true],
-//RS         ),
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "unhandled HTTP client method `{kind}.{method}`"
-//RS             )));
-//RS         }
-//RS     };
-//RS     Ok(h(
-//RS         member,
-//RS         symbol,
-//RS         arity,
-//RS         arity,
-//RS         borrow_mask,
-//RS         Some(Effect::Net),
-//RS         carrier,
-//RS     ))
-//RS }
-//RS 
-//RS impl THandleOp {
-// END-PORT-PENDING 0513 crates/jet-codegen/src/Codegen/TIR/routes.rs:1-1348
+// Total checked operation routes shared by every TIR consumer.
+// No backend inference: primitive plans are expanded structurally into MIR.
+use jet_foundation.[Type, Span, Effect]
+use jet_foundation.MIR.[MirCallSignature, MirPreludeAbi, MirPreludeFamily, MirSymbol]
+use jet_codegen.TIR.[LowerError, TClosureOp, TNumericOp, TFailureCarrier, TPreludeRoute, TRoutePlan, TZipMode]
+use jet_codegen.TIR.Routes04.[h]
+use jet_syntax as Syntax
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:23
+fn route_error(message: String) -> LowerError Never! { LowerError.new(Span.new(0, 0), message) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:32
+pub struct TLoopRouteBundle {
+    pub range_init: TPreludeRoute
+    pub range_has_next: TPreludeRoute
+    pub range_value: TPreludeRoute
+    pub range_advance: TPreludeRoute
+    pub iter_init: TPreludeRoute
+    pub iter_has_next: TPreludeRoute
+    pub iter_value: TPreludeRoute
+    pub iter_advance: TPreludeRoute
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:48
+pub fn loop_route_bundle() -> TLoopRouteBundle Never! {
+    carrier :: TFailureCarrier.Infallible
+    row :: fn(member: String, symbol: String, arity: USize, borrow_mask: [Bool]) {
+        TPreludeRoute{family: MirPreludeFamily.StaticPrelude, module: "core.prelude", member: member,
+            symbol: MirSymbol.Prelude(symbol), signature: MirCallSignature{arity: arity, max_arity: arity, borrow_mask: borrow_mask},
+            effect: None, fallibility: carrier, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
+    }
+    TLoopRouteBundle{
+        range_init: row("loop_range_init", "jet_loop_range_init", 5, [Bool]{false, false, false, false, false}),
+        range_has_next: row("loop_range_has_next", "jet_loop_range_has_next", 1, [Bool]{true}),
+        range_value: row("loop_range_value", "jet_loop_range_value", 1, [Bool]{true}),
+        range_advance: row("loop_range_advance", "jet_loop_range_advance", 1, [Bool]{true}),
+        iter_init: row("loop_iter_init", "jet_loop_iter_init", 5, [Bool]{false, false, false, false, false}),
+        iter_has_next: row("loop_iter_has_next", "jet_loop_iter_has_next", 1, [Bool]{true}),
+        iter_value: row("loop_iter_value", "jet_loop_iter_value", 1, [Bool]{true}),
+        iter_advance: row("loop_iter_advance", "jet_loop_iter_advance", 1, [Bool]{true})}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:88
+pub fn zip_closure_route(mode: TZipMode) -> TPreludeRoute Never! {
+    (member, symbol, arity) :: if mode == { .Short -> ("zip", "jet_iter_zip", 3); .Strict -> ("zip_strict", "jet_iter_zip_strict", 10); .Pad -> ("zip_pad", "jet_iter_zip_pad", 5) }
+    TPreludeRoute{family: MirPreludeFamily.ClosureMethod, module: "core.iter", member: member,
+        symbol: MirSymbol.Prelude(symbol), signature: MirCallSignature{arity: arity, max_arity: arity, borrow_mask: [Bool].repeat(false, arity)},
+        effect: None, fallibility: TFailureCarrier.Infallible, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:112
+fn prelude(family: MirPreludeFamily, module: String, member: String, symbol: String, arity: USize, max_arity: USize, borrow_mask: [Bool], effect: Effect?, carrier: TFailureCarrier, abi: MirPreludeAbi) -> TRoutePlan Never! {
+    TRoutePlan.Prelude(TPreludeRoute{family: family, module: module, member: member, symbol: MirSymbol.Prelude(symbol),
+        signature: MirCallSignature{arity: arity, max_arity: max_arity, borrow_mask: ~borrow_mask}, effect: effect,
+        fallibility: ~carrier, abi: abi, authority: None, db_metadata: None})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:142
+fn primitive() -> TRoutePlan Never! { TRoutePlan.Primitive }
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:146
+fn as_prelude(plan: TRoutePlan, name: String) -> TPreludeRoute LowerError! {
+    if plan == { .Prelude(route) -> Ok(^route); .Primitive -> Err(route_error("checked operation `{name}` requires structural MIR lowering")) }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:154
+fn closure_receiver_kind(receiver: Type) -> String? Never! {
+    if receiver == {
+        .Tagged{inner, ..} -> closure_receiver_kind(inner)
+        .List(_) | .FixedList{..} -> Val("list")
+        .Apply{name, args} if args.len() == 1 && (name == "Iter" || name == "ViewIter") -> Val("iter")
+        .Apply{name, args} if args.len() == 1 && (name == "View" || name == "ViewMut" || name == "ComputeViewMut") -> Val("view")
+        .Option(_) -> Val("option")
+        .Map{..} -> Val("map")
+        .Apply{name, ..} if name == Syntax.TYPE_TALLY -> Val("bag")
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:176
+fn collection_closure_route(op: TClosureOp, receiver: Type, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    kind :: closure_receiver_kind(receiver) ?? return Err(route_error("checked closure operation `{op:?}` has an unsupported receiver type"))
+    (module, member, symbol, arity, borrow_mask) :: if (op, kind) == {
+        (.Map, "list") -> ("core.list", "map", "jet_list_map", 2, [Bool]{false, false})
+        (.Map, "iter") -> ("core.iter", "map", "jet_iter_map", 2, [Bool]{false, false})
+        (.MapMut, "list") -> ("core.list", "map_mut", "jet_list_map_mut", 2, [Bool]{false, false})
+        (.MapMut, "iter") -> ("core.iter", "map_mut", "jet_iter_map_mut", 2, [Bool]{false, false})
+        (.TryMap, "list") -> ("core.list", "try_map", "jet_list_try_map", 2, [Bool]{false, false})
+        (.TryMap, "iter") -> ("core.iter", "try_map", "jet_iter_try_map", 2, [Bool]{false, false})
+        (.TryMap, "view") -> ("core.view", "try_map", "jet_view_try_map", 2, [Bool]{true, false})
+        (.Filter, "list") -> ("core.list", "filter", "jet_list_filter", 2, [Bool]{false, false})
+        (.Filter, "iter") -> ("core.iter", "filter", "jet_iter_filter", 2, [Bool]{false, false})
+        (.FilterMap, "list") -> ("core.list", "filter_map", "jet_list_filter_map_iter", 2, [Bool]{false, false})
+        (.FilterMap, "iter") -> ("core.iter", "filter_map", "jet_iter_filter_map", 2, [Bool]{false, false})
+        (.TryFilter, "list") -> ("core.list", "try_filter", "jet_list_try_filter", 2, [Bool]{false, false})
+        (.TryFilter, "iter") -> ("core.iter", "try_filter", "jet_iter_try_filter", 2, [Bool]{false, false})
+        (.TryFilter, "view") -> ("core.view", "try_filter", "jet_view_try_filter", 2, [Bool]{true, false})
+        (.Each | .EachMut, "list" | "iter") -> if op is .Each -> ("core.list", "each", "jet_list_each", 2, [Bool]{false, false}) else -> ("core.list", "each_mut", "jet_list_each_mut", 2, [Bool]{false, false})
+        (.Find, "list" | "iter") -> ("core.list", "find", "jet_list_find", 2, [Bool]{false, false})
+        (.Any, "list" | "iter") -> ("core.list", "any", "jet_list_any", 2, [Bool]{false, false})
+        (.All, "list" | "iter") -> ("core.list", "all", "jet_list_all", 2, [Bool]{false, false})
+        (.Reduce, "list" | "iter") -> ("core.list", "reduce", "jet_list_reduce", 3, [Bool]{false, false, false})
+        (.TakeWhile, "list") -> ("core.list", "take_while", "jet_list_take_while_iter", 2, [Bool]{false, false})
+        (.TakeWhile, "iter") -> ("core.iter", "take_while", "jet_iter_take_while", 2, [Bool]{false, false})
+        (.SkipWhile, "list") -> ("core.list", "skip_while", "jet_list_skip_while_iter", 2, [Bool]{false, false})
+        (.SkipWhile, "iter") -> ("core.iter", "skip_while", "jet_iter_skip_while", 2, [Bool]{false, false})
+        (.FlatMap, "list") -> ("core.list", "flat_map", "jet_list_flat_map", 2, [Bool]{false, false})
+        (.FlatMap, "iter") -> ("core.iter", "flat_map", "jet_iter_flat_map", 2, [Bool]{false, false})
+        (.Position, "list" | "iter") -> ("core.list", "position", "jet_list_position", 2, [Bool]{false, false})
+        (.MinBy, "list" | "iter") -> ("core.list", "min_by", "jet_list_min_by", 2, [Bool]{false, false})
+        (.MaxBy, "list" | "iter") -> ("core.list", "max_by", "jet_list_max_by", 2, [Bool]{false, false})
+        (.GroupBy, "list" | "iter") -> ("core.list", "group_by", "jet_list_group_by", 2, [Bool]{false, false})
+        (.CountBy, "list" | "iter") -> ("core.list", "count_by", "jet_list_count_by", 2, [Bool]{false, false})
+        (.Scan, "list") -> ("core.list", "scan", "jet_list_scan_iter", 3, [Bool]{false, false, false})
+        (.Scan, "iter") -> ("core.iter", "scan", "jet_iter_scan", 3, [Bool]{false, false, false})
+        (.OptionMap, "option") -> ("core.option", "map", "jet_option_map_ref", 2, [Bool]{true, false})
+        (.BagAny, "bag") -> ("core.bag", "any", "jet_bag_any", 2, [Bool]{true, false})
+        else -> return Err(route_error("checked closure operation `{op:?}` has no Prelude route for receiver `{kind}`"))
+    }
+    Ok(prelude(MirPreludeFamily.ClosureMethod, module, member, symbol, arity, arity, borrow_mask, None, carrier, MirPreludeAbi.Value))
+}
+
+impl TClosureOp {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:417
+    pub fn route_plan(self, receiver: Type, _result: Type, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+        // Each row is the original checked helper, including its borrow/effect/ABI facts.
+        (module, member, symbol, arity, mask, effect, abi) :: if self == {
+            .EditDisjoint -> ("core.collections", "edit_disjoint", "jet_edit_disjoint", 3, [Bool]{true, true, false}, None, MirPreludeAbi.Value)
+            .EachRef -> ("core.collections", "each_ref", "jet_list_each_ref", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+            .EachMap -> ("core.map", "each", "jet_map_each", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .MapAny -> ("core.map", "any", "jet_map_any", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .MapAll -> ("core.map", "all", "jet_map_all", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .MapFilter -> ("core.map", "filter", "jet_map_filter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .MapMap -> ("core.map", "map", "jet_map_map_values", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .MapFold -> ("core.map", "fold", "jet_map_fold", 3, [Bool]{false, false, false}, None, MirPreludeAbi.Value)
+            .MapFlatMap -> ("core.map", "flat_map", "jet_map_flat_map", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .ListBinarySearchBy -> ("core.list", "binary_search_by", "jet_list_binary_search_by", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+            .ListMinMaxBy{..} -> ("core.list", "min_max_by", "jet_list_min_max_by", 2, [Bool]{true, false}, None, MirPreludeAbi.Aggregate)
+            .CountWhere -> ("core.list", "count_where", "jet_list_count_where", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+            .SortBy -> ("core.list", "sort_by", "jet_list_sort_by", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+            .SortByDesc -> ("core.list", "sort_by_desc", "jet_list_sort_by_desc", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+            .TrySortBy -> ("core.list", "try_sort_by", "jet_list_try_sort_by", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+            .TrySortByDesc -> ("core.list", "try_sort_by_desc", "jet_list_try_sort_by_desc", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+            .SortByCompare -> ("core.list", "sort_by_compare", "jet_list_sort_by_compare", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+            .ParaMap -> ("core.list", "para_map", "jet_list_para_map", 3, [Bool]{false, false, false}, None, MirPreludeAbi.Value)
+            .ParaFilter -> ("core.list", "para_filter", "jet_list_para_filter", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .ParaPartition{..} -> ("core.list", "para_partition", "jet_list_para_partition", 2, [Bool]{false, false}, None, MirPreludeAbi.Aggregate)
+            .FloatAddFold{f32} -> ("core.list", if f32 -> "fold_add_fixed_f32" else -> "fold_add_fixed_f64", if f32 -> "jet_list_fold_add_fixed_f32" else -> "jet_list_fold_add_fixed_f64", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .FloatAddParaFold{f32} -> ("core.list", if f32 -> "para_fold_add_fixed_f32" else -> "para_fold_add_fixed_f64", if f32 -> "jet_list_para_fold_add_fixed_f32" else -> "jet_list_para_fold_add_fixed_f64", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .ParaFold -> ("core.list", "para_fold", "jet_list_para_fold", 4, [Bool]{false, false, false, false}, None, MirPreludeAbi.Value)
+            .FilterMap -> return collection_closure_route(self, receiver, carrier)
+            .DedupBy -> ("core.iter", "dedup_by", "jet_iter_dedup_by", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .IsSortedBy -> ("core.iter", "is_sorted_by", "jet_iter_is_sorted_by", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .ChunkWhile -> ("core.iter", "chunk_while", "jet_iter_chunk_while", 2, [Bool]{false, false}, None, MirPreludeAbi.Value)
+            .Scan -> return collection_closure_route(self, receiver, carrier)
+            .Fold -> ("core.list", "fold", "jet_list_fold", 3, [Bool]{false, false, false}, None, MirPreludeAbi.Value)
+            .ViewFold -> ("core.view", "fold", "jet_view_fold", 3, [Bool]{true, false, false}, None, MirPreludeAbi.Value)
+            .ViewMap -> ("core.view", "map", "jet_view_map", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
+            .UpdateFirst -> ("core.list", "update_first", "jet_list_update_first", 3, [Bool]{true, false, false}, Val(Effect.Mem), MirPreludeAbi.Value)
+            .Partition{..} -> ("core.list", "partition", "jet_list_partition", 2, [Bool]{false, false}, None, MirPreludeAbi.Aggregate)
+            .Map | .MapMut | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .Find | .Any | .BagAny | .All | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Position | .MinBy | .MaxBy | .GroupBy | .CountBy | .OptionMap -> return collection_closure_route(self, receiver, carrier)
+        }
+        Ok(prelude(MirPreludeFamily.ClosureMethod, module, member, symbol, arity, arity, mask, effect, carrier, abi))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:827
+    pub fn prelude_route(self, receiver: Type, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+        as_prelude(self.route_plan(receiver, result, carrier)?, "closure method")
+    }
+}
+impl TNumericOp {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:841
+    pub fn route_plan(self, _result: Type, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+        plan :: if self == {
+            .EuclideanDiv{..} -> prelude(MirPreludeFamily.Overflow, "core.numeric", "div_euclid", "jet_std::jet_int_div_euclid", 2, 2, [Bool]{false, false}, None, carrier, MirPreludeAbi.Value)
+            .EuclideanRem{..} -> prelude(MirPreludeFamily.Overflow, "core.numeric", "rem_euclid", "jet_std::jet_int_rem_euclid", 2, 2, [Bool]{false, false}, None, carrier, MirPreludeAbi.Value)
+            .Predicate(method) -> {
+                (member, symbol) :: if method == {
+                    "is_nan" -> ("is_nan", "jet_std_math_is_nan")
+                    "is_infinite" -> ("is_infinite", "jet_std_math_is_infinite")
+                    "is_finite" -> ("is_finite", "jet_std_math_is_finite")
+                    else -> return Err(route_error("unknown numeric predicate `{method}`"))
+                }
+                prelude(MirPreludeFamily.BuiltinMethod, "core.math", member, symbol, 1, 1, [Bool]{false}, None, carrier, MirPreludeAbi.Value)
+            }
+            else -> primitive()
+        }
+        Ok(^plan)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:897
+    pub fn prelude_route(self, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+        as_prelude(self.route_plan(result, carrier)?, "numeric method")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:906
+fn watch_receiver_kind(receiver: Type) -> String? Never! {
+    if receiver == {
+        .Tagged{inner, ..} | .InlineRange{base: inner, ..} -> watch_receiver_kind(inner)
+        .Named(name) if name == "WatchHandle" || name == "WatchSet" -> Val(name)
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:918
+fn watch_route(receiver: Type, method: String, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    kind :: watch_receiver_kind(receiver) ?? return Err(route_error("checked watch method `{method}` has an unsupported receiver type"))
+    Ok(if (kind, method) == {
+        ("WatchHandle", "poll" | "events") -> h("watch.poll", "jet_jit_watch_poll", 1, 1, [Bool]{true}, Val(Effect.IO), carrier)
+        ("WatchHandle", "cancel") -> h("watch.cancel", "jet_jit_watch_cancel", 1, 1, [Bool]{true}, Val(Effect.IO), carrier)
+        ("WatchHandle", "is_active") -> h("watch.is_active", "jet_jit_watch_is_active", 1, 1, [Bool]{true}, None, carrier)
+        ("WatchHandle", "summary") -> h("watch.summary", "jet_jit_watch_summary", 1, 1, [Bool]{true}, None, carrier)
+        ("WatchHandle", "on") -> prelude(MirPreludeFamily.ClosureMethod, "core.watcher", "on", "jet_jit_watch_on", 3, 3, [Bool]{true, true, false}, Val(Effect.IO), carrier, MirPreludeAbi.Value)
+        ("WatchHandle", "once") -> prelude(MirPreludeFamily.ClosureMethod, "core.watcher", "once", "jet_jit_watch_once", 3, 3, [Bool]{true, true, false}, Val(Effect.IO), carrier, MirPreludeAbi.Value)
+        ("WatchSet", "add") -> h("watchset.add", "jet_jit_watchset_add", 2, 2, [Bool]{true, true}, Val(Effect.IO), carrier)
+        ("WatchSet", "poll" | "events") -> h("watchset.poll", "jet_jit_watchset_poll", 1, 1, [Bool]{true}, Val(Effect.IO), carrier)
+        ("WatchSet", "summary") -> h("watchset.summary", "jet_jit_watchset_summary", 1, 1, [Bool]{true}, None, carrier)
+        else -> return Err(route_error("unknown checked watch method `{kind}.{method}`"))
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1024
+fn event_receiver_kind(receiver: Type) -> String? Never! {
+    if receiver == {
+        .Tagged{inner, ..} | .InlineRange{base: inner, ..} -> event_receiver_kind(inner)
+        .Apply{name, ..} | .Named(name) if (if name == { "Event" | "AsyncEvent" | "Hook" | "DecisionHook" | "Subscription" | "EventScope" | "EventTrace" | "DispatchReport" -> true; else -> false }) -> Val(name)
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1048
+fn event_route(receiver: Type, method: String, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    kind :: event_receiver_kind(receiver) ?? return Err(route_error("checked event method `{method}` has an unsupported receiver type"))
+    (symbol, arity, max_arity, mask) :: if (kind, method) == {
+        ("Event", "on") -> ("jet_std::JetEvent::on", 3, 3, [Bool]{true, true, false})
+        ("Event", "once") -> ("jet_std::JetEvent::once", 3, 3, [Bool]{true, true, false})
+        ("Event", "on_priority") -> ("jet_std::JetEvent::on_priority", 4, 4, [Bool]{true, true, false, false})
+        ("Event", "emit") -> ("jet_std::JetEvent::emit", 2, 2, [Bool]{true, false})
+        ("Event", "listener_count") -> ("jet_std::JetEvent::listener_count", 1, 1, [Bool]{true})
+        ("Event", "trace") -> ("jet_std::JetEvent::trace", 1, 1, [Bool]{true})
+        ("AsyncEvent", "on") -> ("jet_std::JetAsyncEvent::on", 3, 3, [Bool]{true, true, false})
+        ("AsyncEvent", "once") -> ("jet_std::JetAsyncEvent::once", 3, 3, [Bool]{true, true, false})
+        ("AsyncEvent", "on_priority") -> ("jet_std::JetAsyncEvent::on_priority", 4, 4, [Bool]{true, true, false, false})
+        ("AsyncEvent", "emit_async") -> (if carrier is .Result{..} -> "jet_std::JetAsyncEvent::emit_async_result" else -> "jet_std::JetAsyncEvent::emit_async", 2, 2, [Bool]{true, false})
+        ("AsyncEvent", "close") -> ("jet_std::JetAsyncEvent::close", 1, 1, [Bool]{true})
+        ("AsyncEvent", "listener_count") -> ("jet_std::JetAsyncEvent::listener_count", 1, 1, [Bool]{true})
+        ("AsyncEvent", "queued_count") -> ("jet_std::JetAsyncEvent::queued_count", 1, 1, [Bool]{true})
+        ("AsyncEvent", "running_count") -> ("jet_std::JetAsyncEvent::running_count", 1, 1, [Bool]{true})
+        ("AsyncEvent", "blocked_count") -> ("jet_std::JetAsyncEvent::blocked_count", 1, 1, [Bool]{true})
+        ("Hook", "on") -> ("jet_std::JetHook::on", 3, 3, [Bool]{true, true, false})
+        ("Hook", "once") -> ("jet_std::JetHook::once", 3, 3, [Bool]{true, true, false})
+        ("Hook", "on_priority") -> ("jet_std::JetHook::on_priority", 4, 4, [Bool]{true, true, false, false})
+        ("Hook", "run") -> ("jet_std::JetHook::run", 3, 3, [Bool]{true, false, false})
+        ("Hook", "listener_count") -> ("jet_std::JetHook::listener_count", 1, 1, [Bool]{true})
+        ("Hook", "trace") -> ("jet_std::JetHook::trace", 1, 1, [Bool]{true})
+        ("DecisionHook", "on") -> ("jet_std::JetDecisionHook::on", 3, 3, [Bool]{true, true, false})
+        ("DecisionHook", "once") -> ("jet_std::JetDecisionHook::once", 3, 3, [Bool]{true, true, false})
+        ("DecisionHook", "on_priority") -> ("jet_std::JetDecisionHook::on_priority", 4, 4, [Bool]{true, true, false, false})
+        ("DecisionHook", "run") -> ("jet_std::JetDecisionHook::run", 2, 2, [Bool]{true, false})
+        ("DecisionHook", "listener_count") -> ("jet_std::JetDecisionHook::listener_count", 1, 1, [Bool]{true})
+        ("Subscription", "unsubscribe") -> ("jet_std::JetSubscription::unsubscribe", 1, 1, [Bool]{true})
+        ("Subscription", "is_active") -> ("jet_std::JetSubscription::active", 1, 1, [Bool]{true})
+        ("EventScope", "cancel") -> ("jet_std::JetEventScope::cancel", 1, 1, [Bool]{true})
+        ("EventScope", "active_count") -> ("jet_std::JetEventScope::active_count", 1, 1, [Bool]{true})
+        ("EventTrace", "summary") -> ("jet_std::JetEventTrace::summary", 1, 1, [Bool]{true})
+        ("EventTrace", "delivered") -> ("jet_std::JetEventTrace::delivered", 1, 1, [Bool]{true})
+        ("EventTrace", "queued") -> ("jet_std::JetEventTrace::queued", 1, 1, [Bool]{true})
+        ("EventTrace", "dropped") -> ("jet_std::JetEventTrace::dropped", 1, 1, [Bool]{true})
+        ("DispatchReport", "state") -> ("jet_std::JetDispatchReport::state", 1, 1, [Bool]{true})
+        ("DispatchReport", "accepted") -> ("jet_std::JetDispatchReport::accepted", 1, 1, [Bool]{true})
+        ("DispatchReport", "delivered_handlers") -> ("jet_std::JetDispatchReport::delivered_handlers", 1, 1, [Bool]{true})
+        ("DispatchReport", "failures") -> ("jet_std::JetDispatchReport::failures", 1, 1, [Bool]{true})
+        ("DispatchReport", "trace") -> ("jet_std::JetDispatchReport::trace", 1, 1, [Bool]{true})
+        else -> return Err(route_error("unknown checked event method `{kind}.{method}`"))
+    }
+    Ok(prelude(MirPreludeFamily.ClosureMethod, "core.event", method, symbol, arity, max_arity, mask, None, carrier, MirPreludeAbi.Value))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1185
+fn task_receiver_args(receiver: Type) -> [Type]? Never! {
+    if receiver == { .Tagged{inner, ..} | .InlineRange{base: inner, ..} -> task_receiver_args(inner); .Apply{name, args} if name == "Task" -> Val(args); else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1195
+fn task_route(receiver: Type, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    args :: task_receiver_args(receiver) ?? return Err(route_error("checked task join has an unsupported receiver type"))
+    task_value :: args.first() ?? return Err(route_error("checked task join is missing its value type"))
+    symbol :: if task_value is .Result{..} -> "jet_std::jet_task_join_result" else -> "jet_std::JetTask::join"
+    Ok(prelude(MirPreludeFamily.HandleMethod, "core.tasks", "join", symbol, 1, 1, [Bool]{false}, None, carrier, MirPreludeAbi.Value))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1222
+fn http_client_request_route(kind: String, method: String, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    (member, symbol, arity, mask) :: if (kind, method) == {
+        ("HTTPRequest" | "HTTPClient", "send") -> ("http.request_send", "jet_http_client_request_send", 1, [Bool]{false})
+        ("Body", "bytes") -> ("http.body_bytes", "jet_http_body_bytes", 2, [Bool]{true, false})
+        ("Body", "chunks") -> ("http.body_chunks", "jet_http_body_chunks", 2, [Bool]{true, false})
+        ("HTTPRequest", "body") -> ("http.request_body", "jet_http_client_request_body", 2, [Bool]{false, true})
+        ("HTTPRequest", "header") -> ("http.request_header", "jet_http_client_request_header", 3, [Bool]{false, true, true})
+        ("HTTPRequest", "timeout") -> ("http.request_timeout", "jet_http_client_request_timeout", 2, [Bool]{false, false})
+        ("HTTPRequest", "connect_timeout") -> ("http.request_connect_timeout", "jet_http_client_request_connect_timeout", 2, [Bool]{false, false})
+        ("HTTPRequest", "read_timeout") -> ("http.request_read_timeout", "jet_http_client_request_read_timeout", 2, [Bool]{false, false})
+        ("HTTPRequest", "total_timeout") -> ("http.request_total_timeout", "jet_http_client_request_total_timeout", 2, [Bool]{false, false})
+        ("HTTPRequest", "dns_timeout") -> ("http.request_dns_timeout", "jet_http_client_request_dns_timeout", 2, [Bool]{false, false})
+        ("HTTPRequest", "tls_timeout") -> ("http.request_tls_timeout", "jet_http_client_request_tls_timeout", 2, [Bool]{false, false})
+        ("HTTPRequest", "write_timeout") -> ("http.request_write_timeout", "jet_http_client_request_write_timeout", 2, [Bool]{false, false})
+        ("HTTPRequest", "first_byte_timeout") -> ("http.request_first_byte_timeout", "jet_http_client_request_first_byte_timeout", 2, [Bool]{false, false})
+        ("HTTPRequest", "redirects") -> ("http.request_redirects", "jet_http_client_request_redirects", 2, [Bool]{false, false})
+        ("HTTPRequest", "proxy") -> ("http.request_proxy", "jet_http_client_request_proxy", 2, [Bool]{false, true})
+        ("HTTPRequest", "cookie") -> ("http.request_cookie", "jet_http_client_request_cookie", 3, [Bool]{false, true, true})
+        ("HTTPRequest", "form") -> ("http.request_form", "jet_http_client_request_form", 3, [Bool]{false, true, true})
+        ("HTTPRequest", "multipart_text") -> ("http.request_multipart_text", "jet_http_client_request_multipart_text", 3, [Bool]{false, true, true})
+        else -> return Err(route_error("unhandled HTTP client method `{kind}.{method}`"))
+    }
+    Ok(h(member, symbol, arity, arity, mask, Val(Effect.Net), carrier))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:1348
+// THandleOp's complete impl continues in the paired Routes02 fragment.

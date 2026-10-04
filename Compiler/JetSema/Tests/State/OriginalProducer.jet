@@ -7,15 +7,16 @@ use jet_sema.[SemaBuildFacts, SemaRegistrationHostHooks, SemaRegistrationModuleI
 use core.files.host.retained_descriptor as state_test_native
 use core.files.runtime.kernel_path_components as state_test_path
 
-fn state_original_module(program: ^Program, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
-    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, foreign_handles: []}
+fn state_original_module(program: ^Program, source: String, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, unit_source: source, foreign_handles: []}
 }
 fn state_original_diagnostics(source: String) -> [Diagnostic] Never! {
     parsed :: parse_source(source.bytes())
     if parsed.diagnostics.len() > 0 -> return parsed.diagnostics
-    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    effects_source :: foundation_embedded_core().effect_source()
+    effects :: parse_source(effects_source.bytes())
     assert(effects.diagnostics.len() == 0)
-    inputs :: [SemaRegistrationModuleInput]{state_original_module(^parsed.program, "main", "state.jet", "state"), state_original_module(^effects.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude")}
+    inputs :: [SemaRegistrationModuleInput]{state_original_module(^parsed.program, source, "main", "state.jet", "state"), state_original_module(^effects.program, effects_source, "effects", "Prelude/Effects.jet", "jet:canonical-prelude")}
     build :: SemaBuildFacts{package_name: "state", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "state-test", stamp_at: "", artifact_build: false}
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
     registration :: sema_test_prepare_graph(inputs, [], "state", "main", "effects", [], jet_target_machine_hosted("x86_64-unknown-linux-gnu", "1.0.0"), build, hooks)
@@ -190,16 +191,19 @@ STATE_ORIGINAL_TASK_TIER_EXPECTED :: "42\n"
 }
 
 #Test("checked_state_owner_and_inherent_impl_in_separate_modules") {
-    owner :: parse_source("pub struct Door {{ state {{ Closed, Open }} }}\n".bytes())
-    main :: parse_source("use owner.[Door]\nimpl Door {{\n    #Transition(_, Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n    #State(Open) fn read(self) -[]> Int {{ return 1 }}\n}}\nfn run() {{ door := Door.new(); door = door.open(); print(door.read()) }}\n".bytes())
+    owner_source :: "pub struct Door {{ state {{ Closed, Open }} }}\n"
+    main_source :: "use owner.[Door]\nimpl Door {{\n    #Transition(_, Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n    #State(Open) fn read(self) -[]> Int {{ return 1 }}\n}}\nfn run() {{ door := Door.new(); door = door.open(); print(door.read()) }}\n"
+    owner :: parse_source(owner_source.bytes())
+    main :: parse_source(main_source.bytes())
     assert(owner.diagnostics.len() == 0)
     assert(main.diagnostics.len() == 0)
-    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    effects_source :: foundation_embedded_core().effect_source()
+    effects :: parse_source(effects_source.bytes())
     assert(effects.diagnostics.len() == 0)
     inputs :: [SemaRegistrationModuleInput]{
-        state_original_module(^main.program, "main", "main.jet", "state"),
-        state_original_module(^owner.program, "owner", "owner.jet", "state"),
-        state_original_module(^effects.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude"),
+        state_original_module(^main.program, main_source, "main", "main.jet", "state"),
+        state_original_module(^owner.program, owner_source, "owner", "owner.jet", "state"),
+        state_original_module(^effects.program, effects_source, "effects", "Prelude/Effects.jet", "jet:canonical-prelude"),
     }
     build :: SemaBuildFacts{package_name: "state", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "state-test", stamp_at: "", artifact_build: false}
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}

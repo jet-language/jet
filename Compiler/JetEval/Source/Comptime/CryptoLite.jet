@@ -1,330 +1,142 @@
-// PORT-PENDING 0574 crates-jet-comptime-src-comptime-complexparity-module-group: crates/jet-comptime/src/Comptime/CryptoLite.rs:1-326
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Deterministic std-only crypto transforms used by comptime and the REPL.
-//RS 
-//RS mod Aes256Gcm;
-//RS mod Argon2id;
-//RS mod ChaCha20Poly1305;
-//RS mod Ed25519;
-//RS mod SHA512;
-//RS 
-//RS type Field = [i64; 16];
-//RS 
-//RS fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
-//RS     let mut key_block = [0u8; 64];
-//RS     if key.len() > key_block.len() {
-//RS         key_block[..32].copy_from_slice(&crate::SHA256::sha256(key));
-//RS     } else {
-//RS         key_block[..key.len()].copy_from_slice(key);
-//RS     }
-//RS     let mut inner = Vec::with_capacity(64 + data.len());
-//RS     inner.extend(key_block.iter().map(|byte| byte ^ 0x36));
-//RS     inner.extend_from_slice(data);
-//RS     let inner = crate::SHA256::sha256(&inner);
-//RS     let mut outer = Vec::with_capacity(96);
-//RS     outer.extend(key_block.iter().map(|byte| byte ^ 0x5c));
-//RS     outer.extend_from_slice(&inner);
-//RS     crate::SHA256::sha256(&outer)
-//RS }
-//RS 
-//RS pub(super) fn hkdf_sha256(ikm: &[u8], salt: &[u8], info: &[u8], length: usize) -> Vec<u8> {
-//RS     let zero_salt = [0u8; 32];
-//RS     let prk = hmac_sha256(if salt.is_empty() { &zero_salt } else { salt }, ikm);
-//RS     let mut output = Vec::with_capacity(length);
-//RS     let mut previous = Vec::new();
-//RS     for counter in 1..=((length + 31) / 32) {
-//RS         let mut input = Vec::with_capacity(previous.len() + info.len() + 1);
-//RS         input.extend_from_slice(&previous);
-//RS         input.extend_from_slice(info);
-//RS         input.push(counter as u8);
-//RS         previous = hmac_sha256(&prk, &input).to_vec();
-//RS         output.extend_from_slice(&previous);
-//RS     }
-//RS     output.truncate(length);
-//RS     output
-//RS }
-//RS 
-//RS fn carry(value: &mut Field) {
-//RS     for index in 0..16 {
-//RS         value[index] += 1 << 16;
-//RS         let overflow = value[index] >> 16;
-//RS         if index < 15 {
-//RS             value[index + 1] += overflow - 1;
-//RS         } else {
-//RS             value[0] += 38 * (overflow - 1);
-//RS         }
-//RS         value[index] -= overflow << 16;
-//RS     }
-//RS }
-//RS 
-//RS fn select(left: &mut Field, right: &mut Field, swap: i64) {
-//RS     let mask = !(swap - 1);
-//RS     for index in 0..16 {
-//RS         let change = mask & (left[index] ^ right[index]);
-//RS         left[index] ^= change;
-//RS         right[index] ^= change;
-//RS     }
-//RS }
-//RS 
-//RS fn add(out: &mut Field, left: &Field, right: &Field) {
-//RS     for index in 0..16 {
-//RS         out[index] = left[index] + right[index];
-//RS     }
-//RS }
-//RS 
-//RS fn sub(out: &mut Field, left: &Field, right: &Field) {
-//RS     for index in 0..16 {
-//RS         out[index] = left[index] - right[index];
-//RS     }
-//RS }
-//RS 
-//RS fn multiply(out: &mut Field, left: &Field, right: &Field) {
-//RS     let mut product = [0i64; 31];
-//RS     for i in 0..16 {
-//RS         for j in 0..16 {
-//RS             product[i + j] += left[i] * right[j];
-//RS         }
-//RS     }
-//RS     for index in 0..15 {
-//RS         product[index] += 38 * product[index + 16];
-//RS     }
-//RS     out.copy_from_slice(&product[..16]);
-//RS     carry(out);
-//RS     carry(out);
-//RS }
-//RS 
-//RS fn square(out: &mut Field, value: &Field) {
-//RS     multiply(out, value, value);
-//RS }
-//RS 
-//RS fn invert(out: &mut Field, value: &Field) {
-//RS     let mut result = *value;
-//RS     for exponent in (0..=253).rev() {
-//RS         let snapshot = result;
-//RS         square(&mut result, &snapshot);
-//RS         if exponent != 2 && exponent != 4 {
-//RS             let snapshot = result;
-//RS             multiply(&mut result, &snapshot, value);
-//RS         }
-//RS     }
-//RS     *out = result;
-//RS }
-//RS 
-//RS fn unpack(out: &mut Field, bytes: &[u8; 32]) {
-//RS     for index in 0..16 {
-//RS         out[index] = i64::from(bytes[index * 2]) + (i64::from(bytes[index * 2 + 1]) << 8);
-//RS     }
-//RS     out[15] &= 0x7fff;
-//RS }
-//RS 
-//RS fn pack(out: &mut [u8; 32], value: &Field) {
-//RS     let mut reduced = *value;
-//RS     carry(&mut reduced);
-//RS     carry(&mut reduced);
-//RS     carry(&mut reduced);
-//RS     for _ in 0..2 {
-//RS         let mut candidate = [0i64; 16];
-//RS         candidate[0] = reduced[0] - 0xffed;
-//RS         for index in 1..15 {
-//RS             candidate[index] = reduced[index] - 0xffff - ((candidate[index - 1] >> 16) & 1);
-//RS             candidate[index - 1] &= 0xffff;
-//RS         }
-//RS         candidate[15] = reduced[15] - 0x7fff - ((candidate[14] >> 16) & 1);
-//RS         let borrow = (candidate[15] >> 16) & 1;
-//RS         candidate[14] &= 0xffff;
-//RS         select(&mut reduced, &mut candidate, 1 - borrow);
-//RS     }
-//RS     for index in 0..16 {
-//RS         out[index * 2] = reduced[index] as u8;
-//RS         out[index * 2 + 1] = (reduced[index] >> 8) as u8;
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn x25519(secret: &[u8], public: &[u8]) -> Option<[u8; 32]> {
-//RS     let mut scalar: [u8; 32] = secret.try_into().ok()?;
-//RS     let public: [u8; 32] = public.try_into().ok()?;
-//RS     scalar[0] &= 248;
-//RS     scalar[31] &= 127;
-//RS     scalar[31] |= 64;
-//RS 
-//RS     let mut x = [0i64; 16];
-//RS     unpack(&mut x, &public);
-//RS     let mut a = [0i64; 16];
-//RS     let mut b = x;
-//RS     let mut c = [0i64; 16];
-//RS     let mut d = [0i64; 16];
-//RS     a[0] = 1;
-//RS     d[0] = 1;
-//RS     let constant = [121665, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-//RS     for bit in (0..=254).rev() {
-//RS         let swap = i64::from((scalar[bit >> 3] >> (bit & 7)) & 1);
-//RS         select(&mut a, &mut b, swap);
-//RS         select(&mut c, &mut d, swap);
-//RS         let (a0, b0, c0, d0) = (a, b, c, d);
-//RS         let mut e = [0i64; 16];
-//RS         let mut f = [0i64; 16];
-//RS         add(&mut e, &a0, &c0);
-//RS         sub(&mut a, &a0, &c0);
-//RS         add(&mut c, &b0, &d0);
-//RS         sub(&mut b, &b0, &d0);
-//RS         square(&mut d, &e);
-//RS         square(&mut f, &a);
-//RS         let (a0, b0, c0, e0) = (a, b, c, e);
-//RS         multiply(&mut a, &c0, &a0);
-//RS         multiply(&mut c, &b0, &e0);
-//RS         let (a0, c0) = (a, c);
-//RS         add(&mut e, &a0, &c0);
-//RS         sub(&mut a, &a0, &c0);
-//RS         square(&mut b, &a);
-//RS         let d0 = d;
-//RS         sub(&mut c, &d0, &f);
-//RS         let c0 = c;
-//RS         multiply(&mut a, &c0, &constant);
-//RS         let a0 = a;
-//RS         add(&mut a, &a0, &d0);
-//RS         let (a0, c0) = (a, c);
-//RS         multiply(&mut c, &c0, &a0);
-//RS         multiply(&mut a, &d0, &f);
-//RS         multiply(&mut d, &b, &x);
-//RS         square(&mut b, &e);
-//RS         select(&mut a, &mut b, swap);
-//RS         select(&mut c, &mut d, swap);
-//RS     }
-//RS     let c0 = c;
-//RS     invert(&mut c, &c0);
-//RS     let a0 = a;
-//RS     multiply(&mut a, &a0, &c);
-//RS     let mut output = [0u8; 32];
-//RS     pack(&mut output, &a);
-//RS     Some(output)
-//RS }
-//RS 
-//RS pub(super) fn ed25519_verify_strict(
-//RS     public: &[u8; 32],
-//RS     message: &[u8],
-//RS     signature: &[u8; 64],
-//RS ) -> Result<bool, ()> {
-//RS     Ed25519::verify_strict(public, message, signature)
-//RS }
-//RS 
-//RS pub(super) fn ed25519_sign(seed: &[u8; 32], message: &[u8]) -> [u8; 64] {
-//RS     Ed25519::sign(seed, message)
-//RS }
-//RS 
-//RS pub(super) fn xchacha20poly1305_seal(
-//RS     key: &[u8],
-//RS     nonce: &[u8],
-//RS     plaintext: &[u8],
-//RS     aad: &[u8],
-//RS ) -> Result<Vec<u8>, ()> {
-//RS     ChaCha20Poly1305::xchacha20poly1305_seal(key, nonce, plaintext, aad)
-//RS }
-//RS 
-//RS pub(super) fn xchacha20poly1305_open(
-//RS     key: &[u8],
-//RS     nonce: &[u8],
-//RS     ciphertext: &[u8],
-//RS     aad: &[u8],
-//RS ) -> Result<Vec<u8>, ()> {
-//RS     ChaCha20Poly1305::xchacha20poly1305_open(key, nonce, ciphertext, aad)
-//RS }
-//RS 
-//RS pub(super) fn aes256gcm_seal(
-//RS     key: &[u8],
-//RS     nonce: &[u8],
-//RS     plaintext: &[u8],
-//RS     aad: &[u8],
-//RS ) -> Result<Vec<u8>, ()> {
-//RS     Aes256Gcm::seal(key, nonce, plaintext, aad)
-//RS }
-//RS 
-//RS pub(super) fn aes256gcm_open(
-//RS     key: &[u8],
-//RS     nonce: &[u8],
-//RS     ciphertext: &[u8],
-//RS     aad: &[u8],
-//RS ) -> Result<Vec<u8>, ()> {
-//RS     Aes256Gcm::open(key, nonce, ciphertext, aad)
-//RS }
-//RS 
-//RS pub(super) fn argon2id(
-//RS     password: &[u8],
-//RS     salt: &[u8],
-//RS     memory_kib: u32,
-//RS     iterations: u32,
-//RS     lanes: u32,
-//RS     output_length: usize,
-//RS ) -> Result<Vec<u8>, ()> {
-//RS     Argon2id::hash(password, salt, memory_kib, iterations, lanes, output_length)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn bytes(hex: &str) -> Vec<u8> {
-//RS         hex.as_bytes()
-//RS             .chunks_exact(2)
-//RS             .map(|pair| {
-//RS                 let digit = |byte: u8| {
-//RS                     if byte <= b'9' {
-//RS                         byte - b'0'
-//RS                     } else {
-//RS                         byte - b'a' + 10
-//RS                     }
-//RS                 };
-//RS                 digit(pair[0]) * 16 + digit(pair[1])
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn rfc_5869_hkdf_sha256_case_1() {
-//RS         let actual = hkdf_sha256(
-//RS             &[0x0b; 22],
-//RS             &bytes("000102030405060708090a0b0c"),
-//RS             &bytes("f0f1f2f3f4f5f6f7f8f9"),
-//RS             42,
-//RS         );
-//RS         assert_eq!(actual, bytes("3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn rfc_7748_x25519_shared_secret() {
-//RS         let secret = bytes("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
-//RS         let public = bytes("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
-//RS         assert_eq!(
-//RS             x25519(&secret, &public).unwrap().to_vec(),
-//RS             bytes("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742")
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn expert_aead_roundtrips() {
-//RS         let key = vec![0x11u8; 32];
-//RS         let xnonce = vec![0x24u8; 24];
-//RS         let anonce = vec![0x12u8; 12];
-//RS         let message = b"expert crypto".to_vec();
-//RS         let aad = b"tenant".to_vec();
-//RS         let xsealed = xchacha20poly1305_seal(&key, &xnonce, &message, &aad).unwrap();
-//RS         assert_eq!(
-//RS             xchacha20poly1305_open(&key, &xnonce, &xsealed, &aad).unwrap(),
-//RS             message
-//RS         );
-//RS         let asealed = aes256gcm_seal(&key, &anonce, &message, &aad).unwrap();
-//RS         assert_eq!(
-//RS             aes256gcm_open(&key, &anonce, &asealed, &aad).unwrap(),
-//RS             message
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn rfc_8032_sign_empty() {
-//RS         let seed = bytes("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
-//RS         let expected = bytes("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b");
-//RS         let seed: [u8; 32] = seed.try_into().unwrap();
-//RS         assert_eq!(ed25519_sign(&seed, b"").to_vec(), expected);
-//RS     }
-//RS }
-// END-PORT-PENDING 0574 crates/jet-comptime/src/Comptime/CryptoLite.rs:1-326
+// Deterministic crypto transforms for comptime and the REPL.
+use jet_comptime.SHA256
+use jet_comptime.Comptime.CryptoLite.[Aes256Gcm, Argon2id, ChaCha20Poly1305, Ed25519, SHA512]
 
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:9
+type Field = [I64;16]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:11
+fn hmac_sha256(key: &[U8], data: &[U8]) -> [U8;32] {
+    key_block := [U8;64]{0}
+    if key.len() > key_block.len() { key_block[..32].copy_from_slice(&SHA256.sha256(key)) }
+    else { key_block[..key.len()].copy_from_slice(key) }
+    inner := [U8].with_capacity(64 + data.len())
+    inner.extend(key_block.iter().map(fn(byte) { byte ^ 0x36 }))
+    inner.extend_from_slice(data)
+    digest := SHA256.sha256(&inner)
+    outer := [U8].with_capacity(96)
+    outer.extend(key_block.iter().map(fn(byte) { byte ^ 0x5c }))
+    outer.extend_from_slice(&digest)
+    SHA256.sha256(&outer)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:28
+fn hkdf_sha256(ikm: &[U8], salt: &[U8], info: &[U8], length: USize) -> [U8] {
+    zero_salt := [U8;32]{0}
+    prk := hmac_sha256(if salt.is_empty() { &zero_salt } else { salt }, ikm)
+    output := [U8].with_capacity(length)
+    previous: [U8] = []
+    for counter in 1..=((length + 31) / 32) {
+        input := [U8].with_capacity(previous.len() + info.len() + 1)
+        input.extend_from_slice(&previous); input.extend_from_slice(info); input.push(counter as U8)
+        previous = hmac_sha256(&prk, &input).to_vec()
+        output.extend_from_slice(&previous)
+    }
+    output.truncate(length)
+    output
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:45
+fn carry(value: &Field) {
+    for index in 0..16 {
+        value[index] += 1 << 16
+        overflow := value[index] >> 16
+        if index < 15 { value[index + 1] += overflow - 1 }
+        else { value[0] += 38 * (overflow - 1) }
+        value[index] -= overflow << 16
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:58
+fn select(left: &Field, right: &Field, swap: I64) {
+    mask := !(swap - 1)
+    for index in 0..16 { change := mask & (left[index] ^ right[index]); left[index] ^= change; right[index] ^= change }
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:67
+fn add(out: &Field, left: &Field, right: &Field) { for index in 0..16 { out[index] = left[index] + right[index] } }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:73
+fn sub(out: &Field, left: &Field, right: &Field) { for index in 0..16 { out[index] = left[index] - right[index] } }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:79
+fn multiply(out: &Field, left: &Field, right: &Field) {
+    product := [I64;31]{0}
+    for i in 0..16 { for j in 0..16 { product[i + j] += left[i] * right[j] } }
+    for index in 0..15 { product[index] += 38 * product[index + 16] }
+    out.copy_from_slice(&product[..16]); carry(out); carry(out)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:94
+fn square(out: &Field, value: &Field) { multiply(out, value, value) }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:98
+fn invert(out: &Field, value: &Field) {
+    result := value.*
+    for exponent in (0..=253).rev() {
+        snapshot := result
+        square(&result, &snapshot)
+        if exponent != 2 && exponent != 4 { snapshot := result; multiply(&result, &snapshot, value) }
+    }
+    out.* = result
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:111
+fn unpack(out: &Field, bytes: &[U8;32]) {
+    for index in 0..16 { out[index] = bytes[index * 2] as I64 + ((bytes[index * 2 + 1] as I64) << 8) }
+    out[15] &= 0x7fff
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:118
+fn pack(out: &[U8;32], value: &Field) {
+    reduced := value.*
+    carry(&reduced); carry(&reduced); carry(&reduced)
+    for _ in 0..2 {
+        candidate := [I64;16]{0}
+        candidate[0] = reduced[0] - 0xffed
+        for index in 1..15 {
+            candidate[index] = reduced[index] - 0xffff - ((candidate[index - 1] >> 16) & 1)
+            candidate[index - 1] &= 0xffff
+        }
+        candidate[15] = reduced[15] - 0x7fff - ((candidate[14] >> 16) & 1)
+        borrow := (candidate[15] >> 16) & 1
+        candidate[14] &= 0xffff
+        select(&reduced, &candidate, 1 - borrow)
+    }
+    for index in 0..16 { out[index * 2] = reduced[index] as U8; out[index * 2 + 1] = (reduced[index] >> 8) as U8 }
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:141
+fn x25519(secret: &[U8], public: &[U8]) -> [U8;32]? {
+    scalar: [U8;32] = secret.try_into().ok()?
+    point: [U8;32] = public.try_into().ok()?
+    scalar[0] &= 248; scalar[31] &= 127; scalar[31] |= 64
+    x := [I64;16]{0}; unpack(&x, &point)
+    a := [I64;16]{0}; b := x; c := [I64;16]{0}; d := [I64;16]{0}
+    a[0] = 1; d[0] = 1
+    constant: Field = [121665, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    for bit in (0..=254).rev() {
+        swap := ((scalar[bit >> 3] >> (bit & 7)) & 1) as I64
+        select(&a, &b, swap); select(&c, &d, swap)
+        (a0, b0, c0, d0) := (a, b, c, d)
+        e := [I64;16]{0}; f := [I64;16]{0}
+        add(&e, &a0, &c0); sub(&a, &a0, &c0); add(&c, &b0, &d0); sub(&b, &b0, &d0)
+        square(&d, &e); square(&f, &a)
+        (a1, b1, c1, e1) := (a, b, c, e)
+        multiply(&a, &c1, &a1); multiply(&c, &b1, &e1)
+        (a2, c2) := (a, c)
+        add(&e, &a2, &c2); sub(&a, &a2, &c2); square(&b, &a)
+        d1 := d; sub(&c, &d1, &f)
+        c3 := c; multiply(&a, &c3, &constant)
+        a3 := a; add(&a, &a3, &d1)
+        (a4, c4) := (a, c)
+        multiply(&c, &c4, &a4); multiply(&a, &d1, &f); multiply(&d, &b, &x); square(&b, &e)
+        select(&a, &b, swap); select(&c, &d, swap)
+    }
+    c0 := c; invert(&c, &c0)
+    a0 := a; multiply(&a, &a0, &c)
+    output := [U8;32]{0}; pack(&output, &a)
+    Val(output)
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:200
+fn ed25519_verify_strict(public: &[U8;32], message: &[U8], signature: &[U8;64]) -> Bool Unit! { Ed25519.verify_strict(public, message, signature)? }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:208
+fn ed25519_sign(seed: &[U8;32], message: &[U8]) -> [U8;64] { Ed25519.sign(seed, message) }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:212
+fn xchacha20poly1305_seal(key: &[U8], nonce: &[U8], plaintext: &[U8], aad: &[U8]) -> [U8] Unit! { ChaCha20Poly1305.xchacha20poly1305_seal(key, nonce, plaintext, aad)? }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:221
+fn xchacha20poly1305_open(key: &[U8], nonce: &[U8], ciphertext: &[U8], aad: &[U8]) -> [U8] Unit! { ChaCha20Poly1305.xchacha20poly1305_open(key, nonce, ciphertext, aad)? }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:230
+fn aes256gcm_seal(key: &[U8], nonce: &[U8], plaintext: &[U8], aad: &[U8]) -> [U8] Unit! { Aes256Gcm.seal(key, nonce, plaintext, aad)? }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:239
+fn aes256gcm_open(key: &[U8], nonce: &[U8], ciphertext: &[U8], aad: &[U8]) -> [U8] Unit! { Aes256Gcm.open(key, nonce, ciphertext, aad)? }
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite.rs:248
+fn argon2id(password: &[U8], salt: &[U8], memory_kib: U32, iterations: U32, lanes: U32, output_length: USize) -> [U8] Unit! { Argon2id.hash(password, salt, memory_kib, iterations, lanes, output_length)? }

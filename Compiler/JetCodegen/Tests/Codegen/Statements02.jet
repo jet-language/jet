@@ -1,0 +1,27 @@
+use JetSema.AST.[BinOp, Type]
+use JetCodegen.Codegen.TIR.TirToMirStmt.[assignment_binary_overflow, let_binds_init_type, local_for_binding]
+use JetCodegen.Codegen.TIR.[TLetTy, TLetWrapper]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:1222
+#Test("assignment_overflow_uses_checked_operand_types") {
+    assert(assignment_binary_overflow(BinOp.Add, Type.Int, Type.Float))
+    assert(assignment_binary_overflow(BinOp.Div, Type.Float, Type.Int))
+    assert(assignment_binary_overflow(BinOp.Shl, Type.Int, Type.Float))
+    assert(!assignment_binary_overflow(BinOp.Shl, Type.Float, Type.Int))
+    assert(!assignment_binary_overflow(BinOp.Add, Type.Float, Type.Float))
+    assert(!assignment_binary_overflow(BinOp.Eq, Type.Int, Type.Int))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:756
+#Test("binding_alias_requires_matching_unwrapped_initializer") {
+    assert(let_binds_init_type(TLetTy.Inferred, Type.Int))
+    assert(let_binds_init_type(TLetTy.Annotated { ty: Type.Int, wrapper: TLetWrapper.None }, Type.Int))
+    assert(!let_binds_init_type(TLetTy.Annotated { ty: Type.Float, wrapper: TLetWrapper.None }, Type.Int))
+    assert(!let_binds_init_type(TLetTy.StrView, Type.String))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs:767
+#Test("local_binding_mutability_tracks_keyword") {
+    assert(local_for_binding("x", "mut").mutable)
+    assert(!local_for_binding("x", "let").mutable)
+}

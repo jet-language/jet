@@ -1,0 +1,20 @@
+use JetCodegen.Codegen.TIR.Subset.Methods.[is_intercepted_method_name, is_builtin_collection_recv, arg_conv_in_subset]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1754
+#Test("intercepted_method_names_preserve_static_dispatch_exclusions") {
+    assert(is_intercepted_method_name("new"))
+    assert(is_intercepted_method_name("para_fold"))
+    assert(is_intercepted_method_name("from_bytes_lossy"))
+    assert(!is_intercepted_method_name("user_only_method"))
+    assert(!is_intercepted_method_name("try_replace"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1896
+#Test("builtin_collection_receiver_nominal_and_qualified_families") {
+    assert(is_builtin_collection_recv(None))
+    assert(is_builtin_collection_recv(Val("SQL")))
+    assert(is_builtin_collection_recv(Val("core.collections.Map")))
+    assert(is_builtin_collection_recv(Val("[U8]")))
+    assert(!is_builtin_collection_recv(Val("core.text.String")))
+    assert(!is_builtin_collection_recv(Val("UserType")))
+}

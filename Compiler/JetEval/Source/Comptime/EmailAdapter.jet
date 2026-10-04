@@ -1,802 +1,395 @@
-// PORT-PENDING 0574 crates-jet-comptime-src-comptime-complexparity-module-group: crates/jet-comptime/src/Comptime/EmailAdapter.rs:1-798
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! CtValue marshalling for the one Prelude `core.email` kernel.
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::{CtReport, CtValue, Type};
-//RS 
-//RS use super::Diagnostics::unsupported;
-//RS 
-//RS mod kernel {
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS     trait JetShow {
-//RS         fn jet_show(&self) -> String;
-//RS     }
-//RS     trait JetDisplay {
-//RS         fn jet_display(&self) -> String;
-//RS     }
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
-//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/Email.rs");
-//RS }
-//RS 
-//RS use kernel::jet_email;
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS pub struct RuntimeFns {
-//RS     pub tls_begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
-//RS     pub tls_begin_ca: fn(std::net::TcpStream, &String, &Vec<u8>) -> Result<i64, String>,
-//RS     pub tls_handshake_step: fn(i64) -> Result<bool, String>,
-//RS     pub tls_set_poll_timeout: fn(i64, i64) -> Result<(), String>,
-//RS     pub tls_read: fn(i64, i64) -> Result<Vec<u8>, String>,
-//RS     pub tls_write_all: fn(i64, &Vec<u8>) -> Result<(), String>,
-//RS     pub tls_close: fn(i64) -> Result<(), String>,
-//RS     pub wipe: fn(&mut Vec<u8>),
-//RS     pub sha256: fn(&[u8]) -> [u8; 32],
-//RS     pub ed25519_sign: fn(&Vec<u8>, &[u8]) -> Result<Vec<u8>, String>,
-//RS     pub cancelled: fn() -> bool,
-//RS     pub remaining_ms: fn() -> Option<i64>,
-//RS     pub accepted_at: fn() -> String,
-//RS }
-//RS 
-//RS fn kernel_runtime(runtime: RuntimeFns) -> jet_email::RuntimeFns {
-//RS     jet_email::RuntimeFns {
-//RS         tls_begin: runtime.tls_begin,
-//RS         tls_begin_ca: runtime.tls_begin_ca,
-//RS         tls_handshake_step: runtime.tls_handshake_step,
-//RS         tls_set_poll_timeout: runtime.tls_set_poll_timeout,
-//RS         tls_read: runtime.tls_read,
-//RS         tls_write_all: runtime.tls_write_all,
-//RS         tls_close: runtime.tls_close,
-//RS         wipe: runtime.wipe,
-//RS         sha256: runtime.sha256,
-//RS         ed25519_sign: runtime.ed25519_sign,
-//RS         cancelled: runtime.cancelled,
-//RS         remaining_ms: runtime.remaining_ms,
-//RS         accepted_at: runtime.accepted_at,
-//RS     }
-//RS }
-//RS 
-//RS fn copy_secret(value: &Vec<u8>) -> Vec<u8> {
-//RS     value.clone()
-//RS }
-//RS 
-//RS pub fn evaluate(method: &str, args: &[CtValue], span: Span) -> Option<Result<CtValue, Diagnostic>> {
-//RS     let result = match method {
-//RS         "address" => email_address(args, span),
-//RS         "attachment" => email_attachment(args, span),
-//RS         "message" => email_message(args, span),
-//RS         "envelope" => email_envelope(args, span),
-//RS         "serialize" => email_serialize(args, span),
-//RS         _ => return None,
-//RS     };
-//RS     Some(result)
-//RS }
-//RS 
-//RS pub fn evaluate_method(
-//RS     recv: &CtValue,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     let result = match method {
-//RS         "envelope" if args.is_empty() => {
-//RS             let message = match message_from_value(recv, span) {
-//RS                 Ok(message) => message,
-//RS                 Err(error) => return Some(Err(error)),
-//RS             };
-//RS             Ok(envelope_value(message.envelope()))
-//RS         }
-//RS         "with_envelope" if args.len() == 1 => {
-//RS             let message = match message_from_value(recv, span) {
-//RS                 Ok(message) => message,
-//RS                 Err(error) => return Some(Err(error)),
-//RS             };
-//RS             let envelope = match envelope_from_value(&args[0], span) {
-//RS                 Ok(envelope) => envelope,
-//RS                 Err(error) => return Some(Err(error)),
-//RS             };
-//RS             Ok(result(message.with_envelope(&envelope), |value| {
-//RS                 message_value(&value)
-//RS             }))
-//RS         }
-//RS         "send" => return None,
-//RS         _ => return None,
-//RS     };
-//RS     Some(result)
-//RS }
-//RS 
-//RS fn one<'a>(
-//RS     args: &'a [CtValue],
-//RS     index: usize,
-//RS     method: &str,
-//RS     span: Span,
-//RS ) -> Result<&'a CtValue, Diagnostic> {
-//RS     args.get(index)
-//RS         .ok_or_else(|| unsupported(&format!("email.{method}(): missing argument {index}"), span))
-//RS }
-//RS 
-//RS fn string(value: &CtValue, span: Span) -> Result<&str, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Str(value) => Ok(value),
-//RS         _ => Err(unsupported("email call expected String", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Bytes(bytes) => Ok(bytes.clone()),
-//RS         CtValue::List(values) => values
-//RS             .iter()
-//RS             .map(|value| match value {
-//RS                 CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
-//RS                 _ => Err(unsupported("email bytes must be a [U8] value", span)),
-//RS             })
-//RS             .collect(),
-//RS         _ => Err(unsupported("email bytes must be a [U8] value", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn field<'a>(value: &'a CtValue, type_name: &str, name: &str) -> Option<&'a CtValue> {
-//RS     match value {
-//RS         CtValue::Struct {
-//RS             type_name: actual,
-//RS             fields,
-//RS         } if actual == type_name => fields
-//RS             .iter()
-//RS             .find(|(field, _)| field == name)
-//RS             .map(|(_, value)| value),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn structure(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: type_name.to_string(),
-//RS         fields: fields
-//RS             .into_iter()
-//RS             .map(|(name, value)| (name.to_string(), value))
-//RS             .collect(),
-//RS     }
-//RS }
-//RS 
-//RS fn address_value(address: &jet_email::Address) -> CtValue {
-//RS     structure(
-//RS         "Address",
-//RS         vec![
-//RS             (
-//RS                 "display",
-//RS                 address
-//RS                     .display
-//RS                     .as_ref()
-//RS                     .map_or(CtValue::absent(Type::String), |display| {
-//RS                         CtValue::Present(Box::new(CtValue::Str(display.clone())))
-//RS                     }),
-//RS             ),
-//RS             ("mailbox", CtValue::Str(address.mailbox.clone())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn address_from_value(value: &CtValue, span: Span) -> Result<jet_email::Address, Diagnostic> {
-//RS     let mailbox = match field(value, "Address", "mailbox") {
-//RS         Some(CtValue::Str(value)) => value.clone(),
-//RS         _ => return Err(unsupported("email call expected Address", span)),
-//RS     };
-//RS     let display = match field(value, "Address", "display") {
-//RS         Some(CtValue::Present(value)) => match value.as_ref() {
-//RS             CtValue::Str(value) => Some(value.clone()),
-//RS             _ => return Err(unsupported("email Address display is invalid", span)),
-//RS         },
-//RS         Some(CtValue::Failed(CtReport::Clean(_))) => None,
-//RS         _ => return Err(unsupported("email Address display is invalid", span)),
-//RS     };
-//RS     Ok(jet_email::Address { display, mailbox })
-//RS }
-//RS 
-//RS fn address_list(value: &CtValue, span: Span) -> Result<Vec<jet_email::Address>, Diagnostic> {
-//RS     let CtValue::List(values) = value else {
-//RS         return Err(unsupported("email call expected an Address list", span));
-//RS     };
-//RS     values
-//RS         .iter()
-//RS         .map(|value| address_from_value(value, span))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn attachment_value(attachment: &jet_email::Attachment) -> CtValue {
-//RS     structure(
-//RS         "Attachment",
-//RS         vec![
-//RS             ("filename", CtValue::Str(attachment.filename.clone())),
-//RS             ("mime", CtValue::Str(attachment.mime.clone())),
-//RS             ("bytes", CtValue::Bytes(attachment.bytes.clone())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn attachment_from_value(value: &CtValue, span: Span) -> Result<jet_email::Attachment, Diagnostic> {
-//RS     let filename = match field(value, "Attachment", "filename") {
-//RS         Some(CtValue::Str(value)) => value.clone(),
-//RS         _ => return Err(unsupported("email call expected Attachment", span)),
-//RS     };
-//RS     let mime = match field(value, "Attachment", "mime") {
-//RS         Some(CtValue::Str(value)) => value.clone(),
-//RS         _ => {
-//RS             return Err(unsupported(
-//RS                 "email Attachment content type is invalid",
-//RS                 span,
-//RS             ))
-//RS         }
-//RS     };
-//RS     let bytes = field(value, "Attachment", "bytes")
-//RS         .ok_or_else(|| unsupported("email Attachment bytes are missing", span))
-//RS         .and_then(|value| bytes(value, span))?;
-//RS     Ok(jet_email::Attachment {
-//RS         filename,
-//RS         mime,
-//RS         bytes,
-//RS     })
-//RS }
-//RS 
-//RS fn attachment_list(value: &CtValue, span: Span) -> Result<Vec<jet_email::Attachment>, Diagnostic> {
-//RS     let CtValue::List(values) = value else {
-//RS         return Err(unsupported("email call expected an Attachment list", span));
-//RS     };
-//RS     values
-//RS         .iter()
-//RS         .map(|value| attachment_from_value(value, span))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn envelope_value(envelope: &jet_email::Envelope) -> CtValue {
-//RS     structure(
-//RS         "Envelope",
-//RS         vec![
-//RS             ("from", address_value(&envelope.from)),
-//RS             (
-//RS                 "recipients",
-//RS                 CtValue::List(envelope.recipients.iter().map(address_value).collect()),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn envelope_from_value(value: &CtValue, span: Span) -> Result<jet_email::Envelope, Diagnostic> {
-//RS     let from = field(value, "Envelope", "from")
-//RS         .ok_or_else(|| unsupported("email Envelope sender is missing", span))
-//RS         .and_then(|value| address_from_value(value, span))?;
-//RS     let recipients = field(value, "Envelope", "recipients")
-//RS         .ok_or_else(|| unsupported("email Envelope recipient list is missing", span))
-//RS         .and_then(|value| address_list(value, span))?;
-//RS     Ok(jet_email::Envelope { from, recipients })
-//RS }
-//RS 
-//RS fn message_value(message: &jet_email::Message) -> CtValue {
-//RS     structure(
-//RS         "Message",
-//RS         vec![
-//RS             ("from", address_value(&message.from)),
-//RS             (
-//RS                 "to",
-//RS                 CtValue::List(message.to.iter().map(address_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "bcc",
-//RS                 CtValue::List(message.bcc.iter().map(address_value).collect()),
-//RS             ),
-//RS             ("subject", CtValue::Str(message.subject.clone())),
-//RS             ("text", CtValue::Str(message.text.clone())),
-//RS             ("html", CtValue::Str(message.html.clone())),
-//RS             (
-//RS                 "attachments",
-//RS                 CtValue::List(message.attachments.iter().map(attachment_value).collect()),
-//RS             ),
-//RS             ("envelope", envelope_value(&message.envelope)),
-//RS             ("wire_upper", CtValue::Int(message.wire_upper as i64)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn message_from_value(value: &CtValue, span: Span) -> Result<jet_email::Message, Diagnostic> {
-//RS     let from = field(value, "Message", "from")
-//RS         .ok_or_else(|| unsupported("email Message sender is missing", span))
-//RS         .and_then(|value| address_from_value(value, span))?;
-//RS     let list = |name| {
-//RS         field(value, "Message", name)
-//RS             .ok_or_else(|| unsupported("email Message address list is missing", span))
-//RS             .and_then(|value| address_list(value, span))
-//RS     };
-//RS     let text = |name| match field(value, "Message", name) {
-//RS         Some(CtValue::Str(value)) => Ok(value.clone()),
-//RS         _ => Err(unsupported("email Message text field is invalid", span)),
-//RS     };
-//RS     let attachments = field(value, "Message", "attachments")
-//RS         .ok_or_else(|| unsupported("email Message attachments are missing", span))
-//RS         .and_then(|value| attachment_list(value, span))?;
-//RS     let to = list("to")?;
-//RS     let bcc = list("bcc")?;
-//RS     let message = jet_email::message(
-//RS         &from,
-//RS         &to,
-//RS         &bcc,
-//RS         &text("subject")?,
-//RS         &text("text")?,
-//RS         &text("html")?,
-//RS         &attachments,
-//RS     )
-//RS     .map_err(|error| {
-//RS         unsupported(
-//RS             &format!(
-//RS                 "email Message is invalid: {}",
-//RS                 jet_email::error_reason(&error)
-//RS             ),
-//RS             span,
-//RS         )
-//RS     })?;
-//RS     match field(value, "Message", "envelope") {
-//RS         Some(value) => {
-//RS             let envelope = envelope_from_value(value, span)?;
-//RS             message.with_envelope(&envelope).map_err(|error| {
-//RS                 unsupported(
-//RS                     &format!(
-//RS                         "email Message envelope is invalid: {}",
-//RS                         jet_email::error_reason(&error)
-//RS                     ),
-//RS                     span,
-//RS                 )
-//RS             })
-//RS         }
-//RS         None => Ok(message),
-//RS     }
-//RS }
-//RS 
-//RS fn error_value(error: jet_email::Error) -> CtValue {
-//RS     let (variant, _disc, operation, server, code, reason) = jet_email::error_parts(error);
-//RS     CtValue::Enum {
-//RS         type_name: "EmailError".to_string(),
-//RS         variant: variant.to_string(),
-//RS         args: vec![
-//RS             (Some("operation".to_string()), CtValue::Str(operation)),
-//RS             (
-//RS                 Some("server".to_string()),
-//RS                 server.map_or(CtValue::absent(Type::String), |value| {
-//RS                     CtValue::Present(Box::new(CtValue::Str(value)))
-//RS                 }),
-//RS             ),
-//RS             (
-//RS                 Some("code".to_string()),
-//RS                 code.map_or(CtValue::absent(Type::Int), |value| {
-//RS                     CtValue::Present(Box::new(CtValue::Int(value)))
-//RS                 }),
-//RS             ),
-//RS             (Some("reason".to_string()), CtValue::Str(reason)),
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS fn result<T>(value: Result<T, jet_email::Error>, map: impl FnOnce(T) -> CtValue) -> CtValue {
-//RS     match value {
-//RS         Ok(value) => CtValue::Present(Box::new(map(value))),
-//RS         Err(error) => CtValue::failed(Box::new(error_value(error))),
-//RS     }
-//RS }
-//RS 
-//RS fn email_address(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let input = string(one(args, 0, "address", span)?, span)?.to_string();
-//RS     Ok(result(jet_email::address(&input), |value| {
-//RS         address_value(&value)
-//RS     }))
-//RS }
-//RS 
-//RS fn email_attachment(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let filename = string(one(args, 0, "attachment", span)?, span)?.to_string();
-//RS     let mime = string(one(args, 1, "attachment", span)?, span)?.to_string();
-//RS     let bytes = bytes(one(args, 2, "attachment", span)?, span)?;
-//RS     Ok(result(
-//RS         jet_email::attachment(&filename, &mime, &bytes),
-//RS         |value| attachment_value(&value),
-//RS     ))
-//RS }
-//RS 
-//RS fn email_envelope(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let from = address_from_value(one(args, 0, "envelope", span)?, span)?;
-//RS     let recipients = address_list(one(args, 1, "envelope", span)?, span)?;
-//RS     Ok(result(jet_email::envelope(&from, &recipients), |value| {
-//RS         envelope_value(&value)
-//RS     }))
-//RS }
-//RS 
-//RS fn email_message(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let from = address_from_value(one(args, 0, "message", span)?, span)?;
-//RS     let to = address_list(one(args, 1, "message", span)?, span)?;
-//RS     let bcc = address_list(one(args, 2, "message", span)?, span)?;
-//RS     let subject = string(one(args, 3, "message", span)?, span)?.to_string();
-//RS     let text = string(one(args, 4, "message", span)?, span)?.to_string();
-//RS     let html = string(one(args, 5, "message", span)?, span)?.to_string();
-//RS     let attachments = attachment_list(one(args, 6, "message", span)?, span)?;
-//RS     Ok(result(
-//RS         jet_email::message(&from, &to, &bcc, &subject, &text, &html, &attachments),
-//RS         |value| message_value(&value),
-//RS     ))
-//RS }
-//RS 
-//RS fn email_serialize(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-//RS     let message = message_from_value(one(args, 0, "serialize", span)?, span)?;
-//RS     Ok(result(jet_email::serialize(&message), CtValue::Bytes))
-//RS }
-//RS 
-//RS fn enum_args<'a>(
-//RS     value: &'a CtValue,
-//RS     type_name: &str,
-//RS     variant: &str,
-//RS ) -> Option<&'a [(Option<String>, CtValue)]> {
-//RS     match value {
-//RS         CtValue::Enum {
-//RS             type_name: actual,
-//RS             variant: actual_variant,
-//RS             args,
-//RS         } if actual == type_name && actual_variant == variant => Some(args.as_slice()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn enum_arg<'a>(args: &'a [(Option<String>, CtValue)], name: &str) -> Option<&'a CtValue> {
-//RS     args.iter()
-//RS         .find_map(|(field, value)| (field.as_deref() == Some(name)).then_some(value))
-//RS }
-//RS 
-//RS fn int(value: &CtValue, what: &str, span: Span) -> Result<i64, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Int(value) => Ok(*value),
-//RS         _ => Err(unsupported(&format!("email {what} must be Int"), span)),
-//RS     }
-//RS }
-//RS 
-//RS fn secret(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Struct { type_name, fields } if type_name == "Secret" => fields
-//RS             .iter()
-//RS             .find_map(|(name, value)| (name == "bytes").then_some(value))
-//RS             .ok_or_else(|| unsupported("email Secret.bytes is missing", span))
-//RS             .and_then(|value| bytes(value, span)),
-//RS         _ => bytes(value, span),
-//RS     }
-//RS }
-//RS 
-//RS fn string_list(value: &CtValue, span: Span) -> Result<Vec<String>, Diagnostic> {
-//RS     let CtValue::List(values) = value else {
-//RS         return Err(unsupported("email expected a String list", span));
-//RS     };
-//RS     values
-//RS         .iter()
-//RS         .map(|value| string(value, span).map(str::to_string))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn optional<T>(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS     map: impl FnOnce(&CtValue) -> Result<T, Diagnostic>,
-//RS ) -> Result<Option<T>, Diagnostic> {
-//RS     match value {
-//RS         CtValue::Failed(CtReport::Clean(_)) => Ok(None),
-//RS         CtValue::Present(value) => map(value).map(Some),
-//RS         _ => Err(unsupported("email optional value is invalid", span)),
-//RS     }
-//RS }
-//RS 
-//RS fn limits_from_value(value: &CtValue, span: Span) -> Result<jet_email::Limits, Diagnostic> {
-//RS     let field_int = |name| {
-//RS         field(value, "Limits", name)
-//RS             .ok_or_else(|| unsupported(&format!("email Limits.{name} is missing"), span))
-//RS             .and_then(|value| int(value, &format!("Limits.{name}"), span))
-//RS     };
-//RS     Ok(jet_email::Limits {
-//RS         max_reply_line_bytes: field_int("max_reply_line_bytes")?,
-//RS         max_reply_lines: field_int("max_reply_lines")?,
-//RS         max_capabilities: field_int("max_capabilities")?,
-//RS         max_recipients: field_int("max_recipients")?,
-//RS         max_message_bytes: field_int("max_message_bytes")?,
-//RS         max_auth_challenge_bytes: field_int("max_auth_challenge_bytes")?,
-//RS     })
-//RS }
-//RS 
-//RS pub fn limits_safe_value() -> CtValue {
-//RS     let limits = jet_email::Limits::safe();
-//RS     structure(
-//RS         "Limits",
-//RS         vec![
-//RS             (
-//RS                 "max_reply_line_bytes",
-//RS                 CtValue::Int(limits.max_reply_line_bytes),
-//RS             ),
-//RS             ("max_reply_lines", CtValue::Int(limits.max_reply_lines)),
-//RS             ("max_capabilities", CtValue::Int(limits.max_capabilities)),
-//RS             ("max_recipients", CtValue::Int(limits.max_recipients)),
-//RS             ("max_message_bytes", CtValue::Int(limits.max_message_bytes)),
-//RS             (
-//RS                 "max_auth_challenge_bytes",
-//RS                 CtValue::Int(limits.max_auth_challenge_bytes),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn auth_from_value(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<jet_email::SMTPAuth<Vec<u8>>, Diagnostic> {
-//RS     if enum_args(value, "SMTPAuth", "None").is_some() {
-//RS         return Ok(jet_email::SMTPAuth::None);
-//RS     }
-//RS     let Some(args) = enum_args(value, "SMTPAuth", "Password") else {
-//RS         return Err(unsupported("email SMTPAuth is invalid", span));
-//RS     };
-//RS     let username = enum_arg(args, "username")
-//RS         .ok_or_else(|| unsupported("email SMTPAuth.username is missing", span))
-//RS         .and_then(|value| string(value, span).map(str::to_string))?;
-//RS     let password = enum_arg(args, "password")
-//RS         .ok_or_else(|| unsupported("email SMTPAuth.password is missing", span))
-//RS         .and_then(|value| secret(value, span))?;
-//RS     Ok(jet_email::SMTPAuth::Password { username, password })
-//RS }
-//RS 
-//RS fn trust_from_value(value: &CtValue, span: Span) -> Result<jet_email::TLSTrust, Diagnostic> {
-//RS     if enum_args(value, "TLSTrust", "System").is_some() {
-//RS         return Ok(jet_email::TLSTrust::System);
-//RS     }
-//RS     let Some(args) = enum_args(value, "TLSTrust", "SystemPlusCa") else {
-//RS         return Err(unsupported("email TLSTrust is invalid", span));
-//RS     };
-//RS     let pem = enum_arg(args, "pem")
-//RS         .ok_or_else(|| unsupported("email TLSTrust.pem is missing", span))
-//RS         .and_then(|value| bytes(value, span))?;
-//RS     Ok(jet_email::TLSTrust::SystemPlusCa { pem })
-//RS }
-//RS 
-//RS fn dkim_from_value(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<jet_email::DkimConfig<Vec<u8>>, Diagnostic> {
-//RS     let domain = field(value, "DKIMConfig", "domain")
-//RS         .ok_or_else(|| unsupported("email DKIMConfig.domain is missing", span))
-//RS         .and_then(|value| string(value, span).map(str::to_string))?;
-//RS     let selector = field(value, "DKIMConfig", "selector")
-//RS         .ok_or_else(|| unsupported("email DKIMConfig.selector is missing", span))
-//RS         .and_then(|value| string(value, span).map(str::to_string))?;
-//RS     let private_key = field(value, "DKIMConfig", "private_key")
-//RS         .ok_or_else(|| unsupported("email DKIMConfig.private_key is missing", span))
-//RS         .and_then(|value| secret(value, span))?;
-//RS     let signed_headers = field(value, "DKIMConfig", "signed_headers")
-//RS         .ok_or_else(|| unsupported("email DKIMConfig.signed_headers is missing", span))
-//RS         .and_then(|value| string_list(value, span))?;
-//RS     Ok(jet_email::DkimConfig {
-//RS         domain,
-//RS         selector,
-//RS         private_key,
-//RS         signed_headers,
-//RS     })
-//RS }
-//RS 
-//RS fn smtp_config_from_value(
-//RS     value: &CtValue,
-//RS     span: Span,
-//RS ) -> Result<jet_email::SMTPConfig<Vec<u8>>, Diagnostic> {
-//RS     let host = field(value, "SMTPConfig", "host")
-//RS         .ok_or_else(|| unsupported("email SMTPConfig.host is missing", span))
-//RS         .and_then(|value| string(value, span).map(str::to_string))?;
-//RS     let port = field(value, "SMTPConfig", "port")
-//RS         .ok_or_else(|| unsupported("email SMTPConfig.port is missing", span))
-//RS         .and_then(|value| int(value, "SMTPConfig.port", span))?;
-//RS     let security = match field(value, "SMTPConfig", "security") {
-//RS         Some(value) if enum_args(value, "SMTPSecurity", "StartTLS").is_some() => {
-//RS             jet_email::SMTPSecurity::StartTLS
-//RS         }
-//RS         Some(value) if enum_args(value, "SMTPSecurity", "TLS").is_some() => {
-//RS             jet_email::SMTPSecurity::TLS
-//RS         }
-//RS         _ => return Err(unsupported("email SMTPConfig.security is invalid", span)),
-//RS     };
-//RS     let auth = field(value, "SMTPConfig", "auth")
-//RS         .ok_or_else(|| unsupported("email SMTPConfig.auth is missing", span))
-//RS         .and_then(|value| auth_from_value(value, span))?;
-//RS     let recipient_policy = match field(value, "SMTPConfig", "recipient_policy") {
-//RS         Some(value) if enum_args(value, "RecipientPolicy", "RequireAll").is_some() => {
-//RS             jet_email::RecipientPolicy::RequireAll
-//RS         }
-//RS         Some(value) if enum_args(value, "RecipientPolicy", "DeliverAccepted").is_some() => {
-//RS             jet_email::RecipientPolicy::DeliverAccepted
-//RS         }
-//RS         _ => {
-//RS             return Err(unsupported(
-//RS                 "email SMTPConfig.recipient_policy is invalid",
-//RS                 span,
-//RS             ))
-//RS         }
-//RS     };
-//RS     let trust = field(value, "SMTPConfig", "trust")
-//RS         .ok_or_else(|| unsupported("email SMTPConfig.trust is missing", span))
-//RS         .and_then(|value| trust_from_value(value, span))?;
-//RS     let limits = field(value, "SMTPConfig", "limits")
-//RS         .ok_or_else(|| unsupported("email SMTPConfig.limits is missing", span))
-//RS         .and_then(|value| limits_from_value(value, span))?;
-//RS     let dkim = field(value, "SMTPConfig", "dkim")
-//RS         .ok_or_else(|| unsupported("email SMTPConfig.dkim is missing", span))
-//RS         .and_then(|value| optional(value, span, |value| dkim_from_value(value, span)))?
-//RS         .map_or(Err(kernel::JetAbsent), Ok);
-//RS     Ok(jet_email::SMTPConfig {
-//RS         host,
-//RS         port,
-//RS         security,
-//RS         auth,
-//RS         recipient_policy,
-//RS         trust,
-//RS         limits,
-//RS         dkim,
-//RS     })
-//RS }
-//RS 
-//RS fn mailer_value(handle: usize) -> CtValue {
-//RS     structure("Mailer", vec![("handle", CtValue::Int(handle as i64 + 1))])
-//RS }
-//RS 
-//RS fn mailer_handle(value: &CtValue) -> Option<usize> {
-//RS     match value {
-//RS         CtValue::Struct { type_name, fields } if type_name == "Mailer" => {
-//RS             fields
-//RS                 .iter()
-//RS                 .find_map(|(name, value)| match (name.as_str(), value) {
-//RS                     ("handle", CtValue::Int(value)) if *value > 0 => Some(*value as usize - 1),
-//RS                     _ => None,
-//RS                 })
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn ambient_mailers() -> &'static std::sync::Mutex<Vec<Option<jet_email::Mailer>>> {
-//RS     use std::sync::OnceLock;
-//RS     static MAILERS: OnceLock<std::sync::Mutex<Vec<Option<jet_email::Mailer>>>> = OnceLock::new();
-//RS     MAILERS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
-//RS }
-//RS 
-//RS fn store_mailer(mailer: jet_email::Mailer) -> CtValue {
-//RS     let mut mailers = ambient_mailers()
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     mailers.push(Some(mailer));
-//RS     mailer_value(mailers.len() - 1)
-//RS }
-//RS 
-//RS fn address_value_owned(address: jet_email::Address) -> CtValue {
-//RS     let jet_email::Address { display, mailbox } = address;
-//RS     structure(
-//RS         "Address",
-//RS         vec![
-//RS             (
-//RS                 "display",
-//RS                 display.map_or(CtValue::absent(Type::String), |display| {
-//RS                     CtValue::Present(Box::new(CtValue::Str(display)))
-//RS                 }),
-//RS             ),
-//RS             ("mailbox", CtValue::Str(mailbox)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn recipient_report_value(report: jet_email::RecipientReport) -> CtValue {
-//RS     let jet_email::RecipientReport {
-//RS         address,
-//RS         accepted,
-//RS         code,
-//RS         message,
-//RS     } = report;
-//RS     structure(
-//RS         "RecipientReport",
-//RS         vec![
-//RS             ("address", address_value_owned(address)),
-//RS             ("accepted", CtValue::Bool(accepted)),
-//RS             ("code", CtValue::Int(code)),
-//RS             ("message", CtValue::Str(message)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn send_report_value(report: jet_email::SendReport) -> CtValue {
-//RS     let jet_email::SendReport {
-//RS         server,
-//RS         accepted,
-//RS         rejected,
-//RS         response_code,
-//RS         response,
-//RS         accepted_at,
-//RS     } = report;
-//RS     structure(
-//RS         "SendReport",
-//RS         vec![
-//RS             ("server", CtValue::Str(server)),
-//RS             (
-//RS                 "accepted",
-//RS                 CtValue::List(accepted.into_iter().map(recipient_report_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "rejected",
-//RS                 CtValue::List(rejected.into_iter().map(recipient_report_value).collect()),
-//RS             ),
-//RS             ("response_code", CtValue::Int(response_code)),
-//RS             ("response", CtValue::Str(response)),
-//RS             ("accepted_at", CtValue::Str(accepted_at)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS pub fn ambient_core_call(
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS     runtime: RuntimeFns,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     if let Some(result) = evaluate(method, args, span) {
-//RS         return Some(result);
-//RS     }
-//RS     let result = match method {
-//RS         "smtp" => {
-//RS             let mut config = match args.first() {
-//RS                 Some(value) => match smtp_config_from_value(value, span) {
-//RS                     Ok(config) => config,
-//RS                     Err(error) => return Some(Err(error)),
-//RS                 },
-//RS                 None => return Some(Err(unsupported("email.smtp(): missing config", span))),
-//RS             };
-//RS             let email_runtime = kernel_runtime(runtime);
-//RS             let smtp_result = jet_email::smtp(&config, copy_secret, email_runtime);
-//RS             jet_email::wipe_config_secrets(&mut config, email_runtime);
-//RS             result(smtp_result, store_mailer)
-//RS         }
-//RS         "smtp_from_env" if args.is_empty() => result(
-//RS             jet_email::smtp_from_env(kernel_runtime(runtime)),
-//RS             store_mailer,
-//RS         ),
-//RS         _ => return None,
-//RS     };
-//RS     Some(Ok(result))
-//RS }
-//RS 
-//RS pub fn ambient_handle(
-//RS     op: &str,
-//RS     recv: &CtValue,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     let method = op.strip_prefix("EmailMethod:")?;
-//RS     if method != "send" {
-//RS         return evaluate_method(recv, method, args, span);
-//RS     }
-//RS     let Some(index) = mailer_handle(recv) else {
-//RS         return Some(Err(unsupported("email Mailer receiver", span)));
-//RS     };
-//RS     let message = match args.first() {
-//RS         Some(value) => match message_from_value(value, span) {
-//RS             Ok(message) => message,
-//RS             Err(error) => return Some(Err(error)),
-//RS         },
-//RS         None => {
-//RS             return Some(Err(unsupported(
-//RS                 "email Mailer.send(): missing message",
-//RS                 span,
-//RS             )))
-//RS         }
-//RS     };
-//RS     let mut mailers = ambient_mailers()
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     let Some(Some(mut mailer)) = mailers.get_mut(index).map(Option::take) else {
-//RS         return Some(Err(unsupported("email Mailer handle", span)));
-//RS     };
-//RS     let send_result = mailer.send(message);
-//RS     mailers[index] = Some(mailer);
-//RS     Some(Ok(result(send_result, send_report_value)))
-//RS }
-// END-PORT-PENDING 0574 crates/jet-comptime/src/Comptime/EmailAdapter.rs:1-798
+// CtValue marshalling for the one canonical core.email kernel; no copied kernel.
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.AST.[CtReport, CtValue, Type]
+use jet_foundation.Outcome.*
+use jet_comptime.Comptime.Diagnostics.unsupported
+use jet_codegen.Prelude.CoreLib.Email.jet_email
+use std.net.TcpStream
+use std.sync.[Mutex, OnceLock]
 
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:12
+trait JetShow { fn jet_show(self) -> String }
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:15
+trait JetDisplay { fn jet_display(self) -> String }
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:24
+// GATE #4494: callbacks use actual native TCP/TLS, cancellation and secret-wipe primitives.
+pub struct RuntimeFns {
+    tls_begin: fn(TcpStream, &String) -> I64 Err!
+    tls_begin_ca: fn(TcpStream, &String, &[U8]) -> I64 Err!
+    tls_handshake_step: fn(I64) -> Bool Err!
+    tls_set_poll_timeout: fn(I64, I64) -> Unit Err!
+    tls_read: fn(I64, I64) -> [U8] Err!
+    tls_write_all: fn(I64, &[U8]) -> Unit Err!
+    tls_close: fn(I64) -> Unit Err!
+    wipe: fn(&[U8])
+    sha256: fn(&[U8]) -> [U8;32]
+    ed25519_sign: fn(&[U8], &[U8]) -> [U8] Err!
+    cancelled: fn() -> Bool
+    remaining_ms: fn() -> I64?
+    accepted_at: fn() -> String
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:40
+fn kernel_runtime(runtime: RuntimeFns) -> jet_email.RuntimeFns {
+    jet_email.RuntimeFns {
+        tls_begin: runtime.tls_begin, tls_begin_ca: runtime.tls_begin_ca,
+        tls_handshake_step: runtime.tls_handshake_step, tls_set_poll_timeout: runtime.tls_set_poll_timeout,
+        tls_read: runtime.tls_read, tls_write_all: runtime.tls_write_all, tls_close: runtime.tls_close,
+        wipe: runtime.wipe, sha256: runtime.sha256, ed25519_sign: runtime.ed25519_sign,
+        cancelled: runtime.cancelled, remaining_ms: runtime.remaining_ms, accepted_at: runtime.accepted_at }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:58
+fn copy_secret(value: &[U8]) -> [U8] { value.clone() }
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:62
+pub fn evaluate(method: &String, args: &[CtValue], span: Span) -> (CtValue Diagnostic!)? {
+    try {
+        value := method == {
+            "address" -> email_address(args, span)?
+            "attachment" -> email_attachment(args, span)?
+            "message" -> email_message(args, span)?
+            "envelope" -> email_envelope(args, span)?
+            "serialize" -> email_serialize(args, span)?
+            _ -> { return None }
+        }
+        Val(Ok(^value))
+    } catch(error) { Val(Err(^error)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:74
+pub fn evaluate_method(recv: &CtValue, method: &String, args: &[CtValue], span: Span) -> (CtValue Diagnostic!)? {
+    try {
+        value := method == {
+            "envelope" if args.is_empty() -> { message := message_from_value(recv, span)?; envelope_value(message.envelope()) }
+            "with_envelope" if args.len() == 1 -> {
+                message := message_from_value(recv, span)?
+                envelope := envelope_from_value(&args[0], span)?
+                result(message.with_envelope(&envelope), fn(value) { message_value(&value) })
+            }
+            "send" -> { return None }
+            _ -> { return None }
+        }
+        Val(Ok(^value))
+    } catch(error) { Val(Err(^error)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:107
+fn one(args: &[CtValue], index: USize, method: &String, span: Span) -> &CtValue Diagnostic! {
+    args.get(index) == { Val(value) -> value; None -> { fail unsupported("email.{method}(): missing argument {index}", span) } }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:117
+fn string(value: &CtValue, span: Span) -> &String Diagnostic! {
+    value == { Str(text) -> text; _ -> { fail unsupported("email call expected String", span) } }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:124
+fn bytes(value: &CtValue, span: Span) -> [U8] Diagnostic! {
+    value == {
+        Bytes(data) -> data.clone()
+        List(values) -> {
+            data: [U8] = []
+            for value in values {
+                value == { Int(v) if v >= 0 && v <= 255 -> data.push(v as U8); _ -> { fail unsupported("email bytes must be a [U8] value", span) } }
+            }
+            data
+        }
+        _ -> { fail unsupported("email bytes must be a [U8] value", span) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:138
+fn field(value: &CtValue, type_name: &String, name: &String) -> &CtValue? {
+    value == { Struct { type_name: actual, fields } if actual == type_name -> fields.iter().find(fn(entry) { entry.0 == name }).map(fn(entry) { &entry.1 }); _ -> None }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:151
+fn structure(type_name: &String, fields: [(String, CtValue)]) -> CtValue { CtValue.Struct { type_name: type_name.to_string(), fields: ^fields } }
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:161
+fn address_value(address: &jet_email.Address) -> CtValue {
+    display := address.display == { Val(d) -> CtValue.Present(Box.new(CtValue.Str(d.clone()))); None -> CtValue.absent(Type.String) }
+    structure("Address", [("display", ^display), ("mailbox", CtValue.Str(address.mailbox.clone()))])
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:179
+fn address_from_value(value: &CtValue, span: Span) -> jet_email.Address Diagnostic! {
+    mailbox := field(value, "Address", "mailbox") == { Val(Str(v)) -> v.clone(); _ -> { fail unsupported("email call expected Address", span) } }
+    display := field(value, "Address", "display") == {
+        Val(Present(v)) -> v.as_ref() == { Str(s) -> Val(s.clone()); _ -> { fail unsupported("email Address display is invalid", span) } }
+        Val(Failed(Clean(_))) -> None
+        _ -> { fail unsupported("email Address display is invalid", span) }
+    }
+    jet_email.Address { display: ^display, mailbox: ^mailbox }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:195
+fn address_list(value: &CtValue, span: Span) -> [jet_email.Address] Diagnostic! {
+    values := value == { List(v) -> v; _ -> { fail unsupported("email call expected an Address list", span) } }
+    out: [jet_email.Address] = []
+    for value in values { out.push(address_from_value(value, span)?) }
+    out
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:205
+fn attachment_value(attachment: &jet_email.Attachment) -> CtValue {
+    structure("Attachment", [("filename", CtValue.Str(attachment.filename.clone())), ("mime", CtValue.Str(attachment.mime.clone())), ("bytes", CtValue.Bytes(attachment.bytes.clone()))])
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:216
+fn attachment_from_value(value: &CtValue, span: Span) -> jet_email.Attachment Diagnostic! {
+    filename := field(value, "Attachment", "filename") == { Val(Str(v)) -> v.clone(); _ -> { fail unsupported("email call expected Attachment", span) } }
+    mime := field(value, "Attachment", "mime") == { Val(Str(v)) -> v.clone(); _ -> { fail unsupported("email Attachment content type is invalid", span) } }
+    data := field(value, "Attachment", "bytes") == { Val(v) -> bytes(v, span)?; None -> { fail unsupported("email Attachment bytes are missing", span) } }
+    jet_email.Attachment { filename: ^filename, mime: ^mime, bytes: ^data }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:240
+fn attachment_list(value: &CtValue, span: Span) -> [jet_email.Attachment] Diagnostic! {
+    values := value == { List(v) -> v; _ -> { fail unsupported("email call expected an Attachment list", span) } }
+    out: [jet_email.Attachment] = []
+    for value in values { out.push(attachment_from_value(value, span)?) }
+    out
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:250
+fn envelope_value(envelope: &jet_email.Envelope) -> CtValue {
+    structure("Envelope", [("from", address_value(&envelope.from)), ("recipients", CtValue.List(envelope.recipients.iter().map(address_value).collect()))])
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:263
+fn envelope_from_value(value: &CtValue, span: Span) -> jet_email.Envelope Diagnostic! {
+    from := field(value, "Envelope", "from") == { Val(v) -> address_from_value(v, span)?; None -> { fail unsupported("email Envelope sender is missing", span) } }
+    recipients := field(value, "Envelope", "recipients") == { Val(v) -> address_list(v, span)?; None -> { fail unsupported("email Envelope recipient list is missing", span) } }
+    jet_email.Envelope { from: ^from, recipients: ^recipients }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:273
+fn message_value(message: &jet_email.Message) -> CtValue {
+    structure("Message", [("from", address_value(&message.from)),
+        ("to", CtValue.List(message.to.iter().map(address_value).collect())),
+        ("bcc", CtValue.List(message.bcc.iter().map(address_value).collect())),
+        ("subject", CtValue.Str(message.subject.clone())), ("text", CtValue.Str(message.text.clone())), ("html", CtValue.Str(message.html.clone())),
+        ("attachments", CtValue.List(message.attachments.iter().map(attachment_value).collect())),
+        ("envelope", envelope_value(&message.envelope)), ("wire_upper", CtValue.Int(message.wire_upper as I64))])
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:299
+fn message_from_value(value: &CtValue, span: Span) -> jet_email.Message Diagnostic! {
+    from := field(value, "Message", "from") == { Val(v) -> address_from_value(v, span)?; None -> { fail unsupported("email Message sender is missing", span) } }
+    list := fn(name) -> [jet_email.Address] Diagnostic! {
+        field(value, "Message", name) == { Val(v) -> address_list(v, span)?; None -> { fail unsupported("email Message address list is missing", span) } }
+    }
+    text := fn(name) -> String Diagnostic! {
+        field(value, "Message", name) == { Val(Str(v)) -> v.clone(); _ -> { fail unsupported("email Message text field is invalid", span) } }
+    }
+    attachments := field(value, "Message", "attachments") == { Val(v) -> attachment_list(v, span)?; None -> { fail unsupported("email Message attachments are missing", span) } }
+    to := list("to")?; bcc := list("bcc")?
+    subject := text("subject")?; plain := text("text")?; html := text("html")?
+    message := try { jet_email.message(&from, &to, &bcc, &subject, &plain, &html, &attachments)? }
+        catch(error) { fail unsupported("email Message is invalid: {jet_email.error_reason(&error)}", span) }
+    field(value, "Message", "envelope") == {
+        Val(v) -> {
+            envelope := envelope_from_value(v, span)?
+            try { message.with_envelope(&envelope)? }
+            catch(error) { fail unsupported("email Message envelope is invalid: {jet_email.error_reason(&error)}", span) }
+        }
+        None -> message
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:352
+fn error_value(error: jet_email.Error) -> CtValue {
+    (variant, disc, operation, server, code, reason) := jet_email.error_parts(^error)
+    server_value := server == { Val(v) -> CtValue.Present(Box.new(CtValue.Str(^v))); None -> CtValue.absent(Type.String) }
+    code_value := code == { Val(v) -> CtValue.Present(Box.new(CtValue.Int(v))); None -> CtValue.absent(Type.Int) }
+    CtValue.Enum { type_name: "EmailError", variant: variant.to_string(), args: [
+        (Val("operation"), CtValue.Str(^operation)), (Val("server"), ^server_value),
+        (Val("code"), ^code_value), (Val("reason"), CtValue.Str(^reason))] }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:376
+fn result<T>(value: T jet_email.Error!, map: fn(T) -> CtValue) -> CtValue {
+    value == { Ok(v) -> CtValue.Present(Box.new(map(^v))); Err(e) -> CtValue.failed(Box.new(error_value(^e))) }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:383
+fn email_address(args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    input := string(one(args, 0, "address", span)?, span)?.to_string()
+    result(jet_email.address(&input), fn(v) { address_value(&v) })
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:390
+fn email_attachment(args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    filename := string(one(args, 0, "attachment", span)?, span)?.to_string()
+    mime := string(one(args, 1, "attachment", span)?, span)?.to_string()
+    data := bytes(one(args, 2, "attachment", span)?, span)?
+    result(jet_email.attachment(&filename, &mime, &data), fn(v) { attachment_value(&v) })
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:400
+fn email_envelope(args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    from := address_from_value(one(args, 0, "envelope", span)?, span)?
+    recipients := address_list(one(args, 1, "envelope", span)?, span)?
+    result(jet_email.envelope(&from, &recipients), fn(v) { envelope_value(&v) })
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:408
+fn email_message(args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    from := address_from_value(one(args, 0, "message", span)?, span)?
+    to := address_list(one(args, 1, "message", span)?, span)?
+    bcc := address_list(one(args, 2, "message", span)?, span)?
+    subject := string(one(args, 3, "message", span)?, span)?.to_string()
+    text := string(one(args, 4, "message", span)?, span)?.to_string()
+    html := string(one(args, 5, "message", span)?, span)?.to_string()
+    attachments := attachment_list(one(args, 6, "message", span)?, span)?
+    result(jet_email.message(&from, &to, &bcc, &subject, &text, &html, &attachments), fn(v) { message_value(&v) })
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:422
+fn email_serialize(args: &[CtValue], span: Span) -> CtValue Diagnostic! {
+    message := message_from_value(one(args, 0, "serialize", span)?, span)?
+    result(jet_email.serialize(&message), fn(v) { CtValue.Bytes(^v) })
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:427
+fn enum_args(value: &CtValue, type_name: &String, variant: &String) -> &[(String?, CtValue)]? {
+    value == { Enum { type_name: actual, variant: actual_variant, args } if actual == type_name && actual_variant == variant -> Val(args.as_slice()); _ -> None }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:442
+fn enum_arg(args: &[(String?, CtValue)], name: &String) -> &CtValue? {
+    args.iter().find_map(fn(entry) { if entry.0.as_deref() == Val(name) { Val(&entry.1) } else { None } })
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:447
+fn int(value: &CtValue, what: &String, span: Span) -> I64 Diagnostic! {
+    value == { Int(v) -> v; _ -> { fail unsupported("email {what} must be Int", span) } }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:454
+fn secret(value: &CtValue, span: Span) -> [U8] Diagnostic! {
+    value == {
+        Struct { type_name, fields } if type_name == "Secret" -> {
+            v := fields.iter().find_map(fn(entry) { if entry.0 == "bytes" { Val(&entry.1) } else { None } }) == {
+                Val(v) -> v; None -> { fail unsupported("email Secret.bytes is missing", span) }
+            }
+            bytes(v, span)?
+        }
+        _ -> bytes(value, span)?
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:465
+fn string_list(value: &CtValue, span: Span) -> [String] Diagnostic! {
+    values := value == { List(v) -> v; _ -> { fail unsupported("email expected a String list", span) } }
+    out: [String] = []
+    for value in values { out.push(string(value, span)?.to_string()) }
+    out
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:475
+fn optional<T>(value: &CtValue, span: Span, map: fn(&CtValue) -> T Diagnostic!) -> T? Diagnostic! {
+    value == { Failed(Clean(_)) -> None; Present(v) -> Val(map(v)?); _ -> { fail unsupported("email optional value is invalid", span) } }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:487
+fn limits_from_value(value: &CtValue, span: Span) -> jet_email.Limits Diagnostic! {
+    field_int := fn(name) -> I64 Diagnostic! {
+        field(value, "Limits", name) == { Val(v) -> int(v, "Limits.{name}", span)?; None -> { fail unsupported("email Limits.{name} is missing", span) } }
+    }
+    jet_email.Limits { max_reply_line_bytes: field_int("max_reply_line_bytes")?, max_reply_lines: field_int("max_reply_lines")?,
+        max_capabilities: field_int("max_capabilities")?, max_recipients: field_int("max_recipients")?,
+        max_message_bytes: field_int("max_message_bytes")?, max_auth_challenge_bytes: field_int("max_auth_challenge_bytes")? }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:503
+pub fn limits_safe_value() -> CtValue {
+    limits := jet_email.Limits.safe()
+    structure("Limits", [("max_reply_line_bytes", CtValue.Int(limits.max_reply_line_bytes)), ("max_reply_lines", CtValue.Int(limits.max_reply_lines)),
+        ("max_capabilities", CtValue.Int(limits.max_capabilities)), ("max_recipients", CtValue.Int(limits.max_recipients)),
+        ("max_message_bytes", CtValue.Int(limits.max_message_bytes)), ("max_auth_challenge_bytes", CtValue.Int(limits.max_auth_challenge_bytes))])
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:524
+fn auth_from_value(value: &CtValue, span: Span) -> jet_email.SMTPAuth<[U8]> Diagnostic! {
+    if enum_args(value, "SMTPAuth", "None").is_some() { return jet_email.SMTPAuth.None }
+    args := enum_args(value, "SMTPAuth", "Password") == { Val(a) -> a; None -> { fail unsupported("email SMTPAuth is invalid", span) } }
+    username := enum_arg(args, "username") == { Val(v) -> string(v, span)?.to_string(); None -> { fail unsupported("email SMTPAuth.username is missing", span) } }
+    password := enum_arg(args, "password") == { Val(v) -> secret(v, span)?; None -> { fail unsupported("email SMTPAuth.password is missing", span) } }
+    jet_email.SMTPAuth.Password { username: ^username, password: ^password }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:543
+fn trust_from_value(value: &CtValue, span: Span) -> jet_email.TLSTrust Diagnostic! {
+    if enum_args(value, "TLSTrust", "System").is_some() { return jet_email.TLSTrust.System }
+    args := enum_args(value, "TLSTrust", "SystemPlusCa") == { Val(a) -> a; None -> { fail unsupported("email TLSTrust is invalid", span) } }
+    pem := enum_arg(args, "pem") == { Val(v) -> bytes(v, span)?; None -> { fail unsupported("email TLSTrust.pem is missing", span) } }
+    jet_email.TLSTrust.SystemPlusCa { pem: ^pem }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:556
+fn dkim_from_value(value: &CtValue, span: Span) -> jet_email.DkimConfig<[U8]> Diagnostic! {
+    domain := field(value, "DKIMConfig", "domain") == { Val(v) -> string(v, span)?.to_string(); None -> { fail unsupported("email DKIMConfig.domain is missing", span) } }
+    selector := field(value, "DKIMConfig", "selector") == { Val(v) -> string(v, span)?.to_string(); None -> { fail unsupported("email DKIMConfig.selector is missing", span) } }
+    private_key := field(value, "DKIMConfig", "private_key") == { Val(v) -> secret(v, span)?; None -> { fail unsupported("email DKIMConfig.private_key is missing", span) } }
+    signed_headers := field(value, "DKIMConfig", "signed_headers") == { Val(v) -> string_list(v, span)?; None -> { fail unsupported("email DKIMConfig.signed_headers is missing", span) } }
+    jet_email.DkimConfig { domain: ^domain, selector: ^selector, private_key: ^private_key, signed_headers: ^signed_headers }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:580
+fn smtp_config_from_value(value: &CtValue, span: Span) -> jet_email.SMTPConfig<[U8]> Diagnostic! {
+    host := field(value, "SMTPConfig", "host") == { Val(v) -> string(v, span)?.to_string(); None -> { fail unsupported("email SMTPConfig.host is missing", span) } }
+    port := field(value, "SMTPConfig", "port") == { Val(v) -> int(v, "SMTPConfig.port", span)?; None -> { fail unsupported("email SMTPConfig.port is missing", span) } }
+    security := field(value, "SMTPConfig", "security") == {
+        Val(v) if enum_args(v, "SMTPSecurity", "StartTLS").is_some() -> jet_email.SMTPSecurity.StartTLS
+        Val(v) if enum_args(v, "SMTPSecurity", "TLS").is_some() -> jet_email.SMTPSecurity.TLS
+        _ -> { fail unsupported("email SMTPConfig.security is invalid", span) }
+    }
+    auth := field(value, "SMTPConfig", "auth") == { Val(v) -> auth_from_value(v, span)?; None -> { fail unsupported("email SMTPConfig.auth is missing", span) } }
+    recipient_policy := field(value, "SMTPConfig", "recipient_policy") == {
+        Val(v) if enum_args(v, "RecipientPolicy", "RequireAll").is_some() -> jet_email.RecipientPolicy.RequireAll
+        Val(v) if enum_args(v, "RecipientPolicy", "DeliverAccepted").is_some() -> jet_email.RecipientPolicy.DeliverAccepted
+        _ -> { fail unsupported("email SMTPConfig.recipient_policy is invalid", span) }
+    }
+    trust := field(value, "SMTPConfig", "trust") == { Val(v) -> trust_from_value(v, span)?; None -> { fail unsupported("email SMTPConfig.trust is missing", span) } }
+    limits := field(value, "SMTPConfig", "limits") == { Val(v) -> limits_from_value(v, span)?; None -> { fail unsupported("email SMTPConfig.limits is missing", span) } }
+    maybe_dkim := field(value, "SMTPConfig", "dkim") == { Val(v) -> optional(v, span, fn(v) { dkim_from_value(v, span) })?; None -> { fail unsupported("email SMTPConfig.dkim is missing", span) } }
+    dkim := maybe_dkim == { Val(v) -> Ok(^v); None -> Err(JetAbsent) }
+    jet_email.SMTPConfig { host: ^host, port: port, security: security, auth: ^auth, recipient_policy: recipient_policy, trust: ^trust, limits: limits, dkim: ^dkim }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:638
+fn mailer_value(handle: USize) -> CtValue { structure("Mailer", [("handle", CtValue.Int(handle as I64 + 1))]) }
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:642
+fn mailer_handle(value: &CtValue) -> USize? {
+    value == {
+        Struct { type_name, fields } if type_name == "Mailer" -> fields.iter().find_map(fn(entry) {
+            (entry.0, entry.1) == { ("handle", Int(v)) if v > 0 -> Val(v as USize - 1); _ -> None }
+        })
+        _ -> None
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:656
+// GATE #4494: process-lifetime OnceLock and poisoned-mutex recovery need native synchronization.
+const MAILERS: OnceLock<Mutex<[jet_email.Mailer?]>> = OnceLock.new()
+fn ambient_mailers() -> &Mutex<[jet_email.Mailer?]> { MAILERS.get_or_init(fn() { Mutex.new([]) }) }
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:662
+fn store_mailer(mailer: jet_email.Mailer) -> CtValue {
+    mailers := ambient_mailers().lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+    mailers.push(Val(^mailer))
+    mailer_value(mailers.len() - 1)
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:670
+fn address_value_owned(address: jet_email.Address) -> CtValue {
+    display := address.display == { Val(v) -> CtValue.Present(Box.new(CtValue.Str(^v))); None -> CtValue.absent(Type.String) }
+    structure("Address", [("display", ^display), ("mailbox", CtValue.Str(^address.mailbox))])
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:686
+fn recipient_report_value(report: jet_email.RecipientReport) -> CtValue {
+    structure("RecipientReport", [("address", address_value_owned(^report.address)), ("accepted", CtValue.Bool(report.accepted)),
+        ("code", CtValue.Int(report.code)), ("message", CtValue.Str(^report.message))])
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:704
+fn send_report_value(report: jet_email.SendReport) -> CtValue {
+    structure("SendReport", [("server", CtValue.Str(^report.server)),
+        ("accepted", CtValue.List(report.accepted.into_iter().map(recipient_report_value).collect())),
+        ("rejected", CtValue.List(report.rejected.into_iter().map(recipient_report_value).collect())),
+        ("response_code", CtValue.Int(report.response_code)), ("response", CtValue.Str(^report.response)), ("accepted_at", CtValue.Str(^report.accepted_at))])
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:732
+pub fn ambient_core_call(method: &String, args: &[CtValue], span: Span, runtime: RuntimeFns) -> (CtValue Diagnostic!)? {
+    if pure := evaluate(method, args, span) { return Val(^pure) }
+    try {
+        output := method == {
+            "smtp" -> {
+                config := args.first() == { Val(v) -> smtp_config_from_value(v, span)?; None -> { fail unsupported("email.smtp(): missing config", span) } }
+                email_runtime := kernel_runtime(runtime)
+                smtp_result := jet_email.smtp(&config, copy_secret, email_runtime)
+                jet_email.wipe_config_secrets(&config, email_runtime)
+                result(^smtp_result, store_mailer)
+            }
+            "smtp_from_env" if args.is_empty() -> result(jet_email.smtp_from_env(kernel_runtime(runtime)), store_mailer)
+            _ -> { return None }
+        }
+        Val(Ok(^output))
+    } catch(error) { Val(Err(^error)) }
+}
+// Rust: crates/jet-comptime/src/Comptime/EmailAdapter.rs:764
+pub fn ambient_handle(op: &String, recv: &CtValue, args: &[CtValue], span: Span) -> (CtValue Diagnostic!)? {
+    method := op.strip_prefix("EmailMethod:")?
+    if method != "send" { return evaluate_method(recv, method, args, span) }
+    try {
+        index := mailer_handle(recv) == { Val(i) -> i; None -> { fail unsupported("email Mailer receiver", span) } }
+        message := args.first() == { Val(v) -> message_from_value(v, span)?; None -> { fail unsupported("email Mailer.send(): missing message", span) } }
+        mailers := ambient_mailers().lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        mailer := mailers.get_mut(index).map(fn(slot) { slot.take() }) == {
+            Val(Val(mailer)) -> mailer; _ -> { fail unsupported("email Mailer handle", span) }
+        }
+        send_result := mailer.send(^message)
+        mailers[index] = Val(^mailer)
+        Val(Ok(result(^send_result, send_report_value)))
+    } catch(error) { Val(Err(^error)) }
+}

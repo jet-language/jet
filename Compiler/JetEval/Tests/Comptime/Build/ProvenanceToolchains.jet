@@ -1,0 +1,34 @@
+use jet_comptime.Comptime.Build.ProvenanceToolchains.*
+
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:41
+#Test("locked_dependency_provenance_retains_lock") {
+    lock := LockRecord.new("compiler", "sha256:abc")
+    provenance := BuildProvenance.jetpack_dependency("clang", lock.clone())
+    assert_eq(provenance.source, ProvenanceSource.JetpackDependency("clang"))
+    assert_eq(provenance.lock, Val(lock))
+    assert_eq(BuildProvenance.inferred_host().lock, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:222
+#Test("host_toolchain_defaults_and_declared_cutover") {
+    spec := ToolchainSpec.host("aarch64-linux", BuildProvenance.inferred_host())
+        .with_tool("cc", "/toolchain/clang").declared_only()
+        .with_read_only_mount_identity("/toolchain", "/sdk", "digest")
+    assert_eq(spec.role, ToolchainRole.Host)
+    assert_eq(spec.host_triple, "aarch64-linux")
+    assert_eq(spec.target_triple, "aarch64-linux")
+    assert_eq(spec.resolution, ToolchainResolution.DeclaredOnly)
+    assert_eq(spec.tools.get("cc"), Val("/toolchain/clang"))
+    assert_eq(spec.mounts, [BuildMount.read_only_with_identity("/toolchain", "/sdk", "digest")])
+    assert_eq(spec.sdk, None)
+    assert_eq(spec.linker, None)
+    assert_eq(spec.sysroot, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/provenance_toolchains.rs:386
+#Test("minimum_version_applies_only_to_pkg_config") {
+    pkg := ProbeSpec.pkg_config("libpng").with_min_version("1.6")
+    assert_eq(pkg.kind, ProbeKind.PkgConfig { package: "libpng", min_version: Val("1.6") })
+    program := ProbeSpec.find_program("clang").with_min_version("17")
+    assert_eq(program.kind, ProbeKind.FindProgram { program: "clang" })
+    assert_eq(program.reproducibility, ReproducibilityClass.Ambient)
+    assert_eq(program.toolchain, None)
+}

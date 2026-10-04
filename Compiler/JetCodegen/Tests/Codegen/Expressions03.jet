@@ -1,0 +1,45 @@
+use jet_codegen.Codegen.Expressions03.[shared_guard_type_name, shared_guard_value_type, pin_inner_type, csv_query_row_type, data_row_type, mir_const_key, reads_container_element]
+use jet_foundation.AST.[Type, CtKey, NamedCtKey]
+use jet_foundation.Diagnostics.[Span]
+use jet_foundation.MIR.[MirConstKey]
+use jet_codegen.Codegen.TIR.[TExpr, TExprKind, tir_user_local]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:30-59
+#Test("checked_guard_and_pin_type_peeling") {
+    assert(shared_guard_type_name("SharedGuard"))
+    assert(shared_guard_type_name("core.mem::SharedGuard"))
+    assert(shared_guard_type_name("core.mem.SharedGuard"))
+    assert(!shared_guard_type_name("SharedGuardExtra"))
+    guard :: Type.Apply("SharedGuard", [Type]{Type.Int})
+    assert(shared_guard_value_type(Type.Result(Type.Option(guard), Type.String)) == Val(Type.Int))
+    assert(shared_guard_value_type(Type.Apply("SharedGuard", [Type]{Type.Int, Type.Float})) == None)
+    assert(pin_inner_type(Type.Apply("Pin", [Type]{Type.String})) == Val(Type.String))
+    assert(pin_inner_type(Type.Option(Type.Apply("Pin", [Type]{Type.String}))) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:665-689
+#Test("data_row_peels_only_checked_wrappers") {
+    query :: Type.Apply("Query", [Type]{Type.Int})
+    assert(csv_query_row_type(Type.Result(query, Type.String)) == Val(Type.Int))
+    assert(csv_query_row_type(query) == None)
+    assert(csv_query_row_type(Type.Result(Type.Apply("Query", []), Type.String)) == None)
+    assert(data_row_type(Type.Result(Type.Option(Type.Apply("DataSnapshot", [Type]{Type.Float})), Type.String)) == Val(Type.Float))
+    assert(data_row_type(Type.List(Type.Int)) == Val(Type.Int))
+    assert(data_row_type(Type.Apply("Other", [Type]{Type.Int})) == None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:760-784
+#Test("neutral_const_key_retains_named_recursive_shape") {
+    key :: CtKey.Tuple([NamedCtKey]{NamedCtKey{name: "left", value: CtKey.Int(7)}, NamedCtKey{name: "right", value: CtKey.Enum("Choice", "Good")}})
+    assert(mir_const_key(key) == MirConstKey.Tuple([("left", MirConstKey.Int(7)), ("right", MirConstKey.Enum{type_name: "Choice", variant: "Good"})]))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs:936-945
+#Test("container_element_read_is_not_plain_local") {
+    span :: Span.new(0, 0)
+    base :: TExpr{ty: Type.List(Type.Int), kind: TExprKind.Local(tir_user_local("values", span)), span: span, integer_bounds: None, cost: None}
+    index :: TExpr{ty: Type.Int, kind: TExprKind.Local(tir_user_local("index", span)), span: span, integer_bounds: None, cost: None}
+    indexed :: TExpr{ty: Type.Int, kind: TExprKind.IndexRead(base, index, false, false, 1), span: span, integer_bounds: None, cost: None}
+    assert(!reads_container_element(base))
+    assert(reads_container_element(indexed))
+}

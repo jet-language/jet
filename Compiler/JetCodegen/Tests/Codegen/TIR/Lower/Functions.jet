@@ -1,0 +1,13 @@
+use jet_foundation.Diagnostics.LineIndex
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/functions.rs:193
+#Test("coverage_line_accepts_offsets_inside_multibyte_prefixes") {
+    src :: "é🚀—λ\nfn run() {}\n"
+    lines :: LineIndex.new(src)
+    line_at :: fn(offset: USize) { lines.line_col(src, offset).0 }
+    loop offset in 0..="é🚀—λ".len() {
+        assert_eq(line_at(offset), 1, "offset {offset}")
+    }
+    assert_eq(line_at("é🚀—λ\n".len()), 2)
+    assert_eq(line_at(USize.MAX), 3)
+}

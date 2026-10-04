@@ -1,0 +1,39 @@
+use jet_foundation.[Type, Span, mir_type_id]
+use jet_codegen.Codegen.TIR.tir_to_mir_types.[canonicalize_checked_trait_types, core_term_stream_carrier, lower_type, lower_derive_names, owner_boxed_edges, type_names_owner]
+use core.collections.Set
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:49 (behavioral control; no inline Rust tests)
+#Test("bare_trait_types_respect_nominal_and_generic_binders") {
+    traits := Set<String>{}
+    _ :: &traits.insert("Adapter")
+    empty :: Set<String>{}
+    assert_eq(canonicalize_checked_trait_types(Type.Named{name: "Adapter"}, traits, empty, empty), Type.TraitObject{bounds: ["Adapter"]})
+    assert_eq(canonicalize_checked_trait_types(Type.Named{name: "Adapter"}, traits, traits, empty), Type.Named{name: "Adapter"})
+    assert_eq(canonicalize_checked_trait_types(Type.Named{name: "Adapter"}, traits, empty, traits), Type.Named{name: "Adapter"})
+    assert_eq(canonicalize_checked_trait_types(Type.Option{inner: Type.Named{name: "Adapter"}}, traits, empty, empty), Type.Option{inner: Type.TraitObject{bounds: ["Adapter"]}})
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1478
+#Test("core_stream_carriers_match_only_registered_core_spelling") {
+    key :: "<corelib>/Core/term::Core/term/term.jet::Stdout"
+    assert_eq(core_term_stream_carrier(key), Val("Stdout"))
+    assert_eq(core_term_stream_carrier("my.module::Stdout"), None)
+    assert_eq(core_term_stream_carrier("Stdout"), None)
+    assert_eq(lower_type(Type.Named{name: key}).id, lower_type(Type.Named{name: "Stdout"}).id)
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:798
+#Test("derive_names_remove_cli_and_add_only_missing_generated_traits") {
+    span :: Span.new(0, 0)
+    assert_eq(lower_derive_names([("CLI", span), ("Debug", span)], true, true), ["Debug", "Equatable"])
+    assert_eq(lower_derive_names([("Equatable", span)], false, true), ["Equatable"])
+    assert_eq(lower_derive_names([("CLI", span)], false, false), [])
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:955
+#Test("boxed_edge_keys_are_owner_local_and_sorted") {
+    edges := Set<(String, String)>{}
+    _ :: &edges.insert(("Node", "right"))
+    _ :: &edges.insert(("Other", "left"))
+    _ :: &edges.insert(("Node", "left"))
+    assert_eq(owner_boxed_edges("Node", edges), ["left", "right"])
+    assert(type_names_owner(Type.Apply{name: "Node", args: []}, "module::Node", "Node"))
+    assert(!type_names_owner(Type.Apply{name: "Node", args: [Type.Int]}, "module::Node", "Node"))
+}

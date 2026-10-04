@@ -1,721 +1,283 @@
-// PORT-PENDING 0595 crates-jet-comptime-src-comptime-methods-pool-module-group: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:1-717
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! REPL authorization and pinned process execution.
-//RS 
-//RS use super::super::Diagnostics::unsupported;
-//RS use super::core_calls::{
-//RS     apply_core_call_with_type, apply_impure_core_call_with_type, as_string, io_error_value,
-//RS     normalize_path_args, IoErrorOperation,
-//RS };
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::AST::{CtValue, Type};
-//RS use jet_foundation::Authority::{answer, ApplicationAuthority, Holds, Verdict};
-//RS use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
-//RS 
-//RS /// #3718: the REPL's E1803 goes through the one application-authority
-//RS /// renderer, so its Why is a sentence and the role rows ride as `--json` detail.
-//RS fn repl_refusal(
-//RS     what: String,
-//RS     reason: &str,
-//RS     fix: String,
-//RS     required: &str,
-//RS     granted: Holds,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     let authority = ApplicationAuthority {
-//RS         required_effects: Holds::from([required.to_string()]),
-//RS         granted_effects: granted,
-//RS         denied_effects: Holds::new(),
-//RS         authority: "REPL lexical Authority".to_string(),
-//RS     };
-//RS     Diagnostic::error(
-//RS         "E1803",
-//RS         what,
-//RS         jet_foundation::Authority::repl_refusal_why(&authority, reason),
-//RS         fix,
-//RS         Some(span),
-//RS     )
-//RS     .with_detail(authority.policy_facts())
-//RS }
-//RS 
-//RS pub(super) fn repl_effect_request(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS ) -> super::super::ReplEffectRequest {
-//RS     let shown = |i: usize, fallback: &str| {
-//RS         args.get(i)
-//RS             .map(CtValue::jet_show)
-//RS             .unwrap_or_else(|| fallback.to_string())
-//RS     };
-//RS     let (root, operation, resource) = if is_nondeterministic_core(module, method) {
-//RS         let (root, operation) = match core_effect(module, method) {
-//RS             Some(Effect::Time) => ("Time", "Read"),
-//RS             Some(Effect::Rand) => ("Rand", "Draw"),
-//RS             _ => unreachable!("nondeterministic Core call has no time/rand effect"),
-//RS         };
-//RS         (root, operation, method.to_string())
-//RS     } else {
-//RS         match (module, method) {
-//RS             ("core.files", "read" | "read_bytes" | "exists" | "is_dir") => {
-//RS                 ("FS", "Read", shown(0, "<path>"))
-//RS             }
-//RS             ("core.files", "write" | "append_all" | "create_dir" | "remove") => {
-//RS                 ("FS", "Write", shown(0, "<path>"))
-//RS             }
-//RS             ("core.sys", "get") => ("Env", "Read", shown(0, "<key>")),
-//RS             ("core.sys", "set") => ("Env", "Write", shown(0, "<key>")),
-//RS             ("core.sys", "current_dir") => ("Env", "Read", "PWD".to_string()),
-//RS             ("core.sys", "home_dir") => ("Env", "Read", "HOME".to_string()),
-//RS             ("core.term", "eprint") => ("IO", "Write", "stderr".to_string()),
-//RS             ("core.term", "input" | "read_all_input" | "stdin") => {
-//RS                 ("IO", "Read", "stdin".to_string())
-//RS             }
-//RS             ("core.process", "argv" | "args") => ("IO", "Read", "argv".to_string()),
-//RS             ("core.process", "run") => ("Exec", "Run", shown(0, "<command>")),
-//RS             ("core.process", "exit") => ("Exec", "Exit", shown(0, "0")),
-//RS             ("core.math.random", _) => ("Rand", "Draw", method.to_string()),
-//RS             ("core.net" | "core.net.tls", _) => ("Net", method, shown(0, "<network resource>")),
-//RS             _ => ("IO", method, module.to_string()),
-//RS         }
-//RS     };
-//RS     super::super::ReplEffectRequest {
-//RS         root: root.to_string(),
-//RS         operation: operation.to_string(),
-//RS         resource,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn apply_repl_fs_call(
-//RS     method: &str,
-//RS     args: &[CtValue],
-//RS     span: Span,
-//RS     authorizer: &mut dyn super::super::ReplAuthorizer,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     let one = |i: usize| {
-//RS         args.get(i)
-//RS             .ok_or_else(|| unsupported("core.files call has the wrong number of arguments", span))
-//RS     };
-//RS     let path = as_string(one(0)?, span)?;
-//RS     let io_operation = match method {
-//RS         "read" | "read_bytes" => IoErrorOperation::Read,
-//RS         "write" | "append_all" | "create_dir" | "remove" => IoErrorOperation::Write,
-//RS         _ => IoErrorOperation::Read,
-//RS     };
-//RS     let io_error = |error| CtValue::failed(Box::new(io_error_value(io_operation, &path, error)));
-//RS     match method {
-//RS         "read" => Ok(match authorizer.fs_read(&path) {
-//RS             Ok(bytes) => match String::from_utf8(bytes) {
-//RS                 Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
-//RS                 Err(error) => io_error(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
-//RS             },
-//RS             Err(error) => io_error(error),
-//RS         }),
-//RS         "read_bytes" => Ok(match authorizer.fs_read(&path) {
-//RS             Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-//RS             Err(error) => io_error(error),
-//RS         }),
-//RS         "write" | "append_all" => {
-//RS             let content = as_string(one(1)?, span)?;
-//RS             Ok(
-//RS                 match authorizer.fs_write(&path, content.as_bytes(), method == "append_all") {
-//RS                     Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-//RS                     Err(error) => io_error(error),
-//RS                 },
-//RS             )
-//RS         }
-//RS         "exists" => authorizer
-//RS             .fs_exists(&path)
-//RS             .map(CtValue::Bool)
-//RS             .map_err(|error| {
-//RS                 unsupported(&format!("secure filesystem check failed: {error}"), span)
-//RS             }),
-//RS         "is_dir" => authorizer
-//RS             .fs_is_dir(&path)
-//RS             .map(CtValue::Bool)
-//RS             .map_err(|error| {
-//RS                 unsupported(&format!("secure filesystem check failed: {error}"), span)
-//RS             }),
-//RS         "create_dir" => Ok(match authorizer.fs_create_dir(&path) {
-//RS             Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-//RS             Err(error) => io_error(error),
-//RS         }),
-//RS         "remove" => Ok(match authorizer.fs_remove(&path) {
-//RS             Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-//RS             Err(error) => io_error(error),
-//RS         }),
-//RS         _ => Err(unsupported(&format!("core.files.{method}"), span)),
-//RS     }
-//RS }
-//RS 
-//RS /// Authorize and execute one REPL Core effect through the shared host seam.
-//RS /// TIR and AST evaluation both call this function, so invocation policy and
-//RS /// secure filesystem dispatch stay in one place.
-//RS pub fn apply_repl_authorized_core_call(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     base_dir: &std::path::Path,
-//RS     sink: Option<&mut super::super::Interpreter::DevSink>,
-//RS     grants: &[CtValue],
-//RS     authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     apply_repl_authorized_core_call_with_type(
-//RS         module, method, args, span, base_dir, sink, grants, authorizer, None,
-//RS     )
-//RS }
-//RS 
-//RS pub fn apply_repl_authorized_core_call_with_type(
-//RS     module: &str,
-//RS     method: &str,
-//RS     mut args: Vec<CtValue>,
-//RS     span: Span,
-//RS     base_dir: &std::path::Path,
-//RS     sink: Option<&mut super::super::Interpreter::DevSink>,
-//RS     grants: &[CtValue],
-//RS     authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
-//RS     resolved_ret: Option<&Type>,
-//RS ) -> Result<CtValue, Diagnostic> {
-//RS     args = normalize_path_args(module, method, args, span)?;
-//RS     // Both qualified print spellings are ordinary transcript output. They do
-//RS     // not need an effect prompt or a lexical grant; the qualified twin must
-//RS     // keep the ambient `print` job usable in #NoPrelude REPL turns.
-//RS     if module == "core.term" && matches!(method, "print" | "eprint") {
-//RS         return apply_impure_core_call_with_type(
-//RS             module,
-//RS             method,
-//RS             args,
-//RS             span,
-//RS             base_dir,
-//RS             sink,
-//RS             true,
-//RS             None,
-//RS             None,
-//RS             resolved_ret,
-//RS         );
-//RS     }
-//RS 
-//RS     let pinned_executable = if matches!((module, method), ("core.process", "run")) {
-//RS         Some(pin_repl_command(&mut args, base_dir, span)?)
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let request = repl_effect_request(module, method, &args);
-//RS     let Some(authorizer) = authorizer else {
-//RS         let granted = grants
-//RS             .iter()
-//RS             .filter_map(super::super::Builtins::authority_holds)
-//RS             .flatten()
-//RS             .collect::<Holds>();
-//RS         return Err(repl_refusal(
-//RS             format!(
-//RS                 "{}.{} for `{}` was denied",
-//RS                 request.root, request.operation, request.resource
-//RS             ),
-//RS             "this REPL mode has no runtime authority provider",
-//RS             format!(
-//RS                 "restart with `jet repl --allow-{}` or use an interactive session and approve the exact operation",
-//RS                 request.root.to_ascii_lowercase()
-//RS             ),
-//RS             &request.root,
-//RS             granted,
-//RS             span,
-//RS         ));
-//RS     };
-//RS     authorizer.preflight(&request, span)?;
-//RS     // The two-argument boundary form carries the actual named Authority value.
-//RS     // One-argument REPL calls use the active lexical authority values, which
-//RS     // are the same CtValue carrier rather than a copied list of right names.
-//RS     let boundary_authority = args.len() == 2
-//RS         && matches!(
-//RS             (module, method),
-//RS             ("core.process", "run") | ("core.plugin", "load")
-//RS         );
-//RS     let held = if boundary_authority {
-//RS         args.get(1)
-//RS             .and_then(super::super::Builtins::authority_holds)
-//RS             .unwrap_or_default()
-//RS     } else {
-//RS         grants
-//RS             .iter()
-//RS             .filter_map(super::super::Builtins::authority_holds)
-//RS             .flatten()
-//RS             .collect::<Holds>()
-//RS     };
-//RS     let denied = Holds::new();
-//RS     let granted = answer(&held, &denied, &request.root) == Verdict::Allowed;
-//RS     if !granted {
-//RS         return Err(repl_refusal(
-//RS             format!(
-//RS                 "{}.{} for `{}` has no REPL runtime authority",
-//RS                 request.root, request.operation, request.resource
-//RS             ),
-//RS             "REPL host effects require both lexical `#FX` access and invocation policy",
-//RS             format!(
-//RS                 "wrap this operation in `#FX(grant: {}) {{ ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`",
-//RS                 request.root,
-//RS                 request.root.to_ascii_lowercase()
-//RS             ),
-//RS             &request.root,
-//RS             held,
-//RS             span,
-//RS         ));
-//RS     }
-//RS     authorizer.authorize(&request, span)?;
-//RS     if module == "core.term" && matches!(method, "input" | "read_all_input") {
-//RS         let prompt = match args.first() {
-//RS             Some(CtValue::Str(value)) => value.as_str(),
-//RS             _ => "",
-//RS         };
-//RS         return Ok(match authorizer.read_input(prompt) {
-//RS             Ok(line) => CtValue::Present(Box::new(CtValue::Str(line))),
-//RS             Err(error) => CtValue::failed(Box::new(io_error_value(
-//RS                 IoErrorOperation::Read,
-//RS                 "stdin",
-//RS                 error,
-//RS             ))),
-//RS         });
-//RS     }
-//RS     if module == "core.files" {
-//RS         return apply_repl_fs_call(method, &args, span, authorizer);
-//RS     }
-//RS     if module == "core.math.random" {
-//RS         return apply_core_call_with_type(module, method, args, span, true, resolved_ret);
-//RS     }
-//RS     let verified_root = if matches!((module, method), ("core.process", "run")) {
-//RS         Some(authorizer.verified_root().map_err(|error| {
-//RS             unsupported(
-//RS                 &format!("REPL project root handle is unavailable: {error}"),
-//RS                 span,
-//RS             )
-//RS         })?)
-//RS     } else {
-//RS         None
-//RS     };
-//RS     apply_impure_core_call_with_type(
-//RS         module,
-//RS         method,
-//RS         args,
-//RS         span,
-//RS         base_dir,
-//RS         sink,
-//RS         true,
-//RS         pinned_executable.as_ref(),
-//RS         verified_root.as_ref(),
-//RS         resolved_ret,
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn pin_repl_command(
-//RS     args: &mut [CtValue],
-//RS     base_dir: &std::path::Path,
-//RS     span: Span,
-//RS ) -> Result<std::fs::File, Diagnostic> {
-//RS     let Some(CtValue::List(words)) = args.first_mut() else {
-//RS         return Err(unsupported(
-//RS             "process.run expects a list of command words",
-//RS             span,
-//RS         ));
-//RS     };
-//RS     let Some(CtValue::Str(program)) = words.first_mut() else {
-//RS         return Err(unsupported("process.run needs an executable name", span));
-//RS     };
-//RS     let candidate = std::path::Path::new(program);
-//RS     let resolved = if candidate.components().count() > 1 || candidate.is_absolute() {
-//RS         let path = if candidate.is_absolute() {
-//RS             candidate.to_path_buf()
-//RS         } else {
-//RS             base_dir.join(candidate)
-//RS         };
-//RS         std::fs::canonicalize(path).ok()
-//RS     } else {
-//RS         std::env::var_os("PATH").and_then(|path| {
-//RS             std::env::split_paths(&path)
-//RS                 .map(|dir| dir.join(candidate))
-//RS                 .find_map(|path| std::fs::canonicalize(path).ok().filter(|p| p.is_file()))
-//RS         })
-//RS     };
-//RS     let Some(resolved) = resolved else {
-//RS         return Err(unsupported(
-//RS             &format!("process.run could not resolve executable `{program}`"),
-//RS             span,
-//RS         ));
-//RS     };
-//RS     let executable = std::fs::File::open(&resolved).map_err(|error| {
-//RS         unsupported(
-//RS             &format!(
-//RS                 "process.run could not pin executable `{}`: {error}",
-//RS                 resolved.display()
-//RS             ),
-//RS             span,
-//RS         )
-//RS     })?;
-//RS     if !executable
-//RS         .metadata()
-//RS         .is_ok_and(|metadata| metadata.is_file())
-//RS     {
-//RS         return Err(unsupported(
-//RS             "process.run executable is not a regular file",
-//RS             span,
-//RS         ));
-//RS     }
-//RS     *program = resolved.to_string_lossy().into_owned();
-//RS     Ok(executable)
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn repl_descriptor_path(fd: std::os::fd::RawFd) -> String {
-//RS     format!("/proc/self/fd/{fd}")
-//RS }
-//RS 
-//RS // Darwin and BSD expose inherited descriptors through fdescfs at `/dev/fd`.
-//RS // Resolve executable and cwd through the already-open descriptor, preserving
-//RS // the REPL's path-swap protection without relying on Linux `/proc`.
-//RS #[cfg(all(unix, not(target_os = "linux")))]
-//RS fn repl_descriptor_path(fd: std::os::fd::RawFd) -> String {
-//RS     format!("/dev/fd/{fd}")
-//RS }
-//RS 
-//RS pub(super) const REPL_PROCESS_OUTPUT_LIMIT_BYTES: usize = 64 * 1024 * 1024;
-//RS 
-//RS fn drain_repl_output(
-//RS     mut reader: impl std::io::Read,
-//RS     used: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
-//RS     overflowed: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS ) -> std::io::Result<Vec<u8>> {
-//RS     let mut output = Vec::new();
-//RS     let mut buffer = [0u8; 8192];
-//RS     loop {
-//RS         let count = reader.read(&mut buffer)?;
-//RS         if count == 0 {
-//RS             return Ok(output);
-//RS         }
-//RS         if used
-//RS             .fetch_update(
-//RS                 std::sync::atomic::Ordering::AcqRel,
-//RS                 std::sync::atomic::Ordering::Acquire,
-//RS                 |previous| {
-//RS                     previous
-//RS                         .checked_add(count)
-//RS                         .filter(|total| *total <= REPL_PROCESS_OUTPUT_LIMIT_BYTES)
-//RS                 },
-//RS             )
-//RS             .is_err()
-//RS         {
-//RS             overflowed.store(true, std::sync::atomic::Ordering::Release);
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::Other,
-//RS                 format!("process.run output exceeded {REPL_PROCESS_OUTPUT_LIMIT_BYTES} bytes"),
-//RS             ));
-//RS         }
-//RS         output.extend_from_slice(&buffer[..count]);
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn run_repl_process(
-//RS     cmd: &[String],
-//RS     base_dir: &std::path::Path,
-//RS     pinned_executable: Option<&std::fs::File>,
-//RS     verified_root: Option<&std::fs::File>,
-//RS     timeout: std::time::Duration,
-//RS ) -> std::io::Result<std::process::Output> {
-//RS     use std::process::Stdio;
-//RS     use std::sync::atomic::Ordering;
-//RS     use std::time::{Duration, Instant};
-//RS 
-//RS     #[cfg(unix)]
-//RS     use std::os::fd::AsRawFd;
-//RS     #[cfg(unix)]
-//RS     use std::os::unix::process::CommandExt;
-//RS 
-//RS     #[cfg(unix)]
-//RS     let executable = pinned_executable
-//RS         .map(|file| repl_descriptor_path(file.as_raw_fd()))
-//RS         .unwrap_or_else(|| cmd[0].clone());
-//RS     #[cfg(not(unix))]
-//RS     let executable = if pinned_executable.is_some() {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::Unsupported,
-//RS             "this platform cannot launch a descriptor-pinned REPL executable",
-//RS         ));
-//RS     } else {
-//RS         cmd[0].clone()
-//RS     };
-//RS     #[cfg(unix)]
-//RS     let cwd = verified_root
-//RS         .map(|file| repl_descriptor_path(file.as_raw_fd()))
-//RS         .unwrap_or_else(|| base_dir.to_string_lossy().into_owned());
-//RS     #[cfg(not(unix))]
-//RS     let cwd = base_dir;
-//RS     let mut command = std::process::Command::new(executable);
-//RS     command
-//RS         .args(&cmd[1..])
-//RS         .current_dir(cwd)
-//RS         .env_clear()
-//RS         .stdin(Stdio::null())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped());
-//RS     #[cfg(unix)]
-//RS     if pinned_executable.is_some() {
-//RS         command.process_group(0);
-//RS     }
-//RS     let child = command.spawn();
-//RS     let mut child = match child {
-//RS         Ok(child) => child,
-//RS         Err(e) => return Err(e),
-//RS     };
-//RS     let stdout = child.stdout.take().ok_or_else(|| {
-//RS         std::io::Error::new(
-//RS             std::io::ErrorKind::Other,
-//RS             "process.run stdout pipe unavailable",
-//RS         )
-//RS     });
-//RS     let stderr = child.stderr.take().ok_or_else(|| {
-//RS         std::io::Error::new(
-//RS             std::io::ErrorKind::Other,
-//RS             "process.run stderr pipe unavailable",
-//RS         )
-//RS     });
-//RS     let (stdout, stderr) = match (stdout, stderr) {
-//RS         (Ok(stdout), Ok(stderr)) => (stdout, stderr),
-//RS         (Err(error), _) | (_, Err(error)) => {
-//RS             let _ = child.kill();
-//RS             let _ = child.wait();
-//RS             return Err(error);
-//RS         }
-//RS     };
-//RS     let output_used = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-//RS     let output_overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS     let stdout_used = output_used.clone();
-//RS     let stdout_overflowed = output_overflowed.clone();
-//RS     let stdout_thread =
-//RS         std::thread::spawn(move || drain_repl_output(stdout, &stdout_used, &stdout_overflowed));
-//RS     let stderr_used = output_used;
-//RS     let stderr_overflowed = output_overflowed.clone();
-//RS     let stderr_thread =
-//RS         std::thread::spawn(move || drain_repl_output(stderr, &stderr_used, &stderr_overflowed));
-//RS     #[cfg(unix)]
-//RS     let _signal_forward = pinned_executable.map(|_| ReplSignalForward::install(child.id() as i32));
-//RS     #[cfg(unix)]
-//RS     let _terminal_signals = pinned_executable.and_then(|_| ReplTerminalSignals::enable());
-//RS 
-//RS     let stop_child = |child: &mut std::process::Child| {
-//RS         #[cfg(unix)]
-//RS         if pinned_executable.is_some() {
-//RS             kill_repl_process_group(child.id() as i32);
-//RS         } else {
-//RS             let _ = child.kill();
-//RS         }
-//RS         #[cfg(not(unix))]
-//RS         let _ = child.kill();
-//RS         let _ = child.wait();
-//RS     };
-//RS     let deadline = Instant::now() + timeout;
-//RS     let status = loop {
-//RS         if output_overflowed.load(Ordering::Acquire) {
-//RS             stop_child(&mut child);
-//RS             break Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::Other,
-//RS                 format!("process.run output exceeded {REPL_PROCESS_OUTPUT_LIMIT_BYTES} bytes"),
-//RS             ));
-//RS         }
-//RS         match child.try_wait() {
-//RS             Ok(Some(status)) => break Ok(status),
-//RS             Ok(None) => {}
-//RS             Err(e) => {
-//RS                 stop_child(&mut child);
-//RS                 break Err(e);
-//RS             }
-//RS         }
-//RS         if Instant::now() >= deadline {
-//RS             stop_child(&mut child);
-//RS             break Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::TimedOut,
-//RS                 "process.run exceeded the 30 second REPL limit",
-//RS             ));
-//RS         }
-//RS         std::thread::sleep(Duration::from_millis(10));
-//RS     };
-//RS     if status.is_ok() && pinned_executable.is_some() {
-//RS         #[cfg(unix)]
-//RS         // A command that backgrounds descendants does not get to leak them past
-//RS         // the REPL operation boundary after its group leader exits.
-//RS         kill_repl_process_group(child.id() as i32);
-//RS     }
-//RS     let stdout = stdout_thread.join().map_err(|_| {
-//RS         std::io::Error::new(
-//RS             std::io::ErrorKind::Other,
-//RS             "process.run stdout reader panicked",
-//RS         )
-//RS     });
-//RS     let stderr = stderr_thread.join().map_err(|_| {
-//RS         std::io::Error::new(
-//RS             std::io::ErrorKind::Other,
-//RS             "process.run stderr reader panicked",
-//RS         )
-//RS     });
-//RS     let status = status?;
-//RS     Ok(std::process::Output {
-//RS         status,
-//RS         stdout: stdout??,
-//RS         stderr: stderr??,
-//RS     })
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS static REPL_CHILD_GROUP: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-//RS 
-//RS // POSIX `signal(3)` keeps platform-specific `sigaction` layouts out of this
-//RS // std-only crate. Store returned disposition opaquely so nested guards restore
-//RS // either prior Jet handler or SIG_DFL/SIG_IGN exactly.
-//RS #[cfg(unix)]
-//RS unsafe extern "C" {
-//RS     fn kill(pid: i32, signal: i32) -> i32;
-//RS     fn signal(signal: i32, handler: usize) -> usize;
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS extern "C" fn forward_repl_interrupt(signal_number: i32) {
-//RS     super::super::note_repl_interrupt();
-//RS     super::super::warn_repl_runtime_call_stopping();
-//RS     let group = REPL_CHILD_GROUP.load(std::sync::atomic::Ordering::Relaxed);
-//RS     if group > 0 {
-//RS         unsafe { kill(-group, signal_number) };
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS struct ReplSignalForward {
-//RS     previous: usize,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS impl ReplSignalForward {
-//RS     fn install(group: i32) -> Self {
-//RS         REPL_CHILD_GROUP.store(group, std::sync::atomic::Ordering::SeqCst);
-//RS         let previous = unsafe { signal(2, forward_repl_interrupt as *const () as usize) };
-//RS         Self { previous }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS impl Drop for ReplSignalForward {
-//RS     fn drop(&mut self) {
-//RS         REPL_CHILD_GROUP.store(0, std::sync::atomic::Ordering::SeqCst);
-//RS         unsafe { signal(2, self.previous) };
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn kill_repl_process_group(group: i32) {
-//RS     unsafe { kill(-group, 9) };
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS struct ReplTerminalSignals {
-//RS     saved: String,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS impl ReplTerminalSignals {
-//RS     fn enable() -> Option<Self> {
-//RS         use std::io::IsTerminal;
-//RS         use std::process::Stdio;
-//RS 
-//RS         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-//RS             return None;
-//RS         }
-//RS         let saved = std::process::Command::new("stty")
-//RS             .arg("-g")
-//RS             .stdin(Stdio::inherit())
-//RS             .stderr(Stdio::null())
-//RS             .output()
-//RS             .ok()?;
-//RS         if !saved.status.success() {
-//RS             return None;
-//RS         }
-//RS         let saved = String::from_utf8_lossy(&saved.stdout).trim().to_string();
-//RS         if saved.is_empty() {
-//RS             return None;
-//RS         }
-//RS         let enabled = std::process::Command::new("stty")
-//RS             .arg("isig")
-//RS             .stdin(Stdio::inherit())
-//RS             .stdout(Stdio::null())
-//RS             .stderr(Stdio::null())
-//RS             .status()
-//RS             .ok()?
-//RS             .success();
-//RS         enabled.then_some(Self { saved })
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS impl Drop for ReplTerminalSignals {
-//RS     fn drop(&mut self) {
-//RS         use std::process::Stdio;
-//RS         let _ = std::process::Command::new("stty")
-//RS             .arg(&self.saved)
-//RS             .stdin(Stdio::inherit())
-//RS             .stdout(Stdio::null())
-//RS             .stderr(Stdio::null())
-//RS             .status();
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(all(test, unix))]
-//RS mod repl_process_tests {
-//RS     use super::run_repl_process;
-//RS     use std::time::{Duration, Instant};
-//RS 
-//RS     #[test]
-//RS     fn timeout_kills_and_reaps_the_process_group() {
-//RS         let executable = std::fs::File::open("/bin/sh").expect("pin /bin/sh");
-//RS         let root = std::fs::File::open(".").expect("open cwd");
-//RS         let cmd = vec![
-//RS             "/bin/sh".to_string(),
-//RS             "-c".to_string(),
-//RS             "while :; do :; done".to_string(),
-//RS         ];
-//RS         let started = Instant::now();
-//RS         let error = run_repl_process(
-//RS             &cmd,
-//RS             std::path::Path::new("."),
-//RS             Some(&executable),
-//RS             Some(&root),
-//RS             Duration::from_millis(50),
-//RS         )
-//RS         .expect_err("long process must time out");
-//RS         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
-//RS         assert!(started.elapsed() < Duration::from_secs(2));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn output_limit_kills_a_flooding_process_before_capture_grows_unbounded() {
-//RS         let executable = std::fs::File::open("/bin/sh").expect("pin /bin/sh");
-//RS         let root = std::fs::File::open(".").expect("open cwd");
-//RS         let cmd = vec![
-//RS             "/bin/sh".to_string(),
-//RS             "-c".to_string(),
-//RS             // PATH is cleared for REPL launches, so flood with a shell builtin.
-//RS             "while :; do printf %s xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done".to_string(),
-//RS         ];
-//RS         let started = Instant::now();
-//RS         let error = run_repl_process(
-//RS             &cmd,
-//RS             std::path::Path::new("."),
-//RS             Some(&executable),
-//RS             Some(&root),
-//RS             Duration::from_secs(10),
-//RS         )
-//RS         .expect_err("output beyond the REPL budget must fail");
-//RS         assert!(
-//RS             error.to_string().contains("output exceeded"),
-//RS             "unexpected output-limit error: {error}"
-//RS         );
-//RS         assert!(started.elapsed() < Duration::from_secs(10));
-//RS     }
-//RS }
-// END-PORT-PENDING 0595 crates/jet-comptime/src/Comptime/Methods/repl_process.rs:1-717
-
+// REPL authorization and pinned process execution.
+use jet_comptime.Diagnostics.[unsupported]
+use jet_comptime.Comptime.Methods.CoreCalls.[apply_core_call_with_type, apply_impure_core_call_with_type, as_string, io_error_value, normalize_path_args, IoErrorOperation]
+use jet_comptime.Comptime.[ReplEffectRequest, ReplAuthorizer, note_repl_interrupt, warn_repl_runtime_call_stopping]
+use jet_comptime.Interpreter.[DevSink]
+use jet_comptime.Builtins.[authority_holds]
+use jet_foundation.[Diagnostic, Span, CtValue, Type]
+use jet_foundation.Authority.[answer, ApplicationAuthority, Holds, Verdict, repl_refusal_why]
+use jet_foundation.Effects.[core_effect, is_nondeterministic_core, Effect]
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.files.host.retained_descriptor.[FileReader, Directory, OpenOptions, open_reader, canonicalize]
+use std.io.[IOError, ErrorKind, Read, stdin, stdout]
+use std.process.[Command, Child, Output, Stdio]
+use std.sync.[Arc]
+use std.sync.atomic.[AtomicUsize, AtomicBool, AtomicI32, Ordering]
+use std.time.[Duration, Instant]
+use std.thread
+use std.env
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:15
+fn repl_refusal(what: String, reason: String, fix: String, required: String, granted: Holds, span: Span) -> Diagnostic Never! {
+    authority :: ApplicationAuthority{required_effects: Holds.from([String]{required}), granted_effects: ^granted, denied_effects: Holds.new(), authority: "REPL lexical Authority"}
+    Diagnostic.error("E1803", what, repl_refusal_why(&authority, reason), fix, Val(span)).with_detail(authority.policy_facts())
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:39
+pub fn repl_effect_request(module: String, method: String, args: &[CtValue]) -> ReplEffectRequest Never! {
+    shown :: fn(i: Int, fallback: String) -> String Never! { if args.get(i) == { Val(value) -> value.jet_show() else -> fallback } }
+    (root, operation, resource) :: if is_nondeterministic_core(module, method) {
+        (root, operation) :: if core_effect(module, method) == { Val(.Time) -> ("Time", "Read"); Val(.Rand) -> ("Rand", "Draw"); else -> panic("nondeterministic Core call has no time/rand effect") }
+        (root, operation, method)
+    } else -> if (module, method) == {
+        ("core.files", "read" | "read_bytes" | "exists" | "is_dir") -> ("FS", "Read", shown(0, "<path>"))
+        ("core.files", "write" | "append_all" | "create_dir" | "remove") -> ("FS", "Write", shown(0, "<path>"))
+        ("core.sys", "get") -> ("Env", "Read", shown(0, "<key>"))
+        ("core.sys", "set") -> ("Env", "Write", shown(0, "<key>"))
+        ("core.sys", "current_dir") -> ("Env", "Read", "PWD")
+        ("core.sys", "home_dir") -> ("Env", "Read", "HOME")
+        ("core.term", "eprint") -> ("IO", "Write", "stderr")
+        ("core.term", "input" | "read_all_input" | "stdin") -> ("IO", "Read", "stdin")
+        ("core.process", "argv" | "args") -> ("IO", "Read", "argv")
+        ("core.process", "run") -> ("Exec", "Run", shown(0, "<command>"))
+        ("core.process", "exit") -> ("Exec", "Exit", shown(0, "0"))
+        ("core.math.random", _) -> ("Rand", "Draw", method)
+        ("core.net" | "core.net.tls", _) -> ("Net", method, shown(0, "<network resource>"))
+        else -> ("IO", method, module)
+    }
+    ReplEffectRequest{root: root, operation: operation, resource: resource}
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:87
+pub fn apply_repl_fs_call(method: String, args: &[CtValue], span: Span, authorizer: &ReplAuthorizer) -> CtValue Diagnostic! {
+    one :: fn(i: Int) -> CtValue Diagnostic! { args.get(i) ?? fail unsupported("core.files call has the wrong number of arguments", span) }
+    path :: as_string(one(0)!, span)!
+    operation :: if method == { "write" | "append_all" | "create_dir" | "remove" -> IoErrorOperation.Write else -> IoErrorOperation.Read }
+    io_error :: fn(error: IOError) -> CtValue Never! { CtValue.failed(io_error_value(operation, path, ^error)) }
+    if method == {
+        "read" -> {
+            bytes :: authorizer.fs_read(path) catch error -> return io_error(^error)
+            // GATE #4409: invalid UTF8 is InvalidData, never InvalidInput.
+            text :: String.from_utf8(^bytes) catch error -> return io_error(IOError.new(ErrorKind.InvalidData, ^error))
+            CtValue.Present{value: CtValue.Str{value: ^text}}
+        }
+        "read_bytes" -> {
+            bytes :: authorizer.fs_read(path) catch error -> return io_error(^error)
+            CtValue.Present{value: CtValue.Bytes{value: ^bytes}}
+        }
+        "write" | "append_all" -> {
+            content :: as_string(one(1)!, span)!
+            authorizer.fs_write(path, content.as_bytes(), method == "append_all") catch error -> return io_error(^error)
+            CtValue.Present{value: CtValue.Unit}
+        }
+        "exists" -> { value :: authorizer.fs_exists(path) catch error -> fail unsupported("secure filesystem check failed: {error}", span); CtValue.Bool{value: value} }
+        "is_dir" -> { value :: authorizer.fs_is_dir(path) catch error -> fail unsupported("secure filesystem check failed: {error}", span); CtValue.Bool{value: value} }
+        "create_dir" -> { authorizer.fs_create_dir(path) catch error -> return io_error(^error); CtValue.Present{value: CtValue.Unit} }
+        "remove" -> { authorizer.fs_remove(path) catch error -> return io_error(^error); CtValue.Present{value: CtValue.Unit} }
+        else -> fail unsupported("core.files.{method}", span)
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:152
+pub fn apply_repl_authorized_core_call(module: String, method: String, args: [CtValue], span: Span, base_dir: &OSPath, sink: DevSink?, grants: &[CtValue], authorizer: ReplAuthorizer?) -> CtValue Diagnostic! {
+    apply_repl_authorized_core_call_with_type(module, method, ^args, span, base_dir, sink, grants, authorizer, None)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:167
+pub fn apply_repl_authorized_core_call_with_type(module: String, method: String, args: [CtValue], span: Span, base_dir: &OSPath, sink: DevSink?, grants: &[CtValue], authorizer: ReplAuthorizer?, resolved_ret: Type?) -> CtValue Diagnostic! {
+    args := normalize_path_args(module, method, ^args, span)!
+    // Qualified prints remain ordinary transcript output, also under #NoPrelude.
+    if module == "core.term" && (method == "print" || method == "eprint") -> return apply_impure_core_call_with_type(module, method, ^args, span, base_dir, sink, true, None, None, resolved_ret)
+    pinned_executable :: if module == "core.process" && method == "run" -> Val(pin_repl_command(&args, base_dir, span)!) else -> None
+    request :: repl_effect_request(module, method, &args)
+    authorizer := authorizer ?? {
+        granted := Holds.new()
+        loop grant in grants { if authority_holds(grant) == Val(rights) -> granted.extend(^rights) }
+        fail repl_refusal("{request.root}.{request.operation} for `{request.resource}` was denied", "this REPL mode has no runtime authority provider", "restart with `jet repl --allow-{request.root.to_ascii_lowercase()}` or use an interactive session and approve the exact operation", request.root, ^granted, span)
+    }
+    authorizer.preflight(&request, span)!
+    boundary_authority :: args.len() == 2 && ((module == "core.process" && method == "run") || (module == "core.plugin" && method == "load"))
+    held := Holds.new()
+    if boundary_authority {
+        if authority_holds(&args[1]) == Val(rights) -> held = ^rights
+    } else { loop grant in grants { if authority_holds(grant) == Val(rights) -> held.extend(^rights) } }
+    denied :: Holds.new()
+    granted :: answer(&held, &denied, request.root) == Verdict.Allowed
+    if !granted -> fail repl_refusal("{request.root}.{request.operation} for `{request.resource}` has no REPL runtime authority", "REPL host effects require both lexical `#FX` access and invocation policy", "wrap this operation in `#FX(grant: {request.root}) {{ ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{request.root.to_ascii_lowercase()}`", request.root, ^held, span)
+    authorizer.authorize(&request, span)!
+    if module == "core.term" && (method == "input" || method == "read_all_input") {
+        prompt :: if args.first() == { Val(.Str(value)) -> value else -> "" }
+        line :: authorizer.read_input(prompt) catch error -> return CtValue.failed(io_error_value(IoErrorOperation.Read, "stdin", ^error))
+        return CtValue.Present{value: CtValue.Str{value: ^line}}
+    }
+    if module == "core.files" -> return apply_repl_fs_call(method, &args, span, &authorizer)
+    if module == "core.math.random" -> return apply_core_call_with_type(module, method, ^args, span, true, resolved_ret)
+    verified_root :: if module == "core.process" && method == "run" {
+        root :: authorizer.verified_root() catch error -> fail unsupported("REPL project root handle is unavailable: {error}", span)
+        Val(^root)
+    } else -> None
+    apply_impure_core_call_with_type(module, method, ^args, span, base_dir, sink, true, pinned_executable.as_ref(), verified_root.as_ref(), resolved_ret)
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:308
+pub fn pin_repl_command(args: &[CtValue], base_dir: &OSPath, span: Span) -> FileReader Diagnostic! {
+    words := if args.first_mut() == { Val(.List(words)) -> &words else -> fail unsupported("process.run expects a list of command words", span) }
+    program := if words.first_mut() == { Val(.Str(program)) -> &program else -> fail unsupported("process.run needs an executable name", span) }
+    candidate :: OSPath.from_text(program)
+    resolved := OSPath?{None}
+    // GATE #4494: native PATH ingress and retained descriptor resolution.
+    if candidate.components().count() > 1 || candidate.is_absolute() {
+        path :: if candidate.is_absolute() -> candidate else -> base_dir.join(candidate)
+        resolved = canonicalize(path).ok()
+    } else {
+        if env.var_os("PATH") == Val(path) {
+            loop dir in env.split_paths(path) {
+                if canonicalize(dir.join(candidate)).ok() == Val(path) { if path.is_file() { resolved = Val(^path); break } }
+            }
+        }
+    }
+    resolved :: resolved ?? fail unsupported("process.run could not resolve executable `{program}`", span)
+    executable :: open_reader(resolved, OpenOptions{}) catch error -> fail unsupported("process.run could not pin executable `{resolved.display()}`: {error}", span)
+    if !executable.stat().is_ok_and(fn(metadata) -> metadata.is_file) -> fail unsupported("process.run executable is not a regular file", span)
+    program = resolved.to_string_lossy()
+    ^executable
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:366
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:374
+fn repl_descriptor_path(fd: I32) -> String Never! {
+    // GATE #4483: selected target OS, not build-host OS.
+    if core.sys.target.selected_os() == "linux" -> "/proc/self/fd/{fd}" else -> "/dev/fd/{fd}"
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:378
+pub const REPL_PROCESS_OUTPUT_LIMIT_BYTES: USize = 64 * 1024 * 1024
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:380
+fn drain_repl_output<R: Read>(reader: R, used: &Arc<AtomicUsize>, overflowed: &Arc<AtomicBool>) -> [U8] IOError! {
+    // GATE #4494: native pipe reads and shared atomic accounting.
+    reader := ^reader
+    output := [U8]{}
+    buffer := [U8; 8192]{0}
+    loop {
+        count :: reader.read(&buffer)!
+        if count == 0 -> return ^output
+        updated :: used.fetch_update(Ordering.AcqRel, Ordering.Acquire, fn(previous) -> USize? Never! {
+            total :: previous.checked_add(count) ?? return None
+            if total <= REPL_PROCESS_OUTPUT_LIMIT_BYTES -> Val(total) else -> None
+        })
+        if updated.is_err() {
+            overflowed.store(true, Ordering.Release)
+            fail IOError.new(ErrorKind.Other, "process.run output exceeded {REPL_PROCESS_OUTPUT_LIMIT_BYTES} bytes")
+        }
+        output.extend_from_slice(buffer[0..<count])
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:414
+pub fn run_repl_process(cmd: &[String], base_dir: &OSPath, pinned_executable: FileReader?, verified_root: Directory?, timeout: Duration) -> Output IOError! {
+    // GATE #4494: native Command, pipes, threads, retained descriptor projection.
+    // GATE #4483: preserve Unix and non-Unix dispatch.
+    unix :: core.sys.target.selected_family() == "unix"
+    executable :: if unix {
+        if pinned_executable == { Val(file) -> repl_descriptor_path(file.as_raw_fd()) else -> cmd[0] }
+    } else {
+        if pinned_executable != None -> fail IOError.new(ErrorKind.Unsupported, "this platform cannot launch a descriptor-pinned REPL executable")
+        cmd[0]
+    }
+    cwd :: if unix {
+        if verified_root == { Val(file) -> OSPath.from_text(repl_descriptor_path(file.as_raw_fd())) else -> base_dir.clone() }
+    } else -> base_dir.clone()
+    command := Command.new(executable)
+    command.args(cmd[1..<cmd.len()]).current_dir(cwd).env_clear().stdin(Stdio.null()).stdout(Stdio.piped()).stderr(Stdio.piped())
+    if unix && pinned_executable != None -> command.process_group(0)
+    child := command.spawn()!
+    stdout := child.stdout.take().ok_or_else(fn() -> IOError.new(ErrorKind.Other, "process.run stdout pipe unavailable"))
+    stderr := child.stderr.take().ok_or_else(fn() -> IOError.new(ErrorKind.Other, "process.run stderr pipe unavailable"))
+    (stdout, stderr) :: if (stdout, stderr) == {
+        (Ok(out), Ok(err)) -> (^out, ^err)
+        (Err(error), _) | (_, Err(error)) -> { _ :: child.kill(); _ :: child.wait(); fail ^error }
+    }
+    output_used :: Arc.new(AtomicUsize.new(0))
+    output_overflowed :: Arc.new(AtomicBool.new(false))
+    stdout_used :: output_used.clone()
+    stdout_overflowed :: output_overflowed.clone()
+    stdout_thread :: thread.spawn(fn() -> [U8] IOError! { drain_repl_output(^stdout, &stdout_used, &stdout_overflowed) })
+    stderr_used :: ^output_used
+    stderr_overflowed :: output_overflowed.clone()
+    stderr_thread :: thread.spawn(fn() -> [U8] IOError! { drain_repl_output(^stderr, &stderr_used, &stderr_overflowed) })
+    signal_forward :: if unix && pinned_executable != None -> Val(ReplSignalForward.install(child.id() as I32)) else -> None
+    terminal_signals :: if unix && pinned_executable != None -> ReplTerminalSignals.enable() else -> None
+    stop_child :: fn(child: &Child) -> Never! {
+        if unix && pinned_executable != None -> kill_repl_process_group(child.id() as I32) else -> { _ :: child.kill() }
+        _ :: child.wait()
+    }
+    deadline :: Instant.now() + timeout
+    status :: (fn() -> std.process.ExitStatus IOError! {
+        loop {
+            if output_overflowed.load(Ordering.Acquire) {
+                stop_child(&child)
+                fail IOError.new(ErrorKind.Other, "process.run output exceeded {REPL_PROCESS_OUTPUT_LIMIT_BYTES} bytes")
+            }
+            waited :: child.try_wait() catch error -> { stop_child(&child); fail ^error }
+            if waited == Val(status) -> return status
+            if Instant.now() >= deadline {
+                stop_child(&child)
+                fail IOError.new(ErrorKind.TimedOut, "process.run exceeded the 30 second REPL limit")
+            }
+            thread.sleep(Duration.from_millis(10))
+        }
+    })()
+    // Background descendants cannot outlive the operation boundary.
+    if status.is_ok() && pinned_executable != None && unix -> kill_repl_process_group(child.id() as I32)
+    stdout :: stdout_thread.join().map_err(fn(_) -> IOError.new(ErrorKind.Other, "process.run stdout reader panicked"))
+    stderr :: stderr_thread.join().map_err(fn(_) -> IOError.new(ErrorKind.Other, "process.run stderr reader panicked"))
+    status :: status!
+    Output{status: status, stdout: stdout!!, stderr: stderr!!}
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:565
+// GATE #4494: process-static native atomic cell, Unix only at call sites.
+static REPL_CHILD_GROUP: AtomicI32 = AtomicI32.new(0)
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:572
+use std.posix.[kill, signal]
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:577
+extern "C" fn forward_repl_interrupt(signal_number: I32) -> Never! {
+    note_repl_interrupt()
+    warn_repl_runtime_call_stopping()
+    group :: REPL_CHILD_GROUP.load(Ordering.Relaxed)
+    if group > 0 { #Unsafe("forward POSIX interrupt to the live child process group; GATE #4494") { _ :: kill(-group, signal_number) } }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:587
+struct ReplSignalForward { previous: USize }
+impl ReplSignalForward {
+    // Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:593
+    fn install(group: I32) -> ReplSignalForward Never! {
+        REPL_CHILD_GROUP.store(group, Ordering.SeqCst)
+        previous :: #Unsafe("opaque POSIX signal disposition and callback ABI; GATE #4494") { signal(2, forward_repl_interrupt as *Unit as USize) }
+        ReplSignalForward{previous: previous}
+    }
+}
+impl ReplSignalForward.Close {
+    // Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:602
+    fn close(^self) -> Never! {
+        REPL_CHILD_GROUP.store(0, Ordering.SeqCst)
+        #Unsafe("restore exact previous POSIX signal disposition; GATE #4494") { _ :: signal(2, self.previous) }
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:609
+fn kill_repl_process_group(group: I32) -> Never! {
+    #Unsafe("SIGKILL targets the retained process group; GATE #4494") { _ :: kill(-group, 9) }
+}
+// Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:614
+struct ReplTerminalSignals { saved: String }
+impl ReplTerminalSignals {
+    // Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:620
+    fn enable() -> ReplTerminalSignals? Never! {
+        // GATE #4494: terminal detection and native stty execution.
+        if !stdin().is_terminal() || !stdout().is_terminal() -> return None
+        saved :: Command.new("stty").arg("-g").stdin(Stdio.inherit()).stderr(Stdio.null()).output().ok() ?? return None
+        if !saved.status.success() -> return None
+        decoded :: String.from_utf8_lossy(&saved.stdout)
+        trimmed := decoded.trim() // #4303
+        saved :: trimmed.to_string()
+        if saved.is_empty() -> return None
+        enabled :: Command.new("stty").arg("isig").stdin(Stdio.inherit()).stdout(Stdio.null()).stderr(Stdio.null()).status().ok() ?? return None
+        if enabled.success() -> Val(ReplTerminalSignals{saved: ^saved}) else -> None
+    }
+}
+impl ReplTerminalSignals.Close {
+    // Rust: crates/jet-comptime/src/Comptime/Methods/repl_process.rs:654
+    fn close(^self) -> Never! {
+        _ :: Command.new("stty").arg(self.saved).stdin(Stdio.inherit()).stdout(Stdio.null()).stderr(Stdio.null()).status()
+    }
+}

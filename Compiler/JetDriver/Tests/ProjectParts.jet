@@ -1,0 +1,85 @@
+use jet_driver.ProjectParts.*
+use jet_foundation.[Lexer, Parser, Syntax]
+use jet_foundation.AST.Item
+use std.[env, process, fs, thread]
+use std.sync.mpsc
+use core.path.OSPath
+use core.sys.target
+
+// Rust: crates/jet-driver/src/ProjectParts.rs:413
+fn tempdir(tag: String) -> OSPath {
+    path :: env.temp_dir().join("jet-project-parts-{tag}-{process.id()}")
+    _ :: fs.remove_dir_all(path)
+    fs.create_dir_all(path).unwrap()
+    path
+}
+// Rust: crates/jet-driver/src/ProjectParts.rs:422
+#Test("internal_part_is_skipped_until_explicitly_imported") {
+    root :: tempdir("explicit")
+    internal :: root.join("bench-config.jet")
+    source :: "module _bench { }\n"
+    fs.write(internal, source).unwrap()
+    (tokens, diagnostics) :: Lexer.lex(source)
+    assert(diagnostics.is_empty())
+    program :: Parser.parse(tokens).expect("parse exact internal module spelling")
+    assert(if program.items == { [.CodeModule(module)] -> module.name == "_bench" else -> false })
+    report :: scan(root)
+    assert_eq(report.parts[0].name, "_bench")
+    assert_eq(report.parts[0].state, ProjectPartState.Skipped)
+    assert(!report.should_index(internal))
+    fs.write(root.join("main.jet"), "use project._bench\nfn run() {}\n").unwrap()
+    explicit_report :: scan(root)
+    assert_eq(explicit_report.parts[0].state, ProjectPartState.Explicit)
+    assert(explicit_report.should_index(internal))
+}
+// Rust: crates/jet-driver/src/ProjectParts.rs:446
+#Test("duplicate_declarations_are_conflicts_even_when_skipped") {
+    root :: tempdir("conflict")
+    fs.write(root.join("a.jet"), "module _bench { }\n").unwrap()
+    fs.write(root.join("b.jet"), "module _bench { }\n").unwrap()
+    report :: scan(root)
+    assert_eq(report.conflicts.len(), 1)
+    assert_eq(report.conflicts[0].name, "_bench")
+    assert_eq(report.conflicts[0].paths.len(), 2)
+}
+// Rust: crates/jet-driver/src/ProjectParts.rs:457
+#Test("source_files_are_the_package_own_modules") {
+    root :: tempdir("source-files")
+    fs.write(root.join(Syntax.PACKAGE_FILE), "name: \"outer\"\n").unwrap()
+    fs.write(root.join("run.jet"), "fn run() {}\n").unwrap()
+    fs.create_dir_all(root.join("src")).unwrap()
+    fs.write(root.join("src/math.jet"), "fn double() -> Int -> 2\n").unwrap()
+    fs.create_dir_all(root.join("vendor/inner")).unwrap()
+    fs.write(root.join("vendor/inner").join(Syntax.PACKAGE_FILE), "name: \"inner\"\n").unwrap()
+    fs.write(root.join("vendor/inner/lib.jet"), "fn theirs() {}\n").unwrap()
+    base :: fs.canonicalize(root).unwrap()
+    files :: source_files(root)
+    names :: files.iter().map(fn(path) { path.strip_prefix(base).unwrap_or(path).to_string_lossy().replace('\\', "/") }).collect::<[String]>()
+    assert_eq(names, ["run.jet", "src/math.jet"])
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/ProjectParts.rs:493
+#Test("scan_ignores_non_regular_jet_entries") {
+    // GATE #4483: original cfg(unix) uses selected family, never the host assumption.
+    if target.selected_family() == "unix" {
+        root :: tempdir("non-regular")
+        fs.write(root.join("main.jet"), "fn run() {}\n").unwrap()
+        fifo :: root.join("blocked.jet")
+        // GATE #4494: real process/FIFO/thread/channel providers, no mock source.
+        assert(process.Command.new("mkfifo").arg(fifo).status().unwrap().success())
+        (opened, observed) :: mpsc.channel()
+        writer_fifo :: fifo
+        writer :: thread.spawn(fn() {
+            file :: fs.OpenOptions.new().write(true).open(writer_fifo).unwrap()
+            opened.send(()).unwrap()
+            drop(file)
+        })
+        report :: scan(root)
+        scanned_fifo :: observed.try_recv().is_ok()
+        if !scanned_fifo { drop(fs.OpenOptions.new().read(true).open(fifo).unwrap()) }
+        writer.join().unwrap()
+        assert(!scanned_fifo, "project scans must not open a FIFO as source")
+        assert(report.parts.is_empty())
+        _ :: fs.remove_dir_all(root)
+    }
+}

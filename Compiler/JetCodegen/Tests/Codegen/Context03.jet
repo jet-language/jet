@@ -1,0 +1,62 @@
+use jet_codegen.Codegen.Context.[Cx, build_cx, rust_param_type, module_identity, foreign_binding_method_key, register_core_import_surfaces, depends_on, receipt_schema_digest]
+use jet_foundation.[AccessConvention, Type, mangle_path, TEXT_NUL]
+use jet_foundation.SHA256.[sha256_hex]
+use jet_sema.[Lexer, Parser]
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:3898
+fn empty_context() -> Cx Never! {
+    (tokens, lex) :: Lexer.lex("fn run() {}")
+    assert(lex.is_empty())
+    program :: Parser.parse(tokens).unwrap()
+    build_cx(program, "fn run() {}", "context_control.jet")
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:3843
+#Test("rust_param_type_preserves_access_conventions") {
+    cx :: empty_context()
+    assert(rust_param_type(cx, AccessConvention.Read, Type.Int) == cx.rust_type(Type.Int))
+    assert(rust_param_type(cx, AccessConvention.Write, Type.Int) == "&mut {cx.rust_type(Type.Int)}")
+    assert(rust_param_type(cx, AccessConvention.Read, Type.String) == "&{cx.rust_type(Type.String)}")
+    assert(rust_param_type(cx, AccessConvention.Move, Type.String) == cx.rust_type(Type.String))
+    assert(rust_param_type(cx, AccessConvention.Read, Type.Named("T")) == "&{cx.rust_type(Type.Named("T"))}")
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:3741
+#Test("function_value_type_uses_owned_mutable_slot_and_http_thread_safe_exception") {
+    cx :: empty_context()
+    regular :: cx.rust_fn_trait([Type.Int], Val(Type.Int), None)
+    assert(regular == "std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut({cx.rust_type(Type.Int)}) -> {cx.rust_type(Type.Int)}>>>>")
+    handler :: Type.Named("HTTPHandler")
+    threaded :: cx.rust_fn_trait([handler], Val(handler), None)
+    assert(threaded == "std::sync::Arc<dyn Fn({cx.rust_type(handler)}) -> {cx.rust_type(handler)} + Send + Sync>")
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4085
+#Test("foreign_binding_method_key_uses_canonical_path_mangler") {
+    assert(foreign_binding_method_key("Owner", "open") == mangle_path("foreign_method__Owner__open"))
+    assert(foreign_binding_method_key("Owner", "open") != foreign_binding_method_key("Other", "open"))
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:4789
+#Test("core_auth_surface_keeps_discriminants_and_appends_not_yet_valid") {
+    cx := empty_context()
+    assert(!cx.enum_variants.contains("AuthError"))
+    cx.core_imports["auth"] = "core.auth"
+    register_core_import_surfaces(&cx)
+    names :: cx.enum_variants["AuthError"].map(fn(row) { row.0 }).to_array()
+    assert(names == ["InvalidSignature", "WeakKey", "TokenExpired", "MalformedToken", "UnsupportedToken", "MissingClaim", "DecodeError", "WrongAudience", "WrongIssuer", "TokenNotYetValid"])
+    assert(cx.cloneable.contains("AuthError"))
+    assert(cx.variant_owner["TokenNotYetValid"] == "AuthError")
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:5218
+#Test("memo_dependency_reachability_keeps_cycles_bounded") {
+    direct :: [String:[String:Bool]]{"a": ["b": true], "b": ["a": true, "source": true]}
+    computed :: [String:Bool]{"a": true, "b": true}
+    visiting := [String:Bool]{}
+    assert(depends_on("a", "source", direct, computed, &visiting))
+    missing_visiting := [String:Bool]{}
+    assert(!depends_on("a", "absent", direct, computed, &missing_visiting))
+    assert(missing_visiting.len() == 2)
+}
+// Rust: crates/jet-codegen/src/Codegen/Context.rs:5270
+#Test("receipt_digest_preserves_field_order_and_canonical_type_spelling") {
+    fields :: [("label", Type.String), ("count", Type.Int)]
+    assert(receipt_schema_digest("Rec", fields) == sha256_hex("Rec{TEXT_NUL}label:String;count:Int;".bytes()))
+    assert(receipt_schema_digest("Rec", fields) != receipt_schema_digest("Rec", [("count", Type.Int), ("label", Type.String)]))
+    assert(receipt_schema_digest("Rec", fields) != receipt_schema_digest("Other", fields))
+}

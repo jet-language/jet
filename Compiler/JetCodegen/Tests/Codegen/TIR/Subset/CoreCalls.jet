@@ -1,0 +1,22 @@
+use JetCodegen.Codegen.TIR.Subset.CoreCalls.*
+use JetSema.Syntax
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs:29
+#Test("core_call_coverage_uses_tir_projection") {
+    for method in ["nanoseconds", "microseconds", "milliseconds", "seconds", "minutes", "hours"] {
+        assert(core_call_covered("core.time", method))
+    }
+    assert(core_call_covered("core.mem", "address_of"))
+    assert(core_call_covered("core.mem", Syntax.MEM_PIN))
+    assert(core_call_covered("core.tasks", "yield_now"))
+    assert(core_call_covered("core.tasks", "current_task"))
+    assert(core_call_covered("core.ui", "mount"))
+    assert(!core_call_covered("not_a_core_module", "not_a_core_method"))
+    for (module, method) in [("core.time", "today"), ("core.ui", "box"), ("core.compute", "set")] {
+        if Syntax.core_call(module, method) == {
+            Val(row) -> assert(core_call_covered(module, method)
+                == row.coverage.contains(Syntax.CoreCallCoverage.TIR_SUBSET))
+            else -> {}
+        }
+    }
+}

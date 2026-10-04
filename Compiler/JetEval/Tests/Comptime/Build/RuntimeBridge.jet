@@ -1,0 +1,41 @@
+use jet_comptime.Comptime.Build.RuntimeBridge.[begin_program_build, eval_program_build_method, build_error_diagnostic_from_value, abort_program_build]
+use jet_foundation.AST.[CtValue, CtReport]
+use jet_foundation.Diagnostics.[Span, StructuredDiagnostic]
+use jet_foundation.Outcome.*
+
+// Rust: crates/jet-comptime/src/Comptime/Build/runtime_bridge.rs:2072
+#Test("build_context_failure_keeps_typed_report_facts") {
+    context := begin_program_build("report-test", CtValue.Unit)
+    span := Span.new(11, 17)
+    args := fn() { [CtValue.Str("app"), CtValue.List([]), CtValue.List([])] }
+    first := eval_program_build_method(context, "add_executable", args(), None, span, false).expect("build context")!
+    assert(first.is_present())
+    failed := eval_program_build_method(context, "add_executable", args(), None, span, false).expect("build context")!
+    assert(failed == { CtValue.Failed(CtReport.Told(_)) -> true; _ -> false })
+    assert(failed.add_error_context("while declaring app", "build.jet", 23))
+    jet_journey_reset()
+    jet_journey_frame("build.jet", 23, 5, "build", fn() { "while declaring app" })
+    jet_error := failed.to_jet_err().expect("default error carrier")
+    report := jet_error_report(jet_error)
+    assert(report.typed_identity == Val("BuildError::DuplicateTargetName"))
+    details := report.details.expect("typed build details")
+    assert(details.variant == "DuplicateTargetName")
+    assert(details.fields.len() == 1)
+    assert(details.fields[0].name == "value")
+    assert(details.fields[0].value == "\"app\"")
+    assert(details.source_span == Val(JetErrorSpan { start: 11, end: 17 }))
+    assert(report.causes.is_empty())
+    assert(report.context_frames.len() == 1)
+    assert(report.context_frames[0].text == "while declaring app")
+    assert(report.context_frames[0].file == "build.jet")
+    assert(report.context_frames[0].line == 23)
+    origin := report.origin.expect("the failing build call is the origin")
+    assert(origin.fn_name == "build")
+    assert(origin.file == "build.jet")
+    assert(origin.line == 23)
+    assert(report.source_journey.is_empty())
+    assert(report.to_json().contains("\"details\":{{\"variant\":\"DuplicateTargetName\",\"fields\":{{\"value\":\"app\"}}"))
+    diagnostic := build_error_diagnostic_from_value(failed, Span.new(0, 0)).expect("structured build diagnostic")
+    assert(diagnostic.structured == { Val(StructuredDiagnostic.BuildError { .. }) -> true; _ -> false })
+    abort_program_build(context)
+}

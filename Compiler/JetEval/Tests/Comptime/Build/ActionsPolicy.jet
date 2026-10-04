@@ -1,0 +1,43 @@
+// No original inline Rust tests in actions_policy.rs:1-1974.
+// Behavioral controls for the mechanically ported parser/policy branches.
+#Test("legacy import directive fields preserve typed authority") {
+    import := LegacyProjectImport.default()
+    apply_import_directives(.Make, "# jet: inputs=[a.c, b.h]\n// jet: output=app\njet.env=NAME=value\njet: pool=[cpu, custom]\njet: cache=phony\njet: kind=source_archive\njet: label.owner=builder\n", &import) ?? panic("{err}")
+    assert_eq(import.inputs, ["a.c", "b.h"])
+    assert_eq(import.outputs, ["app"])
+    assert(import.outputs_explicit)
+    assert_eq(import.env["NAME"], "value")
+    assert(import.resource_pools.contains(.CPU))
+    assert(import.resource_pools.contains(.Custom("custom")))
+    assert_eq(import.cache, Val(.UncachedPhony))
+    assert_eq(import.action_kind, Val(.SourceArchive))
+    assert_eq(import.labels["owner"], "builder")
+}
+#Test("CMake typed import distinguishes literal target and phony cache") {
+    import := LegacyProjectImport.default()
+    parse_cmake_import("project(sample)\nadd_executable(app main.c STATIC)\n", &import) ?? panic("{err}")
+    assert_eq(import.argv, Val(["cmake", "--build", "build", "--target", "app"]))
+    assert_eq(import.inputs, ["main.c"])
+    assert_eq(import.labels["legacy.target"], "app")
+    phony := LegacyProjectImport.default()
+    parse_cmake_import("add_custom_target(clean ALL)", &phony) ?? panic("{err}")
+    assert_eq(phony.cache, Val(.UncachedPhony))
+}
+#Test("Make importer preserves prerequisite and PHONY target") {
+    import := LegacyProjectImport.default()
+    parse_make_import(".PHONY: app\napp: a.c b.h\n", &import) ?? panic("{err}")
+    assert_eq(import.argv, Val(["make", "app"]))
+    assert_eq(import.inputs, ["a.c", "b.h"])
+    assert_eq(import.outputs, ["app"])
+    assert_eq(import.cache, Val(.UncachedPhony))
+}
+#Test("build action policy keeps CI deny and exact source observation") {
+    local :: BuildPolicy.local_default()
+    ci :: BuildPolicy.ci_default()
+    spec :: LegacyWrapperSpec.make(["make", "app"]).with_inputs(["a.c"]).with_outputs(["app"]).with_cap(.Exec)
+    assert(spec.explain(local).allowed)
+    assert(!spec.explain(ci).allowed)
+    assert_eq(spec.explain(ci).reason, "legacy build wrappers are disabled in CI by the production policy")
+    loop kind in [ActionKind.Compile, .Docs, .Debug, .SourceArchive] -> assert(kind.observes_exact_source())
+    assert(!ActionKind.Generic.observes_exact_source())
+}

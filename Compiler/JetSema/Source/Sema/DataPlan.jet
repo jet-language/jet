@@ -1,360 +1,152 @@
-// PORT-PENDING 0413 crates-jet-sema-src-sema-checkerinline-module-group: crates/jet-sema/src/Sema/DataPlan.rs:1-356
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Sema-owned construction of typed query-plan facts.
-//RS //!
-//RS //! The builder accepts only checked types and callable facts. It creates no
-//RS //! rows and executes no predicate: its sole job is to reject an invalid query
-//RS //! transition before recording a backend-neutral graph for TIR and tooling.
-//RS 
-//RS use crate::AST::{
-//RS     DataPlanCallable, DataPlanFact, DataPlanNodeId, DataPlanOperationKind, DataPlanPhysicalNode,
-//RS     DataPlanPhysicalOperatorKind, DataPlanSchema, DataPlanSchemaError, DataPlanSourceKind,
-//RS     DataPlanStreamError, DataPlanStreamMode, DataPlanValidationError, Type,
-//RS };
-//RS use crate::Diagnostics::Span;
-//RS 
-//RS /// Recognized `core.data` source calls and canonical `Query<T>` transitions.
-//RS /// `InspectPlan` is a query over an existing query value and therefore does
-//RS /// not add a graph node.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum DataPlanCallKind {
-//RS     Scan(DataPlanSourceKind),
-//RS     Filter,
-//RS     SortBy,
-//RS     Collect,
-//RS     InspectPlan,
-//RS }
-//RS 
-//RS /// Classify a checked core-data call without deciding how any tier executes
-//RS /// it. Generated/imported calls retain the qualified `core.data` module name.
-//RS pub fn classify_data_call(module: &str, method: &str) -> Option<DataPlanCallKind> {
-//RS     if module != "core.data" {
-//RS         return None;
-//RS     }
-//RS     match method {
-//RS         "query" => Some(DataPlanCallKind::Scan(DataPlanSourceKind::Table)),
-//RS         "csv" => Some(DataPlanCallKind::Scan(DataPlanSourceKind::Csv)),
-//RS         "json" => Some(DataPlanCallKind::Scan(DataPlanSourceKind::Json)),
-//RS         "jsonl" => Some(DataPlanCallKind::Scan(DataPlanSourceKind::Jsonl)),
-//RS         "parquet" => Some(DataPlanCallKind::Scan(DataPlanSourceKind::Parquet)),
-//RS         "arrow" => Some(DataPlanCallKind::Scan(DataPlanSourceKind::Arrow)),
-//RS         "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" => {
-//RS             Some(DataPlanCallKind::Scan(DataPlanSourceKind::Loader))
-//RS         }
-//RS         "csv_reader" => Some(DataPlanCallKind::Scan(DataPlanSourceKind::CsvReader)),
-//RS         "json_reader" => Some(DataPlanCallKind::Scan(DataPlanSourceKind::JsonReader)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Classify a receiver operation on the canonical deferred `Query<T>`.
-//RS /// Receiver rows intentionally have an empty module in the Core registry, so
-//RS /// their operation must be resolved from the retained receiver type.
-//RS pub fn classify_data_receiver_call(
-//RS     receiver_types: &[&str],
-//RS     method: &str,
-//RS ) -> Option<DataPlanCallKind> {
-//RS     if !receiver_types.iter().any(|name| *name == "Query") {
-//RS         return None;
-//RS     }
-//RS     match method {
-//RS         "filter" => Some(DataPlanCallKind::Filter),
-//RS         "sort_by" => Some(DataPlanCallKind::SortBy),
-//RS         "collect" => Some(DataPlanCallKind::Collect),
-//RS         "plan" => Some(DataPlanCallKind::InspectPlan),
-//RS         _ => None,
-//RS     }
-//RS 
-//RS }
-//RS 
-//RS /// A mutable sema-side plan accumulator.  Every successful mutation appends
-//RS /// one logical node and one identity physical choice, so a consumer always
-//RS /// has a complete deterministic projection even before optimization.
-//RS #[derive(Debug, Clone)]
-//RS pub struct DataPlanBuilder {
-//RS     fact: DataPlanFact,
-//RS }
-//RS 
-//RS impl DataPlanBuilder {
-//RS     pub fn new(
-//RS         source: DataPlanSourceKind,
-//RS         schema: DataPlanSchema,
-//RS         span: Span,
-//RS     ) -> Result<Self, DataPlanBuildError> {
-//RS         schema
-//RS             .validate()
-//RS             .map_err(DataPlanBuildError::Schema)?;
-//RS         Ok(Self {
-//RS             fact: DataPlanFact::scan(source, schema, span),
-//RS         })
-//RS     }
-//RS 
-//RS 
-//RS     /// Re-enter a previously checked fact when a chained expression carries
-//RS     /// its plan across another TIR node.  The graph remains sema-owned: this
-//RS     /// constructor only re-validates the copied fact before a later append.
-//RS     pub fn from_fact(fact: DataPlanFact) -> Result<Self, DataPlanBuildError> {
-//RS         fact.validate()
-//RS             .map_err(DataPlanBuildError::Validation)?;
-//RS         Ok(Self { fact })
-//RS     }
-//RS 
-//RS     pub fn fact(&self) -> &DataPlanFact {
-//RS         &self.fact
-//RS     }
-//RS 
-//RS     pub fn current_node(&self) -> Option<&crate::AST::DataPlanLogicalNode> {
-//RS         self.fact.output_node()
-//RS     }
-//RS 
-//RS     pub fn current_node_id(&self) -> DataPlanNodeId {
-//RS         self.fact.output
-//RS     }
-//RS 
-//RS 
-//RS     pub fn filter(
-//RS         &mut self,
-//RS         callable: DataPlanCallable,
-//RS         span: Span,
-//RS     ) -> Result<DataPlanNodeId, DataPlanBuildError> {
-//RS         self.append_unary(DataPlanOperationKind::Filter, callable, span)
-//RS     }
-//RS 
-//RS     pub fn sort_by(
-//RS         &mut self,
-//RS         callable: DataPlanCallable,
-//RS         span: Span,
-//RS     ) -> Result<DataPlanNodeId, DataPlanBuildError> {
-//RS         self.append_unary(DataPlanOperationKind::SortBy, callable, span)
-//RS     }
-//RS 
-//RS     /// An explicit collect is the only standard operation that creates a
-//RS     /// materialization boundary.  The reason is retained in both logical and
-//RS     /// physical facts for the inspector.
-//RS     pub fn collect(&mut self, span: Span) -> Result<DataPlanNodeId, DataPlanBuildError> {
-//RS         let stream = DataPlanStreamMode::materialized("explicit collect")
-//RS             .map_err(DataPlanBuildError::Stream)?;
-//RS         let schema = self
-//RS             .current_node()
-//RS             .ok_or(DataPlanBuildError::EmptyInput)?
-//RS             .schema
-//RS             .clone();
-//RS         self.append(
-//RS             DataPlanOperationKind::Collect,
-//RS             vec![self.current_node_id()],
-//RS             schema,
-//RS             None,
-//RS             stream,
-//RS             span,
-//RS         )
-//RS     }
-//RS 
-//RS     /// Append a checked unary operation whose output schema may differ from
-//RS     /// its input (for example, a future projection or aggregate).
-//RS     pub fn append_unary(
-//RS         &mut self,
-//RS         operation: DataPlanOperationKind,
-//RS         callable: DataPlanCallable,
-//RS         span: Span,
-//RS     ) -> Result<DataPlanNodeId, DataPlanBuildError> {
-//RS         let schema = self
-//RS             .current_node()
-//RS             .ok_or(DataPlanBuildError::EmptyInput)?
-//RS             .schema
-//RS             .clone();
-//RS         let stream = default_stream_for(operation)?;
-//RS         self.append(
-//RS             operation,
-//RS             vec![self.current_node_id()],
-//RS             schema,
-//RS             Some(callable),
-//RS             stream,
-//RS             span,
-//RS         )
-//RS     }
-//RS 
-//RS     /// Append a typed node with explicit inputs.  Callers use this for joins
-//RS     /// and for future operations after sema has checked the result schema.
-//RS     pub fn append(
-//RS         &mut self,
-//RS         operation: DataPlanOperationKind,
-//RS         inputs: Vec<DataPlanNodeId>,
-//RS         schema: DataPlanSchema,
-//RS         callable: Option<DataPlanCallable>,
-//RS         stream: DataPlanStreamMode,
-//RS         span: Span,
-//RS     ) -> Result<DataPlanNodeId, DataPlanBuildError> {
-//RS         schema
-//RS             .validate()
-//RS             .map_err(DataPlanBuildError::Schema)?;
-//RS         if inputs.is_empty() && operation != DataPlanOperationKind::Scan {
-//RS             return Err(DataPlanBuildError::MissingInputs(operation));
-//RS         }
-//RS         let first_input = inputs
-//RS             .first()
-//RS             .and_then(|id| self.fact.logical.get(id.index()))
-//RS             .ok_or(DataPlanBuildError::UnknownInput)?;
-//RS         if let Some(callable) = &callable {
-//RS             if callable.parameter != first_input.schema.row_type {
-//RS                 return Err(DataPlanBuildError::CallableParameter {
-//RS                     operation,
-//RS                     expected: first_input.schema.row_type.name(),
-//RS                     actual: callable.parameter.name(),
-//RS                 });
-//RS             }
-//RS             let expected = match operation {
-//RS                 DataPlanOperationKind::Filter => Some(Type::Bool),
-//RS                 DataPlanOperationKind::SortBy => Some(Type::String),
-//RS                 _ => None,
-//RS             };
-//RS             if let Some(expected) = expected {
-//RS                 if callable.result != expected {
-//RS                     return Err(DataPlanBuildError::CallableResult {
-//RS                         operation,
-//RS                         expected: expected.name(),
-//RS                         actual: callable.result.name(),
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS         let id = self.fact.append_logical(
-//RS             operation,
-//RS             inputs,
-//RS             schema,
-//RS             callable,
-//RS             stream.clone(),
-//RS             span,
-//RS         );
-//RS         self.fact.append_physical(
-//RS             id,
-//RS             operation.default_physical_operator(),
-//RS             stream,
-//RS             format!("identity {}", operation.as_str()),
-//RS         );
-//RS         Ok(id)
-//RS     }
-//RS 
-//RS     /// Replace the default identity choice with an optimizer fact.  This is
-//RS     /// still only metadata; no tier-specific operator or execution callback is
-//RS     /// accepted here.
-//RS     pub fn add_physical_choice(
-//RS         &mut self,
-//RS         logical: DataPlanNodeId,
-//RS         operator: DataPlanPhysicalOperatorKind,
-//RS         stream: DataPlanStreamMode,
-//RS         reason: impl Into<String>,
-//RS     ) -> Result<(), DataPlanBuildError> {
-//RS         if logical.index() >= self.fact.logical.len() {
-//RS             return Err(DataPlanBuildError::UnknownInput);
-//RS         }
-//RS         let reason = reason.into();
-//RS         if reason.trim().is_empty() {
-//RS             return Err(DataPlanBuildError::MissingPhysicalReason);
-//RS         }
-//RS         self.fact.append_physical(logical, operator, stream, reason);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn finish(self) -> Result<DataPlanFact, DataPlanBuildError> {
-//RS         self.fact
-//RS             .validate()
-//RS             .map_err(DataPlanBuildError::Validation)?;
-//RS         Ok(self.fact)
-//RS     }
-//RS }
-//RS 
-//RS fn default_stream_for(
-//RS     operation: DataPlanOperationKind,
-//RS ) -> Result<DataPlanStreamMode, DataPlanBuildError> {
-//RS     match operation {
-//RS         DataPlanOperationKind::SortBy => DataPlanStreamMode::materialized("sort_by requires ordering")
-//RS             .map_err(DataPlanBuildError::Stream),
-//RS         _ => DataPlanStreamMode::bounded(None).map_err(DataPlanBuildError::Stream),
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum DataPlanBuildError {
-//RS     Schema(DataPlanSchemaError),
-//RS     Stream(DataPlanStreamError),
-//RS     Validation(DataPlanValidationError),
-//RS     EmptyInput,
-//RS     MissingInputs(DataPlanOperationKind),
-//RS     UnknownInput,
-//RS     CallableParameter {
-//RS         operation: DataPlanOperationKind,
-//RS         expected: String,
-//RS         actual: String,
-//RS     },
-//RS     CallableResult {
-//RS         operation: DataPlanOperationKind,
-//RS         expected: String,
-//RS         actual: String,
-//RS     },
-//RS     MissingPhysicalReason,
-//RS }
-//RS 
-//RS impl std::fmt::Display for DataPlanBuildError {
-//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         match self {
-//RS             Self::Schema(error) => error.fmt(formatter),
-//RS             Self::Stream(error) => error.fmt(formatter),
-//RS             Self::Validation(error) => error.fmt(formatter),
-//RS             Self::EmptyInput => formatter.write_str("table plan has no input frame"),
-//RS             Self::MissingInputs(operation) => {
-//RS                 write!(formatter, "table plan `{}` needs an input", operation.as_str())
-//RS             }
-//RS             Self::UnknownInput => formatter.write_str("table plan input node is unknown"),
-//RS             Self::CallableParameter {
-//RS                 operation,
-//RS                 expected,
-//RS                 actual,
-//RS             } => write!(
-//RS                 formatter,
-//RS                 "table plan `{}` callback takes {actual}, expected {expected}",
-//RS                 operation.as_str()
-//RS             ),
-//RS             Self::CallableResult {
-//RS                 operation,
-//RS                 expected,
-//RS                 actual,
-//RS             } => write!(
-//RS                 formatter,
-//RS                 "table plan `{}` callback returns {actual}, expected {expected}",
-//RS                 operation.as_str()
-//RS             ),
-//RS             Self::MissingPhysicalReason => {
-//RS                 formatter.write_str("table plan physical choice needs a reason")
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Construct a source schema from a checked row type when the source has no
-//RS /// named fields (for example a scalar-list input).
-//RS pub fn scalar_schema(row_type: Type) -> DataPlanSchema {
-//RS     let nullable = matches!(&row_type, Type::Option(_));
-//RS     DataPlanSchema::new(
-//RS         row_type.clone(),
-//RS         vec![crate::AST::DataPlanColumn::new("value", row_type).with_nullable(nullable)],
-//RS     )
-//RS }
-//RS 
-//RS /// Small helper used by sema call sites that need to preserve the callable
-//RS /// label while filling the type/span fields from the checked expression.
-//RS pub fn callable_fact(
-//RS     label: impl Into<String>,
-//RS     parameter: Type,
-//RS     result: Type,
-//RS     span: Span,
-//RS ) -> DataPlanCallable {
-//RS     DataPlanCallable::new(label, parameter, result, span)
-//RS }
-//RS 
-//RS /// Convert an already-built plan into the physical fact shape without
-//RS /// permitting a caller to smuggle an execution-only node into the graph.
-//RS pub fn physical_facts(fact: &DataPlanFact) -> &[DataPlanPhysicalNode] {
-//RS     &fact.physical
-//RS }
-// END-PORT-PENDING 0413 crates/jet-sema/src/Sema/DataPlan.rs:1-356
+use jet_foundation.[DataPlanCallable, DataPlanFact, DataPlanNodeId, DataPlanOperationKind, DataPlanPhysicalNode, DataPlanPhysicalOperatorKind, DataPlanSchema, DataPlanSchemaError, DataPlanSourceKind, DataPlanStreamError, DataPlanStreamMode, DataPlanValidationError, DataPlanLogicalNode, DataPlanColumn, Type, Span]
 
+// Sema-owned graph facts accept only checked types/callables; no rows or predicates execute here.
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:18
+pub enum DataPlanCallKind {
+    Scan(DataPlanSourceKind)
+    Filter
+    SortBy
+    Collect
+    InspectPlan
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:28
+pub fn classify_data_call(module: String, method: String) -> DataPlanCallKind? {
+    if module != "core.data" -> return None
+    if method == {
+        "query" -> Val(DataPlanCallKind.Scan(DataPlanSourceKind.Table))
+        "csv" -> Val(DataPlanCallKind.Scan(DataPlanSourceKind.Csv))
+        "json" -> Val(DataPlanCallKind.Scan(DataPlanSourceKind.Json))
+        "jsonl" -> Val(DataPlanCallKind.Scan(DataPlanSourceKind.Jsonl))
+        "parquet" -> Val(DataPlanCallKind.Scan(DataPlanSourceKind.Parquet))
+        "arrow" -> Val(DataPlanCallKind.Scan(DataPlanSourceKind.Arrow))
+        "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" -> Val(DataPlanCallKind.Scan(DataPlanSourceKind.Loader))
+        "csv_reader" -> Val(DataPlanCallKind.Scan(DataPlanSourceKind.CsvReader))
+        "json_reader" -> Val(DataPlanCallKind.Scan(DataPlanSourceKind.JsonReader))
+        else -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:51
+pub fn classify_data_receiver_call(receiver_types: [String], method: String) -> DataPlanCallKind? {
+    if !receiver_types.any(fn(name) { name == "Query" }) -> return None
+    if method == {
+        "filter" -> Val(DataPlanCallKind.Filter)
+        "sort_by" -> Val(DataPlanCallKind.SortBy)
+        "collect" -> Val(DataPlanCallKind.Collect)
+        "plan" -> Val(DataPlanCallKind.InspectPlan)
+        else -> None
+    }
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:72
+pub struct DataPlanBuilder {
+    plan_fact: DataPlanFact
+}
+impl DataPlanBuilder {
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:77
+    pub fn new(source: DataPlanSourceKind, schema: DataPlanSchema, span: Span) -> Self DataPlanBuildError! {
+        schema.validate().map_err(DataPlanBuildError.Schema)!
+        Self{plan_fact: DataPlanFact.scan(source, ^schema, span)}
+    }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:94
+    pub fn from_fact(fact: DataPlanFact) -> Self DataPlanBuildError! {
+        fact.validate().map_err(DataPlanBuildError.Validation)!
+        Self{plan_fact: ^fact}
+    }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:100
+    pub fn fact(self: &Self) -> &DataPlanFact { &self.plan_fact }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:104
+    pub fn current_node(self) -> DataPlanLogicalNode? { self.plan_fact.output_node() }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:108
+    pub fn current_node_id(self) -> DataPlanNodeId { self.plan_fact.output }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:113
+    pub fn filter(self: &Self, callable: DataPlanCallable, span: Span) -> DataPlanNodeId DataPlanBuildError! {
+        &self.append_unary(DataPlanOperationKind.Filter, ^callable, span)!
+    }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:121
+    pub fn sort_by(self: &Self, callable: DataPlanCallable, span: Span) -> DataPlanNodeId DataPlanBuildError! {
+        &self.append_unary(DataPlanOperationKind.SortBy, ^callable, span)!
+    }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:132
+    pub fn collect(self: &Self, span: Span) -> DataPlanNodeId DataPlanBuildError! {
+        stream :: DataPlanStreamMode.materialized("explicit collect").map_err(DataPlanBuildError.Stream)!
+        node :: self.current_node() ?? fail DataPlanBuildError.EmptyInput
+        &self.append(DataPlanOperationKind.Collect, [self.current_node_id()], node.schema, None, ^stream, span)!
+    }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:152
+    pub fn append_unary(self: &Self, operation: DataPlanOperationKind, callable: DataPlanCallable, span: Span) -> DataPlanNodeId DataPlanBuildError! {
+        node :: self.current_node() ?? fail DataPlanBuildError.EmptyInput
+        stream :: default_stream_for(operation)!
+        &self.append(operation, [self.current_node_id()], node.schema, Val(^callable), ^stream, span)!
+    }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:176
+    pub fn append(self: &Self, operation: DataPlanOperationKind, inputs: [DataPlanNodeId], schema: DataPlanSchema, callable: DataPlanCallable?, stream: DataPlanStreamMode, span: Span) -> DataPlanNodeId DataPlanBuildError! {
+        schema.validate().map_err(DataPlanBuildError.Schema)!
+        if inputs.is_empty() && operation != .Scan -> fail DataPlanBuildError.MissingInputs(operation)
+        first_id :: inputs.first() ?? fail DataPlanBuildError.UnknownInput
+        first_input :: self.plan_fact.logical.get(first_id.index()) ?? fail DataPlanBuildError.UnknownInput
+        if callable == .Val(callback) {
+            if callback.parameter != first_input.schema.row_type -> fail DataPlanBuildError.CallableParameter{operation: operation, expected: first_input.schema.row_type.name(), actual: callback.parameter.name()}
+            expected :: if operation == { .Filter -> Val(Type.Bool) .SortBy -> Val(Type.String) else -> None }
+            if expected == .Val(result_type) && callback.result != result_type -> fail DataPlanBuildError.CallableResult{operation: operation, expected: result_type.name(), actual: callback.result.name()}
+        }
+        id :: &self.plan_fact.append_logical(operation, ^inputs, ^schema, ^callable, stream, span)
+        _ :: &self.plan_fact.append_physical(id, operation.default_physical_operator(), ^stream, "identity {operation.as_str()}")
+        id
+    }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:238
+    pub fn add_physical_choice(self: &Self, logical: DataPlanNodeId, operator: DataPlanPhysicalOperatorKind, stream: DataPlanStreamMode, reason: String) -> Unit DataPlanBuildError! {
+        if logical.index() >= self.plan_fact.logical.len() -> fail DataPlanBuildError.UnknownInput
+        trimmed := reason.trim() // #4303
+        if trimmed.is_empty() -> fail DataPlanBuildError.MissingPhysicalReason
+        _ :: &self.plan_fact.append_physical(logical, operator, ^stream, ^reason)
+    }
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:256
+    pub fn finish(self) -> DataPlanFact DataPlanBuildError! {
+        self.plan_fact.validate().map_err(DataPlanBuildError.Validation)!
+        ^self.plan_fact
+    }
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:264
+fn default_stream_for(operation: DataPlanOperationKind) -> DataPlanStreamMode DataPlanBuildError! {
+    if operation == .SortBy -> DataPlanStreamMode.materialized("sort_by requires ordering").map_err(DataPlanBuildError.Stream)!
+    else -> DataPlanStreamMode.bounded(None).map_err(DataPlanBuildError.Stream)!
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:275
+#Error
+pub enum DataPlanBuildError {
+    Schema(DataPlanSchemaError)
+    Stream(DataPlanStreamError)
+    Validation(DataPlanValidationError)
+    EmptyInput
+    MissingInputs(DataPlanOperationKind)
+    UnknownInput
+    CallableParameter(operation: DataPlanOperationKind, expected: String, actual: String)
+    CallableResult(operation: DataPlanOperationKind, expected: String, actual: String)
+    MissingPhysicalReason
+}
+impl DataPlanBuildError {
+    // Rust: crates/jet-sema/src/Sema/DataPlan.rs:296
+    pub fn show(self) -> String {
+        if self == {
+            .Schema(error) -> error.show()
+            .Stream(error) -> error.show()
+            .Validation(error) -> error.show()
+            .EmptyInput -> "table plan has no input frame"
+            .MissingInputs(operation) -> "table plan `{operation.as_str()}` needs an input"
+            .UnknownInput -> "table plan input node is unknown"
+            .CallableParameter(operation, expected, actual) -> "table plan `{operation.as_str()}` callback takes {actual}, expected {expected}"
+            .CallableResult(operation, expected, actual) -> "table plan `{operation.as_str()}` callback returns {actual}, expected {expected}"
+            .MissingPhysicalReason -> "table plan physical choice needs a reason"
+        }
+    }
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:333
+pub fn scalar_schema(row_type: Type) -> DataPlanSchema {
+    nullable :: if row_type == { .Option(_) -> true else -> false }
+    DataPlanSchema.new(row_type, [DataPlanColumn.new("value", row_type).with_nullable(nullable)])
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:343
+pub fn callable_fact(label: String, parameter: Type, result: Type, span: Span) -> DataPlanCallable {
+    DataPlanCallable.new(^label, ^parameter, ^result, span)
+}
+// Rust: crates/jet-sema/src/Sema/DataPlan.rs:354
+pub fn physical_facts(fact: &DataPlanFact) -> &[DataPlanPhysicalNode] { &fact.physical }

@@ -1,0 +1,33 @@
+use jet_foundation.[ComponentTypeDescriptor]
+use JetCodegen.Codegen.Plugin.[to_kebab, sanitize_package_name, PluginCoreSlot, merge_plugin_slot, merge_plugin_slots, plugin_flat_slots, plugin_memory_layout, plugin_sequence_layout, plugin_needs_post_return, plugin_host_import_wit, plugin_host_import_bridge]
+
+// Rust: crates/jet-codegen/src/Codegen/Plugin.rs:52-80 (behavioral control; no inline tests)
+#Test("plugin_package_names_preserve_wit_identifier_constraints") {
+    assert(to_kebab("some_function") == "some-function")
+    assert(sanitize_package_name("---Math__Kit---") == "math-kit")
+    assert(sanitize_package_name("123") == "plugin-123")
+    assert(sanitize_package_name("!!!") == "plugin-export")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Plugin.rs:148-281 (behavioral control)
+#Test("plugin_component_flat_slots_and_memory_layout_share_canonical_rules") {
+    assert(merge_plugin_slot(PluginCoreSlot.I32, PluginCoreSlot.F64) == PluginCoreSlot.I64)
+    assert(merge_plugin_slots([PluginCoreSlot]{.I32, .F64}, [PluginCoreSlot]{.I64}) == [PluginCoreSlot]{.I64, .F64})
+    assert(plugin_flat_slots(ComponentTypeDescriptor.String) == [PluginCoreSlot]{.I32, .I32})
+    assert(plugin_memory_layout(ComponentTypeDescriptor.Option(ComponentTypeDescriptor.Int)) == (16, 8))
+    assert(plugin_sequence_layout([ComponentTypeDescriptor]{.Bool, .Int}) == (16, 8))
+    assert(!plugin_needs_post_return(ComponentTypeDescriptor.Option(ComponentTypeDescriptor.Int)))
+    assert(plugin_needs_post_return(ComponentTypeDescriptor.List(ComponentTypeDescriptor.Bool)))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Plugin.rs:1184-1364 (behavioral control)
+#Test("plugin_host_bridge_is_closed_and_emits_real_canonical_marshalling") {
+    assert(plugin_host_import_bridge([]) == "")
+    assert(plugin_host_import_wit("unknown") == "")
+    assert(plugin_host_import_wit("FS.Read").contains("result<string, io-error>"))
+    bridge :: plugin_host_import_bridge([String]{"FS.Read"})
+    assert(bridge.contains("host-read"))
+    assert(bridge.contains("invalid canonical host read result discriminant"))
+    assert(bridge.contains("std::ptr::read_unaligned"))
+    assert(!bridge.contains("host-write"))
+}

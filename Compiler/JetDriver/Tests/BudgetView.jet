@@ -1,0 +1,25 @@
+use jet_driver.BudgetView.[BudgetFact, BudgetProjection, read_compatible]
+use std.[fs, env, process]
+
+// Rust: crates/jet-driver/src/BudgetView.rs:33-94
+#Test("budget_projection_retains_report_identity") {
+    projection := BudgetProjection { facts: [BudgetFact { report_id: "0123456789abcdef", evidence_id: "fedcba9876543210", budget_id: "latency", evidence: "absolute", outcome: "pass", enforcement: "warn", statistical: false }], rejected: ["bad\nreport"] }
+    assert_eq(projection.to_json(), "{{\"mode\":\"read_only\",\"rejected\":[\"bad\\nreport\"],\"reports\":[{{\"budget_id\":\"latency\",\"enforcement\":\"warn\",\"evidence\":\"absolute\",\"evidence_id\":\"fedcba9876543210\",\"outcome\":\"pass\",\"report_id\":\"0123456789abcdef\",\"statistical\":false}}]}}")
+    assert_eq(projection.render_text(), "Performance budgets (read-only)\n  latency  pass (absolute)  report 0123456789ab  evidence fedcba987654\n  rejected: bad\nreport\n")
+}
+// Rust: crates/jet-driver/src/BudgetView.rs:98-177
+#Test("budget_projection_rejects_invalid_report_without_writing") {
+    // GATE #4494: real filesystem projection; this consumer does not manufacture reports.
+    root := env.temp_dir().join("jet-budget-view-control-{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    dir := root.join(".jet/perf/reports")
+    fs.create_dir_all(&dir).unwrap()
+    path := dir.join("bad.json")
+    fs.write(&path, "not canonical JSON").unwrap()
+    projection := read_compatible(&root, [])
+    assert(projection.facts.is_empty())
+    assert_eq(projection.rejected.len(), 1)
+    assert(projection.rejected[0].starts_with("bad.json: "))
+    assert_eq(fs.read_to_string(&path).unwrap(), "not canonical JSON")
+    _ :: fs.remove_dir_all(&root)
+}

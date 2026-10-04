@@ -1,0 +1,30 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/binary.rs:1160-1208 (behavioral control; no inline Rust tests)
+#Test("logic_requires_two_bool_operands") {
+    valid :: statements05_diagnostics("fn run() {{ value :: true && false\n _ :: value }}\n")
+    assert(!valid.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{valid:?}")
+    invalid :: statements05_diagnostics("fn run() {{ value :: true && 2\n _ :: value }}\n")
+    assert(invalid.any(fn(d: Diagnostic) { d.code == "E0110" }))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/binary.rs:2415-2448 (behavioral control)
+#Test("whole_division_and_floor_division_keep_distinct_carriers") {
+    diagnostics :: statements05_diagnostics("fn run() {{ exact: Fraction :: 3 / 2\n floor: Int :: 3 /% 2\n _ :: exact\n _ :: floor }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/binary.rs:2528-2556 (behavioral control)
+#Test("shift_count_can_have_a_different_integer_width") {
+    diagnostics :: statements05_diagnostics("fn run() {{ value: U8 :: 1\n count: U16 :: 2\n shifted: U8 :: value << count\n _ :: shifted }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/binary.rs:2690-2751 (behavioral control)
+#Test("comparison_chain_checks_every_adjacent_pair") {
+    valid :: statements05_diagnostics("fn run() {{ value :: 5\n inside: Bool :: 0 <= value < 10\n _ :: inside }}\n")
+    assert(!valid.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{valid:?}")
+    invalid :: statements05_diagnostics("fn run() {{ value :: 5\n inside :: 0 <= value < true\n _ :: inside }}\n")
+    assert(invalid.any(fn(d: Diagnostic) { d.code == "E0109" }))
+}

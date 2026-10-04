@@ -1,1261 +1,379 @@
-// PORT-PENDING 0478 crates-jet-codegen-src-codegen-tir-lower-expressions-slice-4420: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4420-5676
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-//RS     if let Expr::PatternTest {
-//RS         subject, pattern, ..
-//RS     } = e
-//RS     {
-//RS         let folded =
-//RS             crate::Codegen::TIR::fold_typed_fact_enum_pattern(subject, pattern).or_else(|| {
-//RS                 // A field read of a prepared constant (`EXACTNESS.kind`) holds
-//RS                 // its checked fact enum value; test it here as the inline read.
-//RS                 let Some(CtValue::Enum {
-//RS                     type_name,
-//RS                     variant,
-//RS                     args,
-//RS                 }) = prepared_constant_path_value(subject, cx, env)
-//RS                 else {
-//RS                     return None;
-//RS                 };
-//RS                 if !args.is_empty() {
-//RS                     return None;
-//RS                 }
-//RS                 crate::Codegen::TIR::fold_fact_enum_variant_test(type_name, variant, pattern)
-//RS             });
-//RS         if let Some(value) = folded {
-//RS             return TExpr {
-//RS                 ty: Type::Bool,
-//RS                 kind: TExprKind::BoolLit(value),
-//RS             };
-//RS         }
-//RS     }
-//RS     match e {
-//RS         Expr::Int(n, span, width, raw) => {
-//RS             in_own_frame(|| {
-//RS                 // D-INTBIG1 / D-FIXED-CONSTRUCT1: the lexer keeps the raw
-//RS                 // spelling when its i64 fast path overflows. A fixed-width
-//RS                 // literal must cross the same exact-Int conversion seam as a
-//RS                 // runtime `U64.from_int(...)` call; emitting `n` here would
-//RS                 // turn the token's fallback zero into the program's value.
-//RS                 if let Some(width) = width {
-//RS                     if let Some(raw) = raw.as_deref() {
-//RS                         let raw = raw.replace('_', "");
-//RS                         if let Ok(value) = jet_foundation::Numeric::CtBigInt::from_literal(&raw) {
-//RS                             if value.try_i64().is_none() {
-//RS                                 let target = int_lit_type(&Some(*width));
-//RS                                 let conversion =
-//RS                                     crate::Codegen::TIR::resolve_numeric_conversion_op(
-//RS                                         &target.name(),
-//RS                                         "Int",
-//RS                                     )
-//RS                                     .expect("fixed-width Int literal has a numeric conversion");
-//RS                                 let TNumericOp::TryFrom {
-//RS                                     host_kind,
-//RS                                     dst_rust,
-//RS                                     dst_spelling,
-//RS                                 } = conversion
-//RS                                 else {
-//RS                                     unreachable!(
-//RS                                         "fixed-width Int literal conversion must be checked"
-//RS                                     );
-//RS                                 };
-//RS                                 return TExpr {
-//RS                                     ty: target,
-//RS                                     kind: TExprKind::NumericMethod {
-//RS                                         recv: Box::new(TExpr {
-//RS                                             ty: Type::Int,
-//RS                                             kind: TExprKind::CtLit(CtValue::BigInt(value)),
-//RS                                         }),
-//RS                                         op: TNumericOp::CheckedIntToFixed {
-//RS                                             host_kind,
-//RS                                             dst_rust,
-//RS                                             dst_spelling,
-//RS                                             line: cx.src_line_col(span.start).0 as u32,
-//RS                                         },
-//RS                                     },
-//RS                                 };
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-INTBIG1: the lexer preserves a decimal literal that does not
-//RS                 // fit its token fast path. Keep it as a normal `Int` literal and
-//RS                 // let the packed Prelude constructor own the spill.
-//RS                 if width.is_none() {
-//RS                     if let Some(raw) = raw.as_deref() {
-//RS                         let raw = raw.replace('_', "");
-//RS                         if raw.parse::<i64>().is_err() {
-//RS                             if let Ok(value) = jet_foundation::Numeric::CtBigInt::from_literal(&raw)
-//RS                             {
-//RS                                 return TExpr {
-//RS                                     ty: Type::Int,
-//RS                                     kind: TExprKind::CtLit(CtValue::BigInt(value)),
-//RS                                 };
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 TExpr {
-//RS                     ty: int_lit_type(width),
-//RS                     kind: TExprKind::IntLit(*n, *width),
-//RS                 }
-//RS             })
-//RS         }
-//RS         Expr::Float(v, _, is_f32, _) => TExpr {
-//RS             // D-FLOATW1: sema resolves F32 context and writes `is_f32=true` on the
-//RS             // node; carry that width through to TIR so emit produces the right suffix.
-//RS             ty: if *is_f32 { Type::Float32 } else { Type::Float },
-//RS             kind: TExprKind::FloatLit(*v),
-//RS         },
-//RS         Expr::Bool(b, _) => TExpr {
-//RS             ty: Type::Bool,
-//RS             kind: TExprKind::BoolLit(*b),
-//RS         },
-//RS         // D-VOID1=A: lower the public unit literal to the existing TIR Unit
-//RS         // value and internal Unit type.
-//RS         Expr::Unit(_) => TExpr {
-//RS             ty: unit_type(),
-//RS             kind: TExprKind::Unit,
-//RS         },
-//RS         Expr::Range {
-//RS             start,
-//RS             end,
-//RS             exclusive,
-//RS             ..
-//RS         } => TExpr {
-//RS             ty: Type::Named(Syntax::TYPE_RANGE.to_string()),
-//RS             kind: TExprKind::StructLit {
-//RS                 fields: vec![
-//RS                     ("start".to_string(), lower_expr(start, cx, env), false),
-//RS                     ("end".to_string(), lower_expr(end, cx, env), false),
-//RS                     (
-//RS                         "exclusive".to_string(),
-//RS                         TExpr {
-//RS                             ty: Type::Bool,
-//RS                             kind: TExprKind::BoolLit(*exclusive),
-//RS                         },
-//RS                         false,
-//RS                     ),
-//RS                 ],
-//RS                 extra: None,
-//RS                 as_trait: None,
-//RS             },
-//RS         },
-//RS         Expr::Char(c, _) => TExpr {
-//RS             ty: Type::Char,
-//RS             kind: TExprKind::CharLit(*c),
-//RS         },
-//RS         Expr::Str(parts, _) => in_own_frame(|| {
-//RS             let tparts = parts
-//RS                 .iter()
-//RS                 .map(|p| match p {
-//RS                     StrPart::Lit(s) => TStrPart::Lit(s.clone()),
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Fixed(precision)) => {
-//RS                         let formatted = lower_fmt_call(
-//RS                             "decimal",
-//RS                             vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
-//RS                             e.span(),
-//RS                         );
-//RS                         TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
-//RS                     }
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Grouped(precision)) => {
-//RS                         let formatted = lower_fmt_call(
-//RS                             "grouped",
-//RS                             vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
-//RS                             e.span(),
-//RS                         );
-//RS                         TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
-//RS                     }
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Hex(width)) => {
-//RS                         let formatted = lower_fmt_call(
-//RS                             "hex",
-//RS                             vec![lower_expr(e, cx, env), lower_fmt_int(*width)],
-//RS                             e.span(),
-//RS                         );
-//RS                         TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
-//RS                     }
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Pad { width, fill }) => {
-//RS                         TStrPart::Interp(
-//RS                             lower_fmt_call(
-//RS                                 "pad",
-//RS                                 vec![
-//RS                                     lower_expr(e, cx, env),
-//RS                                     lower_fmt_int(*width),
-//RS                                     lower_fmt_string(fill.clone()),
-//RS                                 ],
-//RS                                 e.span(),
-//RS                             ),
-//RS                             crate::AST::StrFormat::Display,
-//RS                         )
-//RS                     }
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::PadLeft { width, fill }) => {
-//RS                         TStrPart::Interp(
-//RS                             lower_fmt_call(
-//RS                                 "pad_left",
-//RS                                 vec![
-//RS                                     lower_expr(e, cx, env),
-//RS                                     lower_fmt_int(*width),
-//RS                                     lower_fmt_string(fill.clone()),
-//RS                                 ],
-//RS                                 e.span(),
-//RS                             ),
-//RS                             crate::AST::StrFormat::Display,
-//RS                         )
-//RS                     }
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Sci(precision)) => TStrPart::Interp(
-//RS                         lower_fmt_call(
-//RS                             "sci",
-//RS                             vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
-//RS                             e.span(),
-//RS                         ),
-//RS                         crate::AST::StrFormat::Display,
-//RS                     ),
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Percent(precision)) => {
-//RS                         TStrPart::Interp(
-//RS                             lower_fmt_call(
-//RS                                 "percent",
-//RS                                 vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
-//RS                                 e.span(),
-//RS                             ),
-//RS                             crate::AST::StrFormat::Display,
-//RS                         )
-//RS                     }
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Bin) => TStrPart::Interp(
-//RS                         lower_fmt_call("bin", vec![lower_expr(e, cx, env)], e.span()),
-//RS                         crate::AST::StrFormat::Display,
-//RS                     ),
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Oct) => TStrPart::Interp(
-//RS                         lower_fmt_call("oct", vec![lower_expr(e, cx, env)], e.span()),
-//RS                         crate::AST::StrFormat::Display,
-//RS                     ),
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Unit(style)) => {
-//RS                         let value = lower_expr(e, cx, env);
-//RS                         TStrPart::Interp(
-//RS                             lower_unit_text(value, *style, cx),
-//RS                             crate::AST::StrFormat::Display,
-//RS                         )
-//RS                     }
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Pretty) => {
-//RS                         let value = lower_debug_text(lower_expr(e, cx, env));
-//RS                         TStrPart::Interp(
-//RS                             core_call_expr(
-//RS                                 Type::String,
-//RS                                 "core.text.fmt",
-//RS                                 "pretty",
-//RS                                 vec![value],
-//RS                                 e.span(),
-//RS                                 vec![false],
-//RS                             ),
-//RS                             crate::AST::StrFormat::Display,
-//RS                         )
-//RS                     }
-//RS                     StrPart::Interp(e, crate::AST::StrFormat::Display) => TStrPart::Interp(
-//RS                         lower_display_value(lower_expr(e, cx, env), cx),
-//RS                         crate::AST::StrFormat::Display,
-//RS                     ),
-//RS                     StrPart::Interp(e, fmt) => {
-//RS                         TStrPart::Interp(lower_expr(e, cx, env), fmt.clone())
-//RS                     }
-//RS                 })
-//RS                 .collect();
-//RS             TExpr {
-//RS                 ty: Type::String,
-//RS                 kind: TExprKind::StrLit(tparts),
-//RS             }
-//RS         }),
-//RS         Expr::Ident(name, _) => {
-//RS             in_own_frame(|| {
-//RS                 if let Some((temp, ty)) = env.binder_ref(name).cloned() {
-//RS                     return TExpr {
-//RS                         ty,
-//RS                         kind: TExprKind::Local(TLocal::user(&temp)),
-//RS                     };
-//RS                 }
-//RS                 if let Some(ty) = cx.persist_types.get(name) {
-//RS                     return TExpr {
-//RS                         ty: ty.clone(),
-//RS                         kind: TExprKind::Local(
-//RS                             cx.persistent_local(name)
-//RS                                 .expect("persist type and slot must agree"),
-//RS                         ),
-//RS                     };
-//RS                 }
-//RS                 if env.locals.contains_key(name) {
-//RS                     return TExpr {
-//RS                         ty: env.ty_of(name).unwrap_or(Type::Int),
-//RS                         kind: TExprKind::Local(env.local_of(name)),
-//RS                     };
-//RS                 }
-//RS                 // A compile-time constant is considered only after lexical
-//RS                 // locals. Parameters and local bindings shadow a same-named
-//RS                 // package constant just as every other lexical binding does.
-//RS                 // parity: guard tests/tir_patterns_and_fields.rs::lexical_parameter_shadows_same_named_comptime_constant_on_all_tiers
-//RS                 if cx.consts.contains_key(name) || cx.const_ref_keys.contains_key(name) {
-//RS                     return in_own_frame(|| {
-//RS                         let value = cx.const_values.get(name);
-//RS                         let ty = env
-//RS                             .ty_of(name)
-//RS                             .or_else(|| cx.const_ref_types.get(name).cloned())
-//RS                             .or_else(|| cx.const_types.get(name).cloned())
-//RS                             .or_else(|| value.map(crate::AST::CtValue::jet_type))
-//RS                             .unwrap_or(Type::Int);
-//RS                         return TExpr {
-//RS                             kind: lower_comptime_scalar(value, Some(&ty))
-//RS                                 .unwrap_or_else(|| {
-//RS                                     TExprKind::ConstRef(checked_const_ref_name(name, cx))
-//RS                                 }),
-//RS                             ty,
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // c109 Phase 13: a bare function name used as a VALUE (not a local, not a
-//RS                 // const) emits `emit_named_fn_value` — `Box::new(move |…| __jet_<name>(…))
-//RS                 // as <fn-type>`. Mirrors `emit_expr`'s `Expr::Ident` arm (Expression.rs).
-//RS                 if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
-//RS                     let fn_value_ty = cx
-//RS                         .fn_types
-//RS                         .get(name)
-//RS                         .or_else(|| cx.fn_source_types.get(name));
-//RS                     if let Some(ft @ Type::Fn { .. }) = fn_value_ty {
-//RS                         return in_own_frame(|| {
-//RS                             return TExpr {
-//RS                                 ty: ft.clone(),
-//RS                                 kind: TExprKind::FnValue {
-//RS                                     kind: TFnValueKind::NamedFn {
-//RS                                         name: Some(name.clone()),
-//RS                                         lambda: None,
-//RS                                     },
-//RS                                 },
-//RS                             };
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 let ty = env.ty_of(name).unwrap_or(Type::Int);
-//RS                 if env.is_gc(name) {
-//RS                     return in_own_frame(|| {
-//RS                         return TExpr {
-//RS                             ty,
-//RS                             kind: TExprKind::HostCall(Box::new(
-//RS                                 crate::Codegen::TIR::THostCall::GcRead {
-//RS                                     root: env.local_of(name),
-//RS                                 },
-//RS                             )),
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 TExpr {
-//RS                     ty,
-//RS                     kind: TExprKind::Local(env.local_of(name)),
-//RS                 }
-//RS             })
-//RS         }
-//RS         // Derive-template unit enums retain their comptime-substitution node so
-//RS         // canonical compiler facts can fold before dispatch. Non-fact enums
-//RS         // resume the same ordinary typed enum path as an author-written literal.
-//RS         Expr::ComptimeName {
-//RS             value:
-//RS                 Some(crate::AST::CtValue::Enum {
-//RS                     type_name,
-//RS                     variant,
-//RS                     args,
-//RS                 }),
-//RS             ..
-//RS         } if args.is_empty() => in_own_frame(|| {
-//RS             let resolved_type = cx
-//RS                 .core_qualified_rust_type_name(type_name)
-//RS                 .unwrap_or(type_name.as_str());
-//RS             TExpr {
-//RS                 ty: Type::Named(resolved_type.to_string()),
-//RS                 kind: TExprKind::EnumLit {
-//RS                     enum_type: resolved_type.to_string(),
-//RS                     variant: variant.clone(),
-//RS                     payload: TEnumPayload::Unit,
-//RS                 },
-//RS             }
-//RS         }),
-//RS         Expr::ComptimeName {
-//RS             value: Some(value), ..
-//RS         } => {
-//RS             let ty = value.jet_type();
-//RS             let kind = lower_comptime_scalar(Some(value), Some(&ty))
-//RS                 .unwrap_or_else(|| TExprKind::CtLit(value.clone()));
-//RS             TExpr { ty, kind }
-//RS         }
-//RS         Expr::ComptimeName { name, span: _, .. } => lower_named_comptime_binding(name, cx, env)
-//RS             .unwrap_or_else(|| TExpr {
-//RS                 // Fragment lowering also lowers every user function as extra
-//RS                 // context. A later function may mention a const still being
-//RS                 // evaluated; keep a named reference instead of poisoning the
-//RS                 // fragment with an invariant violation.
-//RS                 ty: env
-//RS                     .ty_of(name)
-//RS                     .or_else(|| cx.const_ref_types.get(name).cloned())
-//RS                     .unwrap_or(Type::Int),
-//RS                 kind: TExprKind::ConstRef(checked_const_ref_name(name, cx)),
-//RS             }),
-//RS         // c109 Phase 13: a direct call THROUGH a fn-value (`Expr::CallValue`).
-//RS         // Sema's `.call(args)` projection joins this helper below. Function-type
-//RS         // parameters are unmarked, therefore Read under D-MEM-PARAM1.
-//RS         Expr::CallValue { callee, args, span } => lower_fn_value_call(
-//RS             Some(callee),
-//RS             lower_expr(callee, cx, env),
-//RS             args,
-//RS             span.start as u32,
-//RS             cx,
-//RS             env,
-//RS         ),
-//RS         Expr::Unary(op, inner, _) => in_own_frame(|| {
-//RS             let operand = lower_expr(inner, cx, env);
-//RS             let ty = operand.ty.clone();
-//RS             TExpr {
-//RS                 ty,
-//RS                 kind: TExprKind::Unary {
-//RS                     op: *op,
-//RS                     operand: Box::new(operand),
-//RS                 },
-//RS             }
-//RS         }),
-//RS         // D-CAP9: postfix `p.*` deref. Result type is the pointer's element type.
-//RS         Expr::Deref(inner, _) => in_own_frame(|| {
-//RS             let operand = lower_expr(inner, cx, env);
-//RS             let ty = crate::Sema::ptr_elem(&operand.ty).unwrap_or_else(|| operand.ty.clone());
-//RS             TExpr {
-//RS                 ty,
-//RS                 kind: TExprKind::Deref(Box::new(operand)),
-//RS             }
-//RS         }),
-//RS         // D-CAP9: prefix `*x` raw-pointer-of. Result type is `*T` (`Ptr<T>`).
-//RS         Expr::RawOf(inner, _) => in_own_frame(|| {
-//RS             let operand = lower_expr(inner, cx, env);
-//RS             if matches!(tir_address_lifetime(&operand), TAddressLifetime::Stack) {
-//RS                 env.note_stack_address();
-//RS             }
-//RS             let ty = crate::Sema::ptr_type(operand.ty.clone());
-//RS             TExpr {
-//RS                 ty,
-//RS                 kind: TExprKind::RawOf(Box::new(operand)),
-//RS             }
-//RS         }),
-//RS         // D-CAP2 (D-MEM1/S4): `~x` — a fresh, independent value. Keep this
-//RS         // signal distinct from compiler-inserted Clone nodes: Tensor's explicit
-//RS         // copy is a Prelude storage operation, while ordinary Clone shares its
-//RS         // Arc-backed storage.
-//RS         Expr::Copy(inner, copy_span) => {
-//RS             in_own_frame(|| {
-//RS                 let operand = lower_expr(inner, cx, env);
-//RS                 let view_owned_ty = view_copy_owned_type(&operand.ty);
-//RS                 let is_view_type = view_owned_ty.is_some();
-//RS                 let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
-//RS                 // D-MEM-COPYSEM1: both written `~` and sema-inserted copies of
-//RS                 // read-only views use the shared materialization path. A string
-//RS                 // view's Rust place is a bare `&str`, so cloning it would return
-//RS                 // another `&str`; the Prelude must produce the owned `String`.
-//RS                 let is_view_copy = is_view_type
-//RS                     || matches!(&**inner, Expr::Ident(name, _) if env.is_string_view_local(name))
-//RS                     || matches!(
-//RS                         &**inner,
-//RS                         Expr::Ident(name, _)
-//RS                             if env
-//RS                                 .split_view_handle(name)
-//RS                                 .is_some_and(|ty| view_copy_owned_type(&ty).is_some())
-//RS                     );
-//RS                 // Parser-created `~` spans begin at the sigil. Sema-created
-//RS                 // ownership clones reuse the operand span. Preserve that
-//RS                 // existing provenance fact as a TIR distinction; do not inspect
-//RS                 // source text or make a backend guess.
-//RS                 let explicit = *copy_span != inner.span();
-//RS                 let kind = if is_view_copy {
-//RS                     TExprKind::MaterializeView(Box::new(operand))
-//RS                 } else if explicit {
-//RS                     env.note_clone(&ty);
-//RS                     TExprKind::ExplicitCopy(Box::new(operand))
-//RS                 } else {
-//RS                     env.note_clone(&ty);
-//RS                     TExprKind::Clone(Box::new(operand), jet_foundation::MIR::MirCopyFact::Materialize)
-//RS                 };
-//RS                 TExpr { ty, kind }
-//RS             })
-//RS         }
-//RS         Expr::Place(inner, access, span) => {
-//RS             in_own_frame(|| {
-//RS                 if let Expr::Slice {
-//RS                     base,
-//RS                     start,
-//RS                     end,
-//RS                     range,
-//RS                     ..
-//RS                 } = inner.as_ref()
-//RS                 {
-//RS                     let recv = if *access == crate::AST::PlaceAccess::Write {
-//RS                         lower_expr_as_mut_place(base, cx, env)
-//RS                     } else {
-//RS                         lower_expr(base, cx, env)
-//RS                     };
-//RS                     // Tensor, Vec<N>, and Matrix<M, N> all use the ranked compute
-//RS                     // Prelude. The foundation predicate is exact, so ordinary
-//RS                     // generics cannot accidentally enter the tensor-view path.
-//RS                     let is_tensor = recv.ty.is_compute_tensor_family();
-//RS                     let elem = if is_tensor {
-//RS                         Type::Float
-//RS                     } else {
-//RS                         match &recv.ty {
-//RS                             Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
-//RS                             _ => Type::Int,
-//RS                         }
-//RS                     };
-//RS                     let mutable = *access == crate::AST::PlaceAccess::Write;
-//RS                     let line = cx.src_line_col(span.start).0;
-//RS                     let args = if let Some(range) = range {
-//RS                         vec![lower_expr(range, cx, env)]
-//RS                     } else {
-//RS                         vec![lower_expr(start, cx, env), lower_expr(end, cx, env)]
-//RS                     };
-//RS                     TExpr {
-//RS                         ty: Type::Apply {
-//RS                             name: if mutable && is_tensor {
-//RS                                 "ComputeViewMut"
-//RS                             } else if mutable {
-//RS                                 "ViewMut"
-//RS                             } else {
-//RS                                 "View"
-//RS                             }
-//RS                             .to_string(),
-//RS                             args: vec![elem],
-//RS                         },
-//RS                         kind: TExprKind::BuiltinMethod {
-//RS                             recv: Box::new(recv),
-//RS                             op: if mutable {
-//RS                                 if is_tensor {
-//RS                                     TBuiltinOp::ComputeViewMutNew { line }
-//RS                                 } else {
-//RS                                     TBuiltinOp::ViewMutNew { line }
-//RS                                 }
-//RS                             } else {
-//RS                                 if is_tensor {
-//RS                                     TBuiltinOp::ComputeViewNew { line }
-//RS                                 } else {
-//RS                                     TBuiltinOp::ViewNew { line }
-//RS                                 }
-//RS                             },
-//RS                             args,
-//RS                         },
-//RS                     }
-//RS                 } else {
-//RS                     let place = if *access == crate::AST::PlaceAccess::Write {
-//RS                         lower_expr_as_mut_place(inner, cx, env)
-//RS                     } else {
-//RS                         lower_expr(inner, cx, env)
-//RS                     };
-//RS                     TExpr {
-//RS                         ty: place.ty.clone(),
-//RS                         kind: TExprKind::Borrow {
-//RS                             place: Box::new(place),
-//RS                             mutable: *access == crate::AST::PlaceAccess::Write,
-//RS                         },
-//RS                     }
-//RS                 }
-//RS             })
-//RS         }
-//RS         Expr::Binary(op, l, r, span) => {
-//RS             in_own_frame(|| {
-//RS                 // D-FACT-ENUM-TIR: derive expansion has already substituted the
-//RS                 // fact read with a typed comptime enum value. Fold it here at the
-//RS                 // shared typed boundary; compiler-only fact enums never become a
-//RS                 // runtime TExprKind::EnumLit.
-//RS                 if let Some(value) = crate::Codegen::TIR::fold_typed_fact_enum_equality(*op, l, r) {
-//RS                     return TExpr {
-//RS                         ty: Type::Bool,
-//RS                         kind: TExprKind::BoolLit(value),
-//RS                     };
-//RS                 }
-//RS                 let mut lhs = lower_expr(l, cx, env);
-//RS                 let mut rhs = lower_expr(r, cx, env);
-//RS                 // Sema contextualizes None from its peer for equality. Retain
-//RS                 // that checked option type when lowering the literal to MIR.
-//RS                 if matches!(&rhs.kind, TExprKind::Absent) && matches!(&lhs.ty, Type::Option(_)) {
-//RS                     rhs.ty = lhs.ty.clone();
-//RS                 }
-//RS                 if matches!(&lhs.kind, TExprKind::Absent) && matches!(&rhs.ty, Type::Option(_)) {
-//RS                     lhs.ty = rhs.ty.clone();
-//RS                 }
-//RS                 // Imported method signatures retain their declaration-module
-//RS                 // nominal. Apply that canonical owner to a contextually typed enum
-//RS                 // literal; its source node carries only the visible leaf.
-//RS                 let expected_enum = match &lhs.ty {
-//RS                     Type::Named(name) | Type::Apply { name, .. } if name.contains("::") => {
-//RS                         Some(name.clone())
-//RS                     }
-//RS                     _ => None,
-//RS                 };
-//RS                 if let (
-//RS                     Some(expected_enum),
-//RS                     TExprKind::EnumLit {
-//RS                         enum_type, variant, ..
-//RS                     },
-//RS                 ) = (expected_enum, &mut rhs.kind)
-//RS                 {
-//RS                     let visible_owner_has_variant = cx
-//RS                         .enum_variants
-//RS                         .get(enum_type)
-//RS                         .is_some_and(|variants| variants.iter().any(|(name, _)| name == variant));
-//RS                     if crate::Codegen::nominal_leaf(enum_type)
-//RS                         == crate::Codegen::nominal_leaf(&expected_enum)
-//RS                         && visible_owner_has_variant
-//RS                     {
-//RS                         *enum_type = expected_enum;
-//RS                         rhs.ty = lhs.ty.clone();
-//RS                     }
-//RS                 }
-//RS                 // D-TYPE2-MEASURE1=A: Matrix multiplication carries the composed
-//RS                 // outer measures in TIR while the shared compute Prelude owns the
-//RS                 // one fallible runtime operation.
-//RS                 if *op == BinOp::Mul {
-//RS                     if let (
-//RS                         Type::Apply { name: left, .. },
-//RS                         Type::Apply { name: right, .. },
-//RS                         Some([rows, inner]),
-//RS                         Some([right_inner, cols]),
-//RS                     ) = (
-//RS                         &lhs.ty,
-//RS                         &rhs.ty,
-//RS                         lhs.ty
-//RS                             .compute_shape_dimensions()
-//RS                             .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
-//RS                         rhs.ty
-//RS                             .compute_shape_dimensions()
-//RS                             .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
-//RS                     ) {
-//RS                         if left == "Matrix" && right == "Matrix" && inner == right_inner {
-//RS                             return in_own_frame(|| {
-//RS                                 return core_call_expr(
-//RS                                     Type::Result {
-//RS                                         ok: Box::new(Type::compute_shape_type(
-//RS                                             "Matrix",
-//RS                                             &[rows, cols],
-//RS                                         )),
-//RS                                         err: Box::new(Type::Named("ComputeError".to_string())),
-//RS                                     },
-//RS                                     "core.compute",
-//RS                                     "matmul",
-//RS                                     vec![lhs, rhs],
-//RS                                     *span,
-//RS                                     vec![false, false],
-//RS                                 );
-//RS                             });
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-TYPE2-UNCERT1=A: sema has made exact operands explicit
-//RS                 // zero-uncertainty measurements. Reuse the resident measurement
-//RS                 // handle op so AOT, JIT, interpreter, comptime, REPL and web call
-//RS                 // the same Prelude kernel.
-//RS                 if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
-//RS                     && matches!((&lhs.ty, &rhs.ty), (
-//RS                         Type::Apply { name: left, .. },
-//RS                         Type::Apply { name: right, .. }
-//RS                     ) if left == Syntax::TYPE_MEASUREMENT && right == Syntax::TYPE_MEASUREMENT)
-//RS                 {
-//RS                     return in_own_frame(|| {
-//RS                         return TExpr {
-//RS                             ty: lhs.ty.clone(),
-//RS                             kind: TExprKind::HandleMethod {
-//RS                                 recv: Box::new(lhs),
-//RS                                 op: THandleOp::MeasurementMethod {
-//RS                                     method: match op {
-//RS                                         BinOp::Add => "add",
-//RS                                         BinOp::Sub => "sub",
-//RS                                         BinOp::Mul => "mul",
-//RS                                         BinOp::Div => "div",
-//RS                                         _ => unreachable!(),
-//RS                                     }
-//RS                                     .to_string(),
-//RS                                 },
-//RS                                 args: vec![rhs],
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-SHAPE-QUANTITY1=A: sema has already validated compatibility.
-//RS                 // Multiplication/division unwrap nominal unit values and emit a
-//RS                 // plain numeric operation; the normalized result type is retained
-//RS                 // only as a TIR fact and `rust_type` erases it to the numeric base.
-//RS                 let ldim = cx.quantity_dimension(&lhs.ty);
-//RS                 let rdim = cx.quantity_dimension(&rhs.ty);
-//RS                 if (ldim.is_some() || rdim.is_some()) && matches!(op, BinOp::Mul | BinOp::Div) {
-//RS                     return in_own_frame(|| {
-//RS                         let raw = |expr: TExpr| {
-//RS                             if cx.quantity_dimension(&expr.ty).is_some()
-//RS                                 && matches!(expr.ty, Type::Named(_))
-//RS                             {
-//RS                                 if matches!(&expr.ty, Type::Named(name) if name == crate::Syntax::DURATION_TYPE)
-//RS                                 {
-//RS                                     return TExpr {
-//RS                                         ty: Type::Float,
-//RS                                         kind: TExprKind::HandleMethod {
-//RS                                             recv: Box::new(expr),
-//RS                                             op: THandleOp::DurationSecondsValue,
-//RS                                             args: Vec::new(),
-//RS                                         },
-//RS                                     };
-//RS                                 }
-//RS                                 TExpr {
-//RS                                     ty: Type::Float,
-//RS                                     kind: TExprKind::DistinctRaw(Box::new(expr)),
-//RS                                 }
-//RS                             } else {
-//RS                                 expr
-//RS                             }
-//RS                         };
-//RS                         let lhs = raw(lhs);
-//RS                         let rhs = raw(rhs);
-//RS                         let left = ldim.unwrap_or_else(crate::AST::Dimension::scalar);
-//RS                         let right = rdim.unwrap_or_else(crate::AST::Dimension::scalar);
-//RS                         let dimension = if *op == BinOp::Mul {
-//RS                             left.multiply(&right)
-//RS                         } else {
-//RS                             left.divide(&right)
-//RS                         }
-//RS                         .expect("sema checked physical dimension exponent bounds");
-//RS                         let ty = if dimension == crate::AST::Dimension::scalar() {
-//RS                             Type::Float
-//RS                         } else {
-//RS                             Type::quantity(Type::Float, dimension)
-//RS                         };
-//RS                         let line = cx.src_line_col(span.start).0 as u32;
-//RS                         return TExpr {
-//RS                             ty,
-//RS                             kind: TExprKind::Binary {
-//RS                                 op: *op,
-//RS                                 overflow: false,
-//RS                                 line,
-//RS                                 lhs: Box::new(lhs),
-//RS                                 rhs: Box::new(rhs),
-//RS                             },
-//RS                         };
-//RS                     });
-//RS                 }
-//RS                 // D-LAYOUT1 / D-LAYOUT-GATES1: layout-typed `+`/`-`/`>=`/`<=`/`==`.
-//RS                 // Recompute via the SAME table sema used (mirrors the math/Int
-//RS                 // early-return pattern below) rather than trusting `lhs.ty.clone()`
-//RS                 // — that default is wrong here: e.g. `16.0 + label.right` has a
-//RS                 // plain `Float` LEFT operand, so the result axis (`HVar`) comes
-//RS                 // from the RIGHT side. Comparisons need a DEDICATED node
-//RS                 // (`LayoutCompare`) since Rust's `>=`/`==` can't return a custom
-//RS                 // type; `+`/`-` stay plain `Binary` (`jet_layout::LinExpr`
-//RS                 // implements `std::ops::{Add,Sub}`).
-//RS                 {
-//RS                     let l_axis =
-//RS                         matches!(&lhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
-//RS                     let r_axis =
-//RS                         matches!(&rhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
-//RS                     if (l_axis || r_axis)
-//RS                         && matches!(
-//RS                             op,
-//RS                             BinOp::Ge | BinOp::Le | BinOp::Eq | BinOp::Add | BinOp::Sub
-//RS                         )
-//RS                     {
-//RS                         if let Some(Ok(result_ty)) =
-//RS                             crate::Sema::layout_binop_result(*op, &lhs.ty, &rhs.ty)
-//RS                         {
-//RS                             return in_own_frame(|| {
-//RS                                 // A bare `Int`/`Float` operand (axis-neutral) isn't a
-//RS                                 // `jet_layout::LinExpr` at the Rust level yet — wrap it
-//RS                                 // so `+`/`-`/`ge`/`le`/`eq_` only ever see `LinExpr`.
-//RS                                 let wrap = |t: TExpr| -> TExpr {
-//RS                                     if matches!(t.ty, Type::Int | Type::Float) {
-//RS                                         TExpr {
-//RS                                             ty: Type::Named(
-//RS                                                 crate::Syntax::LAYOUT_LENGTHVAR_TYPE.to_string(),
-//RS                                             ),
-//RS                                             kind: TExprKind::LayoutLit { inner: Box::new(t) },
-//RS                                         }
-//RS                                     } else {
-//RS                                         t
-//RS                                     }
-//RS                                 };
-//RS                                 let lhs = wrap(lhs);
-//RS                                 let rhs = wrap(rhs);
-//RS                                 if matches!(op, BinOp::Add | BinOp::Sub) {
-//RS                                     return in_own_frame(|| {
-//RS                                         let line = cx.src_line_col(span.start).0 as u32;
-//RS                                         return TExpr {
-//RS                                             ty: result_ty,
-//RS                                             kind: TExprKind::Binary {
-//RS                                                 op: *op,
-//RS                                                 overflow: false,
-//RS                                                 line,
-//RS                                                 lhs: Box::new(lhs),
-//RS                                                 rhs: Box::new(rhs),
-//RS                                             },
-//RS                                         };
-//RS                                     });
-//RS                                 }
-//RS                                 return TExpr {
-//RS                                     ty: result_ty,
-//RS                                     kind: TExprKind::LayoutCompare {
-//RS                                         op: *op,
-//RS                                         lhs: Box::new(lhs),
-//RS                                         rhs: Box::new(rhs),
-//RS                                     },
-//RS                                 };
-//RS                             });
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // D-TYPE2-IMAG1=A: mirror `Checker::complexize_operand`. Sema
-//RS                 // promotes the scalar operand of `3 + 4i` through the explicit
-//RS                 // `Complex` constructor before the precise rule below fires, but a
-//RS                 // comptime item or MirBridge fragment lowers the raw AST first
-//RS                 // (`eval_comptime_items` runs early), so the mix still arrives here.
-//RS                 let (mut lhs, mut rhs) = complexize_operands(*op, lhs, rhs, cx);
-//RS                 // D-TYPE2-DEFAULT1 / D-NUMTYPE1: sema permits a Fraction to
-//RS                 // absorb a bare exact integer literal. Materialize that literal
-//RS                 // through the same Fraction Prelude constructor before the
-//RS                 // shared precise-builtin path runs.
-//RS                 let fraction_ty = Type::Named(Syntax::TYPE_FRACTION.to_string());
-//RS                 let fraction_from_int = |value: TExpr| TExpr {
-//RS                     ty: fraction_ty.clone(),
-//RS                     kind: TExprKind::PreciseBuiltin {
-//RS                         type_name: Syntax::TYPE_FRACTION.to_string(),
-//RS                         func: "from_parts".to_string(),
-//RS                         args: vec![
-//RS                             value,
-//RS                             TExpr {
-//RS                                 ty: Type::Int,
-//RS                                 kind: TExprKind::IntLit(1, None),
-//RS                             },
-//RS                         ],
-//RS                     },
-//RS                 };
-//RS                 // D-EXPNEG1: a written negative exponent on the default
-//RS                 // exact Int lowers to `1 / (base ^ |exponent|)` in the
-//RS                 // Fraction Prelude carrier. Dynamic exponents stay on the
-//RS                 // trapping whole-number power path.
-//RS                 if *op == BinOp::Pow && lhs.ty == Type::Int && rhs.ty == Type::Int {
-//RS                     if let Some(exponent) = lower_negative_power_exponent(r, cx, env) {
-//RS                         let line = cx.src_line_col(span.start).0 as u32;
-//RS                         let powered = TExpr {
-//RS                             ty: Type::Int,
-//RS                             kind: TExprKind::Binary {
-//RS                                 op: BinOp::Pow,
-//RS                                 overflow: true,
-//RS                                 line,
-//RS                                 lhs: Box::new(lhs),
-//RS                                 rhs: Box::new(exponent),
-//RS                             },
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: fraction_ty.clone(),
-//RS                             kind: TExprKind::PreciseBuiltin {
-//RS                                 type_name: Syntax::TYPE_FRACTION.to_string(),
-//RS                                 func: "from_parts".to_string(),
-//RS                                 args: vec![
-//RS                                     TExpr {
-//RS                                         ty: Type::Int,
-//RS                                         kind: TExprKind::IntLit(1, None),
-//RS                                     },
-//RS                                     powered,
-//RS                                 ],
-//RS                             },
-//RS                         };
-//RS                     }
-//RS                 }
-//RS                 if matches!(
-//RS                     *op,
-//RS                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Eq | BinOp::Ne
-//RS                 ) {
-//RS                     let lhs_fraction = lhs.ty == fraction_ty;
-//RS                     let rhs_fraction = rhs.ty == fraction_ty;
-//RS                     if lhs_fraction && rhs.ty == Type::Int {
-//RS                         rhs = fraction_from_int(rhs);
-//RS                     } else if rhs_fraction && lhs.ty == Type::Int {
-//RS                         lhs = fraction_from_int(lhs);
-//RS                     }
-//RS                 }
-//RS                 // D-TIMERES1=A: sema has already fixed these three forms to
-//RS                 // Duration. Keep the nanosecond carrier intact and dispatch
-//RS                 // through the handle seam so every engine calls one kernel.
-//RS                 let left_duration = matches!(
-//RS                     &lhs.ty,
-//RS                     Type::Named(name) if name == crate::Syntax::DURATION_TYPE
-//RS                 );
-//RS                 let right_duration = matches!(
-//RS                     &rhs.ty,
-//RS                     Type::Named(name) if name == crate::Syntax::DURATION_TYPE
-//RS                 );
-//RS                 if matches!(*op, BinOp::Mul | BinOp::Div)
-//RS                     && ((left_duration && rhs.ty == Type::Int)
-//RS                         || (*op == BinOp::Mul && lhs.ty == Type::Int && right_duration))
-//RS                 {
-//RS                     let (duration, factor, duration_op) = if left_duration {
-//RS                         (
-//RS                             lhs,
-//RS                             rhs,
-//RS                             if *op == BinOp::Mul {
-//RS                                 THandleOp::DurationScale
-//RS                             } else {
-//RS                                 THandleOp::DurationDivide
-//RS                             },
-//RS                         )
-//RS                     } else {
-//RS                         (rhs, lhs, THandleOp::DurationScale)
-//RS                     };
-//RS                     return TExpr {
-//RS                         ty: Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
-//RS                         kind: TExprKind::HandleMethod {
-//RS                             recv: Box::new(duration),
-//RS                             op: duration_op,
-//RS                             args: vec![factor],
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 // D-TYPE2-DEFAULT1 amends D-INTDIV1: exact whole-number
-//RS                 // division constructs a rational before any machine arithmetic
-//RS                 // path can see the operands.
-//RS                 if *op == BinOp::Div && lhs.ty == Type::Int && rhs.ty == Type::Int {
-//RS                     return TExpr {
-//RS                         ty: fraction_ty,
-//RS                         kind: TExprKind::PreciseBuiltin {
-//RS                             type_name: Syntax::TYPE_FRACTION.to_string(),
-//RS                             func: "from_parts".to_string(),
-//RS                             args: vec![lhs, rhs],
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 // D-SPACE-GEOMETRY1=A: sema owns the coordinate operation
-//RS                 // table, including whether a generic carrier returns a checked
-//RS                 // Result.  Lower only the two arithmetic operations for which
-//RS                 // that table has a geometry builtin; every other binary shape
-//RS                 // remains on the generic path below.
-//RS                 if matches!(*op, BinOp::Add | BinOp::Sub) {
-//RS                     if let Some(Ok(result_ty)) =
-//RS                         crate::Sema::geometry_binop_result(*op, &lhs.ty, &rhs.ty)
-//RS                     {
-//RS                         let type_name = match (&lhs.ty, &rhs.ty) {
-//RS                             (Type::Apply { name, .. }, _)
-//RS                                 if matches!(name.as_str(), "Point2" | "Delta2") =>
-//RS                             {
-//RS                                 name.clone()
-//RS                             }
-//RS                             (_, Type::Apply { name, .. })
-//RS                                 if matches!(name.as_str(), "Point2" | "Delta2") =>
-//RS                             {
-//RS                                 name.clone()
-//RS                             }
-//RS                             (Type::Named(name), _) => name.clone(),
-//RS                             _ => unreachable!("geometry operands have a nominal carrier"),
-//RS                         };
-//RS                         return TExpr {
-//RS                             ty: result_ty,
-//RS                             kind: TExprKind::MathBuiltin {
-//RS                                 type_name,
-//RS                                 func: if *op == BinOp::Add {
-//RS                                     "add".to_string()
-//RS                                 } else {
-//RS                                     "sub".to_string()
-//RS                                 },
-//RS                                 args: vec![lhs, rhs],
-//RS                             },
-//RS                         };
-//RS                     }
-//RS                 }
-//RS                 // Overflow decision for trapping JetArith helpers. Prefer the
-//RS                 // resolved TIR operand types so call results, fields, and other
-//RS                 // shapes the AST replay cannot see still trap (I2 / #1484). The
-//RS                 // AST replay remains for cases where lowering types are not yet
-//RS                 // integer-shaped but the source operand structurally is.
-//RS                 // D-INTBIG1/D-NUMOPS1: fixed-width `+`/`-`/`*`/`/` trap on value
-//RS                 // overflow; exact default `Int` uses packed Prelude helpers.
-//RS                 // Fixed-width `<<`/`>>` trap on a bit-count out of the type's width
-//RS                 // (both via the `JetArith` helpers, so no raw Rust overflow panic
-//RS                 // leaks — I2). A shift's
-//RS                 // overflow is governed by its LEFT operand's integer-ness (the value),
-//RS                 // never the count.
-//RS                 // Exact `Int / Int` returned above as a Fraction. Fixed-width
-//RS                 // integer division remains on the ordinary trapping path.
-//RS                 // Fixed-width `IntN` keeps same-width `/` and must trap via jet_div.
-//RS                 // D-MODSEM1=A: `%` and `%%` always call their Prelude helper above.
-//RS                 let tir_integer = lhs.ty.is_integer() || rhs.ty.is_integer();
-//RS                 let arith_overflow =
-//RS                     matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
-//RS                         && (tir_integer
-//RS                             || ast_operand_is_integer(l, env) == Some(true)
-//RS                             || ast_operand_is_integer(r, env) == Some(true));
-//RS                 let shift_overflow = matches!(op, BinOp::Shl | BinOp::Shr)
-//RS                     && (lhs.ty.is_integer() || ast_operand_is_integer(l, env) == Some(true));
-//RS                 let overflow = arith_overflow || shift_overflow;
-//RS                 let line = cx.src_line_col(span.start).0 as u32;
-//RS                 // A comparison/logical op yields Bool; arithmetic keeps the operand type.
-//RS                 // D-SIMD2 / D-LINALG1: a math-type operator's result follows the closed
-//RS                 // family's rule (e.g. `Mat3 * Vec3 → Vec3`), not the left operand — read
-//RS                 // it from the same sema table so the node's `ty` stays honest.
-//RS                 let canonical_time_ty = in_own_frame(|| match (&lhs.ty, &rhs.ty) {
-//RS                     (Type::Named(left), Type::Named(right))
-//RS                         if matches!(left.as_str(), "Duration" | "Instant")
-//RS                             && matches!(right.as_str(), "Duration" | "Instant") =>
-//RS                     {
-//RS                         let left_kind = cx.unit_facts.get(left).map(|fact| fact.kind);
-//RS                         let right_kind = cx.unit_facts.get(right).map(|fact| fact.kind);
-//RS                         match (*op, left_kind, right_kind) {
-//RS                             (
-//RS                                 BinOp::Add | BinOp::Sub,
-//RS                                 Some(crate::AST::QuantityKind::Delta),
-//RS                                 Some(crate::AST::QuantityKind::Delta),
-//RS                             )
-//RS                             | (
-//RS                                 BinOp::Sub,
-//RS                                 Some(crate::AST::QuantityKind::Point),
-//RS                                 Some(crate::AST::QuantityKind::Point),
-//RS                             ) => Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string())),
-//RS                             (
-//RS                                 BinOp::Add,
-//RS                                 Some(crate::AST::QuantityKind::Point),
-//RS                                 Some(crate::AST::QuantityKind::Delta),
-//RS                             )
-//RS                             | (
-//RS                                 BinOp::Sub,
-//RS                                 Some(crate::AST::QuantityKind::Point),
-//RS                                 Some(crate::AST::QuantityKind::Delta),
-//RS                             )
-//RS                             | (
-//RS                                 BinOp::Add,
-//RS                                 Some(crate::AST::QuantityKind::Delta),
-//RS                                 Some(crate::AST::QuantityKind::Point),
-//RS                             ) => Some(Type::Named(crate::Syntax::TYPE_INSTANT.to_string())),
-//RS                             _ => None,
-//RS                         }
-//RS                     }
-//RS                     _ => None,
-//RS                 });
-//RS                 let ty = in_own_frame(|| {
-//RS                     if *op == BinOp::Compare {
-//RS                         Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
-//RS                     } else if op.is_comparison() || matches!(op, BinOp::And | BinOp::Or) {
-//RS                         Type::Bool
-//RS                     } else if let Some(ty) = canonical_time_ty {
-//RS                         ty
-//RS                     } else if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
-//RS                         let lm = crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln);
-//RS                         let rm = crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn);
-//RS                         if lm || rm {
-//RS                             crate::Sema::math_binop_result(*op, ln, rn)
-//RS                                 .unwrap_or_else(|| lhs.ty.clone())
-//RS                         } else if ln == rn
-//RS                             && crate::Sema::precise_binop_result(*op, ln, rn).is_some()
-//RS                         {
-//RS                             lhs.ty.clone()
-//RS                         } else {
-//RS                             lhs.ty.clone()
-//RS                         }
-//RS                     } else if let Type::Named(ln) = &lhs.ty {
-//RS                         if crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln) {
-//RS                             crate::Sema::math_scalar_binop_result(*op, ln, &rhs.ty)
-//RS                                 .unwrap_or_else(|| lhs.ty.clone())
-//RS                         } else if let Type::Named(rn) = &rhs.ty {
-//RS                             if crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn) {
-//RS                                 crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty)
-//RS                                     .unwrap_or_else(|| lhs.ty.clone())
-//RS                             } else {
-//RS                                 lhs.ty.clone()
-//RS                             }
-//RS                         } else {
-//RS                             lhs.ty.clone()
-//RS                         }
-//RS                     } else if let Type::Named(rn) = &rhs.ty {
-//RS                         if crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn) {
-//RS                             crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty)
-//RS                                 .unwrap_or_else(|| lhs.ty.clone())
-//RS                         } else {
-//RS                             lhs.ty.clone()
-//RS                         }
-//RS                     } else {
-//RS                         lhs.ty.clone()
-//RS                     }
-//RS                 });
-//RS                 // D-DECIMAL1 / D-NUMTYPE1 / D-TYPE2-IMAG1=A: precise arithmetic lowers through
-//RS                 // the shared typed-value Prelude helpers.
-//RS                 if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
-//RS                     if ln == rn {
-//RS                         if let Some(result_ty) = crate::Sema::precise_binop_result(*op, ln, rn) {
-//RS                             if matches!(
-//RS                                 *op,
-//RS                                 BinOp::Add
-//RS                                     | BinOp::Sub
-//RS                                     | BinOp::Mul
-//RS                                     | BinOp::Div
-//RS                                     | BinOp::Eq
-//RS                                     | BinOp::Ne
-//RS                             ) {
-//RS                                 let func = match op {
-//RS                                     BinOp::Add => "add",
-//RS                                     BinOp::Sub => "sub",
-//RS                                     BinOp::Mul => "mul",
-//RS                                     BinOp::Div => "div",
-//RS                                     BinOp::Eq | BinOp::Ne => "equal",
-//RS                                     _ => unreachable!(),
-//RS                                 };
-//RS                                 let precise = TExpr {
-//RS                                     ty: result_ty,
-//RS                                     kind: TExprKind::PreciseBuiltin {
-//RS                                         type_name: ln.clone(),
-//RS                                         func: func.to_string(),
-//RS                                         args: vec![lhs, rhs],
-//RS                                     },
-//RS                                 };
-//RS                                 if *op == BinOp::Ne {
-//RS                                     return TExpr {
-//RS                                         ty: Type::Bool,
-//RS                                         kind: TExprKind::Unary {
-//RS                                             op: crate::AST::UnOp::Not,
-//RS                                             operand: Box::new(precise),
-//RS                                         },
-//RS                                     };
-//RS                                 }
-//RS                                 return precise;
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 // Decimal ordering compares values through the Prelude decimal
-//RS                 // compare kernel on every tier. A primitive relation would order
-//RS                 // the runtime carrier (a JIT side-table handle), not the number.
-//RS                 if matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::Compare)
-//RS                     && matches!((&lhs.ty, &rhs.ty), (Type::Named(ln), Type::Named(rn))
-//RS                         if ln == Syntax::TYPE_DECIMAL && rn == Syntax::TYPE_DECIMAL)
-//RS                 {
-//RS                     let ordering_ty = Type::Named(Syntax::TYPE_ORDERING.to_string());
-//RS                     let compare = TExpr {
-//RS                         ty: ordering_ty.clone(),
-//RS                         kind: TExprKind::PreciseBuiltin {
-//RS                             type_name: Syntax::TYPE_DECIMAL.to_string(),
-//RS                             func: "compare".to_string(),
-//RS                             args: vec![lhs, rhs],
-//RS                         },
-//RS                     };
-//RS                     let (variant, negate) = match op {
-//RS                         BinOp::Lt => ("Less", false),
-//RS                         BinOp::Gt => ("Greater", false),
-//RS                         BinOp::Le => ("Greater", true),
-//RS                         BinOp::Ge => ("Less", true),
-//RS                         _ => return compare,
-//RS                     };
-//RS                     let test = TExpr {
-//RS                         ty: Type::Bool,
-//RS                         kind: TExprKind::Binary {
-//RS                             op: BinOp::Eq,
-//RS                             overflow: false,
-//RS                             line,
-//RS                             lhs: Box::new(compare),
-//RS                             rhs: Box::new(TExpr {
-//RS                                 ty: ordering_ty,
-//RS                                 kind: TExprKind::EnumLit {
-//RS                                     enum_type: Syntax::TYPE_ORDERING.to_string(),
-//RS                                     variant: variant.to_string(),
-//RS                                     payload: TEnumPayload::Unit,
-//RS                                 },
-//RS                             }),
-//RS                         },
-//RS                     };
-//RS                     return if negate {
-//RS                         TExpr {
-//RS                             ty: Type::Bool,
-//RS                             kind: TExprKind::Unary {
-//RS                                 op: crate::AST::UnOp::Not,
-//RS                                 operand: Box::new(test),
-//RS                             },
-//RS                         }
-//RS                     } else {
-//RS                         test
-//RS                     };
-//RS                 }
-//RS                 if let Some((type_name, func)) = math_scalar_builtin(*op, &lhs.ty, &rhs.ty) {
-//RS                     let math_on_left =
-//RS                         matches!(&lhs.ty, Type::Named(name) if crate::Sema::is_math_type(name));
-//RS                     let (left, right) = if math_on_left {
-//RS                         (lhs, coerce_math_scalar_to_float(rhs, line))
-//RS                     } else {
-//RS                         (coerce_math_scalar_to_float(lhs, line), rhs)
-//RS                     };
-//RS                     return TExpr {
-//RS                         ty,
-//RS                         kind: TExprKind::MathBuiltin {
-//RS                             type_name,
-//RS                             func,
-//RS                             args: vec![left, right],
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 // D-NUMOPS1 permits a shift count of any integer width. Exact
-//RS                 // Int shift kernels take an exact-Int count, so losslessly
-//RS                 // promote a fixed-width count here and give every tier the
-//RS                 // same typed operands instead of relying on backend coercions.
-//RS                 if matches!(*op, BinOp::Shl | BinOp::Shr)
-//RS                     && crate::Codegen::TIR::routes::exact_int_type(&lhs.ty)
-//RS                     && rhs.ty.is_integer()
-//RS                     && !crate::Codegen::TIR::routes::exact_int_type(&rhs.ty)
-//RS                 {
-//RS                     rhs = TExpr {
-//RS                         ty: Type::Int,
-//RS                         kind: TExprKind::NumericMethod {
-//RS                             recv: Box::new(rhs),
-//RS                             op: TNumericOp::CastAs {
-//RS                                 dst_rust: String::new(),
-//RS                             },
-//RS                         },
-//RS                     };
-//RS                 }
-//RS                 TExpr {
-//RS                     ty,
-//RS                     kind: TExprKind::Binary {
-//RS                         op: *op,
-//RS                         overflow,
-//RS                         line,
-//RS                         lhs: Box::new(lhs),
-//RS                         rhs: Box::new(rhs),
-//RS                     },
-//RS                 }
-//RS             })
-//RS         }
-//RS         // D-CHAINCMP1: `0 <= sev < 10` — lower each operand plainly, once each
-//RS         // (the shared-middle-operand single-evaluation guarantee is emit's
-//RS         // job: it binds each operand to a temp in a Rust block before ANDing
-//RS         // the pairwise comparisons). Always `Bool`; relational ops never trap.
-//RS         Expr::CompareChain {
-//RS             operands,
-//RS             ops,
-//RS             hooks,
-//RS             ..
-//RS         } => in_own_frame(|| {
-//RS             let toperands: Vec<TExpr> = operands
-//RS                 .iter()
-//RS                 .map(|expression| {
-//RS                     let lowered = lower_expr(expression, cx, env);
-//RS                     let Type::Result { ok, .. } = &lowered.ty else {
-//RS                         return lowered;
-//RS                     };
-//RS                     let (line, column) = cx.src_line_col(expression.span().start);
-//RS                     TExpr {
-//RS                         ty: (**ok).clone(),
-//RS                         kind: TExprKind::Try {
-//RS                             inner: Box::new(lowered),
-//RS                             note: None,
-//RS                             convert: TTryConvert::None,
-//RS                             file: escape_rust_str(&cx.file),
-//RS                             line,
-//RS                             column,
-//RS                             fn_name: escape_rust_str(&env.fn_name),
-//RS                         },
-//RS                     }
-//RS                 })
-//RS                 .collect();
-//RS             TExpr {
-//RS                 ty: Type::Bool,
-//RS                 kind: TExprKind::CompareChain {
-//RS                     operands: toperands,
-//RS                     ops: ops.clone(),
-//RS                     hooks: hooks.clone(),
-//RS                 },
-//RS             }
-//RS         }),
-// END-PORT-PENDING 0478 crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4420-5676
+// Private continuation of TIR.Lower.Expressions; dispatch continues at Rust 5677.
+use jet_foundation.[Expr, CtValue, Type, StrPart, StrFormat, PlaceAccess, BinOp, UnOp, Dimension, QuantityKind, CtBigInt, MirCopyFact, TYPE_RANGE, TYPE_MEASUREMENT, TYPE_FRACTION, DURATION_TYPE, LAYOUT_LENGTHVAR_TYPE, TYPE_INSTANT, TYPE_ORDERING, TYPE_DECIMAL]
+use jet_codegen.[Cx, LowerEnv, TExpr, TExprKind, TStrPart, TLocal, TFnValueKind, THostCall, TEnumPayload, TNumericOp, TAddressLifetime, TBuiltinOp, THandleOp, TTryConvert, fold_typed_fact_enum_pattern, fold_fact_enum_variant_test, fold_typed_fact_enum_equality, resolve_numeric_conversion_op, int_lit_type, ast_operand_is_integer, exact_int_type, nominal_leaf]
+use jet_sema.[ptr_elem, ptr_type, is_layout_axis_type, layout_binop_result, geometry_binop_result, is_math_type, math_binop_result, math_scalar_binop_result, precise_binop_result]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4420
+fn lower_expr_inner(e: Expr, cx: Cx, env: &LowerEnv) -> TExpr {
+    if e == .PatternTest(subject, pattern, _) {
+        folded := fold_typed_fact_enum_pattern(subject, pattern)
+        if folded == None {
+            if prepared_constant_path_value(subject, cx, env) == Val(.Enum(type_name, variant, args)) {
+                if args.is_empty() -> folded = fold_fact_enum_variant_test(type_name, variant, pattern)
+            }
+        }
+        if folded == Val(value) -> return TExpr{ty: Type.Bool, kind: TExprKind.BoolLit(value)}
+    }
+    if e == {
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4450
+        .Int(n, span, width, raw) -> in_own_frame(fn() {
+            // Overflowed lexer tokens must cross the exact Int conversion seam.
+            if width == Val(width_value) {
+                if raw == Val(raw_text) {
+                    raw_text :: raw_text.replace("_", "")
+                    parsed := Val(CtBigInt.from_literal(raw_text)) catch _ -> None
+                    if parsed == Val(value) {
+                        if value.try_i64() == None {
+                            target :: int_lit_type(Val(width_value))
+                            conversion :: resolve_numeric_conversion_op(target.name(), "Int") ?? panic("fixed-width Int literal has a numeric conversion")
+                            if conversion == {
+                                .TryFrom(host_kind, dst_rust, dst_spelling) -> return TExpr{ty: target, kind: TExprKind.NumericMethod{recv: TExpr{ty: Type.Int, kind: TExprKind.CtLit(CtValue.BigInt(value))}, op: TNumericOp.CheckedIntToFixed{host_kind: host_kind, dst_rust: dst_rust, dst_spelling: dst_spelling, line: cx.src_line_col(span.start).0 as U32}}}
+                                else -> panic("fixed-width Int literal conversion must be checked")
+                            }
+                        }
+                    }
+                }
+            }
+            if width == None {
+                if raw == Val(raw_text) {
+                    raw_text :: raw_text.replace("_", "")
+                    small := Val(raw_text.parse::<I64>()) catch _ -> None
+                    if small == None {
+                        parsed := Val(CtBigInt.from_literal(raw_text)) catch _ -> None
+                        if parsed == Val(value) -> return TExpr{ty: Type.Int, kind: TExprKind.CtLit(CtValue.BigInt(value))}
+                    }
+                }
+            }
+            TExpr{ty: int_lit_type(width), kind: TExprKind.IntLit(n, width)}
+        })
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4521
+        .Float(v, _, is_f32, _) -> TExpr{ty: if is_f32 -> Type.Float32 else -> Type.Float, kind: TExprKind.FloatLit(v)}
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4527
+        .Bool(b, _) -> TExpr{ty: Type.Bool, kind: TExprKind.BoolLit(b)}
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4533
+        .Unit(_) -> TExpr{ty: unit_type(), kind: TExprKind.Unit}
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4537
+        .Range(start, end, exclusive, _) -> TExpr{ty: Type.Named(TYPE_RANGE), kind: TExprKind.StructLit{fields: [(String, TExpr, Bool)]{("start", lower_expr(start, cx, &env), false), ("end", lower_expr(end, cx, &env), false), ("exclusive", TExpr{ty: Type.Bool, kind: TExprKind.BoolLit(exclusive)}, false)}, extra: None, as_trait: None}}
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4561
+        .Char(c, _) -> TExpr{ty: Type.Char, kind: TExprKind.CharLit(c)}
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4565
+        .Str(parts, _) -> in_own_frame(fn() {
+            tparts := [TStrPart]{}
+            loop part in parts {
+                lowered :: if part == {
+                    .Lit(s) -> TStrPart.Lit(s)
+                    .Interp(inner, .Fixed(precision)) -> TStrPart.Interp(lower_fmt_call("decimal", [TExpr]{lower_expr(inner, cx, &env), lower_fmt_int(precision)}, inner.span()), StrFormat.Display)
+                    .Interp(inner, .Grouped(precision)) -> TStrPart.Interp(lower_fmt_call("grouped", [TExpr]{lower_expr(inner, cx, &env), lower_fmt_int(precision)}, inner.span()), StrFormat.Display)
+                    .Interp(inner, .Hex(width)) -> TStrPart.Interp(lower_fmt_call("hex", [TExpr]{lower_expr(inner, cx, &env), lower_fmt_int(width)}, inner.span()), StrFormat.Display)
+                    .Interp(inner, .Pad(width, fill)) -> TStrPart.Interp(lower_fmt_call("pad", [TExpr]{lower_expr(inner, cx, &env), lower_fmt_int(width), lower_fmt_string(fill)}, inner.span()), StrFormat.Display)
+                    .Interp(inner, .PadLeft(width, fill)) -> TStrPart.Interp(lower_fmt_call("pad_left", [TExpr]{lower_expr(inner, cx, &env), lower_fmt_int(width), lower_fmt_string(fill)}, inner.span()), StrFormat.Display)
+                    .Interp(inner, .Sci(precision)) -> TStrPart.Interp(lower_fmt_call("sci", [TExpr]{lower_expr(inner, cx, &env), lower_fmt_int(precision)}, inner.span()), StrFormat.Display)
+                    .Interp(inner, .Percent(precision)) -> TStrPart.Interp(lower_fmt_call("percent", [TExpr]{lower_expr(inner, cx, &env), lower_fmt_int(precision)}, inner.span()), StrFormat.Display)
+                    .Interp(inner, .Bin) -> TStrPart.Interp(lower_fmt_call("bin", [TExpr]{lower_expr(inner, cx, &env)}, inner.span()), StrFormat.Display)
+                    .Interp(inner, .Oct) -> TStrPart.Interp(lower_fmt_call("oct", [TExpr]{lower_expr(inner, cx, &env)}, inner.span()), StrFormat.Display)
+                    .Interp(inner, .Unit(style)) -> {
+                        value :: lower_expr(inner, cx, &env)
+                        TStrPart.Interp(lower_unit_text(value, style, cx), StrFormat.Display)
+                    }
+                    .Interp(inner, .Pretty) -> {
+                        value :: lower_debug_text(lower_expr(inner, cx, &env))
+                        TStrPart.Interp(core_call_expr(Type.String, "core.text.fmt", "pretty", [TExpr]{value}, inner.span(), [Bool]{false}), StrFormat.Display)
+                    }
+                    .Interp(inner, .Display) -> TStrPart.Interp(lower_display_value(lower_expr(inner, cx, &env), cx), StrFormat.Display)
+                    .Interp(inner, fmt) -> TStrPart.Interp(lower_expr(inner, cx, &env), fmt)
+                }
+                &tparts.push(lowered)
+            }
+            TExpr{ty: Type.String, kind: TExprKind.StrLit(tparts)}
+        })
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4683
+        .Ident(name, _) -> in_own_frame(fn() {
+            if env.binder_ref(name) == Val((temp, ty)) -> return TExpr{ty: ty, kind: TExprKind.Local(TLocal.user(temp))}
+            if cx.persist_types.get(name) == Val(ty) -> return TExpr{ty: ty, kind: TExprKind.Local(cx.persistent_local(name) ?? panic("persist type and slot must agree"))}
+            if env.locals.contains_key(name) -> return TExpr{ty: env.ty_of(name) ?? Type.Int, kind: TExprKind.Local(env.local_of(name))}
+            // Lexical bindings shadow same-named package constants.
+            if cx.consts.contains_key(name) || cx.const_ref_keys.contains_key(name) {
+                return in_own_frame(fn() {
+                    value :: cx.const_values.get(name)
+                    ty :: env.ty_of(name) ?? cx.const_ref_types.get(name) ?? cx.const_types.get(name) ?? (if value == { Val(value) -> value.jet_type() None -> Type.Int })
+                    kind :: lower_comptime_scalar(value, Val(ty)) ?? TExprKind.ConstRef(checked_const_ref_name(name, cx))
+                    TExpr{ty: ty, kind: kind}
+                })
+            }
+            if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
+                fn_value_ty :: cx.fn_types.get(name) ?? cx.fn_source_types.get(name)
+                if fn_value_ty == Val(ft) {
+                    if ft == .Fn(_, _, _) -> return in_own_frame(fn() { TExpr{ty: ft, kind: TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val(name), lambda: None}}} })
+                }
+            }
+            ty :: env.ty_of(name) ?? Type.Int
+            if env.is_gc(name) -> return in_own_frame(fn() { TExpr{ty: ty, kind: TExprKind.HostCall(THostCall.GcRead{root: env.local_of(name)})} })
+            TExpr{ty: ty, kind: TExprKind.Local(env.local_of(name))}
+        })
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4772
+        .ComptimeName(_, Val(.Enum(type_name, variant, args)), _) where args.is_empty() -> in_own_frame(fn() {
+            resolved_type :: cx.core_qualified_rust_type_name(type_name) ?? type_name
+            TExpr{ty: Type.Named(resolved_type), kind: TExprKind.EnumLit{enum_type: resolved_type, variant: variant, payload: TEnumPayload.Unit}}
+        })
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4793
+        .ComptimeName(_, Val(value), _) -> {
+            ty :: value.jet_type()
+            kind :: lower_comptime_scalar(Val(value), Val(ty)) ?? TExprKind.CtLit(value)
+            TExpr{ty: ty, kind: kind}
+        }
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4801
+        .ComptimeName(name, None, _) -> lower_named_comptime_binding(name, cx, env) ?? TExpr{ty: env.ty_of(name) ?? cx.const_ref_types.get(name) ?? Type.Int, kind: TExprKind.ConstRef(checked_const_ref_name(name, cx))}
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4816
+        .CallValue(callee, args, span) -> lower_fn_value_call(Val(callee), lower_expr(callee, cx, &env), args, span.start as U32, cx, &env)
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4824
+        .Unary(op, inner, _) -> in_own_frame(fn() {
+            operand :: lower_expr(inner, cx, &env)
+            TExpr{ty: operand.ty, kind: TExprKind.Unary{op: op, operand: operand}}
+        })
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4836
+        .Deref(inner, _) -> in_own_frame(fn() {
+            operand :: lower_expr(inner, cx, &env)
+            ty :: ptr_elem(operand.ty) ?? operand.ty
+            TExpr{ty: ty, kind: TExprKind.Deref(operand)}
+        })
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4845
+        .RawOf(inner, _) -> in_own_frame(fn() {
+            operand :: lower_expr(inner, cx, &env)
+            if tir_address_lifetime(operand) == TAddressLifetime.Stack -> &env.note_stack_address()
+            TExpr{ty: ptr_type(operand.ty), kind: TExprKind.RawOf(operand)}
+        })
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4860
+        .Copy(inner, copy_span) -> in_own_frame(fn() {
+            operand :: lower_expr(inner, cx, &env)
+            view_owned_ty :: view_copy_owned_type(operand.ty)
+            is_view_type :: view_owned_ty != None
+            ty :: view_owned_ty ?? operand.ty
+            is_view_copy := is_view_type
+            if inner == .Ident(name, _) {
+                is_view_copy = is_view_copy || env.is_string_view_local(name)
+                if env.split_view_handle(name) == Val(handle_ty) -> is_view_copy = is_view_copy || view_copy_owned_type(handle_ty) != None
+            }
+            explicit :: copy_span != inner.span()
+            kind :: if is_view_copy -> TExprKind.MaterializeView(operand) else if explicit -> {
+                &env.note_clone(ty)
+                TExprKind.ExplicitCopy(operand)
+            } else -> {
+                &env.note_clone(ty)
+                TExprKind.Clone(operand, MirCopyFact.Materialize)
+            }
+            TExpr{ty: ty, kind: kind}
+        })
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4896
+        .Place(inner, access, span) -> in_own_frame(fn() {
+            if inner == {
+                .Slice(base, start, end, range, _) -> {
+                    recv :: if access == PlaceAccess.Write -> lower_expr_as_mut_place(base, cx, &env) else -> lower_expr(base, cx, &env)
+                    is_tensor :: recv.ty.is_compute_tensor_family()
+                    elem :: if is_tensor -> Type.Float else -> if recv.ty == { .List(elem) | .FixedList(elem, _) -> elem else -> Type.Int }
+                    mutable :: access == PlaceAccess.Write
+                    line :: cx.src_line_col(span.start).0
+                    args :: if range == { Val(range) -> [TExpr]{lower_expr(range, cx, &env)} None -> [TExpr]{lower_expr(start, cx, &env), lower_expr(end, cx, &env)} }
+                    name :: if mutable && is_tensor -> "ComputeViewMut" else if mutable -> "ViewMut" else -> "View"
+                    op :: if mutable -> (if is_tensor -> TBuiltinOp.ComputeViewMutNew{line: line} else -> TBuiltinOp.ViewMutNew{line: line}) else -> (if is_tensor -> TBuiltinOp.ComputeViewNew{line: line} else -> TBuiltinOp.ViewNew{line: line})
+                    TExpr{ty: Type.Apply{name: name, args: [Type]{elem}}, kind: TExprKind.BuiltinMethod{recv: recv, op: op, args: args}}
+                }
+                else -> {
+                    place :: if access == PlaceAccess.Write -> lower_expr_as_mut_place(inner, cx, &env) else -> lower_expr(inner, cx, &env)
+                    TExpr{ty: place.ty, kind: TExprKind.Borrow{place: place, mutable: access == PlaceAccess.Write}}
+                }
+            }
+        })
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:4976
+        .Binary(op, l, r, span) -> in_own_frame(fn() {
+            if fold_typed_fact_enum_equality(op, l, r) == Val(value) -> return TExpr{ty: Type.Bool, kind: TExprKind.BoolLit(value)}
+            lhs := lower_expr(l, cx, &env)
+            rhs := lower_expr(r, cx, &env)
+            if rhs.kind == TExprKind.Absent && lhs.ty == .Option(_) -> rhs.ty = lhs.ty
+            if lhs.kind == TExprKind.Absent && rhs.ty == .Option(_) -> lhs.ty = rhs.ty
+            expected_enum :: if lhs.ty == { .Named(name) | .Apply(name, _) -> if name.contains("::") -> Val(name) else -> None else -> None }
+            if expected_enum == Val(expected_enum) {
+                if rhs.kind == .EnumLit(enum_type, variant, payload) {
+                    visible_owner_has_variant :: if cx.enum_variants.get(enum_type) == { Val(variants) -> variants.any(fn(row) { row.0 == variant }) None -> false }
+                    if nominal_leaf(enum_type) == nominal_leaf(expected_enum) && visible_owner_has_variant {
+                        rhs.kind = TExprKind.EnumLit{enum_type: expected_enum, variant: variant, payload: payload}
+                        rhs.ty = lhs.ty
+                    }
+                }
+            }
+            if op == BinOp.Mul {
+                if (lhs.ty, rhs.ty, lhs.ty.compute_shape_dimensions(), rhs.ty.compute_shape_dimensions()) == (.Apply(left, _), .Apply(right, _), Val(left_shape), Val(right_shape)) {
+                    if left_shape.len() == 2 && right_shape.len() == 2 {
+                        rows :: left_shape[0]
+                        inner :: left_shape[1]
+                        right_inner :: right_shape[0]
+                        cols :: right_shape[1]
+                        if left == "Matrix" && right == "Matrix" && inner == right_inner -> return in_own_frame(fn() { core_call_expr(Type.Result{ok: Type.compute_shape_type("Matrix", [U64]{rows, cols}), err: Type.Named("ComputeError")}, "core.compute", "matmul", [TExpr]{lhs, rhs}, span, [Bool]{false, false}) })
+                    }
+                }
+            }
+            if op == .Add | .Sub | .Mul | .Div {
+                if (lhs.ty, rhs.ty) == (.Apply(left, _), .Apply(right, _)) {
+                    if left == TYPE_MEASUREMENT && right == TYPE_MEASUREMENT -> return in_own_frame(fn() {
+                        method :: if op == { .Add -> "add" .Sub -> "sub" .Mul -> "mul" .Div -> "div" else -> panic("unreachable") }
+                        TExpr{ty: lhs.ty, kind: TExprKind.HandleMethod{recv: lhs, op: THandleOp.MeasurementMethod{method: method}, args: [TExpr]{rhs}}}
+                    })
+                }
+            }
+            ldim :: cx.quantity_dimension(lhs.ty)
+            rdim :: cx.quantity_dimension(rhs.ty)
+            if (ldim != None || rdim != None) && op == .Mul | .Div {
+                return in_own_frame(fn() {
+                    raw :: fn(expr: TExpr) -> TExpr {
+                        if cx.quantity_dimension(expr.ty) != None && expr.ty == .Named(_) {
+                            if expr.ty == .Named(DURATION_TYPE) -> return TExpr{ty: Type.Float, kind: TExprKind.HandleMethod{recv: expr, op: THandleOp.DurationSecondsValue, args: [TExpr]{}}}
+                            TExpr{ty: Type.Float, kind: TExprKind.DistinctRaw(expr)}
+                        } else -> expr
+                    }
+                    lhs :: raw(lhs)
+                    rhs :: raw(rhs)
+                    left :: ldim ?? Dimension.scalar()
+                    right :: rdim ?? Dimension.scalar()
+                    dimension :: (if op == BinOp.Mul -> left.multiply(right) else -> left.divide(right)) ?? panic("sema checked physical dimension exponent bounds")
+                    ty :: if dimension == Dimension.scalar() -> Type.Float else -> Type.quantity(Type.Float, dimension)
+                    line :: cx.src_line_col(span.start).0 as U32
+                    TExpr{ty: ty, kind: TExprKind.Binary{op: op, overflow: false, line: line, lhs: lhs, rhs: rhs}}
+                })
+            }
+            l_axis :: if lhs.ty == { .Named(n) -> is_layout_axis_type(n) else -> false }
+            r_axis :: if rhs.ty == { .Named(n) -> is_layout_axis_type(n) else -> false }
+            if (l_axis || r_axis) && op == .Ge | .Le | .Eq | .Add | .Sub {
+                if layout_binop_result(op, lhs.ty, rhs.ty) == Val(Ok(result_ty)) {
+                    return in_own_frame(fn() {
+                        wrap :: fn(t: TExpr) -> TExpr {
+                            if t.ty == .Int | .Float -> TExpr{ty: Type.Named(LAYOUT_LENGTHVAR_TYPE), kind: TExprKind.LayoutLit{inner: t}} else -> t
+                        }
+                        lhs :: wrap(lhs)
+                        rhs :: wrap(rhs)
+                        if op == .Add | .Sub -> return in_own_frame(fn() {
+                            line :: cx.src_line_col(span.start).0 as U32
+                            TExpr{ty: result_ty, kind: TExprKind.Binary{op: op, overflow: false, line: line, lhs: lhs, rhs: rhs}}
+                        })
+                        TExpr{ty: result_ty, kind: TExprKind.LayoutCompare{op: op, lhs: lhs, rhs: rhs}}
+                    })
+                }
+            }
+            (lhs, rhs) = complexize_operands(op, lhs, rhs, cx)
+            fraction_ty :: Type.Named(TYPE_FRACTION)
+            fraction_from_int :: fn(value: TExpr) -> TExpr {
+                TExpr{ty: fraction_ty, kind: TExprKind.PreciseBuiltin{type_name: TYPE_FRACTION, func: "from_parts", args: [TExpr]{value, TExpr{ty: Type.Int, kind: TExprKind.IntLit(1, None)}}}}
+            }
+            if op == BinOp.Pow && lhs.ty == Type.Int && rhs.ty == Type.Int {
+                if lower_negative_power_exponent(r, cx, env) == Val(exponent) {
+                    line :: cx.src_line_col(span.start).0 as U32
+                    powered :: TExpr{ty: Type.Int, kind: TExprKind.Binary{op: BinOp.Pow, overflow: true, line: line, lhs: lhs, rhs: exponent}}
+                    return TExpr{ty: fraction_ty, kind: TExprKind.PreciseBuiltin{type_name: TYPE_FRACTION, func: "from_parts", args: [TExpr]{TExpr{ty: Type.Int, kind: TExprKind.IntLit(1, None)}, powered}}}
+                }
+            }
+            if op == .Add | .Sub | .Mul | .Div | .Eq | .Ne {
+                lhs_fraction :: lhs.ty == fraction_ty
+                rhs_fraction :: rhs.ty == fraction_ty
+                if lhs_fraction && rhs.ty == Type.Int -> rhs = fraction_from_int(rhs)
+                else if rhs_fraction && lhs.ty == Type.Int -> lhs = fraction_from_int(lhs)
+            }
+            left_duration :: lhs.ty == Type.Named(DURATION_TYPE)
+            right_duration :: rhs.ty == Type.Named(DURATION_TYPE)
+            if op == .Mul | .Div && ((left_duration && rhs.ty == Type.Int) || (op == BinOp.Mul && lhs.ty == Type.Int && right_duration)) {
+                (duration, factor, duration_op) :: if left_duration -> (lhs, rhs, if op == BinOp.Mul -> THandleOp.DurationScale else -> THandleOp.DurationDivide) else -> (rhs, lhs, THandleOp.DurationScale)
+                return TExpr{ty: Type.Named(DURATION_TYPE), kind: TExprKind.HandleMethod{recv: duration, op: duration_op, args: [TExpr]{factor}}}
+            }
+            if op == BinOp.Div && lhs.ty == Type.Int && rhs.ty == Type.Int -> return TExpr{ty: fraction_ty, kind: TExprKind.PreciseBuiltin{type_name: TYPE_FRACTION, func: "from_parts", args: [TExpr]{lhs, rhs}}}
+            if op == .Add | .Sub {
+                if geometry_binop_result(op, lhs.ty, rhs.ty) == Val(Ok(result_ty)) {
+                    type_name :: if (lhs.ty, rhs.ty) == {
+                        (.Apply(name, _), _) where name == "Point2" || name == "Delta2" -> name
+                        (_, .Apply(name, _)) where name == "Point2" || name == "Delta2" -> name
+                        (.Named(name), _) -> name
+                        else -> panic("geometry operands have a nominal carrier")
+                    }
+                    return TExpr{ty: result_ty, kind: TExprKind.MathBuiltin{type_name: type_name, func: if op == BinOp.Add -> "add" else -> "sub", args: [TExpr]{lhs, rhs}}}
+                }
+            }
+            tir_integer :: lhs.ty.is_integer() || rhs.ty.is_integer()
+            arith_overflow :: (op == .Add | .Sub | .Mul | .Div) && (tir_integer || ast_operand_is_integer(l, env) == Val(true) || ast_operand_is_integer(r, env) == Val(true))
+            shift_overflow :: (op == .Shl | .Shr) && (lhs.ty.is_integer() || ast_operand_is_integer(l, env) == Val(true))
+            overflow :: arith_overflow || shift_overflow
+            line :: cx.src_line_col(span.start).0 as U32
+            canonical_time_ty :: in_own_frame(fn() {
+                if (lhs.ty, rhs.ty) == {
+                    (.Named(left), .Named(right)) where (left == "Duration" || left == "Instant") && (right == "Duration" || right == "Instant") -> {
+                        left_kind :: if cx.unit_facts.get(left) == { Val(fact) -> Val(fact.kind) None -> None }
+                        right_kind :: if cx.unit_facts.get(right) == { Val(fact) -> Val(fact.kind) None -> None }
+                        if (op, left_kind, right_kind) == {
+                            (.Add | .Sub, Val(.Delta), Val(.Delta)) | (.Sub, Val(.Point), Val(.Point)) -> Val(Type.Named(DURATION_TYPE))
+                            (.Add | .Sub, Val(.Point), Val(.Delta)) | (.Add, Val(.Delta), Val(.Point)) -> Val(Type.Named(TYPE_INSTANT))
+                            else -> None
+                        }
+                    }
+                    else -> None
+                }
+            })
+            ty :: in_own_frame(fn() {
+                if op == BinOp.Compare -> Type.Named(TYPE_ORDERING)
+                else if op.is_comparison() || op == .And | .Or -> Type.Bool
+                else if canonical_time_ty == Val(ty) -> ty
+                else if (lhs.ty, rhs.ty) == (.Named(ln), .Named(rn)) {
+                    lm :: is_math_type(ln) && !cx.type_names.contains(ln)
+                    rm :: is_math_type(rn) && !cx.type_names.contains(rn)
+                    if lm || rm -> math_binop_result(op, ln, rn) ?? lhs.ty
+                    else if ln == rn && precise_binop_result(op, ln, rn) != None -> lhs.ty
+                    else -> lhs.ty
+                } else if lhs.ty == .Named(ln) {
+                    if is_math_type(ln) && !cx.type_names.contains(ln) -> math_scalar_binop_result(op, ln, rhs.ty) ?? lhs.ty
+                    else if rhs.ty == .Named(rn) {
+                        if is_math_type(rn) && !cx.type_names.contains(rn) -> math_scalar_binop_result(op, rn, lhs.ty) ?? lhs.ty else -> lhs.ty
+                    } else -> lhs.ty
+                } else if rhs.ty == .Named(rn) {
+                    if is_math_type(rn) && !cx.type_names.contains(rn) -> math_scalar_binop_result(op, rn, lhs.ty) ?? lhs.ty else -> lhs.ty
+                } else -> lhs.ty
+            })
+            if (lhs.ty, rhs.ty) == (.Named(ln), .Named(rn)) {
+                if ln == rn {
+                    if precise_binop_result(op, ln, rn) == Val(result_ty) {
+                        if op == .Add | .Sub | .Mul | .Div | .Eq | .Ne {
+                            func :: if op == { .Add -> "add" .Sub -> "sub" .Mul -> "mul" .Div -> "div" .Eq | .Ne -> "equal" else -> panic("unreachable") }
+                            precise :: TExpr{ty: result_ty, kind: TExprKind.PreciseBuiltin{type_name: ln, func: func, args: [TExpr]{lhs, rhs}}}
+                            if op == BinOp.Ne -> return TExpr{ty: Type.Bool, kind: TExprKind.Unary{op: UnOp.Not, operand: precise}}
+                            return precise
+                        }
+                    }
+                }
+            }
+            if op == .Lt | .Gt | .Le | .Ge | .Compare && lhs.ty == Type.Named(TYPE_DECIMAL) && rhs.ty == Type.Named(TYPE_DECIMAL) {
+                ordering_ty :: Type.Named(TYPE_ORDERING)
+                compare :: TExpr{ty: ordering_ty, kind: TExprKind.PreciseBuiltin{type_name: TYPE_DECIMAL, func: "compare", args: [TExpr]{lhs, rhs}}}
+                (variant, negate) :: if op == { .Lt -> ("Less", false) .Gt -> ("Greater", false) .Le -> ("Greater", true) .Ge -> ("Less", true) else -> return compare }
+                test :: TExpr{ty: Type.Bool, kind: TExprKind.Binary{op: BinOp.Eq, overflow: false, line: line, lhs: compare, rhs: TExpr{ty: ordering_ty, kind: TExprKind.EnumLit{enum_type: TYPE_ORDERING, variant: variant, payload: TEnumPayload.Unit}}}}
+                return if negate -> TExpr{ty: Type.Bool, kind: TExprKind.Unary{op: UnOp.Not, operand: test}} else -> test
+            }
+            if math_scalar_builtin(op, lhs.ty, rhs.ty) == Val((type_name, func)) {
+                math_on_left :: if lhs.ty == { .Named(name) -> is_math_type(name) else -> false }
+                (left, right) :: if math_on_left -> (lhs, coerce_math_scalar_to_float(rhs, line)) else -> (coerce_math_scalar_to_float(lhs, line), rhs)
+                return TExpr{ty: ty, kind: TExprKind.MathBuiltin{type_name: type_name, func: func, args: [TExpr]{left, right}}}
+            }
+            if op == .Shl | .Shr && exact_int_type(lhs.ty) && rhs.ty.is_integer() && !exact_int_type(rhs.ty) -> rhs = TExpr{ty: Type.Int, kind: TExprKind.NumericMethod{recv: rhs, op: TNumericOp.CastAs{dst_rust: ""}}}
+            TExpr{ty: ty, kind: TExprKind.Binary{op: op, overflow: overflow, line: line, lhs: lhs, rhs: rhs}}
+        })
+        // Rust: crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:5640
+        .CompareChain(operands, ops, hooks, _) -> in_own_frame(fn() {
+            toperands := [TExpr]{}
+            loop expression in operands {
+                lowered :: lower_expr(expression, cx, &env)
+                value :: if lowered.ty == {
+                    .Result(ok, _) -> {
+                        (line, column) :: cx.src_line_col(expression.span().start)
+                        TExpr{ty: ok, kind: TExprKind.Try{inner: lowered, note: None, convert: TTryConvert.None, file: escape_rust_str(cx.file), line: line, column: column, fn_name: escape_rust_str(env.fn_name)}}
+                    }
+                    else -> lowered
+                }
+                &toperands.push(value)
+            }
+            TExpr{ty: Type.Bool, kind: TExprKind.CompareChain{operands: toperands, ops: ops, hooks: hooks}}
+        })
+        else -> lower_expr_inner_5677(e, cx, &env)
+    }
+}

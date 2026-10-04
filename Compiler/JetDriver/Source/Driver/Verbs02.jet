@@ -1,40 +1,25 @@
-// PORT-PENDING 0609 crates-jet-driver-src-compile-module-group: crates/jet-driver/src/Compile.rs:1-36
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Compiler output types.
-//RS use crate::Diagnostics::Diagnostic;
-//RS use crate::Lock;
-//RS use crate::FFI;
-//RS 
-//RS /// Result of a successful compile: generated Rust plus any lint warnings.
-//RS #[derive(Debug)]
-//RS pub struct CompileOutput {
-//RS     pub rust: String,
-//RS     pub lints: Vec<Diagnostic>,
-//RS     /// Built FFI bridge when the program declares `extern rust` (M7).
-//RS     pub ffi: Option<FFI::FfiLink>,
-//RS     /// Native C-library linker args (S59 / E2-M14), ready for `rustc`.
-//RS     pub clinks: Vec<String>,
-//RS     /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs seen during sema.
-//RS     /// Each entry: relative path + sha256 of the bytes at compile time.
-//RS     /// Written to `.jet/lock` by the build driver for reproducibility.
-//RS     pub comptime_inputs: Vec<Lock::ComptimeInput>,
-//RS     /// D-WEBBACKEND1 (c123 M2): web target artifacts when `--target=web`.
-//RS     pub web: Option<crate::Codegen::MIRWeb::WebArtifacts>,
-//RS     /// D-WASM1: partition report when `--target=web`.
-//RS     pub web_partition_report: Option<String>,
-//RS     /// D-PLUGIN1=B / D-DEP-WASM1=A (c81): plugin guest artifacts when
-//RS     /// `--target=sandbox` (the `.wit` world + wasm32 guest Rust source).
-//RS     pub plugin: Option<crate::Codegen::PluginArtifacts>,
-//RS     /// D-LIB-EXPORT1=C: native Library Rust wrappers and foreign projections.
-//RS     pub library: Option<crate::Codegen::LibraryArtifacts>,
-//RS     /// D-LIB-NAME1=A / D-LIB-DYNTRUST1=A: the checked output configuration
-//RS     /// carried beside the generated projections for the native build adapter.
-//RS     pub library_config: Option<crate::LibraryExport::LibraryConfig>,
-//RS     /// D-RINGLAYER1=A M2: minimum runtime profile inferred from imports + helpers.
-//RS     pub inferred_layer: crate::Syntax::RuntimeLayer,
-//RS     /// D-RINGLAYER1=A: optional `runtime:` ceiling from `pkg.jet`.
-//RS     pub layer_ceiling: Option<crate::Syntax::RuntimeLayer>,
-//RS }
-//RS 
-// END-PORT-PENDING 0609 crates/jet-driver/src/Compile.rs:1-36
+use jet_foundation.Diagnostics.Diagnostic
+use crate.Lock.ComptimeInput
+use crate.FFI.FfiLink
+use crate.Codegen.[MIRWeb, PluginArtifacts, LibraryArtifacts]
+use crate.LibraryExport.LibraryConfig
+use crate.Syntax.RuntimeLayer
 
+// Rust: crates/jet-driver/src/Compile.rs:8
+// Successful compiler products and the checked metadata consumed by the build driver.
+#Derive(Debug)
+pub struct CompileOutput {
+    pub rust: String
+    pub lints: [Diagnostic]
+    pub ffi: FfiLink?
+    pub clinks: [String]
+    // Relative path plus SHA256 of compile-time embed inputs, published to .jet/lock.
+    pub comptime_inputs: [ComptimeInput]
+    pub web: MIRWeb.WebArtifacts?
+    pub web_partition_report: String?
+    pub plugin: PluginArtifacts?
+    pub library: LibraryArtifacts?
+    pub library_config: LibraryConfig?
+    pub inferred_layer: RuntimeLayer
+    pub layer_ceiling: RuntimeLayer?
+}

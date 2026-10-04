@@ -1,0 +1,100 @@
+use jet_comptime.Comptime.Build.RemoteScheduler.[RemoteBuildRequest, RemoteBuilderCapabilities, RemoteBuilder, RemoteAttemptError, RemoteScheduleError, RemoteScheduler]
+use jet_comptime.Comptime.Build.CacheCas.[ActionKey, RemoteBuildBinding]
+use jet_comptime.Comptime.Build.ActionsPolicy.[BuildCapability, BuildResourcePool]
+use core.sys.OSPath
+use std.sync.[Arc, mpsc]
+use std.thread
+
+// Rust: crates/jet-comptime/src/Comptime/Build/remote_scheduler.rs:510
+fn binding(name: String, execute: Bool) -> RemoteBuildBinding {
+    RemoteBuildBinding.new(name.clone(), OSPath.from("/var/lib/jet/{name}"), "test-key".as_bytes()).unwrap()
+        .with_trust_domain("trusted").with_platform("linux-x86_64").with_execute(execute)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/remote_scheduler.rs:518
+fn capabilities(priority: I32, execute: Bool) -> RemoteBuilderCapabilities {
+    RemoteBuilderCapabilities.new("linux-x86_64", "trusted").with_capability(.Exec)
+        .with_feature("clang").with_pool(.CPU).with_concurrency(2).with_priority(priority).with_execute(execute)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/remote_scheduler.rs:528
+fn request() -> RemoteBuildRequest {
+    RemoteBuildRequest.new(ActionKey.new("remote-action")).with_capability(.Exec)
+        .with_platform("linux-x86_64").with_trust_domain("trusted").with_feature("clang").with_pool(.CPU).with_execute(true)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/remote_scheduler.rs:539
+#Test("selects_priority_then_name") {
+    scheduler := RemoteScheduler.new([
+        RemoteBuilder.new(binding("zeta", true), capabilities(10, true)).unwrap(),
+        RemoteBuilder.new(binding("alpha", true), capabilities(10, true)).unwrap(),
+        RemoteBuilder.new(binding("fast", true), capabilities(20, true)).unwrap()
+    ]).unwrap()
+    assert_eq(scheduler.select(&request()).unwrap().builder(), "fast")
+    tied := RemoteBuildRequest.new(ActionKey.new("remote-action")).with_capability(.Exec)
+        .with_platform("linux-x86_64").with_trust_domain("trusted").with_feature("clang").with_pool(.CPU).with_execute(true)
+    tied_scheduler := RemoteScheduler.new([
+        RemoteBuilder.new(binding("zeta", true), capabilities(10, true)).unwrap(),
+        RemoteBuilder.new(binding("alpha", true), capabilities(10, true)).unwrap()
+    ]).unwrap()
+    assert_eq(tied_scheduler.select(&tied).unwrap().builder(), "alpha")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/remote_scheduler.rs:564
+#Test("retries_worker_loss_but_rejects_terminal_failure") {
+    scheduler := RemoteScheduler.new([
+        RemoteBuilder.new(binding("fast", true), capabilities(20, true)).unwrap(),
+        RemoteBuilder.new(binding("safe", true), capabilities(10, true)).unwrap()
+    ]).unwrap()
+    dispatched := scheduler.dispatch(&request(), fn(builder) -> String RemoteAttemptError! {
+        if builder.builder() == "fast" { throw RemoteAttemptError.worker_lost("worker disappeared") }
+        builder.builder().clone()
+    }).unwrap()
+    assert_eq(dispatched.builder, "safe")
+    assert_eq(dispatched.attempted, ["fast", "safe"])
+    assert_eq(dispatched.value, "safe")
+    error := scheduler.dispatch(&request(), fn(_) -> Unit RemoteAttemptError! { throw RemoteAttemptError.rejected("bad result") }).unwrap_err()
+    assert(match error { .Rejected { builder, .. } => builder == "fast"; _ => false })
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/remote_scheduler.rs:595
+// GATE #4494: scoped native threads and blocking native channels preserve the concurrency test.
+#Test("dispatch_reserves_capacity_and_releases_it_after_completion") {
+    scheduler := Arc.new(RemoteScheduler.new([
+        RemoteBuilder.new(binding("fast", true), capabilities(20, true).with_concurrency(1)).unwrap(),
+        RemoteBuilder.new(binding("safe", true), capabilities(10, true).with_concurrency(1)).unwrap()
+    ]).unwrap())
+    action_request := request()
+    (started_tx, started_rx) := mpsc.channel<Unit>()
+    (release_tx, release_rx) := mpsc.channel<Unit>()
+    thread.scope(fn(scope) {
+        first_scheduler := scheduler.clone()
+        first_request := action_request.clone()
+        first := scope.spawn(fn() {
+            first_scheduler.dispatch(&first_request, fn(builder) -> String RemoteAttemptError! {
+                assert_eq(builder.builder(), "fast")
+                started_tx.send(()).unwrap()
+                release_rx.recv().unwrap()
+                "first"
+            }).unwrap()
+        })
+        started_rx.recv().unwrap()
+        second := scheduler.dispatch(&action_request, fn(builder) -> String RemoteAttemptError! {
+            assert_eq(builder.builder(), "safe")
+            "second"
+        }).unwrap()
+        assert_eq(second.builder, "safe")
+        release_tx.send(()).unwrap()
+        assert_eq(first.join().unwrap().builder, "fast")
+        third := scheduler.dispatch(&action_request, fn(builder) -> String RemoteAttemptError! {
+            assert_eq(builder.builder(), "fast")
+            "third"
+        }).unwrap()
+        assert_eq(third.builder, "fast")
+    })
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/remote_scheduler.rs:653
+#Test("separates_cache_and_execution_grants") {
+    host_binding := binding("cache-only", false).with_cache_read(true)
+    facts := RemoteBuilderCapabilities.from_binding(&host_binding)
+    scheduler := RemoteScheduler.new([RemoteBuilder.new(^host_binding, ^facts).unwrap()]).unwrap()
+    cache_request := RemoteBuildRequest.new(ActionKey.new("remote-cache"))
+        .with_platform("linux-x86_64").with_trust_domain("trusted").with_cache_read(true)
+    assert_eq(scheduler.select(&cache_request).unwrap().builder(), "cache-only")
+    assert(match scheduler.select(&request()) { Err(.NoEligibleBuilder { .. }) => true; _ => false })
+}

@@ -25,18 +25,19 @@ fn rule_catalog_row(catalog: TAppliedRuleCatalog, name: String) -> TAppliedRule 
     panic("missing canonical row: {name}")
 }
 
-fn rule_catalog_module(program: ^Program, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
-    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, foreign_handles: []}
+fn rule_catalog_module(program: ^Program, source: String, identity: String, path: String, package: String) -> SemaRegistrationModuleInput Never! {
+    SemaRegistrationModuleInput{package_identity: package, module_identity: identity, module_name: identity, module_path: path, source_file: path, source_segments: [], source_origin: SemaSourceOrigin.Snapshot, program: program, unit_source: source, foreign_handles: []}
 }
 
 fn rule_catalog_prepare_registration(source: String) -> SemaRegistrationGraph Never! {
     parsed :: parse_source(source.bytes())
     assert_eq(parsed.diagnostics.len(), 0)
-    effects :: parse_source(foundation_embedded_core().effect_source().bytes())
+    effects_source :: foundation_embedded_core().effect_source()
+    effects :: parse_source(effects_source.bytes())
     assert_eq(effects.diagnostics.len(), 0)
     inputs :: [SemaRegistrationModuleInput]{
-        rule_catalog_module(^parsed.program, "main", "catalog.jet", "catalog"),
-        rule_catalog_module(^effects.program, "effects", "Prelude/Effects.jet", "jet:canonical-prelude"),
+        rule_catalog_module(^parsed.program, source, "main", "catalog.jet", "catalog"),
+        rule_catalog_module(^effects.program, effects_source, "effects", "Prelude/Effects.jet", "jet:canonical-prelude"),
     }
     build :: SemaBuildFacts{package_name: "catalog", package_version: "1.0.0", os: "linux", profile: "test", stamp_git: None, stamp_dirty: false, stamp_toolchain: "catalog-test", stamp_at: "", artifact_build: false}
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}

@@ -1,0 +1,81 @@
+use jet_foundation.[Type, Pattern, PatSlot, Span]
+use jet_syntax as Syntax
+use jet_codegen.Codegen.Functions04.[bind_generic_type, generic_call_substitution, fragment_type_owner, fragment_host_field_type, normalize_fragment_optional_pattern]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1762-1793
+#Test("bind_generic_type_upgrades_unqualified_nominal_identity") {
+    names :: Set<String>.from([String]{"T"})
+    subst := [String: Type]{"T": Type.Named("Record")}
+    assert(bind_generic_type(Type.Named("T"), Type.Named("module::Record"), names, &subst))
+    assert_eq(subst.get("T"), Val(Type.Named("module::Record")))
+    assert(!bind_generic_type(Type.Named("T"), Type.Named("other::Record"), names, &subst))
+    assert_eq(subst.get("T"), Val(Type.Named("module::Record")))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1831-1888
+#Test("bind_generic_callable_return_unwraps_only_source_plain_carrier") {
+    names :: Set<String>.from([String]{"T"})
+    subst := [String: Type]{}
+    template :: Type.Fn{params: [], ret: Val(Type.Named("T")), effect_bound: None,
+        return_view_provenance: None, param_contract: None, call_metadata: None}
+    actual :: Type.Fn{params: [], ret: Val(Type.Result{ok: Type.String, err: Type.Named("Err")}), effect_bound: None,
+        return_view_provenance: None, param_contract: None, call_metadata: None}
+    assert(bind_generic_type(template, actual, names, &subst))
+    assert_eq(subst.get("T"), Val(Type.String))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1862-1878
+#Test("never_failing_callable_binds_generic_failure_slot") {
+    names :: Set<String>.from([String]{"T", "E"})
+    subst := [String: Type]{}
+    template :: Type.Fn{params: [], ret: Val(Type.Result{ok: Type.Named("T"), err: Type.Named("E")}), effect_bound: None,
+        return_view_provenance: None, param_contract: None, call_metadata: None}
+    actual :: Type.Fn{params: [], ret: Val(Type.Result{ok: Type.Int, err: Type.Named(Syntax.TYPE_NEVER)}), effect_bound: None,
+        return_view_provenance: None, param_contract: None, call_metadata: None}
+    assert(bind_generic_type(template, actual, names, &subst))
+    assert_eq(subst.get("T"), Val(Type.Int))
+    assert_eq(subst.get("E"), Val(Type.Named(Syntax.TYPE_NEVER)))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:1909-1938
+#Test("generic_substitution_requires_complete_shape_and_consistent_explicit_types") {
+    inferred :: generic_call_substitution([Type]{Type.Named("T")}, [String]{"T"}, [Type]{Type.Int})
+    assert_eq(inferred.and_then(fn(subst) { subst.get("T") }), Val(Type.Int))
+    assert_eq(generic_call_substitution([Type]{Type.Named("T")}, [String]{"T"}, []), None)
+    assert_eq(generic_call_substitution([Type]{Type.Named("T")}, [String]{"T"}, [Type]{Type.Int, Type.String}), None)
+    assert_eq(generic_call_substitution([], [String]{"T"}, []), None)
+    explicit :: generic_call_substitution([], [String]{"T"}, [Type]{Type.String})
+    assert_eq(explicit.and_then(fn(subst) { subst.get("T") }), Val(Type.String))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3050-3070
+#Test("fragment_host_field_types_preserve_metadata_shapes") {
+    assert_eq(fragment_host_field_type(Syntax.TYPE_BUILD_CONTEXT, "program"), Type.Named(Syntax.TYPE_PROGRAM_INFO))
+    assert_eq(fragment_host_field_type(Syntax.TYPE_BUILD_CONTEXT, "__session"), Type.Int)
+    assert_eq(fragment_host_field_type(Syntax.TYPE_PROGRAM_INFO, "types"), Type.List(Type.Named(Syntax.TYPE_TYPE_INFO)))
+    assert_eq(fragment_host_field_type(Syntax.TYPE_TYPE_INFO, "expanded_markers"), Type.List(Type.String))
+    assert_eq(fragment_host_field_type(Syntax.TYPE_SOURCE_SPAN, "start"), Type.Int)
+    assert_eq(fragment_host_field_type("Other", "name"), Type.String)
+    assert_eq(fragment_type_owner(Type.Apply{name: "module::Record", args: [Type]{Type.Int}}), Val("module::Record"))
+    assert_eq(fragment_type_owner(Type.Int), None)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mod.rs:3152-3226
+#Test("fragment_optional_pattern_keeps_declared_dotted_variant") {
+    span :: Span.new(3, 9)
+    declared :: Set<String>.from([String]{Syntax.LIT_VALUE})
+    dotted := Pattern.Variant{variant: Syntax.LIT_VALUE, bindings: [PatSlot]{PatSlot.Wildcard}, leading_dot: true, span: span}
+    normalize_fragment_optional_pattern(&dotted, declared)
+    assert(dotted is .Variant{..})
+    undotted := Pattern.Variant{variant: Syntax.LIT_VALUE, bindings: [PatSlot]{PatSlot.Wildcard}, leading_dot: false, span: span}
+    normalize_fragment_optional_pattern(&undotted, declared)
+    if undotted == .Present{binding, binding_span, inner, span: actual_span} {
+        assert_eq(binding, Syntax.PAT_WILDCARD_SLOT)
+        assert_eq(binding_span, span)
+        assert_eq(inner, None)
+        assert_eq(actual_span, span)
+    } else -> panic("undotted optional value pattern must normalize")
+    absent := Pattern.Variant{variant: Syntax.LIT_NULL, bindings: [], leading_dot: false, span: span}
+    normalize_fragment_optional_pattern(&absent, declared)
+    assert_eq(absent, Pattern.Absent(span))
+}

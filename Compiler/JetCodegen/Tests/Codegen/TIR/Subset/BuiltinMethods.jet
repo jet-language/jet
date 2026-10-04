@@ -1,0 +1,67 @@
+use jet_foundation.TNumericOp
+use jet_codegen.Codegen.TIR.Subset.BuiltinMethods.[is_covered_builtin_name, is_concurrency_method_name, is_process_handle_method_name, is_http_type, is_http_method_name, is_civil_time_method_name, is_covered_numeric_method, resolve_numeric_op, resolve_numeric_conversion_op, parse_int_name_tir, is_numeric_bounds_const]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:15
+#Test("builtin_gate_keeps_arity_and_variadic_zip") {
+    assert(is_covered_builtin_name("zip_pad", 19))
+    assert(is_covered_builtin_name("zip_short", 0))
+    assert(is_covered_builtin_name("join", 1))
+    assert(!is_covered_builtin_name("join", 0))
+    assert(is_concurrency_method_name("join", 0))
+    assert(!is_concurrency_method_name("join", 1))
+    assert(is_covered_builtin_name("try_insert", 2))
+    assert(!is_covered_builtin_name("try_insert", 1))
+    assert(!is_covered_builtin_name("map", 1))
+    assert(is_covered_builtin_name("position", 0))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:249
+#Test("handle_gate_is_receiver_specific") {
+    assert(is_process_handle_method_name(Val("ProcessChild"), "wait", 0))
+    assert(!is_process_handle_method_name(Val("ProcessSpec"), "wait", 0))
+    assert(is_process_handle_method_name(Val("ProcessSpec"), "terminal", 1))
+    assert(!is_process_handle_method_name(Val("TerminalSession"), "resize", 0))
+    assert(is_http_type(Val("HTTPServerTLS")))
+    assert(!is_http_method_name(Val("HTTPServerTLS"), "serve"))
+    assert(is_http_method_name(Val("BrowserPrivacy"), "redact_receipts"))
+    assert(!is_http_method_name(Val("BrowserPage"), "redact_receipts"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:565
+#Test("civil_time_table_preserves_receiver_laws") {
+    assert(is_civil_time_method_name(Val("ZonedDateTime"), "add_duration"))
+    assert(!is_civil_time_method_name(Val("DateTime"), "add_duration"))
+    assert(is_civil_time_method_name(Val("DateTime"), "plus_duration"))
+    assert(is_civil_time_method_name(Val("LocalDate"), "iso_week_year"))
+    assert(!is_civil_time_method_name(Val("Instant"), "format"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:725
+#Test("numeric_query_preserves_width_and_gate_surface") {
+    op := resolve_numeric_op("count_ones", "U16", 3)
+    if op == .Val(.BitCount(method, width)) {
+        assert(method == "count_ones")
+        assert(width == 16)
+    } else { assert(false) }
+    assert(resolve_numeric_op("bit_count", "I8", 3).is_some())
+    assert(!is_covered_numeric_method("bit_count", 0))
+    assert(is_numeric_bounds_const("NEG_INFINITY"))
+    assert(!is_numeric_bounds_const("min"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:765
+#Test("numeric_conversion_preserves_unsigned_and_float_bounds") {
+    assert(resolve_numeric_conversion_op("Int", "U64").is_some_and(fn(op) { op is .CastAs }))
+    assert(resolve_numeric_conversion_op("I8", "Int").is_some_and(fn(op) { op is .TryFrom }))
+    assert(resolve_numeric_conversion_op("F32", "F64").is_some_and(fn(op) { op is .FloatNarrow }))
+    op := resolve_numeric_conversion_op("U64", "Float")
+    if op == .Val(.FloatToInt(host_kind, _, _, lower, upper)) {
+        assert(host_kind == 7)
+        assert(lower == "0.0")
+        assert(upper == "18446744073709551616.0")
+    } else { assert(false) }
+    assert(resolve_numeric_conversion_op("Unknown", "Int").is_none())
+    assert(parse_int_name_tir("U255") == Val((false, 255)))
+    assert(parse_int_name_tir("U256").is_none())
+    assert(parse_int_name_tir("F32").is_none())
+}

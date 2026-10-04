@@ -1,0 +1,20 @@
+use jet_comptime.Comptime.SyncJetStd.[jet_int_from_i64, jet_int_from_str, jet_int_to_i64, jet_int_to_string, jet_int_to_f64, render_datatree_json]
+use jet_foundation.DataTree.DataTree
+
+// Rust: crates/jet-comptime/src/Comptime/SyncJetStd.rs:26-44
+#Test("exact_int_marshalling") {
+    assert_eq(jet_int_from_i64(-42), -42)
+    assert_eq(jet_int_from_str("9223372036854775807").unwrap(), I64.MAX)
+    assert(jet_int_from_str("9223372036854775808").is_err())
+    assert(jet_int_from_str("not an integer").is_err())
+    assert_eq(jet_int_to_i64(-42), Val(-42))
+    assert_eq(jet_int_to_string(-42), "-42")
+    assert_eq(jet_int_to_f64(42), 42.0)
+}
+// Rust: crates/jet-comptime/src/Comptime/SyncJetStd.rs:54-151
+#Test("datatree_json_compact_and_pretty") {
+    tree := DataTree.Object([("text", DataTree.Text("a\n\"b")), ("numbers", DataTree.Array([DataTree.Int(1), DataTree.Bool(true)]))])
+    assert_eq(render_datatree_json(&tree, false, 0), "{{\"text\":\"a\\n\\\"b\",\"numbers\":[1,true]}}")
+    assert_eq(render_datatree_json(&tree, true, 0), "{{\n  \"text\": \"a\\n\\\"b\",\n  \"numbers\": [\n    1,\n    true\n  ]\n}}")
+    assert_eq(render_datatree_json(&DataTree.Bytes([0, 255]), true, 0), "[0,255]")
+}

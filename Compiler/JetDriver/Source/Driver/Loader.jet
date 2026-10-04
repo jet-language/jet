@@ -2542,6 +2542,11 @@ fn jet_driver_load_pending_sources(request: JetDriverCompileRequest, snapshot: J
         // Only an immutable lookup snapshot survives the move into the bundle.
         program = jet_driver_program_snapshot(bundle.value, modules[module_position])
         if jet_driver_has_errors(parse_result.diagnostics) -> next
+        // Parser teaching keeps the same source-qualified diagnostics as the
+        // loaded wrapper; retained cache modules are never parsed twice.
+        loop parse_diagnostic_index in parse_diagnostic_start..<diagnostics.len() {
+            &bundle.value.parse_teaching.push(diagnostics[parse_diagnostic_index])
+        }
         // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
         // record, so a module that names it loads that Core source without a
         // `use` (Rust `source_names_identifier` in the loader).

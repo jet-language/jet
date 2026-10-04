@@ -1,2022 +1,833 @@
-// PORT-PENDING 0561 crates-jet-comptime-src-comptime-build-cache-cas-slice-1788: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:1788-3805
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub fn publish_execution_result(
-//RS         &self,
-//RS         result: &RemoteExecutionResult,
-//RS         policy: &RemoteCachePolicy,
-//RS     ) -> Result<(), RemoteCacheError> {
-//RS         policy
-//RS             .check(RemoteActionRequest::Execute)
-//RS             .map_err(RemoteCacheError::Denied)?;
-//RS         self.require_auth(RemoteActionRequest::Execute)?;
-//RS         self.require_worker_identity()?;
-//RS         self.validate_policy_identity(policy)?;
-//RS         self.validate_proof_for_key(policy, &result.key, RemoteActionRequest::Execute)?;
-//RS         self.validate_sandbox_proof(policy, &result.sandbox, RemoteActionRequest::Execute)?;
-//RS         if let Some(expected) = &self.worker_identity {
-//RS             self.validate_worker_identity(&result.sandbox, expected)?;
-//RS         }
-//RS         validate_remote_execution_result(result)?;
-//RS         let _commit = remote_execution_commit_lock(&self.root)?;
-//RS         if self.execution_is_cancelled(&result.key, &result.attempt_id)? {
-//RS             return Err(RemoteCacheError::InvalidRecord(
-//RS                 "remote execution was cancelled before this result was published".to_string(),
-//RS             ));
-//RS         }
-//RS         validate_remote_count(result.outputs.len(), "execution outputs")?;
-//RS         let request = self.read_execution_request(&result.key)?;
-//RS         if self.execution_is_cancelled(&result.key, &result.attempt_id)? {
-//RS             return Err(RemoteCacheError::InvalidRecord(
-//RS                 "remote execution was cancelled before this result was published".to_string(),
-//RS             ));
-//RS         }
-//RS         validate_execution_parity(&request, result)?;
-//RS         for output in &result.outputs {
-//RS             self.read_remote_blob_with_len(&output.digest, output.byte_len)?;
-//RS         }
-//RS         self.read_remote_blob(&result.stdout_digest)?;
-//RS         self.read_remote_blob(&result.stderr_digest)?;
-//RS         ensure_remote_root(&self.root)?;
-//RS         let path = self.execution_result_path(&result.key)?;
-//RS         match secure_read_file_bounded(&self.root, &path, MAX_REMOTE_WIRE_BYTES + 256) {
-//RS             Ok(existing_wire) => {
-//RS                 let existing = decode_remote_execution_result(
-//RS                     &self.open("execution-result", &existing_wire)?,
-//RS                 )?;
-//RS                 if existing == *result {
-//RS                     return Ok(());
-//RS                 }
-//RS                 return Err(RemoteCacheError::InvalidRecord(
-//RS                     "remote execution result disagrees with the already published result"
-//RS                         .to_string(),
-//RS                 ));
-//RS             }
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-//RS             Err(error) => return Err(RemoteCacheError::Io(error)),
-//RS         }
-//RS         let bytes = self.seal(
-//RS             "execution-result",
-//RS             encode_remote_execution_result(result).as_bytes(),
-//RS         )?;
-//RS         atomic_restore_file(&self.root, &path, &bytes)?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Read a worker result for a submitted action. This is the explicit
-//RS     /// remote-execution read path; it does not run a local action on a miss.
-//RS     pub fn download_execution_result(
-//RS         &self,
-//RS         key: &ActionKey,
-//RS         policy: &RemoteCachePolicy,
-//RS     ) -> Result<RemoteExecutionResult, RemoteCacheError> {
-//RS         policy
-//RS             .check(RemoteActionRequest::Execute)
-//RS             .map_err(RemoteCacheError::Denied)?;
-//RS         self.require_auth(RemoteActionRequest::Execute)?;
-//RS         self.require_worker_identity()?;
-//RS         self.validate_policy_identity(policy)?;
-//RS         self.validate_proof_for_key(policy, key, RemoteActionRequest::Execute)?;
-//RS         let _commit = remote_execution_commit_lock(&self.root)?;
-//RS         let request = self.read_execution_request(key)?;
-//RS         self.validate_sandbox_proof(policy, &request.sandbox, RemoteActionRequest::Execute)?;
-//RS         let path = self.execution_result_path(key)?;
-//RS         let bytes = secure_read_file_bounded(&self.root, &path, MAX_REMOTE_WIRE_BYTES + 256)?;
-//RS         let result = decode_remote_execution_result(&self.open("execution-result", &bytes)?)?;
-//RS         if self.execution_is_cancelled(key, &result.attempt_id)? {
-//RS             remove_remote_execution_file(&path)?;
-//RS             return Err(RemoteCacheError::Io(io::Error::new(
-//RS                 io::ErrorKind::NotFound,
-//RS                 "remote execution was cancelled",
-//RS             )));
-//RS         }
-//RS         if &result.key != key {
-//RS             return Err(RemoteCacheError::InvalidRecord(
-//RS                 "execution result key does not match lookup key".to_string(),
-//RS             ));
-//RS         }
-//RS         validate_execution_parity(&request, &result)?;
-//RS         for output in &result.outputs {
-//RS             self.read_remote_blob_with_len(&output.digest, output.byte_len)?;
-//RS         }
-//RS         self.read_remote_blob(&result.stdout_digest)?;
-//RS         self.read_remote_blob(&result.stderr_digest)?;
-//RS         Ok(result)
-//RS     }
-//RS 
-//RS     /// Read and validate a queued request for a remote worker. This is the
-//RS     /// worker-facing half of the transport; it returns the immutable request
-//RS     /// envelope, while the worker must upload declared input/output blobs and
-//RS     /// publish a parity-checked result through `publish_execution_result`.
-//RS     pub fn read_execution_request(
-//RS         &self,
-//RS         key: &ActionKey,
-//RS     ) -> Result<RemoteExecutionRequest, RemoteCacheError> {
-//RS         self.require_auth(RemoteActionRequest::Execute)?;
-//RS         self.require_worker_identity()?;
-//RS         let path = self.execution_request_path(key)?;
-//RS         let bytes = secure_read_file_bounded(&self.root, &path, MAX_REMOTE_WIRE_BYTES + 256)?;
-//RS         let request = decode_remote_execution_request(&self.open("execution-request", &bytes)?)?;
-//RS         if &request.key != key {
-//RS             return Err(RemoteCacheError::InvalidRecord(
-//RS                 "execution request key does not match lookup key".to_string(),
-//RS             ));
-//RS         }
-//RS         if let Some(expected) = &self.worker_identity {
-//RS             self.validate_worker_identity(&request.sandbox, expected)?;
-//RS         }
-//RS         if self.execution_is_cancelled(key, &request.attempt_id)? {
-//RS             return Err(RemoteCacheError::Io(io::Error::new(
-//RS                 io::ErrorKind::NotFound,
-//RS                 "remote execution was cancelled",
-//RS             )));
-//RS         }
-//RS         Ok(request)
-//RS     }
-//RS 
-//RS     fn execution_request_path(&self, key: &ActionKey) -> Result<PathBuf, RemoteCacheError> {
-//RS         self.execution_path("requests", key)
-//RS     }
-//RS 
-//RS     fn execution_result_path(&self, key: &ActionKey) -> Result<PathBuf, RemoteCacheError> {
-//RS         self.execution_path("results", key)
-//RS     }
-//RS 
-//RS     fn execution_cancel_path(&self, key: &ActionKey) -> Result<PathBuf, RemoteCacheError> {
-//RS         self.execution_path("cancelled", key)
-//RS     }
-//RS 
-//RS     fn execution_cancel_state(
-//RS         &self,
-//RS         key: &ActionKey,
-//RS     ) -> Result<RemoteCancellationState, RemoteCacheError> {
-//RS         let path = self.execution_cancel_path(key)?;
-//RS         let bytes = match secure_read_file_bounded(&self.root, &path, MAX_REMOTE_WIRE_BYTES + 256) {
-//RS             Ok(bytes) => bytes,
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-//RS                 return Ok(RemoteCancellationState::default())
-//RS             }
-//RS             Err(error) => return Err(RemoteCacheError::Io(error)),
-//RS         };
-//RS         let payload = self.open("execution-cancel", &bytes)?;
-//RS         let text = std::str::from_utf8(&payload).map_err(|_| {
-//RS             RemoteCacheError::InvalidRecord("remote cancellation marker is not UTF-8".to_string())
-//RS         })?;
-//RS         let mut marker_key = None;
-//RS         let mut attempt_ids = Vec::new();
-//RS         let mut seen_attempts = BTreeSet::new();
-//RS         let mut seen_key = false;
-//RS         let mut retired = false;
-//RS         let mut seen_retired = false;
-//RS         for line in text.lines() {
-//RS             if let Some(value) = line.strip_prefix("key=") {
-//RS                 if seen_key {
-//RS                     return Err(duplicate_remote_field("cancellation key"));
-//RS                 }
-//RS                 seen_key = true;
-//RS                 marker_key = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                     RemoteCacheError::InvalidRecord(
-//RS                         "remote cancellation marker key is not UTF-8".to_string(),
-//RS                     )
-//RS                 })?);
-//RS             } else if let Some(value) = line.strip_prefix("attempt=") {
-//RS                 if value.is_empty() {
-//RS                     return Err(duplicate_remote_field("cancellation attempt"));
-//RS                 }
-//RS                 let attempt_id = String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                     RemoteCacheError::InvalidRecord(
-//RS                         "remote cancellation marker attempt is not UTF-8".to_string(),
-//RS                     )
-//RS                 })?;
-//RS                 validate_remote_attempt_id(&attempt_id)?;
-//RS                 if !seen_attempts.insert(attempt_id.clone()) {
-//RS                     return Err(duplicate_remote_field("cancellation attempt"));
-//RS                 }
-//RS                 attempt_ids.push(attempt_id);
-//RS             } else if let Some(value) = line.strip_prefix("retired=") {
-//RS                 if seen_retired {
-//RS                     return Err(duplicate_remote_field("cancellation retired flag"));
-//RS                 }
-//RS                 seen_retired = true;
-//RS                 if value != "1" {
-//RS                     return Err(RemoteCacheError::InvalidRecord(
-//RS                         "remote cancellation retired flag is not 1".to_string(),
-//RS                     ));
-//RS                 }
-//RS                 retired = true;
-//RS             } else if !line.trim().is_empty() {
-//RS                 return Err(RemoteCacheError::InvalidRecord(format!(
-//RS                     "unknown remote cancellation field `{line}`"
-//RS                 )));
-//RS             }
-//RS         }
-//RS         if marker_key.as_deref() != Some(key.as_str()) {
-//RS             return Err(RemoteCacheError::InvalidRecord(
-//RS                 "remote cancellation marker does not match its action".to_string(),
-//RS             ));
-//RS         }
-//RS         if attempt_ids.is_empty() && !retired {
-//RS             return Err(RemoteCacheError::InvalidRecord(
-//RS                 "remote cancellation marker has no attempt id".to_string(),
-//RS             ));
-//RS         }
-//RS         if retired && !attempt_ids.is_empty() {
-//RS             return Err(RemoteCacheError::InvalidRecord(
-//RS                 "retired remote cancellation marker contains attempt history".to_string(),
-//RS             ));
-//RS         }
-//RS         Ok(RemoteCancellationState {
-//RS             attempts: attempt_ids,
-//RS             retired,
-//RS         })
-//RS     }
-//RS 
-//RS     fn execution_is_cancelled(
-//RS         &self,
-//RS         key: &ActionKey,
-//RS         attempt_id: &str,
-//RS     ) -> Result<bool, RemoteCacheError> {
-//RS         let state = self.execution_cancel_state(key)?;
-//RS         Ok(state.retired
-//RS             || state
-//RS                 .attempts
-//RS                 .iter()
-//RS                 .any(|cancelled| cancelled == attempt_id))
-//RS     }
-//RS 
-//RS     fn execution_path(&self, kind: &str, key: &ActionKey) -> Result<PathBuf, RemoteCacheError> {
-//RS         let digest = ContentDigest::from_bytes(key.as_str().as_bytes());
-//RS         let hex = digest.as_str().strip_prefix("sha256:").ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("execution key digest has no sha256 prefix".to_string())
-//RS         })?;
-//RS         Ok(self
-//RS             .root
-//RS             .join("execution")
-//RS             .join(kind)
-//RS             .join(&hex[..2])
-//RS             .join(&hex[2..]))
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct RemoteExecutionRequest {
-//RS     pub key: ActionKey,
-//RS     pub attempt_id: String,
-//RS     pub argv: Vec<String>,
-//RS     pub inputs: Vec<ActionInputSnapshot>,
-//RS     pub outputs: Vec<BuildPath>,
-//RS     pub toolchain_digest: ContentDigest,
-//RS     pub sandbox: RemoteSandboxProof,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct RemoteExecutionResult {
-//RS     pub key: ActionKey,
-//RS     pub attempt_id: String,
-//RS     /// Immutable identity for this exact action/attempt/proof statement.
-//RS     pub execution_id: ContentDigest,
-//RS     pub outcome: ActionOutcome,
-//RS     pub outputs: Vec<ActionOutputRecord>,
-//RS     pub toolchain_digest: ContentDigest,
-//RS     pub sandbox: RemoteSandboxProof,
-//RS     /// CAS digests for the complete worker logs. Empty logs are represented by
-//RS     /// the digest of an uploaded empty blob, never by an omitted field.
-//RS     pub stdout_digest: ContentDigest,
-//RS     pub stderr_digest: ContentDigest,
-//RS     /// The worker identity that signed the provenance statement through the
-//RS     /// authenticated transport receipt.
-//RS     pub provenance_signer: String,
-//RS }
-//RS 
-//RS /// Compute the immutable identity a worker must repeat in its result.
-//RS pub fn remote_execution_identity(request: &RemoteExecutionRequest) -> ContentDigest {
-//RS     let encoded = encode_remote_execution_request(request);
-//RS     let payload = format!(
-//RS         "jet.remote-execution.v2\nbytes={}\n{encoded}",
-//RS         encoded.len()
-//RS     );
-//RS     ContentDigest::from_bytes(payload.as_bytes())
-//RS }
-//RS 
-//RS fn validate_remote_execution_request(
-//RS     request: &RemoteExecutionRequest,
-//RS ) -> Result<(), RemoteCacheError> {
-//RS     validate_action_key(&request.key)?;
-//RS     validate_remote_attempt_id(&request.attempt_id)?;
-//RS     validate_remote_count(request.argv.len(), "argv")?;
-//RS     validate_remote_count(request.inputs.len(), "inputs")?;
-//RS     validate_remote_count(request.outputs.len(), "outputs")?;
-//RS     validate_remote_argv(&request.argv)?;
-//RS     ContentDigest::parse(request.toolchain_digest.as_str())?;
-//RS     if request.sandbox.action_key != request.key.as_str() {
-//RS         return Err(RemoteCacheError::Denied(RemoteCacheDenied {
-//RS             request: RemoteActionRequest::Execute,
-//RS             reason: RemoteDeniedReason::ProofDoesNotMatchAction,
-//RS         }));
-//RS     }
-//RS     if request.sandbox.attempt_id != request.attempt_id {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "remote execution request attempt does not match its sandbox proof".to_string(),
-//RS         ));
-//RS     }
-//RS     if !request.sandbox.is_complete() {
-//RS         return Err(RemoteCacheError::Denied(RemoteCacheDenied {
-//RS             request: RemoteActionRequest::Execute,
-//RS             reason: RemoteDeniedReason::MissingGrantAndSandboxProof,
-//RS         }));
-//RS     }
-//RS     for input in &request.inputs {
-//RS         validate_remote_path(input.path.as_str())?;
-//RS         ContentDigest::parse(input.digest.as_str())?;
-//RS     }
-//RS     validate_unique_remote_paths(request.inputs.iter().map(|input| input.path.as_str()))?;
-//RS     for output in &request.outputs {
-//RS         validate_remote_path(output.as_str())?;
-//RS     }
-//RS     validate_unique_remote_paths(request.outputs.iter().map(|output| output.as_str()))?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_remote_execution_result(
-//RS     result: &RemoteExecutionResult,
-//RS ) -> Result<(), RemoteCacheError> {
-//RS     validate_action_key(&result.key)?;
-//RS     validate_remote_attempt_id(&result.attempt_id)?;
-//RS     validate_remote_count(result.outputs.len(), "execution outputs")?;
-//RS     ContentDigest::parse(result.toolchain_digest.as_str())?;
-//RS     ContentDigest::parse(result.execution_id.as_str())?;
-//RS     ContentDigest::parse(result.stdout_digest.as_str())?;
-//RS     ContentDigest::parse(result.stderr_digest.as_str())?;
-//RS     if result.provenance_signer.is_empty()
-//RS         || result.provenance_signer.len() > 256
-//RS         || result
-//RS             .provenance_signer
-//RS             .chars()
-//RS             .any(|character| character.is_control())
-//RS     {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "remote execution provenance signer is invalid".to_string(),
-//RS         ));
-//RS     }
-//RS     if !result.sandbox.is_complete() {
-//RS         return Err(RemoteCacheError::Denied(RemoteCacheDenied {
-//RS             request: RemoteActionRequest::Execute,
-//RS             reason: RemoteDeniedReason::MissingGrantAndSandboxProof,
-//RS         }));
-//RS     }
-//RS     if result.sandbox.action_key != result.key.as_str() {
-//RS         return Err(RemoteCacheError::Denied(RemoteCacheDenied {
-//RS             request: RemoteActionRequest::Execute,
-//RS             reason: RemoteDeniedReason::ProofDoesNotMatchAction,
-//RS         }));
-//RS     }
-//RS     if result.sandbox.attempt_id != result.attempt_id {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "remote execution result attempt does not match its sandbox proof".to_string(),
-//RS         ));
-//RS     }
-//RS     if result.provenance_signer != result.sandbox.worker_id {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "remote execution provenance signer does not match its worker".to_string(),
-//RS         ));
-//RS     }
-//RS     for output in &result.outputs {
-//RS         validate_remote_path(output.path.as_str())?;
-//RS         ContentDigest::parse(output.digest.as_str())?;
-//RS     }
-//RS     validate_unique_remote_paths(result.outputs.iter().map(|output| output.path.as_str()))?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_execution_parity(
-//RS     request: &RemoteExecutionRequest,
-//RS     result: &RemoteExecutionResult,
-//RS ) -> Result<(), RemoteCacheError> {
-//RS     if request.key != result.key
-//RS         || request.attempt_id != result.attempt_id
-//RS         || request.toolchain_digest != result.toolchain_digest
-//RS         || request.sandbox != result.sandbox
-//RS         || result.execution_id != remote_execution_identity(request)
-//RS     {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "remote execution result changed action, inputs, outputs, toolchain, or sandbox provenance".to_string(),
-//RS         ));
-//RS     }
-//RS     if request.outputs.len() != result.outputs.len()
-//RS         || request
-//RS             .outputs
-//RS             .iter()
-//RS             .zip(&result.outputs)
-//RS             .any(|(declared, actual)| declared != &actual.path)
-//RS     {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "remote execution result outputs do not match declarations".to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn encode_remote_execution_request(request: &RemoteExecutionRequest) -> String {
-//RS     let mut encoded = format!(
-//RS         "version=1\nkey={}\nattempt={}\ntoolchain={}\nsandbox={}\nsandbox_class={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\nargv={}\n",
-//RS         hex_encode(request.key.as_str().as_bytes()),
-//RS         hex_encode(request.attempt_id.as_bytes()),
-//RS         request.toolchain_digest.as_str(),
-//RS         hex_encode(request.sandbox.sandbox_id.as_bytes()),
-//RS         hex_encode(request.sandbox.sandbox_class.as_bytes()),
-//RS         hex_encode(request.sandbox.action_key.as_bytes()),
-//RS         request.sandbox.provenance_digest.as_str(),
-//RS         hex_encode(request.sandbox.worker_id.as_bytes()),
-//RS         hex_encode(request.sandbox.platform.as_bytes()),
-//RS         hex_encode(request.sandbox.abi.as_bytes()),
-//RS         hex_encode(request.sandbox.worker_receipt.as_bytes()),
-//RS         request.argv.len(),
-//RS     );
-//RS     for arg in &request.argv {
-//RS         encoded.push_str("arg=");
-//RS         encoded.push_str(&hex_encode(arg.as_bytes()));
-//RS         encoded.push('\n');
-//RS     }
-//RS     encoded.push_str(&format!("inputs={}\n", request.inputs.len()));
-//RS     for input in &request.inputs {
-//RS         encoded.push_str(&format!(
-//RS             "input\t{}\t{}\t{}\n",
-//RS             hex_encode(input.path.as_str().as_bytes()),
-//RS             input.digest.as_str(),
-//RS             input.byte_len
-//RS         ));
-//RS     }
-//RS     encoded.push_str(&format!("outputs={}\n", request.outputs.len()));
-//RS     for output in &request.outputs {
-//RS         encoded.push_str("output=");
-//RS         encoded.push_str(&hex_encode(output.as_str().as_bytes()));
-//RS         encoded.push('\n');
-//RS     }
-//RS     encoded
-//RS }
-//RS 
-//RS fn decode_remote_execution_request(
-//RS     bytes: &[u8],
-//RS ) -> Result<RemoteExecutionRequest, RemoteCacheError> {
-//RS     if bytes.len() > MAX_REMOTE_WIRE_BYTES {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "execution request exceeds the wire-size limit".to_string(),
-//RS         ));
-//RS     }
-//RS     let text = std::str::from_utf8(bytes).map_err(|_| {
-//RS         RemoteCacheError::InvalidRecord("execution request is not UTF-8".to_string())
-//RS     })?;
-//RS     let mut seen = BTreeSet::new();
-//RS     let mut version = None;
-//RS     let mut key = None;
-//RS     let mut attempt_id = None;
-//RS     let mut toolchain_digest = None;
-//RS     let mut sandbox_id = None;
-//RS     let mut sandbox_class = None;
-//RS     let mut proof_action = None;
-//RS     let mut proof_provenance = None;
-//RS     let mut worker_id = None;
-//RS     let mut platform = None;
-//RS     let mut abi = None;
-//RS     let mut worker_receipt = None;
-//RS     let mut argv_count = None;
-//RS     let mut argv = Vec::new();
-//RS     let mut input_count = None;
-//RS     let mut inputs = Vec::new();
-//RS     let mut output_count = None;
-//RS     let mut outputs = Vec::new();
-//RS     for line in text.lines() {
-//RS         if let Some(value) = line.strip_prefix("version=") {
-//RS             if !seen.insert("version") {
-//RS                 return Err(duplicate_remote_field("version"));
-//RS             }
-//RS             version = Some(parse_remote_version(value, "execution request")?);
-//RS         } else if let Some(value) = line.strip_prefix("key=") {
-//RS             if !seen.insert("key") {
-//RS                 return Err(duplicate_remote_field("key"));
-//RS             }
-//RS             key = Some(ActionKey::new(
-//RS                 String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                     RemoteCacheError::InvalidRecord("execution key is not UTF-8".to_string())
-//RS                 })?,
-//RS             ));
-//RS         } else if let Some(value) = line.strip_prefix("attempt=") {
-//RS             if !seen.insert("attempt") {
-//RS                 return Err(duplicate_remote_field("attempt"));
-//RS             }
-//RS             attempt_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("execution attempt id is not UTF-8".to_string())
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("toolchain=") {
-//RS             if !seen.insert("toolchain") {
-//RS                 return Err(duplicate_remote_field("toolchain"));
-//RS             }
-//RS             toolchain_digest = Some(ContentDigest::parse(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("sandbox=") {
-//RS             if !seen.insert("sandbox") {
-//RS                 return Err(duplicate_remote_field("sandbox"));
-//RS             }
-//RS             sandbox_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("sandbox id is not UTF-8".to_string())
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("sandbox_class=") {
-//RS             if !seen.insert("sandbox_class") {
-//RS                 return Err(duplicate_remote_field("sandbox_class"));
-//RS             }
-//RS             sandbox_class = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("sandbox class is not UTF-8".to_string())
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("proof_action=") {
-//RS             if !seen.insert("proof_action") {
-//RS                 return Err(duplicate_remote_field("proof_action"));
-//RS             }
-//RS             proof_action = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("proof action key is not UTF-8".to_string())
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("proof_provenance=") {
-//RS             if !seen.insert("proof_provenance") {
-//RS                 return Err(duplicate_remote_field("proof_provenance"));
-//RS             }
-//RS             proof_provenance = Some(ContentDigest::parse(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("worker_id=") {
-//RS             if !seen.insert("worker_id") {
-//RS                 return Err(duplicate_remote_field("worker_id"));
-//RS             }
-//RS             worker_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("worker id is not UTF-8".to_string())
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("platform=") {
-//RS             if !seen.insert("platform") {
-//RS                 return Err(duplicate_remote_field("platform"));
-//RS             }
-//RS             platform = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("worker platform is not UTF-8".to_string())
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("abi=") {
-//RS             if !seen.insert("abi") {
-//RS                 return Err(duplicate_remote_field("abi"));
-//RS             }
-//RS             abi = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("worker ABI is not UTF-8".to_string())
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("worker_receipt=") {
-//RS             if !seen.insert("worker_receipt") {
-//RS                 return Err(duplicate_remote_field("worker_receipt"));
-//RS             }
-//RS             worker_receipt = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("worker receipt is not UTF-8".to_string())
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("argv=") {
-//RS             if !seen.insert("argv") {
-//RS                 return Err(duplicate_remote_field("argv"));
-//RS             }
-//RS             argv_count = Some(parse_remote_count(value, "argv")?);
-//RS         } else if let Some(value) = line.strip_prefix("arg=") {
-//RS             argv.push(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("execution argument is not UTF-8".to_string())
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("inputs=") {
-//RS             if !seen.insert("inputs") {
-//RS                 return Err(duplicate_remote_field("inputs"));
-//RS             }
-//RS             input_count = Some(parse_remote_count(value, "inputs")?);
-//RS         } else if let Some(value) = line.strip_prefix("input\t") {
-//RS             let fields = value.split('\t').collect::<Vec<_>>();
-//RS             if fields.len() != 3 {
-//RS                 return Err(RemoteCacheError::InvalidRecord(
-//RS                     "execution input needs path, digest, and byte length".to_string(),
-//RS                 ));
-//RS             }
-//RS             inputs.push(ActionInputSnapshot {
-//RS                 path: BuildPath(String::from_utf8(hex_decode(fields[0])?).map_err(|_| {
-//RS                     RemoteCacheError::InvalidRecord("execution input path is not UTF-8".to_string())
-//RS                 })?),
-//RS                 digest: ContentDigest::parse(fields[1])?,
-//RS                 byte_len: fields[2].parse::<u64>().map_err(|_| {
-//RS                     RemoteCacheError::InvalidRecord(
-//RS                         "execution input byte length is not a number".to_string(),
-//RS                     )
-//RS                 })?,
-//RS             });
-//RS         } else if let Some(value) = line.strip_prefix("outputs=") {
-//RS             if !seen.insert("outputs") {
-//RS                 return Err(duplicate_remote_field("outputs"));
-//RS             }
-//RS             output_count = Some(parse_remote_count(value, "outputs")?);
-//RS         } else if let Some(value) = line.strip_prefix("output=") {
-//RS             outputs.push(BuildPath(String::from_utf8(hex_decode(value)?).map_err(
-//RS                 |_| {
-//RS                     RemoteCacheError::InvalidRecord(
-//RS                         "execution output path is not UTF-8".to_string(),
-//RS                     )
-//RS                 },
-//RS             )?));
-//RS         } else if !line.trim().is_empty() {
-//RS             return Err(RemoteCacheError::InvalidRecord(format!(
-//RS                 "unknown execution request field `{line}`"
-//RS             )));
-//RS         }
-//RS     }
-//RS     if version != Some(1)
-//RS         || argv_count != Some(argv.len())
-//RS         || input_count != Some(inputs.len())
-//RS         || output_count != Some(outputs.len())
-//RS     {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "execution request count does not match records".to_string(),
-//RS         ));
-//RS     }
-//RS     let key =
-//RS         key.ok_or_else(|| RemoteCacheError::InvalidRecord("missing execution key".to_string()))?;
-//RS     let attempt_id = attempt_id.ok_or_else(|| {
-//RS         RemoteCacheError::InvalidRecord("missing execution attempt id".to_string())
-//RS     })?;
-//RS     let sandbox = RemoteSandboxProof::new(
-//RS         sandbox_id
-//RS             .ok_or_else(|| RemoteCacheError::InvalidRecord("missing sandbox id".to_string()))?,
-//RS         proof_action.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing proof action key".to_string())
-//RS         })?,
-//RS         proof_provenance.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing proof provenance".to_string())
-//RS         })?,
-//RS     )
-//RS     .with_sandbox_class(
-//RS         sandbox_class
-//RS             .ok_or_else(|| RemoteCacheError::InvalidRecord("missing sandbox class".to_string()))?,
-//RS     )
-//RS     .with_attempt_id(attempt_id.clone())
-//RS     .with_worker_identity(
-//RS         worker_id
-//RS             .ok_or_else(|| RemoteCacheError::InvalidRecord("missing worker id".to_string()))?,
-//RS         platform.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing worker platform".to_string())
-//RS         })?,
-//RS         abi.ok_or_else(|| RemoteCacheError::InvalidRecord("missing worker ABI".to_string()))?,
-//RS         worker_receipt
-//RS             .ok_or_else(|| RemoteCacheError::InvalidRecord("missing worker receipt".to_string()))?,
-//RS     );
-//RS     let request = RemoteExecutionRequest {
-//RS         key,
-//RS         attempt_id,
-//RS         argv,
-//RS         inputs,
-//RS         outputs,
-//RS         toolchain_digest: toolchain_digest.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing toolchain digest".to_string())
-//RS         })?,
-//RS         sandbox,
-//RS     };
-//RS     validate_remote_execution_request(&request)?;
-//RS     Ok(request)
-//RS }
-//RS 
-//RS fn encode_remote_execution_result(result: &RemoteExecutionResult) -> String {
-//RS     let mut encoded = format!(
-//RS         "version=2\nkey={}\nattempt={}\nexecution_id={}\noutcome={}\ntoolchain={}\nsandbox={}\nsandbox_class={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\nstdout={}\nstderr={}\nprovenance_signer={}\noutputs={}\n",
-//RS         hex_encode(result.key.as_str().as_bytes()),
-//RS         hex_encode(result.attempt_id.as_bytes()),
-//RS         result.execution_id.as_str(),
-//RS         encode_remote_outcome(result.outcome),
-//RS         result.toolchain_digest.as_str(),
-//RS         hex_encode(result.sandbox.sandbox_id.as_bytes()),
-//RS         hex_encode(result.sandbox.sandbox_class.as_bytes()),
-//RS         hex_encode(result.sandbox.action_key.as_bytes()),
-//RS         result.sandbox.provenance_digest.as_str(),
-//RS         hex_encode(result.sandbox.worker_id.as_bytes()),
-//RS         hex_encode(result.sandbox.platform.as_bytes()),
-//RS         hex_encode(result.sandbox.abi.as_bytes()),
-//RS         hex_encode(result.sandbox.worker_receipt.as_bytes()),
-//RS         result.stdout_digest.as_str(),
-//RS         result.stderr_digest.as_str(),
-//RS         hex_encode(result.provenance_signer.as_bytes()),
-//RS         result.outputs.len(),
-//RS     );
-//RS     for output in &result.outputs {
-//RS         encoded.push_str(&format!(
-//RS             "output\t{}\t{}\t{}\n",
-//RS             hex_encode(output.path.as_str().as_bytes()),
-//RS             output.digest.as_str(),
-//RS             output.byte_len
-//RS         ));
-//RS     }
-//RS     encoded
-//RS }
-//RS 
-//RS fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult, RemoteCacheError> {
-//RS     if bytes.len() > MAX_REMOTE_WIRE_BYTES {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "execution result exceeds the wire-size limit".to_string(),
-//RS         ));
-//RS     }
-//RS     let text = std::str::from_utf8(bytes).map_err(|_| {
-//RS         RemoteCacheError::InvalidRecord("execution result is not UTF-8".to_string())
-//RS     })?;
-//RS     let mut seen = BTreeSet::new();
-//RS     let mut version = None;
-//RS     let mut key = None;
-//RS     let mut attempt_id = None;
-//RS     let mut execution_id = None;
-//RS     let mut outcome = None;
-//RS     let mut toolchain_digest = None;
-//RS     let mut sandbox_id = None;
-//RS     let mut sandbox_class = None;
-//RS     let mut proof_action = None;
-//RS     let mut proof_provenance = None;
-//RS     let mut worker_id = None;
-//RS     let mut platform = None;
-//RS     let mut abi = None;
-//RS     let mut worker_receipt = None;
-//RS     let mut stdout_digest = None;
-//RS     let mut stderr_digest = None;
-//RS     let mut provenance_signer = None;
-//RS     let mut output_count = None;
-//RS     let mut outputs = Vec::new();
-//RS     for line in text.lines() {
-//RS         if let Some(value) = line.strip_prefix("version=") {
-//RS             if !seen.insert("version") {
-//RS                 return Err(duplicate_remote_field("version"));
-//RS             }
-//RS             version = Some(parse_remote_version(value, "execution result")?);
-//RS         } else if let Some(value) = line.strip_prefix("key=") {
-//RS             if !seen.insert("key") {
-//RS                 return Err(duplicate_remote_field("key"));
-//RS             }
-//RS             key = Some(ActionKey::new(
-//RS                 String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                     RemoteCacheError::InvalidRecord("execution result key is not UTF-8".to_string())
-//RS                 })?,
-//RS             ));
-//RS         } else if let Some(value) = line.strip_prefix("attempt=") {
-//RS             if !seen.insert("attempt") {
-//RS                 return Err(duplicate_remote_field("attempt"));
-//RS             }
-//RS             attempt_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord(
-//RS                     "execution result attempt id is not UTF-8".to_string(),
-//RS                 )
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("execution_id=") {
-//RS             if !seen.insert("execution_id") {
-//RS                 return Err(duplicate_remote_field("execution_id"));
-//RS             }
-//RS             execution_id = Some(ContentDigest::parse(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("outcome=") {
-//RS             if !seen.insert("outcome") {
-//RS                 return Err(duplicate_remote_field("outcome"));
-//RS             }
-//RS             outcome = Some(parse_remote_outcome(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("toolchain=") {
-//RS             if !seen.insert("toolchain") {
-//RS                 return Err(duplicate_remote_field("toolchain"));
-//RS             }
-//RS             toolchain_digest = Some(ContentDigest::parse(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("sandbox=") {
-//RS             if !seen.insert("sandbox") {
-//RS                 return Err(duplicate_remote_field("sandbox"));
-//RS             }
-//RS             sandbox_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("execution result sandbox is not UTF-8".to_string())
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("sandbox_class=") {
-//RS             if !seen.insert("sandbox_class") {
-//RS                 return Err(duplicate_remote_field("sandbox_class"));
-//RS             }
-//RS             sandbox_class = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord(
-//RS                     "execution result sandbox class is not UTF-8".to_string(),
-//RS                 )
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("proof_action=") {
-//RS             if !seen.insert("proof_action") {
-//RS                 return Err(duplicate_remote_field("proof_action"));
-//RS             }
-//RS             proof_action = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord(
-//RS                     "execution result action key is not UTF-8".to_string(),
-//RS                 )
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("proof_provenance=") {
-//RS             if !seen.insert("proof_provenance") {
-//RS                 return Err(duplicate_remote_field("proof_provenance"));
-//RS             }
-//RS             proof_provenance = Some(ContentDigest::parse(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("worker_id=") {
-//RS             if !seen.insert("worker_id") {
-//RS                 return Err(duplicate_remote_field("worker_id"));
-//RS             }
-//RS             worker_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord(
-//RS                     "execution result worker id is not UTF-8".to_string(),
-//RS                 )
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("platform=") {
-//RS             if !seen.insert("platform") {
-//RS                 return Err(duplicate_remote_field("platform"));
-//RS             }
-//RS             platform = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord(
-//RS                     "execution result worker platform is not UTF-8".to_string(),
-//RS                 )
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("abi=") {
-//RS             if !seen.insert("abi") {
-//RS                 return Err(duplicate_remote_field("abi"));
-//RS             }
-//RS             abi = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord(
-//RS                     "execution result worker ABI is not UTF-8".to_string(),
-//RS                 )
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("worker_receipt=") {
-//RS             if !seen.insert("worker_receipt") {
-//RS                 return Err(duplicate_remote_field("worker_receipt"));
-//RS             }
-//RS             worker_receipt = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord(
-//RS                     "execution result worker receipt is not UTF-8".to_string(),
-//RS                 )
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("stdout=") {
-//RS             if !seen.insert("stdout") {
-//RS                 return Err(duplicate_remote_field("stdout"));
-//RS             }
-//RS             stdout_digest = Some(ContentDigest::parse(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("stderr=") {
-//RS             if !seen.insert("stderr") {
-//RS                 return Err(duplicate_remote_field("stderr"));
-//RS             }
-//RS             stderr_digest = Some(ContentDigest::parse(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("provenance_signer=") {
-//RS             if !seen.insert("provenance_signer") {
-//RS                 return Err(duplicate_remote_field("provenance_signer"));
-//RS             }
-//RS             provenance_signer = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord(
-//RS                     "execution result provenance signer is not UTF-8".to_string(),
-//RS                 )
-//RS             })?);
-//RS         } else if let Some(value) = line.strip_prefix("outputs=") {
-//RS             if !seen.insert("outputs") {
-//RS                 return Err(duplicate_remote_field("outputs"));
-//RS             }
-//RS             output_count = Some(parse_remote_count(value, "outputs")?);
-//RS         } else if let Some(value) = line.strip_prefix("output\t") {
-//RS             let fields = value.split('\t').collect::<Vec<_>>();
-//RS             if fields.len() != 3 {
-//RS                 return Err(RemoteCacheError::InvalidRecord(
-//RS                     "execution output needs path, digest, and byte length".to_string(),
-//RS                 ));
-//RS             }
-//RS             outputs.push(ActionOutputRecord {
-//RS                 path: BuildPath(String::from_utf8(hex_decode(fields[0])?).map_err(|_| {
-//RS                     RemoteCacheError::InvalidRecord(
-//RS                         "execution output path is not UTF-8".to_string(),
-//RS                     )
-//RS                 })?),
-//RS                 digest: ContentDigest::parse(fields[1])?,
-//RS                 byte_len: fields[2].parse::<u64>().map_err(|_| {
-//RS                     RemoteCacheError::InvalidRecord(
-//RS                         "execution output byte length is not a number".to_string(),
-//RS                     )
-//RS                 })?,
-//RS             });
-//RS         } else if !line.trim().is_empty() {
-//RS             return Err(RemoteCacheError::InvalidRecord(format!(
-//RS                 "unknown execution result field `{line}`"
-//RS             )));
-//RS         }
-//RS     }
-//RS     if version != Some(2) || output_count != Some(outputs.len()) {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "execution result version or output count is invalid".to_string(),
-//RS         ));
-//RS     }
-//RS     let key = key.ok_or_else(|| {
-//RS         RemoteCacheError::InvalidRecord("missing execution result key".to_string())
-//RS     })?;
-//RS     let attempt_id = attempt_id.ok_or_else(|| {
-//RS         RemoteCacheError::InvalidRecord("missing execution result attempt id".to_string())
-//RS     })?;
-//RS     let result = RemoteExecutionResult {
-//RS         key,
-//RS         attempt_id: attempt_id.clone(),
-//RS         execution_id: execution_id.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing execution identity".to_string())
-//RS         })?,
-//RS         outcome: outcome.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing execution outcome".to_string())
-//RS         })?,
-//RS         outputs,
-//RS         toolchain_digest: toolchain_digest.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing execution toolchain digest".to_string())
-//RS         })?,
-//RS         sandbox: RemoteSandboxProof::new(
-//RS             sandbox_id.ok_or_else(|| {
-//RS                 RemoteCacheError::InvalidRecord("missing execution sandbox".to_string())
-//RS             })?,
-//RS             proof_action.ok_or_else(|| {
-//RS                 RemoteCacheError::InvalidRecord("missing execution proof action".to_string())
-//RS             })?,
-//RS             proof_provenance.ok_or_else(|| {
-//RS                 RemoteCacheError::InvalidRecord("missing execution proof provenance".to_string())
-//RS             })?,
-//RS         )
-//RS         .with_sandbox_class(sandbox_class.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing execution sandbox class".to_string())
-//RS         })?)
-//RS         .with_attempt_id(attempt_id)
-//RS         .with_worker_identity(
-//RS             worker_id.ok_or_else(|| {
-//RS                 RemoteCacheError::InvalidRecord("missing execution worker id".to_string())
-//RS             })?,
-//RS             platform.ok_or_else(|| {
-//RS                 RemoteCacheError::InvalidRecord("missing execution worker platform".to_string())
-//RS             })?,
-//RS             abi.ok_or_else(|| {
-//RS                 RemoteCacheError::InvalidRecord("missing execution worker ABI".to_string())
-//RS             })?,
-//RS             worker_receipt.ok_or_else(|| {
-//RS                 RemoteCacheError::InvalidRecord("missing execution worker receipt".to_string())
-//RS             })?,
-//RS         ),
-//RS         stdout_digest: stdout_digest.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing execution stdout digest".to_string())
-//RS         })?,
-//RS         stderr_digest: stderr_digest.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing execution stderr digest".to_string())
-//RS         })?,
-//RS         provenance_signer: provenance_signer.ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("missing execution provenance signer".to_string())
-//RS         })?,
-//RS     };
-//RS     validate_remote_execution_result(&result)?;
-//RS     Ok(result)
-//RS }
-//RS 
-//RS fn encode_remote_outcome(outcome: ActionOutcome) -> String {
-//RS     match outcome {
-//RS         ActionOutcome::Succeeded { exit_code } => format!("succeeded:{exit_code}"),
-//RS         ActionOutcome::Failed { exit_code } => format!("failed:{exit_code}"),
-//RS         ActionOutcome::RestoredFromCache => "restored".to_string(),
-//RS     }
-//RS }
-//RS 
-//RS fn parse_remote_count(value: &str, field: &str) -> Result<usize, RemoteCacheError> {
-//RS     let count = value.parse::<usize>().map_err(|_| {
-//RS         RemoteCacheError::InvalidRecord(format!("execution {field} count is not a number"))
-//RS     })?;
-//RS     if count > MAX_REMOTE_ITEMS {
-//RS         return Err(RemoteCacheError::InvalidRecord(format!(
-//RS             "execution {field} count exceeds {MAX_REMOTE_ITEMS}"
-//RS         )));
-//RS     }
-//RS     Ok(count)
-//RS }
-//RS 
-//RS fn validate_remote_count(count: usize, field: &str) -> Result<(), RemoteCacheError> {
-//RS     if count > MAX_REMOTE_ITEMS {
-//RS         return Err(RemoteCacheError::InvalidRecord(format!(
-//RS             "remote {field} count exceeds {MAX_REMOTE_ITEMS}"
-//RS         )));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn parse_remote_version(value: &str, record: &str) -> Result<u32, RemoteCacheError> {
-//RS     value
-//RS         .parse::<u32>()
-//RS         .map_err(|_| RemoteCacheError::InvalidRecord(format!("{record} version is not a number")))
-//RS }
-//RS 
-//RS fn validate_action_key(key: &ActionKey) -> Result<(), RemoteCacheError> {
-//RS     if key.as_str().is_empty()
-//RS         || key.as_str().len() > 4096
-//RS         || key
-//RS             .as_str()
-//RS             .chars()
-//RS             .any(|character| character == '\n' || character == '\r' || character == '\0')
-//RS     {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "action key is empty or contains a record delimiter".to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_remote_attempt_id(attempt_id: &str) -> Result<(), RemoteCacheError> {
-//RS     if attempt_id.is_empty()
-//RS         || attempt_id.len() > 256
-//RS         || attempt_id.chars().any(|character| character.is_control())
-//RS     {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "remote execution attempt id is empty, too long, or contains control text".to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_remote_name(value: &str, label: &str) -> Result<(), String> {
-//RS     if value.is_empty()
-//RS         || value.len() > 256
-//RS         || !value
-//RS             .bytes()
-//RS             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-//RS     {
-//RS         return Err(format!(
-//RS             "remote {label} must be 1..256 ASCII letters, digits, `.`, `_`, or `-`"
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_remote_argv(argv: &[String]) -> Result<(), RemoteCacheError> {
-//RS     if argv.is_empty() || argv.iter().any(|arg| arg.trim().is_empty()) {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "remote execution argv must contain a non-empty command and arguments".to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_unique_remote_paths<'a>(
-//RS     paths: impl IntoIterator<Item = &'a str>,
-//RS ) -> Result<(), RemoteCacheError> {
-//RS     let mut seen = BTreeSet::new();
-//RS     for path in paths {
-//RS         if !seen.insert(path) {
-//RS             return Err(RemoteCacheError::InvalidRecord(format!(
-//RS                 "remote execution path `{path}` is declared more than once"
-//RS             )));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(super) fn hex_encode(bytes: &[u8]) -> String {
-//RS     let mut out = String::with_capacity(bytes.len() * 2);
-//RS     for byte in bytes {
-//RS         out.push_str(&format!("{byte:02x}"));
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub(super) fn hex_decode(value: &str) -> Result<Vec<u8>, RemoteCacheError> {
-//RS     if value.len() % 2 != 0 {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "hex field has odd length".to_string(),
-//RS         ));
-//RS     }
-//RS     let mut out = Vec::with_capacity(value.len() / 2);
-//RS     for pair in value.as_bytes().chunks_exact(2) {
-//RS         let high = hex_digit(pair[0]).ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("hex field contains a non-hex digit".to_string())
-//RS         })?;
-//RS         let low = hex_digit(pair[1]).ok_or_else(|| {
-//RS             RemoteCacheError::InvalidRecord("hex field contains a non-hex digit".to_string())
-//RS         })?;
-//RS         out.push((high << 4) | low);
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn hex_digit(byte: u8) -> Option<u8> {
-//RS     match byte {
-//RS         b'0'..=b'9' => Some(byte - b'0'),
-//RS         b'a'..=b'f' => Some(byte - b'a' + 10),
-//RS         b'A'..=b'F' => Some(byte - b'A' + 10),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn remote_mac(key: &[u8], kind: &str, payload: &[u8]) -> String {
-//RS     // HMAC-SHA256 keeps the envelope authentication independent of the
-//RS     // Merkle/content digest and avoids the length-extension weakness of a
-//RS     // plain `sha256(secret || message)` construction.
-//RS     const BLOCK: usize = 64;
-//RS     let mut key_block = [0u8; BLOCK];
-//RS     if key.len() > BLOCK {
-//RS         key_block[..32].copy_from_slice(&SHA256::sha256(key));
-//RS     } else {
-//RS         key_block[..key.len()].copy_from_slice(key);
-//RS     }
-//RS     let mut inner_input = Vec::with_capacity(BLOCK + kind.len() + payload.len() + 2);
-//RS     let mut outer_input = Vec::with_capacity(BLOCK + 32);
-//RS     for byte in key_block {
-//RS         inner_input.push(byte ^ 0x36);
-//RS         outer_input.push(byte ^ 0x5c);
-//RS     }
-//RS     inner_input.extend_from_slice(kind.as_bytes());
-//RS     inner_input.push(0);
-//RS     inner_input.extend_from_slice(payload);
-//RS     outer_input.extend_from_slice(&SHA256::sha256(&inner_input));
-//RS     hex_encode(&SHA256::sha256(&outer_input))
-//RS }
-//RS 
-//RS fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
-//RS     let mut difference = left.len() ^ right.len();
-//RS     for index in 0..left.len().max(right.len()) {
-//RS         difference |= u8::from(
-//RS             left.get(index).copied().unwrap_or(0) != right.get(index).copied().unwrap_or(0),
-//RS         ) as usize;
-//RS     }
-//RS     difference == 0
-//RS }
-//RS 
-//RS fn ensure_remote_root(root: &Path) -> io::Result<()> {
-//RS     ensure_real_directory(root)
-//RS }
-//RS 
-//RS fn remove_remote_execution_file(path: &Path) -> Result<(), RemoteCacheError> {
-//RS     match fs::symlink_metadata(path) {
-//RS         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-//RS             Err(RemoteCacheError::Io(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 format!(
-//RS                     "remote execution path `{}` is not a regular file",
-//RS                     path.display()
-//RS                 ),
-//RS             )))
-//RS         }
-//RS         Ok(_) => fs::remove_file(path).map_err(RemoteCacheError::Io),
-//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-//RS         Err(error) => Err(RemoteCacheError::Io(error)),
-//RS     }
-//RS }
-//RS 
-//RS /// Create a directory tree without ever following an existing symlink. The
-//RS /// remote transport, CAS, and action-record paths all share this rule so a
-//RS /// cache root cannot redirect writes into an unrelated host directory.
-//RS pub(super) fn ensure_real_directory(path: &Path) -> io::Result<()> {
-//RS     let mut current = PathBuf::new();
-//RS     for component in path.components() {
-//RS         match component {
-//RS             Component::Prefix(prefix) => current.push(prefix.as_os_str()),
-//RS             Component::RootDir => current.push(std::path::MAIN_SEPARATOR.to_string()),
-//RS             Component::CurDir => continue,
-//RS             Component::ParentDir => {
-//RS                 return Err(io::Error::new(
-//RS                     io::ErrorKind::InvalidInput,
-//RS                     "directory path contains `..`",
-//RS                 ));
-//RS             }
-//RS             Component::Normal(part) => current.push(part),
-//RS         }
-//RS         match fs::symlink_metadata(&current) {
-//RS             Ok(metadata) if metadata.file_type().is_symlink() => {
-//RS                 return Err(io::Error::new(
-//RS                     io::ErrorKind::PermissionDenied,
-//RS                     format!("directory path `{}` is a symlink", current.display()),
-//RS                 ));
-//RS             }
-//RS             Ok(metadata) if !metadata.is_dir() => {
-//RS                 return Err(io::Error::new(
-//RS                     io::ErrorKind::NotADirectory,
-//RS                     format!("directory path `{}` is not a directory", current.display()),
-//RS                 ));
-//RS             }
-//RS             Ok(_) => {}
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-//RS                 match fs::create_dir(&current) {
-//RS                     Ok(()) => {}
-//RS                     Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-//RS                         let metadata = fs::symlink_metadata(&current)?;
-//RS                         if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS                             return Err(io::Error::new(
-//RS                                 io::ErrorKind::PermissionDenied,
-//RS                                 format!(
-//RS                                     "directory path `{}` is not a real directory",
-//RS                                     current.display()
-//RS                                 ),
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                     Err(error) => return Err(error),
-//RS                 }
-//RS             }
-//RS             Err(error) => return Err(error),
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn ensure_existing_real_directory(path: &Path) -> io::Result<()> {
-//RS     let mut current = PathBuf::new();
-//RS     for component in path.components() {
-//RS         match component {
-//RS             Component::Prefix(prefix) => current.push(prefix.as_os_str()),
-//RS             Component::RootDir => current.push(std::path::MAIN_SEPARATOR.to_string()),
-//RS             Component::CurDir => continue,
-//RS             Component::ParentDir => {
-//RS                 return Err(io::Error::new(
-//RS                     io::ErrorKind::InvalidInput,
-//RS                     "directory path contains `..`",
-//RS                 ));
-//RS             }
-//RS             Component::Normal(part) => current.push(part),
-//RS         }
-//RS         let metadata = fs::symlink_metadata(&current)?;
-//RS         if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 format!(
-//RS                     "directory path `{}` is not a real directory",
-//RS                     current.display()
-//RS                 ),
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_remote_path(path: &str) -> Result<(), RemoteCacheError> {
-//RS     if path.is_empty()
-//RS         || path.len() > 4096
-//RS         || Path::new(path).is_absolute()
-//RS         || path
-//RS             .chars()
-//RS             .any(|character| matches!(character, '\t' | '\n' | '\r' | '\0'))
-//RS         || Path::new(path)
-//RS             .components()
-//RS             .any(|component| !matches!(component, Component::Normal(_)))
-//RS     {
-//RS         return Err(RemoteCacheError::InvalidRecord(format!(
-//RS             "output path `{path}` is not relative and normal"
-//RS         )));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn encode_remote_record(record: &ActionResultRecord) -> String {
-//RS     let outcome = match record.outcome {
-//RS         ActionOutcome::Succeeded { exit_code } => format!("succeeded:{exit_code}"),
-//RS         ActionOutcome::Failed { exit_code } => format!("failed:{exit_code}"),
-//RS         ActionOutcome::RestoredFromCache => "restored".to_string(),
-//RS     };
-//RS     let status = match record.provenance.status {
-//RS         ActionCacheStatus::Hit(reason) => format!("hit:{reason:?}"),
-//RS         ActionCacheStatus::Miss(reason) => format!("miss:{reason:?}"),
-//RS     };
-//RS     let failure = record
-//RS         .failure_report
-//RS         .as_ref()
-//RS         .map(|report| hex_encode(report.to_json().as_bytes()))
-//RS         .unwrap_or_default();
-//RS     let mut encoded = format!(
-//RS         "version=2\nkey={}\noutcome={}\nstatus={}\nfailure={}\noutputs={}\n",
-//RS         hex_encode(record.key.as_str().as_bytes()),
-//RS         outcome,
-//RS         status,
-//RS         failure,
-//RS         record.outputs.len()
-//RS     );
-//RS     for output in &record.outputs {
-//RS         encoded.push_str(&format!(
-//RS             "output\t{}\t{}\t{}\n",
-//RS             output.path.as_str(),
-//RS             output.digest.as_str(),
-//RS             output.byte_len
-//RS         ));
-//RS     }
-//RS     encoded
-//RS }
-//RS 
-//RS fn decode_remote_record(bytes: &[u8]) -> Result<ActionResultRecord, RemoteCacheError> {
-//RS     if bytes.len() > MAX_REMOTE_WIRE_BYTES {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "cache record exceeds the wire-size limit".to_string(),
-//RS         ));
-//RS     }
-//RS     let text = std::str::from_utf8(bytes)
-//RS         .map_err(|_| RemoteCacheError::InvalidRecord("record is not UTF-8".to_string()))?;
-//RS     let mut seen = BTreeSet::new();
-//RS     let mut version = None;
-//RS     let mut key = None;
-//RS     let mut outcome = None;
-//RS     let mut status = None;
-//RS     let mut failure_report = None;
-//RS     let mut output_count = None;
-//RS     let mut outputs = Vec::new();
-//RS     for line in text.lines() {
-//RS         if let Some(value) = line.strip_prefix("version=") {
-//RS             if !seen.insert("version") {
-//RS                 return Err(duplicate_remote_field("version"));
-//RS             }
-//RS             version = Some(parse_remote_version(value, "cache record")?);
-//RS         } else if let Some(value) = line.strip_prefix("key=") {
-//RS             if !seen.insert("key") {
-//RS                 return Err(duplicate_remote_field("key"));
-//RS             }
-//RS             key = Some(ActionKey::new(
-//RS                 String::from_utf8(hex_decode(value)?).map_err(|_| {
-//RS                     RemoteCacheError::InvalidRecord("cache record key is not UTF-8".to_string())
-//RS                 })?,
-//RS             ));
-//RS         } else if let Some(value) = line.strip_prefix("outcome=") {
-//RS             if !seen.insert("outcome") {
-//RS                 return Err(duplicate_remote_field("outcome"));
-//RS             }
-//RS             outcome = Some(parse_remote_outcome(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("status=") {
-//RS             if !seen.insert("status") {
-//RS                 return Err(duplicate_remote_field("status"));
-//RS             }
-//RS             status = Some(parse_remote_status(value)?);
-//RS         } else if let Some(value) = line.strip_prefix("failure=") {
-//RS             if !seen.insert("failure") {
-//RS                 return Err(duplicate_remote_field("failure"));
-//RS             }
-//RS             if !value.is_empty() {
-//RS                 let bytes = hex_decode(value)?;
-//RS                 let text = String::from_utf8(bytes).map_err(|_| {
-//RS                     RemoteCacheError::InvalidRecord("cache failure report is not UTF-8".to_string())
-//RS                 })?;
-//RS                 failure_report = Some(
-//RS                     jet_foundation::Outcome::JetErrorReport::from_json(&text).map_err(|error| {
-//RS                         RemoteCacheError::InvalidRecord(format!(
-//RS                             "cache failure report is invalid: {error}"
-//RS                         ))
-//RS                     })?,
-//RS                 );
-//RS             }
-//RS         } else if let Some(value) = line.strip_prefix("outputs=") {
-//RS             if !seen.insert("outputs") {
-//RS                 return Err(duplicate_remote_field("outputs"));
-//RS             }
-//RS             output_count = Some(parse_remote_count(value, "cache outputs")?);
-//RS         } else if let Some(value) = line.strip_prefix("output\t") {
-//RS             let fields = value.split('\t').collect::<Vec<_>>();
-//RS             if fields.len() != 3 {
-//RS                 return Err(RemoteCacheError::InvalidRecord(
-//RS                     "output record needs path, digest, and byte length".to_string(),
-//RS                 ));
-//RS             }
-//RS             let digest = ContentDigest::parse(fields[1])?;
-//RS             let byte_len = fields[2].parse::<u64>().map_err(|_| {
-//RS                 RemoteCacheError::InvalidRecord("output byte length is not a number".to_string())
-//RS             })?;
-//RS             outputs.push(ActionOutputRecord {
-//RS                 path: BuildPath(fields[0].to_string()),
-//RS                 digest,
-//RS                 byte_len,
-//RS             });
-//RS         } else if !line.trim().is_empty() {
-//RS             return Err(RemoteCacheError::InvalidRecord(format!(
-//RS                 "unknown cache record field `{line}`"
-//RS             )));
-//RS         }
-//RS     }
-//RS     if version != Some(2) || output_count != Some(outputs.len()) {
-//RS         return Err(RemoteCacheError::InvalidRecord(
-//RS             "cache record version or output count is invalid".to_string(),
-//RS         ));
-//RS     }
-//RS     let key =
-//RS         key.ok_or_else(|| RemoteCacheError::InvalidRecord("missing action key".to_string()))?;
-//RS     validate_action_key(&key)?;
-//RS     let record = ActionResultRecord {
-//RS         key,
-//RS         outcome: outcome
-//RS             .ok_or_else(|| RemoteCacheError::InvalidRecord("missing action outcome".to_string()))?,
-//RS         outputs,
-//RS         failure_report,
-//RS         provenance: ActionCacheProvenance {
-//RS             status: status.ok_or_else(|| {
-//RS                 RemoteCacheError::InvalidRecord("missing cache status".to_string())
-//RS             })?,
-//RS             remote_policy: RemoteCachePolicy::disabled_until_grant_and_sandbox_proof(),
-//RS         },
-//RS     };
-//RS     validate_action_result_record(&record)?;
-//RS     Ok(record)
-//RS }
-//RS 
-//RS fn validate_action_result_record(record: &ActionResultRecord) -> Result<(), RemoteCacheError> {
-//RS     match (&record.outcome, &record.failure_report) {
-//RS         (ActionOutcome::Failed { .. }, Some(_)) if record.outputs.is_empty() => Ok(()),
-//RS         (ActionOutcome::Failed { .. }, None) => Err(RemoteCacheError::InvalidRecord(
-//RS             "failed action record has no structured failure report".to_string(),
-//RS         )),
-//RS         (ActionOutcome::Failed { .. }, Some(_)) => Err(RemoteCacheError::InvalidRecord(
-//RS             "failed action record contains outputs".to_string(),
-//RS         )),
-//RS         (_, Some(_)) => Err(RemoteCacheError::InvalidRecord(
-//RS             "successful action record contains a failure report".to_string(),
-//RS         )),
-//RS         _ => Ok(()),
-//RS     }
-//RS }
-//RS 
-//RS fn duplicate_remote_field(field: &str) -> RemoteCacheError {
-//RS     RemoteCacheError::InvalidRecord(format!(
-//RS         "remote record field `{field}` appears more than once"
-//RS     ))
-//RS }
-//RS 
-//RS fn parse_remote_outcome(value: &str) -> Result<ActionOutcome, RemoteCacheError> {
-//RS     if value == "restored" {
-//RS         return Ok(ActionOutcome::RestoredFromCache);
-//RS     }
-//RS     let (kind, code) = value
-//RS         .split_once(':')
-//RS         .ok_or_else(|| RemoteCacheError::InvalidRecord("outcome has no exit code".to_string()))?;
-//RS     let exit_code = code.parse::<i32>().map_err(|_| {
-//RS         RemoteCacheError::InvalidRecord("outcome exit code is not a number".to_string())
-//RS     })?;
-//RS     match kind {
-//RS         "succeeded" => Ok(ActionOutcome::Succeeded { exit_code }),
-//RS         "failed" => Ok(ActionOutcome::Failed { exit_code }),
-//RS         _ => Err(RemoteCacheError::InvalidRecord(
-//RS             "unknown action outcome".to_string(),
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn parse_remote_status(value: &str) -> Result<ActionCacheStatus, RemoteCacheError> {
-//RS     let (kind, name) = value
-//RS         .split_once(':')
-//RS         .ok_or_else(|| RemoteCacheError::InvalidRecord("cache status has no reason".to_string()))?;
-//RS     match (kind, name) {
-//RS         ("hit", "LocalActionRecordMatched") => Ok(ActionCacheStatus::Hit(
-//RS             CacheHitReason::LocalActionRecordMatched,
-//RS         )),
-//RS         ("hit", "DeclaredOutputsRestored") => Ok(ActionCacheStatus::Hit(
-//RS             CacheHitReason::DeclaredOutputsRestored,
-//RS         )),
-//RS         ("miss", "NoLocalActionRecord") => Ok(ActionCacheStatus::Miss(
-//RS             CacheMissReason::NoLocalActionRecord,
-//RS         )),
-//RS         ("miss", "ActionKeyChanged") => {
-//RS             Ok(ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged))
-//RS         }
-//RS         ("miss", "DeclaredOutputMissing") => Ok(ActionCacheStatus::Miss(
-//RS             CacheMissReason::DeclaredOutputMissing,
-//RS         )),
-//RS         ("miss", "CacheRecordInvalid") => {
-//RS             Ok(ActionCacheStatus::Miss(CacheMissReason::CacheRecordInvalid))
-//RS         }
-//RS         ("miss", "CacheRestoreFailed") => {
-//RS             Ok(ActionCacheStatus::Miss(CacheMissReason::CacheRestoreFailed))
-//RS         }
-//RS         ("miss", "RemoteDenied") => Ok(ActionCacheStatus::Miss(CacheMissReason::RemoteDenied)),
-//RS         ("miss", "UncachedAction") => Ok(ActionCacheStatus::Miss(CacheMissReason::UncachedAction)),
-//RS         ("miss", "FrontEndIncomplete") => {
-//RS             Ok(ActionCacheStatus::Miss(CacheMissReason::FrontEndIncomplete))
-//RS         }
-//RS         _ => Err(RemoteCacheError::InvalidRecord(
-//RS             "cache status kind does not match reason".to_string(),
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ActionOutputRecord {
-//RS     pub path: BuildPath,
-//RS     pub digest: ContentDigest,
-//RS     pub byte_len: u64,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ActionInputSnapshot {
-//RS     pub path: BuildPath,
-//RS     pub digest: ContentDigest,
-//RS     pub byte_len: u64,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ActionResultRecord {
-//RS     pub key: ActionKey,
-//RS     pub outcome: ActionOutcome,
-//RS     pub outputs: Vec<ActionOutputRecord>,
-//RS     /// A failed action carries the same structured report that reached the
-//RS     /// build edge. Successful records never carry a failure report.
-//RS     pub failure_report: Option<jet_foundation::Outcome::JetErrorReport>,
-//RS     pub provenance: ActionCacheProvenance,
-//RS }
-//RS /// The compiler-side storage seam. The driver owns the concrete machine-wide
-//RS /// store and passes this object into build execution; comptime never names a
-//RS /// filesystem cache or depends on `jet-store`.
-//RS pub trait BuildArtifactStore: Send + Sync {
-//RS     fn put_blob(&self, bytes: &[u8]) -> io::Result<ContentDigest>;
-//RS     fn get_blob(&self, digest: &ContentDigest) -> io::Result<Option<Vec<u8>>>;
-//RS     fn put_record(&self, key: &str, bytes: &[u8]) -> io::Result<()>;
-//RS     fn get_record(&self, key: &str) -> io::Result<Option<Vec<u8>>>;
-//RS }
-//RS 
-//RS pub fn snapshot_declared_inputs(
-//RS     store: &dyn BuildArtifactStore,
-//RS     base: &Path,
-//RS     action: &BuildAction,
-//RS ) -> io::Result<Vec<ActionInputSnapshot>> {
-//RS     let mut inputs = Vec::new();
-//RS     for input in &action.inputs {
-//RS         let path = resolve_under(base, input.as_str())?;
-//RS         let bytes = secure_read_file(base, &path)?;
-//RS         let digest = store.put_blob(&bytes)?;
-//RS         inputs.push(ActionInputSnapshot {
-//RS             path: input.clone(),
-//RS             digest,
-//RS             byte_len: bytes.len() as u64,
-//RS         });
-//RS     }
-//RS     Ok(inputs)
-//RS }
-//RS 
-//RS pub fn capture_declared_outputs(
-//RS     store: &dyn BuildArtifactStore,
-//RS     base: &Path,
-//RS     action: &BuildAction,
-//RS     key: ActionKey,
-//RS     outcome: ActionOutcome,
-//RS     provenance: ActionCacheProvenance,
-//RS ) -> io::Result<ActionResultRecord> {
-//RS     let mut outputs = Vec::new();
-//RS     for output in &action.outputs {
-//RS         let path = resolve_under(base, output.as_str())?;
-//RS         let bytes = secure_read_file(base, &path)?;
-//RS         let digest = store.put_blob(&bytes)?;
-//RS         outputs.push(ActionOutputRecord {
-//RS             path: output.clone(),
-//RS             digest,
-//RS             byte_len: bytes.len() as u64,
-//RS         });
-//RS     }
-//RS     Ok(ActionResultRecord {
-//RS         key,
-//RS         outcome,
-//RS         outputs,
-//RS         failure_report: None,
-//RS         provenance,
-//RS     })
-//RS }
-//RS 
-//RS pub fn restore_declared_outputs(
-//RS     store: &dyn BuildArtifactStore,
-//RS     base: &Path,
-//RS     record: &ActionResultRecord,
-//RS ) -> io::Result<()> {
-//RS     restore_outputs(store, base, record)
-//RS }
-//RS 
-//RS pub fn restore_action_outputs(
-//RS     store: &dyn BuildArtifactStore,
-//RS     base: &Path,
-//RS     action: &BuildAction,
-//RS     record: &ActionResultRecord,
-//RS ) -> io::Result<()> {
-//RS     if record.outputs.len() != action.outputs.len()
-//RS         || record
-//RS             .outputs
-//RS             .iter()
-//RS             .zip(&action.outputs)
-//RS             .any(|(recorded, declared)| recorded.path != *declared)
-//RS     {
-//RS         return Err(io::Error::new(
-//RS             io::ErrorKind::InvalidData,
-//RS             "cached output record does not exactly match action declarations",
-//RS         ));
-//RS     }
-//RS     restore_outputs(store, base, record)
-//RS }
-//RS 
-//RS fn restore_outputs(
-//RS     store: &dyn BuildArtifactStore,
-//RS     base: &Path,
-//RS     record: &ActionResultRecord,
-//RS ) -> io::Result<()> {
-//RS     for output in &record.outputs {
-//RS         let path = resolve_under(base, output.path.as_str())?;
-//RS         let bytes = store
-//RS             .get_blob(&output.digest)?
-//RS             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "CAS blob is missing"))?;
-//RS         atomic_restore_file(base, &path, &bytes)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub(super) fn secure_read_file(base: &Path, path: &Path) -> io::Result<Vec<u8>> {
-//RS     use std::ffi::CString;
-//RS     use std::io::Read;
-//RS     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     use std::os::unix::fs::OpenOptionsExt;
-//RS     const O_RDONLY: i32 = 0;
-//RS     const O_CLOEXEC: i32 = 0o2000000;
-//RS     const O_DIRECTORY: i32 = 0o200000;
-//RS     const O_NOFOLLOW: i32 = 0o400000;
-//RS     extern "C" {
-//RS         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
-//RS     }
-//RS     let name = |value: &std::ffi::OsStr| {
-//RS         CString::new(value.as_bytes())
-//RS             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "NUL in cache path"))
-//RS     };
-//RS     let relative = path
-//RS         .strip_prefix(base)
-//RS         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "cache path escapes root"))?;
-//RS     let file_name = relative.file_name().ok_or_else(|| {
-//RS         io::Error::new(io::ErrorKind::InvalidInput, "cache path has no file name")
-//RS     })?;
-//RS     let root = fs::OpenOptions::new()
-//RS         .read(true)
-//RS         .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-//RS         .open(base)?;
-//RS     let mut held = Vec::<OwnedFd>::new();
-//RS     let mut dirfd = root.as_raw_fd();
-//RS     if let Some(parent) = relative.parent() {
-//RS         for component in parent.components() {
-//RS             let Component::Normal(part) = component else {
-//RS                 continue;
-//RS             };
-//RS             let part = name(part)?;
-//RS             let fd = unsafe {
-//RS                 openat(
-//RS                     dirfd,
-//RS                     part.as_ptr(),
-//RS                     O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
-//RS                     0,
-//RS                 )
-//RS             };
-//RS             if fd < 0 {
-//RS                 return Err(io::Error::last_os_error());
-//RS             }
-//RS             held.push(unsafe { OwnedFd::from_raw_fd(fd) });
-//RS             dirfd = held.last().unwrap().as_raw_fd();
-//RS         }
-//RS     }
-//RS     let file_name = name(file_name)?;
-//RS     let fd = unsafe {
-//RS         openat(
-//RS             dirfd,
-//RS             file_name.as_ptr(),
-//RS             O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
-//RS             0,
-//RS         )
-//RS     };
-//RS     if fd < 0 {
-//RS         return Err(io::Error::last_os_error());
-//RS     }
-//RS     let mut file = unsafe { fs::File::from_raw_fd(fd) };
-//RS     if !file.metadata()?.is_file() {
-//RS         return Err(io::Error::new(
-//RS             io::ErrorKind::PermissionDenied,
-//RS             "cache entry is not a regular file",
-//RS         ));
-//RS     }
-//RS     let mut bytes = Vec::new();
-//RS     file.read_to_end(&mut bytes)?;
-//RS     Ok(bytes)
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS pub(super) fn secure_read_file(base: &Path, path: &Path) -> io::Result<Vec<u8>> {
-//RS     let relative = path
-//RS         .strip_prefix(base)
-//RS         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "cache path escapes root"))?;
-//RS     let mut current = base.to_path_buf();
-//RS     for component in relative.components() {
-//RS         let Component::Normal(part) = component else {
-//RS             continue;
-//RS         };
-//RS         current.push(part);
-//RS         if fs::symlink_metadata(&current)?.file_type().is_symlink() {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "cache path contains a symlink",
-//RS             ));
-//RS         }
-//RS     }
-//RS     fs::read(current)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub(super) fn secure_read_file_bounded(
-//RS     base: &Path,
-//RS     path: &Path,
-//RS     limit: usize,
-//RS ) -> io::Result<Vec<u8>> {
-//RS     use std::ffi::CString;
-//RS     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     use std::os::unix::fs::OpenOptionsExt;
-//RS     const O_RDONLY: i32 = 0;
-//RS     const O_CLOEXEC: i32 = 0o2000000;
-//RS     const O_DIRECTORY: i32 = 0o200000;
-//RS     const O_NOFOLLOW: i32 = 0o400000;
-//RS     extern "C" {
-//RS         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
-//RS     }
-//RS     let name = |value: &std::ffi::OsStr| {
-//RS         CString::new(value.as_bytes())
-//RS             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "NUL in cache path"))
-//RS     };
-//RS     let relative = path
-//RS         .strip_prefix(base)
-//RS         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "cache path escapes root"))?;
-//RS     let file_name = relative.file_name().ok_or_else(|| {
-//RS         io::Error::new(io::ErrorKind::InvalidInput, "cache path has no file name")
-//RS     })?;
-//RS     let root = fs::OpenOptions::new()
-//RS         .read(true)
-//RS         .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-//RS         .open(base)?;
-//RS     let mut held = Vec::<OwnedFd>::new();
-//RS     let mut dirfd = root.as_raw_fd();
-//RS     if let Some(parent) = relative.parent() {
-//RS         for component in parent.components() {
-//RS             let Component::Normal(part) = component else {
-//RS                 continue;
-//RS             };
-//RS             let part = name(part)?;
-//RS             let fd = unsafe {
-//RS                 openat(
-//RS                     dirfd,
-//RS                     part.as_ptr(),
-//RS                     O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
-//RS                     0,
-//RS                 )
-//RS             };
-//RS             if fd < 0 {
-//RS                 return Err(io::Error::last_os_error());
-//RS             }
-//RS             held.push(unsafe { OwnedFd::from_raw_fd(fd) });
-//RS             dirfd = held.last().unwrap().as_raw_fd();
-//RS         }
-//RS     }
-//RS     let file_name = name(file_name)?;
-//RS     let fd = unsafe {
-//RS         openat(
-//RS             dirfd,
-//RS             file_name.as_ptr(),
-//RS             O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
-//RS             0,
-//RS         )
-//RS     };
-//RS     if fd < 0 {
-//RS         return Err(io::Error::last_os_error());
-//RS     }
-//RS     let file = unsafe { fs::File::from_raw_fd(fd) };
-//RS     if !file.metadata()?.is_file() {
-//RS         return Err(io::Error::new(
-//RS             io::ErrorKind::PermissionDenied,
-//RS             "cache entry is not a regular file",
-//RS         ));
-//RS     }
-//RS     let mut bytes = Vec::new();
-//RS     file.take(limit.saturating_add(1) as u64)
-//RS         .read_to_end(&mut bytes)?;
-//RS     if bytes.len() > limit {
-//RS         return Err(io::Error::new(
-//RS             io::ErrorKind::InvalidData,
-//RS             "cache entry exceeds its byte limit",
-//RS         ));
-//RS     }
-//RS     Ok(bytes)
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS pub(super) fn secure_read_file_bounded(
-//RS     base: &Path,
-//RS     path: &Path,
-//RS     limit: usize,
-//RS ) -> io::Result<Vec<u8>> {
-//RS     let relative = path
-//RS         .strip_prefix(base)
-//RS         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "cache path escapes root"))?;
-//RS     let mut current = base.to_path_buf();
-//RS     for component in relative.components() {
-//RS         let Component::Normal(part) = component else {
-//RS             continue;
-//RS         };
-//RS         current.push(part);
-//RS         if fs::symlink_metadata(&current)?.file_type().is_symlink() {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "cache path contains a symlink",
-//RS             ));
-//RS         }
-//RS     }
-//RS     let mut file = fs::File::open(current)?;
-//RS     let mut bytes = Vec::new();
-//RS     file.take(limit.saturating_add(1) as u64)
-//RS         .read_to_end(&mut bytes)?;
-//RS     if bytes.len() > limit {
-//RS         return Err(io::Error::new(
-//RS             io::ErrorKind::InvalidData,
-//RS             "cache entry exceeds its byte limit",
-//RS         ));
-//RS     }
-//RS     Ok(bytes)
-//RS }
-//RS 
-//RS #[cfg(all(test, unix))]
-//RS mod hostile_tests {
-//RS     use super::*;
-//RS     use std::os::unix::fs::symlink;
-//RS     use std::sync::atomic::{AtomicU64, Ordering};
-//RS     static NEXT: AtomicU64 = AtomicU64::new(0);
-//RS     fn temp(name: &str) -> PathBuf {
-//RS         let path = std::env::temp_dir().join(format!(
-//RS             "jet-cas-{name}-{}-{}",
-//RS             std::process::id(),
-//RS             NEXT.fetch_add(1, Ordering::Relaxed)
-//RS         ));
-//RS         let _ = fs::remove_dir_all(&path);
-//RS         fs::create_dir_all(&path).unwrap();
-//RS         path
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn put_blob_rejects_cache_root_and_blob_tree_symlinks() {
-//RS         let outside = temp("outside");
-//RS         let root_parent = temp("root-link");
-//RS         symlink(&outside, root_parent.join("cache")).unwrap();
-//RS         assert!(RemoteBlobStore::new(root_parent.join("cache"))
-//RS             .put_blob(b"secret")
-//RS             .is_err());
-//RS         assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
-//RS 
-//RS         let root = temp("blob-link");
-//RS         let cas = root.join("cache");
-//RS         fs::create_dir_all(&cas).unwrap();
-//RS         symlink(&outside, cas.join("blobs")).unwrap();
-//RS         assert!(RemoteBlobStore::new(&cas).put_blob(b"secret").is_err());
-//RS         assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn known_digest_blob_is_never_read() {
-//RS         let root = temp("read-link");
-//RS         let cas = RemoteBlobStore::new(root.join("cas"));
-//RS         let digest = cas.put_blob(b"host-bytes").unwrap();
-//RS         let blob = cas.blob_path(&digest).unwrap();
-//RS         fs::remove_file(&blob).unwrap();
-//RS         let host = root.join("host");
-//RS         fs::write(&host, b"host-bytes").unwrap();
-//RS         symlink(&host, &blob).unwrap();
-//RS         assert!(cas.read_blob(&digest).is_err());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn concurrent_same_size_restores_use_unique_create_new_temps() {
-//RS         let root = temp("concurrent-restore");
-//RS         let output = root.join("out");
-//RS         let payloads = (0..16)
-//RS             .map(|index| format!("payload-{index:08}").into_bytes())
-//RS             .collect::<Vec<_>>();
-//RS         std::thread::scope(|scope| {
-//RS             let jobs = payloads
-//RS                 .iter()
-//RS                 .map(|payload| {
-//RS                     let root = &root;
-//RS                     let output = &output;
-//RS                     scope.spawn(move || atomic_restore_file(root, output, payload))
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS             for job in jobs {
-//RS                 job.join().unwrap().unwrap();
-//RS             }
-//RS         });
-//RS         let final_bytes = fs::read(&output).unwrap();
-//RS         assert!(payloads.contains(&final_bytes));
-//RS         assert!(!fs::read_dir(&root).unwrap().flatten().any(|entry| entry
-//RS             .file_name()
-//RS             .to_string_lossy()
-//RS             .starts_with(".jet-restore-")));
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub(super) fn atomic_restore_file(base: &Path, path: &Path, bytes: &[u8]) -> io::Result<()> {
-//RS     use std::ffi::CString;
-//RS     use std::io::Write;
-//RS     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     use std::os::unix::fs::OpenOptionsExt;
-//RS 
-//RS     const O_RDONLY: i32 = 0;
-//RS     const O_WRONLY: i32 = 1;
-//RS     const O_CREAT: i32 = 0o100;
-//RS     const O_EXCL: i32 = 0o200;
-//RS     const O_CLOEXEC: i32 = 0o2000000;
-//RS     const O_DIRECTORY: i32 = 0o200000;
-//RS     const O_NOFOLLOW: i32 = 0o400000;
-//RS     extern "C" {
-//RS         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
-//RS         fn mkdirat(dirfd: i32, pathname: *const i8, mode: u32) -> i32;
-//RS         fn unlinkat(dirfd: i32, pathname: *const i8, flags: i32) -> i32;
-//RS         fn renameat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8) -> i32;
-//RS     }
-//RS     fn name(value: &std::ffi::OsStr) -> io::Result<CString> {
-//RS         CString::new(value.as_bytes())
-//RS             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "NUL in build output path"))
-//RS     }
-//RS 
-//RS     let relative = path
-//RS         .strip_prefix(base)
-//RS         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "build output escapes root"))?;
-//RS     let file_name = relative.file_name().ok_or_else(|| {
-//RS         io::Error::new(io::ErrorKind::InvalidInput, "build output has no file name")
-//RS     })?;
-//RS     let root = fs::OpenOptions::new()
-//RS         .read(true)
-//RS         .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-//RS         .open(base)?;
-//RS     let mut held = Vec::<OwnedFd>::new();
-//RS     let mut dirfd = root.as_raw_fd();
-//RS     if let Some(parent) = relative.parent() {
-//RS         for component in parent.components() {
-//RS             let Component::Normal(part) = component else {
-//RS                 continue;
-//RS             };
-//RS             let part = name(part)?;
-//RS             let mut fd = unsafe {
-//RS                 openat(
-//RS                     dirfd,
-//RS                     part.as_ptr(),
-//RS                     O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
-//RS                     0,
-//RS                 )
-//RS             };
-//RS             if fd < 0 && io::Error::last_os_error().kind() == io::ErrorKind::NotFound {
-//RS                 if unsafe { mkdirat(dirfd, part.as_ptr(), 0o755) } != 0 {
-//RS                     let error = io::Error::last_os_error();
-//RS                     if error.kind() != io::ErrorKind::AlreadyExists {
-//RS                         return Err(error);
-//RS                     }
-//RS                 }
-//RS                 fd = unsafe {
-//RS                     openat(
-//RS                         dirfd,
-//RS                         part.as_ptr(),
-//RS                         O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
-//RS                         0,
-//RS                     )
-//RS                 };
-//RS             }
-//RS             if fd < 0 {
-//RS                 return Err(io::Error::last_os_error());
-//RS             }
-//RS             held.push(unsafe { OwnedFd::from_raw_fd(fd) });
-//RS             dirfd = held.last().unwrap().as_raw_fd();
-//RS         }
-//RS     }
-//RS     let final_name = name(file_name)?;
-//RS     let (temp_name, fd) = loop {
-//RS         let mut random = [0u8; 16];
-//RS         std::io::Read::read_exact(&mut fs::File::open("/dev/urandom")?, &mut random)?;
-//RS         let nonce = random
-//RS             .iter()
-//RS             .map(|byte| format!("{byte:02x}"))
-//RS             .collect::<String>();
-//RS         let temp_name = CString::new(format!(".jet-restore-{nonce}")).unwrap();
-//RS         let fd = unsafe {
-//RS             openat(
-//RS                 dirfd,
-//RS                 temp_name.as_ptr(),
-//RS                 O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-//RS                 0o600,
-//RS             )
-//RS         };
-//RS         if fd >= 0 {
-//RS             break (temp_name, fd);
-//RS         }
-//RS         let error = io::Error::last_os_error();
-//RS         if error.kind() != io::ErrorKind::AlreadyExists {
-//RS             return Err(error);
-//RS         }
-//RS     };
-//RS     let mut temp = unsafe { fs::File::from_raw_fd(fd) };
-//RS     temp.write_all(bytes)?;
-//RS     temp.sync_all()?;
-//RS     drop(temp);
-//RS     if unsafe { renameat(dirfd, temp_name.as_ptr(), dirfd, final_name.as_ptr()) } != 0 {
-//RS         let error = io::Error::last_os_error();
-//RS         let _ = unsafe { unlinkat(dirfd, temp_name.as_ptr(), 0) };
-//RS         return Err(error);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS pub(super) fn atomic_restore_file(base: &Path, path: &Path, bytes: &[u8]) -> io::Result<()> {
-//RS     prepare_output_destination(base, path)?;
-//RS     let mut random = [0u8; 16];
-//RS     std::io::Read::read_exact(&mut fs::File::open("/dev/urandom")?, &mut random)?;
-//RS     let nonce = random
-//RS         .iter()
-//RS         .map(|byte| format!("{byte:02x}"))
-//RS         .collect::<String>();
-//RS     let temp = path.with_extension(format!("jet-cache-restore-{nonce}.tmp"));
-//RS     let mut file = fs::OpenOptions::new()
-//RS         .write(true)
-//RS         .create_new(true)
-//RS         .open(&temp)?;
-//RS     std::io::Write::write_all(&mut file, bytes)?;
-//RS     if fs::symlink_metadata(path).is_ok() {
-//RS         fs::remove_file(path)?;
-//RS     }
-//RS     fs::rename(temp, path)
-//RS }
-// END-PORT-PENDING 0561 crates/jet-comptime/src/Comptime/Build/cache_cas.rs:1788-3805
+// Continuation of canonical Comptime.Build.cache_cas. No second store or transport.
+use jet_foundation.[TEXT_NUL, sha256, JetErrorReport]
+use jet_eval.[BuildAction, BuildPath, resolve_under, prepare_output_destination]
+use core.collections.Set
+use core.sys.target.selected_family
+use core.files.host.retained_descriptor.[Directory, OpenOptions, CreateOptions, open_directory, open_reader, symlink_metadata, create_dir, remove, rename]
+use core.files.runtime.kernel_path_components.[components, next, ComponentKind]
+use std.[fs, io]
 
+impl RemoteCacheTransport {
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:1788
+    pub fn publish_execution_result(self, result: RemoteExecutionResult, policy: RemoteCachePolicy) -> Unit RemoteCacheError! {
+        policy.check(RemoteActionRequest.Execute) catch error { fail RemoteCacheError.Denied(error) }
+        self.require_auth(RemoteActionRequest.Execute)!
+        self.require_worker_identity()!
+        self.validate_policy_identity(policy)!
+        self.validate_proof_for_key(policy, result.key, RemoteActionRequest.Execute)!
+        self.validate_sandbox_proof(policy, result.sandbox, RemoteActionRequest.Execute)!
+        if self.worker_identity == .Val(expected) -> self.validate_worker_identity(result.sandbox, expected)!
+        validate_remote_execution_result(result)!
+        commit :: remote_execution_commit_lock(self.root)!
+        if self.execution_is_cancelled(result.key, result.attempt_id)! -> fail RemoteCacheError.InvalidRecord("remote execution was cancelled before this result was published")
+        validate_remote_count(result.outputs.len(), "execution outputs")!
+        request :: self.read_execution_request(result.key)!
+        if self.execution_is_cancelled(result.key, result.attempt_id)! -> fail RemoteCacheError.InvalidRecord("remote execution was cancelled before this result was published")
+        validate_execution_parity(request, result)!
+        loop output in result.outputs -> _ :: self.read_remote_blob_with_len(output.digest, output.byte_len)!
+        _ :: self.read_remote_blob(result.stdout_digest)!
+        _ :: self.read_remote_blob(result.stderr_digest)!
+        ensure_real_directory(self.root) catch error { fail RemoteCacheError.Io(error) }
+        path :: self.execution_result_path(result.key)!
+        existing_wire :: {
+            wire :: secure_read_file_bounded(self.root, path, MAX_REMOTE_WIRE_BYTES + 256)!
+            Val(wire)
+        } catch error {
+            if error.kind() == io.ErrorKind.NotFound -> None else -> fail RemoteCacheError.Io(error)
+        }
+        if existing_wire == .Val(wire) {
+            existing :: decode_remote_execution_result(self.open("execution-result", wire)!)!
+            if existing == result -> return
+            fail RemoteCacheError.InvalidRecord("remote execution result disagrees with the already published result")
+        }
+        bytes :: self.seal("execution-result", encode_remote_execution_result(result).bytes())!
+        atomic_restore_file(self.root, path, bytes) catch error { fail RemoteCacheError.Io(error) }
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:1852
+    pub fn download_execution_result(self, key: ActionKey, policy: RemoteCachePolicy) -> RemoteExecutionResult RemoteCacheError! {
+        policy.check(RemoteActionRequest.Execute) catch error { fail RemoteCacheError.Denied(error) }
+        self.require_auth(RemoteActionRequest.Execute)!
+        self.require_worker_identity()!
+        self.validate_policy_identity(policy)!
+        self.validate_proof_for_key(policy, key, RemoteActionRequest.Execute)!
+        commit :: remote_execution_commit_lock(self.root)!
+        request :: self.read_execution_request(key)!
+        self.validate_sandbox_proof(policy, request.sandbox, RemoteActionRequest.Execute)!
+        path :: self.execution_result_path(key)!
+        bytes :: secure_read_file_bounded(self.root, path, MAX_REMOTE_WIRE_BYTES + 256) catch error { fail RemoteCacheError.Io(error) }
+        result :: decode_remote_execution_result(self.open("execution-result", bytes)!)!
+        if self.execution_is_cancelled(key, result.attempt_id)! {
+            remove_remote_execution_file(path)!
+            fail RemoteCacheError.Io(io.Error.new(io.ErrorKind.NotFound, "remote execution was cancelled"))
+        }
+        if result.key != key -> fail RemoteCacheError.InvalidRecord("execution result key does not match lookup key")
+        validate_execution_parity(request, result)!
+        loop output in result.outputs -> _ :: self.read_remote_blob_with_len(output.digest, output.byte_len)!
+        _ :: self.read_remote_blob(result.stdout_digest)!
+        _ :: self.read_remote_blob(result.stderr_digest)!
+        result
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:1895
+    pub fn read_execution_request(self, key: ActionKey) -> RemoteExecutionRequest RemoteCacheError! {
+        self.require_auth(RemoteActionRequest.Execute)!
+        self.require_worker_identity()!
+        path :: self.execution_request_path(key)!
+        bytes :: secure_read_file_bounded(self.root, path, MAX_REMOTE_WIRE_BYTES + 256) catch error { fail RemoteCacheError.Io(error) }
+        request :: decode_remote_execution_request(self.open("execution-request", bytes)!)!
+        if request.key != key -> fail RemoteCacheError.InvalidRecord("execution request key does not match lookup key")
+        if self.worker_identity == .Val(expected) -> self.validate_worker_identity(request.sandbox, expected)!
+        if self.execution_is_cancelled(key, request.attempt_id)! -> fail RemoteCacheError.Io(io.Error.new(io.ErrorKind.NotFound, "remote execution was cancelled"))
+        request
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:1921
+    fn execution_request_path(self, key: ActionKey) -> OSPath RemoteCacheError! { self.execution_path("requests", key) }
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:1925
+    fn execution_result_path(self, key: ActionKey) -> OSPath RemoteCacheError! { self.execution_path("results", key) }
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:1929
+    fn execution_cancel_path(self, key: ActionKey) -> OSPath RemoteCacheError! { self.execution_path("cancelled", key) }
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:1933
+    fn execution_cancel_state(self, key: ActionKey) -> RemoteCancellationState RemoteCacheError! {
+        path :: self.execution_cancel_path(key)!
+        bytes :: secure_read_file_bounded(self.root, path, MAX_REMOTE_WIRE_BYTES + 256) catch error {
+            if error.kind() == io.ErrorKind.NotFound -> return RemoteCancellationState{} else -> fail RemoteCacheError.Io(error)
+        }
+        payload :: self.open("execution-cancel", bytes)!
+        text :: String.from_bytes(payload) ?? fail RemoteCacheError.InvalidRecord("remote cancellation marker is not UTF-8")
+        marker_key := String?{None}
+        attempt_ids := [String]{}
+        seen_attempts := Set<String>{}
+        seen_key := false
+        retired := false
+        seen_retired := false
+        loop line in text.lines() {
+            if line.strip_prefix("key=") == .Val(value) {
+                if seen_key -> fail duplicate_remote_field("cancellation key")
+                seen_key = true
+                marker_key = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("remote cancellation marker key is not UTF-8"))
+            } else if line.strip_prefix("attempt=") == .Val(value) {
+                if value.is_empty() -> fail duplicate_remote_field("cancellation attempt")
+                attempt_id :: String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("remote cancellation marker attempt is not UTF-8")
+                validate_remote_attempt_id(attempt_id)!
+                if !&seen_attempts.insert(attempt_id) -> fail duplicate_remote_field("cancellation attempt")
+                &attempt_ids.push(attempt_id)
+            } else if line.strip_prefix("retired=") == .Val(value) {
+                if seen_retired -> fail duplicate_remote_field("cancellation retired flag")
+                seen_retired = true
+                if value != "1" -> fail RemoteCacheError.InvalidRecord("remote cancellation retired flag is not 1")
+                retired = true
+            } else if !line.trim().is_empty() -> fail RemoteCacheError.InvalidRecord("unknown remote cancellation field `{line}`")
+        }
+        if marker_key != Val(key.as_str()) -> fail RemoteCacheError.InvalidRecord("remote cancellation marker does not match its action")
+        if attempt_ids.is_empty() && !retired -> fail RemoteCacheError.InvalidRecord("remote cancellation marker has no attempt id")
+        if retired && !attempt_ids.is_empty() -> fail RemoteCacheError.InvalidRecord("retired remote cancellation marker contains attempt history")
+        RemoteCancellationState{attempts: attempt_ids, retired: retired}
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2018
+    fn execution_is_cancelled(self, key: ActionKey, attempt_id: String) -> Bool RemoteCacheError! {
+        state :: self.execution_cancel_state(key)!
+        state.retired || state.attempts.contains(attempt_id)
+    }
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2031
+    fn execution_path(self, kind: String, key: ActionKey) -> OSPath RemoteCacheError! {
+        digest :: ContentDigest.from_bytes(key.as_str().bytes())
+        hex := digest.as_str().strip_prefix("sha256:") ?? fail RemoteCacheError.InvalidRecord("execution key digest has no sha256 prefix")
+        self.root.join("execution").join(kind).join(hex[..<2]).join(hex[2..])
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2046
+pub struct RemoteExecutionRequest { pub key: ActionKey, pub attempt_id: String, pub argv: [String], pub inputs: [ActionInputSnapshot], pub outputs: [BuildPath], pub toolchain_digest: ContentDigest, pub sandbox: RemoteSandboxProof }
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2057
+pub struct RemoteExecutionResult { pub key: ActionKey, pub attempt_id: String, pub execution_id: ContentDigest, pub outcome: ActionOutcome, pub outputs: [ActionOutputRecord], pub toolchain_digest: ContentDigest, pub sandbox: RemoteSandboxProof, pub stdout_digest: ContentDigest, pub stderr_digest: ContentDigest, pub provenance_signer: String }
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2076
+pub fn remote_execution_identity(request: RemoteExecutionRequest) -> ContentDigest {
+    encoded :: encode_remote_execution_request(request)
+    ContentDigest.from_bytes("jet.remote-execution.v2\nbytes={encoded.bytes().len()}\n{encoded}".bytes())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2085
+fn validate_remote_execution_request(request: RemoteExecutionRequest) -> Unit RemoteCacheError! {
+    validate_action_key(request.key)!
+    validate_remote_attempt_id(request.attempt_id)!
+    validate_remote_count(request.argv.len(), "argv")!
+    validate_remote_count(request.inputs.len(), "inputs")!
+    validate_remote_count(request.outputs.len(), "outputs")!
+    validate_remote_argv(request.argv)!
+    _ :: ContentDigest.parse(request.toolchain_digest.as_str())!
+    if request.sandbox.action_key != request.key.as_str() -> fail RemoteCacheError.Denied(RemoteCacheDenied{request: RemoteActionRequest.Execute, reason: RemoteDeniedReason.ProofDoesNotMatchAction})
+    if request.sandbox.attempt_id != request.attempt_id -> fail RemoteCacheError.InvalidRecord("remote execution request attempt does not match its sandbox proof")
+    if !request.sandbox.is_complete() -> fail RemoteCacheError.Denied(RemoteCacheDenied{request: RemoteActionRequest.Execute, reason: RemoteDeniedReason.MissingGrantAndSandboxProof})
+    loop input in request.inputs { validate_remote_path(input.path.as_str())!; _ :: ContentDigest.parse(input.digest.as_str())! }
+    validate_unique_remote_paths(request.inputs.iter().map(fn(input) { input.path.as_str() }))!
+    loop output in request.outputs -> validate_remote_path(output.as_str())!
+    validate_unique_remote_paths(request.outputs.iter().map(fn(output) { output.as_str() }))!
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2124
+fn validate_remote_execution_result(result: RemoteExecutionResult) -> Unit RemoteCacheError! {
+    validate_action_key(result.key)!
+    validate_remote_attempt_id(result.attempt_id)!
+    validate_remote_count(result.outputs.len(), "execution outputs")!
+    _ :: ContentDigest.parse(result.toolchain_digest.as_str())!
+    _ :: ContentDigest.parse(result.execution_id.as_str())!
+    _ :: ContentDigest.parse(result.stdout_digest.as_str())!
+    _ :: ContentDigest.parse(result.stderr_digest.as_str())!
+    if result.provenance_signer.is_empty() || result.provenance_signer.bytes().len() > 256 || result.provenance_signer.chars().any(fn(character) { character.is_control() }) -> fail RemoteCacheError.InvalidRecord("remote execution provenance signer is invalid")
+    if !result.sandbox.is_complete() -> fail RemoteCacheError.Denied(RemoteCacheDenied{request: RemoteActionRequest.Execute, reason: RemoteDeniedReason.MissingGrantAndSandboxProof})
+    if result.sandbox.action_key != result.key.as_str() -> fail RemoteCacheError.Denied(RemoteCacheDenied{request: RemoteActionRequest.Execute, reason: RemoteDeniedReason.ProofDoesNotMatchAction})
+    if result.sandbox.attempt_id != result.attempt_id -> fail RemoteCacheError.InvalidRecord("remote execution result attempt does not match its sandbox proof")
+    if result.provenance_signer != result.sandbox.worker_id -> fail RemoteCacheError.InvalidRecord("remote execution provenance signer does not match its worker")
+    loop output in result.outputs { validate_remote_path(output.path.as_str())!; _ :: ContentDigest.parse(output.digest.as_str())! }
+    validate_unique_remote_paths(result.outputs.iter().map(fn(output) { output.path.as_str() }))!
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2175
+fn validate_execution_parity(request: RemoteExecutionRequest, result: RemoteExecutionResult) -> Unit RemoteCacheError! {
+    if request.key != result.key || request.attempt_id != result.attempt_id || request.toolchain_digest != result.toolchain_digest || request.sandbox != result.sandbox || result.execution_id != remote_execution_identity(request) -> fail RemoteCacheError.InvalidRecord("remote execution result changed action, inputs, outputs, toolchain, or sandbox provenance")
+    if request.outputs.len() != result.outputs.len() -> fail RemoteCacheError.InvalidRecord("remote execution result outputs do not match declarations")
+    loop index in 0..<request.outputs.len() { if request.outputs[index] != result.outputs[index].path -> fail RemoteCacheError.InvalidRecord("remote execution result outputs do not match declarations") }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2203
+fn encode_remote_execution_request(request: RemoteExecutionRequest) -> String {
+    encoded := "version=1\nkey={hex_encode(request.key.as_str().bytes())}\nattempt={hex_encode(request.attempt_id.bytes())}\ntoolchain={request.toolchain_digest.as_str()}\nsandbox={hex_encode(request.sandbox.sandbox_id.bytes())}\nsandbox_class={hex_encode(request.sandbox.sandbox_class.bytes())}\nproof_action={hex_encode(request.sandbox.action_key.bytes())}\nproof_provenance={request.sandbox.provenance_digest.as_str()}\nworker_id={hex_encode(request.sandbox.worker_id.bytes())}\nplatform={hex_encode(request.sandbox.platform.bytes())}\nabi={hex_encode(request.sandbox.abi.bytes())}\nworker_receipt={hex_encode(request.sandbox.worker_receipt.bytes())}\nargv={request.argv.len()}\n"
+    loop arg in request.argv -> &encoded.push_str("arg={hex_encode(arg.bytes())}\n")
+    &encoded.push_str("inputs={request.inputs.len()}\n")
+    loop input in request.inputs -> &encoded.push_str("input\t{hex_encode(input.path.as_str().bytes())}\t{input.digest.as_str()}\t{input.byte_len}\n")
+    &encoded.push_str("outputs={request.outputs.len()}\n")
+    loop output in request.outputs -> &encoded.push_str("output={hex_encode(output.as_str().bytes())}\n")
+    encoded
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2242
+fn decode_remote_execution_request(bytes: [U8]) -> RemoteExecutionRequest RemoteCacheError! {
+    if bytes.len() > MAX_REMOTE_WIRE_BYTES -> fail RemoteCacheError.InvalidRecord("execution request exceeds the wire-size limit")
+    text :: String.from_bytes(bytes) ?? fail RemoteCacheError.InvalidRecord("execution request is not UTF-8")
+    seen := Set<String>{}
+    version := U32?{None}
+    key := ActionKey?{None}
+    attempt_id := String?{None}
+    toolchain_digest := ContentDigest?{None}
+    sandbox_id := String?{None}
+    sandbox_class := String?{None}
+    proof_action := String?{None}
+    proof_provenance := ContentDigest?{None}
+    worker_id := String?{None}
+    platform := String?{None}
+    abi := String?{None}
+    worker_receipt := String?{None}
+    argv_count := Int?{None}
+    argv := [String]{}
+    input_count := Int?{None}
+    inputs := [ActionInputSnapshot]{}
+    output_count := Int?{None}
+    outputs := [BuildPath]{}
+    loop line in text.lines() {
+        if line.strip_prefix("version=") == .Val(value) {
+            if !&seen.insert("version") -> fail duplicate_remote_field("version")
+            version = Val(parse_remote_version(value, "execution request")!)
+        } else if line.strip_prefix("key=") == .Val(value) {
+            if !&seen.insert("key") -> fail duplicate_remote_field("key")
+            key = Val(ActionKey.new(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution key is not UTF-8")))
+        } else if line.strip_prefix("attempt=") == .Val(value) {
+            if !&seen.insert("attempt") -> fail duplicate_remote_field("attempt")
+            attempt_id = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution attempt id is not UTF-8"))
+        } else if line.strip_prefix("toolchain=") == .Val(value) {
+            if !&seen.insert("toolchain") -> fail duplicate_remote_field("toolchain")
+            toolchain_digest = Val(ContentDigest.parse(value)!)
+        } else if line.strip_prefix("sandbox=") == .Val(value) {
+            if !&seen.insert("sandbox") -> fail duplicate_remote_field("sandbox")
+            sandbox_id = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("sandbox id is not UTF-8"))
+        } else if line.strip_prefix("sandbox_class=") == .Val(value) {
+            if !&seen.insert("sandbox_class") -> fail duplicate_remote_field("sandbox_class")
+            sandbox_class = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("sandbox class is not UTF-8"))
+        } else if line.strip_prefix("proof_action=") == .Val(value) {
+            if !&seen.insert("proof_action") -> fail duplicate_remote_field("proof_action")
+            proof_action = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("proof action key is not UTF-8"))
+        } else if line.strip_prefix("proof_provenance=") == .Val(value) {
+            if !&seen.insert("proof_provenance") -> fail duplicate_remote_field("proof_provenance")
+            proof_provenance = Val(ContentDigest.parse(value)!)
+        } else if line.strip_prefix("worker_id=") == .Val(value) {
+            if !&seen.insert("worker_id") -> fail duplicate_remote_field("worker_id")
+            worker_id = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("worker id is not UTF-8"))
+        } else if line.strip_prefix("platform=") == .Val(value) {
+            if !&seen.insert("platform") -> fail duplicate_remote_field("platform")
+            platform = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("worker platform is not UTF-8"))
+        } else if line.strip_prefix("abi=") == .Val(value) {
+            if !&seen.insert("abi") -> fail duplicate_remote_field("abi")
+            abi = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("worker ABI is not UTF-8"))
+        } else if line.strip_prefix("worker_receipt=") == .Val(value) {
+            if !&seen.insert("worker_receipt") -> fail duplicate_remote_field("worker_receipt")
+            worker_receipt = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("worker receipt is not UTF-8"))
+        } else if line.strip_prefix("argv=") == .Val(value) {
+            if !&seen.insert("argv") -> fail duplicate_remote_field("argv")
+            argv_count = Val(parse_remote_count(value, "argv")!)
+        } else if line.strip_prefix("arg=") == .Val(value) -> &argv.push(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution argument is not UTF-8"))
+        else if line.strip_prefix("inputs=") == .Val(value) {
+            if !&seen.insert("inputs") -> fail duplicate_remote_field("inputs")
+            input_count = Val(parse_remote_count(value, "inputs")!)
+        } else if line.strip_prefix("input\t") == .Val(value) {
+            fields :: value.split('\t').collect()
+            if fields.len() != 3 -> fail RemoteCacheError.InvalidRecord("execution input needs path, digest, and byte length")
+            path :: BuildPath(String.from_bytes(hex_decode(fields[0])!) ?? fail RemoteCacheError.InvalidRecord("execution input path is not UTF-8"))
+            digest :: ContentDigest.parse(fields[1])!
+            byte_len :: U64.parse(fields[2]) ?? fail RemoteCacheError.InvalidRecord("execution input byte length is not a number")
+            &inputs.push(ActionInputSnapshot{path: path, digest: digest, byte_len: byte_len})
+        } else if line.strip_prefix("outputs=") == .Val(value) {
+            if !&seen.insert("outputs") -> fail duplicate_remote_field("outputs")
+            output_count = Val(parse_remote_count(value, "outputs")!)
+        } else if line.strip_prefix("output=") == .Val(value) -> &outputs.push(BuildPath(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution output path is not UTF-8")))
+        else if !line.trim().is_empty() -> fail RemoteCacheError.InvalidRecord("unknown execution request field `{line}`")
+    }
+    if version != Val(1) || argv_count != Val(argv.len()) || input_count != Val(inputs.len()) || output_count != Val(outputs.len()) -> fail RemoteCacheError.InvalidRecord("execution request count does not match records")
+    action_key :: key ?? fail RemoteCacheError.InvalidRecord("missing execution key")
+    attempt :: attempt_id ?? fail RemoteCacheError.InvalidRecord("missing execution attempt id")
+    sandbox :: RemoteSandboxProof.new(sandbox_id ?? fail RemoteCacheError.InvalidRecord("missing sandbox id"), proof_action ?? fail RemoteCacheError.InvalidRecord("missing proof action key"), proof_provenance ?? fail RemoteCacheError.InvalidRecord("missing proof provenance")).with_sandbox_class(sandbox_class ?? fail RemoteCacheError.InvalidRecord("missing sandbox class")).with_attempt_id(attempt).with_worker_identity(worker_id ?? fail RemoteCacheError.InvalidRecord("missing worker id"), platform ?? fail RemoteCacheError.InvalidRecord("missing worker platform"), abi ?? fail RemoteCacheError.InvalidRecord("missing worker ABI"), worker_receipt ?? fail RemoteCacheError.InvalidRecord("missing worker receipt"))
+    request :: RemoteExecutionRequest{key: action_key, attempt_id: attempt, argv: argv, inputs: inputs, outputs: outputs, toolchain_digest: toolchain_digest ?? fail RemoteCacheError.InvalidRecord("missing toolchain digest"), sandbox: sandbox}
+    validate_remote_execution_request(request)!
+    request
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2458
+fn encode_remote_execution_result(result: RemoteExecutionResult) -> String {
+    encoded := "version=2\nkey={hex_encode(result.key.as_str().bytes())}\nattempt={hex_encode(result.attempt_id.bytes())}\nexecution_id={result.execution_id.as_str()}\noutcome={encode_remote_outcome(result.outcome)}\ntoolchain={result.toolchain_digest.as_str()}\nsandbox={hex_encode(result.sandbox.sandbox_id.bytes())}\nsandbox_class={hex_encode(result.sandbox.sandbox_class.bytes())}\nproof_action={hex_encode(result.sandbox.action_key.bytes())}\nproof_provenance={result.sandbox.provenance_digest.as_str()}\nworker_id={hex_encode(result.sandbox.worker_id.bytes())}\nplatform={hex_encode(result.sandbox.platform.bytes())}\nabi={hex_encode(result.sandbox.abi.bytes())}\nworker_receipt={hex_encode(result.sandbox.worker_receipt.bytes())}\nstdout={result.stdout_digest.as_str()}\nstderr={result.stderr_digest.as_str()}\nprovenance_signer={hex_encode(result.provenance_signer.bytes())}\noutputs={result.outputs.len()}\n"
+    loop output in result.outputs -> &encoded.push_str("output\t{hex_encode(output.path.as_str().bytes())}\t{output.digest.as_str()}\t{output.byte_len}\n")
+    encoded
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2490
+fn decode_remote_execution_result(bytes: [U8]) -> RemoteExecutionResult RemoteCacheError! {
+    if bytes.len() > MAX_REMOTE_WIRE_BYTES -> fail RemoteCacheError.InvalidRecord("execution result exceeds the wire-size limit")
+    text :: String.from_bytes(bytes) ?? fail RemoteCacheError.InvalidRecord("execution result is not UTF-8")
+    seen := Set<String>{}
+    version := U32?{None}
+    key := ActionKey?{None}
+    attempt_id := String?{None}
+    execution_id := ContentDigest?{None}
+    outcome := ActionOutcome?{None}
+    toolchain_digest := ContentDigest?{None}
+    sandbox_id := String?{None}
+    sandbox_class := String?{None}
+    proof_action := String?{None}
+    proof_provenance := ContentDigest?{None}
+    worker_id := String?{None}
+    platform := String?{None}
+    abi := String?{None}
+    worker_receipt := String?{None}
+    stdout_digest := ContentDigest?{None}
+    stderr_digest := ContentDigest?{None}
+    provenance_signer := String?{None}
+    output_count := Int?{None}
+    outputs := [ActionOutputRecord]{}
+    loop line in text.lines() {
+        if line.strip_prefix("version=") == .Val(value) {
+            if !&seen.insert("version") -> fail duplicate_remote_field("version")
+            version = Val(parse_remote_version(value, "execution result")!)
+        } else if line.strip_prefix("key=") == .Val(value) {
+            if !&seen.insert("key") -> fail duplicate_remote_field("key")
+            key = Val(ActionKey.new(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution result key is not UTF-8")))
+        } else if line.strip_prefix("attempt=") == .Val(value) {
+            if !&seen.insert("attempt") -> fail duplicate_remote_field("attempt")
+            attempt_id = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution result attempt id is not UTF-8"))
+        } else if line.strip_prefix("execution_id=") == .Val(value) {
+            if !&seen.insert("execution_id") -> fail duplicate_remote_field("execution_id")
+            execution_id = Val(ContentDigest.parse(value)!)
+        } else if line.strip_prefix("outcome=") == .Val(value) {
+            if !&seen.insert("outcome") -> fail duplicate_remote_field("outcome")
+            outcome = Val(parse_remote_outcome(value)!)
+        } else if line.strip_prefix("toolchain=") == .Val(value) {
+            if !&seen.insert("toolchain") -> fail duplicate_remote_field("toolchain")
+            toolchain_digest = Val(ContentDigest.parse(value)!)
+        } else if line.strip_prefix("sandbox=") == .Val(value) {
+            if !&seen.insert("sandbox") -> fail duplicate_remote_field("sandbox")
+            sandbox_id = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution result sandbox is not UTF-8"))
+        } else if line.strip_prefix("sandbox_class=") == .Val(value) {
+            if !&seen.insert("sandbox_class") -> fail duplicate_remote_field("sandbox_class")
+            sandbox_class = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution result sandbox class is not UTF-8"))
+        } else if line.strip_prefix("proof_action=") == .Val(value) {
+            if !&seen.insert("proof_action") -> fail duplicate_remote_field("proof_action")
+            proof_action = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution result action key is not UTF-8"))
+        } else if line.strip_prefix("proof_provenance=") == .Val(value) {
+            if !&seen.insert("proof_provenance") -> fail duplicate_remote_field("proof_provenance")
+            proof_provenance = Val(ContentDigest.parse(value)!)
+        } else if line.strip_prefix("worker_id=") == .Val(value) {
+            if !&seen.insert("worker_id") -> fail duplicate_remote_field("worker_id")
+            worker_id = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution result worker id is not UTF-8"))
+        } else if line.strip_prefix("platform=") == .Val(value) {
+            if !&seen.insert("platform") -> fail duplicate_remote_field("platform")
+            platform = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution result worker platform is not UTF-8"))
+        } else if line.strip_prefix("abi=") == .Val(value) {
+            if !&seen.insert("abi") -> fail duplicate_remote_field("abi")
+            abi = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution result worker ABI is not UTF-8"))
+        } else if line.strip_prefix("worker_receipt=") == .Val(value) {
+            if !&seen.insert("worker_receipt") -> fail duplicate_remote_field("worker_receipt")
+            worker_receipt = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution result worker receipt is not UTF-8"))
+        } else if line.strip_prefix("stdout=") == .Val(value) {
+            if !&seen.insert("stdout") -> fail duplicate_remote_field("stdout")
+            stdout_digest = Val(ContentDigest.parse(value)!)
+        } else if line.strip_prefix("stderr=") == .Val(value) {
+            if !&seen.insert("stderr") -> fail duplicate_remote_field("stderr")
+            stderr_digest = Val(ContentDigest.parse(value)!)
+        } else if line.strip_prefix("provenance_signer=") == .Val(value) {
+            if !&seen.insert("provenance_signer") -> fail duplicate_remote_field("provenance_signer")
+            provenance_signer = Val(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("execution result provenance signer is not UTF-8"))
+        } else if line.strip_prefix("outputs=") == .Val(value) {
+            if !&seen.insert("outputs") -> fail duplicate_remote_field("outputs")
+            output_count = Val(parse_remote_count(value, "outputs")!)
+        } else if line.strip_prefix("output\t") == .Val(value) {
+            fields :: value.split('\t').collect()
+            if fields.len() != 3 -> fail RemoteCacheError.InvalidRecord("execution output needs path, digest, and byte length")
+            path :: BuildPath(String.from_bytes(hex_decode(fields[0])!) ?? fail RemoteCacheError.InvalidRecord("execution output path is not UTF-8"))
+            digest :: ContentDigest.parse(fields[1])!
+            byte_len :: U64.parse(fields[2]) ?? fail RemoteCacheError.InvalidRecord("execution output byte length is not a number")
+            &outputs.push(ActionOutputRecord{path: path, digest: digest, byte_len: byte_len})
+        } else if !line.trim().is_empty() -> fail RemoteCacheError.InvalidRecord("unknown execution result field `{line}`")
+    }
+    if version != Val(2) || output_count != Val(outputs.len()) -> fail RemoteCacheError.InvalidRecord("execution result version or output count is invalid")
+    action_key :: key ?? fail RemoteCacheError.InvalidRecord("missing execution result key")
+    attempt :: attempt_id ?? fail RemoteCacheError.InvalidRecord("missing execution result attempt id")
+    result :: RemoteExecutionResult{
+        key: action_key, attempt_id: attempt,
+        execution_id: execution_id ?? fail RemoteCacheError.InvalidRecord("missing execution identity"),
+        outcome: outcome ?? fail RemoteCacheError.InvalidRecord("missing execution outcome"), outputs: outputs,
+        toolchain_digest: toolchain_digest ?? fail RemoteCacheError.InvalidRecord("missing execution toolchain digest"),
+        sandbox: RemoteSandboxProof.new(sandbox_id ?? fail RemoteCacheError.InvalidRecord("missing execution sandbox"), proof_action ?? fail RemoteCacheError.InvalidRecord("missing execution proof action"), proof_provenance ?? fail RemoteCacheError.InvalidRecord("missing execution proof provenance")).with_sandbox_class(sandbox_class ?? fail RemoteCacheError.InvalidRecord("missing execution sandbox class")).with_attempt_id(attempt).with_worker_identity(worker_id ?? fail RemoteCacheError.InvalidRecord("missing execution worker id"), platform ?? fail RemoteCacheError.InvalidRecord("missing execution worker platform"), abi ?? fail RemoteCacheError.InvalidRecord("missing execution worker ABI"), worker_receipt ?? fail RemoteCacheError.InvalidRecord("missing execution worker receipt")),
+        stdout_digest: stdout_digest ?? fail RemoteCacheError.InvalidRecord("missing execution stdout digest"),
+        stderr_digest: stderr_digest ?? fail RemoteCacheError.InvalidRecord("missing execution stderr digest"),
+        provenance_signer: provenance_signer ?? fail RemoteCacheError.InvalidRecord("missing execution provenance signer"),
+    }
+    validate_remote_execution_result(result)!
+    result
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2741
+fn encode_remote_outcome(outcome: ActionOutcome) -> String {
+    if outcome == { .Succeeded(exit_code) -> "succeeded:{exit_code}" .Failed(exit_code) -> "failed:{exit_code}" .RestoredFromCache -> "restored" }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2749
+fn parse_remote_count(value: String, field: String) -> Int RemoteCacheError! {
+    count :: USize.parse(value) ?? fail RemoteCacheError.InvalidRecord("execution {field} count is not a number")
+    if count > MAX_REMOTE_ITEMS -> fail RemoteCacheError.InvalidRecord("execution {field} count exceeds {MAX_REMOTE_ITEMS}")
+    Int.from_usize(count)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2761
+fn validate_remote_count(count: Int, field: String) -> Unit RemoteCacheError! {
+    if count > MAX_REMOTE_ITEMS -> fail RemoteCacheError.InvalidRecord("remote {field} count exceeds {MAX_REMOTE_ITEMS}")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2770
+fn parse_remote_version(value: String, record: String) -> U32 RemoteCacheError! {
+    U32.parse(value) ?? fail RemoteCacheError.InvalidRecord("{record} version is not a number")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2776
+fn validate_action_key(key: ActionKey) -> Unit RemoteCacheError! {
+    value :: key.as_str()
+    if value.is_empty() || value.bytes().len() > 4096 || value.contains("\n") || value.contains("\r") || value.contains(TEXT_NUL) -> fail RemoteCacheError.InvalidRecord("action key is empty or contains a record delimiter")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2791
+fn validate_remote_attempt_id(attempt_id: String) -> Unit RemoteCacheError! {
+    if attempt_id.is_empty() || attempt_id.bytes().len() > 256 || attempt_id.chars().any(fn(character) { character.is_control() }) -> fail RemoteCacheError.InvalidRecord("remote execution attempt id is empty, too long, or contains control text")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2803
+fn validate_remote_name(value: String, label: String) -> Unit Err! {
+    if value.is_empty() || value.bytes().len() > 256 -> fail "remote {label} must be 1..256 ASCII letters, digits, `.`, `_`, or `-`"
+    loop byte in value.bytes() {
+        if !((byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 46 || byte == 95 || byte == 45) -> fail "remote {label} must be 1..256 ASCII letters, digits, `.`, `_`, or `-`"
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2817
+fn validate_remote_argv(argv: [String]) -> Unit RemoteCacheError! {
+    if argv.is_empty() || argv.any(fn(arg) { arg.trim().is_empty() }) -> fail RemoteCacheError.InvalidRecord("remote execution argv must contain a non-empty command and arguments")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2826
+fn validate_unique_remote_paths(paths: Iterable<String>) -> Unit RemoteCacheError! {
+    seen := Set<String>{}
+    loop path in paths { if !&seen.insert(path) -> fail RemoteCacheError.InvalidRecord("remote execution path `{path}` is declared more than once") }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2840
+fn hex_encode(bytes: [U8]) -> String {
+    out := [U8].with_capacity(bytes.len() * 2)
+    digits :: "0123456789abcdef".bytes()
+    loop byte in bytes { &out.push(digits[Int.from_u8(byte >> 4)]); &out.push(digits[Int.from_u8(byte & 15)]) }
+    String.from_bytes(^out) ?? panic("hex encoding is ASCII")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2848
+fn hex_decode(value: String) -> [U8] RemoteCacheError! {
+    bytes :: value.bytes()
+    if bytes.len() % 2 != 0 -> fail RemoteCacheError.InvalidRecord("hex field has odd length")
+    out := [U8].with_capacity(bytes.len() / 2)
+    loop index in 0..<(bytes.len() / 2) {
+        high :: hex_digit(bytes[index * 2]) ?? fail RemoteCacheError.InvalidRecord("hex field contains a non-hex digit")
+        low :: hex_digit(bytes[index * 2 + 1]) ?? fail RemoteCacheError.InvalidRecord("hex field contains a non-hex digit")
+        &out.push((high << 4) | low)
+    }
+    out
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2867
+fn hex_digit(byte: U8) -> U8? {
+    if byte >= 48 && byte <= 57 -> Val(byte - 48)
+    else if byte >= 97 && byte <= 102 -> Val(byte - 97 + 10)
+    else if byte >= 65 && byte <= 70 -> Val(byte - 65 + 10)
+    else -> None
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2876
+fn remote_mac(key: [U8], kind: String, payload: [U8]) -> String {
+    BLOCK :: 64
+    key_block := [U8].filled(BLOCK, 0)
+    if key.len() > BLOCK {
+        digest :: sha256(key)
+        loop index in 0..<32 -> key_block[index] = digest[index]
+    } else { loop index in 0..<key.len() -> key_block[index] = key[index] }
+    inner_input := [U8].with_capacity(BLOCK + kind.bytes().len() + payload.len() + 2)
+    outer_input := [U8].with_capacity(BLOCK + 32)
+    loop byte in key_block { &inner_input.push(byte ^ 0x36); &outer_input.push(byte ^ 0x5c) }
+    &inner_input.extend_from_slice(kind.bytes())
+    &inner_input.push(0)
+    &inner_input.extend_from_slice(payload)
+    &outer_input.extend_from_slice(sha256(inner_input))
+    hex_encode(sha256(outer_input))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2900
+fn constant_time_equal(left: [U8], right: [U8]) -> Bool {
+    difference := left.len() ^ right.len()
+    loop index in 0..<left.len().max(right.len()) {
+        difference |= if (left.get(index) ?? 0) != (right.get(index) ?? 0) -> 1 else -> 0
+    }
+    difference == 0
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2910
+// ensure_remote_root uses ensure_real_directory directly (same source body, no forwarding alias).
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2914
+fn remove_remote_execution_file(path: OSPath) -> Unit RemoteCacheError! {
+    metadata :: symlink_metadata(path) catch error { if error.kind() == io.ErrorKind.NotFound -> return else -> fail RemoteCacheError.Io(error) }
+    if metadata.is_symlink || !metadata.is_file -> fail RemoteCacheError.Io(io.Error.new(io.ErrorKind.PermissionDenied, "remote execution path `{path}` is not a regular file"))
+    remove(path) catch error { fail RemoteCacheError.Io(error) }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2934
+fn ensure_real_directory(path: OSPath) -> Unit io.Error! {
+    // GATE #4494/#4409: real native no-follow metadata and exact error kinds.
+    current := OSPath.empty()
+    loop component in path.components() {
+        if component == {
+            .Prefix(prefix) -> &current.push(prefix.as_os_str())
+            .RootDir -> &current.push(std.path.MAIN_SEPARATOR.to_string())
+            .CurDir -> next
+            .ParentDir -> fail io.Error.new(io.ErrorKind.InvalidInput, "directory path contains `..`")
+            .Normal(part) -> &current.push(part)
+        }
+        metadata :: symlink_metadata(current) catch error {
+            if error.kind() != io.ErrorKind.NotFound -> fail error
+            create_dir(current) catch create_error {
+                if create_error.kind() != io.ErrorKind.AlreadyExists -> fail create_error
+                existing :: symlink_metadata(current)!
+                if existing.is_symlink || !existing.is_dir -> fail io.Error.new(io.ErrorKind.PermissionDenied, "directory path `{current}` is not a real directory")
+            }
+            next
+        }
+        if metadata.is_symlink -> fail io.Error.new(io.ErrorKind.PermissionDenied, "directory path `{current}` is a symlink")
+        if !metadata.is_dir -> fail io.Error.new(io.ErrorKind.NotADirectory, "directory path `{current}` is not a directory")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:2987
+fn ensure_existing_real_directory(path: OSPath) -> Unit io.Error! {
+    current := OSPath.empty()
+    loop component in path.components() {
+        if component == {
+            .Prefix(prefix) -> &current.push(prefix.as_os_str())
+            .RootDir -> &current.push(std.path.MAIN_SEPARATOR.to_string())
+            .CurDir -> next
+            .ParentDir -> fail io.Error.new(io.ErrorKind.InvalidInput, "directory path contains `..`")
+            .Normal(part) -> &current.push(part)
+        }
+        metadata :: symlink_metadata(current)!
+        if metadata.is_symlink || !metadata.is_dir -> fail io.Error.new(io.ErrorKind.PermissionDenied, "directory path `{current}` is not a real directory")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3016
+fn validate_remote_path(path: String) -> Unit RemoteCacheError! {
+    native :: OSPath(path)
+    if path.is_empty() || path.bytes().len() > 4096 || native.is_absolute() || path.contains("\t") || path.contains("\n") || path.contains("\r") || path.contains(TEXT_NUL) || native.components().any(fn(component) { !(component == .Normal(_)) }) -> fail RemoteCacheError.InvalidRecord("output path `{path}` is not relative and normal")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3034
+fn encode_remote_record(record: ActionResultRecord) -> String {
+    outcome :: encode_remote_outcome(record.outcome)
+    status :: if record.provenance.status == { .Hit(reason) -> "hit:{reason.debug()}" .Miss(reason) -> "miss:{reason.debug()}" }
+    failure :: if record.failure_report == { Val(report) -> hex_encode(report.to_json().bytes()) None -> "" }
+    encoded := "version=2\nkey={hex_encode(record.key.as_str().bytes())}\noutcome={outcome}\nstatus={status}\nfailure={failure}\noutputs={record.outputs.len()}\n"
+    loop output in record.outputs -> &encoded.push_str("output\t{output.path.as_str()}\t{output.digest.as_str()}\t{output.byte_len}\n")
+    encoded
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3068
+fn decode_remote_record(bytes: [U8]) -> ActionResultRecord RemoteCacheError! {
+    if bytes.len() > MAX_REMOTE_WIRE_BYTES -> fail RemoteCacheError.InvalidRecord("cache record exceeds the wire-size limit")
+    text :: String.from_bytes(bytes) ?? fail RemoteCacheError.InvalidRecord("record is not UTF-8")
+    seen := Set<String>{}
+    version := U32?{None}
+    key := ActionKey?{None}
+    outcome := ActionOutcome?{None}
+    status := ActionCacheStatus?{None}
+    failure_report := JetErrorReport?{None}
+    output_count := Int?{None}
+    outputs := [ActionOutputRecord]{}
+    loop line in text.lines() {
+        if line.strip_prefix("version=") == .Val(value) {
+            if !&seen.insert("version") -> fail duplicate_remote_field("version")
+            version = Val(parse_remote_version(value, "cache record")!)
+        } else if line.strip_prefix("key=") == .Val(value) {
+            if !&seen.insert("key") -> fail duplicate_remote_field("key")
+            key = Val(ActionKey.new(String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("cache record key is not UTF-8")))
+        } else if line.strip_prefix("outcome=") == .Val(value) {
+            if !&seen.insert("outcome") -> fail duplicate_remote_field("outcome")
+            outcome = Val(parse_remote_outcome(value)!)
+        } else if line.strip_prefix("status=") == .Val(value) {
+            if !&seen.insert("status") -> fail duplicate_remote_field("status")
+            status = Val(parse_remote_status(value)!)
+        } else if line.strip_prefix("failure=") == .Val(value) {
+            if !&seen.insert("failure") -> fail duplicate_remote_field("failure")
+            if !value.is_empty() {
+                failure_text :: String.from_bytes(hex_decode(value)!) ?? fail RemoteCacheError.InvalidRecord("cache failure report is not UTF-8")
+                report :: JetErrorReport.from_json(failure_text) catch error { fail RemoteCacheError.InvalidRecord("cache failure report is invalid: {error}") }
+                failure_report = Val(report)
+            }
+        } else if line.strip_prefix("outputs=") == .Val(value) {
+            if !&seen.insert("outputs") -> fail duplicate_remote_field("outputs")
+            output_count = Val(parse_remote_count(value, "cache outputs")!)
+        } else if line.strip_prefix("output\t") == .Val(value) {
+            fields :: value.split('\t').collect()
+            if fields.len() != 3 -> fail RemoteCacheError.InvalidRecord("output record needs path, digest, and byte length")
+            digest :: ContentDigest.parse(fields[1])!
+            byte_len :: U64.parse(fields[2]) ?? fail RemoteCacheError.InvalidRecord("output byte length is not a number")
+            &outputs.push(ActionOutputRecord{path: BuildPath(fields[0]), digest: digest, byte_len: byte_len})
+        } else if !line.trim().is_empty() -> fail RemoteCacheError.InvalidRecord("unknown cache record field `{line}`")
+    }
+    if version != Val(2) || output_count != Val(outputs.len()) -> fail RemoteCacheError.InvalidRecord("cache record version or output count is invalid")
+    action_key :: key ?? fail RemoteCacheError.InvalidRecord("missing action key")
+    validate_action_key(action_key)!
+    record :: ActionResultRecord{key: action_key, outcome: outcome ?? fail RemoteCacheError.InvalidRecord("missing action outcome"), outputs: outputs, failure_report: failure_report, provenance: ActionCacheProvenance{status: status ?? fail RemoteCacheError.InvalidRecord("missing cache status"), remote_policy: RemoteCachePolicy.disabled_until_grant_and_sandbox_proof()}}
+    validate_action_result_record(record)!
+    record
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3178
+fn validate_action_result_record(record: ActionResultRecord) -> Unit RemoteCacheError! {
+    if record.outcome == .Failed(_) {
+        if record.failure_report == None -> fail RemoteCacheError.InvalidRecord("failed action record has no structured failure report")
+        if !record.outputs.is_empty() -> fail RemoteCacheError.InvalidRecord("failed action record contains outputs")
+    } else if record.failure_report != None -> fail RemoteCacheError.InvalidRecord("successful action record contains a failure report")
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3194
+fn duplicate_remote_field(field: String) -> RemoteCacheError { RemoteCacheError.InvalidRecord("remote record field `{field}` appears more than once") }
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3200
+fn parse_remote_outcome(value: String) -> ActionOutcome RemoteCacheError! {
+    if value == "restored" -> return ActionOutcome.RestoredFromCache
+    (kind, code) :: value.split_once(':') ?? fail RemoteCacheError.InvalidRecord("outcome has no exit code")
+    exit_code :: I32.parse(code) ?? fail RemoteCacheError.InvalidRecord("outcome exit code is not a number")
+    if kind == { "succeeded" -> ActionOutcome.Succeeded{exit_code: exit_code} "failed" -> ActionOutcome.Failed{exit_code: exit_code} else -> fail RemoteCacheError.InvalidRecord("unknown action outcome") }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3219
+fn parse_remote_status(value: String) -> ActionCacheStatus RemoteCacheError! {
+    (kind, name) :: value.split_once(':') ?? fail RemoteCacheError.InvalidRecord("cache status has no reason")
+    if (kind, name) == {
+        ("hit", "LocalActionRecordMatched") -> ActionCacheStatus.Hit(CacheHitReason.LocalActionRecordMatched)
+        ("hit", "DeclaredOutputsRestored") -> ActionCacheStatus.Hit(CacheHitReason.DeclaredOutputsRestored)
+        ("miss", "NoLocalActionRecord") -> ActionCacheStatus.Miss(CacheMissReason.NoLocalActionRecord)
+        ("miss", "ActionKeyChanged") -> ActionCacheStatus.Miss(CacheMissReason.ActionKeyChanged)
+        ("miss", "DeclaredOutputMissing") -> ActionCacheStatus.Miss(CacheMissReason.DeclaredOutputMissing)
+        ("miss", "CacheRecordInvalid") -> ActionCacheStatus.Miss(CacheMissReason.CacheRecordInvalid)
+        ("miss", "CacheRestoreFailed") -> ActionCacheStatus.Miss(CacheMissReason.CacheRestoreFailed)
+        ("miss", "RemoteDenied") -> ActionCacheStatus.Miss(CacheMissReason.RemoteDenied)
+        ("miss", "UncachedAction") -> ActionCacheStatus.Miss(CacheMissReason.UncachedAction)
+        ("miss", "FrontEndIncomplete") -> ActionCacheStatus.Miss(CacheMissReason.FrontEndIncomplete)
+        else -> fail RemoteCacheError.InvalidRecord("cache status kind does not match reason")
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3257
+pub struct ActionOutputRecord { pub path: BuildPath, pub digest: ContentDigest, pub byte_len: U64 }
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3264
+pub struct ActionInputSnapshot { pub path: BuildPath, pub digest: ContentDigest, pub byte_len: U64 }
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3271
+pub struct ActionResultRecord { pub key: ActionKey, pub outcome: ActionOutcome, pub outputs: [ActionOutputRecord], pub failure_report: JetErrorReport?, pub provenance: ActionCacheProvenance }
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3283
+pub trait BuildArtifactStore {
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3284
+    fn put_blob(self, bytes: [U8]) -> ContentDigest io.Error!
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3285
+    fn get_blob(self, digest: ContentDigest) -> [U8]? io.Error!
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3286
+    fn put_record(self, key: String, bytes: [U8]) -> Unit io.Error!
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3287
+    fn get_record(self, key: String) -> [U8]? io.Error!
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3290
+pub fn snapshot_declared_inputs(store: BuildArtifactStore, base: OSPath, action: BuildAction) -> [ActionInputSnapshot] io.Error! {
+    inputs := [ActionInputSnapshot]{}
+    loop input in action.inputs {
+        path :: resolve_under(base, input.as_str())!
+        bytes :: secure_read_file(base, path)!
+        digest :: store.put_blob(bytes)!
+        &inputs.push(ActionInputSnapshot{path: input, digest: digest, byte_len: U64.from_int(bytes.len())})
+    }
+    inputs
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3309
+pub fn capture_declared_outputs(store: BuildArtifactStore, base: OSPath, action: BuildAction, key: ActionKey, outcome: ActionOutcome, provenance: ActionCacheProvenance) -> ActionResultRecord io.Error! {
+    outputs := [ActionOutputRecord]{}
+    loop output in action.outputs {
+        path :: resolve_under(base, output.as_str())!
+        bytes :: secure_read_file(base, path)!
+        digest :: store.put_blob(bytes)!
+        &outputs.push(ActionOutputRecord{path: output, digest: digest, byte_len: U64.from_int(bytes.len())})
+    }
+    ActionResultRecord{key: key, outcome: outcome, outputs: outputs, failure_report: None, provenance: provenance}
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3337
+// restore_declared_outputs uses restore_outputs directly; no obsolete forwarding alias.
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3345
+pub fn restore_action_outputs(store: BuildArtifactStore, base: OSPath, action: BuildAction, record: ActionResultRecord) -> Unit io.Error! {
+    if record.outputs.len() != action.outputs.len() -> fail io.Error.new(io.ErrorKind.InvalidData, "cached output record does not exactly match action declarations")
+    loop index in 0..<record.outputs.len() { if record.outputs[index].path != action.outputs[index] -> fail io.Error.new(io.ErrorKind.InvalidData, "cached output record does not exactly match action declarations") }
+    restore_outputs(store, base, record)!
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3366
+pub fn restore_outputs(store: BuildArtifactStore, base: OSPath, record: ActionResultRecord) -> Unit io.Error! {
+    loop output in record.outputs {
+        path :: resolve_under(base, output.path.as_str())!
+        bytes :: store.get_blob(output.digest)! ?? fail io.Error.new(io.ErrorKind.NotFound, "CAS blob is missing")
+        atomic_restore_file(base, path, bytes)!
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3382
+pub fn secure_read_file(base: OSPath, path: OSPath) -> [U8] io.Error! {
+    if selected_family() != "unix" -> return secure_read_file_nonunix(base, path)!
+    // GATE #4494: borrowed descriptor-relative nofollow opens and consuming Close.
+    relative :: path.strip_prefix(base) ?? fail io.Error.new(io.ErrorKind.InvalidInput, "cache path escapes root")
+    file_name :: relative.file_name_component() ?? fail io.Error.new(io.ErrorKind.InvalidInput, "cache path has no file name")
+    root :: open_directory(base, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})!
+    held := [Directory]{}
+    if relative.parent() == .Val(parent) {
+        cursor := components(parent)
+        loop {
+            part :: next(parent, &cursor) ?? break
+            if part.kind != ComponentKind.Normal -> next
+            if parent.component_bytes(part).contains(U8{0}) -> fail io.Error.new(io.ErrorKind.InvalidInput, "NUL in cache path")
+            // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3393 (openat)
+            child :: if held.is_empty() -> root.open_directory(parent, part, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})! else -> held[held.len() - 1].open_directory(parent, part, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})!
+            &held.push(^child)
+        }
+    }
+    if relative.component_bytes(file_name).contains(U8{0}) -> fail io.Error.new(io.ErrorKind.InvalidInput, "NUL in cache path")
+    file :: if held.is_empty() -> root.open_reader(relative, file_name, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})! else -> held[held.len() - 1].open_reader(relative, file_name, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})!
+    if !file.stat()!.is_file -> fail io.Error.new(io.ErrorKind.PermissionDenied, "cache entry is not a regular file")
+    file.read_to_end()!
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3457
+fn secure_read_file_nonunix(base: OSPath, path: OSPath) -> [U8] io.Error! {
+    relative :: path.strip_prefix(base) ?? fail io.Error.new(io.ErrorKind.InvalidInput, "cache path escapes root")
+    current := base
+    loop component in relative.components() {
+        if component == .Normal(part) {
+            &current.push(part)
+            if symlink_metadata(current)!.is_symlink -> fail io.Error.new(io.ErrorKind.PermissionDenied, "cache path contains a symlink")
+        }
+    }
+    fs.read(current)!
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3478
+pub fn secure_read_file_bounded(base: OSPath, path: OSPath, limit: Int) -> [U8] io.Error! {
+    if selected_family() != "unix" -> return secure_read_file_bounded_nonunix(base, path, limit)!
+    relative :: path.strip_prefix(base) ?? fail io.Error.new(io.ErrorKind.InvalidInput, "cache path escapes root")
+    file_name :: relative.file_name_component() ?? fail io.Error.new(io.ErrorKind.InvalidInput, "cache path has no file name")
+    root :: open_directory(base, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})!
+    held := [Directory]{}
+    if relative.parent() == .Val(parent) {
+        cursor := components(parent)
+        loop {
+            part :: next(parent, &cursor) ?? break
+            if part.kind != ComponentKind.Normal -> next
+            if parent.component_bytes(part).contains(U8{0}) -> fail io.Error.new(io.ErrorKind.InvalidInput, "NUL in cache path")
+            // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3492 (openat)
+            child :: if held.is_empty() -> root.open_directory(parent, part, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})! else -> held[held.len() - 1].open_directory(parent, part, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})!
+            &held.push(^child)
+        }
+    }
+    if relative.component_bytes(file_name).contains(U8{0}) -> fail io.Error.new(io.ErrorKind.InvalidInput, "NUL in cache path")
+    file :: if held.is_empty() -> root.open_reader(relative, file_name, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})! else -> held[held.len() - 1].open_reader(relative, file_name, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})!
+    if !file.stat()!.is_file -> fail io.Error.new(io.ErrorKind.PermissionDenied, "cache entry is not a regular file")
+    bytes :: file.read_bounded(U64.from_usize(USize.from_int(limit).saturating_add(1)))!
+    if bytes.len() > limit -> fail io.Error.new(io.ErrorKind.InvalidData, "cache entry exceeds its byte limit")
+    bytes
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3563
+fn secure_read_file_bounded_nonunix(base: OSPath, path: OSPath, limit: Int) -> [U8] io.Error! {
+    relative :: path.strip_prefix(base) ?? fail io.Error.new(io.ErrorKind.InvalidInput, "cache path escapes root")
+    current := base
+    loop component in relative.components() {
+        if component == .Normal(part) {
+            &current.push(part)
+            if symlink_metadata(current)!.is_symlink -> fail io.Error.new(io.ErrorKind.PermissionDenied, "cache path contains a symlink")
+        }
+    }
+    file :: open_reader(current, OpenOptions{nofollow: false, cloexec: false, open_reparse_point: false, read: Val(true)})!
+    bytes :: file.read_bounded(U64.from_usize(USize.from_int(limit).saturating_add(1)))!
+    if bytes.len() > limit -> fail io.Error.new(io.ErrorKind.InvalidData, "cache entry exceeds its byte limit")
+    bytes
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3598-3672
+// Unix hostile_tests, atomic counter and temp helper are in paired Tests/Comptime/Build/CacheCas02.jet.
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3675
+pub fn atomic_restore_file(base: OSPath, path: OSPath, bytes: [U8]) -> Unit io.Error! {
+    if selected_family() != "unix" -> return atomic_restore_file_nonunix(base, path, bytes)!
+    // GATE #4494: actual retained descriptor operations, native creation, entropy and Close.
+    relative :: path.strip_prefix(base) ?? fail io.Error.new(io.ErrorKind.InvalidInput, "build output escapes root")
+    file_name :: relative.file_name_component() ?? fail io.Error.new(io.ErrorKind.InvalidInput, "build output has no file name")
+    root :: open_directory(base, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})!
+    held := [Directory]{}
+    if relative.parent() == .Val(parent) {
+        cursor := components(parent)
+        loop {
+            part :: next(parent, &cursor) ?? break
+            if part.kind != ComponentKind.Normal -> next
+            if parent.component_bytes(part).contains(U8{0}) -> fail io.Error.new(io.ErrorKind.InvalidInput, "NUL in build output path")
+            child :: {
+                owner :: if held.is_empty() -> &root else -> &held[held.len() - 1]
+                // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3690 (openat)
+                owner.open_directory(parent, part, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)}) catch error {
+                    if error.kind() != io.ErrorKind.NotFound -> fail error
+                    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3691 (mkdirat)
+                    owner.create_dir(parent, part, 0o755) catch mkdir_error { if mkdir_error.kind() != io.ErrorKind.AlreadyExists -> fail mkdir_error }
+                    owner.open_directory(parent, part, OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false, read: Val(true)})!
+                }
+            }
+            &held.push(^child)
+        }
+    }
+    owner :: if held.is_empty() -> &root else -> &held[held.len() - 1]
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3695 (name)
+    if relative.component_bytes(file_name).contains(U8{0}) -> fail io.Error.new(io.ErrorKind.InvalidInput, "NUL in build output path")
+    temp_path := OSPath.empty()
+    temp_component := file_name
+    writer := {
+        loop {
+            random := [U8].filled(16, 0)
+            entropy :: fs.File.open(OSPath("/dev/urandom"))!
+            entropy.read_exact(&random)!
+            temp_path = OSPath(".jet-restore-{hex_encode(random)}")
+            temp_component = temp_path.file_name_component() ?? panic("generated temp name is normal")
+            candidate :: owner.create_file(temp_path, temp_component, CreateOptions{read: false, write: true, mode: Val(0o600), custom_flags: Val(0o400000 | 0o2000000), delete_on_close: false, open_reparse_point: false}) catch error {
+                if error.kind() == io.ErrorKind.AlreadyExists -> next else -> fail error
+            }
+            break ^candidate
+        }
+    }
+    writer.write_all(bytes)!
+    writer.sync_all()!
+    _ :: writer.close().ok()
+    // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3693 (renameat)
+    owner.rename(temp_path, temp_component, owner, relative, file_name) catch error {
+        // Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3692 (unlinkat)
+        _ :: owner.remove_file(temp_path, temp_component).ok()
+        fail error
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3787
+fn atomic_restore_file_nonunix(base: OSPath, path: OSPath, bytes: [U8]) -> Unit io.Error! {
+    prepare_output_destination(base, path)!
+    random := [U8].filled(16, 0)
+    entropy :: fs.File.open(OSPath("/dev/urandom"))!
+    entropy.read_exact(&random)!
+    nonce :: hex_encode(random)
+    temp :: path.with_extension("jet-cache-restore-{nonce}.tmp")
+    file :: core.files.host.retained_descriptor.create_new(temp, CreateOptions{read: false, write: true, delete_on_close: false, open_reparse_point: false}, None)!
+    file.write_all(bytes)!
+    if symlink_metadata(path).ok() != None -> remove(path)!
+    rename(temp, path)!
+}

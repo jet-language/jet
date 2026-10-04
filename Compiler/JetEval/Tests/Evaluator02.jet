@@ -1,0 +1,32 @@
+use jet_eval.Evaluator.*
+use jet_foundation.AST.[CtValue, Type]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_comptime.Comptime.DevSink
+use std.panic.[catch_unwind, AssertUnwindSafe, panic_any]
+
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:608
+fn outer_core(module: String, method: String, args: [CtValue], span: Span, resolved_ret: Type?, sink: &DevSink?) -> (CtValue Diagnostic!)? Never! { None }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:619
+fn inner_core(module: String, method: String, args: [CtValue], span: Span, resolved_ret: Type?, sink: &DevSink?) -> (CtValue Diagnostic!)? Never! { None }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:630
+fn outer_handle(operation: String, recv: &CtValue, args: &[CtValue], span: Span) -> (CtValue Diagnostic!)? Never! { None }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:639
+fn outer_extern(wrapper: String, args: [CtValue], span: Span, resolved_ret: Type?) -> (CtValue Diagnostic!)? Never! { None }
+// Rust: crates/jet-comptime/src/Comptime/AmbientRuntime.rs:649
+#Test("nested_ambient_scopes_restore_previous_hooks") {
+    // GATE #4494: actual unwind must drop scope guards and restore native TLS.
+    assert(ambient_hooks() == (None, None, None))
+    outer :: (Val(outer_core as AmbientCoreCall), Val(outer_handle as AmbientHandle), Val(outer_extern as AmbientExternCall))
+    inner :: (Val(inner_core as AmbientCoreCall), None, None)
+    with_ambient(Val(outer_core), Val(outer_handle), Val(outer_extern), fn() {
+        assert(ambient_hooks() == outer)
+        with_ambient(Val(inner_core), None, None, fn() { assert(ambient_hooks() == inner) })
+        assert(ambient_hooks() == outer)
+        unwound :: catch_unwind(AssertUnwindSafe(fn() {
+            with_ambient(None, Val(outer_handle), None, fn() { panic_any("ambient scope unwind") })
+        }))
+        assert(unwound.is_err())
+        assert(ambient_hooks() == outer)
+    })
+    assert(ambient_hooks() == (None, None, None))
+}

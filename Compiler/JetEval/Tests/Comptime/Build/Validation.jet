@@ -1,0 +1,35 @@
+use jet_comptime.Comptime.Build.Validation.[resolve_under, check_name, valid_header_name, validate_paths]
+use jet_comptime.Comptime.Build.Targets.TargetSpec
+use jet_comptime.Comptime.Build.ErrorsKeys.[BuildError, NameKind]
+use jet_foundation.TEXT_NUL
+use std.io
+
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:13
+#Test("resolve_under_preserves_base_and_rejects_escape") {
+    base := OSPath.from("build-root")
+    assert(resolve_under(&base, "./a/b")? == base.join("a/b"))
+    result := resolve_under(&base, "../outside")
+    assert(result is .Err(error) && error.kind() == io.ErrorKind.InvalidInput)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:35
+#Test("check_name_preserves_text_and_kind_specific_error") {
+    assert(check_name("  named  ", NameKind.Target)? == "  named  ")
+    assert(check_name(" ", NameKind.Action) is .Err(BuildError.EmptyActionName))
+    assert(check_name(" ", NameKind.Probe) is .Err(BuildError.EmptyProbeName))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:171
+#Test("header_name_requires_normal_relative_components") {
+    assert(valid_header_name("sys/types.h"))
+    assert(!valid_header_name("../types.h"))
+    assert(!valid_header_name("<types.h>"))
+    assert(!valid_header_name("a\nb.h"))
+    assert(!valid_header_name("a{TEXT_NUL}b.h"))
+    assert(!valid_header_name(""))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/validation.rs:267
+#Test("deferred_target_paths_are_checked_before_execution") {
+    invalid := TargetSpec.new().with_source("../outside")
+    assert(validate_paths(&invalid.sources) is .Err(BuildError.InvalidPath("../outside")))
+    empty := TargetSpec.new().with_output(" ")
+    assert(validate_paths(&empty.outputs) is .Err(BuildError.EmptyPath))
+}

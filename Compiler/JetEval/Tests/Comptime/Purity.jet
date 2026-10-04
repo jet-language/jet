@@ -1,0 +1,25 @@
+use jet_comptime.Comptime.Purity.*
+
+// Rust: crates/jet-comptime/src/Comptime/Purity.rs:81 (behavioral control; no Rust inline tests)
+#Test("purity_stage_walk_options") {
+    runtime :: WalkOpts.for_stage(.RunTime)
+    assert(!runtime.include_suppressed)
+    assert(runtime.descend_impure)
+    assert(!runtime.descend_comptime_block)
+    build :: WalkOpts.for_stage(.BuildTime)
+    assert(!build.include_suppressed)
+    assert(!build.descend_impure)
+    assert(build.descend_comptime_block)
+    assert(WalkOpts.REACHABLE.include_suppressed)
+    assert(WalkOpts.REACHABLE.descend_impure)
+    assert(WalkOpts.REACHABLE.descend_comptime_block)
+}
+
+// Rust: crates/jet-comptime/src/Comptime/Purity.rs:403 (behavioral control)
+#Test("known_func_name_qualification") {
+    funcs :: [String:I64]{ "plain": 1, "module::symbol": 2, "exact.name": 3, "exact::name": 4 }
+    assert(known_func_name("plain", &funcs) == Val("plain"))
+    assert(known_func_name("module.symbol", &funcs) == Val("module::symbol"))
+    assert(known_func_name("exact.name", &funcs) == Val("exact.name"))
+    assert(known_func_name("missing.symbol", &funcs) == None)
+}

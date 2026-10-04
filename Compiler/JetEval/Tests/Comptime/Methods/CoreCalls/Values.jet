@@ -1,0 +1,14 @@
+use jet_comptime.Comptime.Methods.CoreCalls.Values.*
+use jet_foundation.AST.[CtValue, Type]
+use jet_foundation.Diagnostics.Span
+// Behavioral controls for Rust values.rs:3/26/42; no inline Rust tests.
+#Test("named_tuple_retains_names_and_field_order") {
+    value := named_tuple(&[("b", CtValue.Int(2)), ("a", CtValue.Str("x"))])
+    assert(value == { Struct { type_name, fields } -> type_name == "(b,a)" && fields[0].0 == "b" && fields[1].0 == "a"; _ -> false })
+}
+#Test("csv_records_use_first_header_and_blank_missing_fields") {
+    records := CtValue.List([CtValue.Struct { type_name: "Row", fields: [("a", CtValue.Int(1)), ("b", CtValue.Bool(true))] }, CtValue.Struct { type_name: "Row", fields: [("a", CtValue.Str("x"))] }])
+    assert_eq(csv_rows_from_records(&records).unwrap(), [["a", "b"], ["1", "true"], ["x", ""]])
+    assert(csv_rows_from_records(&CtValue.List([])).is_none())
+    assert(as_string_rows(&CtValue.List([CtValue.Int(1)]), Span.new(0, 0)).is_err())
+}

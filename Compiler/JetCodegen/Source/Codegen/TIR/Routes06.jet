@@ -1,1453 +1,333 @@
-// PORT-PENDING 0518 crates-jet-codegen-src-codegen-tir-routes-slice-8487: crates/jet-codegen/src/Codegen/TIR/routes.rs:8487-9935
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS pub(super) fn geometry_builtin_route(
-//RS     type_name: &str,
-//RS     func: &str,
-//RS     arity: usize,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let symbol = format!("jet_math_{type_name}_{func}");
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::MathBuiltin,
-//RS         "core.math",
-//RS         &format!("geometry.{type_name}.{func}"),
-//RS         &symbol,
-//RS         arity,
-//RS         arity,
-//RS         &vec![false; arity],
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "coordinate-space builtin",
-//RS     )
-//RS }
-//RS 
-//RS fn geometry_method_arity(method: &str) -> Option<usize> {
-//RS     match method {
-//RS         "add" | "sub" | "then" | "ray" => Some(2),
-//RS         "inverse" => Some(1),
-//RS         "point" => Some(2),
-//RS         "point_at_depth" => Some(3),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn geometry_method_route(
-//RS     type_name: &str,
-//RS     method: &str,
-//RS     _receiver: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let arity = geometry_method_arity(method).ok_or_else(|| {
-//RS         route_error(format!(
-//RS             "coordinate-space method `{type_name}.{method}` has no registered route"
-//RS         ))
-//RS     })?;
-//RS     let symbol = format!("jet_math_{type_name}_{method}");
-//RS     let borrow_mask = std::iter::once(true)
-//RS         .chain(std::iter::repeat_n(false, arity.saturating_sub(1)))
-//RS         .collect::<Vec<_>>();
-//RS     Ok(TRoutePlan::Prelude(prelude_route_row(
-//RS         MirPreludeFamily::MathBuiltin,
-//RS         "core.math",
-//RS         &format!("geometry.{type_name}.{method}"),
-//RS         &symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "coordinate-space method",
-//RS     )?))
-//RS }
-//RS 
-//RS pub(super) fn precise_builtin_route(
-//RS     type_name: &str,
-//RS     func: &str,
-//RS     arity: usize,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     // Measurement is a typed Prelude carrier, not a decimal-like numeric
-//RS     // implementation. Keep its existing AOT/JIT method symbol and use the
-//RS     // shared PreciseBuiltin route shape for the source constructor.
-//RS     let symbol = if type_name == "Measurement" && func == "new" {
-//RS         "jet_std::JetMeasurement::new".to_string()
-//RS     } else {
-//RS         // The shared Prelude spells every precise-numeric entry point as
-//RS         // `jet_<type>_<func>` (`Prelude/CoreLib/Top/MathRandomTime.rs`:
-//RS         // `jet_decimal_from_str(&String)`, `jet_decimal_add(&a, &b)`,
-//RS         // `jet_fraction_from_parts(i64, i64)`). Constructors take their
-//RS         // parts by value, `from_str` and every method borrow.
-//RS         format!("jet_{}_{func}", type_name.to_ascii_lowercase())
-//RS     };
-//RS     let by_value =
-//RS         matches!(func, "new" | "from_parts") || (func.starts_with("from_") && func != "from_str");
-//RS     let borrow_mask = vec![!by_value; arity];
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::PreciseBuiltin,
-//RS         type_name,
-//RS         func,
-//RS         &symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "precise builtin",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn print_route(
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.term",
-//RS         "print",
-//RS         "jet_term_write_stdout_line",
-//RS         2,
-//RS         2,
-//RS         &[true, false],
-//RS         Some(Effect::IO),
-//RS         carrier,
-//RS         MirPreludeAbi::Effect,
-//RS         "print",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn ambient_input_route(
-//RS     has_prompt: bool,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = (has_prompt, result);
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.term",
-//RS         "input",
-//RS         "jet_std_io_input",
-//RS         1,
-//RS         1,
-//RS         &[true],
-//RS         Some(Effect::IO),
-//RS         carrier,
-//RS         MirPreludeAbi::Effect,
-//RS         "ambient input",
-//RS     )
-//RS }
-//RS /// Convert one checked runtime entry vector into the canonical typed map.
-//RS pub(super) fn data_entries_to_map_route(
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.collections",
-//RS         "entries_to_map",
-//RS         "jet_data_entries_to_map",
-//RS         1,
-//RS         1,
-//RS         &[false],
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "map entries conversion",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn todo_route(
-//RS     result: &Type,
-//RS     _carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let carrier = TFailureCarrier::Diverges {
-//RS         value: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-//RS     };
-//RS     runtime_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.runtime",
-//RS         "todo",
-//RS         "jet_todo_stop",
-//RS         3,
-//RS         3,
-//RS         &[true, false, true],
-//RS         Some(Effect::IO),
-//RS         &carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "todo",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn string_format_route(
-//RS     format: &crate::AST::StrFormat,
-//RS     value_ty: &Type,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let integer = {
-//RS         fn is_int(ty: &Type) -> bool {
-//RS             match ty.without_user_tags() {
-//RS                 Type::Int | Type::IntN { .. } => true,
-//RS                 Type::InlineRange { base, .. } => is_int(base),
-//RS                 Type::Named(name) if name == "Int" => true,
-//RS                 Type::Tagged { inner, .. } => is_int(inner),
-//RS                 _ => false,
-//RS             }
-//RS         }
-//RS         is_int(value_ty)
-//RS     };
-//RS     let (member, symbol, arity, borrow_mask) = match format {
-//RS         crate::AST::StrFormat::Display => ("display", "jet_fmt_display", 1, vec![true]),
-//RS         crate::AST::StrFormat::Debug => ("debug", "jet_fmt_debug", 1, vec![true]),
-//RS         crate::AST::StrFormat::Pretty => ("pretty", "jet_fmt_pretty", 1, vec![true]),
-//RS         crate::AST::StrFormat::Unit(_) => {
-//RS             return Err(route_error(
-//RS                 "unit formatting is lowered through its checked String function",
-//RS             ));
-//RS         }
-//RS         crate::AST::StrFormat::Fixed(_) => (
-//RS             "fixed",
-//RS             if integer {
-//RS                 "jet_fmt_decimal_int"
-//RS             } else {
-//RS                 "jet_fmt_decimal"
-//RS             },
-//RS             2,
-//RS             if integer {
-//RS                 vec![true, false]
-//RS             } else {
-//RS                 vec![false, false]
-//RS             },
-//RS         ),
-//RS         crate::AST::StrFormat::Grouped(_) => (
-//RS             "grouped",
-//RS             if integer {
-//RS                 "jet_fmt_grouped_int"
-//RS             } else {
-//RS                 "jet_fmt_grouped"
-//RS             },
-//RS             2,
-//RS             if integer {
-//RS                 vec![true, false]
-//RS             } else {
-//RS                 vec![false, false]
-//RS             },
-//RS         ),
-//RS         crate::AST::StrFormat::Hex(_) => (
-//RS             "hex",
-//RS             if integer {
-//RS                 "jet_fmt_hex"
-//RS             } else {
-//RS                 "jet_fmt_hex_decimal"
-//RS             },
-//RS             2,
-//RS             if integer {
-//RS                 vec![true, false]
-//RS             } else {
-//RS                 vec![false, false]
-//RS             },
-//RS         ),
-//RS         crate::AST::StrFormat::Pad { .. } => ("pad", "jet_fmt_pad", 3, vec![true, false, true]),
-//RS         crate::AST::StrFormat::PadLeft { .. } => {
-//RS             ("pad_left", "jet_fmt_pad_left", 3, vec![true, false, true])
-//RS         }
-//RS         crate::AST::StrFormat::Sci(_) => (
-//RS             "sci",
-//RS             "jet_fmt_sci",
-//RS             2,
-//RS             if integer {
-//RS                 vec![true, false]
-//RS             } else {
-//RS                 vec![false, false]
-//RS             },
-//RS         ),
-//RS         crate::AST::StrFormat::Percent(_) => (
-//RS             "percent",
-//RS             "jet_fmt_percent",
-//RS             2,
-//RS             if integer {
-//RS                 vec![true, false]
-//RS             } else {
-//RS                 vec![false, false]
-//RS             },
-//RS         ),
-//RS         crate::AST::StrFormat::Bin => (
-//RS             "bin",
-//RS             if integer {
-//RS                 "jet_fmt_bin"
-//RS             } else {
-//RS                 "jet_fmt_bin_decimal"
-//RS             },
-//RS             1,
-//RS             vec![true],
-//RS         ),
-//RS         crate::AST::StrFormat::Oct => (
-//RS             "oct",
-//RS             if integer {
-//RS                 "jet_fmt_oct"
-//RS             } else {
-//RS                 "jet_fmt_oct_decimal"
-//RS             },
-//RS             1,
-//RS             vec![true],
-//RS         ),
-//RS     };
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.text.fmt",
-//RS         member,
-//RS         symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "string interpolation format",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn quantity_format_route(
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.text.fmt",
-//RS         "quantity",
-//RS         "jet_fmt_quantity",
-//RS         1,
-//RS         1,
-//RS         &[false],
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "quantity magnitude formatting",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn static_prelude_route(
-//RS     module: &str,
-//RS     member: &str,
-//RS     borrow_mask: &[bool],
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let effect = (module == "::JetAtomic" && member == "try_new").then_some(Effect::Mem);
-//RS     let arity = borrow_mask.len();
-//RS     let symbol = match (module, member) {
-//RS         ("::JetAuthority", "from_rights") => "jet_authority_from_rights".to_string(),
-//RS         ("::JetAuthority", "workspace") => "jet_authority_workspace".to_string(),
-//RS         ("::JetAuthority", "with") => "jet_authority_with".to_string(),
-//RS         ("::JetAuthority", "without") => "jet_authority_without".to_string(),
-//RS         _ if let Some(rooted_module) = module.strip_prefix("::") => {
-//RS             format!("{rooted_module}::{member}")
-//RS         }
-//RS         _ => format!("{module}::{member}"),
-//RS     };
-//RS     let plan = if module.starts_with("::") {
-//RS         prelude(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             module,
-//RS             member,
-//RS             &symbol,
-//RS             arity,
-//RS             arity,
-//RS             borrow_mask,
-//RS             effect,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS         )
-//RS     } else {
-//RS         runtime(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             module,
-//RS             member,
-//RS             &symbol,
-//RS             arity,
-//RS             arity,
-//RS             borrow_mask,
-//RS             effect,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS         )
-//RS     };
-//RS     as_prelude(plan, "static Prelude call")
-//RS }
-//RS 
-//RS pub(super) fn decode_under_route(
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.encoding",
-//RS         "decode_under",
-//RS         "jet_std::FieldError::under",
-//RS         2,
-//RS         2,
-//RS         &[true, false],
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "decode error context",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn compare_chain_route(
-//RS     op: BinOp,
-//RS     hook: bool,
-//RS     left_ty: &Type,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TRoutePlan, LowerError> {
-//RS     let _ = left_ty;
-//RS     compare_route(op, hook, result, carrier)
-//RS }
-//RS 
-//RS pub(super) fn overflow_opt_route(
-//RS     prefix: &str,
-//RS     op: &str,
-//RS     line: u32,
-//RS     input: &Type,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = line;
-//RS     let Some(width) = fixed_width_name(input) else {
-//RS         return Err(route_error(
-//RS             "overflow option has no resolved fixed numeric receiver type",
-//RS         ));
-//RS     };
-//RS     let checked = prefix == "checked";
-//RS     if checked {
-//RS         let Type::Option(value) = result else {
-//RS             return Err(route_error(
-//RS                 "checked overflow option has no Option result type",
-//RS             ));
-//RS         };
-//RS         if value.as_ref() != input {
-//RS             return Err(route_error(
-//RS                 "checked overflow option has a mismatched payload type",
-//RS             ));
-//RS         }
-//RS         if !matches!(carrier, TFailureCarrier::Optional { .. }) {
-//RS             return Err(route_error(
-//RS                 "checked overflow option has a mismatched failure carrier",
-//RS             ));
-//RS         }
-//RS     } else if result != input {
-//RS         return Err(route_error(
-//RS             "overflow option has a mismatched resolved result type",
-//RS         ));
-//RS     } else if matches!(carrier, TFailureCarrier::Optional { .. }) {
-//RS         return Err(route_error(
-//RS             "value-producing overflow option has an optional failure carrier",
-//RS         ));
-//RS     }
-//RS     let (mode, op_name, arity, effect) = match (prefix, op) {
-//RS         ("checked", "add" | "sub" | "mul" | "div" | "rem" | "pow") => ("checked", op, 2, None),
-//RS         ("checked_policy", "add" | "sub" | "mul" | "div" | "rem" | "pow") => {
-//RS             ("trap", op, 4, Some(Effect::Panic))
-//RS         }
-//RS         ("wrapping", "add" | "sub" | "mul") => ("wrapping", op, 2, None),
-//RS         ("wrapping", "div" | "pow") => ("wrapping", op, 4, Some(Effect::Panic)),
-//RS         ("saturating", "add" | "sub" | "mul") => ("saturating", op, 2, None),
-//RS         ("saturating", "div" | "pow") => ("saturating", op, 4, Some(Effect::Panic)),
-//RS         ("rotate_left" | "rotate_right", "rotate") => (prefix, "rotate", 4, Some(Effect::Panic)),
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "unsupported fixed-width overflow operation `{prefix}_{op}`",
-//RS             )));
-//RS         }
-//RS     };
-//RS     let symbol = if matches!(prefix, "rotate_left" | "rotate_right") {
-//RS         format!("jet_{width}_{prefix}")
-//RS     } else {
-//RS         format!("jet_{width}_{mode}_{op_name}")
-//RS     };
-//RS     let member = format!("{width}.{prefix}.{op}");
-//RS     let borrow_mask = vec![false; arity];
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::Overflow,
-//RS         "core.numeric",
-//RS         &member,
-//RS         &symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         effect,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "fixed-width overflow option",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn try_conversion_route(
-//RS     convert: &TTryConvert,
-//RS     source: &Type,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = (source, result, carrier);
-//RS     match convert {
-//RS         TTryConvert::DefaultErr => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.errors",
-//RS             "from_message",
-//RS             "jet_err_from_message",
-//RS             1,
-//RS             1,
-//RS             &[false],
-//RS             None,
-//RS             &TFailureCarrier::Infallible,
-//RS             MirPreludeAbi::Value,
-//RS             "default error conversion",
-//RS         ),
-//RS         TTryConvert::Typed { .. } => Err(route_error(
-//RS             "typed error conversion requires checked MIR function lowering",
-//RS         )),
-//RS         TTryConvert::WidenUnion { .. } => Err(route_error(
-//RS             "union error conversion requires checked MIR enum lowering",
-//RS         )),
-//RS         TTryConvert::ProtocolExit => {
-//RS             let carrier = TFailureCarrier::Diverges {
-//RS                 value: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-//RS             };
-//RS             prelude_route_row(
-//RS                 MirPreludeFamily::StaticPrelude,
-//RS                 "core.errors",
-//RS                 "entry_error_exit",
-//RS                 "jet_entry_error_exit_jet",
-//RS                 1,
-//RS                 1,
-//RS                 &[false],
-//RS                 Some(Effect::Panic),
-//RS                 &carrier,
-//RS                 MirPreludeAbi::Control,
-//RS                 "protocol error exit",
-//RS             )
-//RS         }
-//RS         TTryConvert::None | TTryConvert::Never => Err(route_error(
-//RS             "bare try propagation has no conversion Prelude route",
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn apply_conversion_route() -> Result<TPreludeRoute, LowerError> {
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.errors",
-//RS         "apply_conversion",
-//RS         "jet_err_apply_conversion",
-//RS         3,
-//RS         3,
-//RS         &[false, false, false],
-//RS         None,
-//RS         &TFailureCarrier::Infallible,
-//RS         MirPreludeAbi::Value,
-//RS         "declared error conversion history",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn journey_reset_route() -> Result<TPreludeRoute, LowerError> {
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.errors",
-//RS         "journey_reset",
-//RS         "jet_journey_reset",
-//RS         0,
-//RS         0,
-//RS         &[],
-//RS         None,
-//RS         &TFailureCarrier::Infallible,
-//RS         MirPreludeAbi::Effect,
-//RS         "successful try journey reset",
-//RS     )
-//RS }
-//RS 
-//RS /// #3713: the `Err(...)` a function returns claims where its failure started.
-//RS /// Arguments: source file, line, column, function.
-//RS pub(super) fn journey_origin_route() -> Result<TPreludeRoute, LowerError> {
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.errors",
-//RS         "journey_origin",
-//RS         "jet_journey_origin",
-//RS         4,
-//RS         4,
-//RS         &[true, false, false, true],
-//RS         None,
-//RS         &TFailureCarrier::Infallible,
-//RS         MirPreludeAbi::Effect,
-//RS         "failure journey origin",
-//RS     )
-//RS }
-//RS 
-//RS /// Arguments: error, source file, line, column, function, note.
-//RS pub(super) fn failure_context_route(
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = (result, carrier);
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.errors",
-//RS         "err_with_context_frame",
-//RS         "jet_err_with_context_frame",
-//RS         6,
-//RS         6,
-//RS         &[false, true, false, false, true, false],
-//RS         None,
-//RS         &TFailureCarrier::Infallible,
-//RS         MirPreludeAbi::Value,
-//RS         "default error context frame",
-//RS     )
-//RS }
-//RS 
-//RS /// Arguments: source file, line, column, function, note.
-//RS pub(super) fn failure_note_route(
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = (result, carrier);
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.errors",
-//RS         "journey_frame_text",
-//RS         "jet_journey_frame_text",
-//RS         5,
-//RS         5,
-//RS         &[true, false, false, true, true],
-//RS         None,
-//RS         &TFailureCarrier::Infallible,
-//RS         MirPreludeAbi::Effect,
-//RS         "failure journey frame",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn range_checked_ctor_route(
-//RS     name: &str,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = (name, result);
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.numeric",
-//RS         "inline_range",
-//RS         "jet_inline_range_from_int",
-//RS         3,
-//RS         3,
-//RS         &[false, false, false],
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "range checked constructor",
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn distinct_conversion_route(
-//RS     name: &str,
-//RS     source: &Type,
-//RS     op: &TNumericOp,
-//RS     range: Option<(i64, i64)>,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = (name, range, result);
-//RS     match op {
-//RS         TNumericOp::CheckedIntToFloat { .. } if matches!(source, Type::Int) => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.numeric",
-//RS             "checked_widen",
-//RS             "jet_std::jet_int_checked_widen",
-//RS             4,
-//RS             4,
-//RS             &[false, false, true, false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "integer widening",
-//RS         ),
-//RS         TNumericOp::CheckedIntToFloat { .. } => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.numeric",
-//RS             "checked_widen",
-//RS             "jet_numeric_checked_widen_at",
-//RS             5,
-//RS             5,
-//RS             &[false, false, false, true, false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "numeric widening",
-//RS         ),
-//RS         TNumericOp::TryFrom { .. } if matches!(source, Type::Int) => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.numeric",
-//RS             "int_try_from",
-//RS             "jet_std::jet_int_try_from_checked",
-//RS             2,
-//RS             2,
-//RS             &[false, false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "integer narrowing conversion",
-//RS         ),
-//RS         TNumericOp::TryFrom { .. } => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.numeric",
-//RS             "fixed_try_from",
-//RS             "jet_numeric_try_from_fixed",
-//RS             3,
-//RS             3,
-//RS             &[false, false, false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "fixed integer narrowing conversion",
-//RS         ),
-//RS         TNumericOp::InlineRange { .. } => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.numeric",
-//RS             "inline_range",
-//RS             "jet_inline_range_from_int",
-//RS             3,
-//RS             3,
-//RS             &[false, false, false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "inline range conversion",
-//RS         ),
-//RS         TNumericOp::CheckedIntToFixed { .. } => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.numeric",
-//RS             "int_checked_fixed",
-//RS             "jet_std::jet_int_checked_fixed",
-//RS             4,
-//RS             4,
-//RS             &[false, false, true, false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "checked fixed integer construction",
-//RS         ),
-//RS         TNumericOp::FloatToInt { .. } => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.numeric",
-//RS             "float_to_int",
-//RS             "jet_numeric_float_to_int",
-//RS             2,
-//RS             2,
-//RS             &[false, false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "float to integer conversion",
-//RS         ),
-//RS         TNumericOp::FloatNarrow { .. } => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.numeric",
-//RS             "float_narrow",
-//RS             "jet_numeric_float_narrow",
-//RS             1,
-//RS             1,
-//RS             &[false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "float narrowing conversion",
-//RS         ),
-//RS         TNumericOp::CastAs { .. }
-//RS         | TNumericOp::Predicate(_)
-//RS         | TNumericOp::BitCount { .. }
-//RS         | TNumericOp::ToShow
-//RS         | TNumericOp::EuclideanDiv { .. }
-//RS         | TNumericOp::EuclideanRem { .. } => Err(route_error(
-//RS             "numeric operation is not a checked distinct conversion",
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn is_measurement_type(ty: &Type) -> bool {
-//RS     matches!(
-//RS         ty.without_user_tags(),
-//RS         Type::Apply { name, args }
-//RS             if name == "Measurement"
-//RS                 && args.len() == 1
-//RS                 && matches!(args[0].without_user_tags(), Type::Float)
-//RS     )
-//RS }
-//RS 
-//RS fn is_measured_conversion_result(ty: &Type) -> bool {
-//RS     match ty.without_user_tags() {
-//RS         Type::Option(inner) => is_measurement_type(inner),
-//RS         Type::Result { ok, .. } => is_measurement_type(ok),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn unit_conversion_route(
-//RS     destination: &str,
-//RS     scale: &crate::AST::UnitRatio,
-//RS     offset: &crate::AST::UnitRatio,
-//RS     rounding: Option<UnitRoundingMode>,
-//RS     relative_uncertainty: Option<f64>,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = (destination, scale, offset);
-//RS     let measured = relative_uncertainty.is_some() && is_measured_conversion_result(result);
-//RS     match (rounding, measured) {
-//RS         (None, false) => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.units",
-//RS             "conversion_exact",
-//RS             "jet_unit_conversion_exact",
-//RS             5,
-//RS             5,
-//RS             &[false, true, true, true, true],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "exact unit conversion",
-//RS         ),
-//RS         (None, true) => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.units",
-//RS             "conversion_exact_measurement",
-//RS             "jet_std::jet_unit_conversion_exact_measurement",
-//RS             6,
-//RS             6,
-//RS             &[false, true, true, true, true, false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "exact measured unit conversion",
-//RS         ),
-//RS         (Some(_), false) => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.units",
-//RS             "conversion_rounded",
-//RS             "jet_unit_conversion_rounded",
-//RS             7,
-//RS             7,
-//RS             &[false, true, true, true, true, false, false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "rounded unit conversion",
-//RS         ),
-//RS         (Some(_), true) => prelude_route_row(
-//RS             MirPreludeFamily::StaticPrelude,
-//RS             "core.units",
-//RS             "conversion_rounded_measurement",
-//RS             "jet_std::jet_unit_conversion_rounded_measurement",
-//RS             8,
-//RS             8,
-//RS             &[false, true, true, true, true, false, false, false],
-//RS             None,
-//RS             carrier,
-//RS             MirPreludeAbi::Value,
-//RS             "rounded measured unit conversion",
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS /// Read one checked carrier fact through the shared Prelude projector. The
-//RS /// field identity remains a MIR field ID; this row chooses only the kernel.
-//RS pub(super) fn carrier_fact_route(
-//RS     notes: bool,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let (member, symbol) = if notes {
-//RS         ("notes", "jet_notes")
-//RS     } else {
-//RS         ("partial", "jet_partial")
-//RS     };
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.outcome",
-//RS         member,
-//RS         symbol,
-//RS         1,
-//RS         1,
-//RS         &[true],
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "carrier fact",
-//RS     )
-//RS }
-//RS 
-//RS /// Read the value protected by a checked GC root.
-//RS pub(super) fn gc_read_route(
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.gc",
-//RS         "read",
-//RS         "jet_gc_read",
-//RS         1,
-//RS         1,
-//RS         &[true],
-//RS         Some(Effect::Mem),
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "GC read",
-//RS     )
-//RS }
-//RS 
-//RS /// Select the one exact GC edit wrapper for a checked edit shape. Edge IDs are
-//RS /// passed as one aggregate operand, rather than as a variable-arity name list.
-//RS pub(super) fn gc_edit_route(
-//RS     kind: TGcEditKind,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let (member, symbol, arity, borrow_mask) = match kind {
-//RS         TGcEditKind::Clear => ("edit_clear", "jet_gc_edit_clear", 2, vec![true, false]),
-//RS         TGcEditKind::Pop => ("edit_pop", "jet_gc_edit_pop", 2, vec![true, false]),
-//RS         TGcEditKind::RemoveIndex => (
-//RS             "edit_remove_index",
-//RS             "jet_gc_edit_remove_index",
-//RS             3,
-//RS             vec![true, false, false],
-//RS         ),
-//RS         TGcEditKind::InsertIndex => (
-//RS             "edit_insert_index",
-//RS             "jet_gc_edit_insert_index",
-//RS             4,
-//RS             vec![true, false, true, false],
-//RS         ),
-//RS         TGcEditKind::Prepend => (
-//RS             "edit_prepend",
-//RS             "jet_gc_edit_prepend",
-//RS             3,
-//RS             vec![true, true, false],
-//RS         ),
-//RS         TGcEditKind::Additive => (
-//RS             "edit_additive",
-//RS             "jet_gc_edit_additive",
-//RS             3,
-//RS             vec![true, true, false],
-//RS         ),
-//RS         TGcEditKind::Plain => ("edit_plain", "jet_gc_edit_plain", 2, vec![true, false]),
-//RS         TGcEditKind::EdgeSlot => (
-//RS             "edit_edge_slot",
-//RS             "jet_gc_edit_edge_slot",
-//RS             4,
-//RS             vec![true, true, false, false],
-//RS         ),
-//RS     };
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.gc",
-//RS         member,
-//RS         symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         Some(Effect::Mem),
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "GC edit",
-//RS     )
-//RS }
-//RS 
-//RS /// Route a checked typed-text projection to its exact Prelude kernel.
-//RS pub(super) fn typed_text_route(
-//RS     kind: TTypedTextForm,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let (member, symbol, borrow_mask) = match kind {
-//RS         TTypedTextForm::SQLRaw => ("sql_raw", "jet_typed_sql_raw", vec![false]),
-//RS         TTypedTextForm::HTMLRaw => ("html_raw", "jet_typed_html_raw", vec![false]),
-//RS         TTypedTextForm::ShRaw => ("sh_raw", "jet_typed_sh_raw", vec![false]),
-//RS         TTypedTextForm::SQLTemplate => ("sql_template", "jet_typed_sql_template", vec![true]),
-//RS         TTypedTextForm::SQLParams => ("sql_params", "jet_typed_sql_params", vec![true]),
-//RS         TTypedTextForm::HTMLText => ("html_text", "jet_typed_html_text", vec![false]),
-//RS     };
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.typed_text",
-//RS         member,
-//RS         symbol,
-//RS         1,
-//RS         1,
-//RS         &borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "typed text projection",
-//RS     )
-//RS }
-//RS 
-//RS /// Route a checked typed-head interpolation. Literal and hole/trust metadata
-//RS /// are carried in the structured MIR operation, so this row has a fixed ABI.
-//RS pub(super) fn typed_text_interp_route(
-//RS     kind: TTypedTextInterpKind,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let (member, symbol, arity, borrow_mask) = match kind {
-//RS         TTypedTextInterpKind::SQL => (
-//RS             "sql_interpolate",
-//RS             "jet_typed_sql_interpolate",
-//RS             2,
-//RS             vec![true, false],
-//RS         ),
-//RS         TTypedTextInterpKind::HTML => (
-//RS             "html_interpolate",
-//RS             "jet_typed_html_interpolate",
-//RS             3,
-//RS             vec![true, false, true],
-//RS         ),
-//RS         TTypedTextInterpKind::Sh => (
-//RS             "sh_interpolate",
-//RS             "jet_typed_sh_interpolate",
-//RS             2,
-//RS             vec![true, false],
-//RS         ),
-//RS         TTypedTextInterpKind::URL => (
-//RS             "url_literal",
-//RS             "jet_std::jet_typed_url_literal",
-//RS             2,
-//RS             vec![true, false],
-//RS         ),
-//RS         TTypedTextInterpKind::Path => (
-//RS             "path_literal",
-//RS             "jet_typed_path_literal",
-//RS             2,
-//RS             vec![true, false],
-//RS         ),
-//RS         TTypedTextInterpKind::DateTime => (
-//RS             "datetime_literal",
-//RS             "jet_typed_datetime_literal",
-//RS             2,
-//RS             vec![true, false],
-//RS         ),
-//RS     };
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.typed_text",
-//RS         member,
-//RS         symbol,
-//RS         arity,
-//RS         arity,
-//RS         &borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "typed text interpolation",
-//RS     )
-//RS }
-//RS 
-//RS /// Snapshot comparison is a single harness kernel. The path is a data operand,
-//RS /// never part of a synthesized symbol or member string.
-//RS pub(super) fn expect_snapshot_route(
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.test",
-//RS         "expect_snapshot",
-//RS         "jet_expect_snapshot",
-//RS         2,
-//RS         2,
-//RS         &[false, false],
-//RS         Some(Effect::FS),
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "expect snapshot",
-//RS     )
-//RS }
-//RS 
-//RS /// Select the generic expiring-value constructor. `secret` chooses the
-//RS /// capability-bearing wrapper while the element type remains a MIR type arg.
-//RS pub(super) fn expiring_route(
-//RS     secret: bool,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let (member, symbol) = if secret {
-//RS         ("secret_new", "jet_expiring_secret_new")
-//RS     } else {
-//RS         ("new", "jet_expiring_new")
-//RS     };
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.expiring",
-//RS         member,
-//RS         symbol,
-//RS         3,
-//RS         3,
-//RS         &[false, true, true],
-//RS         Some(Effect::Time),
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "expiring constructor",
-//RS     )
-//RS }
-//RS 
-//RS /// C callback construction has one runtime operand: the lowered closure.
-//RS /// Extern symbol and return type stay as structured metadata on the MIR op.
-//RS pub(super) fn c_callback_route(
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.ffi",
-//RS         "callback_boundary",
-//RS         "jet_ffi_callback_boundary",
-//RS         1,
-//RS         1,
-//RS         &[false],
-//RS         Some(Effect::FFI),
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "C callback boundary",
-//RS     )
-//RS }
-//RS /// Route the structured text/binary pattern matcher. Pattern parts remain
-//RS /// checked metadata on the MIR operation; this row only fixes the subject ABI.
-//RS pub(super) fn pattern_match_route(
-//RS     binary: bool,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let (member, symbol) = if binary {
-//RS         ("binary_match", "jet_binary_pattern_match")
-//RS     } else {
-//RS         ("text_match", "jet_text_pattern_match")
-//RS     };
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.pattern",
-//RS         member,
-//RS         symbol,
-//RS         2,
-//RS         2,
-//RS         &[true, false],
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "pattern match",
-//RS     )
-//RS }
-//RS /// Route the closed set of runtime-backed host methods to exact Prelude wrappers.
-//RS ///
-//RS /// The receiver is always argument zero. Transactional Shared methods add the
-//RS /// explicit STM handle as argument one; the lowerer supplies that value from the
-//RS /// checked transaction local before the user closure. No receiver/type strings
-//RS /// cross the MIR boundary.
-//RS 
-//RS fn host_recv_borrow_mask(arity: usize) -> &'static [bool] {
-//RS     match arity {
-//RS         0 => &[],
-//RS         1 => &[true],
-//RS         2 => &[true, false],
-//RS         3 => &[true, false, false],
-//RS         4 => &[true, false, false, false],
-//RS         5 => &[true, false, false, false, false],
-//RS         6 => &[true, false, false, false, false, false],
-//RS         7 => &[true, false, false, false, false, false, false],
-//RS         8 => &[true, false, false, false, false, false, false, false],
-//RS         9 => &[true, false, false, false, false, false, false, false, false],
-//RS         10 => &[
-//RS             true, false, false, false, false, false, false, false, false, false,
-//RS         ],
-//RS         11 => &[
-//RS             true, false, false, false, false, false, false, false, false, false, false,
-//RS         ],
-//RS         12 => &[
-//RS             true, false, false, false, false, false, false, false, false, false, false, false,
-//RS         ],
-//RS         13 => &[
-//RS             true, false, false, false, false, false, false, false, false, false, false, false,
-//RS             false,
-//RS         ],
-//RS         14 => &[
-//RS             true, false, false, false, false, false, false, false, false, false, false, false,
-//RS             false, false,
-//RS         ],
-//RS         15 => &[
-//RS             true, false, false, false, false, false, false, false, false, false, false, false,
-//RS             false, false, false,
-//RS         ],
-//RS         _ => &[
-//RS             true, false, false, false, false, false, false, false, false, false, false, false,
-//RS             false, false, false, false,
-//RS         ],
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn host_method_route(
-//RS     recv: &Type,
-//RS     method: &str,
-//RS     arg_count: usize,
-//RS     result: &Type,
-//RS     carrier: &TFailureCarrier,
-//RS ) -> Result<TPreludeRoute, LowerError> {
-//RS     let _ = result;
-//RS     let mut shape = recv;
-//RS     while let Type::Tagged { inner, .. } = shape {
-//RS         shape = inner;
-//RS     }
-//RS     if let Type::Named(name) = shape {
-//RS         let name = name
-//RS             .rsplit("::")
-//RS             .next()
-//RS             .unwrap_or(name.as_str())
-//RS             .rsplit('.')
-//RS             .next()
-//RS             .unwrap_or(name.as_str());
-//RS         if matches!(
-//RS             name,
-//RS             crate::Syntax::TYPE_BUILD_CONTEXT
-//RS                 | crate::Syntax::TYPE_PROGRAM_INFO
-//RS                 | crate::Syntax::TYPE_TYPE_INFO
-//RS                 | "FieldInfo"
-//RS                 | "MethodInfo"
-//RS                 | "CompilerLexed"
-//RS                 | "CompilerSyntaxTree"
-//RS                 | "CompilerChecked"
-//RS                 | "CompilerSourceMap"
-//RS                 | "CompilerPackageError"
-//RS                 | "CompilerDependency"
-//RS                 | "CompilerPackageTarget"
-//RS                 | "CompilerPackageOutput"
-//RS                 | "CompilerBuildProfile"
-//RS                 | "CompilerManifest"
-//RS                 | "CompilerPackage"
-//RS                 | "CompilerLockedPackage"
-//RS                 | "CompilerLock"
-//RS                 | "CompilerKeyValue"
-//RS                 | "CompilerProfile"
-//RS                 | "CompilerProfileSet"
-//RS         ) {
-//RS             let member = format!("{name}.{method}");
-//RS             let arity = arg_count.saturating_add(1);
-//RS             return prelude_route_row(
-//RS                 MirPreludeFamily::StaticPrelude,
-//RS                 "core.host",
-//RS                 &member,
-//RS                 "jet_comptime_host_method",
-//RS                 arity,
-//RS                 arity,
-//RS                 host_recv_borrow_mask(arity),
-//RS                 None,
-//RS                 carrier,
-//RS                 MirPreludeAbi::Value,
-//RS                 "comptime host method",
-//RS             );
-//RS         }
-//RS     }
-//RS     let (member, symbol, arity, borrow_mask): (&str, &str, usize, &[bool]) = match shape {
-//RS         Type::Apply { name, .. } if name == "Pool" => match method {
-//RS             "add" => ("Pool.add", "jet_std::JetPool::add", 2, &[true, false]),
-//RS             "remove" => ("Pool.remove", "jet_std::JetPool::remove", 2, &[true, false]),
-//RS             "ids" => ("Pool.ids", "jet_std::JetPool::ids", 1, &[true]),
-//RS             _ => {
-//RS                 return Err(route_error(format!(
-//RS                     "unknown checked Pool host method `{method}`"
-//RS                 )));
-//RS             }
-//RS         },
-//RS         Type::Shared(_) => match (method, arg_count) {
-//RS             ("get", 0) => ("Shared.get", "jet_shared_get", 1, &[true]),
-//RS             ("set", 1) => ("Shared.set", "jet_shared_set", 2, &[true, false]),
-//RS             ("replace", 1) => ("Shared.replace", "jet_shared_replace", 2, &[true, false]),
-//RS             ("read", 1) => ("Shared.read", "jet_shared_read", 2, &[true, false]),
-//RS             ("edit", 1) => ("Shared.edit", "jet_shared_edit", 2, &[true, false]),
-//RS             ("capture", 0) => ("Shared.capture", "jet_shared_capture", 1, &[true]),
-//RS             ("capture", 1) => (
-//RS                 "Shared.capture",
-//RS                 "jet_shared_capture_with",
-//RS                 2,
-//RS                 &[true, false],
-//RS             ),
-//RS             ("capture_txn", 0) => (
-//RS                 "Shared.capture_txn",
-//RS                 "jet_shared_capture_txn_plain",
-//RS                 2,
-//RS                 &[true, true],
-//RS             ),
-//RS             ("capture_txn", 1) => (
-//RS                 "Shared.capture_txn",
-//RS                 "jet_shared_capture_txn",
-//RS                 3,
-//RS                 &[true, true, false],
-//RS             ),
-//RS             ("try_replace", 2) => (
-//RS                 "Shared.try_replace",
-//RS                 "jet_shared_try_replace",
-//RS                 3,
-//RS                 &[true, false, false],
-//RS             ),
-//RS             ("read_txn", 1) => (
-//RS                 "Shared.read_txn",
-//RS                 "jet_shared_read_txn",
-//RS                 3,
-//RS                 &[true, true, false],
-//RS             ),
-//RS             ("edit_txn", 1) => (
-//RS                 "Shared.edit_txn",
-//RS                 "jet_shared_edit_txn",
-//RS                 3,
-//RS                 &[true, true, false],
-//RS             ),
-//RS             ("guard_read", 0) => ("Shared.guard_read", "jet_shared_guard_read", 1, &[true]),
-//RS             ("guard_edit", 0) => ("Shared.guard_edit", "jet_shared_guard_edit", 1, &[true]),
-//RS             ("downgrade", 0) => ("Shared.downgrade", "jet_shared_downgrade", 1, &[true]),
-//RS             ("strong_count", 0) => ("Shared.strong_count", "jet_shared_strong_count", 1, &[true]),
-//RS             ("same", 1) => ("Shared.same", "jet_shared_same", 2, &[true, true]),
-//RS             _ => {
-//RS                 return Err(route_error(format!(
-//RS                     "unknown checked Shared host method `{method}`"
-//RS                 )));
-//RS             }
-//RS         },
-//RS         Type::Apply { name, .. } if name == crate::Syntax::TYPE_SHARED_SNAPSHOT => match method {
-//RS             "value" if arg_count == 0 => (
-//RS                 "SharedSnapshot.value",
-//RS                 "jet_shared_snapshot_value",
-//RS                 1,
-//RS                 &[true],
-//RS             ),
-//RS             _ => {
-//RS                 return Err(route_error(format!(
-//RS                     "unknown checked SharedSnapshot host method `{method}`"
-//RS                 )));
-//RS             }
-//RS         },
-//RS         Type::Apply { name, .. } if name == crate::Syntax::TYPE_SHARED_WEAK => match method {
-//RS             "upgrade" => ("Shared.Weak.upgrade", "jet_shared_weak_upgrade", 1, &[true]),
-//RS             _ => {
-//RS                 return Err(route_error(format!(
-//RS                     "unknown checked Shared.Weak host method `{method}`"
-//RS                 )));
-//RS             }
-//RS         },
-//RS         Type::Apply { name, .. } if name == "Cell" => match method {
-//RS             "get" => ("Cell.get", "jet_cell_get", 1, &[true]),
-//RS             "guard_read" => ("Cell.guard_read", "jet_cell_guard_read", 1, &[true]),
-//RS             "guard_edit" => ("Cell.guard_edit", "jet_cell_guard_edit", 1, &[true]),
-//RS             "set" => ("Cell.set", "jet_cell_set", 2, &[true, false]),
-//RS             "replace" => ("Cell.replace", "jet_cell_replace", 2, &[true, false]),
-//RS             "read" => ("Cell.read", "jet_cell_read", 2, &[true, false]),
-//RS             "edit" => ("Cell.edit", "jet_cell_edit", 2, &[true, false]),
-//RS             "get_or_set" => ("Cell.get_or_set", "jet_cell_get_or_set", 2, &[true, false]),
-//RS             _ => {
-//RS                 return Err(route_error(format!(
-//RS                     "unknown checked Cell host method `{method}`"
-//RS                 )));
-//RS             }
-//RS         },
-//RS         Type::Apply { name, .. } if name == "CellReadGuard" => match method {
-//RS             "get" => ("CellReadGuard.get", "jet_cell_read_guard_get", 1, &[true]),
-//RS             "read" => (
-//RS                 "CellReadGuard.read",
-//RS                 "jet_cell_read_guard_read",
-//RS                 2,
-//RS                 &[true, false],
-//RS             ),
-//RS             _ => {
-//RS                 return Err(route_error(format!(
-//RS                     "unknown checked CellReadGuard host method `{method}`"
-//RS                 )));
-//RS             }
-//RS         },
-//RS         Type::Apply { name, .. } if name == "CellEditGuard" => match method {
-//RS             "get" => ("CellEditGuard.get", "jet_cell_edit_guard_get", 1, &[true]),
-//RS             "set" => (
-//RS                 "CellEditGuard.set",
-//RS                 "jet_cell_edit_guard_set",
-//RS                 2,
-//RS                 &[true, false],
-//RS             ),
-//RS             "read" => (
-//RS                 "CellEditGuard.read",
-//RS                 "jet_cell_edit_guard_read",
-//RS                 2,
-//RS                 &[true, false],
-//RS             ),
-//RS             "edit" => (
-//RS                 "CellEditGuard.edit",
-//RS                 "jet_cell_edit_guard_edit",
-//RS                 2,
-//RS                 &[true, false],
-//RS             ),
-//RS             _ => {
-//RS                 return Err(route_error(format!(
-//RS                     "unknown checked CellEditGuard host method `{method}`"
-//RS                 )));
-//RS             }
-//RS         },
-//RS         Type::Apply { name, .. } if name == "ExpiringSecret" => match method {
-//RS             "with" => (
-//RS                 "ExpiringSecret.with",
-//RS                 "jet_expiring_secret_with",
-//RS                 2,
-//RS                 &[true, false],
-//RS             ),
-//RS             _ => {
-//RS                 return Err(route_error(format!(
-//RS                     "unknown checked ExpiringSecret host method `{method}`"
-//RS                 )));
-//RS             }
-//RS         },
-//RS         _ => {
-//RS             return Err(route_error(format!(
-//RS                 "unknown checked host method `{method}` on `{}`",
-//RS                 recv.name()
-//RS             )));
-//RS         }
-//RS     };
-//RS     prelude_route_row(
-//RS         MirPreludeFamily::StaticPrelude,
-//RS         "core.host",
-//RS         member,
-//RS         symbol,
-//RS         arity,
-//RS         arity,
-//RS         borrow_mask,
-//RS         None,
-//RS         carrier,
-//RS         MirPreludeAbi::Value,
-//RS         "runtime host method",
-//RS     )
-//RS }
-// END-PORT-PENDING 0518 crates/jet-codegen/src/Codegen/TIR/routes.rs:8487-9935
+// Private fragment of Codegen.TIR.routes; shares the total checked route registry.
+use jet_foundation.[Type, BinOp, StrFormat, UnitRatio, UnitRoundingMode, Effect, TFailureCarrier, TGCEditKind, TNumericOp, TTryConvert, TTypedTextForm, MIRTypedHeadKind, MIRPreludeFamily, MIRPreludeABI]
+use jet_foundation.Syntax.[TYPE_NEVER, TYPE_BUILD_CONTEXT, TYPE_PROGRAM_INFO, TYPE_TYPE_INFO, TYPE_SHARED_SNAPSHOT, TYPE_SHARED_WEAK]
+use jet_codegen.Codegen.TIR.[TPreludeRoute, TRoutePlan, LowerError]
+use jet_codegen.Codegen.TIR.Routes.[prelude_route_row, runtime_route_row, route_error, prelude, runtime, as_prelude, compare_route, fixed_width_name]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8487
+pub fn geometry_builtin_route(type_name: String, func: String, arity: Int, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    symbol :: "jet_math_{type_name}_{func}"
+    prelude_route_row(MIRPreludeFamily.MathBuiltin, "core.math", "geometry.{type_name}.{func}", symbol, arity, arity, [Bool].repeat(false, arity), None, carrier, MIRPreludeABI.Value, "coordinate-space builtin")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8511
+fn geometry_method_arity(method: String) -> Int? Never! {
+    if method == { "add" | "sub" | "then" | "ray" -> Val(2) "inverse" -> Val(1) "point" -> Val(2) "point_at_depth" -> Val(3) else -> None }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8521
+fn geometry_method_route(type_name: String, method: String, receiver: Type, carrier: TFailureCarrier) -> TRoutePlan LowerError! {
+    arity :: geometry_method_arity(method) ?? return Err(route_error("coordinate-space method `{type_name}.{method}` has no registered route"))
+    symbol :: "jet_math_{type_name}_{method}"
+    borrow_mask := [Bool].repeat(false, arity)
+    borrow_mask[0] = true
+    Ok(TRoutePlan.Prelude(prelude_route_row(MIRPreludeFamily.MathBuiltin, "core.math", "geometry.{type_name}.{method}", symbol, arity, arity, borrow_mask, None, carrier, MIRPreludeABI.Value, "coordinate-space method")?))
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8551
+pub fn precise_builtin_route(type_name: String, func: String, arity: Int, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    symbol :: if type_name == "Measurement" && func == "new" -> "jet_std::JetMeasurement::new" else -> "jet_{type_name.to_ascii_lowercase()}_{func}"
+    by_value :: func == "new" || func == "from_parts" || (func.starts_with("from_") && func != "from_str")
+    prelude_route_row(MIRPreludeFamily.PreciseBuiltin, type_name, func, symbol, arity, arity, [Bool].repeat(!by_value, arity), None, carrier, MIRPreludeABI.Value, "precise builtin")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8590
+pub fn print_route(result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.term", "print", "jet_term_write_stdout_line", 2, 2, [true, false], Val(Effect.IO), carrier, MIRPreludeABI.Effect, "print")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8610
+pub fn ambient_input_route(has_prompt: Bool, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.term", "input", "jet_std_io_input", 1, 1, [true], Val(Effect.IO), carrier, MIRPreludeABI.Effect, "ambient input")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8631
+pub fn data_entries_to_map_route(result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.collections", "entries_to_map", "jet_data_entries_to_map", 1, 1, [false], None, carrier, MIRPreludeABI.Value, "map entries conversion")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8651
+pub fn todo_route(result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    diverges :: TFailureCarrier.Diverges(Type.Named(TYPE_NEVER))
+    runtime_route_row(MIRPreludeFamily.StaticPrelude, "core.runtime", "todo", "jet_todo_stop", 3, 3, [true, false, true], Val(Effect.IO), diverges, MIRPreludeABI.Value, "todo")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8674
+pub fn string_format_route(format: StrFormat, value_ty: Type, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    integer :: is_int(value_ty)
+    (member, symbol, arity, borrow_mask) :: if format == {
+        .Display -> ("display", "jet_fmt_display", 1, [true])
+        .Debug -> ("debug", "jet_fmt_debug", 1, [true])
+        .Pretty -> ("pretty", "jet_fmt_pretty", 1, [true])
+        .Unit(_) -> return Err(route_error("unit formatting is lowered through its checked String function"))
+        .Fixed(_) -> ("fixed", if integer -> "jet_fmt_decimal_int" else -> "jet_fmt_decimal", 2, [integer, false])
+        .Grouped(_) -> ("grouped", if integer -> "jet_fmt_grouped_int" else -> "jet_fmt_grouped", 2, [integer, false])
+        .Hex(_) -> ("hex", if integer -> "jet_fmt_hex" else -> "jet_fmt_hex_decimal", 2, [integer, false])
+        .Pad{..} -> ("pad", "jet_fmt_pad", 3, [true, false, true])
+        .PadLeft{..} -> ("pad_left", "jet_fmt_pad_left", 3, [true, false, true])
+        .Sci(_) -> ("sci", "jet_fmt_sci", 2, [integer, false])
+        .Percent(_) -> ("percent", "jet_fmt_percent", 2, [integer, false])
+        .Bin -> ("bin", if integer -> "jet_fmt_bin" else -> "jet_fmt_bin_decimal", 1, [true])
+        .Oct -> ("oct", if integer -> "jet_fmt_oct" else -> "jet_fmt_oct_decimal", 1, [true])
+    }
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.text.fmt", member, symbol, arity, arity, borrow_mask, None, carrier, MIRPreludeABI.Value, "string interpolation format")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8682
+fn is_int(ty: Type) -> Bool Never! {
+    if ty.without_user_tags() == { .Int | .IntN{..} -> true .InlineRange(base, _, _) -> is_int(base) .Named(name) -> name == "Int" .Tagged(_, inner) -> is_int(inner) else -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8804
+pub fn quantity_format_route(result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.text.fmt", "quantity", "jet_fmt_quantity", 1, 1, [false], None, carrier, MIRPreludeABI.Value, "quantity magnitude formatting")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8824
+pub fn static_prelude_route(module: String, member: String, borrow_mask: [Bool], result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    effect :: if module == "::JetAtomic" && member == "try_new" -> Val(Effect.Mem) else -> None
+    arity :: borrow_mask.len()
+    symbol :: if (module, member) == {
+        ("::JetAuthority", "from_rights") -> "jet_authority_from_rights"
+        ("::JetAuthority", "workspace") -> "jet_authority_workspace"
+        ("::JetAuthority", "with") -> "jet_authority_with"
+        ("::JetAuthority", "without") -> "jet_authority_without"
+        else -> if module.strip_prefix("::") == { .Val(rooted) -> "{rooted}::{member}" else -> "{module}::{member}" }
+    }
+    plan :: if module.starts_with("::") -> prelude(MIRPreludeFamily.StaticPrelude, module, member, symbol, arity, arity, borrow_mask, effect, carrier, MIRPreludeABI.Value) else -> runtime(MIRPreludeFamily.StaticPrelude, module, member, symbol, arity, arity, borrow_mask, effect, carrier, MIRPreludeABI.Value)
+    as_prelude(plan, "static Prelude call")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8874
+pub fn decode_under_route(result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.encoding", "decode_under", "jet_std::FieldError::under", 2, 2, [true, false], None, carrier, MIRPreludeABI.Value, "decode error context")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8894
+pub fn compare_chain_route(op: BinOp, hook: Bool, left_ty: Type, result: Type, carrier: TFailureCarrier) -> TRoutePlan LowerError! { compare_route(op, hook, result, carrier) }
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8905
+pub fn overflow_opt_route(prefix: String, op: String, line: Int, input: Type, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    width :: fixed_width_name(input) ?? return Err(route_error("overflow option has no resolved fixed numeric receiver type"))
+    checked :: prefix == "checked"
+    if checked {
+        value :: if result == { .Option(value) -> value else -> return Err(route_error("checked overflow option has no Option result type")) }
+        if value != input -> return Err(route_error("checked overflow option has a mismatched payload type"))
+        if carrier != .Optional{..} -> return Err(route_error("checked overflow option has a mismatched failure carrier"))
+    } else if result != input {
+        return Err(route_error("overflow option has a mismatched resolved result type"))
+    } else if carrier == .Optional{..} {
+        return Err(route_error("value-producing overflow option has an optional failure carrier"))
+    }
+    (mode, op_name, arity, effect) :: if (prefix, op) == {
+        ("checked", "add" | "sub" | "mul" | "div" | "rem" | "pow") -> ("checked", op, 2, None)
+        ("checked_policy", "add" | "sub" | "mul" | "div" | "rem" | "pow") -> ("trap", op, 4, Val(Effect.Panic))
+        ("wrapping", "add" | "sub" | "mul") -> ("wrapping", op, 2, None)
+        ("wrapping", "div" | "pow") -> ("wrapping", op, 4, Val(Effect.Panic))
+        ("saturating", "add" | "sub" | "mul") -> ("saturating", op, 2, None)
+        ("saturating", "div" | "pow") -> ("saturating", op, 4, Val(Effect.Panic))
+        ("rotate_left" | "rotate_right", "rotate") -> (prefix, "rotate", 4, Val(Effect.Panic))
+        else -> return Err(route_error("unsupported fixed-width overflow operation `{prefix}_{op}`"))
+    }
+    symbol :: if prefix == "rotate_left" || prefix == "rotate_right" -> "jet_{width}_{prefix}" else -> "jet_{width}_{mode}_{op_name}"
+    member :: "{width}.{prefix}.{op}"
+    prelude_route_row(MIRPreludeFamily.Overflow, "core.numeric", member, symbol, arity, arity, [Bool].repeat(false, arity), effect, carrier, MIRPreludeABI.Value, "fixed-width overflow option")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:8983
+pub fn try_conversion_route(convert: TTryConvert, source: Type, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    if convert == {
+        .DefaultErr -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.errors", "from_message", "jet_err_from_message", 1, 1, [false], None, TFailureCarrier.Infallible, MIRPreludeABI.Value, "default error conversion")
+        .Typed{..} -> Err(route_error("typed error conversion requires checked MIR function lowering"))
+        .WidenUnion{..} -> Err(route_error("union error conversion requires checked MIR enum lowering"))
+        .ProtocolExit -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.errors", "entry_error_exit", "jet_entry_error_exit_jet", 1, 1, [false], Val(Effect.Panic), TFailureCarrier.Diverges(Type.Named(TYPE_NEVER)), MIRPreludeABI.Control, "protocol error exit")
+        .NoConversion | .Never -> Err(route_error("bare try propagation has no conversion Prelude route"))
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9034
+pub fn apply_conversion_route() -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.errors", "apply_conversion", "jet_err_apply_conversion", 3, 3, [false, false, false], None, TFailureCarrier.Infallible, MIRPreludeABI.Value, "declared error conversion history")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9050
+pub fn journey_reset_route() -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.errors", "journey_reset", "jet_journey_reset", 0, 0, [], None, TFailureCarrier.Infallible, MIRPreludeABI.Effect, "successful try journey reset")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9068
+pub fn journey_origin_route() -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.errors", "journey_origin", "jet_journey_origin", 4, 4, [true, false, false, true], None, TFailureCarrier.Infallible, MIRPreludeABI.Effect, "failure journey origin")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9085
+pub fn failure_context_route(result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.errors", "err_with_context_frame", "jet_err_with_context_frame", 6, 6, [false, true, false, false, true, false], None, TFailureCarrier.Infallible, MIRPreludeABI.Value, "default error context frame")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9106
+pub fn failure_note_route(result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.errors", "journey_frame_text", "jet_journey_frame_text", 5, 5, [true, false, false, true, true], None, TFailureCarrier.Infallible, MIRPreludeABI.Effect, "failure journey frame")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9126
+pub fn range_checked_ctor_route(name: String, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.numeric", "inline_range", "jet_inline_range_from_int", 3, 3, [false, false, false], None, carrier, MIRPreludeABI.Value, "range checked constructor")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9147
+pub fn distinct_conversion_route(name: String, source: Type, op: TNumericOp, range: (Int, Int)?, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    if op == {
+        .CheckedIntToFloat{..} -> if source == Type.Int -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.numeric", "checked_widen", "jet_std::jet_int_checked_widen", 4, 4, [false, false, true, false], None, carrier, MIRPreludeABI.Value, "integer widening") else -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.numeric", "checked_widen", "jet_numeric_checked_widen_at", 5, 5, [false, false, false, true, false], None, carrier, MIRPreludeABI.Value, "numeric widening")
+        .TryFrom{..} -> if source == Type.Int -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.numeric", "int_try_from", "jet_std::jet_int_try_from_checked", 2, 2, [false, false], None, carrier, MIRPreludeABI.Value, "integer narrowing conversion") else -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.numeric", "fixed_try_from", "jet_numeric_try_from_fixed", 3, 3, [false, false, false], None, carrier, MIRPreludeABI.Value, "fixed integer narrowing conversion")
+        .InlineRange{..} -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.numeric", "inline_range", "jet_inline_range_from_int", 3, 3, [false, false, false], None, carrier, MIRPreludeABI.Value, "inline range conversion")
+        .CheckedIntToFixed{..} -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.numeric", "int_checked_fixed", "jet_std::jet_int_checked_fixed", 4, 4, [false, false, true, false], None, carrier, MIRPreludeABI.Value, "checked fixed integer construction")
+        .FloatToInt{..} -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.numeric", "float_to_int", "jet_numeric_float_to_int", 2, 2, [false, false], None, carrier, MIRPreludeABI.Value, "float to integer conversion")
+        .FloatNarrow{..} -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.numeric", "float_narrow", "jet_numeric_float_narrow", 1, 1, [false], None, carrier, MIRPreludeABI.Value, "float narrowing conversion")
+        .CastAs{..} | .Predicate(_) | .BitCount{..} | .ToShow | .EuclideanDiv{..} | .EuclideanRem{..} -> Err(route_error("numeric operation is not a checked distinct conversion"))
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9272
+fn is_measurement_type(ty: Type) -> Bool Never! {
+    if ty.without_user_tags() == { .Apply(name, args) -> name == "Measurement" && args.len() == 1 && args[0].without_user_tags() == Type.Float else -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9282
+fn is_measured_conversion_result(ty: Type) -> Bool Never! {
+    if ty.without_user_tags() == { .Option(inner) -> is_measurement_type(inner) .Result(ok, _) -> is_measurement_type(ok) else -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9290
+pub fn unit_conversion_route(destination: String, scale: UnitRatio, offset: UnitRatio, rounding: UnitRoundingMode?, relative_uncertainty: Float?, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    measured :: relative_uncertainty.is_some() && is_measured_conversion_result(result)
+    if (rounding, measured) == {
+        (None, false) -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.units", "conversion_exact", "jet_unit_conversion_exact", 5, 5, [false, true, true, true, true], None, carrier, MIRPreludeABI.Value, "exact unit conversion")
+        (None, true) -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.units", "conversion_exact_measurement", "jet_std::jet_unit_conversion_exact_measurement", 6, 6, [false, true, true, true, true, false], None, carrier, MIRPreludeABI.Value, "exact measured unit conversion")
+        (Val(_), false) -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.units", "conversion_rounded", "jet_unit_conversion_rounded", 7, 7, [false, true, true, true, true, false, false], None, carrier, MIRPreludeABI.Value, "rounded unit conversion")
+        (Val(_), true) -> prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.units", "conversion_rounded_measurement", "jet_std::jet_unit_conversion_rounded_measurement", 8, 8, [false, true, true, true, true, false, false, false], None, carrier, MIRPreludeABI.Value, "rounded measured unit conversion")
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9359
+pub fn carrier_fact_route(notes: Bool, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    (member, symbol) :: if notes -> ("notes", "jet_notes") else -> ("partial", "jet_partial")
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.outcome", member, symbol, 1, 1, [true], None, carrier, MIRPreludeABI.Value, "carrier fact")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9386
+pub fn gc_read_route(result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.gc", "read", "jet_gc_read", 1, 1, [true], Val(Effect.Mem), carrier, MIRPreludeABI.Value, "GC read")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9408
+pub fn gc_edit_route(kind: TGCEditKind, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    (member, symbol, arity, borrow_mask) :: if kind == {
+        .Clear -> ("edit_clear", "jet_gc_edit_clear", 2, [true, false])
+        .Pop -> ("edit_pop", "jet_gc_edit_pop", 2, [true, false])
+        .RemoveIndex -> ("edit_remove_index", "jet_gc_edit_remove_index", 3, [true, false, false])
+        .InsertIndex -> ("edit_insert_index", "jet_gc_edit_insert_index", 4, [true, false, true, false])
+        .Prepend -> ("edit_prepend", "jet_gc_edit_prepend", 3, [true, true, false])
+        .Additive -> ("edit_additive", "jet_gc_edit_additive", 3, [true, true, false])
+        .Plain -> ("edit_plain", "jet_gc_edit_plain", 2, [true, false])
+        .EdgeSlot -> ("edit_edge_slot", "jet_gc_edit_edge_slot", 4, [true, true, false, false])
+    }
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.gc", member, symbol, arity, arity, borrow_mask, Val(Effect.Mem), carrier, MIRPreludeABI.Value, "GC edit")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9465
+pub fn typed_text_route(kind: TTypedTextForm, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    (member, symbol, borrow_mask) :: if kind == {
+        .SQLRaw -> ("sql_raw", "jet_typed_sql_raw", [false])
+        .HTMLRaw -> ("html_raw", "jet_typed_html_raw", [false])
+        .ShRaw -> ("sh_raw", "jet_typed_sh_raw", [false])
+        .SQLTemplate -> ("sql_template", "jet_typed_sql_template", [true])
+        .SQLParams -> ("sql_params", "jet_typed_sql_params", [true])
+        .HTMLText -> ("html_text", "jet_typed_html_text", [false])
+    }
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.typed_text", member, symbol, 1, 1, borrow_mask, None, carrier, MIRPreludeABI.Value, "typed text projection")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9496
+pub fn typed_text_interp_route(kind: MIRTypedHeadKind, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    (member, symbol, arity, borrow_mask) :: if kind == {
+        .SQL -> ("sql_interpolate", "jet_typed_sql_interpolate", 2, [true, false])
+        .HTML -> ("html_interpolate", "jet_typed_html_interpolate", 3, [true, false, true])
+        .Sh -> ("sh_interpolate", "jet_typed_sh_interpolate", 2, [true, false])
+        .URL -> ("url_literal", "jet_std::jet_typed_url_literal", 2, [true, false])
+        .Path -> ("path_literal", "jet_typed_path_literal", 2, [true, false])
+        .DateTime -> ("datetime_literal", "jet_typed_datetime_literal", 2, [true, false])
+    }
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.typed_text", member, symbol, arity, arity, borrow_mask, None, carrier, MIRPreludeABI.Value, "typed text interpolation")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9557
+pub fn expect_snapshot_route(result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.test", "expect_snapshot", "jet_expect_snapshot", 2, 2, [false, false], Val(Effect.FS), carrier, MIRPreludeABI.Value, "expect snapshot")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9579
+pub fn expiring_route(secret: Bool, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    (member, symbol) :: if secret -> ("secret_new", "jet_expiring_secret_new") else -> ("new", "jet_expiring_new")
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.expiring", member, symbol, 3, 3, [false, true, true], Val(Effect.Time), carrier, MIRPreludeABI.Value, "expiring constructor")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9607
+pub fn c_callback_route(result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.ffi", "callback_boundary", "jet_ffi_callback_boundary", 1, 1, [false], Val(Effect.FFI), carrier, MIRPreludeABI.Value, "C callback boundary")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9628
+pub fn pattern_match_route(binary: Bool, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    (member, symbol) :: if binary -> ("binary_match", "jet_binary_pattern_match") else -> ("text_match", "jet_text_pattern_match")
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.pattern", member, symbol, 2, 2, [true, false], None, carrier, MIRPreludeABI.Value, "pattern match")
+}
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9660
+// One static mask backs all returned borrowed slices; arities above 15 select 16.
+HOST_RECV_BORROW_MASK :: [Bool#16]{true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false}
+fn host_recv_borrow_mask(arity: Int) -> View<Bool> Never! { HOST_RECV_BORROW_MASK[0..<min(arity, 16)] }
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs:9700
+pub fn host_method_route(recv: Type, method: String, arg_count: Int, result: Type, carrier: TFailureCarrier) -> TPreludeRoute LowerError! {
+    shape := recv
+    loop shape == .Tagged(_, inner) { shape = inner }
+    if shape == .Named(full_name) {
+        name :: full_name.rsplit("::").next() ?? full_name
+        leaf :: name.rsplit('.').next() ?? name
+        if leaf == TYPE_BUILD_CONTEXT || leaf == TYPE_PROGRAM_INFO || leaf == TYPE_TYPE_INFO || leaf == "FieldInfo" || leaf == "MethodInfo" || leaf == "CompilerLexed" || leaf == "CompilerSyntaxTree" || leaf == "CompilerChecked" || leaf == "CompilerSourceMap" || leaf == "CompilerPackageError" || leaf == "CompilerDependency" || leaf == "CompilerPackageTarget" || leaf == "CompilerPackageOutput" || leaf == "CompilerBuildProfile" || leaf == "CompilerManifest" || leaf == "CompilerPackage" || leaf == "CompilerLockedPackage" || leaf == "CompilerLock" || leaf == "CompilerKeyValue" || leaf == "CompilerProfile" || leaf == "CompilerProfileSet" {
+            member :: "{leaf}.{method}"
+            arity :: arg_count.saturating_add(1)
+            return prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.host", member, "jet_comptime_host_method", arity, arity, host_recv_borrow_mask(arity), None, carrier, MIRPreludeABI.Value, "comptime host method")
+        }
+    }
+    (member, symbol, arity, borrow_mask) :: if shape == {
+        .Apply(name, _) if name == "Pool" -> if method == {
+            "add" -> ("Pool.add", "jet_std::JetPool::add", 2, [true, false])
+            "remove" -> ("Pool.remove", "jet_std::JetPool::remove", 2, [true, false])
+            "ids" -> ("Pool.ids", "jet_std::JetPool::ids", 1, [true])
+            else -> return Err(route_error("unknown checked Pool host method `{method}`"))
+        }
+        .Shared(_) -> if (method, arg_count) == {
+            ("get", 0) -> ("Shared.get", "jet_shared_get", 1, [true])
+            ("set", 1) -> ("Shared.set", "jet_shared_set", 2, [true, false])
+            ("replace", 1) -> ("Shared.replace", "jet_shared_replace", 2, [true, false])
+            ("read", 1) -> ("Shared.read", "jet_shared_read", 2, [true, false])
+            ("edit", 1) -> ("Shared.edit", "jet_shared_edit", 2, [true, false])
+            ("capture", 0) -> ("Shared.capture", "jet_shared_capture", 1, [true])
+            ("capture", 1) -> ("Shared.capture", "jet_shared_capture_with", 2, [true, false])
+            ("capture_txn", 0) -> ("Shared.capture_txn", "jet_shared_capture_txn_plain", 2, [true, true])
+            ("capture_txn", 1) -> ("Shared.capture_txn", "jet_shared_capture_txn", 3, [true, true, false])
+            ("try_replace", 2) -> ("Shared.try_replace", "jet_shared_try_replace", 3, [true, false, false])
+            ("read_txn", 1) -> ("Shared.read_txn", "jet_shared_read_txn", 3, [true, true, false])
+            ("edit_txn", 1) -> ("Shared.edit_txn", "jet_shared_edit_txn", 3, [true, true, false])
+            ("guard_read", 0) -> ("Shared.guard_read", "jet_shared_guard_read", 1, [true])
+            ("guard_edit", 0) -> ("Shared.guard_edit", "jet_shared_guard_edit", 1, [true])
+            ("downgrade", 0) -> ("Shared.downgrade", "jet_shared_downgrade", 1, [true])
+            ("strong_count", 0) -> ("Shared.strong_count", "jet_shared_strong_count", 1, [true])
+            ("same", 1) -> ("Shared.same", "jet_shared_same", 2, [true, true])
+            else -> return Err(route_error("unknown checked Shared host method `{method}`"))
+        }
+        .Apply(name, _) if name == TYPE_SHARED_SNAPSHOT -> if (method, arg_count) == {
+            ("value", 0) -> ("SharedSnapshot.value", "jet_shared_snapshot_value", 1, [true])
+            else -> return Err(route_error("unknown checked SharedSnapshot host method `{method}`"))
+        }
+        .Apply(name, _) if name == TYPE_SHARED_WEAK -> if method == {
+            "upgrade" -> ("Shared.Weak.upgrade", "jet_shared_weak_upgrade", 1, [true])
+            else -> return Err(route_error("unknown checked Shared.Weak host method `{method}`"))
+        }
+        .Apply(name, _) if name == "Cell" -> if method == {
+            "get" -> ("Cell.get", "jet_cell_get", 1, [true])
+            "guard_read" -> ("Cell.guard_read", "jet_cell_guard_read", 1, [true])
+            "guard_edit" -> ("Cell.guard_edit", "jet_cell_guard_edit", 1, [true])
+            "set" -> ("Cell.set", "jet_cell_set", 2, [true, false])
+            "replace" -> ("Cell.replace", "jet_cell_replace", 2, [true, false])
+            "read" -> ("Cell.read", "jet_cell_read", 2, [true, false])
+            "edit" -> ("Cell.edit", "jet_cell_edit", 2, [true, false])
+            "get_or_set" -> ("Cell.get_or_set", "jet_cell_get_or_set", 2, [true, false])
+            else -> return Err(route_error("unknown checked Cell host method `{method}`"))
+        }
+        .Apply(name, _) if name == "CellReadGuard" -> if method == {
+            "get" -> ("CellReadGuard.get", "jet_cell_read_guard_get", 1, [true])
+            "read" -> ("CellReadGuard.read", "jet_cell_read_guard_read", 2, [true, false])
+            else -> return Err(route_error("unknown checked CellReadGuard host method `{method}`"))
+        }
+        .Apply(name, _) if name == "CellEditGuard" -> if method == {
+            "get" -> ("CellEditGuard.get", "jet_cell_edit_guard_get", 1, [true])
+            "set" -> ("CellEditGuard.set", "jet_cell_edit_guard_set", 2, [true, false])
+            "read" -> ("CellEditGuard.read", "jet_cell_edit_guard_read", 2, [true, false])
+            "edit" -> ("CellEditGuard.edit", "jet_cell_edit_guard_edit", 2, [true, false])
+            else -> return Err(route_error("unknown checked CellEditGuard host method `{method}`"))
+        }
+        .Apply(name, _) if name == "ExpiringSecret" -> if method == {
+            "with" -> ("ExpiringSecret.with", "jet_expiring_secret_with", 2, [true, false])
+            else -> return Err(route_error("unknown checked ExpiringSecret host method `{method}`"))
+        }
+        else -> return Err(route_error("unknown checked host method `{method}` on `{recv.name()}`"))
+    }
+    prelude_route_row(MIRPreludeFamily.StaticPrelude, "core.host", member, symbol, arity, arity, borrow_mask, None, carrier, MIRPreludeABI.Value, "runtime host method")
+}

@@ -1,878 +1,220 @@
-// PORT-PENDING 0427 crates-jet-sema-src-sema-diagnostics-slice-1760: crates/jet-sema/src/Sema/Diagnostics.rs:1760-2633
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS pub(crate) fn is_displayable(
-//RS     ty: &Type,
-//RS     type_reg: &TypeRegistry,
-//RS     trait_reg: &crate::Traits::TraitRegistry,
-//RS ) -> bool {
-//RS     if is_secret_bearing_crypto_type(ty) || is_one_pass_source(ty) {
-//RS         return false;
-//RS     }
-//RS     match ty {
-//RS         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
-//RS         Type::IntN { .. } | Type::Float32 => true,
-//RS         Type::Option(inner) => is_displayable(inner, type_reg, trait_reg),
-//RS         Type::Result { ok, err } => {
-//RS             is_displayable(ok, type_reg, trait_reg) && is_displayable(err, type_reg, trait_reg)
-//RS         }
-//RS         Type::List(inner) => is_displayable(inner, type_reg, trait_reg),
-//RS         Type::Map { key, value, .. } => {
-//RS             is_displayable(key, type_reg, trait_reg) && is_displayable(value, type_reg, trait_reg)
-//RS         }
-//RS         Type::Named(n) => {
-//RS             type_reg.is_unit_type(n)
-//RS                 || trait_reg.implements_trait(n, Generics::DISPLAY)
-//RS                 || trait_reg.implements_trait(n, Generics::PRINTABLE)
-//RS                 || is_core_shown_type(n)
-//RS                 || matches!(
-//RS                     n.as_str(),
-//RS                     Syntax::TYPE_INT
-//RS                         | Syntax::TYPE_FLOAT
-//RS                         | Syntax::TYPE_BOOL
-//RS                         | Syntax::TYPE_STRING
-//RS                         | Syntax::TYPE_CHAR
-//RS                 )
-//RS         }
-//RS         Type::Quantity { .. } => true,
-//RS         Type::Apply { name, .. } if name == "KeyRef" => true,
-//RS         Type::Apply { name, args } => {
-//RS             let native_composite = matches!(
-//RS                 name.as_str(),
-//RS                 Syntax::TYPE_LIST
-//RS                     | Syntax::TYPE_SET
-//RS                     | Syntax::TYPE_RANK
-//RS                     | Syntax::TYPE_PRIORITY_QUEUE
-//RS                     | Syntax::TYPE_QUEUE
-//RS                     | Syntax::TYPE_LRU
-//RS                     | Syntax::EXPIRING_VALUE_TYPE
-//RS                     | "Loadable"
-//RS                     | "View"
-//RS             );
-//RS             (native_composite
-//RS                 || trait_reg.implements_trait(name, Generics::DISPLAY)
-//RS                 || trait_reg.implements_trait(name, Generics::PRINTABLE))
-//RS                 && args.iter().all(|a| is_displayable(a, type_reg, trait_reg))
-//RS         }
-//RS         Type::Tuple(fields) => fields
-//RS             .iter()
-//RS             .all(|(_, t)| is_displayable(t, type_reg, trait_reg)),
-//RS         // D-ANY-JAI1 (c7jaiany): the one blessed trait-object shape that IS
-//RS         // displayable — `Renderable` means "has `JetDisplay`" by construction
-//RS         // (see `TraitRegistry::implements_trait`), so a `Renderable` trait-object
-//RS         // value (the loop element of a trait-bounded variadic) is interpolatable.
-//RS         // Every other bare trait-object stays non-displayable.
-//RS         // D-ANY-JAI1: displayable if ANY bound trait is `Renderable` — a
-//RS         // multi-trait-bounded variadic loop element (`...[Renderable, Debug]`)
-//RS         // is still interpolatable via its `Renderable` bound.
-//RS         Type::TraitObject(t) => t.iter().any(|n| n == Generics::RENDERABLE),
-//RS         Type::Shared(_) | Type::Fn { .. } => false,
-//RS         Type::FixedList { elem, .. } => is_displayable(elem, type_reg, trait_reg),
-//RS         Type::Tagged { inner, .. } => is_displayable(inner, type_reg, trait_reg),
-//RS         Type::InlineRange { base, .. } => is_displayable(base, type_reg, trait_reg),
-//RS         Type::Union(members) => members
-//RS             .iter()
-//RS             .all(|m| is_displayable(m, type_reg, trait_reg)),
-//RS         // Same as `is_printable`'s note: preserves the retired string
-//RS         // encoding's behavior (never matched, so non-displayable on its own).
-//RS         Type::Measure(_) => false,
-//RS     }
-//RS }
-//RS 
-//RS /// D-CAPBUNDLE1: an operation used on a nominal `distinct` type whose
-//RS /// operation bundles don't grant it. `operation` names the thing that was
-//RS /// attempted ("string interpolation", …), `needed_bundle` is the `#Bundle`
-//RS /// spelling that would grant it, and `granted` lists the bundles already
-//RS /// present on the type (empty when the type is still fully inert).
-//RS pub(crate) fn e0138(
-//RS     type_name: &str,
-//RS     operation: &str,
-//RS     needed_bundle: &str,
-//RS     granted: Vec<&'static str>,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     let has = if granted.is_empty() {
-//RS         "no operation bundles".to_string()
-//RS     } else {
-//RS         format!("only {}", granted.join(", "))
-//RS     };
-//RS     Diagnostic::error(
-//RS         "E0138",
-//RS         format!("`{type_name}` doesn't support {operation}"),
-//RS         format!(
-//RS             "a nominal type only gets the operations its operation bundles grant; `{type_name}` has {has}"
-//RS         ),
-//RS         format!(
-//RS             "add `{needed_bundle}` before the declaration, or convert to the base type first"
-//RS         ),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// D-PREPOST1: a `#Pre`/`#Post` contract condition used an effect — contract
-//RS /// clauses are checked at every call, so they must stay pure (same checker
-//RS /// as `#Pure fn`, E3401). `clause_kw` is `"Pre"`/`"Post"`; `span` is the
-//RS /// impure call site inside the condition (from `Purity::check_pure_expr`).
-//RS pub(crate) fn e0139(clause_kw: &str, span: Option<Span>) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0139",
-//RS         format!("a `#{clause_kw}` condition can't do I/O"),
-//RS         "a contract is checked at every call and must be a pure claim about values".to_string(),
-//RS         "move the effect out; keep only a pure test".to_string(),
-//RS         span,
-//RS     )
-//RS }
-//RS 
-//RS /// D-ATTR4=A: `{value:Debug}` uses auto-derived or explicit `Debug`.
-//RS pub(crate) fn is_debuggable(
-//RS     ty: &Type,
-//RS     type_reg: &TypeRegistry,
-//RS     trait_reg: &crate::Traits::TraitRegistry,
-//RS ) -> bool {
-//RS     if is_secret_bearing_crypto_type(ty) {
-//RS         return false;
-//RS     }
-//RS     match ty {
-//RS         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
-//RS         Type::IntN { .. } | Type::Float32 => true,
-//RS         Type::Option(inner) => is_debuggable(inner, type_reg, trait_reg),
-//RS         Type::Result { ok, err } => {
-//RS             is_debuggable(ok, type_reg, trait_reg) && is_debuggable(err, type_reg, trait_reg)
-//RS         }
-//RS         Type::List(inner) => is_debuggable(inner, type_reg, trait_reg),
-//RS         Type::Map { key, value, .. } => {
-//RS             is_debuggable(key, type_reg, trait_reg) && is_debuggable(value, type_reg, trait_reg)
-//RS         }
-//RS         Type::Named(n) => {
-//RS             type_reg.is_unit_type(n)
-//RS                 || trait_reg.implements_trait(n, Generics::DEBUG)
-//RS                 || is_core_shown_type(n)
-//RS         }
-//RS         Type::Apply { name, .. } if name == "KeyRef" => true,
-//RS         Type::Quantity { .. } => true,
-//RS         Type::Apply { name, args } => {
-//RS             trait_reg.implements_trait(name, Generics::DEBUG)
-//RS                 && args.iter().all(|a| is_debuggable(a, type_reg, trait_reg))
-//RS         }
-//RS         Type::Tuple(fields) => fields
-//RS             .iter()
-//RS             .all(|(_, t)| is_debuggable(t, type_reg, trait_reg)),
-//RS         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
-//RS         Type::FixedList { elem, .. } => is_debuggable(elem, type_reg, trait_reg),
-//RS         Type::Tagged { inner, .. } => is_debuggable(inner, type_reg, trait_reg),
-//RS         Type::InlineRange { base, .. } => is_debuggable(base, type_reg, trait_reg),
-//RS         Type::Union(members) => members
-//RS             .iter()
-//RS             .all(|m| is_debuggable(m, type_reg, trait_reg)),
-//RS         // Same as `is_printable`'s note: preserves the retired string
-//RS         // encoding's behavior (never matched, so non-debuggable on its own).
-//RS         Type::Measure(_) => false,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn is_equatable(
-//RS     ty: &Type,
-//RS     registry: &TypeRegistry,
-//RS     trait_reg: &crate::Traits::TraitRegistry,
-//RS ) -> bool {
-//RS     if is_secret_bearing_crypto_type(ty) {
-//RS         return false;
-//RS     }
-//RS     match ty {
-//RS         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
-//RS         Type::IntN { .. } | Type::Float32 => true,
-//RS         Type::Option(inner) | Type::List(inner) => is_equatable(inner, registry, trait_reg),
-//RS         Type::Result { ok, err } => {
-//RS             is_equatable(ok, registry, trait_reg) && is_equatable(err, registry, trait_reg)
-//RS         }
-//RS         Type::Named(name) if name == "U8" || name == Syntax::TYPE_ORDERING => true,
-//RS         Type::Named(name)
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 "EncodingFormat"
-//RS                     | "EncodingErrorKind"
-//RS                     | "EncodingCause"
-//RS                     | "EncodingError"
-//RS                     | "EncodingLimits"
-//RS                     | "DataError"
-//RS                     | "DataErrorKind"
-//RS                     | "DataLimits"
-//RS                     | "DataFreshness"
-//RS                     | "DataFormat"
-//RS                     | "DataLoaderKind"
-//RS                     | "DataInvalidationCause"
-//RS                     | "JetDataPlotMark"
-//RS                     | "JetDataPlotValue"
-//RS                     | "JetDataPlotRenderFormat"
-//RS             ) =>
-//RS         {
-//RS             true
-//RS         }
-//RS         Type::Named(name) => trait_reg.implements_trait(name, Generics::EQUATABLE),
-//RS         Type::Apply { name, .. } if name == "KeyRef" => true,
-//RS         Type::Apply { name, .. } if name == "ID" => {
-//RS             trait_reg.implements_trait(name, Generics::EQUATABLE)
-//RS         }
-//RS         Type::Apply { name, .. }
-//RS             if matches!(name.as_str(), "MutationPlan" | "VaultWrite" | "Rotation") =>
-//RS         {
-//RS             false
-//RS         }
-//RS         Type::Apply { name, args } => {
-//RS             trait_reg.implements_trait(name, Generics::EQUATABLE)
-//RS                 && args
-//RS                     .iter()
-//RS                     .all(|arg| is_equatable(arg, registry, trait_reg))
-//RS         }
-//RS         Type::Tuple(fields) => fields
-//RS             .iter()
-//RS             .all(|(_, field)| is_equatable(field, registry, trait_reg)),
-//RS         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
-//RS         Type::Map { key, value, .. } => {
-//RS             is_equatable(key, registry, trait_reg) && is_equatable(value, registry, trait_reg)
-//RS         }
-//RS         Type::FixedList { elem, .. } => is_equatable(elem, registry, trait_reg),
-//RS         Type::Tagged { inner, .. } => is_equatable(inner, registry, trait_reg),
-//RS         Type::InlineRange { base, .. } => is_equatable(base, registry, trait_reg),
-//RS         Type::Union(members) => members
-//RS             .iter()
-//RS             .all(|member| is_equatable(member, registry, trait_reg)),
-//RS         // Same as the prior `\0Quantity` encoding: falls through the generic
-//RS         // `Type::Apply` trait-lookup path, which never registered an
-//RS         // `Equatable` impl for the marker name, so this stayed non-equatable.
-//RS         Type::Quantity { .. } => false,
-//RS         // Same note applies to the retired `\0compute.dimension.N` encoding.
-//RS         Type::Measure(_) => false,
-//RS     }
-//RS }
-//RS 
-//RS fn native_structural_ordering(
-//RS     ty: &Type,
-//RS     registry: &TypeRegistry,
-//RS     visiting: &mut HashSet<String>,
-//RS ) -> bool {
-//RS     match ty {
-//RS         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
-//RS         Type::IntN { .. } | Type::Float32 => true,
-//RS         Type::List(inner)
-//RS         | Type::Option(inner)
-//RS         | Type::FixedList { elem: inner, .. }
-//RS         | Type::Tagged { inner, .. } => native_structural_ordering(inner, registry, visiting),
-//RS         Type::Result { ok, err } => {
-//RS             native_structural_ordering(ok, registry, visiting)
-//RS                 && native_structural_ordering(err, registry, visiting)
-//RS         }
-//RS         Type::Tuple(fields) => fields
-//RS             .iter()
-//RS             .all(|(_, field)| native_structural_ordering(field, registry, visiting)),
-//RS         Type::Named(name) if name == "U8" || name == Syntax::TYPE_ORDERING => true,
-//RS         Type::Named(name) => {
-//RS             let Some((params, target)) = registry.type_alias(name) else {
-//RS                 return false;
-//RS             };
-//RS             if !params.is_empty() || !visiting.insert(name.clone()) {
-//RS                 return false;
-//RS             }
-//RS             let ready = native_structural_ordering(target, registry, visiting);
-//RS             visiting.remove(name);
-//RS             ready
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
-//RS     if is_secret_bearing_crypto_type(ty) {
-//RS         return false;
-//RS     }
-//RS     match ty {
-//RS         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
-//RS         Type::IntN { .. } | Type::Float32 => true,
-//RS         Type::Option(inner) => native_structural_ordering(inner, registry, &mut HashSet::new()),
-//RS         Type::Result { ok, err } => {
-//RS             native_structural_ordering(ok, registry, &mut HashSet::new())
-//RS                 && native_structural_ordering(err, registry, &mut HashSet::new())
-//RS         }
-//RS         Type::List(inner) => native_structural_ordering(inner, registry, &mut HashSet::new()),
-//RS         Type::Named(name) if name == "U8" || name == Syntax::TYPE_ORDERING => true,
-//RS         // D-ENCSTREAM-SURFACE1=A: shared encoding value types compare by value.
-//RS         Type::Named(name)
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 "EncodingFormat"
-//RS                     | "EncodingErrorKind"
-//RS                     | "EncodingCause"
-//RS                     | "EncodingError"
-//RS                     | "EncodingLimits"
-//RS                     | "DataError"
-//RS                     | "DataErrorKind"
-//RS                     | "DataLimits"
-//RS             ) =>
-//RS         {
-//RS             true
-//RS         }
-//RS         Type::Named(name) => registry.contains(name) && named_fields_comparable(name, ty, registry),
-//RS         Type::Apply { name, .. } if name == "KeyRef" => true,
-//RS         Type::Apply { name, .. }
-//RS             if matches!(name.as_str(), "MutationPlan" | "VaultWrite" | "Rotation") =>
-//RS         {
-//RS             false
-//RS         }
-//RS         Type::Apply { args, .. } => args.iter().all(|a| types_comparable(a, registry)),
-//RS         Type::Tuple(fields) => fields
-//RS             .iter()
-//RS             .all(|(_, t)| native_structural_ordering(t, registry, &mut HashSet::new())),
-//RS         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
-//RS         Type::FixedList { elem, .. } => {
-//RS             native_structural_ordering(elem, registry, &mut HashSet::new())
-//RS         }
-//RS         Type::Tagged { inner, .. } => {
-//RS             native_structural_ordering(inner, registry, &mut HashSet::new())
-//RS         }
-//RS         Type::InlineRange { base, .. } => types_comparable(base, registry),
-//RS         Type::Union(_) => false,
-//RS         // Same as the prior `\0Quantity` encoding: falls through the generic
-//RS         // `Type::Apply` trait-lookup path, which never registered an
-//RS         // `Equatable` impl for the marker name, so this stayed non-comparable.
-//RS         Type::Quantity { .. } => false,
-//RS         // Same note applies to the retired `\0compute.dimension.N` encoding.
-//RS         Type::Measure(_) => false,
-//RS     }
-//RS }
-//RS 
-//RS thread_local! {
-//RS     /// Named types already entered by the comparability query running on this
-//RS     /// thread, plus the query's nesting depth (the set clears when it ends).
-//RS     static COMPARABLE_VISITED: std::cell::RefCell<(usize, HashSet<String>)> =
-//RS         std::cell::RefCell::new((0, HashSet::new()));
-//RS }
-//RS 
-//RS /// A recursive type (`enum Expr { Neg(inner: Expr) }`) reaches itself through
-//RS /// its fields, and shared field types are reached many times. A revisit adds
-//RS /// no obligation: a type still being decided is assumed comparable
-//RS /// (coinduction), and a type that finished as incomparable already ended the
-//RS /// whole query, because every caller short-circuits on the first failure. So
-//RS /// a visited type answers `true`, and each type is walked once per query.
-//RS /// Without the guard a recursive type never terminates (stack overflow while
-//RS /// checking the self-hosted compiler) and a shared graph costs exponential time.
-//RS fn named_fields_comparable(name: &str, ty: &Type, registry: &TypeRegistry) -> bool {
-//RS     let entered = COMPARABLE_VISITED.with(|state| {
-//RS         let mut state = state.borrow_mut();
-//RS         if !state.1.insert(name.to_string()) {
-//RS             return false;
-//RS         }
-//RS         state.0 += 1;
-//RS         true
-//RS     });
-//RS     if !entered {
-//RS         return true;
-//RS     }
-//RS     let comparable = incomparable_field(ty, registry).is_none();
-//RS     COMPARABLE_VISITED.with(|state| {
-//RS         let mut state = state.borrow_mut();
-//RS         state.0 -= 1;
-//RS         if state.0 == 0 {
-//RS             state.1.clear();
-//RS         }
-//RS     });
-//RS     comparable
-//RS }
-//RS 
-//RS pub(crate) fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<String> {
-//RS     match ty {
-//RS         Type::Named(name) => match registry.types.get(name) {
-//RS             Some(TypeDef::Struct { fields, .. }) => fields.iter().find_map(|(fname, _, fty)| {
-//RS                 if !types_comparable(fty, registry) {
-//RS                     Some(fname.clone())
-//RS                 } else {
-//RS                     None
-//RS                 }
-//RS             }),
-//RS             Some(TypeDef::Enum { variants, .. }) => {
-//RS                 variants.values().find_map(|(_, payload)| match payload {
-//RS                     VariantPayload::Unit => None,
-//RS                     VariantPayload::Single(t, _) if !types_comparable(t, registry) => {
-//RS                         Some("payload".to_string())
-//RS                     }
-//RS                     VariantPayload::Named(fs) => fs.iter().find_map(|f| {
-//RS                         if types_comparable(&f.ty, registry) {
-//RS                             None
-//RS                         } else {
-//RS                             Some(f.name.clone())
-//RS                         }
-//RS                     }),
-//RS                     _ => None,
-//RS                 })
-//RS             }
-//RS             // D-DIST1: distinct types wrap a comparable base; they are always comparable.
-//RS             Some(TypeDef::Distinct { .. }) => None,
-//RS             Some(TypeDef::Alias { .. }) => None,
-//RS             None => None,
-//RS         },
-//RS         Type::Option(inner) => incomparable_field(inner, registry),
-//RS         Type::Result { ok, err } => {
-//RS             incomparable_field(ok, registry).or_else(|| incomparable_field(err, registry))
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn collection_changed_in_loop(name: &str, span: Span) -> Diagnostic {
-//RS     collection_changed_in_loop_with_operation(name, None, span)
-//RS }
-//RS 
-//RS pub(crate) fn collection_changed_by_method_in_loop(
-//RS     name: &str,
-//RS     method: &str,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     collection_changed_in_loop_with_operation(name, Some(method), span)
-//RS }
-//RS 
-//RS fn collection_changed_in_loop_with_operation(
-//RS     name: &str,
-//RS     operation: Option<&str>,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     let operation = operation
-//RS         .map(|method| format!("`{name}.{method}()`"))
-//RS         .unwrap_or_else(|| format!("a mutation of `{name}`"));
-//RS     Diagnostic::from_row(
-//RS         "E0507",
-//RS         &[("name", name), ("operation", operation.as_str())],
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS pub(crate) fn collection_root_name(expr: &Expr) -> Option<String> {
-//RS     match expr {
-//RS         Expr::Ident(n, _) => Some(n.clone()),
-//RS         Expr::MethodCall {
-//RS             receiver, method, ..
-//RS         } if method == "chars" => collection_root_name(receiver),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Walk `a.b[i].c` down to the root name (`a`, possibly `self`).
-//RS pub(crate) fn expr_root_ident(expr: &Expr) -> Option<&str> {
-//RS     match expr {
-//RS         Expr::Ident(n, _) => Some(n),
-//RS         Expr::Field(inner, _, _) => expr_root_ident(inner),
-//RS         Expr::Index { base, .. } | Expr::Slice { base, .. } => expr_root_ident(base),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Types every execution tier copies implicitly (no move on read).
-//RS pub(crate) fn type_is_copy(ty: &Type) -> bool {
-//RS     ty.is_scalar()
-//RS         || matches!(ty, Type::Char)
-//RS         || is_u8_ty(ty)
-//RS         // D-TYPE2-IMAG1=A: the shared Complex carrier is two f64 values and
-//RS         // is Copy at every runtime tier.
-//RS         || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_COMPLEX)
-//RS         || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_RANGE)
-//RS }
-//RS 
-//RS pub(crate) fn is_task_type(ty: &Type) -> bool {
-//RS     matches!(ty, Type::Apply { name, .. } if name == "Task")
-//RS }
-//RS 
-//RS /// True when iterating a value must move its elements because the value carries
-//RS /// a task handle. Sema and TIR lowering use the same predicate: sema records
-//RS /// the collection move, and lowering uses the matching by-value iteration.
-//RS pub fn type_requires_owned_iteration(ty: &Type) -> bool {
-//RS     match ty {
-//RS         // A ViewMut element is iterated through the mut-view path, not by
-//RS         // consuming the outer list — do not treat it as a task-handle payload.
-//RS         Type::Apply { name, .. } if name == "ViewMut" => false,
-//RS         Type::Apply { name, args } => {
-//RS             name == "Task" || args.iter().any(type_requires_owned_iteration)
-//RS         }
-//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-//RS             type_requires_owned_iteration(inner)
-//RS         }
-//RS         Type::Tuple(fields) => fields
-//RS             .iter()
-//RS             .any(|(_, ty)| type_requires_owned_iteration(ty)),
-//RS         Type::Option(inner) | Type::Shared(inner) => type_requires_owned_iteration(inner),
-//RS         Type::Result { ok, err } => {
-//RS             type_requires_owned_iteration(ok) || type_requires_owned_iteration(err)
-//RS         }
-//RS         Type::Map { key, value, .. } => {
-//RS             type_requires_owned_iteration(key) || type_requires_owned_iteration(value)
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn prepend_send_path(
-//RS     root: &str,
-//RS     field: &str,
-//RS     mut problem: SendabilityProblem,
-//RS ) -> SendabilityProblem {
-//RS     problem.root = Some(root.to_string());
-//RS     problem.path.insert(0, field.to_string());
-//RS     problem
-//RS }
-//RS 
-//RS pub(crate) fn describe_sendability_problem(problem: &SendabilityProblem) -> String {
-//RS     match &problem.kind {
-//RS         SendProblemKind::ClosureNeedsTake => {
-//RS             if let (Some(root), false) = (problem.root.as_deref(), problem.path.is_empty()) {
-//RS                 format!(
-//RS                     "`{}` contains `{}`, whose captures cannot cross this boundary",
-//RS                     root,
-//RS                     problem.path.join(".")
-//RS                 )
-//RS             } else {
-//RS                 "the closure holds state that cannot cross this boundary".to_string()
-//RS             }
-//RS         }
-//RS         SendProblemKind::ClosureCaptures => {
-//RS             "the closure holds captures that are not sendable".to_string()
-//RS         }
-//RS         SendProblemKind::CallableValue => {
-//RS             "a function value carries executable state, not a worker data value".to_string()
-//RS         }
-//RS         SendProblemKind::TraitValue(name) => {
-//RS             format!(
-//RS                 "`{}` is a trait value, so the compiler cannot prove which concrete value crosses this boundary",
-//RS                 name
-//RS             )
-//RS         }
-//RS         SendProblemKind::ThreadConfined(name) => format!(
-//RS             "`{}` owns thread-local state and must stay on the thread that created it",
-//RS             name
-//RS         ),
-//RS         SendProblemKind::LocalReactive(name) => {
-//RS             format!("`#Local` keeps `{}` in the fast one-thread form", name)
-//RS         }
-//RS         SendProblemKind::ViewBorrow => "a view is a borrow, not an owned value".to_string(),
-//RS     }
-//RS }
-//RS 
-//RS /// True when `e` is a struct-field *value* read (not enum-literal sugar like
-//RS /// `Color.Red`, not `.clone`, not an import-alias path).
-//RS pub(crate) fn field_read_to_clone(
-//RS     e: &Expr,
-//RS     registry: &TypeRegistry,
-//RS     imports: &HashMap<String, usize>,
-//RS ) -> bool {
-//RS     match e {
-//RS         Expr::Field(inner, member, _) => {
-//RS             if member == "clone" {
-//RS                 return false;
-//RS             }
-//RS             match inner.as_ref() {
-//RS                 Expr::Ident(n, _) => {
-//RS                     registry.enum_variants(n).is_none() && !imports.contains_key(n)
-//RS                 }
-//RS                 _ => true,
-//RS             }
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
-//RS     if let Some(numeric) = crate::AST::numeric_type_from_name(name) {
-//RS         return Some(numeric);
-//RS     }
-//RS     match name {
-//RS         Syntax::TYPE_BOOL => Some(Type::Bool),
-//RS         Syntax::TYPE_STRING => Some(Type::String),
-//RS         Syntax::TYPE_CHAR => Some(Type::Char),
-//RS         Syntax::DURATION_TYPE => Some(Type::Named(Syntax::DURATION_TYPE.to_string())),
-//RS         Syntax::CLOCK_TYPE => Some(Type::Named(Syntax::CLOCK_TYPE.to_string())),
-//RS         Syntax::TYPE_AUTHORITY => Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
-//RS         Syntax::TYPE_DECIMAL => Some(Type::Named(Syntax::TYPE_DECIMAL.to_string())),
-//RS         Syntax::TYPE_FRACTION => Some(Type::Named(Syntax::TYPE_FRACTION.to_string())),
-//RS         "Date" => Some(Type::Named("Date".to_string())),
-//RS         "Instant" => Some(Type::Named("Instant".to_string())),
-//RS         "Path" => Some(Type::Named("Path".to_string())),
-//RS         Syntax::TYPE_CONDITION => Some(Type::Named(Syntax::TYPE_CONDITION.to_string())),
-//RS         "Cell" => Some(Type::Named("Cell".to_string())),
-//RS         Syntax::TYPE_LIST => Some(Type::List(Box::new(Type::Int))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-FIELDPOL1: writing to a computed field (`s.field = v`, `s.field++`) — a
-//RS /// computed field is not a writable source field, whether or not its result is
-//RS /// retained by `#Memo`.
-//RS pub(crate) fn computed_field_not_settable(field: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0339",
-//RS         format!("`{}` is a computed field — it can't be assigned", field),
-//RS         format!(
-//RS             "`{}` is declared `{} => …` — its value always comes from that formula; `#Memo` only retains the result between valid reads",
-//RS             field, field
-//RS         ),
-//RS         format!("change a stored field the `{}` formula reads, not `{}` itself", field, field),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS pub(crate) fn private_item(name: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0605",
-//RS         format!("`{}` exists but is private to its file", name),
-//RS         "only names marked `pub` can be used from another file (S18)".to_string(),
-//RS         format!(
-//RS             "add `pub` before `{}`, or don't reach across files here",
-//RS             name
-//RS         ),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// D-SHAPE-INTERNAL1=A: crossing a module boundary through a public `_name`
-//RS /// is legal but deliberately never a supported-API promise. There is no allow
-//RS /// marker for this lint, so every resolved use remains visible.
-//RS pub(crate) fn soft_public_use(name: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::lint(
-//RS         "L0601",
-//RS         format!("`{name}` is a soft-public API"),
-//RS         "a leading underscore allows outside use but carries no compatibility promise across minor releases"
-//RS             .to_string(),
-//RS         "use a public name without a leading underscore when callers need a stable API"
-//RS             .to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{
-//RS         core_crypto_nominal, is_secret_bearing_crypto_type, suggest_field, suggest_method,
-//RS     };
-//RS     use crate::AST::{InternalTag, TagMarker, Type};
-//RS 
-//RS     fn count_core_crypto_markers(ty: &Type) -> usize {
-//RS         match ty {
-//RS             Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
-//RS                 count_core_crypto_markers(inner)
-//RS             }
-//RS             Type::Map { key, value, .. } => {
-//RS                 count_core_crypto_markers(key) + count_core_crypto_markers(value)
-//RS             }
-//RS             Type::Result { ok, err } => {
-//RS                 count_core_crypto_markers(ok) + count_core_crypto_markers(err)
-//RS             }
-//RS             Type::Fn { params, ret, .. } => {
-//RS                 params.iter().map(count_core_crypto_markers).sum::<usize>()
-//RS                     + ret.as_deref().map(count_core_crypto_markers).unwrap_or(0)
-//RS             }
-//RS             Type::Apply { args, .. } => args.iter().map(count_core_crypto_markers).sum(),
-//RS             Type::Tuple(fields) => fields
-//RS                 .iter()
-//RS                 .map(|(_, ty)| count_core_crypto_markers(ty))
-//RS                 .sum(),
-//RS             Type::FixedList { elem, .. } => count_core_crypto_markers(elem),
-//RS             Type::Quantity { base, .. } => count_core_crypto_markers(base),
-//RS             Type::InlineRange { base, .. } => count_core_crypto_markers(base),
-//RS             Type::Tagged { marker, inner } => {
-//RS                 usize::from(matches!(
-//RS                     marker,
-//RS                     TagMarker::Internal(InternalTag::CoreCryptoNominal)
-//RS                 )) + count_core_crypto_markers(inner)
-//RS             }
-//RS             Type::Union(members) => members.iter().map(count_core_crypto_markers).sum(),
-//RS             Type::Int
-//RS             | Type::Float
-//RS             | Type::Bool
-//RS             | Type::String
-//RS             | Type::Char
-//RS             | Type::Named(_)
-//RS             | Type::TraitObject(_)
-//RS             | Type::IntN { .. }
-//RS             | Type::Measure(_)
-//RS             | Type::Float32 => 0,
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn crypto_nominal_provenance_is_recursive_and_never_inferred_from_a_leaf_name() {
-//RS         for leaf in ["Secret", "SigningKey", "X25519SecretKey", "SharedSecret"] {
-//RS             let local_generic = Type::Named(leaf.to_string());
-//RS             assert!(!is_secret_bearing_crypto_type(&local_generic));
-//RS             assert!(is_secret_bearing_crypto_type(&core_crypto_nominal(
-//RS                 local_generic
-//RS             )));
-//RS         }
-//RS 
-//RS         let wrapped = Type::Fn {
-//RS             params: vec![
-//RS                 Type::Shared(Box::new(Type::Named("Secret".to_string()))),
-//RS                 Type::FixedList {
-//RS                     elem: Box::new(Type::Named("SigningKey".to_string())),
-//RS                     len: crate::AST::Measure::literal("length", 1),
-//RS                 },
-//RS                 Type::Tagged {
-//RS                     marker: TagMarker::User("Audit".to_string()),
-//RS                     inner: Box::new(Type::Named("X25519SecretKey".to_string())),
-//RS                 },
-//RS                 Type::Apply {
-//RS                     name: "Holder".to_string(),
-//RS                     args: vec![Type::Named("SharedSecret".to_string())],
-//RS                 },
-//RS             ],
-//RS             ret: Some(Box::new(Type::Tuple(vec![
-//RS                 (
-//RS                     "list".to_string(),
-//RS                     Box::new(Type::List(Box::new(Type::Named("Secret".to_string())))),
-//RS                 ),
-//RS                 (
-//RS                     "maybe".to_string(),
-//RS                     Box::new(Type::Option(Box::new(Type::Named(
-//RS                         "SigningKey".to_string(),
-//RS                     )))),
-//RS                 ),
-//RS                 (
-//RS                     "result".to_string(),
-//RS                     Box::new(Type::Result {
-//RS                         ok: Box::new(Type::Named("X25519SecretKey".to_string())),
-//RS                         err: Box::new(Type::Named("SharedSecret".to_string())),
-//RS                     }),
-//RS                 ),
-//RS                 (
-//RS                     "map".to_string(),
-//RS                     Box::new(Type::Map {
-//RS                         key: Box::new(Type::String),
-//RS                         key_span: None,
-//RS                         value: Box::new(Type::Named("Secret".to_string())),
-//RS                     }),
-//RS                 ),
-//RS             ]))),
-//RS             effect_bound: None,
-//RS             param_contract: None,
-//RS             call_metadata: None,
-//RS             return_view_provenance: None,
-//RS         };
-//RS 
-//RS         let resolved = core_crypto_nominal(wrapped);
-//RS         assert_eq!(count_core_crypto_markers(&resolved), 9);
-//RS         let (flow_inner_is_secret, flow_tag_is_secret) = match &resolved {
-//RS             Type::Fn { params, .. } => match params.get(2) {
-//RS                 Some(tag @ Type::Tagged { inner, .. }) => (
-//RS                     is_secret_bearing_crypto_type(inner),
-//RS                     is_secret_bearing_crypto_type(tag),
-//RS                 ),
-//RS                 _ => (false, false),
-//RS             },
-//RS             _ => (false, false),
-//RS         };
-//RS         assert!(
-//RS             flow_inner_is_secret,
-//RS             "flow tag must preserve inner provenance"
-//RS         );
-//RS         assert!(flow_tag_is_secret, "flow tag must remain secret-bearing");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn suggest_field_never_echoes_the_rejected_identifier() {
-//RS         let only_itself = vec!["decode".to_string()];
-//RS         assert_eq!(suggest_field("decode", &only_itself).as_deref(), None);
-//RS         let family = vec![
-//RS             "decode".to_string(),
-//RS             "encode".to_string(),
-//RS             "parse".to_string(),
-//RS         ];
-//RS         assert_ne!(suggest_field("decode", &family).as_deref(), Some("decode"));
-//RS         assert_eq!(suggest_field("decod", &family).as_deref(), Some("decode"));
-//RS         let tied = vec!["decode".to_string(), "decord".to_string()];
-//RS         assert_eq!(suggest_field("decod", &tied), None);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn foreign_method_names_reach_the_jet_spelling() {
-//RS         let list = vec![
-//RS             "all".to_string(),
-//RS             "any".to_string(),
-//RS             "len".to_string(),
-//RS             "push".to_string(),
-//RS         ];
-//RS         // `add` is two edits from `all`, so edit distance alone answered with a
-//RS         // predicate combinator instead of the append it asked for (#1965).
-//RS         for foreign in ["append", "add", "push_back"] {
-//RS             assert_eq!(
-//RS                 suggest_method(foreign, &list).map(|s| s.name).as_deref(),
-//RS                 Some("push"),
-//RS                 "{foreign} should reach `push`"
-//RS             );
-//RS         }
-//RS         for foreign in ["size", "length", "count"] {
-//RS             assert_eq!(
-//RS                 suggest_method(foreign, &list).map(|s| s.name).as_deref(),
-//RS                 Some("len"),
-//RS                 "{foreign} should reach `len`"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn one_alias_row_serves_every_receiver_that_carries_the_target() {
-//RS         let map = vec!["add".to_string(), "has_key".to_string(), "len".to_string()];
-//RS         let set = vec!["add".to_string(), "has".to_string(), "len".to_string()];
-//RS         assert_eq!(
-//RS             suggest_method("contains_key", &map)
-//RS                 .map(|s| s.name)
-//RS                 .as_deref(),
-//RS             Some("has_key")
-//RS         );
-//RS         assert_eq!(
-//RS             suggest_method("contains_key", &set)
-//RS                 .map(|s| s.name)
-//RS                 .as_deref(),
-//RS             Some("has")
-//RS         );
-//RS         // `add` is the real Map/Set name, so the row that maps it to `push`
-//RS         // cannot fire on a receiver that has no `push`.
-//RS         assert_eq!(suggest_method("add", &map).map(|s| s.name).as_deref(), None);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn camel_case_reaches_the_snake_case_method_without_a_table_row() {
-//RS         let text = vec![
-//RS             "index_of".to_string(),
-//RS             "to_string".to_string(),
-//RS             "to_upper".to_string(),
-//RS         ];
-//RS         let suggestion = suggest_method("indexOf", &text).expect("camelCase should resolve");
-//RS         assert_eq!(suggestion.name, "index_of");
-//RS         assert_eq!(
-//RS             suggestion.fix,
-//RS             "did you mean `index_of`? Jet method names are snake_case"
-//RS         );
-//RS         assert_eq!(
-//RS             suggest_method("toString", &text).map(|s| s.name).as_deref(),
-//RS             Some("to_string")
-//RS         );
-//RS         // Normalizing before the table lookup is what lets one snake_case row
-//RS         // answer both spellings of a foreign name: Java's `containsKey`
-//RS         // normalizes to `contains_key`, which the table maps to `has_key`.
-//RS         let map = vec!["add".to_string(), "has_key".to_string()];
-//RS         assert_eq!(
-//RS             suggest_method("containsKey", &map)
-//RS                 .map(|s| s.name)
-//RS                 .as_deref(),
-//RS             Some("has_key")
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn true_typos_keep_the_edit_distance_fix_byte_for_byte() {
-//RS         let list = vec![
-//RS             "len".to_string(),
-//RS             "push".to_string(),
-//RS             "try_push".to_string(),
-//RS         ];
-//RS         let suggestion = suggest_method("psh", &list).expect("close typo should resolve");
-//RS         assert_eq!(suggestion.name, "push");
-//RS         assert_eq!(suggestion.fix, "did you mean `push`?");
-//RS         assert!(suggest_method("frobnicate", &list).is_none());
-//RS     }
-//RS }
-// END-PORT-PENDING 0427 crates/jet-sema/src/Sema/Diagnostics.rs:1760-2633
+// Diagnostics fragment; canonical owner: Sema/Comparability.jet.
+use jet_foundation.[Type, Expr, Diagnostic, Span, Syntax, Generics, VariantPayload]
+use jet_sema.[TypeRegistry, TypeDef, TraitRegistry, SendabilityProblem, SendProblemKind]
 
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:1760
+pub fn is_displayable(ty: Type, type_reg: TypeRegistry, trait_reg: TraitRegistry) -> Bool Never! {
+    if is_secret_bearing_crypto_type(ty) || is_one_pass_source(ty) -> return false
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> is_displayable(inner, type_reg, trait_reg)
+        .Result(ok, err) | .Map(ok, _, err) -> is_displayable(ok, type_reg, trait_reg) && is_displayable(err, type_reg, trait_reg)
+        .Named(n) -> type_reg.is_unit_type(n) || trait_reg.implements_trait(n, Generics.DISPLAY) || trait_reg.implements_trait(n, Generics.PRINTABLE) || is_core_shown_type(n) || n == Syntax.TYPE_INT || n == Syntax.TYPE_FLOAT || n == Syntax.TYPE_BOOL || n == Syntax.TYPE_STRING || n == Syntax.TYPE_CHAR
+        .Quantity(_, _) -> true
+        .Apply(name, args) -> {
+            if name == "KeyRef" -> return true
+            native_composite :: name == Syntax.TYPE_LIST || name == Syntax.TYPE_SET || name == Syntax.TYPE_RANK || name == Syntax.TYPE_PRIORITY_QUEUE || name == Syntax.TYPE_QUEUE || name == Syntax.TYPE_LRU || name == Syntax.EXPIRING_VALUE_TYPE || name == "Loadable" || name == "View"
+            if !(native_composite || trait_reg.implements_trait(name, Generics.DISPLAY) || trait_reg.implements_trait(name, Generics.PRINTABLE)) -> return false
+            loop arg in args { if !is_displayable(arg, type_reg, trait_reg) -> return false }
+            true
+        }
+        .Tuple(fields) -> {
+            loop field in fields { if !is_displayable(field.ty, type_reg, trait_reg) -> return false }
+            true
+        }
+        // D-ANY-JAI1: any Renderable bound grants interpolation.
+        .TraitObject(bounds) -> {
+            loop bound in bounds { if bound == Generics.RENDERABLE -> return true }
+            false
+        }
+        .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> false
+        .Union(members) -> {
+            loop member in members { if !is_displayable(member, type_reg, trait_reg) -> return false }
+            true
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:1843
+pub fn e0138(type_name: String, operation: String, needed_bundle: String, granted: [String], span: Span) -> Diagnostic Never! {
+    has :: if granted.is_empty() { "no operation bundles" } else { "only {granted.join(", ")}" }
+    Diagnostic.error("E0138", "`{type_name}` doesn't support {operation}", "a nominal type only gets the operations its operation bundles grant; `{type_name}` has {has}", "add `{needed_bundle}` before the declaration, or convert to the base type first", Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:1872
+pub fn e0139(clause_kw: String, span: Span?) -> Diagnostic Never! {
+    Diagnostic.error("E0139", "a `#{clause_kw}` condition can't do I/O", "a contract is checked at every call and must be a pure claim about values", "move the effect out; keep only a pure test", span)
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:1883
+pub fn is_debuggable(ty: Type, type_reg: TypeRegistry, trait_reg: TraitRegistry) -> Bool Never! {
+    if is_secret_bearing_crypto_type(ty) -> return false
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> is_debuggable(inner, type_reg, trait_reg)
+        .Result(ok, err) | .Map(ok, _, err) -> is_debuggable(ok, type_reg, trait_reg) && is_debuggable(err, type_reg, trait_reg)
+        .Named(n) -> type_reg.is_unit_type(n) || trait_reg.implements_trait(n, Generics.DEBUG) || is_core_shown_type(n)
+        .Quantity(_, _) -> true
+        .Apply(name, args) -> {
+            if name == "KeyRef" -> return true
+            if !trait_reg.implements_trait(name, Generics.DEBUG) -> return false
+            loop arg in args { if !is_debuggable(arg, type_reg, trait_reg) -> return false }
+            true
+        }
+        .Tuple(fields) -> {
+            loop field in fields { if !is_debuggable(field.ty, type_reg, trait_reg) -> return false }
+            true
+        }
+        .TraitObject(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> false
+        .Union(members) -> {
+            loop member in members { if !is_debuggable(member, type_reg, trait_reg) -> return false }
+            true
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:1929
+// Canonical equivalent: Comparability.jet::sema_type_equatable.
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2005
+// Canonical equivalent: Comparability.jet::sema_comparability_native_ordering.
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2040
+// Canonical equivalent: Comparability.jet::sema_types_comparable (structural query).
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2099
+// COMPARABLE_VISITED is replaced by canonical SemaComparabilityQuery.visited;
+// explicit query ownership preserves coinduction without native TLS (#4494).
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2114
+// Canonical equivalent: Comparability.jet::sema_comparability_named_fields.
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2137
+// Canonical equivalent: Comparability.jet::sema_incomparable_field and
+// sema_comparability_definition_incomparable_field (all struct/enum arms).
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2176
+pub fn collection_changed_in_loop(name: String, span: Span) -> Diagnostic Never! {
+    collection_changed_in_loop_with_operation(name, None, span)
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2180
+pub fn collection_changed_by_method_in_loop(name: String, method: String, span: Span) -> Diagnostic Never! {
+    collection_changed_in_loop_with_operation(name, Val(method), span)
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2188
+fn collection_changed_in_loop_with_operation(name: String, method: String?, span: Span) -> Diagnostic Never! {
+    operation :: if method == { .Val(value) -> "`{name}.{value}()`"; .None -> "a mutation of `{name}`" }
+    Diagnostic.from_row("E0507", [("name", name), ("operation", operation)], Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2203
+pub fn collection_root_name(expr: Expr) -> String? {
+    if expr == {
+        .Ident(name, _) -> Val(name)
+        .MethodCall(receiver, method, _, _) -> if method == "chars" { collection_root_name(receiver) } else { None }
+        else -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2214
+pub fn expr_root_ident(expr: Expr) -> String? {
+    if expr == {
+        .Ident(name, _) -> Val(name)
+        .Field(inner, _, _) -> expr_root_ident(inner)
+        .Index(base, _, _) | .Slice(base, _, _, _) -> expr_root_ident(base)
+        else -> None
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2224
+pub fn type_is_copy(ty: Type) -> Bool Never! {
+    if ty.is_scalar() || is_u8_ty(ty) -> return true
+    if ty == {
+        .Char -> true
+        .Named(name) -> name == Syntax.TYPE_COMPLEX || name == Syntax.TYPE_RANGE
+        else -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2234
+pub fn is_task_type(ty: Type) -> Bool Never! {
+    if ty == { .Apply(name, _) -> name == "Task"; else -> false }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2241
+pub fn type_requires_owned_iteration(ty: Type) -> Bool Never! {
+    if ty == {
+        .Apply(name, args) -> {
+            if name == "ViewMut" -> return false
+            if name == "Task" -> return true
+            loop arg in args { if type_requires_owned_iteration(arg) -> return true }
+            false
+        }
+        .List(inner) | .FixedList(inner, _) | .Option(inner) | .Shared(inner) -> type_requires_owned_iteration(inner)
+        .Tuple(fields) -> {
+            loop field in fields { if type_requires_owned_iteration(field.ty) -> return true }
+            false
+        }
+        .Result(ok, err) | .Map(ok, _, err) -> type_requires_owned_iteration(ok) || type_requires_owned_iteration(err)
+        else -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2266
+pub fn prepend_send_path(root: String, field: String, problem: SendabilityProblem) -> SendabilityProblem Never! {
+    problem.root = Val(root)
+    &problem.path.insert(0, field)
+    problem
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2276
+pub fn describe_sendability_problem(problem: SendabilityProblem) -> String Never! {
+    if problem.kind == {
+        .ClosureNeedsTake -> {
+            if problem.root == .Val(root) {
+                if !problem.path.is_empty() -> return "`{root}` contains `{problem.path.join(".")}`, whose captures cannot cross this boundary"
+            }
+            "the closure holds state that cannot cross this boundary"
+        }
+        .ClosureCaptures -> "the closure holds captures that are not sendable"
+        .CallableValue -> "a function value carries executable state, not a worker data value"
+        .TraitValue(name) -> "`{name}` is a trait value, so the compiler cannot prove which concrete value crosses this boundary"
+        .ThreadConfined(name) -> "`{name}` owns thread-local state and must stay on the thread that created it"
+        .LocalReactive(name) -> "`#Local` keeps `{name}` in the fast one-thread form"
+        .ViewBorrow -> "a view is a borrow, not an owned value"
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2314
+pub fn field_read_to_clone(expr: Expr, registry: TypeRegistry, imports: [String:Int]) -> Bool Never! {
+    if expr == {
+        .Field(inner, member, _) -> {
+            if member == "clone" -> return false
+            if inner == { .Ident(name, _) -> registry.enum_variants(name) == None && !imports.contains_key(name); else -> true }
+        }
+        else -> false
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2335
+pub fn builtin_type_from_ident(name: String) -> Type? {
+    if numeric_type_from_name(name) == .Val(numeric) -> return Val(numeric)
+    if name == Syntax.TYPE_BOOL -> return Val(Type.Bool)
+    if name == Syntax.TYPE_STRING -> return Val(Type.String)
+    if name == Syntax.TYPE_CHAR -> return Val(Type.Char)
+    if name == Syntax.DURATION_TYPE || name == Syntax.CLOCK_TYPE || name == Syntax.TYPE_AUTHORITY || name == Syntax.TYPE_DECIMAL || name == Syntax.TYPE_FRACTION || name == "Date" || name == "Instant" || name == "Path" || name == Syntax.TYPE_CONDITION || name == "Cell" -> return Val(Type.Named(name))
+    if name == Syntax.TYPE_LIST -> return Val(Type.List(Type.Int))
+    None
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2361
+pub fn computed_field_not_settable(field: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0339", "`{field}` is a computed field — it can't be assigned", "`{field}` is declared `{field} => …` — its value always comes from that formula; `#Memo` only retains the result between valid reads", "change a stored field the `{field}` formula reads, not `{field}` itself", Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2374
+pub fn private_item(name: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.error("E0605", "`{name}` exists but is private to its file", "only names marked `pub` can be used from another file (S18)", "add `pub` before `{name}`, or don't reach across files here", Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/Diagnostics.rs:2390
+pub fn soft_public_use(name: String, span: Span) -> Diagnostic Never! {
+    Diagnostic.lint("L0601", "`{name}` is a soft-public API", "a leading underscore allows outside use but carries no compatibility promise across minor releases", "use a public name without a leading underscore when callers need a stable API", Val(span))
+}

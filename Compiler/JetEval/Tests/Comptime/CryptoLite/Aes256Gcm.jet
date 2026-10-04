@@ -1,0 +1,17 @@
+use jet_comptime.Comptime.CryptoLite.Aes256Gcm.[seal, open]
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:273
+fn hex(text: String) -> [U8] {
+    text.as_bytes().chunks_exact(2).map(fn(pair) {
+        digit := fn(byte: U8) -> U8 { if byte <= b'9' -> byte - b'0' else -> byte - b'a' + 10 }
+        digit(pair[0]) * 16 + digit(pair[1])
+    }).collect::<[U8]>()
+}
+// Rust: crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:290
+#Test("nist_cavs_empty_payload") {
+    key := hex("b52c505a37d78eda5dd34f20c22540ea1b58963cf8e5bf8ffa85f9f2492505b4")
+    nonce := hex("516c33929df5a3284ff463d7")
+    expected := hex("bdc1ac884d332457a1d2664f168c76f0")
+    sealed := seal(&key, &nonce, [], []).unwrap()
+    assert(sealed == expected)
+    assert(open(&key, &nonce, &sealed, []).unwrap() == [U8].new())
+}

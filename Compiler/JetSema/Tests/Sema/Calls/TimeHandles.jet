@@ -1,0 +1,15 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR]
+use JetSema.Tests.Sema.Statements05.[statements05_diagnostics]
+
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/options_rng.rs:19-135 (behavioral control; no inline Rust tests)
+#Test("option_lift2_requires_two_optional_inputs") {
+    diagnostics :: statements05_diagnostics("fn run() {{ _ :: Option.lift2((x, y) -> x + y, 1, 2) }}\n")
+    assert(diagnostics.any(fn(d: Diagnostic) { d.code == "E0108" }))
+}
+// Rust: crates/jet-sema/src/Sema/CheckerInfer/calls/options_rng.rs:140-177 (behavioral control)
+#Test("option_zip_preserves_independent_payload_types") {
+    diagnostics :: statements05_diagnostics("fn run(a: Int?, b: String?) {{ pair: (a: Int, b: String)? :: a.zip(b)\n _ :: pair }}\n")
+    assert(!diagnostics.any(fn(d: Diagnostic) { d.severity == DIAGNOSTIC_ERROR }), "{diagnostics:?}")
+    rejected :: statements05_diagnostics("fn run(a: Int?) {{ _ :: a.zip(1) }}\n")
+    assert(rejected.any(fn(d: Diagnostic) { d.code == "E0108" }))
+}

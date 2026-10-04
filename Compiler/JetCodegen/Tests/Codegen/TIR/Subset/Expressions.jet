@@ -1,0 +1,31 @@
+use jet_codegen.Codegen.TIR.Subset.Expressions.[is_binder_ref_name]
+use jet_codegen.Codegen.[mangle_generated]
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/expressions.rs:1046-1057
+#Test("binder_ref_accepts_nonempty_ascii_site_and_slot") {
+    prefix :: mangle_generated("binder_ref_")
+    assert(is_binder_ref_name("{prefix}0_0"))
+    assert(is_binder_ref_name("{prefix}12345_67890"))
+    assert(is_binder_ref_name("{prefix}001_002"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/expressions.rs:1046-1057
+#Test("binder_ref_rejects_missing_parts_and_extra_separators") {
+    prefix :: mangle_generated("binder_ref_")
+    assert(!is_binder_ref_name("binder_ref_1_2"))
+    assert(!is_binder_ref_name(prefix))
+    assert(!is_binder_ref_name("{prefix}12"))
+    assert(!is_binder_ref_name("{prefix}_2"))
+    assert(!is_binder_ref_name("{prefix}1_"))
+    assert(!is_binder_ref_name("{prefix}1_2_3"))
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/subset/expressions.rs:1053-1057
+#Test("binder_ref_rejects_non_ascii_digits_and_signs") {
+    prefix :: mangle_generated("binder_ref_")
+    assert(!is_binder_ref_name("{prefix}١_2"))
+    assert(!is_binder_ref_name("{prefix}1_２"))
+    assert(!is_binder_ref_name("{prefix}+1_2"))
+    assert(!is_binder_ref_name("{prefix}1_-2"))
+    assert(!is_binder_ref_name("{prefix}1_2x"))
+}

@@ -1,0 +1,37 @@
+use jet_bootstrap.EntryCodec.[emit_entry_conversion_helpers, integer_as_i128]
+use jet_foundation.MIR.MirRuntimeValue
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1754 (behavioral control; no original inline test)
+#Test("entry_codec_shared_helpers_preserve_alias_and_guard_release_paths") {
+    source := ""
+    emit_entry_conversion_helpers(&source)!
+    assert(source.contains("Source Shared owner alias was already released"))
+    assert(source.contains("Source Shared weak upgrade resolved an inconsistent physical root"))
+    assert(source.contains("self.alias.take()"))
+    assert(source.contains("self.guard.take()"))
+    assert(source.contains("drop(self.guard.take())"))
+    assert(source.contains("(self.read)(guard).map(Some)"))
+    assert(source.contains("__jet_bootstrap_shared_outcome((self.suspend)(guard))"))
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:1754 (behavioral control; no original inline test)
+#Test("entry_codec_checked_helper_errors_keep_field_order_and_exact_integer_carriers") {
+    source := ""
+    emit_entry_conversion_helpers(&source)!
+    assert(source.contains("record is missing checked field"))
+    assert(source.contains("is out of checked order; expected"))
+    assert(source.contains("enum payload field name/order differs from checked MIR"))
+    assert(source.contains("tuple result is missing a checked field"))
+    assert(source.contains("entry integer does not have an exact integer carrier"))
+    assert(source.contains("entry fixed-width integer does not have an exact integer carrier"))
+    assert(source.contains("CtBigInt::from_str(&value)"))
+}
+
+// Rust: Compiler/Bootstrap/Host/EntryCodec.rs:3618 (behavioral control; no original inline test)
+#Test("entry_codec_i128_projection_is_exact_and_rejects_other_carriers") {
+    assert(integer_as_i128(MirRuntimeValue.Int(-7)) == Some(I128.from(-7)))
+    assert(integer_as_i128(MirRuntimeValue.BigInt("9223372036854775808")) == Some(I128.from_str("9223372036854775808")!))
+    assert(integer_as_i128(MirRuntimeValue.BigInt("170141183460469231731687303715884105728")) == None)
+    assert(integer_as_i128(MirRuntimeValue.BigInt("not-an-integer")) == None)
+    assert(integer_as_i128(MirRuntimeValue.Bool(true)) == None)
+}

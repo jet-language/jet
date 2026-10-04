@@ -1,0 +1,38 @@
+use Codegen.Library.[LibraryExport, render_c_header, render_python, render_swift]
+use Codegen.Embedding.[ExportOwnership, ExportScalar]
+use jet_foundation.MIR.[MirAccess, MirOwnership]
+
+// Rust: crates/jet-codegen/src/Codegen/Library.rs:2227
+#Test("generated_foreign_projections_use_the_native_symbol") {
+    exports :: [LibraryExport]{LibraryExport{
+        name: "on_tick", symbol: "on_tick", callee: "on_tick",
+        scalar: .Int, params: 1, conventions: [MirAccess.Read],
+        ownership: ExportOwnership{parameters: [MirOwnership.from_access(.Read)], return_views: None}
+    }}
+    header :: render_c_header("flightlog", exports)
+    python :: render_python("flightlog", exports)
+    assert(header.contains("int64_t on_tick(int64_t p0);"))
+    assert(python.contains("self._lib.on_tick"))
+    assert(exports[0].symbol == "on_tick")
+}
+
+// Rust: crates/jet-codegen/src/Codegen/Library.rs:2248
+#Test("generated_text_projections_check_pointer_length_and_utf8") {
+    exports :: [LibraryExport]{LibraryExport{
+        name: "greet", symbol: "greet", callee: "greet",
+        scalar: .Text, params: 1, conventions: [MirAccess.Read],
+        ownership: ExportOwnership{parameters: [MirOwnership.from_access(.Read)], return_views: None}
+    }}
+    python :: render_python("flightlog", exports)
+    swift :: render_swift(exports)
+    assert(python.contains("address = ctypes.cast(result.ptr, ctypes.c_void_p).value"))
+    assert(python.contains("result.len > sys.maxsize - address"))
+    assert(python.contains(".decode(\"utf-8\")"))
+    assert(swift.contains("case invalidPointerLength"))
+    assert(swift.contains("case invalidUTF8"))
+    assert(swift.contains("String(bytes: bytes, encoding: .utf8)"))
+    assert(swift.contains("mutating func release()"))
+    assert(swift.contains("jet_text_free(self)"))
+    assert(swift.contains("self.ptr = nil"))
+    assert(swift.contains("self.len = 0"))
+}

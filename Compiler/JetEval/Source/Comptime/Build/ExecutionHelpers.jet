@@ -1,230 +1,90 @@
-// PORT-PENDING 0563 crates-jet-comptime-src-comptime-build-errors-keys-module-group: crates/jet-comptime/src/Comptime/Build/execution_helpers.rs:1-226
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::actions_policy::{ActionCache, BuildAction, BuildResourcePool, BuildResourcePoolSpec};
-//RS use super::cache_cas::{ActionCacheStatus, CacheHitReason, CacheMissReason};
-//RS use super::errors_keys::{action_cycle_error, target_cycle_error, BuildError};
-//RS use super::handles::{ActionId, TargetId};
-//RS use super::plan_graph::{BuildExecutionMetrics, BuildExecutionStage, BuildPlan};
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS 
-//RS pub(super) fn default_resource_pools() -> Vec<BuildResourcePoolSpec> {
-//RS     vec![
-//RS         BuildResourcePoolSpec::new(BuildResourcePool::CPU, 0),
-//RS         BuildResourcePoolSpec::new(BuildResourcePool::Memory, 0),
-//RS         BuildResourcePoolSpec::new(BuildResourcePool::Linker, 1),
-//RS         BuildResourcePoolSpec::new(BuildResourcePool::Console, 1),
-//RS         BuildResourcePoolSpec::new(BuildResourcePool::GPU, 1),
-//RS     ]
-//RS }
-//RS 
-//RS pub(super) fn action_pools(action: &BuildAction) -> Vec<BuildResourcePool> {
-//RS     if action.resource_pools.is_empty() {
-//RS         vec![BuildResourcePool::CPU]
-//RS     } else {
-//RS         action.resource_pools.iter().cloned().collect()
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn cache_status_reason(status: ActionCacheStatus) -> &'static str {
-//RS     match status {
-//RS         ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched) => {
-//RS             "local action record matched"
-//RS         }
-//RS         ActionCacheStatus::Hit(CacheHitReason::DeclaredOutputsRestored) => {
-//RS             "declared outputs restored"
-//RS         }
-//RS         ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord) => "no local action record",
-//RS         ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged) => "action key changed",
-//RS         ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing) => {
-//RS             "declared output missing"
-//RS         }
-//RS         ActionCacheStatus::Miss(CacheMissReason::CacheRecordInvalid) => {
-//RS             "local cache record or blob is invalid"
-//RS         }
-//RS         ActionCacheStatus::Miss(CacheMissReason::CacheRestoreFailed) => {
-//RS             "local cache output could not be restored"
-//RS         }
-//RS         ActionCacheStatus::Miss(CacheMissReason::RemoteDenied) => "remote cache denied by policy",
-//RS         ActionCacheStatus::Miss(CacheMissReason::UncachedAction) => "action is uncached",
-//RS         ActionCacheStatus::Miss(CacheMissReason::FrontEndIncomplete) => {
-//RS             "cache lookup blocked until parser, sema, policy, and diagnostics complete"
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn execution_stages(
-//RS     plan: &BuildPlan,
-//RS     prereqs: &BTreeMap<ActionId, Vec<ActionId>>,
-//RS ) -> Result<Vec<BuildExecutionStage>, BuildError> {
-//RS     let mut remaining = prereqs.keys().copied().collect::<BTreeSet<_>>();
-//RS     let mut indegree = prereqs
-//RS         .iter()
-//RS         .map(|(action, dependencies)| (*action, dependencies.len()))
-//RS         .collect::<BTreeMap<_, _>>();
-//RS     let mut dependents = BTreeMap::<ActionId, Vec<ActionId>>::new();
-//RS     for (action, dependencies) in prereqs {
-//RS         for dependency in dependencies {
-//RS             dependents.entry(*dependency).or_default().push(*action);
-//RS         }
-//RS     }
-//RS     for actions in dependents.values_mut() {
-//RS         actions.sort();
-//RS     }
-//RS     let mut ready = indegree
-//RS         .iter()
-//RS         .filter_map(|(action, count)| (*count == 0).then_some(*action))
-//RS         .collect::<BTreeSet<_>>();
-//RS     let mut stages = Vec::new();
-//RS     while !ready.is_empty() {
-//RS         let current = ready.into_iter().collect::<Vec<_>>();
-//RS         for action in &current {
-//RS             remaining.remove(action);
-//RS         }
-//RS         let mut next_ready = BTreeSet::new();
-//RS         for action in &current {
-//RS             for dependent in dependents.get(action).into_iter().flatten() {
-//RS                 let count = indegree
-//RS                     .get_mut(dependent)
-//RS                     .expect("dependency graph node must have an indegree");
-//RS                 *count -= 1;
-//RS                 if *count == 0 {
-//RS                     next_ready.insert(*dependent);
-//RS                 }
-//RS             }
-//RS         }
-//RS         stages.push(BuildExecutionStage {
-//RS             index: stages.len(),
-//RS             actions: current,
-//RS         });
-//RS         ready = next_ready;
-//RS     }
-//RS     if !remaining.is_empty() {
-//RS         return Err(action_cycle_error(plan, &remaining, prereqs));
-//RS     }
-//RS     Ok(stages)
-//RS }
-//RS 
-//RS pub(super) fn execution_metrics(
-//RS     actions: &[BuildAction],
-//RS     stages: &[BuildExecutionStage],
-//RS ) -> BuildExecutionMetrics {
-//RS     BuildExecutionMetrics {
-//RS         actions_total: actions.len(),
-//RS         parallel_stages: stages.len(),
-//RS         max_parallel_actions: stages
-//RS             .iter()
-//RS             .map(|stage| stage.actions.len())
-//RS             .max()
-//RS             .unwrap_or(0),
-//RS         cacheable_actions: actions
-//RS             .iter()
-//RS             .filter(|action| action.cache == ActionCache::Cached)
-//RS             .count(),
-//RS         phony_actions: actions
-//RS             .iter()
-//RS             .filter(|action| action.cache == ActionCache::UncachedPhony)
-//RS             .count(),
-//RS         ..BuildExecutionMetrics::default()
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn collect_target_actions(
-//RS     plan: &BuildPlan,
-//RS     target: TargetId,
-//RS     visiting: &mut Vec<TargetId>,
-//RS     out: &mut BTreeSet<ActionId>,
-//RS ) -> Result<(), BuildError> {
-//RS     if visiting.contains(&target) {
-//RS         return Err(target_cycle_error(plan, visiting, target));
-//RS     }
-//RS     visiting.push(target);
-//RS     let target_ref = plan
-//RS         .targets
-//RS         .get(target.0)
-//RS         .ok_or(BuildError::UnknownTarget(target))?;
-//RS     for dep in &target_ref.deps {
-//RS         collect_target_actions(plan, dep.id, visiting, out)?;
-//RS     }
-//RS     out.extend(target_ref.actions.iter().map(|action| action.id));
-//RS     visiting.pop();
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::super::actions_policy::ActionSpec;
-//RS     use super::super::context::BuildContext;
-//RS     use super::super::errors_keys::BuildError;
-//RS     use super::super::handles::TargetRef;
-//RS     use super::super::plan_graph::MAX_ACTIONS;
-//RS     use super::super::targets::TargetSpec;
-//RS 
-//RS     #[test]
-//RS     fn action_admission_budget_accepts_the_limit_and_rejects_the_next_action() {
-//RS         let mut context = BuildContext::new();
-//RS         let mut target_spec = TargetSpec::new();
-//RS         for index in 0..MAX_ACTIONS {
-//RS             let mut spec = ActionSpec::cached(["true"]).with_outputs([format!("out/{index}")]);
-//RS             if index > 0 {
-//RS                 spec = spec.with_inputs([format!("out/{}", index - 1)]);
-//RS             }
-//RS             let action = context
-//RS                 .action(format!("scale-{index}"), spec)
-//RS                 .expect("the declared action budget must be usable");
-//RS             target_spec = target_spec.with_action(action);
-//RS         }
-//RS 
-//RS         let error = context
-//RS             .action(
-//RS                 "scale-overflow",
-//RS                 ActionSpec::cached(["true"]).with_outputs(["out/overflow"]),
-//RS             )
-//RS             .expect_err("the action graph must fail closed at its scale budget");
-//RS         assert!(matches!(
-//RS             error,
-//RS             BuildError::PackagedPlugin(message) if message.contains("100000")
-//RS         ));
-//RS         let target = context
-//RS             .add_library("scale", target_spec)
-//RS             .expect("the limit-sized graph must remain buildable");
-//RS         let plan = context.plan_with_default(target).unwrap();
-//RS         let model = plan
-//RS             .execution_model()
-//RS             .expect("the limit-sized graph must schedule");
-//RS         assert_eq!(model.metrics.actions_total, MAX_ACTIONS);
-//RS         assert_eq!(model.stages.len(), MAX_ACTIONS);
-//RS         assert!(model.stages.iter().all(|stage| stage.actions.len() == 1));
-//RS     }
-//RS 
-//RS     /// #1522 criterion 4: a target cycle is reported as the whole loop, in
-//RS     /// the order the walk found it.
-//RS     ///
-//RS     /// `fn build` cannot express this — a target dependency needs a target
-//RS     /// handle, and a handle only exists once its target is registered — so
-//RS     /// the loop is closed on the finished plan. The detection and rendering
-//RS     /// under test are the ones every `selected_action_ids` caller reaches.
-//RS     #[test]
-//RS     fn target_dependency_cycle_names_every_node_in_traversal_order() {
-//RS         let mut context = BuildContext::new();
-//RS         let core = context.add_library("core", TargetSpec::new()).unwrap();
-//RS         let app = context
-//RS             .add_executable("app", TargetSpec::new().with_dep(core))
-//RS             .unwrap();
-//RS         let mut plan = context.plan_with_default(app).unwrap();
-//RS         plan.targets[core.id().0].deps.push(TargetRef::from(app));
-//RS 
-//RS         match plan.selected_action_ids().unwrap_err() {
-//RS             BuildError::TargetDependencyCycle(cycle) => {
-//RS                 assert_eq!(
-//RS                     cycle.nodes().to_vec(),
-//RS                     vec!["app", "core", "app"],
-//RS                     "the cycle must be the walked path, not the visited set"
-//RS                 );
-//RS                 assert_eq!(cycle.chain(), "`app` -> `core` -> `app`");
-//RS             }
-//RS             other => panic!("a cyclic target graph must report a target cycle: {other:?}"),
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0563 crates/jet-comptime/src/Comptime/Build/execution_helpers.rs:1-226
+use jet_comptime.Comptime.Build.ActionsPolicy.[ActionCache, BuildAction, BuildResourcePool, BuildResourcePoolSpec]
+use jet_comptime.Comptime.Build.CacheCas.[ActionCacheStatus, CacheHitReason, CacheMissReason]
+use jet_comptime.Comptime.Build.ErrorsKeys.[action_cycle_error, target_cycle_error, BuildError]
+use jet_comptime.Comptime.Build.Handles.[ActionId, TargetId]
+use jet_comptime.Comptime.Build.PlanGraph.[BuildExecutionMetrics, BuildExecutionStage, BuildPlan]
+use std.collections.BTreeSet
 
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_helpers.rs:8
+fn default_resource_pools() -> [BuildResourcePoolSpec] {
+    [BuildResourcePoolSpec.new(BuildResourcePool.CPU, 0),
+     BuildResourcePoolSpec.new(BuildResourcePool.Memory, 0),
+     BuildResourcePoolSpec.new(BuildResourcePool.Linker, 1),
+     BuildResourcePoolSpec.new(BuildResourcePool.Console, 1),
+     BuildResourcePoolSpec.new(BuildResourcePool.GPU, 1)]
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_helpers.rs:18
+fn action_pools(action: &BuildAction) -> [BuildResourcePool] {
+    if action.resource_pools.is_empty() { [BuildResourcePool.CPU] }
+    else { action.resource_pools.iter().cloned().collect() }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_helpers.rs:26
+fn cache_status_reason(status: ActionCacheStatus) -> String {
+    status == {
+        Hit(LocalActionRecordMatched) -> "local action record matched"
+        Hit(DeclaredOutputsRestored) -> "declared outputs restored"
+        Miss(NoLocalActionRecord) -> "no local action record"
+        Miss(ActionKeyChanged) -> "action key changed"
+        Miss(DeclaredOutputMissing) -> "declared output missing"
+        Miss(CacheRecordInvalid) -> "local cache record or blob is invalid"
+        Miss(CacheRestoreFailed) -> "local cache output could not be restored"
+        Miss(RemoteDenied) -> "remote cache denied by policy"
+        Miss(UncachedAction) -> "action is uncached"
+        Miss(FrontEndIncomplete) -> "cache lookup blocked until parser, sema, policy, and diagnostics complete"
+    }
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_helpers.rs:53
+// GATE #4499: action-handle map/set keys use canonical equality and ordering.
+fn execution_stages(plan: &BuildPlan, prereqs: &[ActionId:[ActionId]]) -> [BuildExecutionStage] BuildError! {
+    remaining := BTreeSet<ActionId>.new()
+    indegree: [ActionId:USize] = [:]
+    dependents: [ActionId:[ActionId]] = [:]
+    for (action, dependencies) in prereqs {
+        _ :: remaining.insert(action)
+        indegree.insert(action, dependencies.len())
+        for dependency in dependencies {
+            dependents.entry(dependency).or_default().push(action)
+        }
+    }
+    for actions in dependents.values_mut() { actions.sort() }
+    ready := BTreeSet<ActionId>.new()
+    for (action, count) in &indegree { if count == 0 { _ :: ready.insert(action) } }
+    stages: [BuildExecutionStage] = []
+    while !ready.is_empty() {
+        current := ready.into_iter().collect::<[ActionId]>()
+        for action in &current { _ :: remaining.remove(action) }
+        next_ready := BTreeSet<ActionId>.new()
+        for action in &current {
+            if followers := dependents.get(action) {
+                for dependent in followers {
+                    count := indegree.get_mut(dependent).expect("dependency graph node must have an indegree")
+                    count.* -= 1
+                    if count.* == 0 { _ :: next_ready.insert(dependent) }
+                }
+            }
+        }
+        stages.push(BuildExecutionStage { index: stages.len(), actions: ^current })
+        ready = ^next_ready
+    }
+    if !remaining.is_empty() { fail action_cycle_error(plan, &remaining, prereqs) }
+    stages
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_helpers.rs:105
+fn execution_metrics(actions: &[BuildAction], stages: &[BuildExecutionStage]) -> BuildExecutionMetrics {
+    metrics := BuildExecutionMetrics.default()
+    metrics.actions_total = actions.len()
+    metrics.parallel_stages = stages.len()
+    metrics.max_parallel_actions = stages.iter().map(fn(stage) { stage.actions.len() }).max().unwrap_or(0)
+    metrics.cacheable_actions = actions.iter().filter(fn(action) { action.cache == ActionCache.Cached }).count()
+    metrics.phony_actions = actions.iter().filter(fn(action) { action.cache == ActionCache.UncachedPhony }).count()
+    metrics
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_helpers.rs:129
+fn collect_target_actions(plan: &BuildPlan, target: TargetId, visiting: &[TargetId], out: &BTreeSet<ActionId>) -> Unit BuildError! {
+    if visiting.contains(&target) { fail target_cycle_error(plan, visiting, target) }
+    visiting.push(target)
+    target_ref := plan.targets.get(target.0) == { Val(t) -> t; None -> { fail BuildError.UnknownTarget(target) } }
+    for dep in &target_ref.deps { collect_target_actions(plan, dep.id, visiting, out)? }
+    out.extend(target_ref.actions.iter().map(fn(action) { action.id }))
+    _ :: visiting.pop()
+}

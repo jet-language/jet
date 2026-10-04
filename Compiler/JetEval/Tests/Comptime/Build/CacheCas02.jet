@@ -1,0 +1,64 @@
+use jet_eval.Comptime.Build.cache_cas.[RemoteBlobStore, atomic_restore_file]
+use core.sys.target.selected_family
+use std.[fs, env, process, thread]
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.os.unix.fs.symlink
+
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3602
+// GATE #4494: real native atomic counter, process identity and temp directory.
+NEXT :: AtomicU64.new(0)
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3603
+fn temp(name: String) -> OSPath {
+    path :: env.temp_dir().join("jet-cas-{name}-{process.id()}-{NEXT.fetch_add(1, Ordering.Relaxed)}")
+    _ :: fs.remove_dir_all(path).ok()
+    fs.create_dir_all(path)!
+    path
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3615
+#Test("put_blob_rejects_cache_root_and_blob_tree_symlinks") {
+    if selected_family() != "unix" -> return
+    outside :: temp("outside")
+    root_parent :: temp("root-link")
+    symlink(outside, root_parent.join("cache"))!
+    assert(RemoteBlobStore.new(root_parent.join("cache")).put_blob("secret".bytes()).is_err())
+    assert_eq(fs.read_dir(outside)!.count(), 0)
+    root :: temp("blob-link")
+    cas :: root.join("cache")
+    fs.create_dir_all(cas)!
+    symlink(outside, cas.join("blobs"))!
+    assert(RemoteBlobStore.new(cas).put_blob("secret".bytes()).is_err())
+    assert_eq(fs.read_dir(outside)!.count(), 0)
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3633
+#Test("known_digest_blob_is_never_read") {
+    if selected_family() != "unix" -> return
+    root :: temp("read-link")
+    cas :: RemoteBlobStore.new(root.join("cas"))
+    digest :: cas.put_blob("host-bytes".bytes())!
+    blob :: cas.blob_path(digest)!
+    fs.remove_file(blob)!
+    host :: root.join("host")
+    fs.write(host, "host-bytes".bytes())!
+    symlink(host, blob)!
+    assert(cas.read_blob(digest).is_err())
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/cache_cas.rs:3646
+#Test("concurrent_same_size_restores_use_unique_create_new_temps") {
+    if selected_family() != "unix" -> return
+    root :: temp("concurrent-restore")
+    output :: root.join("out")
+    payloads := [[U8]]{}
+    loop index in 0..<16 {
+        digits :: index.to_string().pad_start(8, '0')
+        &payloads.push("payload-{digits}".bytes())
+    }
+    // GATE #4494: scoped real threads borrow payload/root/output; every join and IO failure propagates.
+    thread.scope(fn(scope) {
+        jobs := []
+        loop payload in payloads -> &jobs.push(scope.spawn(fn() { atomic_restore_file(root, output, payload) }))
+        loop job in jobs -> job.join()!!
+    })
+    final_bytes :: fs.read(output)!
+    assert(payloads.contains(final_bytes))
+    assert(!fs.read_dir(root)!.flatten().any(fn(entry) { entry.file_name().to_string_lossy().starts_with(".jet-restore-") }))
+}

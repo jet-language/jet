@@ -1,0 +1,31 @@
+use jet_comptime.Comptime.EncodingLite.*
+use jet_comptime.Comptime.JSONInterp.[json_variant, json_payload]
+use jet_foundation.AST.CtValue
+// Behavioral controls for Rust EncodingLite.rs:38/55 (no inline Rust tests).
+#Test("csv_render_quotes_separator_and_embedded_quote") {
+    assert_eq(csv_render(&[["a,b", "c\"d"]]), "\"a,b\",\"c\"\"d\"\n")
+    assert(csv_parse("a,b\n", "xx", false, false).is_err())
+}
+// Behavioral control for Rust EncodingLite.rs:87/154/255/315.
+#Test("toml_preserves_root_insertion_and_array_table_descent") {
+    tree := toml_parse("title = \"x\"\nport = 7\n[[server]]\nname = \"a\"\n[[server]]\nname = \"b\"\n").unwrap()
+    assert_eq(toml_render(&tree), "title = \"x\"\nport = 7\n\n[[server]]\nname = \"a\"\n\n[[server]]\nname = \"b\"")
+    assert(toml_parse("v = [1, 2\n").is_err())
+}
+// Behavioral control for Rust EncodingLite.rs:1000/1389/1668.
+#Test("yaml_alias_and_big_integer_preserve_values") {
+    tree := yaml_parse("a: &x [1, 2]\nb: *x\nbig: 18446744073709551616\n").unwrap()
+    entries := json_object_entries(&tree).unwrap()
+    assert_eq(entries[0].1, entries[1].1)
+    assert(json_payload(&entries[2].1, "Int").is_some())
+    assert_eq(yaml_render(&yaml_parse("a: |\n  first\n  second\n").unwrap()), "a: \"first\\nsecond\\n\"")
+}
+// Behavioral control for Rust EncodingLite.rs:1072/1084/1433.
+#Test("yaml_budget_rejects_before_charging_and_flow_depth_is_bounded") {
+    budget := YamlBudget { nodes: MAX_YAML_NODES, bytes: 0 }
+    assert(budget.node(0).is_err())
+    assert_eq(budget.nodes, MAX_YAML_NODES)
+    assert_eq(budget.bytes, 0)
+    fresh := YamlBudget { nodes: 0, bytes: 0 }
+    assert(yaml_parse_flow("[]", MAX_YAML_DEPTH, &fresh) == { Err(Depth) -> true; _ -> false })
+}

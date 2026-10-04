@@ -1,83 +1,36 @@
-// PORT-PENDING 0553 build: build.rs:1-79
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #[allow(dead_code, non_snake_case)]
-//RS mod Syntax {
-//RS     pub const FILE_EXT: &str = "jet";
-//RS }
-//RS 
-//RS #[allow(dead_code, non_snake_case)]
-//RS #[path = "crates/jet-foundation/src/SHA256.rs"]
-//RS mod SHA256;
-//RS #[path = "Compiler/Bootstrap/BuildIdentity.rs"]
-//RS mod BuildIdentity;
-//RS 
-//RS // Core module bodies are embedded from `Core/` (jet-sema's CoreSources), so
-//RS // every identity that covers the embedded Core closure names `Core` itself.
-//RS const STDLIB_SOURCES: &[&str] = &[
-//RS     "Core",
-//RS     "crates/jet-foundation",
-//RS     "crates/jet-codegen/src/Prelude",
-//RS ];
-//RS const RUNNER_SOURCES: &[&str] = &[
-//RS     "Core",
-//RS     "crates/jet-foundation",
-//RS     "crates/jet-net",
-//RS     "crates/jet-codegen",
-//RS     "crates/jet-jit",
-//RS     "crates/jet-rt",
-//RS ];
-//RS 
-//RS fn main() {
-//RS     // Set only by the generated self-hosting compiler artifact's build
-//RS     // script; declared here so the shared Host/Runner sources check cleanly.
-//RS     println!("cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)");
-//RS     let target = std::env::var("TARGET").expect("Cargo always provides TARGET to build scripts");
-//RS     println!("cargo:rustc-env=JET_BUILD_TARGET={target}");
-//RS     let facts = BuildIdentity::build_facts().expect("compiler build facts must be readable");
-//RS     let root = std::path::Path::new(".");
-//RS     let compiler = BuildIdentity::semantic_id(
-//RS         root,
-//RS         BuildIdentity::COMPILER_DOMAIN,
-//RS         BuildIdentity::COMPILER_SOURCES,
-//RS         &facts,
-//RS     )
-//RS     .expect("compiler source identity must be readable");
-//RS     let stdlib = BuildIdentity::semantic_id(root, "jet.stdlib.v2", STDLIB_SOURCES, &facts)
-//RS         .expect("stdlib source identity must be readable");
-//RS     let runner = BuildIdentity::semantic_id(root, "jet.runner.v2", RUNNER_SOURCES, &facts)
-//RS         .expect("runner source identity must be readable");
-//RS     println!("cargo:rustc-env=JET_COMPILER_BUILD_ID={compiler}");
-//RS     println!("cargo:rustc-env=JET_STDLIB_BUILD_ID={stdlib}");
-//RS     println!("cargo:rustc-env=JET_RUNNER_BUILD_ID={runner}");
-//RS     let mut watched = BuildIdentity::COMPILER_SOURCES
-//RS         .iter()
-//RS         .chain(STDLIB_SOURCES)
-//RS         .chain(RUNNER_SOURCES)
-//RS         .collect::<Vec<_>>();
-//RS     watched.sort();
-//RS     watched.dedup();
-//RS     for path in watched {
-//RS         println!("cargo:rerun-if-changed={path}");
-//RS     }
-//RS     for key in [
-//RS         "RUSTC",
-//RS         "TARGET",
-//RS         "HOST",
-//RS         "PROFILE",
-//RS         "OPT_LEVEL",
-//RS         "DEBUG",
-//RS         "CARGO_CFG_TARGET_FEATURE",
-//RS         "CARGO_ENCODED_RUSTFLAGS",
-//RS     ] {
-//RS         println!("cargo:rerun-if-env-changed={key}");
-//RS     }
-//RS     for key in BuildIdentity::profile_override_keys() {
-//RS         println!("cargo:rerun-if-env-changed={key}");
-//RS     }
-//RS     if let Some(spec) = BuildIdentity::target_spec_path() {
-//RS         println!("cargo:rerun-if-changed={}", spec.display());
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 0553 build.rs:1-79
+use jet_foundation.SHA256
+use JetBootstrap.BuildIdentity
+use std.env
 
+// Rust: build.rs:3
+// The build-time Syntax module shares the canonical file extension.
+use jet_foundation.Syntax
+// Rust: build.rs:14
+const STDLIB_SOURCES: [String] = ["Core", "crates/jet-foundation", "crates/jet-codegen/src/Prelude"]
+// Rust: build.rs:19
+const RUNNER_SOURCES: [String] = ["Core", "crates/jet-foundation", "crates/jet-net", "crates/jet-codegen", "crates/jet-jit", "crates/jet-rt"]
+
+// Rust: build.rs:28
+fn main() {
+    println("cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)")
+    // GATE #4494: real build environment, never synthesized facts.
+    target := env.var("TARGET").expect("Cargo always provides TARGET to build scripts")
+    println("cargo:rustc-env=JET_BUILD_TARGET={target}")
+    facts := BuildIdentity.build_facts().expect("compiler build facts must be readable")
+    root := OSPath.new(".")
+    compiler := BuildIdentity.semantic_id(root, BuildIdentity.COMPILER_DOMAIN, BuildIdentity.COMPILER_SOURCES, facts).expect("compiler source identity must be readable")
+    stdlib := BuildIdentity.semantic_id(root, "jet.stdlib.v2", STDLIB_SOURCES, facts).expect("stdlib source identity must be readable")
+    runner := BuildIdentity.semantic_id(root, "jet.runner.v2", RUNNER_SOURCES, facts).expect("runner source identity must be readable")
+    println("cargo:rustc-env=JET_COMPILER_BUILD_ID={compiler}")
+    println("cargo:rustc-env=JET_STDLIB_BUILD_ID={stdlib}")
+    println("cargo:rustc-env=JET_RUNNER_BUILD_ID={runner}")
+    watched := BuildIdentity.COMPILER_SOURCES.iter().chain(STDLIB_SOURCES).chain(RUNNER_SOURCES).collect<[String]>()
+    watched.sort()
+    watched.dedup()
+    for path in watched { println("cargo:rerun-if-changed={path}") }
+    for key in ["RUSTC", "TARGET", "HOST", "PROFILE", "OPT_LEVEL", "DEBUG", "CARGO_CFG_TARGET_FEATURE", "CARGO_ENCODED_RUSTFLAGS"] {
+        println("cargo:rerun-if-env-changed={key}")
+    }
+    for key in BuildIdentity.profile_override_keys() { println("cargo:rerun-if-env-changed={key}") }
+    if BuildIdentity.target_spec_path() == Val(spec) { println("cargo:rerun-if-changed={spec.display()}") }
+}

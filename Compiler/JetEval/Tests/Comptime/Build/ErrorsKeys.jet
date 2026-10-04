@@ -1,0 +1,43 @@
+use jet_comptime.Comptime.Build.ActionsPolicy.ActionSpec
+use jet_comptime.Comptime.Build.Context.BuildContext
+use jet_comptime.Comptime.Build.ErrorsKeys.BuildError
+use jet_comptime.Comptime.Build.Handles.TargetRef
+use jet_comptime.Comptime.Build.PlanGraph.MAX_ACTIONS
+use jet_comptime.Comptime.Build.Targets.TargetSpec
+
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_helpers.rs:161
+#Test("action_admission_budget_accepts_the_limit_and_rejects_the_next_action") {
+    context := BuildContext.new()
+    target_spec := TargetSpec.new()
+    for index in 0..MAX_ACTIONS {
+        spec := ActionSpec.cached(["true"]).with_outputs(["out/{index}"])
+        if index > 0 { spec = spec.with_inputs(["out/{index - 1}"]) }
+        action := context.action("scale-{index}", spec).expect("the declared action budget must be usable")
+        target_spec = target_spec.with_action(action)
+    }
+    error := context.action("scale-overflow", ActionSpec.cached(["true"]).with_outputs(["out/overflow"]))
+        .expect_err("the action graph must fail closed at its scale budget")
+    assert(error == { PackagedPlugin(message) -> message.contains("100000"); _ -> false })
+    target := context.add_library("scale", target_spec).expect("the limit-sized graph must remain buildable")
+    plan := context.plan_with_default(target)?
+    model := plan.execution_model().expect("the limit-sized graph must schedule")
+    assert(model.metrics.actions_total == MAX_ACTIONS)
+    assert(model.stages.len() == MAX_ACTIONS)
+    assert(model.stages.iter().all(fn(stage) { stage.actions.len() == 1 }))
+}
+// Rust: crates/jet-comptime/src/Comptime/Build/execution_helpers.rs:205
+// Close the loop on the finished plan: registration handles cannot express it beforehand.
+#Test("target_dependency_cycle_names_every_node_in_traversal_order") {
+    context := BuildContext.new()
+    core := context.add_library("core", TargetSpec.new())?
+    app := context.add_executable("app", TargetSpec.new().with_dep(core))?
+    plan := context.plan_with_default(app)?
+    plan.targets[core.id().0].deps.push(TargetRef.from(app))
+    plan.selected_action_ids().unwrap_err() == {
+        TargetDependencyCycle(cycle) -> {
+            assert(cycle.nodes().to_vec() == ["app", "core", "app"], "the cycle must be the walked path, not the visited set")
+            assert(cycle.chain() == "`app` -> `core` -> `app`")
+        }
+        other -> panic("a cyclic target graph must report a target cycle: {other:?}")
+    }
+}
