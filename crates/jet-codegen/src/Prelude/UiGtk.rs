@@ -193,6 +193,8 @@ mod jet_gtk {
         g_error_matches: unsafe extern "C" fn(*const GError, u32, c_int) -> gboolean,
         g_main_loop_new: unsafe extern "C" fn(gpointer, gboolean) -> *mut GMainLoop,
         g_main_loop_run: unsafe extern "C" fn(*mut GMainLoop),
+        g_main_loop_quit: unsafe extern "C" fn(*mut GMainLoop),
+        g_main_loop_ref: unsafe extern "C" fn(*mut GMainLoop) -> *mut GMainLoop,
         g_main_loop_unref: unsafe extern "C" fn(*mut GMainLoop),
         g_object_unref: unsafe extern "C" fn(gpointer),
         gtk_accessible_update_property: GtkAccessibleUpdateProperty,
@@ -320,6 +322,8 @@ mod jet_gtk {
                 g_error_matches: load_symbol!("g_error_matches"),
                 g_main_loop_new: load_symbol!("g_main_loop_new"),
                 g_main_loop_run: load_symbol!("g_main_loop_run"),
+                g_main_loop_quit: load_symbol!("g_main_loop_quit"),
+                g_main_loop_ref: load_symbol!("g_main_loop_ref"),
                 g_main_loop_unref: load_symbol!("g_main_loop_unref"),
                 g_object_unref: load_symbol!("g_object_unref"),
                 gtk_accessible_update_property: load_symbol!("gtk_accessible_update_property"),
@@ -413,6 +417,8 @@ mod jet_gtk {
     gtk_api_wrapper!(g_error_matches(error: *const GError, domain: u32, code: c_int) -> gboolean = 0);
     gtk_api_wrapper!(g_main_loop_new(context: gpointer, is_running: gboolean) -> *mut GMainLoop = std::ptr::null_mut());
     gtk_api_wrapper!(g_main_loop_run(loop_: *mut GMainLoop) -> () = ());
+    gtk_api_wrapper!(g_main_loop_quit(loop_: *mut GMainLoop) -> () = ());
+    gtk_api_wrapper!(g_main_loop_ref(loop_: *mut GMainLoop) -> *mut GMainLoop = std::ptr::null_mut());
     gtk_api_wrapper!(g_main_loop_unref(loop_: *mut GMainLoop) -> () = ());
     gtk_api_wrapper!(g_object_unref(object: gpointer) -> () = ());
     gtk_api_wrapper!(gtk_event_controller_key_new() -> *mut GtkEventController = std::ptr::null_mut());
@@ -433,6 +439,18 @@ mod jet_gtk {
             let cb = &*(data as *const Arc<dyn Fn() + Send + Sync>);
             cb();
         }
+    }
+
+    extern "C" fn jet_gtk_close_trampoline(_window: *mut GtkWidget, data: gpointer) -> gboolean {
+        // SAFETY: the signal owns a GLib loop reference until its destroy notifier.
+        unsafe { g_main_loop_quit(data as *mut GMainLoop) };
+        // Let GTK's default handler close the window.
+        0
+    }
+
+    extern "C" fn jet_gtk_close_drop(data: gpointer, _closure: *mut GClosure) {
+        // SAFETY: balances the signal's g_main_loop_ref, not present()'s reference.
+        unsafe { g_main_loop_unref(data as *mut GMainLoop) };
     }
     struct ClipboardRead {
         done: bool,
@@ -1578,8 +1596,16 @@ mod jet_gtk {
                 if let Ok(ctitle) = CString::new(title) {
                     gtk_window_set_title(window, ctitle.as_ptr());
                 }
-                gtk_window_present(window);
                 let main_loop = g_main_loop_new(std::ptr::null_mut(), 0);
+                g_signal_connect_data(
+                    window as gpointer,
+                    c"close-request".as_ptr(),
+                    jet_gtk_close_trampoline as gpointer,
+                    g_main_loop_ref(main_loop) as gpointer,
+                    Some(jet_gtk_close_drop),
+                    0,
+                );
+                gtk_window_present(window);
                 g_main_loop_run(main_loop);
                 g_main_loop_unref(main_loop);
             }

@@ -146,6 +146,18 @@ pub fn is_whitespace(text: String) -> Bool Never! {
     true
 }
 
+/// True iff any scalar is Unicode 17 Cc (D-TEXT-CONTROL1=A).
+/// Empty text is false. Scan UTF-8 bytes without per-scalar allocation.
+pub fn has_control(value: String) -> Bool Never! {
+    after_c2 := false
+    loop b in value.bytes() {
+        if b < (U8{32}) || b == (U8{127}) -> return true
+        if after_c2 && b >= (U8{128}) && b <= (U8{159}) -> return true
+        after_c2 = b == (U8{194})
+    }
+    false
+}
+
 pub fn trim(text: String) -> String Never! { trim_end(trim_start(text)) }
 
 pub fn trim_start(text: String) -> String Never! {
@@ -859,8 +871,8 @@ fn grapheme_break(prev: Int, cur: Int) -> Bool {
     // GB3 CR × LF
     if prev == 13 && cur == 10 -> return false
     // GB4 / GB5
-    if prev == 13 || prev == 10 || is_control(prev) -> return true
-    if cur == 13 || cur == 10 || is_control(cur) -> return true
+    if prev == 13 || prev == 10 || is_grapheme_control(prev) -> return true
+    if cur == 13 || cur == 10 || is_grapheme_control(cur) -> return true
     // GB6-8 Hangul
     if is_l(prev) && (is_l(cur) || is_v(cur) || is_lv(cur) || is_lvt(cur)) -> return false
     if (is_lv(prev) || is_v(prev)) && (is_v(cur) || is_t(cur)) -> return false
@@ -885,7 +897,7 @@ fn has_emoji_zwj_prefix(cluster: [Int]) -> Bool {
 }
 
 
-fn is_control(cp: Int) -> Bool { (cp < 32 && cp != 9 && cp != 10 && cp != 13) || (cp >= 127 && cp <= 159) }
+fn is_grapheme_control(cp: Int) -> Bool { (cp < 32 && cp != 9 && cp != 10 && cp != 13) || (cp >= 127 && cp <= 159) }
 fn is_l(cp: Int) -> Bool { cp >= C_LBASE && cp < C_LBASE + C_LCOUNT }
 fn is_v(cp: Int) -> Bool { cp >= C_VBASE && cp < C_VBASE + C_VCOUNT }
 fn is_t(cp: Int) -> Bool { cp >= C_TBASE + 1 && cp < C_TBASE + C_TCOUNT }

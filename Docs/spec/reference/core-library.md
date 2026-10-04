@@ -937,6 +937,9 @@ The source-facing carriers include `HTTPError`, `Method`, `Version`, `Status`,
 `Header`, `Headers`, and `Body`. The default limits are one MiB for a body,
 32 KiB for headers, 8 KiB for a header line and request line, 100 headers, and
 8 KiB for a URL.
+The source parsers check the remaining body length before projecting its bytes.
+Accepted bodies use one owned byte-slice projection; oversized bodies are
+rejected without a body allocation.
 
 | API | Result | Description |
 | --- | --- | --- |
@@ -1828,7 +1831,7 @@ fn run() {
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `units.from(magnitude, unit)` | `Measurement<Float>` | Build a measured quantity from a magnitude and a scalar unit. |
+| `units.from(magnitude, unit)` | `Measurement<Float>` | Jet-owned construction of SI value `magnitude * unit` with zero uncertainty; the host only represents the measurement. |
 | `units.si(value)` | `Measurement<Float>` | Construct a value in the SI base scale. |
 | `units.scale(value, factor)` | `Measurement<Float>` | Scale a measured value. |
 | `units.add(a, b)` / `units.sub(a, b)` | `Measurement<Float>` | Add or subtract measured values with propagated uncertainty. |
@@ -2008,6 +2011,7 @@ resulting parts (D-TEXTUNICODE1=A).
 | `text.display_width(value)` | `Int` | Compute terminal display width under the portable text-width policy (D-TEXTWIDTH1=B). |
 | `text.grapheme_views(value)` / `word_views(value)` / `line_views(value)` / `byte_views(value)` | `[String]` | Produce views or segments for the requested boundaries. |
 | `text.is_alphabetic(value)` / `is_numeric(value)` / `is_whitespace(value)` | `Bool` | Test the corresponding scalar property. |
+| `text.has_control(value)` | `Bool Never!` | True iff any scalar is Unicode 17 Cc (`U+0000..U+001F` or `U+007F..U+009F`); empty text is false. One UTF-8 byte scan stops at the first match without creating per-character strings or a decoded-scalar list. |
 | `text.trim(value)` / `trim_start(value)` / `trim_end(value)` | `String` | Remove supported whitespace at both or one end. |
 | `text.pad_start(value, width, fill)` / `pad_end(value, width, fill)` | `String` | Pad to a requested display width. |
 | `text.center(value, width, fill)` | `String` | Center a value in a requested width. |
@@ -2779,6 +2783,9 @@ handle. The provider/catalog may add interactive node and mount operations,
 but those operations remain typed provider boundaries. Build a portable tree
 first, then use backend-specific capabilities; do not infer that a node tree
 supplies a platform-native callback API.
+The native GTK `present` call runs its application loop until a window
+close request quits that loop. GTK's default close handler still owns window
+teardown; a signal-owned loop reference keeps its callback data live.
 
 ### `core.reactive` — explicit signals and dependency tracking
 
