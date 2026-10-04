@@ -802,7 +802,7 @@ struct Pair {
     a: Int
     b: Int
 }
-fn align(left: D, right: D) -> Pair -> Pair{a: left.value, b: right.value}
+fn align(left: D, right: D) -> Pair { Pair{a: left.value, b: right.value} }
 impl D.Add {
     fn add(self, rhs: D) -> D {
         pair :: align(self, rhs)

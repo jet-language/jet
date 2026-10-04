@@ -622,7 +622,7 @@ fn run() {
 #[test]
 fn infallible_sort_callback_is_tier_stable() {
     let src = "\
-fn sort_key(n: Int) -> String Never! -> \"{n}\"
+fn sort_key(n: Int) -> String Never! { \"{n}\" }
 fn run() {
     ascending := [3, 1, 2]
     ascending.sort_by((n: Int) -> sort_key(n))
@@ -639,7 +639,7 @@ fn run() {
 #[test]
 fn try_sort_by_is_atomic_and_tier_stable() {
     let src = "\
-fn sort_key(n: Int) -> String Never! -> \"{n}\"
+fn sort_key(n: Int) -> String Never! { \"{n}\" }
 fn stopping_sort_key(n: Int, seen: &String) -> String Err! {
     seen += \"{n}\"
     if n == 1 { return Err(\"stop\", code: \"E_SORT\") }
@@ -1414,7 +1414,7 @@ fn run() {
 #[test]
 fn readonly_optional_list_alias_preserves_sequence() {
     let src = r#"
-fn none() -> Float? -> None
+fn none() -> Float? { None }
 fn run() {
     values :: [Val(Float{4.0}), none(), Val(Float{8.0}), none()]
     print(values.len())
@@ -1447,7 +1447,7 @@ fn run() {
 fn command_entry_ignores_associated_run_method() {
     let src = r#"
 struct Worker {
-    fn run() -> Int -> 99
+    fn run() -> Int { 99 }
 }
 fn run() {
     print(Worker.run())
@@ -1486,7 +1486,7 @@ fn run() {
     assert_tiers_agree("tir_card_2860_fallible_map", fallible_map, "bad\n[]\n");
 
     let default_helper_map = "\
-fn parse_default(n: Int) -> Int -> n
+fn parse_default(n: Int) -> Int { n }
 fn run() {
     values :: [1, 2].map((n: Int) -> parse_default(n))
     print(values)
@@ -1495,7 +1495,7 @@ fn run() {
     assert_tiers_agree("tir_card_2860_default_helper_map", default_helper_map, "[1, 2]\n");
 
     let explicit_ok_arms = "\
-fn choose(first: Bool) -> Int Err! -> if first -> Ok(1) else -> Ok(2)
+fn choose(first: Bool) -> Int Err! { if first -> Ok(1) else -> Ok(2) }
 fn run() {
     print(choose(true) ?? 0)
     print(choose(false) ?? 0)

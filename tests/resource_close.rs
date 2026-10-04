@@ -206,7 +206,7 @@ struct Resource { name: String }
 impl Resource.Close {
     fn close(^self) { print("auto {self.name}") }
 }
-fn missing() -> Int -> #Todo
+fn missing() -> Int { #Todo }
 fn run() {
     resource := Resource{ name: "todo" }
     print("body")

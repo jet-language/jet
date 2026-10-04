@@ -1389,7 +1389,7 @@ mod s61_tests {
                  impossible: !Never\n\
              }\n\
              alias Box<T> :: T? IOError!\n\
-             fn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! -> value\n\
+             fn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! { value }\n\
              fn save() IOError! {}\n\
              fn run() {}\n",
         );
@@ -1430,7 +1430,7 @@ mod s61_tests {
                 if matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_NEVER)
         ));
         let formatted = crate::Formatter::format_source(
-            "fn save() IOError! {}\nfn load() -> Int (DbError | TimeoutError)! -> 1\n",
+            "fn save() IOError! {}\nfn load() -> Int (DbError | TimeoutError)! { 1 }\n",
         )
         .expect("prefix formatter");
         assert!(formatted.contains("fn save() IOError!"), "{formatted}");
@@ -1439,7 +1439,7 @@ mod s61_tests {
             "{formatted}"
         );
         let contextual =
-            crate::Formatter::format_source("fn load() IOError! -> read()?(\"loading config\")\n")
+            crate::Formatter::format_source("fn load() IOError! { read()?(\"loading config\") }\n")
                 .expect("contextual propagation formatter");
         assert!(contextual.contains("?(\"loading config\")"), "{contextual}");
     }
@@ -1639,8 +1639,8 @@ mod s61_tests {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) -> @param -> ~self.value
-    fn type_name(self) -> String -> T.$name
+    fn get_value(self) -> @param { ~self.value }
+    fn type_name(self) -> String { T.$name }
 }
 "#,
         );
@@ -1676,7 +1676,7 @@ derive T.TypeName {
         let source = r#"
 derive T.Debug {
     impl Thing.Debug {
-        fn debug(self) -> String -> "nested"
+        fn debug(self) -> String { "nested" }
     }
 }
 "#;
@@ -1691,7 +1691,7 @@ derive T.Debug {
 fn build(b: BuildContext) {
     b.generate("made") {
         impl Thing.Debug {
-            fn debug(self) -> String -> "generated"
+            fn debug(self) -> String { "generated" }
         }
     }
 }
@@ -1708,7 +1708,7 @@ fn build(b: BuildContext) {
             r#"
 prep loop T in [Point] {
     impl T {
-        fn generated(self) -> String -> "generated"
+        fn generated(self) -> String { "generated" }
     }
     #Test("generated") {
         .measure {
@@ -2311,10 +2311,12 @@ fn run() {
     server: Ready()
 }
 
-fn classify(score: Int) -> Grade -> if {
-    score >= 90 -> .A
-    score >= 80 -> .B
-    else -> .C
+fn classify(score: Int) -> Grade {
+    if {
+        score >= 90 -> .A
+        score >= 80 -> .B
+        else -> .C
+    }
 }
 
 fn notify(ready: Bool) -[Net]> {
@@ -2333,10 +2335,7 @@ fn notify(ready: Bool) -[Net]> {
 "#;
 
         let once = format_source(src).expect("canonical arrow/control syntax formats");
-        assert!(
-            once.contains("fn classify(score: Int) -> Grade -> if {"),
-            "{once}"
-        );
+        assert!(once.contains("fn classify(score: Int) -> Grade {"), "{once}");
         assert!(once.contains("score >= 90 -> .A"), "{once}");
         assert!(once.contains("fn notify(ready: Bool) -[Net]> {"), "{once}");
         assert!(once.contains("if ready -> send() else -> skip()"), "{once}");
@@ -2475,6 +2474,41 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
+    fn braced_one_expression_bodies_keep_leading_dot_and_todo_values() {
+        // Card #4512: `-> T -> expr` becomes `-> T { expr }`, so the braced
+        // body must read the same expressions the arrow body did.
+        let parsed = program(
+            "fn ok() -> Int Err! { .Ok(1) }\nfn hole() -> Int { #Todo }\nfn run() {}\n",
+        );
+        let body = |name: &str| {
+            parsed
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    crate::AST::Item::Func(f) if f.name == name => Some(f.body.clone()),
+                    _ => None,
+                })
+                .expect(name)
+        };
+        assert!(
+            matches!(
+                body("ok").as_slice(),
+                [crate::AST::Stmt::Expr(crate::AST::Expr::EnumLit { leading_dot: true, .. })]
+            ),
+            "{:?}",
+            body("ok")
+        );
+        assert!(
+            matches!(
+                body("hole").as_slice(),
+                [crate::AST::Stmt::Expr(crate::AST::Expr::Todo { .. })]
+            ),
+            "{:?}",
+            body("hole")
+        );
+    }
+
+    #[test]
     fn adjacent_call_result_has_the_registered_call_value_fix() {
         let src = "fn run() { make()() }\n";
         let (tokens, lex_diagnostics) = lex(src);
@@ -2569,7 +2603,7 @@ fn notify(ready: Bool) -[Net]> {
     /// `!` prefix.
     #[test]
     fn return_type_question_spacing_disambiguates_option_vs_result() {
-        let opt = program("fn a() -> Int? -> None\nfn run() {}\n");
+        let opt = program("fn a() -> Int? { None }\nfn run() {}\n");
         let a = opt.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "a" => Some(f),
             _ => None,
@@ -2579,7 +2613,7 @@ fn notify(ready: Bool) -[Net]> {
             "prefix `?Int` must be Optional"
         );
 
-        let res = program("fn b() -> Int Err! -> Ok(1)\nfn run() {}\n");
+        let res = program("fn b() -> Int Err! { Ok(1) }\nfn run() {}\n");
         let b = res.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "b" => Some(f),
             _ => None,
@@ -2592,7 +2626,7 @@ fn notify(ready: Bool) -[Net]> {
             "`Int !Err` must be Result"
         );
 
-        let paren = program("fn c() -> (Int?) -> None\nfn run() {}\n");
+        let paren = program("fn c() -> (Int?) { None }\nfn run() {}\n");
         let c = paren.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "c" => Some(f),
             _ => None,
@@ -2612,7 +2646,7 @@ fn notify(ready: Bool) -[Net]> {
                  callback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!\n\
              }\n\
              alias Box<T> :: T? IOError!\n\
-             fn fetch(value: Int? IOError!) -> Box<Int? IOError!> -> value\n\
+             fn fetch(value: Int? IOError!) -> Box<Int? IOError!> { value }\n\
              fn run() {}\n",
         );
         assert!(parsed
@@ -2668,8 +2702,8 @@ fn notify(ready: Bool) -[Net]> {
     fn failure_contracts_compose_optional_success_and_error_union() {
         let parsed = program(
             "struct Holder { value: Int? IOError! }\n\
-             fn fetch(value: Int? IOError!) -> Int (DbError | TimeoutError)! -> value\n\
-             fn invoke(callback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!) -> Int? IOError! -> None\n\
+             fn fetch(value: Int? IOError!) -> Int (DbError | TimeoutError)! { value }\n\
+             fn invoke(callback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!) -> Int? IOError! { None }\n\
              fn run() {}\n",
         );
         let holder = parsed
@@ -2818,7 +2852,7 @@ fn notify(ready: Bool) -[Net]> {
             "struct Holder {\n\
                  first: Int Err!\n\
                  callback: fn() Err!\n\
-                 fn value(self) -> Int -> 1\n\
+                 fn value(self) -> Int { 1 }\n\
                  second: String\n\
              }\n\
              fn run() {}\n",

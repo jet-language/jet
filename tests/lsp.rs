@@ -3806,8 +3806,8 @@ fn lsp_checked_identity_and_versioned_rename() {
     let root = common::Scratch::new("lsp-checked-rename");
     fs::write(root.join("package.jet"), "name: \"rename\"\nversion: \"0.1.0\"\n").unwrap();
     let main = "use scoring as grades\nuse \"util\"\nfn run() {\n    print(grades.letter(91))\n    print(util.letter(91))\n}\nfn shadow(letter: Int) { print(letter) }\n";
-    let scoring = "pub fn letter(score: Int) -> String -> \"A\"\n";
-    let util = "pub fn letter(score: Int) -> String -> \"unrelated\"\n";
+    let scoring = "pub fn letter(score: Int) -> String { \"A\" }\n";
+    let util = "pub fn letter(score: Int) -> String { \"unrelated\" }\n";
     let sources = [("run.jet", main), ("scoring.jet", scoring), ("util.jet", util)];
     for (name, source) in sources {
         fs::write(root.join(name), source).unwrap();

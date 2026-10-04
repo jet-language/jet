@@ -681,11 +681,12 @@ increment :: (n: Int) -> {
 }
 ```
 
-`->` is the callable and control arrow. A named callable has `->` before a
-braced non-unit result; a unit or unit-fallible callable keeps a bare braced
-body. An effect ceiling has its own arrow, `-[Effect]>` or `-[]>`. An
-arrowless braced value body reports **E0080**; `jet fmt` inserts the canonical
-arrow (D-CALLABLE-ONE1=A).
+`->` is the callable and control arrow. A named function or method has exactly
+one arrow after its inputs, `->` or an effect ceiling `-[Effect]>` / `-[]>`,
+followed by its optional result type and then a braced body:
+`fn f() -> T { expr }`. A unit or unit-fallible callable keeps a bare braced
+body. A second body arrow (`fn f() -> T -> expr`) or an unbraced body after the
+arrow reports **E0080**; `jet fmt` rewrites it to `{ expr }` (D-SIG-AFTER1=A).
 
 Function values use a function type with parameter types and a result:
 `fn(T1, T2) -> R`. A result may be omitted for a unit callback. A pure

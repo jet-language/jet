@@ -102,7 +102,7 @@ fn fmt_separates_core_functions_with_exactly_two_newlines() {
 #[test]
 fn fmt_returned_function_calls_use_call_and_are_stable() {
     let source = r#"
-fn make_adder() -> fn(Int) -> Int -> (value: Int) -> value + 1
+fn make_adder() -> fn(Int) -> Int { (value: Int) -> value + 1 }
 
 fn run() {
     result :: make_adder().call(2)
@@ -307,10 +307,10 @@ fn computed_declaration_values_format_stably() {
 
 #[test]
 fn multi_head_function_surface_round_trips() {
-    let src = "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) -> Float -> r * r\nfn area(Rect(w: Float, h: Float)) -> Float -> w * h\n";
+    let src = "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) -> Float { r * r }\nfn area(Rect(w: Float, h: Float)) -> Float { w * h }\n";
     let once = jet::format_source(src).expect("multi-head functions should format");
-    assert!(once.contains("fn area(Circle(r: Float)) -> Float -> r * r"));
-    assert!(once.contains("fn area(Rect(w: Float, h: Float)) -> Float -> w * h"));
+    assert!(once.contains("fn area(Circle(r: Float)) -> Float { r * r }"));
+    assert!(once.contains("fn area(Rect(w: Float, h: Float)) -> Float { w * h }"));
     let twice = jet::format_source(&once).expect("formatted multi-head functions should parse");
     assert_eq!(once, twice, "multi-head formatting must be stable");
 }
@@ -1170,7 +1170,7 @@ fn fmt_simplify_one_line_return_is_ast_equal_and_stable() {
     let options = jet::Formatter::FormatOptions { simplify: true };
     let once =
         jet::format_source_with_options(source, options).expect("simplify fmt should format");
-    assert_eq!(once, "fn answer() -> Int -> 42\n");
+    assert_eq!(once, "fn answer() -> Int { 42 }\n");
 
     let (before_tokens, before_lex_diags) = jet::Lexer::lex(source);
     assert!(before_lex_diags.is_empty(), "{before_lex_diags:?}");
@@ -1257,7 +1257,7 @@ fn fmt_simplify_keeps_a_routed_value_loop_binding() {
     let simplified = jet::format_source_with_options(&plain, options)
         .expect("a routed value loop must not reach the identity assertion");
     assert!(
-        simplified.contains("fn answer() -> Int -> 42"),
+        simplified.contains("fn answer() -> Int { 42 }"),
         "R1 did not fire ahead of the value loop, so nothing moved:\n{simplified}"
     );
 
@@ -1283,9 +1283,9 @@ fn fmt_marks_only_value_returning_braced_callables_with_an_arrow() {
     let source = "fn value() Int { return 1 }\nfn concise() Int -> 1\nfn record() Rect -> { width: 1, height: 2 }\nfn impure() { print(1) }\nfn explicit() () { print(1) }\nfn fail() Err! { }\nfn bounded() Int -[IO]> { return 1 }\nfn pure() Int -[]> { return 1 }\ntrait Value { fn get(self) Int { return 1 } fn bounded(self) Int -[IO]> { return 1 } }\n";
     let once = jet::format_source(source).expect("callable body shapes should format");
     assert!(once.contains("fn value() -> Int { return 1 }"), "{once}");
-    assert!(once.contains("fn concise() -> Int -> 1"), "{once}");
+    assert!(once.contains("fn concise() -> Int { 1 }"), "{once}");
     assert!(
-        once.contains("fn record() -> Rect -> {width: 1, height: 2}"),
+        once.contains("fn record() -> Rect { {width: 1, height: 2} }"),
         "{once}"
     );
     assert!(once.contains("fn impure() { print(1) }"), "{once}");
@@ -1331,27 +1331,30 @@ fn early(flag: Bool) -> String {
 }
 
 #[test]
-fn parser_rejects_arrowless_value_callable_and_offers_insertion_fix() {
-    let source = "fn value() -> Int { return 1 }\n";
+fn parser_rejects_function_body_arrow_and_offers_brace_fix() {
+    // D-SIG-AFTER1=A (card #4512): one arrow per named function; a body
+    // after a second arrow is E0080 with the braced body as its edit.
+    let source = "fn value() -> Int -> 1\n";
     let (tokens, lex_diagnostics) = jet::Lexer::lex(source);
     assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
-    let diagnostics = jet::Parser::parse(&tokens).expect_err("the body arrow is required");
+    let diagnostics =
+        jet::Parser::parse_with_source(&tokens, source).expect_err("the body needs braces");
     let diagnostic = diagnostics
         .iter()
         .find(|diagnostic| diagnostic.code == "E0080")
-        .expect("missing callable body arrow diagnostic");
+        .expect("function body arrow diagnostic");
     assert_eq!(
         diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()),
-        Some("-> ")
+        Some("{ 1 }")
     );
 
     let (canonical_tokens, canonical_lex_diagnostics) =
-        jet::Lexer::lex("fn value() -> Int { return 1 }\n");
+        jet::Lexer::lex("fn value() -> Int { 1 }\n");
     assert!(
         canonical_lex_diagnostics.is_empty(),
         "{canonical_lex_diagnostics:?}"
     );
-    jet::Parser::parse(&canonical_tokens).expect("the canonical body arrow should parse");
+    jet::Parser::parse(&canonical_tokens).expect("the one-arrow braced body should parse");
 }
 
 #[test]
@@ -1367,7 +1370,7 @@ fn fmt_simplify_keeps_a_struct_literal_return_braced() {
     let once = jet::format_source_with_options(source, options)
         .expect("a struct-literal return must stay parseable under simplify");
     assert!(
-        once.contains("fn make(width: Int, height: Int) -> Rect -> { return {"),
+        once.contains("fn make(width: Int, height: Int) -> Rect { return {"),
         "the braced struct-literal return did not survive simplify:\n{once}"
     );
     assert!(
@@ -2004,12 +2007,12 @@ fn fmt_preserves_single_line_loops_and_fn() {
     let two_bind = "fn run() {\n    loop (i, x) in xs -> print(\"{i}\")\n}\n";
     assert_fmt_stable(two_bind, "list two-binding loop");
 
-    let fn_src = "fn one() -> Int -> 1\n";
+    let fn_src = "fn one() -> Int { 1 }\n";
     assert_fmt_stable(fn_src, "single-line fn body");
 
     let retired_fn_src = "fn one() => Int = 1\n";
     let retired_fn = jet::format_source(retired_fn_src).expect("retired fn body should be fixable");
-    assert!(retired_fn.contains("fn one() -> Int -> 1"), "{retired_fn}");
+    assert!(retired_fn.contains("fn one() -> Int { 1 }"), "{retired_fn}");
 
     let empty_fn_src = "fn noop() {}\n";
     assert_fmt_stable(empty_fn_src, "empty single-line fn body");
@@ -2024,7 +2027,7 @@ fn fmt_preserves_single_line_if_expr_branch() {
 
 #[test]
 fn fmt_compact_result_handler_is_one_line_when_it_fits() {
-    let src = "fn pick(value: Int String!) -> String -> value ? ok -> ok ! error -> error\n";
+    let src = "fn pick(value: Int String!) -> String { value ? ok -> ok ! error -> error }\n";
     let out = jet::format_source(src).expect("compact Result handler should format");
     assert!(
         out.contains("value ? ok -> ok ! error -> error"),
@@ -2042,11 +2045,11 @@ fn fmt_compact_result_handler_expands_long_branches_deterministically() {
         "ok_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
     let long_err = "error_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
     let src = format!(
-        "fn pick(value: Int String!) -> String -> value ? ok -> {long_ok} ! error -> {long_err}\n"
+        "fn pick(value: Int String!) -> String {{ value ? ok -> {long_ok} ! error -> {long_err} }}\n"
     );
     let out = jet::format_source(&src).expect("long Result handler should format");
     assert!(
-        out.contains("\n! error ->"),
+        out.contains("\n    ! error ->"),
         "long handler should use the two-arm layout:\n{out}"
     );
     assert!(
@@ -2065,12 +2068,12 @@ fn fmt_compact_result_handler_expands_long_branches_deterministically() {
 
 #[test]
 fn fmt_result_handler_expands_blocked_nested_and_commented_branches() {
-    let blocked = "fn pick(value: Int String!) -> String -> value ? ok -> {\n    saved :: ok\n    saved\n} ! error -> {\n    saved_error :: error\n    saved_error\n}\n";
-    let nested = "fn pick(value: Int String!) -> Int -> value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0\n";
+    let blocked = "fn pick(value: Int String!) -> String {\n    value ? ok -> {\n        saved :: ok\n        saved\n    } ! error -> {\n        saved_error :: error\n        saved_error\n    }\n}\n";
+    let nested = "fn pick(value: Int String!) -> Int { value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0 }\n";
     let nested_if =
-        "fn pick(value: Int String!) -> Int -> value ? ok -> if ready -> 1 else -> 2 ! error -> 0\n";
-    let commented = "fn pick(value: Int String!) -> String -> value ? ok -> ok /* keep this branch readable */ ! error -> error\n";
-    let commented_failure = "fn pick(value: Int String!) -> String -> value ? ok -> ok ! error -> error /* keep failure readable */\n";
+        "fn pick(value: Int String!) -> Int { value ? ok -> if ready -> 1 else -> 2 ! error -> 0 }\n";
+    let commented = "fn pick(value: Int String!) -> String { value ? ok -> ok /* keep this branch readable */ ! error -> error }\n";
+    let commented_failure = "fn pick(value: Int String!) -> String { value ? ok -> ok ! error -> error /* keep failure readable */ }\n";
 
     for (source, label) in [
         (blocked, "blocked"),
@@ -2081,7 +2084,7 @@ fn fmt_result_handler_expands_blocked_nested_and_commented_branches() {
     ] {
         let out = jet::format_source(source).expect("Result handler should format");
         assert!(
-            out.contains("\n! error ->"),
+            out.contains("\n    ! error ->"),
             "{label} handler should use the deterministic two-arm layout:\n{out}"
         );
         assert!(
@@ -2214,7 +2217,7 @@ fn fmt_rewrites_marker_stacking_to_one_shape_and_is_stable() {
 #[test]
 fn fmt_preserves_memo_bound_marker() {
     let src =
-        "#Memo(bound: none) fn cube(value: Int) -[]> Int -> value * value * value\n\nfn run() {}\n";
+        "#Memo(bound: none) fn cube(value: Int) -[]> Int { value * value * value }\n\nfn run() {}\n";
     assert_fmt_stable(src, "#Memo(bound: none) marker");
 }
 
@@ -2669,13 +2672,13 @@ fn fmt_comptime_splice_stability() {
     // (Expr::ComptimeName). The formatter must emit it as `$name` so that
     // the round-trip is stable (previously the mark could be silently dropped
     // if it reached the formatter without an AST node).
-    let src = "derive T.Debug {\n    fn tag(self) -> String -> \"ok\"\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
+    let src = "derive T.Debug {\n    fn tag(self) -> String { \"ok\" }\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
     let once = jet::format_source(src).expect("fmt should accept a typed derive body");
     let twice = jet::format_source(&once).expect("second fmt should succeed");
     assert_eq!(once, twice, "typed derive body must be fmt-idempotent");
 
     // Standalone `$name` splice (outside emit string) round-trips as `$name`.
-    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: $tname\n    fn $tname(self) -> String -> $tname\n}\n\nfn run() {}\n";
+    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: $tname\n    fn $tname(self) -> String { $tname }\n}\n\nfn run() {}\n";
     let splice_once = jet::format_source(splice_src).expect("fmt should accept $name splice");
     assert!(
         splice_once.contains("x :: $tname") && splice_once.contains("fn $tname(self)"),
@@ -3164,7 +3167,7 @@ fn effect_control_arrows_format_as_one_statement_bodies() {
 
 #[test]
 fn fmt_preserves_braced_loop_value_drop_and_is_stable() {
-    let src = "fn value() -> String -> \"value\"\n\nfn run() {\n    values := [1, 2]\n    loop v in values { value() }\n}\n";
+    let src = "fn value() -> String { \"value\" }\n\nfn run() {\n    values := [1, 2]\n    loop v in values { value() }\n}\n";
     let once = jet::format_source(src).expect("braced value-dropping loop should format");
     assert!(once.contains("loop v in values { value() }"), "{once}");
     assert!(!once.contains("loop v in values ->"), "{once}");
@@ -3176,7 +3179,7 @@ fn fmt_preserves_braced_loop_value_drop_and_is_stable() {
 
 #[test]
 fn fmt_canonicalizes_explicit_drop_to_arrow_loop_body() {
-    let src = "fn value() -> String -> \"value\"\n\nfn run() {\n    values := [1, 2]\n    loop v in values { value().drop(\"checked\") }\n}\n";
+    let src = "fn value() -> String { \"value\" }\n\nfn run() {\n    values := [1, 2]\n    loop v in values { value().drop(\"checked\") }\n}\n";
     let once = jet::format_source(src).expect("explicit-drop loop should format");
     assert!(
         once.contains("loop v in values -> value().drop(\"checked\")"),
@@ -3962,7 +3965,7 @@ fn fmt_typed_derive_body_comment_not_duplicated() {
     // D-META-CODE1: a derive body is a typed item template. Its comments are
     // walked with the ordinary formatter and must remain attached exactly
     // once across repeated formatting.
-    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: $tname\n    fn label(self) -> String -> $lbl\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube{side: 5}\n    print(c.label())\n}\n";
+    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: $tname\n    fn label(self) -> String { $lbl }\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube{side: 5}\n    print(c.label())\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on a derive block");
     assert_eq!(
         out.matches("resolves to the same value as `tname`").count(),
@@ -4338,7 +4341,7 @@ fn fmt_preserves_parameter_zones_and_public_labels() {
     // from the local name. All three must round-trip byte-for-byte (fmt
     // STABILITY — idempotence alone would not notice a dropped separator,
     // because a dropped one stays dropped on the second pass).
-    let src = "fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String -> host\n";
+    let src = "fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String { host }\n";
     let once = jet::format_source(src).expect("fmt should accept parameter zones");
     for token in [
         "host: String",

@@ -408,9 +408,9 @@ struct Door {
     state { Closed, Open, Orphan }
 }
 impl Door {
-    #Transition(_, Closed) fn close() -> Door -> Door{}
-    #Transition(Closed, Open) fn open(self: ^Door) -> Door -> self
-    #Transition(Closed, Closed) fn hold(self: ^Door) -> Door -> self
+    #Transition(_, Closed) fn close() -> Door { Door{} }
+    #Transition(Closed, Open) fn open(self: ^Door) -> Door { self }
+    #Transition(Closed, Closed) fn hold(self: ^Door) -> Door { self }
 }
 fn run() {}
 "#,
@@ -1378,7 +1378,7 @@ fn semindex_indexes_loop_label_definition_and_dot_exit_references() {
 fn semindex_dossier_stitches_scattered_members() {
     let src = r#"
 trait DrawThing {
-    fn render(self) -> String ->
+    fn render(self) -> String
 }
 
 struct Widget {

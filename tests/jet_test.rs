@@ -89,7 +89,7 @@ fn jet_test_inline_c_comparison_preserves_checked_int_declaration() {
     let wrong = cwd.path.join("wrong_inline_c.jet");
     fs::write(
         &wrong,
-        r#"fn jet_add(n: Int) -> Int -> (n * 2)
+        r#"fn jet_add(n: Int) -> Int { (n * 2) }
 
 #[Unsafe("deliberately wrong scalar C result"), FFI(c)] fn c_wrong(n: Int) -> Int {
     """int64_t c_wrong(int64_t n) { return n * 2 + 1; }"""
@@ -1496,7 +1496,7 @@ fn bare_jet_test_discovers_tests_in_every_package_module() {
     let dir = bare_package_project("bare_package", &jet);
     fs::write(
         dir.join("math.jet"),
-        "fn double(n: Int) -> Int -> (n * 2)\n\n#Test(\"double returns twice the input\") {\n    assert_eq(double(3), 6)\n}\n",
+        "fn double(n: Int) -> Int { (n * 2) }\n\n#Test(\"double returns twice the input\") {\n    assert_eq(double(3), 6)\n}\n",
     )
     .unwrap();
     let out = Command::new(&jet)
@@ -1526,7 +1526,7 @@ fn jet_test_package_directory_aggregates_mixed_modules() {
         return;
     }
     let dir = bare_package_project("package_directory", &jet);
-    fs::write(dir.join("helper.jet"), "fn helper() -> Int -> 1\n").unwrap();
+    fs::write(dir.join("helper.jet"), "fn helper() -> Int { 1 }\n").unwrap();
     fs::write(
         dir.join("math.jet"),
         "#Test(\"mixed package test\") {\n    assert(true)\n}\n",
@@ -1569,7 +1569,7 @@ fn jet_test_package_directory_reports_no_tests_once() {
         return;
     }
     let dir = bare_package_project("bare_testless", &jet);
-    fs::write(dir.join("math.jet"), "fn double(n: Int) -> Int -> (n * 2)\n").unwrap();
+    fs::write(dir.join("math.jet"), "fn double(n: Int) -> Int { (n * 2) }\n").unwrap();
     let out = Command::new(&jet)
         .args(["test", dir.to_str().unwrap()])
         .current_dir(&dir)
