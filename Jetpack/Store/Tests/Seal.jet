@@ -251,3 +251,60 @@ fn store_test_set_census_enabled(verification: &StoreVerification, enabled: Bool
     assert_eq(lines[15], "       4  object-4")
     assert(!report.contains("disabled"))
 }
+
+// Rust PROVEN_MEMBERS/invalidate_proven_member: the (hangar, digest) proof is
+// shared by copies of one owner, absent from another owner, and invalidation
+// drops only the exact (hangar, digest) member.
+#Test("store verification owner shares proven closure members and invalidates exactly") {
+    verification := StoreVerification.new()
+    other := StoreVerification.new()
+    key :: store_proven_member_key("hangar", "sha256-member")
+    sibling :: store_proven_member_key("other-hangar", "sha256-member")
+    neighbor :: store_proven_member_key("hangar", "sha256-other-member")
+    assert_eq(key, "hangar\tsha256-member")
+    assert(!store_proven_member_contains(&verification, key))
+    store_proven_member_insert(&verification, key)
+    store_proven_member_insert(&verification, sibling)
+    store_proven_member_insert(&verification, neighbor)
+    retained := ~verification
+    assert(store_proven_member_contains(&retained, key))
+    assert(!store_proven_member_contains(&other, key))
+    store_invalidate_proven_member(&retained, "hangar", "sha256-member")
+    assert(!store_proven_member_contains(&verification, key))
+    assert(store_proven_member_contains(&verification, sibling))
+    assert(store_proven_member_contains(&verification, neighbor))
+    // An absent member is already invalid.
+    store_invalidate_proven_member(&other, "hangar", "sha256-member")
+    assert(!store_proven_member_contains(&other, key))
+}
+
+// Rust closure_object_rehashes + Seal::remove: a proven member stays trusted
+// for its owner inside the D-JPK-VERIFYONCE1=A window even after its bytes
+// drift, another owner re-hashes and sees the drift, and removing the seal
+// drops the owner's proof so the next check re-hashes real bytes.
+#Test("store seal removal invalidates the owner's proven closure member") {
+    verification := StoreVerification.new()
+    other := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    ingested :: store_test_seal_fixture(&verification, roots, "proven", "seal-test")
+    object :: ingested.entry.out
+    digest :: ingested.entry.envelope.output_hash
+    hangar :: roots.hangar_dir()
+    key :: store_proven_member_key(hangar, digest)
+    graph :: store_closure_graph(&verification, roots) ?? panic("graph")
+    assert(store_closure_object_rehashes(&verification, roots, graph, digest))
+    assert(store_proven_member_contains(&verification, key))
+    assert(!store_proven_member_contains(&other, key))
+    payload :: files.join(object, "payload")
+    store_test_make_writable(payload)
+    files.write(payload, "drifted bytes") ?? panic("drift payload")
+    assert(store_closure_object_rehashes(&verification, roots, graph, digest))
+    assert(!store_closure_object_rehashes(&other, roots, graph, digest))
+    assert(!store_proven_member_contains(&other, key))
+    store_remove_seal(&verification, object, hangar) ?? panic("remove seal")
+    assert(!store_proven_member_contains(&verification, key))
+    assert(!files.exists(files.join(files.join(hangar, STORE_SEALS_DIR), digest)))
+    assert(!store_closure_object_rehashes(&verification, roots, graph, digest))
+    assert(!store_proven_member_contains(&verification, key))
+    store_test_drop_roots(roots)
+}

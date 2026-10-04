@@ -1,6 +1,6 @@
 # #3300 — Explicit JSON-with-comments support (CORE-F080, D-CORE-JSONC1=A)
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-luna/safe-jet.sh`,
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-dev/safe-jet.sh`,
 source rev `e9c708fa7`. Author: Closer03 (evidence closer). No compiler, runtime or
 Core change was made.
 
@@ -19,7 +19,7 @@ paths handle the same commented-config job?
   and `--interpret`.
 - Source read: `Core/encoding/json.jet` (`skip_ws`, trailing-comma rejection),
   `Docs/spec/reference/core-library.md:2128-2212` (json/toml/yaml sections).
-- Probes live in `~/.cache/jet-test-scratch/Closer03/`.
+- Probes live in `~/.cache/jet-dev/scratch/Closer03/`.
 
 ## Evidence
 

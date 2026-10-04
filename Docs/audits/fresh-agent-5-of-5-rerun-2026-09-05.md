@@ -91,7 +91,7 @@ sessions, stop before the run and record the unavailability; do not fill the
 row with an owner, a synthetic participant, or an old transcript.
 
 For each participant, create separate disk-backed roots under
-`~/.cache/jet-test-scratch/2393-r2/` for Jet and Rust. Start each task-arm
+`~/.cache/jet-dev/scratch/2393-r2/` for Jet and Rust. Start each task-arm
 session from an empty arm-specific build cache. The r2 operational refinement
 uses one cold implementation session per task and arm (eight isolated sessions
 per participant). This does not change the four-task set; it ensures the

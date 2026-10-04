@@ -1,6 +1,6 @@
 # 3283 — INI configuration profile: shipped codec vs ratified D-CORE-INI1=A
 
-Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -9,7 +9,7 @@ Which INI dialect does `core.encoding.ini` ship today, and how far is it from th
 ## Method
 
 - Read `Core/encoding/ini.jet:1-147`, `crates/jet-codegen/src/Prelude/Core.jet:92-93` and the D-CORE-INI1 record (`node Tools/tower/tower.mjs card show 3283`).
-- Ran `~/.cache/jet-test-scratch/Closer02/ini_probe.jet` with `safe-jet.sh run --interpret`. It parses 15 inputs and exercises the getters and `to_string`.
+- Ran `~/.cache/jet-dev/scratch/Closer02/ini_probe.jet` with `safe-jet.sh run --interpret`. It parses 15 inputs and exercises the getters and `to_string`.
 
 ## Evidence (observed output, blank lines elided)
 

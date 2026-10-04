@@ -214,7 +214,7 @@ Apply the matched-input and `not measured` laws in
 - Preserve stdout, stderr, exit status, final source, command lines, environment
   identity, and raw timer output. A missing sample remains `not measured`.
 - Do not use network, package downloads, or a shared mutable store. Keep Jet and
-  Rust artifacts in separate roots under `~/.cache/jet-test-scratch`; delete
+  Rust artifacts in separate roots under `~/.cache/jet-dev/scratch`; delete
   scratch only after sealing the receipt.
 
 ### Raw scorecard receipt

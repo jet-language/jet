@@ -151,7 +151,7 @@ the only standing exclusions.
 Check the frozen contract:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-test-scratch" bash tools/ci/compiled-workload-gate.sh --contract
+TMPDIR="$HOME/.cache/jet-dev/scratch" bash tools/ci/compiled-workload-gate.sh --contract
 ```
 
 Review and check a producer report in the independent workflow:
@@ -164,7 +164,7 @@ REVIEW_RUN=1 REVIEW_ACTOR=reviewer \
 Check a complete reviewed report directory:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-test-scratch" bash tools/ci/compiled-workload-gate.sh --check <report-dir>
+TMPDIR="$HOME/.cache/jet-dev/scratch" bash tools/ci/compiled-workload-gate.sh --check <report-dir>
 ```
 
 The gate has no checked-in measurement report yet. This is deliberate. Until

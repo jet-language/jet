@@ -263,7 +263,7 @@ New cards: #3016 inspection, #3017 inline assembly/native-mode repair, #3018 ran
 
 Observed HEAD: `5382a5b2055e1c32c8eb02a2f6cbf9e1598c9a6f`. The tree contained concurrent work. HEAD alone does not identify the inspected source; selected file hashes follow. No source edit, manifest edit, staging or commit was performed by this mine. No product implementation is claimed.
 
-Temporary captures and throwaway binaries were stored under `~/.cache/jet-test-scratch/mine-casey-performance-2026-09-10`. They are removed at research closeout, as the mining method requires. The retained material below contains the normalized claims, input sources, command configuration, full measurement samples and hashes. Capture paths in these records are historical locators, not promises of permanent files.
+Temporary captures and throwaway binaries were stored under `~/.cache/jet-dev/scratch/mine-casey-performance-2026-09-10`. They are removed at research closeout, as the mining method requires. The retained material below contains the normalized claims, input sources, command configuration, full measurement samples and hashes. Capture paths in these records are historical locators, not promises of permanent files.
 
 ### Capture and source hashes
 

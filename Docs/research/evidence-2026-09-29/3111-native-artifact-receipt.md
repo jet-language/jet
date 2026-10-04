@@ -27,7 +27,7 @@ load?
 ### Execution
 
 The proof command assembled 244 sources / 379 test claims and then failed:
-receipt `~/.cache/jet-luna/jetpack-bootstrap/closer09p3111-f0a9e45f67/check.receipt`
+receipt `~/.cache/jet-dev/jetpack-bootstrap/closer09p3111-f0a9e45f67/check.receipt`
 records `check-exit: 124` (wall-clock timeout) with `check-peak-bytes:
 6071971840`, `jet-binary: target/debug/jet` (sha256 `1c6f33ed…`), `exit: 1`.
 No `JETPACK CHECK OK` and no test was executed. Under tonight's machine load

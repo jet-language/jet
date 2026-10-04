@@ -82,5 +82,3 @@ Jai does NOT do incremental rebuilds because there can be associated bugs -> yet
 Lua does MECHANISMS over policies -> give you the features you need at a base level but not 5 keywords to learn
 Neovim as inspiration for hooks -> application for data structures/types, accessing compiler internals for metaprogramming, etc
 Lua for simplicity?
-
-pip --resume 01a0e554-cd74-7386-bdaa-ddceb2293fbd

@@ -218,7 +218,7 @@ pub fn jetos_render_user_profile_json_parts(user: String, home: String, shell: S
 // Rust :338-367: quotes toggle literally (even escaped quotes); brackets are
 // stripped only as a matching outer pair. Commas inside quotes stay in one item.
 pub fn jetos_parse_list_items(value: String) -> [String] Never! {
-    trimmed :: value.trim()
+    trimmed := value.trim() // #4303: temporary owned String allocation; revert with view emitter fix.
     inner :: if trimmed.starts_with("[") && trimmed.ends_with("]") && trimmed.len() >= 2 -> trimmed.removeprefix("[").removesuffix("]") else -> value
     items := [String]{}
     current := [String]{}
@@ -256,7 +256,7 @@ pub fn jetos_service_extra(service: ServicePlan, keys: [String]) -> String? Neve
 }
 
 pub fn jetos_clean_value(value: String) -> String Never! {
-    trimmed :: value.trim()
+    trimmed := value.trim() // #4303: temporary owned String allocation; revert with view emitter fix.
     if trimmed.len() >= 2 && trimmed.starts_with("\"") && trimmed.ends_with("\"") -> return trimmed.removeprefix("\"").removesuffix("\"")
     trimmed
 }

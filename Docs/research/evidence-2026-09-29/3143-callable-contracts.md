@@ -1,8 +1,8 @@
 # #3143 — Callable identity, labels and capture contracts
 
-Closer09, 2026-09-29. Binary via `~/.cache/jet-luna/safe-jet.sh` (jet-current
+Closer09, 2026-09-29. Binary via `~/.cache/jet-dev/safe-jet.sh` (jet-current
 snapshot14 → snapshot16 during the session; all runs below after 02:30 are on
-snapshot16). Scratch `~/.cache/jet-test-scratch/Closer09/free/` (package
+snapshot16). Scratch `~/.cache/jet-dev/scratch/Closer09/free/` (package
 without an authority budget).
 
 ## Question

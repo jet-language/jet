@@ -15,7 +15,9 @@ STORE_PINNED_FILE_MODE :: prep { 0o600 }
 
 pub struct PinnedLifecycleDirectory {
     directory: Directory
-    path: String
+    // The absolute path the held directory was opened at (Rust `path`);
+    // read through `path()`.
+    absolute_path: String
 
     // Open `path`, creating missing components as private directories. A
     // relative path is taken from the current directory; `.` and `..`
@@ -39,16 +41,16 @@ pub struct PinnedLifecycleDirectory {
                 }
             }
         }
-        Ok(PinnedLifecycleDirectory{directory, path: absolute})
+        Ok(PinnedLifecycleDirectory{directory, absolute_path: absolute})
     }
 
     fn path(self) -> String Never! {
-        self.path
+        self.absolute_path
     }
 
     // The member path used in diagnostics (`path().join(name)`).
     fn member_path(self, name: String) -> String Never! {
-        files.join(self.path, name)
+        files.join(self.absolute_path, name)
     }
 
     // At most `maximum` member names of the held directory.

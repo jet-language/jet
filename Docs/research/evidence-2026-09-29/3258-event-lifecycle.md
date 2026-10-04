@@ -1,6 +1,6 @@
 # #3258 — Typed message and subscription lifecycle on core.event
 
-Date: 2026-09-29. Card #3258 (CORE-F034). Binary: `jet-debug-snapshot14` via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Card #3258 (CORE-F034). Binary: `jet-debug-snapshot14` via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -8,7 +8,7 @@ On `core.event`, how do duplicate registration, retained-recipient lifetime (sco
 
 ## Method
 
-The witness is `event_lifecycle.jet`, kept at `~/.cache/jet-test-scratch/Closer06/keep/ev/event_lifecycle.jet`, in six sections:
+The witness is `event_lifecycle.jet`, kept at `~/.cache/jet-dev/scratch/Closer06/keep/ev/event_lifecycle.jet`, in six sections:
 
 1. The same handler registered twice.
 2. `unsubscribe` called twice, then `emit`.
@@ -79,7 +79,7 @@ internal compiler error: JIT drop `HookOutcome` enum discriminant is invalid
 
 `internal compiler error: MIR nominal type "T" has no declaration row` at `crates/jet-codegen/src/Codegen/MIRRust.rs:2699:32`.
 
-## Defects (minimal repros kept under `~/.cache/jet-test-scratch/Closer06/keep/ev/`)
+## Defects (minimal repros kept under `~/.cache/jet-dev/scratch/Closer06/keep/ev/`)
 
 | id | repro | tiers | observed | expected |
 |---|---|---|---|---|

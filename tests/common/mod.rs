@@ -648,7 +648,7 @@ pub fn test_scratch_root(scope: &str) -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
-                .join(".cache/jet-test-scratch")
+                .join(".cache/jet-dev/scratch")
         });
     assert_test_path_on_disk(&root, "JET_TEST_SCRATCH_DIR");
     let path = root.join(scope);

@@ -7,7 +7,7 @@ Date: 2026-09-29. Binary: `jet-debug-snapshot14`. Status: execution BLOCKED (cor
 `safe-jet.sh run Examples/features/io/db_pool.jet` and `.../db_checked_sql.jet` both fail inside Core/db/db.jet:
 `E0358 DbPool is spelled DBPool` (:28:43), `E2417 explicit failure domain String is not an Error type` (:32:57),
 and `E2404` (:35:71, :38:9). Every `use core.db` program is uncompilable, so no db cell can run. Main assigned the fix to WaveDbFix.
-The draft witness is parked at `~/.cache/jet-test-scratch/Closer01/parked/db_contracts.jet`; it never got past Core/db.
+The draft witness is parked at `~/.cache/jet-dev/scratch/Closer01/parked/db_contracts.jet`; it never got past Core/db.
 
 ## Mapping (criterion 3, source read)
 

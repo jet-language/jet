@@ -165,7 +165,7 @@ pub struct AdmissionTransaction {
     }
 
     fn commit_steps(&self, entries: &[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
-        verification :: self.verification
+        verification := ~self.verification
         &self.publish_objects(excluded)
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
         receipts_dir :: files.join(self.roots.hangar_dir(), STORE_RECEIPTS_DIR)
@@ -210,7 +210,7 @@ pub struct AdmissionTransaction {
     }
 
     fn publish_objects(&self, excluded: String?) StoreError! {
-        verification :: self.verification
+        verification := ~self.verification
         objects_dir :: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         store_ensure_real_directory(objects_dir, "Hangar object pool")
         incoming := 0
@@ -242,7 +242,7 @@ pub struct AdmissionTransaction {
     }
 
     fn object_is_verified(self, destination: String, object: AdmissionObject) -> Bool StoreError! {
-        verification :: self.verification
+        verification := ~self.verification
         if files.stat(destination) == {
             .Ok(_) -> {
                 actual :: store_verified_output_hash_persistent(&verification, destination, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs) ?? return Ok(false)
@@ -266,7 +266,7 @@ pub struct AdmissionTransaction {
     }
 
     fn publish_object(&self, index: Int) StoreError! {
-        verification :: self.verification
+        verification := ~self.verification
         object :: self.objects[index]
         objects_dir :: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         destination :: files.join(objects_dir, object.digest)
@@ -390,7 +390,7 @@ pub struct AdmissionTransaction {
     // Undo every publication step in reverse order. Rust ran this from
     // `Drop` for an uncommitted transaction.
     fn rollback(&self) Never! {
-        verification :: self.verification
+        verification := ~self.verification
         if self.committed -> return
         index := self.published.len() - 1
         loop index >= 0 {

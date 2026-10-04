@@ -192,7 +192,7 @@ The candidates are ordered by how many counted exceptions the law would explain.
 
 ## 3. Dives
 
-Method for every dive: close the target, draft two or more laws, keep the losers with reasons, then run a closed-book prediction test. A fresh helper saw only the law (plus its key where the law has one). The held-out items were drawn with a fixed seed (`20260930`) before any showcase existed, and the answer key was written to disk before the answers came back. Scoring: **hit** is exactly right; **near** is right after one named extra fact; **miss** is anything else. All scripts are in `~/.cache/jet-test-scratch/elegance/`; the answer keys are in `answers-diag.md` and `answers-other.md`, and the verbatim answers with helper identities are in `raw-answers.md`.
+Method for every dive: close the target, draft two or more laws, keep the losers with reasons, then run a closed-book prediction test. A fresh helper saw only the law (plus its key where the law has one). The held-out items were drawn with a fixed seed (`20260930`) before any showcase existed, and the answer key was written to disk before the answers came back. Scoring: **hit** is exactly right; **near** is right after one named extra fact; **miss** is anything else. All scripts are in `~/.cache/jet-dev/scratch/elegance/`; the answer keys are in `answers-diag.md` and `answers-other.md`, and the verbatim answers with helper identities are in `raw-answers.md`.
 
 ### 3.1 Diagnostic codes
 

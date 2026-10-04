@@ -11,7 +11,7 @@
 //
 // JET_CMD selects the jet launcher (default: Tools/agent/jet-env jet).
 // Front-end JSON is cached by content hash under
-// ~/.cache/jet-luna/compiler-modules/ast.
+// ~/.cache/jet-dev/compiler-modules/ast.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -20,7 +20,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const cacheDir = resolve(homedir(), ".cache/jet-luna/compiler-modules/ast");
+const cacheDir = resolve(homedir(), ".cache/jet-dev/compiler-modules/ast");
 const jetCmd = (process.env.JET_CMD ?? `${repo}/Tools/agent/jet-env jet`).split(/\s+/);
 
 export const PACKAGES = [

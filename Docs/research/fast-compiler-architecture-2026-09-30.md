@@ -19,18 +19,18 @@ profile the Rust pipeline, which `Compiler/` mirrors structure for structure
 path). They show which structures cost the most; section 3 finds the same
 structures in `Compiler/`.
 
-Method: release binary snapshot67 (`~/.cache/jet-test-scratch/jet-release-snapshot67`),
+Method: release binary snapshot67 (`~/.cache/jet-dev/scratch/jet-release-snapshot67`),
 32-thread machine, `JET_STORE_DIR=` and `JET_RECEIPT_BYPASS=1` (no caches),
 one process at a time. The binary has no phase timers, and `perf` could not
 unwind the compiler thread, so phase shares come from a gdb sampler that
 stops the process at a fixed interval and records every thread's stack
-(`~/.cache/jet-test-scratch/SpeedArch/pmp.py`, classified by
+(`~/.cache/jet-dev/scratch/SpeedArch/pmp.py`, classified by
 `classify.mjs`). Phase CPU seconds = busy thread-stacks in the phase ÷ sample
 rounds × unsampled wall time; lines/s = input lines ÷ phase CPU seconds.
 Phases below about 0.1 s are within sampling noise.
 
 Inputs: `~/.cache/jetbench2/big/main.jet` (5,135 lines) and the sema slice
-`~/.cache/jet-test-scratch/ParallelCheck/sema/unit.jet` (116,571 lines).
+`~/.cache/jet-dev/scratch/ParallelCheck/sema/unit.jet` (116,571 lines).
 
 | Command | Wall | CPU | Lines/s end to end |
 |---|---|---|---|

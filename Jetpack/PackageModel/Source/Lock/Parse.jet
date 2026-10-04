@@ -670,24 +670,7 @@ struct PartialPackage {
             .Val(partial) -> Val(partial.finish())
             .None -> None
         }
-        if source == {
-            .Nix(_, output) -> {
-                closure :: nix_closure ?? return Err(LockError.Invalid("Nix package is missing its portable closure record"))
-                if closure.output != output -> return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
-            }
-            else -> {
-                if nix_closure != None -> return Err(LockError.Invalid("portable Nix closure record attached to a non-Nix package"))
-            }
-        }
-        if self.envelope == {
-            .Val(envelope) -> if nix_closure == {
-                .Val(closure) -> {
-                    if envelope.output_hash != closure.output || envelope.platform != closure.system -> return Err(LockError.Invalid("Nix envelope identity disagrees with its closure record"))
-                }
-                .None -> {}
-            }
-            .None -> {}
-        }
+        pkg_lock_validate_package_nix(source, nix_closure, self.envelope)
         locked :: if self.locked_raw == {
             .Val(raw) -> Val(pkg_lock_parse_locked(raw))
             .None -> None
@@ -713,6 +696,30 @@ struct PartialPackage {
             receipt: self.receipt,
             provenance: self.provenance
         })
+    }
+}
+
+// Rust PartialPkg::finish validates borrowed identities before moving the
+// source, closure and envelope into the completed package. Read parameters
+// keep those same owned records reusable without cloning their payloads.
+fn pkg_lock_validate_package_nix(source: LockSource, nix_closure: NixClosureRecord?, envelope: LockEnvelope?) LockError! {
+    if source == {
+        .Nix(_, output) -> {
+            closure :: nix_closure ?? return Err(LockError.Invalid("Nix package is missing its portable closure record"))
+            if closure.output != output -> return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
+        }
+        else -> {
+            if nix_closure != None -> return Err(LockError.Invalid("portable Nix closure record attached to a non-Nix package"))
+        }
+    }
+    if envelope == {
+        .Val(realized) -> if nix_closure == {
+            .Val(closure) -> {
+                if realized.output_hash != closure.output || realized.platform != closure.system -> return Err(LockError.Invalid("Nix envelope identity disagrees with its closure record"))
+            }
+            .None -> {}
+        }
+        .None -> {}
     }
 }
 

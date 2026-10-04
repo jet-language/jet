@@ -9,7 +9,7 @@ and every Rust-only change is a parity gap to find, card and port.
 
 This note records what was compared, how, and the gaps found. Plans and state
 belong on Tower cards; the machine-readable gap list for filing them is
-`~/.cache/jet-luna/p0/ParityAudit.json` (70 entries, ids P1…I3, used below).
+`~/.cache/jet-dev/p0/ParityAudit.json` (70 entries, ids P1…I3, used below).
 
 ## Evidence base
 
@@ -17,8 +17,8 @@ belong on Tower cards; the machine-readable gap list for filing them is
   2026-09-30. Uncommitted Rust: 273 files under `crates/` and `Source/`
   (+14,051 / −5,314) and 10 new files; uncommitted `Compiler/`: 144 files
   (+6,373 / −4,686) and 3 new files.
-- Worker reports read: all 30 files in `~/.cache/jet-luna/p0/` and the 30
-  closer/verify reports in `~/.cache/jet-luna/closer/`.
+- Worker reports read: all 30 files in `~/.cache/jet-dev/p0/` and the 30
+  closer/verify reports in `~/.cache/jet-dev/closer/`.
 - Commits read: every commit since 2026-09-28 (43; 8 touch compiler code:
   `542012fe9`, `39b713f09`, `f5c00c314`, `de1e1da15`, `8d16171ec`,
   `23b44a407`, `c0c5493a9`, `118e7ac0c` is Jetpack only).

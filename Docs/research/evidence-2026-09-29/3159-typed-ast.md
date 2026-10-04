@@ -1,6 +1,6 @@
 # #3159 — Type-indexed variant results on a concrete typed AST
 
-Closer09, 2026-09-29. Binary: `~/.cache/jet-luna/safe-jet.sh` (jet-current =
+Closer09, 2026-09-29. Binary: `~/.cache/jet-dev/safe-jet.sh` (jet-current =
 `jet-debug-snapshot14`, moved to `snapshot16` during the session; the defect
 repros were re-run on 16, see the end). Source head `e9c708fa7`.
 
@@ -13,7 +13,7 @@ survives, return one owner ballot.
 
 ## Method
 
-Scratch package `~/.cache/jet-test-scratch/Closer09/free/` (no authority
+Scratch package `~/.cache/jet-dev/scratch/Closer09/free/` (no authority
 budget). Files:
 
 - `typed_ast.jet`: three encodings of the same two programs

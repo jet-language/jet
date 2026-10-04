@@ -1,6 +1,6 @@
 # 3275 — Binary-to-text encodings and fixed-buffer contracts
 
-Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -9,7 +9,7 @@ Do the Core base encodings (base64, base64url, base32, base32hex, hex) and `core
 ## Method
 
 - Read `Core/encoding/base64.jet:1-60`, `base32.jet`, `hex.jet:1-100`, `binary.jet:1-160` and `crates/jet-codegen/src/Prelude/Core.jet:80-91`. All of these are Jet source modules.
-- New witness `Examples/features/serde/encoding_base_hostile.jet` and scratch probes `~/.cache/jet-test-scratch/Closer02/base_probe.jet`, `pack_probe.jet` and `pack_probe2.jet`, run on JIT, interpreter and AOT with `tiers.sh` (AOT binary `.jet/build/<stem>`).
+- New witness `Examples/features/serde/encoding_base_hostile.jet` and scratch probes `~/.cache/jet-dev/scratch/Closer02/base_probe.jet`, `pack_probe.jet` and `pack_probe2.jet`, run on JIT, interpreter and AOT with `tiers.sh` (AOT binary `.jet/build/<stem>`).
 - Grep of `Core/` for `encode_into|decode_into|encoded_len|decoded_len` finds no matches (confirmed by the triage log on the card and by the export lists at `Core.jet:80-91`).
 
 ## Evidence

@@ -1,6 +1,6 @@
 # Probe area-cli — CLI tools, scripts, automation
 
-Read `~/.cache/jet-luna/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -18,8 +18,8 @@ A `notes` command-line tool as one Jet package: subcommands with typed args and 
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-luna/dx2/shell-sysadmin/`, `~/.cache/jet-luna/dx2/text-processing-parsing/`, `~/.cache/jet-luna/dx2/build-systems-monorepo/`, `~/.cache/jet-luna/dx2/devops-iac-cloud/`, `~/.cache/jet-luna/dx2/testing-qa-automation/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-luna/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-luna/dx2/_families/*/synthesis.md`.
+Domain census and reports: `~/.cache/jet-dev/dx2/shell-sysadmin/`, `~/.cache/jet-dev/dx2/text-processing-parsing/`, `~/.cache/jet-dev/dx2/build-systems-monorepo/`, `~/.cache/jet-dev/dx2/devops-iac-cloud/`, `~/.cache/jet-dev/dx2/testing-qa-automation/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-luna/dx3/area-cli/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-luna/dx3/area-cli/pkg/`. Gap ids start with `area-cli-G`.
+`~/.cache/jet-dev/dx3/area-cli/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-dev/dx3/area-cli/pkg/`. Gap ids start with `area-cli-G`.

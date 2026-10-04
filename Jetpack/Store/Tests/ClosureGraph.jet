@@ -308,3 +308,105 @@ fn store_test_assert_hashed_at_most_once(verification: &StoreVerification, entri
     store_test_assert_hashed_at_most_once(&verification, entries)
     store_test_drop_roots(roots)
 }
+
+// Closure.rs transitive_references/transitive_referrers: pop the pending
+// digest before extending the worklist; cycles exclude the root, shared
+// members are visited once, and the result is sorted.
+#Test("store closure walk consumes pending members before following cycles") {
+    index :: [String: [String]]{
+        "root": [String]{"z", "a", "z", "root"},
+        "a": [String]{"shared", "root"},
+        "z": [String]{"shared", "leaf"},
+        "shared": [String]{"z"},
+        "leaf": [String]{},
+    }
+    assert_eq(store_closure_walk(index, "root"), [String]{"a", "leaf", "shared", "z"})
+    assert_eq(store_closure_walk(index, "missing"), [String]{})
+    assert_eq(store_closure_walk(index, "leaf"), [String]{})
+    assert_eq(store_closure_walk([String: [String]]{"self": [String]{"self"}}, "self"), [String]{})
+    // A walk never consumes the caller's reference index.
+    assert_eq(index["root"], [String]{"z", "a", "z", "root"})
+}
+
+// Closure.rs:2235-2298: all outputs and dependency facts must share the
+// decoded producer without consuming its optional payload per output.
+#Test("store descriptor shares one producer across named outputs and dependencies") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    entry := store_test_closure_ingest(&verification, roots, "descriptor-producer", [String]{}, "dependency bytes", "registration-test").entry
+    dependency :: files.join(entry.out, "payload")
+    dependency_digest :: "sha256-{store_sha256_hex(files.read_bytes(dependency) ?? panic("dependency bytes"))}"
+    producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    object_root :: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
+    preferred :: files.join(roots.root, "external-dev")
+    fallback :: files.join(entry.out, "doc")
+    entry.named_outputs["dev"] = "sha256-{store_sha256_hex("dev".bytes())}"
+    entry.named_outputs["doc"] = "sha256-{store_sha256_hex("doc".bytes())}"
+    entry.named_outputs["unmapped"] = "sha256-{store_sha256_hex("unmapped".bytes())}"
+    producer.facts["nix.output.dev"] = preferred
+    producer.facts["output.path.dev"] = files.join(entry.out, "ignored-dev")
+    producer.facts["output.path.doc"] = fallback
+    producer.facts["dependency.object.{dependency_digest}"] = "payload"
+    entry.references = [String]{dependency_digest, dependency_digest, "unmapped-reference"}
+    entry.producer_record = producer.encode()
+    descriptor :: store_descriptor_for_entry(&verification, roots, entry) ?? panic("descriptor")
+    objects := [String: ClosureObject]{}
+    loop object in descriptor.objects -> objects[object.digest] = object
+    assert_eq(objects.len(), 5)
+    assert_eq(objects[entry.envelope.output_hash].path, entry.out)
+    assert_eq(objects[entry.named_outputs["dev"]].path, preferred)
+    assert(objects[entry.named_outputs["dev"]].external)
+    assert_eq(objects[entry.named_outputs["doc"]].path, fallback)
+    assert(!objects[entry.named_outputs["doc"]].external)
+    assert_eq(objects[entry.named_outputs["unmapped"]].path, files.join(object_root, entry.named_outputs["unmapped"]))
+    assert_eq(objects[dependency_digest].path, dependency)
+    assert(!objects[dependency_digest].external)
+    assert_eq(descriptor.record.outputs, entry.named_outputs)
+    assert_eq(descriptor.record.references, store_sorted_unique(entry.references))
+    assert_eq(entry.producer_record, producer.encode())
+
+    // Nix ignores even explicit named-output paths but still projects the
+    // dependency relative to the original output.
+    producer.provider = "nix"
+    entry.producer_record = producer.encode()
+    nix :: store_descriptor_for_entry(&verification, roots, entry) ?? panic("nix descriptor")
+    assert_eq(nix.objects.len(), 5)
+    loop object in nix.objects {
+        assert_eq(object.path, if object.digest == dependency_digest -> dependency else -> files.join(object_root, object.digest))
+        assert(!object.external)
+    }
+
+    // A rejected codec result remains absent for both projections.
+    entry.producer_record = "truncated"
+    absent :: store_descriptor_for_entry(&verification, roots, entry) ?? panic("absent descriptor")
+    assert_eq(absent.objects.len(), 4)
+    loop object in absent.objects {
+        assert_eq(object.path, if object.digest == entry.envelope.output_hash -> entry.out else -> files.join(object_root, object.digest))
+    }
+
+    producer.provider = "path"
+    invalid_paths :: [String]{"/absolute", "../payload", "dir/../payload", "./payload"}
+    loop relative in invalid_paths {
+        producer.facts["dependency.object.{dependency_digest}"] = relative
+        entry.producer_record = producer.encode()
+        if store_descriptor_for_entry(&verification, roots, entry) == {
+            .Ok(_) -> panic("invalid dependency path accepted")
+            .Err(error) -> assert_eq(error.message(), "closure record `{entry.id}` has invalid dependency object path `{relative}`")
+        }
+    }
+    producer.facts["dependency.object.{dependency_digest}"] = "missing"
+    entry.producer_record = producer.encode()
+    if store_descriptor_for_entry(&verification, roots, entry) == {
+        .Ok(_) -> panic("missing dependency object accepted")
+        .Err(error) -> assert(error.message().starts_with("reading dependency object `{files.join(entry.out, "missing")}`: "))
+    }
+    wrong_digest :: "sha256-{store_sha256_hex("wrong dependency".bytes())}"
+    entry.references = [String]{wrong_digest}
+    producer.facts["dependency.object.{wrong_digest}"] = "payload"
+    entry.producer_record = producer.encode()
+    if store_descriptor_for_entry(&verification, roots, entry) == {
+        .Ok(_) -> panic("dependency digest mismatch accepted")
+        .Err(error) -> assert_eq(error.message(), "dependency object `{dependency}` records `{wrong_digest}`, re-hash produced `{dependency_digest}`")
+    }
+    store_test_drop_roots(roots)
+}

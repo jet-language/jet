@@ -37,7 +37,7 @@ Capture limits:
 - The original BFPRT paper scan had incomplete text extraction. The CMU lecture supports the recurrence, and the Princeton publication record supports the paper’s exact published comparison bound. The complete original proof was not reconstructed from the scan.
 - Video and Cohen blog share the CMU/BFPRT provenance. They do not count as independent confirmations. The blog’s graph excludes pivot-selection work, unlike a whole-operation timing result.
 - One helper received an inconsistent `tests/jet_measure.rs` view. A fresh read and line count established the actual 101-line file; the inconsistent view was discarded. A Python-kernel compiler launch also lacked `rustc` on its path; compilation succeeded through the project shell instead. Neither failed tool path is presented as product evidence.
-- Scratch captures lived on disk under `~/.cache/jet-test-scratch`, not `/tmp`. The retained record is this report, its normalized claim appendix, source identities, commands, experiment source and outputs. Raw media/comment captures and temporary programs are temporary; this report is their durable evidence summary.
+- Scratch captures lived on disk under `~/.cache/jet-dev/scratch`, not `/tmp`. The retained record is this report, its normalized claim appendix, source identities, commands, experiment source and outputs. Raw media/comment captures and temporary programs are temporary; this report is their durable evidence summary.
 
 ### Audience signals worth keeping
 

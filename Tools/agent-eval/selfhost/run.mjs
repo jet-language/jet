@@ -13,7 +13,7 @@ const MANIFEST = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
 const JET_ENV = join(REPO_ROOT, "Tools/agent/jet-env");
 const TIME_BIN = "/usr/bin/time";
 const SCRATCH_ROOT = resolve(
-  process.env.JET_SELFHOST_SCRATCH ?? join(homedir(), ".cache/jet-luna/selfhost"),
+  process.env.JET_SELFHOST_SCRATCH ?? join(homedir(), ".cache/jet-dev/selfhost"),
 );
 const ALLOWED_PHASES = new Set(["identity", "complexity", "check", "build", "run", "repair", "reasoning", "all"]);
 const ALLOWED_MODES = new Set(["check", "run", "run-interpret", "build", "run-release"]);

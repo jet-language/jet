@@ -18,7 +18,7 @@ const FEATURES = join(ROOT, "Examples/features");
 const EXPECTED = join(FEATURES, "expected");
 const JET = join(ROOT, "target/debug/jet");
 const SCRATCH_BASE = process.env.JET_TEST_SCRATCH_DIR
-  ?? (process.env.HOME ? join(process.env.HOME, ".cache/jet-test-scratch") : null);
+  ?? (process.env.HOME ? join(process.env.HOME, ".cache/jet-dev/scratch") : null);
 const EXPECTED_FAIL_EXITS = new Set([1, 70]);
 
 export function usage() {

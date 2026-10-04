@@ -5,8 +5,8 @@ path semantics (roots, empty paths, separators, prefixes), keep ReadDir
 per-item errors apart from constructor errors, and offer a borrowed
 remaining-path projection?
 
-Binary: `~/.cache/jet-luna/safe-jet.sh` → `jet-debug-snapshot14`, 2026-09-29.
-Scratch: `~/.cache/jet-test-scratch/Closer04/` (`pc.jet`, `rd.jet`).
+Binary: `~/.cache/jet-dev/safe-jet.sh` → `jet-debug-snapshot14`, 2026-09-29.
+Scratch: `~/.cache/jet-dev/scratch/Closer04/` (`pc.jet`, `rd.jet`).
 
 ## c1 — roots, empty paths, separators, prefixes
 

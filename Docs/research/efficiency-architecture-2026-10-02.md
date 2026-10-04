@@ -11,12 +11,12 @@ Evidence keys used throughout:
 
 - **H** — [`compile-cost-hello-2026-10-02.md`](../audits/compile-cost-hello-2026-10-02.md),
   especially setup, results and profile/root-cause sections.
-- **B** — `~/.cache/jet-luna/sol/efficiency/01-binary-size.md`.
-- **P** — `~/.cache/jet-luna/sol/efficiency/02-prelude-linking.md`.
-- **S** — `~/.cache/jet-luna/sol/efficiency/03-compile-speed.md`.
-- **R** — `~/.cache/jet-luna/sol/efficiency/04-runtime-memory.md`.
-- **M** — `~/.cache/jet-luna/sol/efficiency/05-compile-memory.md`.
-- **J** — `~/.cache/jet-luna/sol/efficiency/06-jai-target.md`, including its
+- **B** — `~/.cache/jet-dev/sol/efficiency/01-binary-size.md`.
+- **P** — `~/.cache/jet-dev/sol/efficiency/02-prelude-linking.md`.
+- **S** — `~/.cache/jet-dev/sol/efficiency/03-compile-speed.md`.
+- **R** — `~/.cache/jet-dev/sol/efficiency/04-runtime-memory.md`.
+- **M** — `~/.cache/jet-dev/sol/efficiency/05-compile-memory.md`.
+- **J** — `~/.cache/jet-dev/sol/efficiency/06-jai-target.md`, including its
   qualified public Jai evidence. It became available during synthesis.
 
 These are source reports, not six independent benchmark runs. H supplies the
@@ -146,7 +146,7 @@ typed selection gates. `crates/jet-store/src/runtime.rs` already caches one
 content-addressed runtime rlib; warm programs do not always rebuild it, but
 still assemble/export/strip/hash broad text.
 
-The historical prefix census (`~/.cache/jet-luna/sol/prep/Runtime-Prefix-Plan.md:7–17`,
+The historical prefix census (`~/.cache/jet-dev/sol/prep/Runtime-Prefix-Plan.md:7–17`,
 quoted by B/P) is **6,524,480 total Rust bytes: 6,523,585 prefix and 895 suffix**.
 Unicode literals contribute **2,085,277 source bytes**; the name pool alone
 contains 1,041,729 UTF-8 bytes. Rust test-item stripping already exists in

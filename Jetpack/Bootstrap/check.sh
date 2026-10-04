@@ -15,14 +15,14 @@
 #
 # Every jet command runs in its own cgroup scope with a hard memory cap and no
 # swap, under a wall-clock timeout; AOT builds take one of a few shared slots.
-# Assembled units, logs and receipts stay under ~/.cache/jet-luna, never /tmp.
+# Assembled units, logs and receipts stay under ~/.cache/jet-dev, never /tmp.
 set -euo pipefail
 
 bootstrap="${JETPACK_BOOTSTRAP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 # Run from a private copy: bash reads scripts incrementally, so an edit to this
 # file while a long proof runs would otherwise corrupt the running proof.
 if [[ -z "${JETPACK_CHECK_SNAPSHOT:-}" ]]; then
-  snapshot_dir="$HOME/.cache/jet-luna/jetpack-bootstrap/scripts"
+  snapshot_dir="$HOME/.cache/jet-dev/jetpack-bootstrap/scripts"
   mkdir -p "$snapshot_dir"
   snapshot="$snapshot_dir/check-$$.sh"
   cp "$bootstrap/check.sh" "$snapshot"
@@ -56,21 +56,21 @@ if (( each == 1 )); then
   # One unit per populated area, a few at a time; each child caps its own memory.
   parallel="${JETPACK_EACH_PARALLEL:-4}"
   base_worker="${JETPACK_WORKER:-lead}"
-  summary="$HOME/.cache/jet-luna/jetpack-bootstrap/$base_worker-each.summary"
+  summary="$HOME/.cache/jet-dev/jetpack-bootstrap/$base_worker-each.summary"
   : > "$summary"
   while IFS= read -r area; do
     [[ -n "$area" ]] || continue
     while (( $(jobs -rp | wc -l) >= parallel )); do wait -n || true; done
     (
       JETPACK_WORKER="$base_worker-each-$area" env -u JETPACK_CHECK_SNAPSHOT bash "$bootstrap/check.sh" --area "$area" $([[ $with_tests == 1 ]] && echo --tests) \
-        > "$HOME/.cache/jet-luna/jetpack-bootstrap/$base_worker-each-$area.log" 2>&1
+        > "$HOME/.cache/jet-dev/jetpack-bootstrap/$base_worker-each-$area.log" 2>&1
       printf '%s %d\n' "$area" "$?" >> "$summary"
     ) &
   done < <(node "$bootstrap/areas.mjs" populated)
   wait
   failed=0
   while read -r area status; do
-    printf 'area %-14s %s (log ~/.cache/jet-luna/jetpack-bootstrap/%s-each-%s.log)\n' "$area" "$([[ $status == 0 ]] && echo OK || echo "FAILED exit $status")" "$base_worker" "$area"
+    printf 'area %-14s %s (log ~/.cache/jet-dev/jetpack-bootstrap/%s-each-%s.log)\n' "$area" "$([[ $status == 0 ]] && echo OK || echo "FAILED exit $status")" "$base_worker" "$area"
     [[ "$status" == 0 ]] || failed=1
   done < <(sort "$summary")
   (( failed == 0 )) && echo "JETPACK EACH OK$([[ $with_tests == 1 ]] && echo ' (check, default run, AOT test)')"
@@ -92,7 +92,7 @@ if [[ ! -x "$jet" ]]; then
 fi
 
 root_tag="$(printf '%s\0%s\0%s\0%s' "$(cd "$source_root" && pwd)" "${sorted_areas:-*}" "$own_area" "$deps_from_head" | sha256sum | cut -c1-10)"
-scratch="$HOME/.cache/jet-luna/jetpack-bootstrap/$worker-$root_tag"
+scratch="$HOME/.cache/jet-dev/jetpack-bootstrap/$worker-$root_tag"
 export JETPACK_BOOTSTRAP_SOURCE_ROOT="$source_root" JETPACK_BOOTSTRAP_SCRATCH="$scratch" JETPACK_WORKER="$worker"
 if [[ -n "$sorted_areas" ]]; then export JETPACK_BOOTSTRAP_AREAS="$sorted_areas"; else unset JETPACK_BOOTSTRAP_AREAS; fi
 if [[ -n "$own_area" ]]; then export JETPACK_BOOTSTRAP_OWN_AREA="$own_area"; else unset JETPACK_BOOTSTRAP_OWN_AREA; fi
@@ -103,7 +103,7 @@ else
   unset JETPACK_BOOTSTRAP_DEPS_FROM_HEAD
 fi
 receipt="$scratch/check.receipt"
-mkdir -p "$scratch" "$HOME/.cache/jet-luna/jetpack-bootstrap/slots"
+mkdir -p "$scratch" "$HOME/.cache/jet-dev/jetpack-bootstrap/slots"
 # Pin one compiler for every stage: a hard link keeps this exact binary even if
 # cargo replaces target/debug/jet mid-proof (no extra disk; removed at exit).
 jet_pinned="$scratch/jet-pinned"
@@ -212,11 +212,11 @@ fi
 # Full type checks take a machine-wide slot (JETPACK_CHECK_SLOTS, default 2):
 # many parallel writers must not run many multi-GB checks at once.
 check_slots="${JETPACK_CHECK_SLOTS:-2}"
-exec 7>"$HOME/.cache/jet-luna/jetpack-bootstrap/slots/check-wait"
+exec 7>"$HOME/.cache/jet-dev/jetpack-bootstrap/slots/check-wait"
 got_slot=""
 while [[ -z "$got_slot" ]]; do
   for slot in $(seq 1 "$check_slots"); do
-    exec 8>"$HOME/.cache/jet-luna/jetpack-bootstrap/slots/check-$slot"
+    exec 8>"$HOME/.cache/jet-dev/jetpack-bootstrap/slots/check-$slot"
     if flock -n 8; then got_slot="$slot"; break; fi
     exec 8>&-
   done
@@ -245,7 +245,7 @@ if (( with_tests == 1 && overall == 0 )); then
   node "$bootstrap/assemble.mjs" aot
   unit_record aot
   # One AOT build at a time machine-wide for this stream (~1 GiB+ per build).
-  exec 9>"$HOME/.cache/jet-luna/jetpack-bootstrap/slots/aot"
+  exec 9>"$HOME/.cache/jet-dev/jetpack-bootstrap/slots/aot"
   flock 9
   bounded aot "$aot_mem" 1800 "$scratch/aot/project" "$jet" test src/jetpack.jet || overall=1
   flock -u 9

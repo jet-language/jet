@@ -335,7 +335,7 @@ The browser exercise covered revision conflicts, network failure, retained draft
 
 A final read-only check against the existing owner server displayed root AGENTS.md and a revision matching its SHA-256. Both policy files retained their pre-change hashes. No second Tower server was started. The dedicated Chromium process and disposable probes were removed.
 
-Evidence receipt: `/home/nate/.cache/jet-luna/cleanup-agents-browser-proof.json`. The plugin README documents save, conflict, draft-lifetime, cancellation, and file-safety behavior. This editor upgrade does not merge policy content; B4 remains gated.
+Evidence receipt: `/home/nate/.cache/jet-dev/cleanup-agents-browser-proof.json`. The plugin README documents save, conflict, draft-lifetime, cancellation, and file-safety behavior. This editor upgrade does not merge policy content; B4 remains gated.
 
 ### Delivered: B7 skill contracts
 
@@ -418,7 +418,7 @@ Supporting consumers changed only in `scripts/agent/check-skill-consolidation.mj
 
 All 42 B7 skill/support paths resolve inside the Jet checkout: 15 audit/reference paths, 24 workflow/router/adapter paths, and three checker consumers. No shared/global installation was a write target. Root policy and the B4 documents were not rewritten; existing protected reports were not changed. This separately authorized review is the only report updated for delivery.
 
-Proof receipt: `/home/nate/.cache/jet-luna/cleanup-skill-proof-2026-09-05.json`. It retains source hashes, both worker preservation maps, the original route read and corrected-resource observation, the workflow trace and full artifacts, and the exact evidence limits.
+Proof receipt: `/home/nate/.cache/jet-dev/cleanup-skill-proof-2026-09-05.json`. It retains source hashes, both worker preservation maps, the original route read and corrected-resource observation, the workflow trace and full artifacts, and the exact evidence limits.
 
 The disposable workflow and ledger fixtures have been removed. Their required inputs and complete output artifacts remain in the receipt.
 

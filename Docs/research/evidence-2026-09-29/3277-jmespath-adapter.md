@@ -1,6 +1,6 @@
 # #3277 — Standard JMESPath adapter (D-CORE-JMESPATH1=A): evidence check
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-luna/safe-jet.sh`).
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-dev/safe-jet.sh`).
 
 ## Question
 

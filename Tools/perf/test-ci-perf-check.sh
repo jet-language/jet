@@ -6,7 +6,7 @@ checker_source="$script_dir/ci-perf-check.sh"
 dashboard_source="$script_dir/dashboard.sh"
 corpus_source="$script_dir/corpus.tsv"
 plan_source="$script_dir/../../Docs/spec/reference/compiler-speed.md"
-scratch_parent=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-perf"}
+scratch_parent=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}
 scratch_parent_resolved=$(realpath -m -- "$scratch_parent")
 case "$scratch_parent_resolved" in
     /tmp|/tmp/*|*/target|*/target/*)
@@ -273,7 +273,7 @@ assert_dashboard_source '"$JET_BIN" run run.jet -- seed_data'
 assert_dashboard_source '"$JET_BIN" run --interpret run.jet -- seed_data'
 assert_dashboard_source '"$JET_BIN" jobs'
 assert_dashboard_source 'parity_check_job_runner_case edit Tools/perf/edits/job_runner.jet'
-assert_dashboard_source 'TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-perf"}'
+assert_dashboard_source 'TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}'
 assert_dashboard_source 'run_dir=$(mktemp -d "$TMP_ROOT/compiler-speed.XXXXXX")'
 assert_dashboard_source 'run_bounded_process()'
 assert_dashboard_source 'record_machine_load'
@@ -309,7 +309,7 @@ assert_plan_source 'complete native run'
 assert_plan_source 'atomic rename'
 assert_checker_source 'realpath -m -- "$SCRATCH_ROOT"'
 assert_checker_source 'df -P "$SCRATCH_ROOT"'
-assert_checker_source 'SCRATCH_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-perf"}'
+assert_checker_source 'SCRATCH_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}'
 assert_checker_source 'CI_RUN_DIR=$(mktemp -d "$SCRATCH_ROOT/compiler-speed-ci.XXXXXX")'
 assert_checker_source 'cleanup_ci()'
 assert_checker_source 'JET_PERF_SCRATCH_ROOT="$SCRATCH_ROOT" TMPDIR="$SCRATCH_ROOT"'

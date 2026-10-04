@@ -21,7 +21,7 @@ fi
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo"
-scratch_root="${JET_CORPUS_GATE_SCRATCH_DIR:-${JET_TEST_SCRATCH:-$HOME/.cache/jet-test-scratch}}"
+scratch_root="${JET_CORPUS_GATE_SCRATCH_DIR:-${JET_TEST_SCRATCH:-$HOME/.cache/jet-dev/scratch}}"
 mkdir -p "$scratch_root"
 tmp="$(mktemp -d "$scratch_root/compose-corpus-gate.XXXXXX")"
 ledger_tmp=

@@ -183,7 +183,7 @@ fn publication_policy_test_error(result: PublicationPackagePolicyReceipt Publica
     assert(refusal.why.contains("#935 live signature chain, #431 advisory audit, #1912 name policy, #1913 maintainer liveness"))
 }
 #Test("publication policy community missing and malformed advisory evidence closes gates") {
-    root :: files.join(sys.get("HOME") ?? panic("HOME"), ".cache/jet-test-scratch/policy-gates-{sys.pid()}")
+    root :: files.join(sys.get("HOME") ?? panic("HOME"), ".cache/jet-dev/scratch/policy-gates-{sys.pid()}")
     files.remove_all(root).drop("stale fixture may be absent")
     files.create_dir_all(files.join(root, ".jet")) ?? panic("create fixture")
     assert_eq(publication_advisory_gate_status(root), PublicationGateState.Blocked)
@@ -210,7 +210,7 @@ fn publication_policy_test_resign(feed: &PublicationAdvisoryFeed, seed: [U8]) Pu
 #Test("publication policy community signed audit clean vulnerability maturity and stale") {
     assert_eq(sys.get("JET_ADVISORY_DB"), None)
     assert_eq(sys.get("JET_ADVISORY_NOW"), None)
-    root :: files.join(sys.get("HOME") ?? panic("HOME"), ".cache/jet-test-scratch/policy-signed-gates-{sys.pid()}")
+    root :: files.join(sys.get("HOME") ?? panic("HOME"), ".cache/jet-dev/scratch/policy-signed-gates-{sys.pid()}")
     files.remove_all(root).drop("stale fixture may be absent")
     jet_dir :: files.join(root, ".jet")
     files.create_dir_all(jet_dir) ?? panic("create fixture")

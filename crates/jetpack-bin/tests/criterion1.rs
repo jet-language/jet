@@ -24,7 +24,7 @@ fn scratch(tag: &str) -> PathBuf {
 
 fn criterion_root() -> PathBuf {
     let root = PathBuf::from(std::env::var_os("HOME").unwrap())
-        .join(".cache/jet-test-scratch/jetpack-criterion1-root");
+        .join(".cache/jet-dev/scratch/jetpack-criterion1-root");
     fs::create_dir_all(&root).unwrap();
     root
 }

@@ -30,7 +30,7 @@ Each probe followed the same evidence order:
 
 1. Read the probe brief and the campaign's source-of-truth material: ratified specs and decisions, shipped examples, `jet help`, compiler facts, and the relevant Prelude/core surface.
 2. Read the applicable law map and prior family evidence, including retained `dx2` reports and deleted-ballot history when that changed interpretation.
-3. Build the smallest useful program in `~/.cache/jet-luna/dx3/<probe>` rather than editing the repository.
+3. Build the smallest useful program in `~/.cache/jet-dev/dx3/<probe>` rather than editing the repository.
 4. Run it through `scripts/agent/jet-env jet run`; build or run AOT only when the question required it.
 5. Record successful behavior, exact diagnostics or ICEs, performance observations, and the smallest credible workaround. A workaround is evidence of reachability, not proof that the missing native surface is acceptable.
 6. Put every observed gap in the matching JSON payload. The Markdown report explains the experiment, decision, and evidence. Area probes also record a focused battery.

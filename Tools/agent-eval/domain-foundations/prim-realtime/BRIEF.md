@@ -1,6 +1,6 @@
 # Probe prim-realtime — Real-time guarantees: deadlines, audio callbacks, jitter
 
-Read `~/.cache/jet-luna/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -16,8 +16,8 @@ Build, as library Jet: a 48 kHz audio callback that must fill 256-sample buffers
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-luna/dx2/acoustics-audio-engineering/`, `~/.cache/jet-luna/dx2/audio-music-production/`, `~/.cache/jet-luna/dx2/real-time-safety-critical/`, `~/.cache/jet-luna/dx2/robotics/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-luna/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-luna/dx2/_families/*/synthesis.md`.
+Domain census and reports: `~/.cache/jet-dev/dx2/acoustics-audio-engineering/`, `~/.cache/jet-dev/dx2/audio-music-production/`, `~/.cache/jet-dev/dx2/real-time-safety-critical/`, `~/.cache/jet-dev/dx2/robotics/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-luna/dx3/prim-realtime/probe.md`, `gaps.json`, and the code under `~/.cache/jet-luna/dx3/prim-realtime/pkg/`. Gap ids start with `prim-realtime-G`.
+`~/.cache/jet-dev/dx3/prim-realtime/probe.md`, `gaps.json`, and the code under `~/.cache/jet-dev/dx3/prim-realtime/pkg/`. Gap ids start with `prim-realtime-G`.

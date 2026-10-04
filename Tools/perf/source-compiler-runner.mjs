@@ -333,7 +333,7 @@ const canonicalProbes = canonicalProbeSpecs.map(spec => {
   return { ...spec, input_path: inputPath, input_sha256: sha256File(inputPath), expected_path: expectedPath, expected_sha256: sha256File(expectedPath) };
 });
 const commit = commitIdentity();
-const scratchRoot = path.resolve(process.env.JET_SOURCE_COMPILER_PERF_SCRATCH || process.env.JET_PERF_SCRATCH_ROOT || path.join(os.homedir(), ".cache", "jet-perf"));
+const scratchRoot = path.resolve(process.env.JET_SOURCE_COMPILER_PERF_SCRATCH || process.env.JET_PERF_SCRATCH_ROOT || path.join(os.homedir(), ".cache", "jet-dev", "perf-bench"));
 rejectRamScratch(scratchRoot);
 fs.mkdirSync(scratchRoot, { recursive: true });
 const work = fs.mkdtempSync(path.join(scratchRoot, "source-compiler-perf-"));

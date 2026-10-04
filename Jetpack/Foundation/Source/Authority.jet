@@ -85,7 +85,8 @@ pub fn authority_parse_root(right: String) -> String? Never! {
 
 // Preserve a right's leaf spelling while normalizing its canonical root.
 pub fn authority_parse_right(right: String) -> String? Never! {
-    trimmed :: right.trim()
+    // #4303: Main-approved host-emitter binding workaround; restore :: with the emitter fix.
+    trimmed := right.trim()
     root :: authority_parse_root(trimmed) ?? return None
     if root == AUTHORITY_PANIC_ROOT && trimmed != AUTHORITY_PANIC_ROOT -> return None
     raw :: trimmed.bytes()

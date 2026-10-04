@@ -1,6 +1,6 @@
 # #3372: Per-family iterator capability map
 
-Date: 2026-09-29. Binary: jet-debug-snapshot14, run through `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Binary: jet-debug-snapshot14, run through `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -46,7 +46,7 @@ union sorted: [10, 20, 30, 40]
 union len: 4
 ```
 
-`~/.cache/jet-test-scratch/Closer08/maporder.jet` shows the same Map order on
+`~/.cache/jet-dev/scratch/Closer08/maporder.jet` shows the same Map order on
 JIT and the interpreter. Literal `{"pear", "apple", "fig"}` lists as
 `[apple, fig, pear]`. A later `add("banana")` lists as
 `[apple, banana, fig, pear]`.

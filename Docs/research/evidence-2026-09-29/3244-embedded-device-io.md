@@ -5,7 +5,7 @@ Closer11, 2026-09-29.
 - Test binary: the prebuilt
   `target-integ/debug/deps/target_machines-26bd6929cfe143b9`, built 2026-09-29
   01:56 from HEAD a8d8417c2, with the working-tree edits present at that time.
-- CLI binary: `jet-debug-snapshot14`, run through `~/.cache/jet-luna/safe-jet.sh`.
+- CLI binary: `jet-debug-snapshot14`, run through `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -33,14 +33,14 @@ systemd-run --user --slice=jetwork.slice --scope -q -p MemoryMax=6G \
 ```
 
 Result: `test result: FAILED. 3 passed; 5 failed`. The log is
-`~/.cache/jet-test-scratch/Closer11/target_machines2.log`.
+`~/.cache/jet-dev/scratch/Closer11/target_machines2.log`.
 
 Command 2 repeats the MCU test with the nix cc-wrapper hardening disabled:
 `... Tools/agent/jet-env env NIX_HARDENING_ENABLE= target-integ/.../target_machines-... mcu_firmware_build_writes_elf_map_audit_and_size_budget`.
 Result: `1 passed`. This run includes the QEMU MPS2 serial check
 (`program-linked\n`).
 
-The CLI probes are in `~/.cache/jet-test-scratch/Closer11/emb/`.
+The CLI probes are in `~/.cache/jet-dev/scratch/Closer11/emb/`.
 
 ## Cell table
 
@@ -87,7 +87,7 @@ The CLI probes are in `~/.cache/jet-test-scratch/Closer11/emb/`.
   - Expected: `jet-env` or the test disables hardening for cross targets. With
     `NIX_HARDENING_ENABLE=` the test passes.
 - **D4: `jet check --target` is ignored.**
-  - Repro: `jet check --target=board.sensor_v1 ~/.cache/jet-test-scratch/Closer11/emb/files_on_board.jet`
+  - Repro: `jet check --target=board.sensor_v1 ~/.cache/jet-dev/scratch/Closer11/emb/files_on_board.jet`
     (`use core.files as fs` + `fs.read`).
   - Observed: exit 0, 115 Core-internal lint warnings, and no E3310.
     `jet check --help` has no `--target`.

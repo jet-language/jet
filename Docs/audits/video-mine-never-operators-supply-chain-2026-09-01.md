@@ -24,7 +24,7 @@ Limitations, stated plainly:
 - The probed binary was `target/debug/jet` built 2026-09-01 20:17 from commit 8b9933668 plus a 688-path dirty tree owned by a sibling session. Every defect below was therefore confirmed against **committed** source (`git show HEAD:…`) before it became a card. The binary disappeared mid-verification (sibling rebuild), so the second reader confirmed defect D2 from committed source only; the first reader's live outputs stand.
 - The exact-key topic matrix across the four ledgers (103 claims, all enum-valid) found zero repeated keys; the cross-video repeats below were established by semantic review, per the skill.
 
-Captures: `/tmp/jet-mine/jet-mine-<id>.transcript.txt`, `.info.json`, `<id>.claims.json`, `<id>.findings.md`, `<id>.manifest.json`; probes under `~/.cache/jet-test-scratch/mine-<id>/` and `mine-main/`.
+Captures: `/tmp/jet-mine/jet-mine-<id>.transcript.txt`, `.info.json`, `<id>.claims.json`, `<id>.findings.md`, `<id>.manifest.json`; probes under `~/.cache/jet-dev/scratch/mine-<id>/` and `mine-main/`.
 
 ## Reframes — where the popular reading is wrong
 
@@ -246,8 +246,8 @@ Prior cards reused rather than duplicated: #496 (D-OPDEF1), #2252 (E0956 batch),
 ## Files and links
 
 - Ledgers and findings: `/tmp/jet-mine/kHpEolpE3pU.*`, `/tmp/jet-mine/wpqiH56ITZo.*`, `/tmp/jet-mine/xUBIbhPC_rQ.*`, `/tmp/jet-mine/uQV6hYwyjMY.*`, `/tmp/jet-mine/manifest.json`
-- Probes: `~/.cache/jet-test-scratch/mine-kHpEolpE3pU/`, `mine-wpqiH56ITZo/`, `mine-xUBIbhPC_rQ/`, `mine-uQV6hYwyjMY/`, `mine-main/`, `mine-verify/`
-- Ballot JSON as filed: `~/.cache/jet-luna/ballot-D-NEVER2.json`, `~/.cache/jet-luna/ballot-D-OPMIX1.json`
+- Probes: `~/.cache/jet-dev/scratch/mine-kHpEolpE3pU/`, `mine-wpqiH56ITZo/`, `mine-xUBIbhPC_rQ/`, `mine-uQV6hYwyjMY/`, `mine-main/`, `mine-verify/`
+- Ballot JSON as filed: `~/.cache/jet-dev/ballot-D-NEVER2.json`, `~/.cache/jet-dev/ballot-D-OPMIX1.json`
 - Videos: https://www.youtube.com/watch?v=kHpEolpE3pU · https://www.youtube.com/watch?v=wpqiH56ITZo · https://www.youtube.com/watch?v=xUBIbhPC_rQ · https://www.youtube.com/watch?v=uQV6hYwyjMY
 - Primary sources: https://rust-lang.github.io/rfcs/1216-bang-type.html · https://github.com/rust-lang/rust/pull/155499 · https://doc.rust-lang.org/edition-guide/rust-2024/never-type-fallback.html · https://blog.rust-lang.org/2026/08/20/supply-chain-attack-on-arrayref/ · https://rustsec.org/advisories/RUSTSEC-2026-0260 · https://www.wiz.io/blog/rust-supply-chain-attack-on-arrayref-significant-overlap-with-dprk-campaigns · https://github.com/suryanox/dump/tree/main/cdvar
 

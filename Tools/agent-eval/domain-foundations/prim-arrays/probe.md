@@ -2,7 +2,7 @@
 
 ## What I built
 
-Scratch package: `/home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/` with `package.jet` authority for `GPU, IO, Mem.Alloc, Panic`. Programs are small library-author experiments, not proposed niche libraries.
+Scratch package: `/home/nate/.cache/jet-dev/dx3/prim-arrays/pkg/` with `package.jet` authority for `GPU, IO, Mem.Alloc, Panic`. Programs are small library-author experiments, not proposed niche libraries.
 
 - `run.jet`: dense `core.compute` constructor and inspection.
 - `views.jet`: reshape, transpose, broadcast, and elementwise add.
@@ -14,21 +14,21 @@ Scratch package: `/home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/` with `package
 
 ## What worked
 
-1. `Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/run.jet` returned `shape:[2, 3] rank:2 numel:6` and six `2.0` values.
-2. `Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/views.jet` returned `matrix:[2, 3] transpose:[3, 2] values:[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]` and `broadcast_sum:[11.0, 12.0, 13.0, 14.0, 15.0, 16.0]`. The same source built AOT and `/home/nate/Projects/Github/jet/build/views` produced byte-identical lines.
-3. `Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/labeled_tuple.jet` returned `lookup:3.0` and `missing:null`. The same source built AOT with `jet build` and produced the same output. An anonymous named tuple can therefore carry a Tensor plus metadata.
-4. `Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/chunked.jet` returned `chunks:8 reads_before:0`, `first:[0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0] reads_after_one:1`, and `mapped_len:64 reads_after_all:8`. AOT `jet build` also succeeded. This is manual chunking, not a Core lazy plan.
+1. `Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/prim-arrays/pkg/run.jet` returned `shape:[2, 3] rank:2 numel:6` and six `2.0` values.
+2. `Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/prim-arrays/pkg/views.jet` returned `matrix:[2, 3] transpose:[3, 2] values:[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]` and `broadcast_sum:[11.0, 12.0, 13.0, 14.0, 15.0, 16.0]`. The same source built AOT and `/home/nate/Projects/Github/jet/build/views` produced byte-identical lines.
+3. `Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/prim-arrays/pkg/labeled_tuple.jet` returned `lookup:3.0` and `missing:null`. The same source built AOT with `jet build` and produced the same output. An anonymous named tuple can therefore carry a Tensor plus metadata.
+4. `Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/prim-arrays/pkg/chunked.jet` returned `chunks:8 reads_before:0`, `first:[0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0] reads_after_one:1`, and `mapped_len:64 reads_after_all:8`. AOT `jet build` also succeeded. This is manual chunking, not a Core lazy plan.
 5. The inline image program runs in the default `jet run` tier and returns `image:4x4x3 dtype:f64 corner:1.0` and `gray:2x2x1 first:0.3`. The loops prove that ordinary Jet code can express a toy transform over Tensor values.
 
 ## Gaps
 
 ### prim-arrays-G1 — Tensor-bearing records cannot be code-generated
 
-Tags: `defect`, `impossible`. `JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-arrays/store Tools/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/tensor_wrapper_ice.jet` exits 101 with `codegen reached a construct the typed IR does not cover: the expression BoxedTensor{tensor: values}` at `tensor_wrapper_ice.jet:9:14` (compiler bug I2/R7, `Items.rs:3409:5`). A labeled/raster value cannot be a normal user-defined record in AOT. Workaround: anonymous named tuples or parallel values. Areas: data, AI/ML, science.
+Tags: `defect`, `impossible`. `JET_STORE_DIR=/home/nate/.cache/jet-dev/dx3/prim-arrays/store Tools/agent/jet-env jet build /home/nate/.cache/jet-dev/dx3/prim-arrays/pkg/tensor_wrapper_ice.jet` exits 101 with `codegen reached a construct the typed IR does not cover: the expression BoxedTensor{tensor: values}` at `tensor_wrapper_ice.jet:9:14` (compiler bug I2/R7, `Items.rs:3409:5`). A labeled/raster value cannot be a normal user-defined record in AOT. Workaround: anonymous named tuples or parallel values. Areas: data, AI/ML, science.
 
 ### prim-arrays-G2 — AOT Tensor writes fail
 
-Tag: `defect`. `JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-arrays/store Tools/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/set_ice.jet` exits 101 with `internal compiler error: the generated Rust did not compile` (`build/set_ice.rs`). The same `compute.set(&tensor, [0, 1], 3.0)` program under `jet run` returns `values:[0.0, 3.0, 0.0, 0.0]`. This blocks AOT implementations that allocate an output and fill indexed pixels. Areas: data, AI/ML, science.
+Tag: `defect`. `JET_STORE_DIR=/home/nate/.cache/jet-dev/dx3/prim-arrays/store Tools/agent/jet-env jet build /home/nate/.cache/jet-dev/dx3/prim-arrays/pkg/set_ice.jet` exits 101 with `internal compiler error: the generated Rust did not compile` (`build/set_ice.rs`). The same `compute.set(&tensor, [0, 1], 3.0)` program under `jet run` returns `values:[0.0, 3.0, 0.0, 0.0]`. This blocks AOT implementations that allocate an output and fill indexed pixels. Areas: data, AI/ML, science.
 
 ### prim-arrays-G3 — No labeled N-D Tensor primitive
 
@@ -60,14 +60,14 @@ Tag: `slow`. Release `jet build` of `map_4k.jet` succeeded. `/home/nate/Projects
 ## Defects
 
 - G1 and G2 are exact AOT defects with compiler ICE/generated-Rust failures.
-- `image_inline.jet` default execution succeeds, but `JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-arrays/store Tools/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/image_inline.jet` exits 101 with `internal compiler error: the generated Rust did not compile` (`build/image_inline.rs`). This is the combined consequence of indexed Tensor writes and should be fixed with G2 before treating image code as AOT-ready.
+- `image_inline.jet` default execution succeeds, but `JET_STORE_DIR=/home/nate/.cache/jet-dev/dx3/prim-arrays/store Tools/agent/jet-env jet build /home/nate/.cache/jet-dev/dx3/prim-arrays/pkg/image_inline.jet` exits 101 with `internal compiler error: the generated Rust did not compile` (`build/image_inline.rs`). This is the combined consequence of indexed Tensor writes and should be fixed with G2 before treating image code as AOT-ready.
 
 ## Research mined
 
-- `~/.cache/jet-luna/dx2/climate-weather/report.md`: checked dense Tensor is real, but labeled N-D arrays, coordinate alignment, netCDF/Zarr, lazy chunks, and distributed halos are absent; performance was previously unclaimed.
-- `~/.cache/jet-luna/dx2/remote-sensing/report.md`: Tensor shape/transpose/broadcast exists, but raster, CRS, windows, and blocked arrays are absent; the report records `core.geospatial` rejection with E1001.
-- `~/.cache/jet-luna/dx2/image-processing/report.md`: Tensor/View/FFT/sparse/placement exist, but image value, dtype/range, codec, colorspace, resampler, and demand-driven pipeline are absent.
-- `~/.cache/jet-luna/dx2/oceanography-hydrology/report.md` and `medical-imaging/report.md`: scientific workflows need labeled arrays, Dask/Zarr/netCDF, spatial metadata, medical image IO, and tiled inference; Jet currently has only eager Tensor numerics.
+- `~/.cache/jet-dev/dx2/climate-weather/report.md`: checked dense Tensor is real, but labeled N-D arrays, coordinate alignment, netCDF/Zarr, lazy chunks, and distributed halos are absent; performance was previously unclaimed.
+- `~/.cache/jet-dev/dx2/remote-sensing/report.md`: Tensor shape/transpose/broadcast exists, but raster, CRS, windows, and blocked arrays are absent; the report records `core.geospatial` rejection with E1001.
+- `~/.cache/jet-dev/dx2/image-processing/report.md`: Tensor/View/FFT/sparse/placement exist, but image value, dtype/range, codec, colorspace, resampler, and demand-driven pipeline are absent.
+- `~/.cache/jet-dev/dx2/oceanography-hydrology/report.md` and `medical-imaging/report.md`: scientific workflows need labeled arrays, Dask/Zarr/netCDF, spatial metadata, medical image IO, and tiled inference; Jet currently has only eager Tensor numerics.
 - Deleted ballots `D-M-LABELED-ARRAYS1` (recommendation C: checked facets on one Tensor) and `D-M-RASTER1` (recommendation C: one Raster over Tensor storage) both preserve the same current-vs-proposed boundary. `M-CHUNKED-LAZY-ARRAYS.json` identifies the separate chunk scheduler mechanism.
 
 ## Verdict

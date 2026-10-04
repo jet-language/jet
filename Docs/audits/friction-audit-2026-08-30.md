@@ -249,4 +249,4 @@ Every one of the 38 lane findings maps through this table. **Audit-only: zero.**
 Lexical `rg` counts approximate real developer frequency; generated time-accuracy fixtures and
 comments inflate some rows, and no out-of-repo Jet corpus exists yet to check against.
 
-Lane evidence: `~/.cache/jet-luna/friction-2026-08-30/out/*.md` (8 corpus lanes, 38 findings, plus 5 Luna-max systemic-prevention lanes).
+Lane evidence: `~/.cache/jet-dev/friction-2026-08-30/out/*.md` (8 corpus lanes, 38 findings, plus 5 Luna-max systemic-prevention lanes).

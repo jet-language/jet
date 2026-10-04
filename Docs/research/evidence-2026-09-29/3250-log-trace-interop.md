@@ -45,7 +45,7 @@ Telemetry caps (Log.rs:10-13): 512-byte text, 16 fields, 64 metrics, 32 open spa
 observations / linked logs. `sample_every(n)` keeps every n-th record (Log.rs:773-782).
 The file sink has **no in-memory buffer and no size cap**: every record reopens the file
 in append mode (Log.rs:689-700), so buffering is bounded (zero) but file growth is not.
-The 10k-event wall-time measurement (`~/.cache/jet-test-scratch/Closer03/log_cost.jet`) was
+The 10k-event wall-time measurement (`~/.cache/jet-dev/scratch/Closer03/log_cost.jet`) was
 not taken: BLOCKED by the request budget.
 
 ## Source identity (criterion 4)

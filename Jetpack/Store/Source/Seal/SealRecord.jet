@@ -14,7 +14,8 @@ STORE_SEAL_PARTIAL_SUFFIX :: prep { ".partial" }
 store_seal_sequence := 0
 
 // One command/library invocation owns this state. Copies of the owner retain
-// the same shared ledger; no request copies the memo or census maps.
+// the same shared ledger; no request copies the memo, census, digest, or
+// proven-member maps.
 pub struct StoreVerification {
     state: Shared<StoreVerificationState>
 
@@ -26,6 +27,7 @@ pub struct StoreVerification {
             seal_census: [String: Int]{},
             verified_digests: [String: VerifiedDigestMemo]{},
             verified_digest_hash_counts: [String: Int]{},
+            proven_members: [String: Bool]{},
         }}
     }
 }
@@ -37,6 +39,9 @@ struct StoreVerificationState {
     seal_census: [String: Int]
     verified_digests: [String: VerifiedDigestMemo]
     verified_digest_hash_counts: [String: Int]
+    // Closure members proven against their seals, keyed by
+    // `store_proven_member_key(hangar, digest)` (Rust `PROVEN_MEMBERS`).
+    proven_members: [String: Bool]
 }
 
 pub enum SealRootKind {
@@ -174,7 +179,7 @@ pub fn store_write_seal(verification: &StoreVerification, path: String, hangar: 
     seals :: files.join(hangar, STORE_SEALS_DIR)
     store_seal_ensure_real_directory(seals, "Hangar seal directory")
     target :: files.join(seals, digest)
-    sequence :: store_seal_sequence
+    sequence :: ~store_seal_sequence
     store_seal_sequence = store_seal_sequence + 1
     temporary :: files.join(seals, ".{digest}-{process.current_pid()}-{sequence}{STORE_SEAL_PARTIAL_SUFFIX}")
     store_seal_publish(temporary, target, record.bytes()) ?? {
@@ -198,9 +203,9 @@ fn store_seal_publish(temporary: String, target: String, bytes: [U8]) StoreError
 pub fn store_remove_seal(verification: &StoreVerification, path: String, hangar: String) StoreError! {
     store_seal_memo_forget(&verification, path)
     digest :: store_object_digest_for_path(path, hangar) ?? return
-    // A removed seal means the object is quarantined or replaced; drop its
-    // process-local closure-member proof with it.
-    store_invalidate_proven_member(hangar, digest)
+    // A removed seal means the object is quarantined or replaced; drop the
+    // owner's closure-member proof with it.
+    store_invalidate_proven_member(&verification, hangar, digest)
     seal :: files.join(files.join(hangar, STORE_SEALS_DIR), digest)
     if files.stat(seal) == {
         .Ok(metadata) -> {

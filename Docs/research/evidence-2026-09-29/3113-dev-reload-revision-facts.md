@@ -1,13 +1,13 @@
 # #3113 — dev reload: failed-edit revision facts (criteria 3–4)
 
-Closer07, 2026-09-29. Binary: `jet-debug-snapshot14` (sha256 prefix `00b1e35e25ed941c`, built 2026-09-29 00:47), tree HEAD `e9c708fa7`. Run via `~/.cache/jet-luna/safe-jet.sh`.
+Closer07, 2026-09-29. Binary: `jet-debug-snapshot14` (sha256 prefix `00b1e35e25ed941c`, built 2026-09-29 00:47), tree HEAD `e9c708fa7`. Run via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 While `jet dev` holds a rejected edit, do the machine-readable diagnostics and the displayed active revision agree? Criterion 4 says `/__jet_dev_status` should carry `diagnostic_revision` equal to the rejected candidate, and `last_good_revision`/`accepted_revision` equal to what `/__jet_dev_version` shows.
 
 ## Method
-1. The gauntlet app (`Tools/gauntlet/axes/live-reload/jet/run.jet`) cannot start on snapshot14. `jet dev --json` prints one `jet.status/v1` `diagnostics ok=false` record with two E0769 errors from the embedded Core: `` `viewport` is a label-only parameter of `preview` `` at `<corelib>/Core/ui/ui.jet:104` and the same error for `playground` at `:109`. The tree `Core/ui/ui.jet:104,109` now passes `viewport: viewport`, so a later snapshot should get past this. Reproduced with `~/.cache/jet-test-scratch/Closer07/devreload/drive.py`: connection refused for 240 s.
-2. As a replacement I used a web app that does not use core.ui: `~/.cache/jet-test-scratch/Closer07/devreload/app2/{run.jet,package.jet,index.html}`. It has the gauntlet package/HTML and `#[Target(Web), HTML(Path{"index.html"})] fn run() { print("reload-before") }`.
+1. The gauntlet app (`Tools/gauntlet/axes/live-reload/jet/run.jet`) cannot start on snapshot14. `jet dev --json` prints one `jet.status/v1` `diagnostics ok=false` record with two E0769 errors from the embedded Core: `` `viewport` is a label-only parameter of `preview` `` at `<corelib>/Core/ui/ui.jet:104` and the same error for `playground` at `:109`. The tree `Core/ui/ui.jet:104,109` now passes `viewport: viewport`, so a later snapshot should get past this. Reproduced with `~/.cache/jet-dev/scratch/Closer07/devreload/drive.py`: connection refused for 240 s.
+2. As a replacement I used a web app that does not use core.ui: `~/.cache/jet-dev/scratch/Closer07/devreload/app2/{run.jet,package.jet,index.html}`. It has the gauntlet package/HTML and `#[Target(Web), HTML(Path{"index.html"})] fn run() { print("reload-before") }`.
 3. Drivers:
    - `drive2.py` saves in place (truncate+write, like `open(...,"w")`).
    - `drive3.py` saves atomically (write a temp file, then `os.replace`).
@@ -42,7 +42,7 @@ Criterion 4 is NOT met: the named fields are absent from the route, and `cargo t
 ## Defects
 1. `/__jet_dev_status` omits revision identity during a failed edit (see above). Expected: `diagnostic_revision` = the rejected candidate, and `last_good_revision` = `accepted_revision` = `/__jet_dev_version`.
 2. `jet dev --json` emits no machine record for watch-cycle build failures or successes (stdout holds only `App preview:`).
-3. In-place saves: 2 of 2 runs lost the first good in-place save after ready (no rebuild in 180 s), and 1 run compiled a truncated empty file (E0003 at 1:1). An atomic save was picked up in 12.4 s (1 of 1). Repro: `python3 ~/.cache/jet-test-scratch/Closer07/devreload/drive2.py` vs `drive3.py`.
+3. In-place saves: 2 of 2 runs lost the first good in-place save after ready (no rebuild in 180 s), and 1 run compiled a truncated empty file (E0003 at 1:1). An atomic save was picked up in 12.4 s (1 of 1). Repro: `python3 ~/.cache/jet-dev/scratch/Closer07/devreload/drive2.py` vs `drive3.py`.
 4. Snapshot14 embedded Core rejects `core.ui` apps (E0769 at `<corelib>/Core/ui/ui.jet:104,109`). This looks fixed in the tree, but it is unverified until a new snapshot exists.
 
 ## Rerun vs inspect

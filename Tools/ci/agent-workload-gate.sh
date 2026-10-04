@@ -10,7 +10,7 @@ MANIFEST="$ROOT/tests/agent_workloads/manifest.tsv"
 POLICY_CONTRACT="$ROOT/tests/agent_workloads/policy.tsv"
 BASELINE="${JET_AGENT_WORKLOAD_BASELINE:-$ROOT/tests/agent_workloads/jet_baseline.tsv}"
 REPORT="${JET_AGENT_WORKLOAD_REPORT:-$ROOT/Docs/audits/agent-workload-corpus-report.tsv}"
-SCRATCH_ROOT="${JET_AGENT_WORKLOAD_SCRATCH_DIR:-${TMPDIR:-$HOME/.cache/jet-test-scratch}}"
+SCRATCH_ROOT="${JET_AGENT_WORKLOAD_SCRATCH_DIR:-${TMPDIR:-$HOME/.cache/jet-dev/scratch}}"
 
 usage() {
   echo "usage: bash Tools/ci/agent-workload-gate.sh [--check REPORT]" >&2

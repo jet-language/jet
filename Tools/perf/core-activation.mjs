@@ -34,9 +34,9 @@ const BATTERIES = {
 
 function parseArgs(argv) {
   const args = {
-    jet: join(homedir(), ".cache/jet-luna/safe-jet.sh"),
-    out: join(homedir(), ".cache/jet-test-scratch/core-activation.json"),
-    work: join(homedir(), ".cache/jet-luna/core-activation"),
+    jet: join(homedir(), ".cache/jet-dev/safe-jet.sh"),
+    out: join(homedir(), ".cache/jet-dev/scratch/core-activation.json"),
+    work: join(homedir(), ".cache/jet-dev/core-activation"),
     samples: 20,
     batteries: Object.keys(BATTERIES),
   };

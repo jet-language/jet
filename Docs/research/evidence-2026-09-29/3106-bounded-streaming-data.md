@@ -1,6 +1,6 @@
 # #3106: bounded streaming data paths (SCRIPT-F15)
 
-Closer10, 2026-09-29. Binary: `~/.cache/jet-luna/safe-jet.sh` →
+Closer10, 2026-09-29. Binary: `~/.cache/jet-dev/safe-jet.sh` →
 `jet-debug-snapshot14`. Peer: CPython 3.14.7 `csv`. Verdict: **PARTIAL**: criterion 3 met (ballot draft below); criteria 1 and 2 unmet because the stream runs on no tier.
 
 ## Question
@@ -12,7 +12,7 @@ time compare with a streaming peer?
 
 ## Workload
 
-`~/.cache/jet-luna/stream-probe/gen.py` (deterministic) generates:
+`~/.cache/jet-dev/stream-probe/gen.py` (deterministic) generates:
 
 | File | Size | sha256 prefix | Content |
 |---|---|---|---|
@@ -24,7 +24,7 @@ time compare with a streaming peer?
 The task: take the first 10 `match` rows of `big.csv` and stop. The hostile
 files are scanned until an error or EOF.
 
-Jet programs, in `~/.cache/jet-test-scratch/Closer10/stream/`:
+Jet programs, in `~/.cache/jet-dev/scratch/Closer10/stream/`:
 
 - `csv_stream.jet`: `files.open(path)` → `csv.reader(^input, encoding.EncodingLimits.safe())`,
   a `reader.next()` loop, stopping at 10 matches.
@@ -51,7 +51,7 @@ Measurement is `measure.py` (`os.wait4`: wall, maxrss, utime, stime).
   - `malformed_limits_and_terminal_errors_match_across_applicable_tiers` →
     `E0104 writer expects 0 arguments, got 3` on `json.writer(^fs_write, limits, false)`.
     Here the Core `json.writer()` shadows the provider writer.
-  - Log: `~/.cache/jet-test-scratch/Closer10/encoding_parity.log`.
+  - Log: `~/.cache/jet-dev/scratch/Closer10/encoding_parity.log`.
 
 ### File-backed streaming reader (the path the card needs)
 

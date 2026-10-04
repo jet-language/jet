@@ -6,7 +6,7 @@ Closer07, 2026-09-29. Library built by `jet-debug-snapshot14` (sha256 prefix `00
 When a native host drives the guest Library through prepare, repeated calls, held Text results and release, do native-held values stay valid for their declared lifetime and become releasable afterwards? Is steady-state memory bounded? Allocator memory, managed values and scarce external handles are reported separately.
 
 ## Method
-Scratch witness `~/.cache/jet-test-scratch/Closer07/retention/retention.cpp` (the fixture is not modified):
+Scratch witness `~/.cache/jet-dev/scratch/Closer07/retention/retention.cpp` (the fixture is not modified):
 1. `safe-jet.sh build --lib library.jet` → `.jet/build/libembedding.so` + `embedding.h`.
 2. `jet-env g++ -O2 -std=c++17 -I .jet/build retention.cpp -o retention -pthread -ldl -rdynamic`.
 3. `./retention $PWD/.jet/build/libembedding.so`, run 3 times under `systemd-run … MemoryMax=6G`.
@@ -58,7 +58,7 @@ Runs 2 and 3:
   - The 256 Text results held by the native side stay intact and readable until `jet_text_free`: byte check `hello, …!` passes, so they stay rooted for their declared lifetime.
   - Each result is releasable exactly once. The outstanding count returns to 0 before unload.
   - The Library exposes no internal outstanding-object counter, so this count is host-side accounting only.
-- **External-handle row:** the unchanged fixture opens no files (fd count stays 6 throughout). A scratch variant (`~/.cache/jet-test-scratch/Closer07/retention2`) adds `use core.files as files` and `#Export(c) pub fn read_len(salt: Int) -> Int { text :: files.read("/etc/hostname") ?? return -1 … text.len() }`, with package `authority: { holds: { allow: [FS, Mem.Alloc] } }`. Host `fdrow.cpp`, 2 runs:
+- **External-handle row:** the unchanged fixture opens no files (fd count stays 6 throughout). A scratch variant (`~/.cache/jet-dev/scratch/Closer07/retention2`) adds `use core.files as files` and `#Export(c) pub fn read_len(salt: Int) -> Int { text :: files.read("/etc/hostname") ?? return -1 … text.len() }`, with package `authority: { holds: { allow: [FS, Mem.Alloc] } }`. Host `fdrow.cpp`, 2 runs:
   ```
   start fds=6 rss_kb=3728
   single-call result=8 fds_after_return=6

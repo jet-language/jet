@@ -10,7 +10,7 @@ For each selected baseline and library peer: what are the archived pin and the c
 
 - **Pins and the 2026-09-11 current identities.** `Docs/research/mine-for-jet-2026-09-12.md` lines 35866–35880 ("Core currentness records", 15 rows).
 - **Retained companions.** The west `current-release-notes.md` (lines 61226–61324, SHA-256 `bebb86c0…670e26b`) and the east `currentness-2026-09-11.md` (lines 62349–62403, SHA-256 `adf4a940…c241cbac3`). The card plan says these are not in the repo, but both are retained verbatim in the report and were read there.
-- **Re-derivation today.** `python3 ~/.cache/jet-test-scratch/Closer06/keep/currentness.py`, run 2026-09-29, output below. It reads each peer's official machine-readable feed: GCC timeline, `channel-rust-stable.toml`, endoflife.date Python, `go.dev/dl?mode=json`, Adoptium `available_releases`, the .NET `releases-index.json`, the GitHub releases API, crates.io, PyPI, Maven Central `maven-metadata.xml`, and NuGet flat-container.
+- **Re-derivation today.** `python3 ~/.cache/jet-dev/scratch/Closer06/keep/currentness.py`, run 2026-09-29, output below. It reads each peer's official machine-readable feed: GCC timeline, `channel-rust-stable.toml`, endoflife.date Python, `go.dev/dl?mode=json`, Adoptium `available_releases`, the .NET `releases-index.json`, the GitHub releases API, crates.io, PyPI, Maven Central `maven-metadata.xml`, and NuGet flat-container.
 - **Glaze tags**, from `git ls-remote` and the GitHub releases API bodies for v8.4.0 and v9.0.0. **JDK 27**, from `https://openjdk.org/projects/jdk/27/`.
 
 ```

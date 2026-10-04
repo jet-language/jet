@@ -30,7 +30,7 @@ The hardest cell is a truly cold, single-package, optimized build of a tiny prog
 
 ## Part I — Current facts (verified 2026-09-01, commit `8b9933668`)
 
-Documentation under `Docs/` is stale by default; every fact here is backed by code, the Tower CLI, or a command run on this machine. Evidence files from the fact lanes live under `~/.cache/jet-luna/abo/` (session evidence, not repository content).
+Documentation under `Docs/` is stale by default; every fact here is backed by code, the Tower CLI, or a command run on this machine. Evidence files from the fact lanes live under `~/.cache/jet-dev/abo/` (session evidence, not repository content).
 
 ### I.1 What `jet build` does today
 
@@ -92,7 +92,7 @@ Competitive gate (`AGENTS.md`): per cell and metric; Rust parity only at Jet/Rus
 
 ### I.4 Measured baseline
 
-Measured on 2026-09-01 with `target/debug/jet` (a debug build of the compiler; **front-end phases are inflated by that, rustc and link phases are not**), rustc 1.97.1, LLVM 21.1.8, 32 threads, load average ≈ 9 before the runs, three trials per state, `JET_TIMING=1` (which disables receipt replay), all caches redirected into scratch so the machine's real caches were untouched. Wall seconds, median of three. Full tables: `~/.cache/jet-luna/abo/MeasureNow.md`.
+Measured on 2026-09-01 with `target/debug/jet` (a debug build of the compiler; **front-end phases are inflated by that, rustc and link phases are not**), rustc 1.97.1, LLVM 21.1.8, 32 threads, load average ≈ 9 before the runs, three trials per state, `JET_TIMING=1` (which disables receipt replay), all caches redirected into scratch so the machine's real caches were untouched. Wall seconds, median of three. Full tables: `~/.cache/jet-dev/abo/MeasureNow.md`.
 
 | Program | LOC | State | Wall | Front end (parse+sema) | Backend (rustc of user crate) | Link (includes thin LTO) |
 |---|---|---|---|---|---|---|
@@ -113,7 +113,7 @@ Three findings the numbers make plain:
 - **Thin LTO over the runtime is the warm tax.** The 3349-line program spends ≈ 29 s in link on *every* build, including no-change, because the default optimized profile runs thin LTO across the program and the full runtime bitcode each time. A per-module ThinLTO cache removes this for unchanged modules.
 - **Reuse is inconsistent.** `nbody` hits the binary cache on no-change (0.97 s); `job_runner` and the 3349-line program do not (backend and link run again). The graph below has one rule for all of them.
 
-Cargo peer rows for the `nbody` pair (`Tools/gauntlet/entries/nbody/rust-expert/main.rs`, 240 LOC): see §I.4a, filled from `~/.cache/jet-luna/abo/CargoPeer.md`.
+Cargo peer rows for the `nbody` pair (`Tools/gauntlet/entries/nbody/rust-expert/main.rs`, 240 LOC): see §I.4a, filled from `~/.cache/jet-dev/abo/CargoPeer.md`.
 
 ### I.4a Cargo peer baseline
 

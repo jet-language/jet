@@ -17,9 +17,9 @@ if [[ -z $perf ]]; then
   fi
 fi
 [[ -n $perf && -x $perf ]] || { echo 'Set PERF to a working perf binary.' >&2; exit 1; }
-map=${JET_SOURCE_MAP:-$HOME/.cache/jet-luna/stage1/run-loop6g/selfcheck/compiler.map.json}
+map=${JET_SOURCE_MAP:-$HOME/.cache/jet-dev/stage1/run-loop6g/selfcheck/compiler.map.json}
 repo=${JET_REPO:-$(readlink -f "$here/../../..")}
-out=${JET_PROFILE_OUT:-$HOME/.cache/jet-test-scratch/sol/SolJetcProfile/jetc-$pid-$(date +%Y%m%d-%H%M%S)}
+out=${JET_PROFILE_OUT:-$HOME/.cache/jet-dev/scratch/sol/SolJetcProfile/jetc-$pid-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$out"
 mode=${JET_CALL_GRAPH:-auto}
 case $mode in auto|fp|dwarf) ;; *) echo 'JET_CALL_GRAPH must be auto, fp, or dwarf' >&2; exit 2;; esac

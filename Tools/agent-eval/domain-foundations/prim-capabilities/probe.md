@@ -26,12 +26,12 @@ Files:
 - Malformed and out-of-root modules fail cleanly: the host printed `plugin:malformed-rejected no plugin loaded for this handle` and `plugin:outside-rejected no plugin loaded for this handle`.
 - No-follow protection works: a temporary `link.wasm` symlink caused `E1334: Authority path .../link.wasm is a symlink`; the fixture was removed after the check.
 - Service lifecycle works: the host printed `service:started`, `service:exited-before=false`, `service:stopped`, `service:exited-after=true`, and `service:exit-success=false`.
-- ABI freeze works: `/home/nate/Projects/Github/jet/Tools/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-capabilities/version_guest_pkg/run.jet --target=sandbox` after removing export `two` returned `E1257` and named `export two was removed`.
+- ABI freeze works: `/home/nate/Projects/Github/jet/Tools/agent/jet-env jet build /home/nate/.cache/jet-dev/dx3/prim-capabilities/version_guest_pkg/run.jet --target=sandbox` after removing export `two` returned `E1257` and named `export two was removed`.
 
 Important host run:
 
 ```text
-$ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-capabilities/pkg/run.jet --allow-fs --allow-exec
+$ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/prim-capabilities/pkg/run.jet --allow-fs --allow-exec
 file:inside=inside-capability
 plugin:greeting=hello, Ada!
 plugin:scale=42.0
@@ -55,11 +55,11 @@ The implementation matches `crates/jet-pkg-model/src/Prelude/Plugin.rs:119-177` 
 A sandbox guest cannot receive a checked FS, Net, or Exec host import. This blocks an untrusted plugin that must open a host-granted directory or call a host service. It affects backend, CLI, GUI, and games plugins.
 
 ```text
-$ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-capabilities/fs_guest_pkg/run.jet --target=sandbox
+$ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet build /home/nate/.cache/jet-dev/dx3/prim-capabilities/fs_guest_pkg/run.jet --target=sandbox
 Error [E1258]: A sandbox can't use any effect
 Why: ... it uses: FS. Sandboxes run with zero host authority ...
 
-$ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-capabilities/net_guest_pkg/run.jet --target=sandbox
+$ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet build /home/nate/.cache/jet-dev/dx3/prim-capabilities/net_guest_pkg/run.jet --target=sandbox
 Error [E3304]: `core.net` is not available for target `sandbox`.
 ```
 
@@ -72,9 +72,9 @@ Error [E3304]: `core.net` is not available for target `sandbox`.
 A package cannot bind a directory authority to ordinary `core.files` calls. `pkg/scoped_fs_pkg/package.jet:4` grants `IO`, `Mem.Alloc`, and `FS.Read:<root>`, but `fs.read(path)` still requires the bare `FS` effect and the package fails:
 
 ```text
-$ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-capabilities/scoped_fs_pkg/run.jet --allow-fs
+$ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/prim-capabilities/scoped_fs_pkg/run.jet --allow-fs
 Error [E1803]: Application authority is undecided for `FS`
-Why: required_effects=FS, IO, Mem.Alloc; granted_effects=FS.Read:/home/nate/.cache/jet-luna/dx3/prim-capabilities/inputs, IO, Mem.Alloc; denied_effects=; denied_required_effects=none; undecided_effects=FS; authority=package.jet authority.holds
+Why: required_effects=FS, IO, Mem.Alloc; granted_effects=FS.Read:/home/nate/.cache/jet-dev/dx3/prim-capabilities/inputs, IO, Mem.Alloc; denied_effects=; denied_required_effects=none; undecided_effects=FS; authority=package.jet authority.holds
 ```
 
 With broad `[FS, IO, Mem.Alloc]`, the same path-only program reads both `inside-capability` and `outside-capability`. `crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:835-844` confirms `jet_std_fs_read` takes only a path. A library can manually validate paths; the shipped no-follow root boundary is only on `plugin.load` for WASM artifacts.
@@ -86,7 +86,7 @@ With broad `[FS, IO, Mem.Alloc]`, the same path-only program reads both `inside-
 The sandbox ABI cannot export records, lists, resources, callbacks, or async values. A structured export fails:
 
 ```text
-$ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-capabilities/rich_guest_pkg/run.jet --target=sandbox
+$ /home/nate/Projects/Github/jet/Tools/agent/jet-env jet build /home/nate/.cache/jet-dev/dx3/prim-capabilities/rich_guest_pkg/run.jet --target=sandbox
 Error [E1260]: A sandbox's exported function has an unsupported signature
 Why: `pub fn sum` isn't one homogeneous `Int`, `Float`, `Bool`, or `Text` shape
 ```

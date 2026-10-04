@@ -35,7 +35,7 @@ const rootTag = createHash("sha256")
   .digest("hex")
   .slice(0, 10);
 const scratchDir = resolve(
-  process.env.JETPACK_BOOTSTRAP_SCRATCH ?? resolve(homedir(), ".cache/jet-luna/jetpack-bootstrap", `${workerName}-${rootTag}`),
+  process.env.JETPACK_BOOTSTRAP_SCRATCH ?? resolve(homedir(), ".cache/jet-dev/jetpack-bootstrap", `${workerName}-${rootTag}`),
   mode,
 );
 const projectDir = resolve(scratchDir, "project");

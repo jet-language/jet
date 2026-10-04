@@ -10,15 +10,15 @@ rounding, overflow, NaN and conversions, on every tier? Which cells are missing 
 
 ## Method
 
-- Throwaway probes in `~/.cache/jet-test-scratch/Closer12/num/`: `nm_int`, `nm_fixed`,
+- Throwaway probes in `~/.cache/jet-dev/scratch/Closer12/num/`: `nm_int`, `nm_fixed`,
   `nm_fixed_checked`, `nm_float`, `nm_conversions`, `nm_decimal`, `nm_rng`, `u8_trap`, `frac_cells`.
 - Existing witnesses were copied unchanged into scratch: `math/{fraction,fraction_exact,exact_rational_math,
   int_from_u64_extreme,random_audit,random_extremes,min_max_nan,math_audit,round_half_away}.jet`
   and `lowlevel/sized_integers.jet`.
-- Every file ran through `~/.cache/jet-test-scratch/Closer12/tiers.sh`, which runs
+- Every file ran through `~/.cache/jet-dev/scratch/Closer12/tiers.sh`, which runs
   `jet run` (Cranelift), `jet run --interpret`, and `jet build` followed by the built
   `.jet/build/<name>` binary. Outputs were compared with the repo golden when one exists, else with
-  `jet run`. Raw outputs are in `~/.cache/jet-test-scratch/Closer12/out/<name>/`.
+  `jet run`. Raw outputs are in `~/.cache/jet-dev/scratch/Closer12/out/<name>/`.
 - Every `jet run`/`--interpret` invocation in a scratch directory also prints
   `E2105 Record index update failed … record index path must stay under .jet/<artifact-kind>`
   to stderr after the program. This is ignored below. It is a separate defect (see list).

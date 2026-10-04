@@ -8,10 +8,10 @@ monotonic time, ambiguous and nonexistent local times, parse round-trip, and the
 
 ## Method
 
-- Binary: snapshot14 through `~/.cache/jet-luna/safe-jet.sh`. Tiers: `run`,
-  `run --interpret`, and `build` plus the binary (`~/.cache/jet-test-scratch/Closer05/tiers.sh`).
+- Binary: snapshot14 through `~/.cache/jet-dev/safe-jet.sh`. Tiers: `run`,
+  `run --interpret`, and `build` plus the binary (`~/.cache/jet-dev/scratch/Closer05/tiers.sh`).
 - Goldens: `Examples/features/time/{datetime_accuracy_zones,datetime_accuracy_epoch_parse,time_core_witnesses}.jet`.
-- Probes: `~/.cache/jet-test-scratch/Closer05/t3265/probe.jet`, which adds `parse_rfc3339`
+- Probes: `~/.cache/jet-dev/scratch/Closer05/t3265/probe.jet`, which adds `parse_rfc3339`
   and `isoformat` round trips, and `probe2.jet`, which covers `zone`, `parse_time`, `parse`
   and `instant` only.
 - Source read: `Core/time/time.jet:14-22,124-129,249-270,348-358,371-382,458,522-548,691-692`,

@@ -112,7 +112,7 @@ Error [E1272]: 1 package lacks a supported Nix compatibility output
 
 `default.[cargo]` currently stops earlier at E1317 because its name resembles a provider. Another worker owns that independent parser defect; this audit does not duplicate it.
 
-I also attempted the package list as individual `target/debug/jetpack use <name>@nixpkgs --prep` probes from `$HOME/.cache/jet-test-scratch`. The managed audit sandbox stopped every command before provider dispatch:
+I also attempted the package list as individual `target/debug/jetpack use <name>@nixpkgs --prep` probes from `$HOME/.cache/jet-dev/scratch`. The managed audit sandbox stopped every command before provider dispatch:
 
 ```text
 Error [E2604]: Integrity check failed for Hangar path migration legacy — expected complete native per-user Hangar, got Read-only file system (os error 30).

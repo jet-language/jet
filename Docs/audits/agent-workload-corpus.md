@@ -106,7 +106,7 @@ No platform row is closed by a real workload CI job. The following jobs are the 
         env:
           JET_AGENT_WORKLOAD_REPORT: ${{ github.workspace }}/agent-workload-reports/${{ matrix.label }}.tsv
         run: |
-          scratch="$HOME/.cache/jet-test-scratch"
+          scratch="$HOME/.cache/jet-dev/scratch"
           mkdir -p "$scratch"
           TMPDIR="$scratch" nix develop -c bash tools/ci/agent-workload-gate.sh
 
@@ -143,7 +143,7 @@ No platform row is closed by a real workload CI job. The following jobs are the 
 Run the gate on each required native host:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-test-scratch" bash tools/ci/agent-workload-gate.sh
+TMPDIR="$HOME/.cache/jet-dev/scratch" bash tools/ci/agent-workload-gate.sh
 ```
 
 The gate writes the report atomically, checks the frozen task set, and fails when a task that passed in `jet_baseline.tsv` no longer passes. Set `JET_AGENT_WORKLOAD_REPORT` for a per-host CI artifact. After Linux and macOS jobs finish, run `bash tools/ci/agent-workload-matrix.sh <report-dir>`; it requires one passing report for each required OS. Keep the committed report from the selected baseline host at the path above.
@@ -221,7 +221,7 @@ JET_NIX_TMP_CLEANED=1 timeout 20m scripts/agent/jet-env cargo test --test agent_
 The report-validator self-check is:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-test-scratch" bash tools/ci/test-agent-workload-gate.sh
+TMPDIR="$HOME/.cache/jet-dev/scratch" bash tools/ci/test-agent-workload-gate.sh
 ```
 
 The old six-test run note is obsolete. The current source also checks the interpreter receipt, native OS matrix, Jet baseline ownership, production-path adapter reachability, and the first-program digest; a fresh full corpus run remains a closeout proof owned by #1173.

@@ -57,7 +57,7 @@ play.
 | Cross-process reuse | The Receipt (card #2517, batch 1) replays a whole unchanged invocation from typed diagnostics. Any source edit falls back to a full check. | `crates/jet-store/src/receipt.rs`, `Source/CheckReceipt.rs` |
 | Self-hosted driver | `JetDriver` loads packages with identities (`JetDriverPackageInfo`, `JetDriverSourceUnit.package_identity`). It has no digest-keyed reuse beyond the Receipt closure in `Identity.jet`. | `Compiler/JetDriver/Source/Driver/Identity.jet:47-88,266-304` |
 | Self-hosted sema | Checking returns values (`SemaGraphModuleResult`, `TFunc` with `effects`) instead of mutating the AST. The effect solve still runs over one graph that holds every module. | `Compiler/JetSema/Source/Sema/CheckProgram.jet:20-44,2254-2421`; `Effects/Checks.jet:1109-1166` |
-| Scale | Rust `jet check` time per line grows from 4.6 ms at 31k lines to 12.2 ms at 58k lines, and memory grows about 2.4 times for 1.9 times the lines. The self-hosted compiler has 223 files and about 171k lines in nine packages; JetSema alone has about 57k. | `Docs/research/check-scaling-2026-09-30.md`; `~/.cache/jet-luna/compiler-modules/inventory.json` (#3862) |
+| Scale | Rust `jet check` time per line grows from 4.6 ms at 31k lines to 12.2 ms at 58k lines, and memory grows about 2.4 times for 1.9 times the lines. The self-hosted compiler has 223 files and about 171k lines in nine packages; JetSema alone has about 57k. | `Docs/research/check-scaling-2026-09-30.md`; `~/.cache/jet-dev/compiler-modules/inventory.json` (#3862) |
 
 **Why the Rust checker cannot skip a module today** (PersistCheckCache's
 report, confirmed in source):

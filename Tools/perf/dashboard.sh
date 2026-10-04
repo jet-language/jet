@@ -26,7 +26,7 @@ CORPUS="$PERF_DIR/corpus.tsv"
 FIXTURE_PACKAGE="$PERF_DIR/package.jet"
 SCALE_CORPUS="$PERF_DIR/construct-scale.tsv"
 BASELINE="$PERF_DIR/baseline.json"
-TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-perf"}
+TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}
 JET_ENV="$ROOT/Tools/agent/jet-env"
 JET_BIN="$ROOT/target/debug/jet"
 

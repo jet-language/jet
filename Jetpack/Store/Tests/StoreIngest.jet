@@ -113,6 +113,77 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
     store_test_drop_roots(roots)
 }
 
+// Rust ingest lifts each Hangar `io::Error` through `From<io::Error>` into
+// `IngestError::IO(err.to_string())`: a non-directory Hangar root keeps its
+// exact InvalidData message and E1315 diagnostic, and nothing is staged.
+#Test("store ingest lifts hangar store failures to typed io diagnostics") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    source :: files.join(roots.root, "hangar-file-source")
+    files.create_dir_all(source) ?? panic("fixture dir")
+    files.write(files.join(source, "payload"), "bytes") ?? panic("fixture payload")
+    hangar :: roots.hangar_dir()
+    files.create_dir_all(files.dirname(hangar)) ?? panic("hangar parent")
+    files.write(hangar, "not a directory") ?? panic("hangar file")
+    expected :: "Hangar root is not a real directory; repair the path before writing"
+    if store_ingest_tree(&verification, roots, store_test_ingest_request("hangar-file", "path:hangar-file", source, [String]{}, "")) == {
+        .Ok(_) -> panic("a non-directory Hangar root must fail")
+        .Err(error) -> {
+            if error == {
+                .IO(message) -> assert_eq(message, expected)
+                else -> panic("a Hangar store failure must lift to IngestError.IO")
+            }
+            assert_eq(error.code(), "E1315")
+            assert_eq(error.what(), "hangar ingest failed: {expected}")
+            assert_eq(error.why(), expected)
+            assert_eq(error.fix(), "Check hangar permissions and free disk space, then retry.")
+        }
+    }
+    assert_eq(files.read(hangar) ?? panic("hangar file kept"), "not a directory")
+    store_test_drop_roots(roots)
+}
+
+// The one explicit StoreError -> IngestError uplift keeps every StoreError
+// kind's Rust message (`io::Error::to_string`), including the canonical
+// IOError display of a wrapped Core failure, under the E1315 IO diagnostic.
+#Test("store ingest store error uplift keeps each kind message") {
+    hangar :: "/hangar"
+    lifted :: store_ingest_store_error(StoreError.InvalidInput("cannot seal a non-canonical Hangar object"))
+    if lifted == {
+        .IO(message) -> assert_eq(message, "cannot seal a non-canonical Hangar object")
+        else -> panic("InvalidInput must lift to IngestError.IO")
+    }
+    assert_eq(lifted.code(), "E1315")
+    assert_eq(lifted.what(), "hangar ingest failed: cannot seal a non-canonical Hangar object")
+    data :: store_ingest_store_error(StoreError.InvalidData("{hangar} is not a real directory; repair the path before writing"))
+    if data == {
+        .IO(message) -> assert_eq(message, "/hangar is not a real directory; repair the path before writing")
+        else -> panic("InvalidData must lift to IngestError.IO")
+    }
+    io :: IOError.NotFound(IOContext{operation: .Read, resource: Val(hangar), os_code: None, cause: Val("gone")})
+    if store_ingest_store_error(StoreError.IO(io)) == {
+        .IO(message) -> assert_eq(message, "{io}")
+        else -> panic("a wrapped IOError must lift to IngestError.IO")
+    }
+    loop error in [StoreError]{
+        StoreError.NotFound("missing object"),
+        StoreError.AlreadyExists("existing object"),
+        StoreError.PermissionDenied("protected object"),
+        StoreError.Unsupported("unsupported object"),
+        StoreError.Interrupted("interrupted ingest"),
+        StoreError.Other("other failure"),
+        StoreError.LifecycleConflict(expected: None, current: None),
+    } {
+        uplift :: store_ingest_store_error(error)
+        if uplift == {
+            .IO(message) -> assert_eq(message, error.message())
+            else -> panic("each StoreError kind must lift to IngestError.IO")
+        }
+        assert_eq(uplift.code(), "E1315")
+        assert_eq(uplift.why(), error.message())
+    }
+}
+
 #Test("store ingest child replaced after copy is typed atomic and retryable") {
     verification := StoreVerification.new()
     roots :: store_test_temp_roots()

@@ -1,6 +1,6 @@
 # #3224 — Rooted file and temporary-resource lifecycle (CORE-F010, SCRIPT-F13)
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-luna/safe-jet.sh`,
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-dev/safe-jet.sh`,
 source rev `e9c708fa7` (shared, dirty checkout). Host: Linux x86_64.
 Author: Closer03 (evidence closer).
 
@@ -17,7 +17,7 @@ failure? Which pieces are missing capabilities?
   one `files.temp_dir`). Ran it on the default tier (`safe-jet.sh run --allow=FS,IO,Env`)
   and AOT (`safe-jet.sh build --allow=FS,IO,Env` then the produced
   `.jet/build/files_rooted_lifecycle`), and on the interpreter (`run --interpret`).
-- Minimal FileScope probe `~/.cache/jet-test-scratch/Closer03/scope_probe.jet`.
+- Minimal FileScope probe `~/.cache/jet-dev/scratch/Closer03/scope_probe.jet`.
 - Read: `Core/files/files.jet` (`scope` :95, `walk_impl` :661-676, `copy_file_impl` :408-413,
   `temp_dir`/`temp_file`/`lock`), `crates/jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs`
   (`jet_std_fs_scope_read` :38, temp/lock owners :127-196),

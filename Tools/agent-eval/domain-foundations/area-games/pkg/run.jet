@@ -63,8 +63,8 @@ fn process_audio_block() Int -[]> {
 
 fn run() {
     scene := game.Scene.new("arcade_probe")
-    image :: scene.assets.image("/home/nate/.cache/jet-luna/dx3/area-games/pkg/assets/player.atlas") ?? panic("image")
-    sound :: scene.assets.sound("/home/nate/.cache/jet-luna/dx3/area-games/pkg/assets/jump.wav") ?? panic("sound")
+    image :: scene.assets.image("/home/nate/.cache/jet-dev/dx3/area-games/pkg/assets/player.atlas") ?? panic("image")
+    sound :: scene.assets.sound("/home/nate/.cache/jet-dev/dx3/area-games/pkg/assets/jump.wav") ?? panic("sound")
     scene.input.bind("jump", "Space")
     scene.component<Body>()
     nodes :: [Node]{
@@ -100,7 +100,7 @@ fn run() {
     print("aabb_hits={hit_count}")
     print("sprite={image:Debug}")
     print("sound={sound:Debug}")
-    audio_effect :: rl.load_sound("/home/nate/.cache/jet-luna/dx3/area-games/pkg/assets/jump.wav")
+    audio_effect :: rl.load_sound("/home/nate/.cache/jet-dev/dx3/area-games/pkg/assets/jump.wav")
     print("sound_effect_play={rl.play_sound(audio_effect)}")
     print("audio_block_checksum={process_audio_block()}")
     window :: rl.window_open(320, 240, "Jet game probe")
@@ -113,10 +113,10 @@ fn run() {
     space_key :: "Space"
     print("window_ready={rl.window_ready(window)} key_space={rl.key_down(space_key)}")
     rl.close_window(window)
-    replay :: game.Replay.record("/home/nate/.cache/jet-luna/dx3/area-games/pkg/replay.jetreplay")
+    replay :: game.Replay.record("/home/nate/.cache/jet-dev/dx3/area-games/pkg/replay.jetreplay")
     transcript :: game.run(scene, replay: replay)
     print(transcript)
-    save_path :: "/home/nate/.cache/jet-luna/dx3/area-games/pkg/save.txt"
+    save_path :: "/home/nate/.cache/jet-dev/dx3/area-games/pkg/save.txt"
     fs.write(save_path, "x={current_x} paused={paused}") ?? panic("write save")
     saved :: fs.read(save_path) ?? panic("read save")
     print("save={saved}")

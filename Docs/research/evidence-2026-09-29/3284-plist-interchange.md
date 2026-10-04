@@ -1,6 +1,6 @@
 # #3284 — Property-list (plist) and platform data interchange (CORE-F063, D-CORE-PLIST1=A)
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-luna/safe-jet.sh`,
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-dev/safe-jet.sh`,
 source rev `e9c708fa7`. Author: Closer03 (evidence closer). No compiler, runtime or
 Core change was made.
 
@@ -20,7 +20,7 @@ the ratified fixture and a real Apple plist?
 - Source read: `Core/encoding/` (no `plist.jet`), `Core/encoding/xml.jet` (DOCTYPE
   rejection, no entity definitions), `Docs/spec/reference/core-library.md:2214-2220`
   ("parses well-formed XML 1.0 without DTDs").
-- Probes live in `~/.cache/jet-test-scratch/Closer03/`.
+- Probes live in `~/.cache/jet-dev/scratch/Closer03/`.
 
 ## Evidence
 

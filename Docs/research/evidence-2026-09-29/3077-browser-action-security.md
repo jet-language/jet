@@ -8,7 +8,7 @@ On the App action path (`web.app().action(name, handler)`), do CSRF, authenticat
 
 ## Blocker: no App program compiles on snapshot14
 
-Probe: `~/.cache/jet-test-scratch/Closer06/web/action_security.jet`. It defines two actions, `save(note: Note)` and `ping()`; each prints `MUTATION …` when invoked. It was run as a service with `JET_APP_PORT=47731` through `safe-jet.sh run`, and exited 1 with 14 errors, among them:
+Probe: `~/.cache/jet-dev/scratch/Closer06/web/action_security.jet`. It defines two actions, `save(note: Note)` and `ping()`; each prints `MUTATION …` when invoked. It was run as a service with `JET_APP_PORT=47731` through `safe-jet.sh run`, and exited 1 with 14 errors, among them:
 
 ```
 E0102 `<corelib>/Core/web::Core/web/web.jet::App` has no method `route`   (action_security.jet:24)
@@ -41,7 +41,7 @@ Findings that the planned harness must confirm or refute:
 
 ## Criterion 3 — unknown and duplicate member policy (runtime evidence on the wire codec)
 
-Probe: `~/.cache/jet-test-scratch/Closer06/web/json_members.jet`, adapted from the retained CORE input `json-deny-unknown-initial.jet`. It decodes `{"count":2}`, `{"count":2,"extra":3}` and `{"count":2,"count":3}` into a `#[Codable, DenyUnknownFields]` struct and a plain `#Codable` struct. `jet run` and `jet run --interpret` gave identical output, rc=0:
+Probe: `~/.cache/jet-dev/scratch/Closer06/web/json_members.jet`, adapted from the retained CORE input `json-deny-unknown-initial.jet`. It decodes `{"count":2}`, `{"count":2,"extra":3}` and `{"count":2,"count":3}` into a `#[Codable, DenyUnknownFields]` struct and a plain `#Codable` struct. `jet run` and `jet run --interpret` gave identical output, rc=0:
 
 ```
 strict valid: accepted 2

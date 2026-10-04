@@ -22,7 +22,7 @@ Allocation count and peak live bytes come from ``Tools/perf/alloccount.c``
 (LD_PRELOAD); peak RSS comes from ``wait4``.  A cell that cannot be measured is
 recorded as ``unavailable`` with a reason, never as zero.
 
-    python3 Tools/perf/enumset_bench.py --samples 5 --json ~/.cache/jet-luna/perf/enumset.json
+    python3 Tools/perf/enumset_bench.py --samples 5 --json ~/.cache/jet-dev/perf/enumset.json
 """
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 JET_ENV = ROOT / "Tools/agent/jet-env"
-DEFAULT_JET = Path.home() / ".cache/jet-luna/safe-jet.sh"
-SCRATCH = Path.home() / ".cache/jet-luna/enumset-bench"
+DEFAULT_JET = Path.home() / ".cache/jet-dev/safe-jet.sh"
+SCRATCH = Path.home() / ".cache/jet-dev/enumset-bench"
 PHASES = ("construction", "update", "membership", "setops", "iteration", "conversion")
 JET_ARMS = ("jet_set_enum", "jet_bits", "jet_int_mask", "jet_packed_fields")
 RUST_ARMS = ("rust_native", "rust_btreeset")

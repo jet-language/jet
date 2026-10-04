@@ -71,7 +71,7 @@ field name and section `base`. Preserve this stronger field-name requirement
 even if the retained checker only searches for `duplicate` and `base`.
 
 Use a fresh task workspace and program artifacts under
-`~/.cache/jet-test-scratch`. The agent submits its first complete program
+`~/.cache/jet-dev/scratch`. The agent submits its first complete program
 before receiving compiler or run feedback; preserve the exact source and
 first result. Permit at most one repair submission, with only raw
 compiler/run results and expected-versus-actual differences as feedback, not

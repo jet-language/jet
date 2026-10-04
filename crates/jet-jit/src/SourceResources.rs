@@ -6101,7 +6101,7 @@ mod tests {
             .or_else(|| {
                 std::env::var_os("HOME")
                     .map(PathBuf::from)
-                    .map(|home| home.join(".cache").join("jet-luna"))
+                    .map(|home| home.join(".cache").join("jet-dev"))
             })
             .expect("JET_SCRATCH or HOME must select the Jet scratch directory");
         std::fs::create_dir_all(&root).expect("create Jet scratch directory");

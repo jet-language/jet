@@ -35,7 +35,7 @@ ROW_HEADER=$(printf 'program\tstate\tstage\tlatency_ns\tmemory_bytes\tvariance_p
 PEER_META_PREFIX='compiler-speed-peer version='
 PEER_ROW_HEADER=$(printf 'peer\tlanguage\tprogram\tstate\tmetric\tvalue\tworkload_sha256\tsource_sha256\texpected_sha256\tmanifest_sha256\ttoolchain_sha256')
 PEER_METRICS=latency_ns,memory_bytes
-SCRATCH_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-perf"}
+SCRATCH_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}
 STATE_COUNT=6
 
 # CI evidence must name the exact checked-out candidate. The explicit override

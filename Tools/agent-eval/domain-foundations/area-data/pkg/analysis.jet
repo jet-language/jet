@@ -117,11 +117,11 @@ fn labeled_cell(values: [[Float]], row_labels: [String], col_labels: [String], r
 }
 
 fn mark(stage: String) {
-    files.write("/home/nate/.cache/jet-luna/dx3/area-data/stage.txt", stage) ?? panic("mark")
+    files.write("/home/nate/.cache/jet-dev/dx3/area-data/stage.txt", stage) ?? panic("mark")
 }
 
 fn run() {
-    csv_path :: "/home/nate/.cache/jet-luna/dx3/area-data/fixture-100k.csv"
+    csv_path :: "/home/nate/.cache/jet-dev/dx3/area-data/fixture-100k.csv"
     raw :: files.read(csv_path) ?? panic("read csv")
     rows :: data.csv<Observation>(raw) ?? panic("decode csv")
     print("stage=loaded")
@@ -175,7 +175,7 @@ fn run() {
     mark("tensor")
 
     svg :: data.bar_svg(groups) ?? panic("bar svg")
-    svg_path :: "/home/nate/.cache/jet-luna/dx3/area-data/analysis.svg"
+    svg_path :: "/home/nate/.cache/jet-dev/dx3/area-data/analysis.svg"
     files.write(svg_path, svg) ?? panic("write svg")
     print("stage=plotted")
     mark("plotted")
@@ -193,7 +193,7 @@ fn run() {
         regression: regression,
     }
     receipt_json :: json.to_string(receipt)
-    files.write("/home/nate/.cache/jet-luna/dx3/area-data/analysis.receipt.json", receipt_json) ?? panic("write receipt")
+    files.write("/home/nate/.cache/jet-dev/dx3/area-data/analysis.receipt.json", receipt_json) ?? panic("write receipt")
     mark("receipt")
     print("rows={receipt.rows} cols={receipt.columns} filtered={receipt.filtered} groups={receipt.groups} joined={receipt.joined} pivot={receipt.pivot_cells} rolling={rolling.len()} stats={summary.count} coord={coordinate_value} tensor={tensor_cell} svg={receipt.svg_bytes}")
 }

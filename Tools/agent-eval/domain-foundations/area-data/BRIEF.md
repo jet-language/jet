@@ -1,6 +1,6 @@
 # Probe area-data — Data analysis
 
-Read `~/.cache/jet-luna/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -18,8 +18,8 @@ A data-analysis session as one Jet package plus a notebook: load a 100k-row CSV 
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-luna/dx2/statistics/`, `~/.cache/jet-luna/dx2/data-engineering-etl/`, `~/.cache/jet-luna/dx2/big-data-analytics/`, `~/.cache/jet-luna/dx2/bi-dashboards/`, `~/.cache/jet-luna/dx2/spreadsheets-business-logic/`, `~/.cache/jet-luna/dx2/numerical-computing/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-luna/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-luna/dx2/_families/*/synthesis.md`.
+Domain census and reports: `~/.cache/jet-dev/dx2/statistics/`, `~/.cache/jet-dev/dx2/data-engineering-etl/`, `~/.cache/jet-dev/dx2/big-data-analytics/`, `~/.cache/jet-dev/dx2/bi-dashboards/`, `~/.cache/jet-dev/dx2/spreadsheets-business-logic/`, `~/.cache/jet-dev/dx2/numerical-computing/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-luna/dx3/area-data/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-luna/dx3/area-data/pkg/`. Gap ids start with `area-data-G`.
+`~/.cache/jet-dev/dx3/area-data/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-dev/dx3/area-data/pkg/`. Gap ids start with `area-data-G`.

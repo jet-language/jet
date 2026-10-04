@@ -7,7 +7,7 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 jet=$(printenv JET_BIN 2>/dev/null || true)
 if [ -z "$jet" ]; then jet="$repo/target/debug/jet"; fi
 scratch=$(printenv JET_TEST_SCRATCH 2>/dev/null || true)
-if [ -z "$scratch" ]; then scratch="$HOME/.cache/jet-test-scratch"; fi
+if [ -z "$scratch" ]; then scratch="$HOME/.cache/jet-dev/scratch"; fi
 work="$scratch/toolchain-update-$$"
 stage="$work/site"
 root="$work/root"

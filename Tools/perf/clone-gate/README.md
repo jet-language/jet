@@ -5,8 +5,8 @@ maps it to its Jet function and source line, ranks it, and optionally fails
 on copies that run per item, per call, or per loop iteration.
 
 ```sh
-node Tools/perf/clone-gate/clone-gate.mjs ~/.cache/jet-luna/loop10/stage-zero.rs \
-  --out ~/.cache/jet-test-scratch/clone-gate \
+node Tools/perf/clone-gate/clone-gate.mjs ~/.cache/jet-dev/loop10/stage-zero.rs \
+  --out ~/.cache/jet-dev/scratch/clone-gate \
   [--profile perf-script.txt] [--check] [--check-tier 2] [--top 40]
 ```
 

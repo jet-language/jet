@@ -1,6 +1,6 @@
 # #3102 — Component plugin trust and resource boundary (runtime probe)
 
-Closer07, 2026-09-29. Binary: `jet-debug-snapshot14` (sha256 prefix `00b1e35e25ed941c`). Guest: the committed `Examples/features/packages/sandbox_mathkit/mathkit.wasm`, copied to `~/.cache/jet-test-scratch/Closer07/plugin/`.
+Closer07, 2026-09-29. Binary: `jet-debug-snapshot14` (sha256 prefix `00b1e35e25ed941c`). Guest: the committed `Examples/features/packages/sandbox_mathkit/mathkit.wasm`, copied to `~/.cache/jet-dev/scratch/Closer07/plugin/`.
 
 The API snapshot needed a patch. The committed `fixture-state/cache/api/plugin__mathkit.api` lists only `gcd`, `hypot` and `scale`, although the golden `run.jet` calls `greet` and `is_enabled`: E1257 "Plugin interface `plugin__mathkit` has no export `greet`" when staged unchanged. The scratch `.jet/cache/api/plugin__mathkit.api` adds `fn greet(name: String) String` and `fn is_enabled(flag: Bool) Bool`. The package allows FS, IO, Exec, Log, Mem.Alloc, Time (without Exec: E1220 "`run::run` uses the `Exec` effect").
 

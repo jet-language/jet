@@ -41,7 +41,7 @@ errors or unknowns.
   `roc-lang/examples@c176d73`. Roc repository HEAD was `00cab95a` when read.
 - **Roc runs.** Roc claims below marked *(run)* were executed with the Roc
   nightly `nightly-2026-09-29-7f11a82` (linux x86_64), probe files `r1`–`r4`
-  in `~/.cache/jet-luna/rocskip/`. The langref is marked work-in-progress by
+  in `~/.cache/jet-dev/rocskip/`. The langref is marked work-in-progress by
   its authors; where docs and the compiler disagree, the run wins.
 - **Skip sources.** Skip (skiplang.com) is the 2017–2018 Facebook research
   language, archived at
@@ -51,9 +51,9 @@ errors or unknowns.
   ([SkipLabs/skip](https://github.com/SkipLabs/skip)), is a TypeScript API over
   a runtime written in Skiplang and is noted only briefly.
 - **Jet runs.** Jet probes `p1`–`p15` ran through
-  `~/.cache/jet-luna/safe-jet.sh` on the frozen snapshot
+  `~/.cache/jet-dev/safe-jet.sh` on the frozen snapshot
   `jet-debug-snapshot23` (built 2026-09-30 04:54), repository HEAD
-  `5273e43d4`, from `~/.cache/jet-test-scratch/rocskip/`. `jet run` is the
+  `5273e43d4`, from `~/.cache/jet-dev/scratch/rocskip/`. `jet run` is the
   default JIT tier; one probe also tried `jet build` (AOT). Other agents were
   editing failure-model code (#3838, #3708 neighbours) at the time, so the
   snapshot may already be stale for those areas.
@@ -1023,8 +1023,8 @@ ballots. Several may be affected by in-flight work (#3838, #3708, #3713).
 
 ## Appendix. Probe index
 
-Jet probes live in `~/.cache/jet-test-scratch/rocskip/`; Roc probes in
-`~/.cache/jet-luna/rocskip/`. Both are scratch and not part of the repository.
+Jet probes live in `~/.cache/jet-dev/scratch/rocskip/`; Roc probes in
+`~/.cache/jet-dev/rocskip/`. Both are scratch and not part of the repository.
 
 | Probe | Question | Result |
 |---|---|---|

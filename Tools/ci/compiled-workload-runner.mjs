@@ -66,7 +66,7 @@ reportDir = path.isAbsolute(reportDir) ? reportDir : path.join(root, reportDir);
 
 const jetBin = path.resolve(process.env.JET_COMPILED_WORKLOAD_JET_BIN || path.join(root, "target", "debug", process.platform === "win32" ? "jet.exe" : "jet"));
 const exeSuffix = process.platform === "win32" ? ".exe" : "";
-const scratchRoot = process.env.JET_COMPILED_WORKLOAD_SCRATCH || path.join(os.homedir(), ".cache", "jet-test-scratch");
+const scratchRoot = process.env.JET_COMPILED_WORKLOAD_SCRATCH || path.join(os.homedir(), ".cache", "jet-dev", "scratch");
 const scratchPath = path.resolve(scratchRoot);
 const ramBackedTmpPath = process.platform === "linux" ? path.resolve("/tmp") : null;
 if (ramBackedTmpPath && (scratchPath === ramBackedTmpPath || scratchPath.startsWith(ramBackedTmpPath + path.sep))) fail("scratch must not use the RAM-backed system temporary directory: " + scratchRoot);

@@ -1,6 +1,6 @@
 # Probe prim-receipts — Receipts and evidence as an extensible shared type
 
-Read `~/.cache/jet-luna/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -17,8 +17,8 @@ Learn the shipped receipt (jet-receipt-v2, `jet prove`, `--record`, .measure, Ex
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-luna/dx2/mlops/`, `~/.cache/jet-luna/dx2/proof-formal/`, `~/.cache/jet-luna/dx2/observability-platforms/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-luna/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-luna/dx2/_families/*/synthesis.md`.
+Domain census and reports: `~/.cache/jet-dev/dx2/mlops/`, `~/.cache/jet-dev/dx2/proof-formal/`, `~/.cache/jet-dev/dx2/observability-platforms/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-luna/dx3/prim-receipts/probe.md`, `gaps.json`, and the code under `~/.cache/jet-luna/dx3/prim-receipts/pkg/`. Gap ids start with `prim-receipts-G`.
+`~/.cache/jet-dev/dx3/prim-receipts/probe.md`, `gaps.json`, and the code under `~/.cache/jet-dev/dx3/prim-receipts/pkg/`. Gap ids start with `prim-receipts-G`.

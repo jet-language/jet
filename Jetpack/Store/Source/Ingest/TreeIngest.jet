@@ -363,13 +363,16 @@ fn store_is_single_component(id: String) -> Bool Never! {
 }
 
 fn store_quarantine_suffix() -[Env, Time]> String Never! {
-    sequence :: store_quarantine_sequence
+    sequence :: ~store_quarantine_sequence
     store_quarantine_sequence += 1
-    "{sys.pid()}-{time.instant().unix_ns}-{sequence}"
+    nanos :: time.unix_ns()
+    "{sys.pid()}-{if nanos < 0 -> 0 else -> nanos}-{sequence}"
 }
 
+// Rust Ingest::now_secs: a wall-clock stamp, zero before the Unix epoch.
 pub fn store_now_secs() -[Time]> Int Never! {
-    time.instant().unix_ns /% 1000000000
+    nanos :: time.unix_ns()
+    if nanos < 0 -> 0 else -> nanos /% 1000000000
 }
 
 // Inputs for a Hangar Store v2 ingest. `outputs` maps each named output
@@ -446,7 +449,13 @@ pub enum IngestError {
 
 impl IOError -> IngestError { IngestError.IO("{self}") }
 
-impl StoreError -> IngestError { IngestError.IO(self.message()) }
+// Rust Hangar helpers return `io::Result`, and ingest lifts each one through
+// `From<io::Error> for IngestError` as `IngestError::IO(err.to_string())`.
+// StoreError has no automatic IngestError edge (IOError already reaches both
+// carriers), so every ingest boundary names this one explicit uplift.
+fn store_ingest_store_error(error: StoreError) -> IngestError Never! {
+    IngestError.IO(error.message())
+}
 
 // Sweep abandoned staging / `.partial` object dirs left by a crash.
 pub fn store_recover_hangar_staging(roots: HangarRoots) -[FS, Env, Time]> Int StoreError! {
@@ -492,12 +501,12 @@ fn store_ingest_tree_unlocked(verification: &StoreVerification, roots: HangarRoo
         if !store_valid_output_name(name) -> return Err(IngestError.Invalid("named output `{name}` must be one path component"))
     }
     hangar :: roots.hangar_dir()
-    store_ensure_real_directory(hangar, "Hangar root")
-    _ :: AdmissionTransaction.recover_unlocked(roots)
+    store_ensure_real_directory(hangar, "Hangar root") ?? return Err(store_ingest_store_error(err))
+    _ :: AdmissionTransaction.recover_unlocked(roots) ?? return Err(store_ingest_store_error(err))
 
     stamp :: "{store_now_secs()}-{sys.pid()}"
     stage_parent :: files.join(hangar, STORE_STAGE_DIR)
-    store_ensure_real_directory(stage_parent, "Hangar ingest staging")
+    store_ensure_real_directory(stage_parent, "Hangar ingest staging") ?? return Err(store_ingest_store_error(err))
     stage :: files.join(stage_parent, stamp)
     files.create_dir(stage)
 
@@ -546,7 +555,7 @@ fn store_ingest_stage_and_commit(verification: &StoreVerification, roots: Hangar
         if !request.allow_semantic_xattrs() -> store_reject_semantic_xattrs_tree(source)
         store_copy_nofollow_tree_observed(source, destination, after_child_copy)
         if request.allow_semantic_xattrs() -> store_copy_semantic_xattrs_tree(source, destination)
-        store_seal_node(destination)
+        store_seal_node(destination) ?? return Err(store_ingest_store_error(err))
         hook := EnvelopeWalkHook.recording()
         digest :: pkg_try_output_hash_of_with_policy(destination, request.allow_semantic_xattrs(), &hook) ?? return Err(store_ingest_hash_error(destination, err.message()))
         named_digests[name] = digest
@@ -554,7 +563,7 @@ fn store_ingest_stage_and_commit(verification: &StoreVerification, roots: Hangar
     }
     primary :: named_digests.get("out") ?? return Err(IngestError.Invalid("missing `out` digest"))
     objects :: files.join(hangar, STORE_OBJECTS_DIR)
-    store_ensure_real_directory(objects, "Hangar object pool")
+    store_ensure_real_directory(objects, "Hangar object pool") ?? return Err(store_ingest_store_error(err))
     final_object :: files.join(objects, primary)
     deduplicated :: files.is_dir(final_object)
     // `final_object` is not published until below. Inspect the staged output
@@ -571,7 +580,8 @@ fn store_ingest_stage_and_commit(verification: &StoreVerification, roots: Hangar
     now :: store_now_secs()
     facts := [String: String]{}
     loop name in output_names -> facts["output.{name}"] = named_digests[name]
-    producer := ProducerRecord.decode(store_canonical_producer("hangar-ingest", "cas:{primary}", primary, request.cache_identity, facts)) ?? return Err(IngestError.IO(err.message()))
+    canonical :: store_canonical_producer("hangar-ingest", "cas:{primary}", primary, request.cache_identity, facts) ?? return Err(store_ingest_store_error(err))
+    producer := ProducerRecord.decode(canonical) ?? return Err(store_ingest_store_error(err))
     &producer.bind_cache_provenance(request.reference, primary, request.cache_identity, request.references)
     realized_at :: if store_read_meta(record_dir) == {
         .Val(meta) -> meta.realized_at ?? now
@@ -595,18 +605,21 @@ fn store_ingest_stage_and_commit(verification: &StoreVerification, roots: Hangar
         realized_at: realized_at,
         last_used_at: now,
     }
-    transaction := AdmissionTransaction.new(&verification, roots)
+    transaction := AdmissionTransaction.new(&verification, roots) ?? return Err(store_ingest_store_error(err))
     loop name in output_names {
         staged :: staged_outs[name]
         digest :: named_digests.get(name) ?? return Err(IngestError.Invalid("named output `{name}` has no digest"))
         bytes :: store_admission_size(staged) ?? return Err(IngestError.IO("cannot measure staged output `{staged}`: {err.message()}"))
-        _ :: &transaction.stage_object(AdmissionObject{source: staged, digest: digest, bytes: bytes, allow_semantic_xattrs: request.allow_semantic_xattrs(), repair_corrupt: false})
+        _ :: &transaction.stage_object(AdmissionObject{source: staged, digest: digest, bytes: bytes, allow_semantic_xattrs: request.allow_semantic_xattrs(), repair_corrupt: false}) ?? return Err(store_ingest_store_error(err))
     }
     entries := [StoreEntry]{entry}
-    _ :: &transaction.commit(&entries, [AdmissionReceipt]{}, Val(stage), RegistrationMode.Native, None) ? registered -> registered ! error -> {
-        message :: error.message()
-        if message.starts_with("Hangar store limit exceeded") -> return Err(IngestError.IO("Hangar quota admission failed: {message}"))
-        return Err(IngestError.IO(message))
+    if &transaction.commit(&entries, [AdmissionReceipt]{}, Val(stage), RegistrationMode.Native, None) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            message :: error.message()
+            if message.starts_with("Hangar store limit exceeded") -> return Err(IngestError.IO("Hangar quota admission failed: {message}"))
+            return Err(store_ingest_store_error(error))
+        }
     }
     Ok(IngestedObject{entry: entries[0], deduplicated})
 }

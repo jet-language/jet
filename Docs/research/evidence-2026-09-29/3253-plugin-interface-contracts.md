@@ -1,6 +1,6 @@
 # #3253 — Typed shared-library and plugin interfaces (CORE-F026)
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` (`~/.cache/jet-luna/safe-jet.sh`), source rev `a8d8417c2`.
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` (`~/.cache/jet-dev/safe-jet.sh`), source rev `a8d8417c2`.
 Author: Closer12 (evidence closer). No compiler, runtime or Core change was made.
 
 ## Question
@@ -21,7 +21,7 @@ map onto it? Is raw-pointer safety inferred anywhere?
   `docs/building-shared-libraries.md` (raw.githubusercontent.com, tag v8.3.0).
 - Ran the witness `Examples/features/packages/sandbox_mathkit/run.jet` on the current binary,
   staged like `tests/golden.rs` (`fixture-state/` → `.jet/`) under
-  `~/.cache/jet-test-scratch/Closer12/plugin/`.
+  `~/.cache/jet-dev/scratch/Closer12/plugin/`.
 - Ran the prebuilt UI test binary:
   `JET_UI_FILTER=plugin_e12 target-integ/debug/deps/diagnostic_snapshots-a3bde39c91baa0bf ui_snapshots`
   (built 2026-09-29 01:58, under the jetwork slice, 6G cap).

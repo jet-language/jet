@@ -2,7 +2,7 @@
 
 Closer10, 2026-09-29. Binaries:
 
-- DAP runs: `~/.cache/jet-luna/safe-jet.sh` → `jet-debug-snapshot14`.
+- DAP runs: `~/.cache/jet-dev/safe-jet.sh` → `jet-debug-snapshot14`.
 - Test runs: the prebuilt `target-integ/debug/deps/debug-baaa3fa51bba9e15`
   (built 2026-09-29 01:53). Its `CARGO_BIN_EXE_jet` is `target-integ/debug/jet`
   (2026-09-29 00:10).
@@ -19,9 +19,9 @@ Verdict: **FAIL**.
    systemd-run --user --slice=jetwork.slice --scope -q -p MemoryMax=6G env TMPDIR=… PATH=<lldb>/bin:$PATH \
      Tools/agent/jet-env sh -c 'command -v lldb; lldb --version; target-integ/debug/deps/debug-baaa3fa51bba9e15 --test-threads=2'
    ```
-   Log: `~/.cache/jet-test-scratch/Closer10/debug_tests.log`. The first lines
+   Log: `~/.cache/jet-dev/scratch/Closer10/debug_tests.log`. The first lines
    are `/nix/store/…lldb-21.1.8/bin/lldb` and `lldb version 21.1.8`.
-2. A DAP session on a script. The driver is `~/.cache/jet-test-scratch/Closer10/dap/drive.py`,
+2. A DAP session on a script. The driver is `~/.cache/jet-dev/scratch/Closer10/dap/drive.py`,
    adapted from ProveOther's. It runs initialize, launch, setBreakpoints at
    line 10, configurationDone, stackTrace/scopes/variables, a mutating
    `evaluate total = 999`, and then continue. The target is

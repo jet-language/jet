@@ -2,7 +2,7 @@
 
 Attach to a running Jet-written compiler; it is never started or restarted:
 ```sh
-~/.cache/jet-luna/laneS.sh Tools/perf/jetc-profile/live.sh <pid> 20
+~/.cache/jet-dev/laneS.sh Tools/perf/jetc-profile/live.sh <pid> 20
 ```
 Requires Linux perf permissions, `perf`, Node.js 20+, and an unstripped compiler.
 Frame pointers are preferred (`perf record -g --call-graph=fp`, 99 Hz user cycles).

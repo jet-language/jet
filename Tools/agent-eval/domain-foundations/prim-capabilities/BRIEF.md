@@ -1,6 +1,6 @@
 # Probe prim-capabilities — Capabilities, authority, and plugins
 
-Read `~/.cache/jet-luna/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -17,8 +17,8 @@ Learn Jet's authority/effect model (Docs/spec/safety.md, Examples/features/effec
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-luna/dx2/wasm-plugins-sandboxing/`, `~/.cache/jet-luna/dx2/security-tooling/`, `~/.cache/jet-luna/dx2/digital-forensics/`, `~/.cache/jet-luna/dx2/containers-orchestration/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-luna/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-luna/dx2/_families/*/synthesis.md`.
+Domain census and reports: `~/.cache/jet-dev/dx2/wasm-plugins-sandboxing/`, `~/.cache/jet-dev/dx2/security-tooling/`, `~/.cache/jet-dev/dx2/digital-forensics/`, `~/.cache/jet-dev/dx2/containers-orchestration/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-luna/dx3/prim-capabilities/probe.md`, `gaps.json`, and the code under `~/.cache/jet-luna/dx3/prim-capabilities/pkg/`. Gap ids start with `prim-capabilities-G`.
+`~/.cache/jet-dev/dx3/prim-capabilities/probe.md`, `gaps.json`, and the code under `~/.cache/jet-dev/dx3/prim-capabilities/pkg/`. Gap ids start with `prim-capabilities-G`.

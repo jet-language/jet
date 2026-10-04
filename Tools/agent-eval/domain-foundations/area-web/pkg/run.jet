@@ -95,7 +95,7 @@ fn protected(session_id: String, req: HTTPRequest) -> HTTPResponse HTTPError! {
 }
 
 fn run() (HTTPError | NetError | TaskFailure)! {
-    db_path :: "/home/nate/.cache/jet-luna/dx3/area-web/pkg/orders.sqlite"
+    db_path :: "/home/nate/.cache/jet-dev/dx3/area-web/pkg/orders.sqlite"
     conn :: db.open(db_path)
     policy :: db.policy("orders", "true") ?? return
     scope :: conn.with_policy(policy, "web")
@@ -124,7 +124,7 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     mux.post("/orders", (req: HTTPRequest) HTTPResponse HTTPError! -> create_order(db_path, cache_version, req))
     mux.post("/login", (req: HTTPRequest) HTTPResponse HTTPError! -> login(req))
     mux.get("/protected", (req: HTTPRequest) HTTPResponse HTTPError! -> protected(session_id, req))
-    server.static_files(mux, "/assets", "/home/nate/.cache/jet-luna/dx3/area-web/pkg/public")
+    server.static_files(mux, "/assets", "/home/nate/.cache/jet-dev/dx3/area-web/pkg/public")
 
     t :: task {
         server.serve_once_listener(listener, mux)

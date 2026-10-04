@@ -1,6 +1,6 @@
 # 3271 — CBOR semantic profile: accepted/rejected table on the current binary
 
-Date: 2026-09-29. Closer02. Binary: `~/.cache/jet-test-scratch/jet-current` → `jet-debug-snapshot14`, run through `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Closer02. Binary: `~/.cache/jet-dev/scratch/jet-current` → `jet-debug-snapshot14`, run through `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -9,7 +9,7 @@ What does `core.encoding.cbor` actually accept and reject today (map keys, tags,
 ## Method
 
 - Read `crates/jet-codegen/src/Prelude/Core.jet:86-87`: `core.encoding.cbor` is a host module; the Jet source module owns only `reader` and `writer`. `parse`, `decode`, `to_bytes` and `to_bytes_canonical` dispatch to the host kernel (`crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:469-600`, `jet_cbor_kernel`). `Core/encoding/cbor.jet`'s own `parse`/`decode_cbor` are dead: the build lints `decode_cbor` as an unused private function (L0104), so its header comment (lines 29-37) and its hard-wired `safe_limits()` no longer describe shipped behaviour.
-- Scratch witnesses in `~/.cache/jet-test-scratch/Closer02/`: `cbor_probe2.jet` (cells), `cbor_opts.jet` (options), `cbor_err_min.jet`, `cbor_nan.jet`, `cbor_typed.jet`, `cbor_probe.jet` (tier/AOT attempt).
+- Scratch witnesses in `~/.cache/jet-dev/scratch/Closer02/`: `cbor_probe2.jet` (cells), `cbor_opts.jet` (options), `cbor_err_min.jet`, `cbor_nan.jet`, `cbor_typed.jet`, `cbor_probe.jet` (tier/AOT attempt).
 - Each witness was run with `safe-jet.sh run --interpret`, `safe-jet.sh run` (JIT) and `safe-jet.sh build` (AOT).
 
 ## Evidence: cell table (`safe-jet.sh run --interpret cbor_probe2.jet`, observed)

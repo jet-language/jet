@@ -5,7 +5,7 @@ No SMTP cell was exercised.
 
 ## Prepared harness (scratch, not in repo)
 
-`~/.cache/jet-test-scratch/Closer04/smtp/` holds three pieces:
+`~/.cache/jet-dev/scratch/Closer04/smtp/` holds three pieces:
 - `server.py`: stdlib-only scripted SMTP server that uses the
   `tests/fixtures/tls/smtp.*` certificates. Modes:
   - `starttls`: advertise STARTTLS, upgrade, accept AUTH, answer

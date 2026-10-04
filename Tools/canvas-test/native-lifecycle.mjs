@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 const repo = process.cwd();
 const jet = process.env.JET_BIN;
 const source = process.env.JET_SOURCE || "Examples/features/tooling/canvas_blueprint_demo.jet";
-const tmpdir = process.env.TMPDIR || "/home/nate/.cache/jet-test-scratch";
+const tmpdir = process.env.TMPDIR || "/home/nate/.cache/jet-dev/scratch";
 const chromium = process.env.CHROMIUM || "chromium";
 
 assert(jet, "JET_BIN is required");

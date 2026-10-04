@@ -1,8 +1,8 @@
 # #3389 — Typed selection without unchecked runtime casts
 
-Closer09, 2026-09-29. Binary: `~/.cache/jet-luna/safe-jet.sh` (jet-current
+Closer09, 2026-09-29. Binary: `~/.cache/jet-dev/safe-jet.sh` (jet-current
 snapshot14 → snapshot16 during the session). Scratch:
-`~/.cache/jet-test-scratch/Closer09/free/`.
+`~/.cache/jet-dev/scratch/Closer09/free/`.
 
 ## Question
 

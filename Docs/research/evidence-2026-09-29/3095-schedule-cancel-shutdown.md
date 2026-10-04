@@ -1,6 +1,6 @@
 # #3095 — timer/interval cancellation and shutdown (criterion 2 / 4)
 
-Closer07, 2026-09-29. Binary: `jet-debug-snapshot14` (sha256 prefix `00b1e35e25ed941c`). Scratch: `~/.cache/jet-test-scratch/Closer07/sched/` (package allows FS, Time, IO, Log, Mem.Alloc).
+Closer07, 2026-09-29. Binary: `jet-debug-snapshot14` (sha256 prefix `00b1e35e25ed941c`). Scratch: `~/.cache/jet-dev/scratch/Closer07/sched/` (package allows FS, Time, IO, Log, Mem.Alloc).
 
 ## Question
 After `tasks.cancel`, does the timer/interval producer stop? At process or App shutdown, are scheduled producers cancelled and joined, or reported rather than silently outliving? Does this hold on JIT (`jet run`), `--interpret` and AOT?

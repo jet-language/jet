@@ -197,7 +197,7 @@ The raw payload recounts also show 3,069 high-confidence, 99 medium-confidence, 
 
 The proposal reported that 96 of 108 domains had no gauntlet coverage. The other 12 named only adjacent generic cells such as `numerics.float-kernel`, `netserv`, `embedded.kernel`, or `regex-logscan`; no domain had a matched cell. The performance records retain each incumbent, workload, published number, and required Jet proof so later work can build the right fixture instead of reusing an easier cell.
 
-The source corpus was mined on 2026-09-01 and 2026-09-02 by Luna max workers. Per-domain reports and probes lived under `~/.cache/jet-luna/dx2/`; that machine-local working set is not a repository artifact. The archive records the sources and evidence cited by each row, but no additional verification is implied here.
+The source corpus was mined on 2026-09-01 and 2026-09-02 by Luna max workers. Per-domain reports and probes lived under `~/.cache/jet-dev/dx2/`; that machine-local working set is not a repository artifact. The archive records the sources and evidence cited by each row, but no additional verification is implied here.
 
 ## Exact source recovery
 

@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 CORPUS="$ROOT/tests/compiled_workloads"
-scratch_root="${TMPDIR:-$HOME/.cache/jet-test-scratch}"
+scratch_root="${TMPDIR:-$HOME/.cache/jet-dev/scratch}"
 mkdir -p "$scratch_root"
 tmp="$(mktemp -d "$scratch_root/compiled-workload-gate.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT

@@ -60,7 +60,7 @@ const UNIT = [
 ].join('\n') + '\n';
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.homedir(), '.cache', 'jet-test-scratch', 'clone-gate-test-'));
+  const root = fs.mkdtempSync(path.join(os.homedir(), '.cache', 'jet-dev', 'scratch', 'clone-gate-test-'));
   fs.mkdirSync(path.join(root, 'compiler-project', 'src'), { recursive: true });
   fs.writeFileSync(path.join(root, 'stage-zero.rs'), STAGE_ZERO);
   fs.writeFileSync(path.join(root, 'compiler-project', 'src', 'compiler.jet'), UNIT);

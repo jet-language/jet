@@ -871,7 +871,7 @@ fn library_build_scratch(tag: &str) -> Scratch {
                 .expect("HOME is required for test scratch"),
         )
         .expect("canonicalize HOME");
-        let fallback_root = home.join(".cache/jet-test-scratch/scratch");
+        let fallback_root = home.join(".cache/jet-dev/scratch/scratch");
         assert!(
             !fallback_root.starts_with(&checkout),
             "HOME disk scratch must be outside the repository: {}",

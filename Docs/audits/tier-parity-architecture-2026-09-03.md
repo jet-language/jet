@@ -152,6 +152,6 @@ That a Rust emitter reduced to a mechanical MIR printer produces Rust that rustc
 
 ## Files
 
-- Probes: `~/.cache/jet-test-scratch/mine-20260903/{loops,build,simd,main}/results.md`, `main/g2.jet`, `main/build/g2.rs`
-- Ballot as filed: `~/.cache/jet-luna/mine-20260903/ballots/D-TIER-ONEIR1.json`; card #2888
+- Probes: `~/.cache/jet-dev/scratch/mine-20260903/{loops,build,simd,main}/results.md`, `main/g2.jet`, `main/build/g2.rs`
+- Ballot as filed: `~/.cache/jet-dev/mine-20260903/ballots/D-TIER-ONEIR1.json`; card #2888
 - Source seams: `crates/jet-codegen/src/Codegen/TIR/{emit,eval}`, `crates/jet-jit/src/jit/{lower_ctx.rs,tiers.rs,deopt.rs}`, `crates/jet-jit/src/lib.rs:74-177`, `crates/jet-jit/src/ambient_interp.rs`, `crates/jet-foundation/src/Syntax/core_calls.rs:421-455`, `Source/CmdCompile.rs:1603-1667`, `tests/jit_corpus_gate.txt`, `docs/spec/syntax-decisions.md` (D-JIT1/2, D-DEVMODE1)

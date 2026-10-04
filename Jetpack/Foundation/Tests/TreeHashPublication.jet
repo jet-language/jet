@@ -8,7 +8,7 @@
 
 fn foundation_publication_test_root(label: String) -[FS, Env]> String Never! {
     home :: sys.get("HOME") ?? panic("publication fixtures require HOME")
-    root :: files.join(home, ".cache/jet-test-scratch/jet-foundation-publication-{label}-{sys.pid()}")
+    root :: files.join(home, ".cache/jet-dev/scratch/jet-foundation-publication-{label}-{sys.pid()}")
     files.remove_all(root).drop("a stale publication fixture may be absent")
     files.create_dir_all(root) ?? panic("create publication fixture")
     root
@@ -74,6 +74,19 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     assert_eq(files.read(path) ?? panic("read published"), "edited")
     assert((files.stat(path) ?? panic("stat published")).id != original.id)
     foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("rooted bounded reads retain exact InvalidInput refusal") {
+    root :: foundation_publication_test_root("rooted-bound-kind")
+    path :: files.join(root, "input.jet")
+    files.write(path, "original") ?? panic("write input")
+    source :: foundation_open_file_authority(root, "input.jet") ?? panic("hold input")
+    if source.read_bounded(7) == {
+        .Ok(_) -> panic("oversize rooted read must refuse")
+        .Err(error) -> assert_eq(error, IOError.InvalidInput(foundation_io_context(.Read, "input.jet", "file exceeds its read bound")))
+    }
+    assert_eq(source.read_bounded(8) ?? panic("rooted exact-bound read"), "original".bytes())
     files.remove_all(root) ?? panic("cleanup")
 }
 
@@ -588,6 +601,129 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     assert_eq(files.read(files.join(root, "checkpoint.lock")) ?? panic("replacement read"), "replacement")
     assert_eq(files.read(files.join(fixture, "old/checkpoint.lock")) ?? panic("held read"), "held")
     files.remove_all(fixture) ?? panic("cleanup")
+}
+
+// Authority sourcefix: grow each original descriptor vector beyond its initial
+// capacity. Parent projections must end before push; no cloned chain or walker.
+#Test("authority chains survive growth in root publication and held file walks") {
+    fixture :: foundation_publication_test_root("authority-chain-growth")
+    root := fixture
+    loop index in 0..<24 -> root = files.join(root, "root-{index}")
+    authority :: foundation_open_directory_authority(root, true) ?? panic("create deep held root")
+    authority.revalidate() ?? panic("retain every root descriptor")
+    relative := "payload"
+    loop index in 0..<24 -> relative = "parent-{index}/{relative}"
+    foundation_write_file_nofollow_at_root(root, relative, "owned chain".bytes(), None) ?? panic("publish through growing chain")
+    source :: foundation_open_file_authority(root, relative) ?? panic("retain growing file chain")
+    assert_eq(source.read_bounded(11) ?? panic("read through all retained descriptors"), "owned chain".bytes())
+    source.revalidate() ?? panic("held file chain survives vector growth")
+    authority.revalidate() ?? panic("original root authority still valid")
+    foundation_publication_test_no_temporary(files.dirname(files.join(root, relative)))
+    files.remove_all(fixture) ?? panic("cleanup")
+}
+
+#Test("open or create authority preserves existing modes and refuses links and files") {
+    root :: foundation_publication_test_root("authority-open-create")
+    parent :: files.open_directory(root) ?? panic("hold parent")
+    existing :: files.join(root, "existing")
+    files.create_dir_all(existing) ?? panic("existing directory")
+    files.set_mode(existing, 0o750) ?? panic("existing mode")
+    held :: foundation_open_or_create_directory(parent, "existing") ?? panic("open existing")
+    assert_eq((held.stat() ?? panic("existing held metadata")).mode & 0o777, 0o750)
+    created :: foundation_open_or_create_directory(parent, "created") ?? panic("create protected child")
+    assert_eq((created.stat() ?? panic("created held metadata")).mode & 0o777, 0o700)
+    assert_eq((created.stat() ?? panic("created identity")).id, (files.stat(files.join(root, "created")) ?? panic("bound identity")).id)
+    files.write(files.join(root, "ordinary"), "sentinel") ?? panic("ordinary collision")
+    files.symlink(existing, files.join(root, "linked")) ?? panic("link collision")
+    collisions :: [String]{"ordinary", "linked"}
+    loop name in collisions {
+        if foundation_open_or_create_directory(parent, name) == {
+            .Ok(_) -> panic("non-directory or link opened as authority")
+            .Err(_) -> {}
+        }
+    }
+    assert_eq(files.read(files.join(root, "ordinary")) ?? panic("collision preserved"), "sentinel")
+    assert((files.stat(files.join(root, "linked")) ?? panic("link preserved")).is_symlink)
+    assert_eq((files.stat(existing) ?? panic("referent mode")).mode & 0o777, 0o750)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication cleanup failure preserves the exact primary validation error") {
+    root :: foundation_publication_test_root("authority-cleanup-error")
+    path :: files.join(root, "input")
+    files.write(path, "original") ?? panic("original")
+    original :: files.stat(path) ?? panic("original identity")
+    primary :: IOError.Other(foundation_io_context(.Write, path, "primary validation refusal"))
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        entries :: files.list_dir(root)
+        loop entry in entries {
+            if entry.name.starts_with(".jet-lock-") {
+                files.remove(entry.path)
+                // unlink of this directory must fail, not replace `primary`.
+                files.create_dir_all(entry.path)
+            }
+        }
+        return Err(primary)
+    }
+    if foundation_write_file_nofollow_at_root(root, "input", "edited".bytes(), Val(validate)) == {
+        .Ok(_) -> panic("validation failure published")
+        .Err(error) -> assert_eq(error, primary)
+    }
+    assert_eq(files.read(path) ?? panic("original bytes"), "original")
+    assert_eq((files.stat(path) ?? panic("original retained")).id, original.id)
+    stages := 0
+    cleanup_entries :: files.list_dir(root) ?? panic("inspect failed cleanup")
+    loop entry in cleanup_entries {
+        if entry.name.starts_with(".jet-lock-") {
+            stages += 1
+            assert((files.stat(entry.path) ?? panic("replacement stage")).is_dir)
+        }
+    }
+    assert(stages == 1, "failed best-effort cleanup must preserve the primary error")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication cleanup of an already removed stage preserves the primary error") {
+    root :: foundation_publication_test_root("authority-cleanup-missing")
+    primary :: IOError.Other(foundation_io_context(.Write, root, "primary missing-stage refusal"))
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        entries :: files.list_dir(root)
+        loop entry in entries {
+            if entry.name.starts_with(".jet-lock-") -> files.remove(entry.path)
+        }
+        return Err(primary)
+    }
+    if foundation_write_file_nofollow_at_root(root, "input", "edited".bytes(), Val(validate)) == {
+        .Ok(_) -> panic("validation failure published")
+        .Err(error) -> assert_eq(error, primary)
+    }
+    assert(!files.exists(files.join(root, "input")))
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("held tree cleanup removes files directories and link bindings but tolerates absence") {
+    root :: foundation_publication_test_root("authority-held-tree-cleanup")
+    parent :: files.open_directory(root) ?? panic("hold cleanup parent")
+    files.create_dir_all(files.join(root, "tree/nested")) ?? panic("nested tree")
+    files.write(files.join(root, "tree/nested/payload"), "remove") ?? panic("nested payload")
+    files.write(files.join(root, "outside"), "sentinel") ?? panic("outside sentinel")
+    files.symlink(files.join(root, "outside"), files.join(root, "tree/link")) ?? panic("tree link")
+    foundation_remove_held_tree(parent, "tree") ?? panic("remove real held tree")
+    foundation_remove_held_tree(parent, "tree") ?? panic("missing tree is success")
+    foundation_remove_held_tree(parent, "absent") ?? panic("missing child is success")
+    assert(!files.exists(files.join(root, "tree")))
+    assert_eq(files.read(files.join(root, "outside")) ?? panic("link referent preserved"), "sentinel")
+    files.write(files.join(root, "ordinary"), "remove") ?? panic("ordinary child")
+    foundation_remove_held_tree(parent, "ordinary") ?? panic("remove ordinary binding")
+    assert(!files.exists(files.join(root, "ordinary")))
+    files.symlink(files.join(root, "outside"), files.join(root, "linked")) ?? panic("final link")
+    foundation_remove_held_tree(parent, "linked") ?? panic("remove final link binding")
+    assert(!files.exists(files.join(root, "linked")))
+    assert_eq(files.read(files.join(root, "outside")) ?? panic("final referent preserved"), "sentinel")
+    files.remove_all(root) ?? panic("cleanup")
 }
 
 // Pure streaming cases use the same canonical SHA compression as rooted IO.

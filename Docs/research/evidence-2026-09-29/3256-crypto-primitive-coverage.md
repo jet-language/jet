@@ -1,11 +1,11 @@
 # #3256 — Common cryptographic primitive coverage (core.crypto)
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-luna/safe-jet.sh`).
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-dev/safe-jet.sh`).
 Primary sources read: `Core/crypto/{crypto,expert,random}.jet`, `Core/math/random.jet`,
 `Compiler/JetFoundation/Source/Registry/{CoreCallRows,CorePlatformSignatures}.jet`,
 `crates/jet-pkg-model/src/Prelude/Crypto.rs`, `crates/jet-jit/Cargo.toml:48-66`.
 Reference vectors were generated independently with Node 24 / OpenSSL 3.6
-(`~/.cache/jet-test-scratch/Closer00/crypto_ref.mjs`) and a BLAKE3 reference port
+(`~/.cache/jet-dev/scratch/Closer00/crypto_ref.mjs`) and a BLAKE3 reference port
 (`blake3_ref.py`, matches the published empty and "abc" vectors); they equal the
 published RFC/FIPS/draft vectors cited in the witness header.
 
@@ -148,7 +148,7 @@ type position is E1004. Bare `CryptoError` names a different prelude type (E0109
 
 The whole witness still does not compile on any tier (next ICE: "missing
 checked MIR owner type" at an inline `crypto.X25519SecretKey{…}` argument).
-So c5 was measured per call (`~/.cache/jet-test-scratch/Closer00/cprobe.py`,
+So c5 was measured per call (`~/.cache/jet-dev/scratch/Closer00/cprobe.py`,
 `hash_aot.jet`; outputs in `probe*_{run,int}.txt`) against the independent
 references:
 

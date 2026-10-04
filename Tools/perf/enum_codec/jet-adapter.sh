@@ -6,7 +6,7 @@
 # never a wrapper script that itself takes a jet slot.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
-work=${ENUM_CODEC_JET_WORK:-$HOME/.cache/jet-luna/enum-codec-jet}
+work=${ENUM_CODEC_JET_WORK:-$HOME/.cache/jet-dev/enum-codec-jet}
 bin=$work/.jet/build/adapter
 if [ "${1:-}" = "--build" ]; then
   jet=${JET:-$root/target/release/jet}

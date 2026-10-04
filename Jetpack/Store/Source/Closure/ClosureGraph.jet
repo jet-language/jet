@@ -5,14 +5,6 @@
 
 STORE_RECEIPTS_DIR :: prep { "receipts" }
 
-// Closure members already proven against their seals in this process, as
-// `hangar\tdigest\n` lines. A 28-package env shares one toolchain closure;
-// without this each package re-stat-walks every shared member. Entry-level
-// verification never consults this memo, so the sealed drift law for package
-// outputs is unchanged; member drift is caught by the next command (the
-// trust window D-JPK-VERIFYONCE1=A ratified for stat-identical content).
-store_proven_members := ""
-
 pub struct ClosureObject {
     pub digest: String
     pub path: String
@@ -162,8 +154,7 @@ fn store_closure_walk(index: [String: [String]], start: String) -> [String] Neve
     seen := [String: Bool]{}
     pending := index.get(start) ?? [String]{}
     loop pending.len() > 0 {
-        next_digest :: pending[pending.len() - 1]
-        pending = pending[0..<(pending.len() - 1)]
+        next_digest :: &pending.pop() ?? break
         if next_digest == start || seen.has_key(next_digest) -> next
         seen[next_digest] = true
         referenced :: index.get(next_digest) ?? [String]{}
@@ -277,21 +268,44 @@ pub fn store_entry_closure_objects_rehash(verification: &StoreVerification, root
     true
 }
 
-pub fn store_invalidate_proven_member(hangar: String, digest: String) Never! {
-    line :: "{hangar}\t{digest}"
-    kept := ""
-    loop existing in store_text_lines(store_proven_members) {
-        if existing == line -> next
-        kept = "{kept}{existing}\n"
-    }
-    store_proven_members = kept
+// Closure members already proven against their seals by this verification
+// owner (Rust process-wide `PROVEN_MEMBERS`). A 28-package env shares one
+// toolchain closure; without this each package re-stat-walks every shared
+// member. Entry-level verification never consults this memo, so the sealed
+// drift law for package outputs is unchanged; member drift is caught by the
+// next command (the trust window D-JPK-VERIFYONCE1=A ratified for
+// stat-identical content). The set is keyed by (hangar root, digest), so a
+// member replaced under a different digest never hits. A canonical digest
+// never contains a tab, so the joined key is unambiguous.
+fn store_proven_member_key(hangar: String, digest: String) -> String Never! {
+    "{hangar}\t{digest}"
 }
 
+pub fn store_invalidate_proven_member(verification: &StoreVerification, hangar: String, digest: String) Never! {
+    state :: verification.state
+    permit := state.guard_edit()
+    &permit.value.proven_members.remove(store_proven_member_key(hangar, digest)).drop("a member may never have been proven")
+}
+
+fn store_proven_member_contains(verification: &StoreVerification, key: String) -> Bool Never! {
+    state :: verification.state
+    permit :: state.guard_read()
+    permit.value.proven_members.has_key(key)
+}
+
+fn store_proven_member_insert(verification: &StoreVerification, key: String) Never! {
+    state :: verification.state
+    permit := state.guard_edit()
+    permit.value.proven_members[key] = true
+}
+
+// Each guard is held only inside its helper, so the uncached re-hash never
+// runs filesystem work while the shared verification state is locked.
 fn store_closure_object_rehashes(verification: &StoreVerification, roots: HangarRoots, graph: ClosureGraph, digest: String) -> Bool Never! {
-    line :: "{roots.hangar_dir()}\t{digest}"
-    if store_text_lines(store_proven_members).contains(line) -> return true
+    key :: store_proven_member_key(roots.hangar_dir(), digest)
+    if store_proven_member_contains(&verification, key) -> return true
     ok :: store_closure_object_rehashes_uncached(&verification, roots, graph, digest)
-    if ok -> store_proven_members = "{store_proven_members}{line}\n"
+    if ok -> store_proven_member_insert(&verification, key)
     ok
 }
 
@@ -352,10 +366,9 @@ pub fn store_actions_for_output(verification: &StoreVerification, roots: HangarR
 // The canonical action key of a package record.
 pub fn store_entry_action_key(entry: StoreEntry) -> String Never! {
     identity :: entry.cache_identity
-    decoded :: ProducerRecord.decode(entry.producer_record)
     canonical := "jet.action-store.v5".bytes()
     &canonical.push(U8{0})
-    if decoded == {
+    if ProducerRecord.decode(entry.producer_record) == {
         .Ok(producer) -> {
             nix :: producer.provider == "nix"
             // A Nix derivation path is the canonical input/action identity.
@@ -603,7 +616,8 @@ pub fn store_register_entries_unlocked_with_mode(verification: &StoreVerificatio
         // hardlinks. Refresh only the stat manifest: the transaction already
         // checked the canonical digest before publication.
         digest :: entry.envelope.output_hash
-        if digest != "" && store_object_digest_for_path(entry.out, hangar) == Val(digest) {
+        canonical_digest :: store_object_digest_for_path(entry.out, hangar) ?? ""
+        if digest != "" && canonical_digest == digest {
             store_write_seal(&verification, entry.out, hangar, digest)
         }
         store_verify_registration_output(&verification, roots, entry)
@@ -846,24 +860,25 @@ fn store_descriptor_for_entry(verification: &StoreVerification, roots: HangarRoo
     }
     outputs := ~entry.named_outputs
     outputs["out"] = primary
-    decoded :: ProducerRecord.decode(entry.producer_record)
+    // Rust descriptor_for_entry treats a rejected producer as absent for
+    // path projection; the validation boundary still rejects invalid records.
+    decoded :: if ProducerRecord.decode(entry.producer_record) == {
+        .Ok(producer) -> Val(producer)
+        .Err(_) -> None
+    }
     objects := [ClosureObject]{}
-    loop name in store_sorted_keys(outputs) {
-        digest :: outputs[name]
-        path :: if decoded == {
-            .Ok(producer) -> {
-                if {
+    // Consume the decoded owner once; both projections read the same payload.
+    if decoded == {
+        .Val(producer) -> {
+            loop name in store_sorted_keys(outputs) {
+                digest :: outputs[name]
+                path :: if {
                     producer.provider == "nix" -> files.join(object_root, digest)
                     name == "out" -> entry.out
-                    else -> producer.facts.get("nix.output.{name}") ?? producer.facts.get("output.path.{name}") ?? files.join(object_root, digest)
+                    else -> producer.facts.get("nix.output.{name}") ?? (producer.facts.get("output.path.{name}") ?? files.join(object_root, digest))
                 }
+                &objects.push(ClosureObject{digest: digest, path: path, external: !store_path_starts_with(path, hangar)})
             }
-            .Err(_) -> if name == "out" -> entry.out else -> files.join(object_root, digest)
-        }
-        &objects.push(ClosureObject{digest: digest, path: path, external: !store_path_starts_with(path, hangar)})
-    }
-    if decoded == {
-        .Ok(producer) -> {
             loop digest in entry.references {
                 relative :: producer.facts.get("dependency.object.{digest}") ?? next
                 if !store_path_is_normal_relative(relative) {
@@ -877,7 +892,13 @@ fn store_descriptor_for_entry(verification: &StoreVerification, roots: HangarRoo
                 &objects.push(ClosureObject{digest: digest, path: path, external: !store_path_starts_with(path, hangar)})
             }
         }
-        .Err(_) -> {}
+        .None -> {
+            loop name in store_sorted_keys(outputs) {
+                digest :: outputs[name]
+                path :: if name == "out" -> entry.out else -> files.join(object_root, digest)
+                &objects.push(ClosureObject{digest: digest, path: path, external: !store_path_starts_with(path, hangar)})
+            }
+        }
     }
     &objects.sort_by(object -> object.digest)
     unique := [ClosureObject]{}

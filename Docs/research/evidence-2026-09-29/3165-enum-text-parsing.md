@@ -1,6 +1,6 @@
 # #3165: enum text parsing keeps case, wire and display names distinct
 
-Closer11, 2026-09-29. Binary: `~/.cache/jet-luna/safe-jet.sh` → `jet-debug-snapshot14`.
+Closer11, 2026-09-29. Binary: `~/.cache/jet-dev/safe-jet.sh` → `jet-debug-snapshot14`.
 
 ## Question
 
@@ -24,8 +24,8 @@ what would a Core API ballot look like?
 
 ## Method
 
-Probe: `~/.cache/jet-test-scratch/Closer11/enumtext/probe_heading.jet`. The
-scratch root `~/.cache/jet-test-scratch/Closer11/package.jet` grants IO and
+Probe: `~/.cache/jet-dev/scratch/Closer11/enumtext/probe_heading.jet`. The
+scratch root `~/.cache/jet-dev/scratch/Closer11/package.jet` grants IO and
 Mem.Alloc. The probe declares one payload-free enum with plain cases, a variant
 group (D-TAG1), and a case carrying `#Rename("west-side")`:
 
@@ -49,7 +49,7 @@ The probe tries two routes on the same ten inputs:
   This is an `if text == { "North" -> ... else -> return Err(UnknownHeading{text: text}) }`
   table, with `#Error struct UnknownHeading { text: String }`.
 
-Commands, run from `~/.cache/jet-test-scratch/Closer11`:
+Commands, run from `~/.cache/jet-dev/scratch/Closer11`:
 
 ```
 ~/.cache/jet-luna/safe-jet.sh run enumtext/probe_heading.jet
@@ -119,7 +119,7 @@ What this shows:
 ### Peer comparison on the same inputs (criterion 3)
 
 - **Python 3.13.13** (executed with
-  `python3 ~/.cache/jet-test-scratch/Closer11/enumtext/peer_python.py`; its
+  `python3 ~/.cache/jet-dev/scratch/Closer11/enumtext/peer_python.py`; its
   output is the table above).
   - `Enum[name]` is an exact, case-sensitive source-name lookup that raises
     `KeyError`.
@@ -145,7 +145,7 @@ What this shows:
 ### Defect found while probing
 
 - An enum named `Target` breaks every tier. Minimal repro:
-  `~/.cache/jet-test-scratch/Closer11/enumtext/minA.jet`
+  `~/.cache/jet-dev/scratch/Closer11/enumtext/minA.jet`
   (`enum Target { North South }` + `print("display {Target.North}")`).
   - `jet run`: ICE `Cranelift cannot execute MIR function ...::run: MIR enum variant North is missing`.
   - `--interpret`: `E0956 MIR enum variant has no canonical row`.

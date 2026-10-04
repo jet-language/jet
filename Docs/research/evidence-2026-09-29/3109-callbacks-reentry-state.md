@@ -22,7 +22,7 @@ This re-confirms, on a current integration build, the fixture's cells:
 The Closer07 #3110 retention witness adds 10k re-entrant calls and 256 native-held Text values that stay valid until `jet_text_free` (`Docs/research/evidence-2026-09-29/3110-guest-retention-measurement.md`).
 
 ## Component row: cross-thread handle use (criterion 3)
-Probe `~/.cache/jet-test-scratch/Closer07/plugin/xthread2.jet`: load mathkit on the owner thread, call `gcd`, then call `mathkit.gcd` from a `task` in `task.group g { … worker.join() }`.
+Probe `~/.cache/jet-dev/scratch/Closer07/plugin/xthread2.jet`: load mathkit on the owner thread, call `gcd`, then call `mathkit.gcd` from a `task` in `task.group g { … worker.join() }`.
 - **JIT:** ICE `Cranelift cannot execute MIR function … MIR call ABI expects 3 arguments, got 2`. Every plugin call ICEs on JIT (see #3102 doc).
 - **`--interpret`:** prints `owner thread gcd = 6` / `owner continues`, exit 0. The worker's `print("worker gcd = …")` never appears, yet `worker.join()` succeeds.
 - Control without a plugin (`taskprint.jet`: a task that only prints `worker ran`):

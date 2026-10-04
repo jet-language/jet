@@ -11,12 +11,12 @@ and which only a typed codec carries?
 
 ## Method
 
-Witness program: `~/.cache/jet-test-scratch/Closer01/parked/datatree_losslessness.jet`
+Witness program: `~/.cache/jet-dev/scratch/Closer01/parked/datatree_losslessness.jet`
 (parked, not blessed). Every fixture prints the root `DataTree` variant plus
 `json.to_string(tree)`, or the error. I ran it with
 `safe-jet.sh run <file>` (Cranelift JIT). The TOML, XML and CBOR-rejection
 cells ICE on the JIT, so I moved them to scratch repros:
-`~/.cache/jet-test-scratch/Closer01/{toml1.jet,cbor_rej.jet}` (the latter I ran on
+`~/.cache/jet-dev/scratch/Closer01/{toml1.jet,cbor_rej.jet}` (the latter I ran on
 `jet run` and on `jet run --interpret`). The original TOML cells are kept in
 `.../toml_cells.txt`.
 

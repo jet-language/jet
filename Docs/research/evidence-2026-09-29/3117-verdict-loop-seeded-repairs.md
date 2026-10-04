@@ -1,6 +1,6 @@
 # #3117: verdict-loop quantities on seeded script repairs (SCRIPT-F27)
 
-Closer10, 2026-09-29. Binary: `~/.cache/jet-luna/safe-jet.sh` →
+Closer10, 2026-09-29. Binary: `~/.cache/jet-dev/safe-jet.sh` →
 `jet-debug-snapshot14`, a debug build, so the latencies below include an
 unoptimized compiler and are not performance claims. Verdict: **PARTIAL**.
 Criterion 1 is met; criterion 2 is met for this agent's own repair session
@@ -9,7 +9,7 @@ only; criterion 3 is blocked.
 ## Method
 
 - Three seeded defects run on the current binary. Scratch:
-  `~/.cache/jet-test-scratch/Closer10/{f27,stream,mk}`.
+  `~/.cache/jet-dev/scratch/Closer10/{f27,stream,mk}`.
 - For each defect the following is recorded:
   - the rejection stage and whether any side effect happened;
   - the diagnostic text an agent sees (fidelity and actionability);
@@ -36,7 +36,7 @@ shapes.
 
 ## Seed 2: malformed external record
 
-The seed is `~/.cache/jet-luna/stream-probe/malformed.csv`: 15.5 MB with an
+The seed is `~/.cache/jet-dev/stream-probe/malformed.csv`: 15.5 MB with an
 unterminated quote at row 200,001 (generator `gen.py`). The program is
 `stream/csv_stream.jet`, which uses the file-backed `csv.reader(^input, EncodingLimits.safe())`.
 

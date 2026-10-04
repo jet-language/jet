@@ -231,7 +231,7 @@ The attempted run observed HEAD `08243a6aa42f0e960c9df54b5cc22f55934c93d7`.
 The shared checkout was dirty because sibling implementation lanes were editing it.
 Preparation stopped before scan execution with `security-scan: repository must be clean before a security scan`.
 The requested finalization then stopped because no request existed:
-`security-scan: scan request does not exist: /home/nate/.cache/jet-luna/security/request-2026-09-02/request.json`.
+`security-scan: scan request does not exist: /home/nate/.cache/jet-dev/security/request-2026-09-02/request.json`.
 No scan artifacts or publish directory were created.
 
 ## Receipt

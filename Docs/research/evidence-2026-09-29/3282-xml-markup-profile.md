@@ -1,6 +1,6 @@
 # 3282 — XML and markup data-parser profile
 
-Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -10,7 +10,7 @@ What XML and markup data-parsing profile does Core ship (namespaces, entities, e
 
 - Read `Core/encoding/xml.jet:1-218` and `crates/jet-codegen/src/Prelude/Core.jet:100-101`. `parse`, `parse_bytes`, `parse_with`, `canonical`, `reader` and `to_string` are Jet source. `decode<T>` is host (`jet_enc_xml_decode`, `EncodingCodecs.rs:379`).
 - Read `Docs/spec/encoding-decisions.md:216-335` (D-ENCXML1=A) and `Core/text/html.jet:1-86`.
-- Ran in `~/.cache/jet-test-scratch/Closer02/`: `xml_profile_existing.jet` (a copy of the committed `Examples/features/serde/xml_profile.jet`), `xml_min.jet`, `xml_probe.jet` (28 cells), `xml_typed.jet` (15 typed cells) and `html_probe.jet`, each on JIT, interpreter and AOT (`tiers.sh`).
+- Ran in `~/.cache/jet-dev/scratch/Closer02/`: `xml_profile_existing.jet` (a copy of the committed `Examples/features/serde/xml_profile.jet`), `xml_min.jet`, `xml_probe.jet` (28 cells), `xml_typed.jet` (15 typed cells) and `html_probe.jet`, each on JIT, interpreter and AOT (`tiers.sh`).
 
 ## Evidence: no XML parse path runs on the current binary
 

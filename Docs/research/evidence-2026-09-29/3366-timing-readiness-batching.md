@@ -9,7 +9,7 @@ if any, genuinely need a new public form?
 
 ## Method
 
-- Witness: `~/.cache/jet-test-scratch/Closer05/t3366/timing_batches.jet`. It has one
+- Witness: `~/.cache/jet-dev/scratch/Closer05/t3366/timing_batches.jet`. It has one
   function per row, and each printed line names its clock. The package grants
   `[IO, Mem.Alloc, Mem.Rc, Panic, Time]`.
 - `no_event.jet` is the same file without the event-time row. `row_*.jet` run each row

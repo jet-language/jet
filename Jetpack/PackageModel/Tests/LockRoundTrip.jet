@@ -141,6 +141,166 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
     assert(pkg_lock_test_rejects(pkg_lock_write(pkg_lock_test_base_lock([LockedPackage]{non_nix}, [LockedToolchain]{}))))
 }
 
+// Exercise Rust PartialPkg::finish directly: its owned parse results must
+// survive validation and retain every field in the completed package.
+fn pkg_lock_test_partial_nix(output: String) -> PartialPackage Never! {
+    record :: pkg_lock_test_nix_closure(output)
+    PartialPackage{
+        name: Val("nix-owned"),
+        version: Val("1.2.3"),
+        source_raw: Val("{{ nix = \"nixpkgs#hello\", output = \"{output}\" }}"),
+        nix_closure: Val(PartialNixClosure{
+            channel: Val(record.channel),
+            revision: Val(record.revision),
+            system: Val(record.system),
+            index_authority: Val(record.index_authority),
+            derivation: Val(record.derivation),
+            output: Val(record.output),
+            nar_hash: Val(record.nar_hash),
+            size: Val(record.size),
+            compression: Val(record.compression),
+            references: Val(record.references),
+            upstream_proof: Val(record.upstream_proof),
+            cache_key: Val(record.cache_key),
+            project_cas_bundle: Val(record.project_cas_bundle)
+        })
+    }
+}
+
+fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
+    if partial.finish() == {
+        .Ok(_) -> panic("partial package must be rejected")
+        .Err(error) -> error.message()
+    }
+}
+
+#Test("lock finish keeps owned Nix source closure envelope and all fields") {
+    output :: pkg_lock_test_nix_digest("a")
+    envelope :: pkg_lock_test_env(output, "x86_64-linux", "ed25519:sig", "nix-owned")
+    provenance :: DependencyProvenance{transparency: Val("logged"), publisher: Val("signed"), build: Val("attested")}
+    partial := pkg_lock_test_partial_nix(output)
+    partial.locked_raw = Val("{{ rev = \"revision\", tree-hash = \"tree\", last-modified = 42 }}")
+    partial.fingerprint = Val("fingerprint")
+    partial.content_hash = Val("content")
+    partial.dependencies = [String]{"dep"}
+    partial.layer = Val(MIRRuntimeLayer.Std)
+    partial.inferred_layer = Val(MIRRuntimeLayer.Alloc)
+    partial.effects = [String]{"FS.Read"}
+    partial.effect_grants = [String]{"FS"}
+    partial.required_effects = [String]{"Net.Connect"}
+    partial.granted_effects = [String]{"Net"}
+    partial.denied_effects = [String]{"Exec"}
+    partial.effect_authority = Val("manifest")
+    partial.envelope = Val(envelope)
+    partial.receipt = Val("receipt")
+    partial.provenance = Val(provenance)
+    finished :: partial.finish() ?? panic("matching owned Nix package must finish")
+    assert_eq(finished, LockedPackage{
+        name: "nix-owned", version: "1.2.3",
+        source: LockSource.Nix{reference: "nixpkgs#hello", output: output},
+        nix_closure: Val(pkg_lock_test_nix_closure(output)),
+        locked: Val(LockedRevision{rev: "revision", tree_hash: "tree", last_modified: 42}),
+        fingerprint: "fingerprint", content_hash: Val("content"),
+        dependencies: [String]{"dep"},
+        layer: Val(MIRRuntimeLayer.Std), inferred_layer: Val(MIRRuntimeLayer.Alloc),
+        effects: [String]{"FS.Read"}, effect_grants: [String]{"FS"},
+        required_effects: [String]{"Net.Connect"}, granted_effects: [String]{"Net"},
+        denied_effects: [String]{"Exec"}, effect_authority: Val("manifest"),
+        envelope: Val(envelope), receipt: Val("receipt"), provenance: Val(provenance)
+    })
+}
+
+#Test("lock finish keeps owned non-Nix source and envelope without closure") {
+    envelope :: pkg_lock_test_env("sha256-path", "aarch64-linux", "", "path")
+    partial :: PartialPackage{
+        name: Val("path-owned"), version: Val("2.0.0"),
+        source_raw: Val("{{ path = \"../dependency\" }}"),
+        envelope: Val(envelope)
+    }
+    finished :: partial.finish() ?? panic("non-Nix package without closure must finish")
+    assert_eq(finished.source, LockSource.Path("../dependency"))
+    assert_eq(finished.nix_closure, None)
+    assert_eq(finished.envelope, Val(envelope))
+}
+
+#Test("lock finish preserves portable closure refusal order and exact messages") {
+    output :: pkg_lock_test_nix_digest("a")
+    other :: pkg_lock_test_nix_digest("b")
+    partial := pkg_lock_test_partial_nix(output)
+    partial.nix_closure = None
+    partial.envelope = Val(pkg_lock_test_env(other, "aarch64-linux", "", "mismatch"))
+    assert_eq(pkg_lock_test_finish_error(partial), "Nix package is missing its portable closure record")
+
+    mismatch := pkg_lock_test_partial_nix(output)
+    mismatch.source_raw = Val("{{ nix = \"nixpkgs#hello\", output = \"{other}\" }}")
+    mismatch.envelope = Val(pkg_lock_test_env(other, "aarch64-linux", "", "mismatch"))
+    assert_eq(pkg_lock_test_finish_error(mismatch), "Nix source output disagrees with its closure record")
+
+    attached := pkg_lock_test_partial_nix(output)
+    attached.source_raw = Val("{{ root = true }}")
+    attached.envelope = Val(pkg_lock_test_env(other, "aarch64-linux", "", "mismatch"))
+    assert_eq(pkg_lock_test_finish_error(attached), "portable Nix closure record attached to a non-Nix package")
+}
+
+#Test("lock finish refuses either Nix envelope identity mismatch") {
+    output :: pkg_lock_test_nix_digest("a")
+    wrong_hash := pkg_lock_test_partial_nix(output)
+    wrong_hash.envelope = Val(pkg_lock_test_env(pkg_lock_test_nix_digest("b"), "x86_64-linux", "", "hash"))
+    assert_eq(pkg_lock_test_finish_error(wrong_hash), "Nix envelope identity disagrees with its closure record")
+
+    wrong_platform := pkg_lock_test_partial_nix(output)
+    wrong_platform.envelope = Val(pkg_lock_test_env(output, "aarch64-linux", "", "platform"))
+    assert_eq(pkg_lock_test_finish_error(wrong_platform), "Nix envelope identity disagrees with its closure record")
+
+    unrealized :: pkg_lock_test_partial_nix(output).finish() ?? panic("Nix closure without envelope must finish")
+    assert_eq(unrealized.nix_closure, Val(pkg_lock_test_nix_closure(output)))
+    assert_eq(unrealized.envelope, None)
+}
+
+#Test("lock Nix validation borrows owned records until package construction") {
+    output :: pkg_lock_test_nix_digest("a")
+    source :: LockSource.Nix{reference: "nixpkgs#hello", output: output}
+    closure :: Val(pkg_lock_test_nix_closure(output))
+    envelope :: Val(pkg_lock_test_env(output, "x86_64-linux", "signature", "provenance"))
+    pkg_lock_validate_package_nix(source, closure, envelope) ?? panic("matching Nix records must validate")
+    package :: LockedPackage{name: "owned", version: "1.0.0", source: source, nix_closure: closure, envelope: envelope}
+    assert_eq(package.source, LockSource.Nix{reference: "nixpkgs#hello", output: output})
+    assert_eq(package.nix_closure, Val(pkg_lock_test_nix_closure(output)))
+    assert_eq(package.envelope, Val(pkg_lock_test_env(output, "x86_64-linux", "signature", "provenance")))
+}
+
+#Test("lock Nix validation borrows non-Nix records until package construction") {
+    source :: LockSource.Path("../dependency")
+    closure :: NixClosureRecord?{None}
+    envelope :: Val(pkg_lock_test_env("sha256-path", "aarch64-linux", "", "path"))
+    pkg_lock_validate_package_nix(source, closure, envelope) ?? panic("non-Nix record without closure must validate")
+    package :: LockedPackage{name: "owned", version: "1.0.0", source: source, nix_closure: closure, envelope: envelope}
+    assert_eq(package.source, LockSource.Path("../dependency"))
+    assert_eq(package.nix_closure, None)
+    assert_eq(package.envelope, Val(pkg_lock_test_env("sha256-path", "aarch64-linux", "", "path")))
+}
+
+fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?, envelope: LockEnvelope?) -> String Never! {
+    if pkg_lock_validate_package_nix(source, closure, envelope) == {
+        .Ok(_) -> panic("package identities must be rejected")
+        .Err(error) -> error.message()
+    }
+}
+
+#Test("lock Nix validation keeps exact refusal messages and precedence") {
+    output :: pkg_lock_test_nix_digest("a")
+    other :: pkg_lock_test_nix_digest("b")
+    source :: LockSource.Nix{reference: "nixpkgs#hello", output: output}
+    closure :: Val(pkg_lock_test_nix_closure(output))
+    wrong_envelope :: Val(pkg_lock_test_env(other, "aarch64-linux", "", "mismatch"))
+    assert_eq(pkg_lock_test_validation_error(source, None, wrong_envelope), "Nix package is missing its portable closure record")
+    assert_eq(pkg_lock_test_validation_error(LockSource.Nix{reference: "nixpkgs#hello", output: other}, closure, wrong_envelope), "Nix source output disagrees with its closure record")
+    assert_eq(pkg_lock_test_validation_error(LockSource.Root, closure, wrong_envelope), "portable Nix closure record attached to a non-Nix package")
+    assert_eq(pkg_lock_test_validation_error(source, closure, Val(pkg_lock_test_env(other, "x86_64-linux", "", "hash"))), "Nix envelope identity disagrees with its closure record")
+    assert_eq(pkg_lock_test_validation_error(source, closure, Val(pkg_lock_test_env(output, "aarch64-linux", "", "platform"))), "Nix envelope identity disagrees with its closure record")
+    pkg_lock_validate_package_nix(source, closure, None) ?? panic("unrealized Nix records must validate")
+}
+
 #Test("lock writer deduplicates replayed records and stays bounded") {
     old :: pkg_lock_test_pkg("duplicate", Val(pkg_lock_test_env("sha256-old", "x86_64-linux", "", "old")))
     newest :: pkg_lock_test_pkg("duplicate", Val(pkg_lock_test_env("sha256-new", "x86_64-linux", "", "new")))

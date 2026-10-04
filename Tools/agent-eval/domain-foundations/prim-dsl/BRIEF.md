@@ -1,6 +1,6 @@
 # Probe prim-dsl — Embedded languages in a library: symbolic math, rules, filters, formulas
 
-Read `~/.cache/jet-luna/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -16,8 +16,8 @@ Build, as library Jet, four tiny embedded languages and use each from a 15-line 
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-luna/dx2/symbolic-math/`, `~/.cache/jet-luna/dx2/business-rules-workflows/`, `~/.cache/jet-luna/dx2/logic-constraint/`, `~/.cache/jet-luna/dx2/spreadsheets-business-logic/`, `~/.cache/jet-luna/dx2/text-processing-parsing/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-luna/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-luna/dx2/_families/*/synthesis.md`.
+Domain census and reports: `~/.cache/jet-dev/dx2/symbolic-math/`, `~/.cache/jet-dev/dx2/business-rules-workflows/`, `~/.cache/jet-dev/dx2/logic-constraint/`, `~/.cache/jet-dev/dx2/spreadsheets-business-logic/`, `~/.cache/jet-dev/dx2/text-processing-parsing/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-luna/dx3/prim-dsl/probe.md`, `gaps.json`, and the code under `~/.cache/jet-luna/dx3/prim-dsl/pkg/`. Gap ids start with `prim-dsl-G`.
+`~/.cache/jet-dev/dx3/prim-dsl/probe.md`, `gaps.json`, and the code under `~/.cache/jet-dev/dx3/prim-dsl/pkg/`. Gap ids start with `prim-dsl-G`.

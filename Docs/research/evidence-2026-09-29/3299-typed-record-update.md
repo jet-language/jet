@@ -1,6 +1,6 @@
 # #3299 — Partial updates to existing typed records (CORE-F079, D-CORE-TYPED-UPDATE1=A)
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-luna/safe-jet.sh`,
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-dev/safe-jet.sh`,
 source rev `e9c708fa7`. Author: Closer03 (evidence closer). No compiler, runtime or
 Core change was made.
 
@@ -12,7 +12,7 @@ and unknown fields (the law `update` must keep)?
 
 ## Method
 
-- Probe `~/.cache/jet-test-scratch/Closer03/update_absent.jet`: the decision's own
+- Probe `~/.cache/jet-dev/scratch/Closer03/update_absent.jet`: the decision's own
   example (`json.update<Config>(before, json.parse("{\"count\":3}"))`), run with
   `safe-jet.sh run --interpret`.
 - Source search: `grep "fn update"` over `Core/`, `Compiler/JetSema/Source/Sema/Calls/Data.jet`,

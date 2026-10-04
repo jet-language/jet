@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Measure one jetc0 compile of hello: wall time, RSS every second, perf every 10 s.
 set -u
-L=$HOME/.cache/jet-luna
+L=$HOME/.cache/jet-dev
 D=$L/loop
 OUT=${1:-$L/stage1/measure-hello}
 rm -rf "$OUT"; mkdir -p "$OUT"

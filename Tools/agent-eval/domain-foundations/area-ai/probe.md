@@ -35,19 +35,19 @@ restored=[0.7738926045572292, 0.0, 0.0, 0.7738926045572292]
 
 ## What worked
 
-- `Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-ai/pkg/run.jet` — shuffled four examples into two batches for four epochs; loss fell from `0.5` to `0.0037189569727621593`; model state round-tripped through `compute.serialize` and `compute.deserialize`; broadcast output was `[1.5, 2.5, 1.5, 2.5]`.
-- `Tools/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/area-ai/pkg/run.jet --verbose` — native build passed; generated 5,336,873 bytes of Rust and reported `Built build/run in 33.8s`.
-- `Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-ai/evidence/llm_probe.jet` — `step=0 status=200 streamed=true tool_call=true`, `step=1 status=200 streamed=true tool_call=false`, `bounded_tool_loop=2`. The probe uses generic JSON HTTP and SSE; no model provider library is needed for this protocol-shaped mock.
-- `Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-ai/evidence/gpu_probe.jet` — Vulkan succeeded with `Placement(requested=Vulkan, selected=Vulkan, backend=vulkan, ... profile=F32Strict+Reproducible, ... ability=vulkan.f32)`. The initial F64 Vulkan request was correctly rejected with `Vulkan backend supports only F32Strict+Reproducible` and `E3002`; converting through `matmul_f32_tile` made the explicit F32 path work.
-- `Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-ai/evidence/bench.jet` — interpreter timing for eight 32x32 matmuls was `elapsed_ms=41360`, first result `64.0`. A native `jet build` followed by `/home/nate/Projects/Github/jet/build/bench` reported `elapsed_ms=2909`, first result `64.0`.
+- `Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/area-ai/pkg/run.jet` — shuffled four examples into two batches for four epochs; loss fell from `0.5` to `0.0037189569727621593`; model state round-tripped through `compute.serialize` and `compute.deserialize`; broadcast output was `[1.5, 2.5, 1.5, 2.5]`.
+- `Tools/agent/jet-env jet build /home/nate/.cache/jet-dev/dx3/area-ai/pkg/run.jet --verbose` — native build passed; generated 5,336,873 bytes of Rust and reported `Built build/run in 33.8s`.
+- `Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/area-ai/evidence/llm_probe.jet` — `step=0 status=200 streamed=true tool_call=true`, `step=1 status=200 streamed=true tool_call=false`, `bounded_tool_loop=2`. The probe uses generic JSON HTTP and SSE; no model provider library is needed for this protocol-shaped mock.
+- `Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/area-ai/evidence/gpu_probe.jet` — Vulkan succeeded with `Placement(requested=Vulkan, selected=Vulkan, backend=vulkan, ... profile=F32Strict+Reproducible, ... ability=vulkan.f32)`. The initial F64 Vulkan request was correctly rejected with `Vulkan backend supports only F32Strict+Reproducible` and `E3002`; converting through `matmul_f32_tile` made the explicit F32 path work.
+- `Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/area-ai/evidence/bench.jet` — interpreter timing for eight 32x32 matmuls was `elapsed_ms=41360`, first result `64.0`. A native `jet build` followed by `/home/nate/Projects/Github/jet/build/bench` reported `elapsed_ms=2909`, first result `64.0`.
 
 ## Research mined
 
-- `~/.cache/jet-luna/dx2/ml-training/report.md` and `D-M-ML-LIFECYCLE1.json`: `core.compute` has Tensor algebra, autodiff names, SGD, placement, and a checksummed single-Tensor wire. Dataset/Loader, Module/parameter registry, AdamW, AMP, distributed sharding, complete checkpoints, and run lineage remain absent or proposed. The ballot explicitly says the shipped wire is not a full checkpoint.
-- `~/.cache/jet-luna/dx2/llm-apps-agents/report.md` and `~/.cache/jet-luna/dx2/ml-inference-serving/report.md`: typed JSON, HTTP, tasks, authority, and receipts are usable foundations, but provider/model abstractions, token streams, generation, model artifacts, tokenizers, schedulers, and serving lifecycle are not core surfaces. The local probe confirms a library can compose the small provider-neutral HTTP/SSE/tool-loop path today.
-- `~/.cache/jet-luna/dx2/recommender-search/report.md`: no first-class collection, vector index, `top_k`, or retrieval result receipt exists. The 10,000-entry exact scan is therefore an executable library example, not a claim that Jet ships a retrieval index.
-- `~/.cache/jet-luna/dx2/computer-vision/report.md` and `~/.cache/jet-luna/dx2/mlops/report.md`: image/model runtime surfaces and run, artifact, lineage, registry, label, and feature-store surfaces are absent. They were not needed for this probe.
-- `~/.cache/jet-luna/dx2/_families/ai-ml/synthesis.md`: the reusable mechanisms are model state, data loader, model calls, retrieval index, Tensor/linalg, GPU kernels, tables, networking, storage, and evidence. `D-M-GPU1.json` keeps array operations and placement receipts shipped while checked custom kernel launch remains proposed. `docs/reference/core-library.md:3976-4068` confirms the current Tensor, broadcast, matmul, autodiff, serialization, and explicit-device API.
+- `~/.cache/jet-dev/dx2/ml-training/report.md` and `D-M-ML-LIFECYCLE1.json`: `core.compute` has Tensor algebra, autodiff names, SGD, placement, and a checksummed single-Tensor wire. Dataset/Loader, Module/parameter registry, AdamW, AMP, distributed sharding, complete checkpoints, and run lineage remain absent or proposed. The ballot explicitly says the shipped wire is not a full checkpoint.
+- `~/.cache/jet-dev/dx2/llm-apps-agents/report.md` and `~/.cache/jet-dev/dx2/ml-inference-serving/report.md`: typed JSON, HTTP, tasks, authority, and receipts are usable foundations, but provider/model abstractions, token streams, generation, model artifacts, tokenizers, schedulers, and serving lifecycle are not core surfaces. The local probe confirms a library can compose the small provider-neutral HTTP/SSE/tool-loop path today.
+- `~/.cache/jet-dev/dx2/recommender-search/report.md`: no first-class collection, vector index, `top_k`, or retrieval result receipt exists. The 10,000-entry exact scan is therefore an executable library example, not a claim that Jet ships a retrieval index.
+- `~/.cache/jet-dev/dx2/computer-vision/report.md` and `~/.cache/jet-dev/dx2/mlops/report.md`: image/model runtime surfaces and run, artifact, lineage, registry, label, and feature-store surfaces are absent. They were not needed for this probe.
+- `~/.cache/jet-dev/dx2/_families/ai-ml/synthesis.md`: the reusable mechanisms are model state, data loader, model calls, retrieval index, Tensor/linalg, GPU kernels, tables, networking, storage, and evidence. `D-M-GPU1.json` keeps array operations and placement receipts shipped while checked custom kernel launch remains proposed. `docs/reference/core-library.md:3976-4068` confirms the current Tensor, broadcast, matmul, autodiff, serialization, and explicit-device API.
 
 ## Gaps
 
@@ -57,8 +57,8 @@ A cross-tier executable Tensor autodiff path is missing: named `compute.gradient
 
 Evidence:
 
-- `Tools/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-ai/evidence/mini.jet` -> `Error [E0956]: \`Tensor\` isn't supported by the current evaluator yet` at `mini.jet:6`, the named `(dw, dx) :: compute.gradient(...)` call.
-- `Tools/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/area-ai/evidence/mini.jet --verbose` -> exit `101`: `internal compiler error: the generated Rust did not compile`, generated `/home/nate/Projects/Github/jet/build/mini.rs`.
+- `Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/area-ai/evidence/mini.jet` -> `Error [E0956]: \`Tensor\` isn't supported by the current evaluator yet` at `mini.jet:6`, the named `(dw, dx) :: compute.gradient(...)` call.
+- `Tools/agent/jet-env jet build /home/nate/.cache/jet-dev/dx3/area-ai/evidence/mini.jet --verbose` -> exit `101`: `internal compiler error: the generated Rust did not compile`, generated `/home/nate/Projects/Github/jet/build/mini.rs`.
 - `Tools/agent/jet-env jet run Examples/features/tooling/compute_autodiff.jet` -> `E0112` at `compute_autodiff.jet:18` (`compute.gradient` needs named Tensor parameters), then `E0102` at line 19 because `curvature` was not defined.
 
 The workaround is explicit manual chain rule in `pkg/run.jet:48-64`; it trains the tiny model but is not composable autodiff.
@@ -71,7 +71,7 @@ Workaround: an author can use `[Int].shuffle().to_list()` and explicit batch hel
 
 ### area-ai-G3 — slow, blocks
 
-The compiler does not reach a bounded proof for the ordinary 10,000-entry embedding index. `Tools/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/area-ai/pkg/embedding.jet --verbose` timed out after 360 seconds while still at `Checking program and build plan`, before generated Rust or a binary. The source at `pkg/embedding.jet:25-49` constructs 10,000 small vectors and scans them with cosine similarity. The earlier integrated interpreter run also timed out after 300 seconds once this scan was appended to the otherwise successful training package.
+The compiler does not reach a bounded proof for the ordinary 10,000-entry embedding index. `Tools/agent/jet-env jet build /home/nate/.cache/jet-dev/dx3/area-ai/pkg/embedding.jet --verbose` timed out after 360 seconds while still at `Checking program and build plan`, before generated Rust or a binary. The source at `pkg/embedding.jet:25-49` constructs 10,000 small vectors and scans them with cosine similarity. The earlier integrated interpreter run also timed out after 300 seconds once this scan was appended to the otherwise successful training package.
 
 Workaround: keep the index behind a native provider or reduce the corpus while waiting for compiler/runtime help; no Jet-native 10,000-entry timing receipt was reachable.
 

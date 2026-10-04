@@ -1,6 +1,6 @@
 # 3272 — TOML version, typed round-trip and write order
 
-Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -9,7 +9,7 @@ Which TOML grammar and version does Core ship, and which constructs are unsuppor
 ## Method
 
 - Read `Core/encoding/toml.jet:1-60` and `crates/jet-codegen/src/Prelude/Core.jet:98-99`. There are two parsers. The Jet source module owns `parse`, `load` and `loads`. `decode<T>` and `to_string` are host (`crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs:153-222`, `jet_std::toml::parse_to_tree` and `render`).
-- Scratch witnesses in `~/.cache/jet-test-scratch/Closer02/`: `toml_min.jet` and `toml_probe.jet` (Jet-source `parse`), `toml_probe2.jet` (`decode<DataTree>`), and `toml_typed.jet` (typed structs), run on JIT, interpreter and AOT with `tiers.sh` (AOT binary at `.jet/build/<stem>`).
+- Scratch witnesses in `~/.cache/jet-dev/scratch/Closer02/`: `toml_min.jet` and `toml_probe.jet` (Jet-source `parse`), `toml_probe2.jet` (`decode<DataTree>`), and `toml_typed.jet` (typed structs), run on JIT, interpreter and AOT with `tiers.sh` (AOT binary at `.jet/build/<stem>`).
 
 ## Evidence
 

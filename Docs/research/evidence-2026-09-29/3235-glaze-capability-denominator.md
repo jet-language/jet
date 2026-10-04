@@ -16,7 +16,7 @@ git clone --depth 1 --branch v9.0.0 https://github.com/stephenberry/glaze glaze-
 python3 glaze_rows.py glaze-v8.3.0 glaze-main glaze_rows.json
 ```
 
-`glaze_rows.py` (kept at `~/.cache/jet-test-scratch/Closer06/keep/glaze_rows.py`) reads the `nav:` block of the tag's `mkdocs.yml` (lines 66–150). For each page it records:
+`glaze_rows.py` (kept at `~/.cache/jet-dev/scratch/Closer06/keep/glaze_rows.py`) reads the `nav:` block of the tag's `mkdocs.yml` (lines 66–150). For each page it records:
 
 - the page body's SHA-256 at the tag;
 - whether the same path on `main` is byte-identical;

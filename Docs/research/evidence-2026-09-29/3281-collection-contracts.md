@@ -1,6 +1,6 @@
 # #3281 — Collection families: shipped types and their contracts
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-luna/safe-jet.sh`).
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-dev/safe-jet.sh`).
 Finding: `Docs/research/mine-for-jet-2026-09-12.md#finding-core-f060`.
 
 ## Question
@@ -17,11 +17,11 @@ have? Which useful families are missing?
   :312-319, Cache rows at :320-322); `Docs/spec/reference/core-library.md:254-304`;
   `Core/collections/collections.jet:14-49`; `Core/collections/set.jet`.
 - Witness program (one block per family), parked because the tiers disagree:
-  `~/.cache/jet-test-scratch/Closer01/parked/collection_contracts.jet`.
-  I ran it with `~/.cache/jet-test-scratch/Closer01/tiers.sh collections/collection_contracts`
+  `~/.cache/jet-dev/scratch/Closer01/parked/collection_contracts.jet`.
+  I ran it with `~/.cache/jet-dev/scratch/Closer01/tiers.sh collections/collection_contracts`
   (`jet run`, `jet run --interpret`, `jet build` + binary). The observed `jet run`
   output is in `.../parked/collection_contracts.run.observed`.
-- Scratch probe: `~/.cache/jet-test-scratch/Closer01/tally.jet`.
+- Scratch probe: `~/.cache/jet-dev/scratch/Closer01/tally.jet`.
 
 ## Evidence (observed on `jet run`)
 

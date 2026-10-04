@@ -14,7 +14,7 @@ Files:
 - `pkg/web/index.html` — browser companion page.
 - `query_probe.jet` — negative query/form API probe.
 
-Research note: `~/.cache/jet-luna/dx2/web-frameworks/` was absent. I read the CMS/ecommerce, serverless-edge, browser-extension, and documentation-static-sites reports.
+Research note: `~/.cache/jet-dev/dx2/web-frameworks/` was absent. I read the CMS/ecommerce, serverless-edge, browser-extension, and documentation-static-sites reports.
 
 ## What worked
 

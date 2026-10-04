@@ -8,7 +8,7 @@ Does one struct-declared rule set (D-VALIDATE1 `validate { }` plus decode `Field
 
 ## Runtime evidence: decode and `T.validate` agree
 
-Probe: `~/.cache/jet-test-scratch/Closer06/web/validate_decode.jet`. `#Codable struct Signup { email, password, validate { check(email.len() > 0, at: email, "email required"); check(password.len() >= 12, at: password, "needs at least 12 characters") } }`. It prints every `FieldError` path and reason from `Signup.validate` and from `json.decode<Signup>`. `jet run` and `jet run --interpret` gave identical output, rc=0:
+Probe: `~/.cache/jet-dev/scratch/Closer06/web/validate_decode.jet`. `#Codable struct Signup { email, password, validate { check(email.len() > 0, at: email, "email required"); check(password.len() >= 12, at: password, "needs at least 12 characters") } }`. It prints every `FieldError` path and reason from `Signup.validate` and from `json.decode<Signup>`. `jet run` and `jet run --interpret` gave identical output, rc=0:
 
 ```
 bad validate: email: email required
