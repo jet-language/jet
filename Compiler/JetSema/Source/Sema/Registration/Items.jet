@@ -1807,9 +1807,17 @@ pub fn sema_registration_prepare_module(input: SemaRegistrationModuleInput) -> S
     sema_registration_prepare_module_with(input, [SemaGenericModuleSource]{})
 }
 
+fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource]) -> SemaRegistrationModuleResult {
+    diagnostics := [Diagnostic]{}
+    module_row := sema_registration_prepare_module_row(input, templates, &diagnostics)
+    SemaRegistrationModuleResult{module_row: module_row, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
+}
+
+// The prepared row of one module; its diagnostics are appended to `reported`.
+// The row is returned whole, so the graph takes it without a copy.
 // `templates` are the generic-module templates the module imports; its own
 // templates come from its program.
-fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource]) -> SemaRegistrationModuleResult {
+fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], reported: &[Diagnostic]) -> SemaRegistrationModule {
     diagnostics := [Diagnostic]{}
     module_row := SemaRegistrationModule{
         package_identity: input.package_identity,
@@ -1914,7 +1922,8 @@ fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, tem
     }
 
     sema_attach_diagnostic_source_locations(&diagnostics, 0, module_row.source_segments)
-    SemaRegistrationModuleResult{module_row: module_row, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
+    loop diagnostic in diagnostics -> &reported.push(diagnostic)
+    module_row
 }
 
 fn sema_registration_import_is_unqualified(declaration: ImportDecl) -> Bool Never! {
@@ -2168,13 +2177,12 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
     loop input in inputs {
-        prepared := sema_registration_prepare_module_with(input, sema_generic_modules_imported(inputs, edges, input.module_identity))
-        loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
-        duplicate :: module_rows.get(prepared.module_row.module_identity) != None
-        if !duplicate -> module_rows[prepared.module_row.module_identity] = modules.len()
+        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(inputs, edges, input.module_identity), &diagnostics)
+        duplicate :: module_rows.get(module_row.module_identity) != None
+        if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {
-            duplicate -> &diagnostics.push(sema_defined_twice_optional(prepared.module_row.module_identity, "module identities must be unique in one declaration graph", None))
-            else -> &modules.push(prepared.module_row)
+            duplicate -> &diagnostics.push(sema_defined_twice_optional(module_row.module_identity, "module identities must be unique in one declaration graph", None))
+            else -> &modules.push(module_row)
         }
     }
     if package_identity == "" || entry_module_identity == "" {
@@ -2271,17 +2279,17 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     sema_generic_modules_check(&graph, inputs)
     graph.complete = !sema_has_error_since(graph.diagnostics, 0)
     // Rust erases templates and aliases once expanded: their symbols stay
-    // registered, but no later pass sees an unexpanded body.
+    // registered, but no later pass sees an unexpanded body. They are removed
+    // in place; every other item stays where it is, uncopied.
     loop erased_index in 0..<graph.modules.len() {
-        kept := [Item]{}
-        loop item_index in 0..<graph.modules[erased_index].program.items.len() {
-            item :: graph.modules[erased_index].program.items[item_index]
-            if item == {
-                .GenericModule(_) | .ModuleAlias(_) -> {}
-                else -> &kept.push(item)
+        item_index := 0
+        loop item_index < graph.modules[erased_index].program.items.len() {
+            if sema_registration_item_is_expanded_template(graph.modules[erased_index].program.items[item_index]) {
+                _ := &graph.modules[erased_index].program.items.remove(item_index, .Slot)
+            } else {
+                item_index += 1
             }
         }
-        graph.modules[erased_index].program.items = kept
     }
     // D-METADERIVE1=A / D-META-USER1=A: user derives and declared marker
     // bodies expand over the complete graph's reflection and register their
@@ -2290,6 +2298,13 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     sema_registration_index_callables(&graph)
     sema_registration_index_impl_traits(&graph)
     graph
+}
+
+fn sema_registration_item_is_expanded_template(item: Item) -> Bool Never! {
+    if item == {
+        .GenericModule(_) | .ModuleAlias(_) -> true
+        else -> false
+    }
 }
 
 pub fn sema_registration_lookup_name(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
@@ -2357,22 +2372,34 @@ fn sema_registration_parameter_default(parameters: [SemaRegistrationParameter], 
 }
 
 pub fn sema_registration_apply_graph_module(graph: SemaRegistrationGraph, module_identity: String, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    waiting := [SemaScopeProbeConstant]{}
+    sema_registration_apply_graph_module_rows(graph, module_identity, &scopes, &diagnostics, &waiting)
+}
+
+// sema_registration_apply_graph_module that also records in `waiting` each
+// binding it pushes for a constant still waiting for its known-time type,
+// with the graph row the binding was copied from.
+pub fn sema_registration_apply_graph_module_rows(graph: SemaRegistrationGraph, module_identity: String, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaScopeProbeConstant]) -> Bool {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return false
     module_row :: graph.modules[module_index]
     complete := true
     sema_scope_seed_unit_policy(&scopes, graph, module_identity)
     if !sema_scope_add_compiler_builtin(&scopes, graph) -> complete = false
-    loop symbol in module_row.symbols {
+    loop (position, symbol) in module_row.symbols {
         if !sema_scope_add_module_symbol(&scopes, symbol) {
             &diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, "module declarations share one namespace", symbol.span), module_row.source_segments))
             complete = false
+        } else if sema_comptime_symbol_waits(symbol) {
+            &waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Symbol{position: position}})
         }
     }
-    loop import in module_row.imports {
-        loop binding in import.bindings {
+    loop (import_index, import) in module_row.imports {
+        loop (binding_index, binding) in import.bindings {
             if !sema_scope_add_module_symbol(&scopes, binding.symbol) {
                 &diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(binding.local, "imported names share the module namespace", binding.symbol.span), module_row.source_segments))
                 complete = false
+            } else if sema_comptime_symbol_waits(binding.symbol) {
+                &waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Import{import_index: import_index, binding: binding_index}})
             }
         }
     }
