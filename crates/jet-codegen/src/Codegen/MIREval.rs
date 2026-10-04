@@ -112,8 +112,6 @@ fn mir_ui_backend_value(backend: MirUiBackend) -> CtValue {
         lambda: Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body: LambdaBody::Block(Vec::new()),
             span: Span::new(0, 0),
@@ -19873,8 +19871,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             lambda: Lambda {
                 take_names: Vec::new(),
                 params: Vec::new(),
-                result_type: None,
-                error_type: None,
                 effects: None,
                 body: LambdaBody::Block(Vec::new()),
                 span: Span::new(0, 0),
@@ -28136,8 +28132,6 @@ fn mir_runtime_owner_value<T: Send + Sync + 'static>(value: T) -> CtValue {
         lambda: Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body: LambdaBody::Block(Vec::new()),
             span: Span::new(0, 0),

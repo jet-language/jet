@@ -359,7 +359,7 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     state :: shared HandlerState{label: "before registration"}
     mux :: server.mux()
     mux.get("/zero", () -> Ok(server.response(200, "zero")))
-    mux.get("/items/:id", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+    mux.get("/items/:id", (req: HTTPRequest) -> {
         header :: &req.header("x-state") ?? "missing"
         id :: req.param("id") ?? "missing"
         path :: req.path()
@@ -1434,7 +1434,7 @@ use core.net as net
 fn run() (HTTPError | NetError | TaskFailure)! {{
     listener :: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen")
     mux :: server.mux()
-    mux.post("/", (req: HTTPRequest) HTTPResponse HTTPError! -> {{
+    mux.post("/", (req: HTTPRequest) -> {{
         body :: req.body().text(1024) ?? "rejected"
         return Ok(server.response(200, body))
     }})

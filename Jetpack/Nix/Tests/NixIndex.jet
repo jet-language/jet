@@ -52,7 +52,7 @@ fn nix_test_document_for(record: NixIndexRecordWire) -> NixIndexDocument {
 // Rust `MapTransport`: fixed responses by URL.
 fn nix_test_map_transport(values: [String: [U8]]) -> NixIndexTransport {
     responses :: ~values
-    NixIndexTransport{get_bounded: (url: String, max_bytes: Int) [U8] NixIndexError! -[Net, Time.Wait]> {
+    NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
         value :: responses.get(url) ?? return Err(NixIndexError.Transport("missing test URL {url}"))
         if value.len() > max_bytes -> return Err(NixIndexError.Invalid("test response exceeded bound"))
         Ok(value)

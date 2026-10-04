@@ -3653,8 +3653,6 @@ fn sema_stmt_check_reactive(body: [Stmt], span: Span, environment: SemaScopeEnvi
     lambda := Lambda{
         take_names: [NamedSpan]{},
         params: [LambdaParam]{},
-        result_type: Val(Type.Named{name: "Unit"}),
-        error_type: None,
         effects: None,
         body: LambdaBody.Block{body: closure_body},
         span: span,
@@ -3662,7 +3660,7 @@ fn sema_stmt_check_reactive(body: [Stmt], span: Span, environment: SemaScopeEnvi
     }
     previous_escapes := context.lambda_escapes
     context.lambda_escapes = Val(true)
-    checked := sema_expression_lambda(lambda, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked := sema_expression_lambda(lambda, Val(Type.Fn{params: [Type]{}, ret: Val(Type.Named{name: "Unit"}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}), environment, &scopes, &state, &tail_store, &context, &diagnostics)
     context.lambda_escapes = previous_escapes
     if forbidden -> return None
     expression :: checked ?? return None

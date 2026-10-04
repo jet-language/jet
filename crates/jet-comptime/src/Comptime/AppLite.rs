@@ -1008,8 +1008,6 @@ fn opaque_web<T: std::any::Any + Send + Sync>(value: T) -> CtValue {
         lambda: Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body: LambdaBody::Block(Vec::new()),
             span: Span::new(0, 0),

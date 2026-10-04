@@ -4387,8 +4387,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let synthetic = crate::AST::Lambda {
                     take_names: Vec::new(),
                     params: Vec::new(),
-                    result_type: None,
-                    error_type: None,
                     effects: None,
                     body: crate::AST::LambdaBody::Block(body.clone()),
                     span: *span,

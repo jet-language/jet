@@ -82,7 +82,7 @@ pub struct NixIndexClient {
     fn from_local_catalog(catalog: String, offline: Bool) -[FS]> NixIndexClient NixIndexError! {
         if !nix_index_path_exists(catalog) -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog `{catalog}` does not exist"))
         nix_index_ensure_real_directory(catalog)
-        transport :: NixIndexTransport{get_bounded: (url: String, max_bytes: Int) [U8] NixIndexError! -[Net, Time.Wait]> {
+        transport :: NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
             Err(NixIndexError.Transport("native index transport has no configured endpoint"))
         }}
         Ok(NixIndexClient{endpoint: "", root: catalog, key_id: "", public_key: None, local_catalog: true, offline, clock: NixIndexClock.System, transport})
@@ -438,7 +438,7 @@ fn nix_index_native_transport(endpoint: String) -> NixIndexTransport NixIndexErr
         .redirects(.Disabled)
         .timeouts(total: time.duration_ms(NIX_INDEX_TRANSPORT_TIMEOUT_MS))
     scheme :: configured.scheme
-    Ok(NixIndexTransport{get_bounded: (url: String, max_bytes: Int) [U8] NixIndexError! -[Net, Time.Wait]> {
+    Ok(NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
         nix_index_native_get(client, scheme, url, max_bytes)
     }})
 }

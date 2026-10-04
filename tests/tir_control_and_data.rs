@@ -677,7 +677,7 @@ fn branch_value(value: Int) -> Int {
 }
 
 fn closure(value: Int) -> Int {
-    worker :: (n: Int) Int -> source(n) + 1
+    worker :: (n: Int) -> source(n) + 1
     return worker(value)
 }
 

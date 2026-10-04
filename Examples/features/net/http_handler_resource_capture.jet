@@ -14,7 +14,7 @@ fn run() {
     conn :: db.open_memory() ?? panic("open")
     pool :: db.pool(":memory:", max: 1) ?? panic("pool")
     mux :: server.mux()
-    mux.post("/order", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+    mux.post("/order", (req: HTTPRequest) -> {
         lease :: pool.acquire(deadline: 100ms) ?? return Ok(server.response(503, "busy"))
         opened :: conn.begin()
         lease.close() ?? panic("lease")

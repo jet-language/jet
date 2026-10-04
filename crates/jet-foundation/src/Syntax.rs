@@ -263,8 +263,8 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // D-CALLABLE-ONE1=A is amended: the plain arrow is present when a non-unit
 // success result is declared; unit bodies keep bare braces.
 // D-EFFECT-ROW2=B (ratified 2026-08-21, card #2144): effect ceilings keep the
-// `-[` / `]>` spelling, including pure `-[]>`; D-LAMBDA-IFACE1=A gives lambdas
-// the same interface suffixes.
+// `-[` / `]>` spelling, including pure `-[]>`; D-LAMBDA-IFACE2=A limits
+// lambda interfaces to parameters and that optional effect row.
 // D-ARMHEAD-PAREN1=A, D-SUBJECT-COHERE1=A, and D-DEFAULT-SHAPE1=B (ratified
 // 2026-08-21, card #2144) add no token: arm grouping, subject chains, and
 // declaration defaults reuse the existing parentheses, dot, and typed-value

@@ -1617,7 +1617,27 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             }
         }
     }
-    if expected_effects == None -> expected_effects = lambda.effects
+    if expected_effects == .Val(bound) {
+        if lambda.effects == .Val(written) {
+            open := false
+            loop entry in bound -> if entry.name.starts_with("..") -> open = true
+            exceeds := false
+            loop entry in written {
+                if entry.name.starts_with("!") || entry.name.starts_with("..") -> next
+                covered := false
+                loop allowed in bound -> if sema_effect_covers(allowed.name, entry.name) -> covered = true
+                if !covered -> exceeds = true
+            }
+            if !open && exceeds {
+                offered := [String]{}
+                allowed := [String]{}
+                loop entry in written -> &offered.push(entry.name)
+                loop entry in bound -> &allowed.push(entry.name)
+                if !sema_effect_check_callback_bound(offered, allowed, lambda.span, &diagnostics) -> return None
+            }
+        }
+    }
+    if lambda.effects != None -> expected_effects = lambda.effects
     if expected_params != None && lambda.params.len() != (expected_params ?? [Type]{}).len() {
         &diagnostics.push(sema_error("E0104", lambda.span, "this lambda has {lambda.params.len()} parameters, but {(expected_params ?? [Type]{}).len()} were expected", "function values have a fixed parameter count", "match the expected function type"))
         return None
@@ -1667,6 +1687,12 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             &diagnostics.push(sema_error("E0801", parameter.name_span, "tell me the type of `{parameter.name}`", "this lambda parameter has no type to go on", "write `({parameter.name}: Int) -> …` (or whatever type fits)"))
             return None
         }
+        if parameter.ty != None && expected_params == .Val(required_params) {
+            if index < required_params.len() && !type_identity_equal(parameter_type, required_params[index]) {
+                &diagnostics.push(sema_type_mismatch(required_params[index], parameter_type, parameter.ty_span ?? parameter.name_span))
+                return None
+            }
+        }
         parameter_owner := sema_scope_local_owner_key(lambda_scopes)
         parameter_id := symbol_id(SymbolKind.Parameter, environment.module_identity, parameter_owner, parameter.name)
         parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_name: environment.module_identity, owner: Val(parameter_owner), span: parameter.name_span, ty: Val(parameter_type), visibility: 0}
@@ -1681,20 +1707,8 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         index += 1
     }
 
-    body_expected := lambda.result_type
-    if body_expected == None && expected_ret == .Val(.Result(ok, _)) -> body_expected = Val(ok)
-    if body_expected == None && lambda.error_type == None {
-        if expected_ret != None && !sema_expression_lambda_type_is_result(expected_ret ?? Type.Named{name: "Unit"}) -> body_expected = expected_ret
-    }
-    child_return := Type?{None}
-    if {
-        lambda.error_type != None -> {
-            child_return = Val(Type.Result{ok: body_expected ?? Type.Named{name: "Unit"}, err: lambda.error_type ?? Type.Named{name: "Err"}})
-        }
-        body_expected != None -> {
-            child_return = Val(body_expected ?? Type.Named{name: "Unit"})
-        }
-    }
+    body_expected := if expected_ret == .Val(.Result(ok, _)) -> Val(ok) else -> expected_ret
+    child_return :: body_expected
     if {
         inline_loop -> {
             lambda_scopes.return_type = outer_return_type
@@ -1711,8 +1725,8 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             // carries the failure. Every other callback has no failure route:
             // a fallible call in it is E0403.
             carrier_source := child_return
-            if lambda.error_type == None && expected_ret == .Val(.Result(_, _)) -> carrier_source = expected_ret
-            infers :: lambda.result_type == None && lambda.error_type == None && expected_ret != (Val(Type.Named{name: "Unit"})) && !sema_expression_lambda_type_is_result(expected_ret ?? Type.Named{name: "Unit"})
+            if expected_ret == .Val(.Result(_, _)) -> carrier_source = expected_ret
+            infers :: expected_ret != (Val(Type.Named{name: "Unit"})) && !sema_expression_lambda_type_is_result(expected_ret ?? Type.Named{name: "Unit"})
             lambda_scopes.failure_carrier = if infers -> None else -> Val(sema_expression_failure_carrier(carrier_source ?? Type.Named{name: "Unit"}))
             lambda_context.failure_inference = infers
             lambda_context.inferred_failure_carrier = None
@@ -1747,7 +1761,6 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         }
         .Block(statements) -> {
             statement_return := if inline_loop -> outer_return_type else -> body_expected
-            if !inline_loop && lambda.error_type != None -> statement_return = child_return
             statement_body := [Stmt]{}
             tail_source := Expr?{None}
             statement_index := 0
@@ -1993,31 +2006,19 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
 
     success_ty := body_result_ty
-    if lambda.result_type != None && !sema_expression_lambda_return_fits(lambda.result_type ?? success_ty, success_ty, environment) {
-        &diagnostics.push(sema_type_mismatch(lambda.result_type ?? success_ty, success_ty, lambda.span))
-        return None
-    }
     ret_ty := success_ty
-    if {
-        lambda.error_type != None -> {
-            ret_ty = Type.Result{ok: success_ty, err: lambda.error_type ?? Type.Named{name: "Err"}}
+    if expected_ret == {
+        .Val(.Result(_, err)) -> {
+            if !sema_expression_lambda_type_is_result(success_ty) -> ret_ty = Type.Result{ok: success_ty, err: err}
         }
-        else -> {
-            if expected_ret == {
-                .Val(.Result(_, err)) -> {
-                    if !sema_expression_lambda_type_is_result(success_ty) -> ret_ty = Type.Result{ok: success_ty, err: err}
-                }
-                else -> {}
-            }
-            // A callback that inferred its carrier returns that carrier
-            // around its success value.
-            if !inline_loop && lambda_context.failure_inference && lambda_context.inferred_failure_carrier == .Val(inferred) {
-                if inferred == .Result(_, err) {
-                    if !sema_expression_lambda_type_is_result(success_ty) -> ret_ty = Type.Result{ok: success_ty, err: err}
-                    lambda_work.meta.fallible_propagation = true
-                    lambda_work.meta.fallible_carrier = Val(ret_ty)
-                }
-            }
+        else -> {}
+    }
+    // A callback that inferred its carrier returns it around the success value.
+    if !inline_loop && lambda_context.failure_inference && lambda_context.inferred_failure_carrier == .Val(inferred) {
+        if inferred == .Result(_, err) {
+            if !sema_expression_lambda_type_is_result(success_ty) -> ret_ty = Type.Result{ok: success_ty, err: err}
+            lambda_work.meta.fallible_propagation = true
+            lambda_work.meta.fallible_carrier = Val(ret_ty)
         }
     }
     if expected_ret != None && !sema_expression_lambda_return_fits(expected_ret ?? ret_ty, ret_ty, environment) {

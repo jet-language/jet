@@ -28,8 +28,8 @@ More: jet-lang.dev/e/E1102
 Error [E1102]: `cell` can't be captured by an HTTP handler because `Cell<Int>` isn't sendable
   --> tests/ui/local_cell_crossing.jet:25:18
     |
- 25 |     mux.get("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {
-    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 25 |     mux.get("/", (req: HTTPRequest) -> {
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^
  Why: HTTP handlers are retained by the server and invoked on request workers, so their captured state must be owned and thread-safe
  Fix: Capture only owned sendable values in the HTTP handler, or use `Shared<T>` for synchronized state
 More: jet-lang.dev/e/E1102
