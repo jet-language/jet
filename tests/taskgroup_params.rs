@@ -254,7 +254,7 @@ fn taskgroup_type_is_second_class() {
 #[test]
 fn taskgroup_cannot_escape_in_a_closure() {
     let source = r#"
-fn use_group(group: Group) -> Int -> 1
+fn use_group(group: Group) -> Int { 1 }
 
 fn escape(group: Group) -> fn() -> Int { return () -> use_group(group) }
 
@@ -266,7 +266,7 @@ fn run() {}
     // parameter is admitted, and the lambda escape door it could otherwise open
     // stays shut with the same escape and fallibility diagnostics.
     let method_escape = r#"
-fn use_group(group: Group) -> Int -> 1
+fn use_group(group: Group) -> Int { 1 }
 
 struct Crawler {
     step: Int

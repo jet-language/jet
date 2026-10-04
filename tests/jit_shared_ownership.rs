@@ -17,7 +17,7 @@ fn extract_owner(holder: ^Holder) -> Shared<Int> {
     return holder.owner
 }
 
-fn append_then_fail(values: &[Int], value: Int) -> Int? String! -> {
+fn append_then_fail(values: &[Int], value: Int) -> Int? String! {
     &values.push(value)
     return Err("expected failure")
 }

@@ -59,7 +59,7 @@ struct Pair {
     b: Int
 }
 
-fn align(left: D, right: D) -> Pair -> Pair{a: left.value, b: right.value}
+fn align(left: D, right: D) -> Pair { Pair{a: left.value, b: right.value} }
 
 impl D.Add {
     fn add(self, rhs: D) -> D {
@@ -77,7 +77,7 @@ struct Shown {
 }
 
 impl Shown.Display {
-    fn display(self) -> String -> "shown={self.value}"
+    fn display(self) -> String { "shown={self.value}" }
 }
 
 fn mark(label: String, value: Int) -[IO]> D {

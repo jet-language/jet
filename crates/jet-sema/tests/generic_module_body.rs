@@ -235,7 +235,7 @@ fn generic_module_comptime_bindings_survive_item_registration() {
 module cache<K>(capacity: Int) {
     BASE :: prep { capacity }
     COMPUTED_SIZE :: prep { BASE + 1 }
-    fn size() -> Int -> COMPUTED_SIZE
+    fn size() -> Int { COMPUTED_SIZE }
 }
 module instance :: cache<Int>(3)
 fn run() {}
@@ -891,8 +891,8 @@ fn run() {
 fn selective_alias_ledger_keeps_local_binding_span() {
     let src = r#"
 module util {
-    pub fn double(x: Int) -> Int -> x * 2
-    pub fn triple(x: Int) -> Int -> x * 3
+    pub fn double(x: Int) -> Int { x * 2 }
+    pub fn triple(x: Int) -> Int { x * 3 }
 }
 use util.[double as d, triple as t]
 fn run() { print(d(5)) }

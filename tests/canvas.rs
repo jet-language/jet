@@ -3732,7 +3732,7 @@ fn canvas_preserves_pure_effect_row_for_signature_edits() {
     jet::Canvas::apply_transaction_json(&path, &edit).expect("edit pure signature");
     let after = fs::read_to_string(&path).unwrap();
     assert!(after.contains("fn adjust(next: Int) -[]> Int"), "{after}");
-    assert!(!after.contains("fn adjust(next: Int) -> Int ->"), "{after}");
+    assert!(!after.contains("fn adjust(next: Int) -> Int"), "{after}");
 }
 
 #[test]

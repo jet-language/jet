@@ -36,7 +36,7 @@ OS_MAP_PRIVATE_ANONYMOUS :: prep { 0x22 }
 // any argument register is written, so the operands may live in any register;
 // the argument registers are restored afterwards.
 #[Unsafe("a raw Linux x86-64 system call; the caller passes the call number and arguments that call expects"), FFI(asm)]
-fn os_syscall(number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int -> {
+fn os_syscall(number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int {
     """
     push rdi
     push rsi
@@ -155,7 +155,7 @@ fn os_copy_in(address: Int, bytes: [U8]) {
 // with one word argument and return its word result. The caller vouches that
 // `address` is executable code with that signature.
 #[Unsafe("calls machine code; the caller vouches for the code and its System V signature"), FFI(asm)]
-fn os_call_address(address: Int, argument: Int) -> Int -> {
+fn os_call_address(address: Int, argument: Int) -> Int {
     """
     mov rdi, {argument}
     call {address}
@@ -165,7 +165,7 @@ fn os_call_address(address: Int, argument: Int) -> Int -> {
 }
 
 #[Unsafe("dlopen reads the NUL-terminated path at `path`"), FFI(c)]
-fn os_dl_open(path: Int) -> Int -> {
+fn os_dl_open(path: Int) -> Int {
     """
     void *dlopen(const char *path, int flags);
     int64_t os_dl_open(int64_t path) { return (int64_t)dlopen((const char *)path, 2); }
@@ -173,7 +173,7 @@ fn os_dl_open(path: Int) -> Int -> {
 }
 
 #[Unsafe("dlsym reads the NUL-terminated name at `name`"), FFI(c)]
-fn os_dl_symbol(library: Int, name: Int) -> Int -> {
+fn os_dl_symbol(library: Int, name: Int) -> Int {
     """
     void *dlsym(void *library, const char *name);
     int64_t os_dl_symbol(int64_t library, int64_t name) { return (int64_t)dlsym((void *)library, (const char *)name); }

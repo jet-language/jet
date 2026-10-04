@@ -227,14 +227,16 @@ dispatch arm, loop body, and lambda uses `->`. An explicit effect ceiling uses
 `-[Effects]>`, with `-[]>` for an empty row and `-[..E]>` for an open row.
 Braces group multiline bodies. They do not imply a result.
 
-Named functions, methods, function types, lambdas, computed fields, conversion
-implementations, and migration converters use the callable arrow. A concise
-named callable uses `-> expression` after its result type:
+Function types, lambdas, computed fields, conversion implementations, and
+migration converters use the callable arrow as a body arrow. A named function
+or method has exactly one arrow after its inputs (`->` or `-[Effects]>`), then
+its optional result type, then a braced body (D-SIG-AFTER1=A, card #4512); a
+second body arrow is E0080:
 
 ```jet
 fn double(value: Int) -> Int { value * 2 }
 
-fn load(path: String) String -[FS]> {
+fn load(path: String) -[FS]> String {
     text :: core.files.read(path)
     text.trim()
 }
@@ -7165,12 +7167,13 @@ finite-source finding form above. This section records the other outcomes.
   parameter and field declaration defaults use `{…}`.
 
 **D-ONELINE-BODY1=B — one body rule** *(ratified 2026-08-13, cards #1453 and
-#1454; reconciles D-CHOOSE-FNBODY1=A; amended by D-CALLABLE-ONE1=A)*: ordinary
-and multi-head function one-liners use `->` after a non-unit return type.
-Callable heads use `->`. An
+#1454; reconciles D-CHOOSE-FNBODY1=A; amended by D-CALLABLE-ONE1=A and
+D-SIG-AFTER1=A)*: named function and method bodies, including multi-head
+functions, always use braces after the one arrow and result
+(`fn f() -> T { expr }`); a body `->` is E0080 (card #4512). An
 effect-only `if` or `loop` may put `->` before one adjacent statement; braces
 are required for multiple statements and scoped marker blocks. Function-body
-`=` retires with a teaching fix to `->`; `=` remains for slot-filling forms
+`=` retires with a teaching fix to braces; `=` remains for slot-filling forms
 such as extern bindings, reassignment, and enum discriminants. Declaration
 defaults ride the type as `{…}`. Marker-scoped blocks retain their own braces.
 

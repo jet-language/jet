@@ -82,10 +82,12 @@ fn tui_backend_reactive_conditional_capture() {
 use core.ui as ui
 use core.reactive as reactive
 
-fn view(title: String) -> UINode -> ui.box([
-    ui.text(title),
-    ui.node_role("notes", 30.0, 3.0, ui.aria_role_text_input())
-])
+fn view(title: String) -> UINode {
+    ui.box([
+        ui.text(title),
+        ui.node_role("notes", 30.0, 3.0, ui.aria_role_text_input())
+    ])
+}
 
 fn run() {
     selected := reactive.signal(0)

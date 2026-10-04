@@ -376,7 +376,7 @@ fn panic_context_uses_only_lexically_live_locals() {
     for (name, scoped_stmt, dead_names) in cases {
         let src = format!(
             r#"
-fn missing() -> (Int?) -> None
+fn missing() -> (Int?) {{ None }}
 fn capture(live: Int) {{
     {scoped_stmt}
     _value :: missing() ?? panic("missing value")
@@ -546,7 +546,7 @@ fn try_note_interpolation_is_lazy_on_success() {
     }
 
     let src = r#"
-fn present() -> String -> Ok("ok")
+fn present() -> String { Ok("ok") }
 fn note_value() -[IO]> String {
     print("evaluated")
     return "unexpected"
@@ -578,7 +578,7 @@ fn fallback_handles_locally_and_context_preserves_the_structured_cause() {
     // second crossing uses the canonical `?(text)` form; it adds one hop and
     // leaves both the typed code and nested cause on the same carrier.
     let src = r#"
-fn fail() -> String -> Err("outer", code: "E_OUTER", cause: Err("root"))
+fn fail() -> String { Err("outer", code: "E_OUTER", cause: Err("root")) }
 fn pass_through() -[]> {
     _ :: fail()?("loading")
 }
@@ -744,7 +744,7 @@ fn uncaught_err_prints_propagation_chain() {
     // D-FAIL-CTX1=A: uncaught Err at `fn run()` prints the journey
     // (file:line per frame, with notes) then the error text, exit 1.
     let src = r#"
-fn read_raw() -> String -> Err("file not found")
+fn read_raw() -> String { Err("file not found") }
 fn parse_config() -[]> String {
     raw :: read_raw()?("reading raw config")
     return Ok(raw)
