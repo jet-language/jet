@@ -183,7 +183,7 @@ pub mod scheduler {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::{
         jet_render_runtime_stop, jet_stream_record_failure_report,
-        jet_stream_take_failure_report, JetOutcome, JetRuntimeDiagnostic, JetTaskFailure,
+        jet_stream_take_failure_report, JetStreamFailure, JetOutcome, JetRuntimeDiagnostic, JetTaskFailure,
     };
     include!("Prelude/Deadline.rs");
     include!("Prelude/WorkflowWait.rs");

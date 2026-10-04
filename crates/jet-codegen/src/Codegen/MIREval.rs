@@ -4138,7 +4138,7 @@ struct Machine<'a, 'state, 'debug> {
     next_dma_transfer_id: Rc<RefCell<u64>>,
     completed_parameters: Option<Vec<RuntimeValue>>,
     completed_callback_parameters: Option<Vec<RuntimeValue>>,
-    last_runtime_stop: Option<String>,
+    last_runtime_stop: Option<(String, String)>,
     atexit_handlers: Vec<RuntimeValue>,
     deadline_guards: Vec<(usize, MirScopeId, crate::scheduler::JetDeadlineGuard)>,
     /// Held for the machine's lifetime so the scoped Web runtime policy is
@@ -4850,10 +4850,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             let step = match self.step(index) {
                 Ok(step) => step,
                 Err(error) if error.code == "SOFT_EXIT" => {
-                    let Some(code) = self.last_runtime_stop.clone() else {
+                    let Some((code, message)) = self.last_runtime_stop.clone() else {
                         return Err(error);
                     };
-                    if self.catch_expected_runtime_stop(index, &code)? {
+                    if self.catch_expected_runtime_stop(index, &code, &message, stderr_len)? {
                         self.last_runtime_stop = None;
                         self.stderr.truncate(stderr_len);
                         self.exit_code = 0;
@@ -5111,6 +5111,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         &mut self,
         frame_index: usize,
         code: &str,
+        message: &str,
+        stderr_len: usize,
     ) -> Result<bool, Diagnostic> {
         let mut target = None;
         let upper = frame_index.min(self.frames.len().saturating_sub(1));
@@ -5123,11 +5125,18 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 if scope.kind != MirScopeKind::ScopeMember
                     || !matches!(
                         function.test_scope_member(scope_id),
-                        Some(MirTestScopeMember::ExpectFail { expected_code })
-                            if expected_code.as_deref().is_none_or(|expected| expected == code)
+                        Some(MirTestScopeMember::ExpectFail { .. })
                     )
                 {
                     continue;
+                }
+                if let Some(MirTestScopeMember::ExpectFail { expected_code, expected_message }) = function.test_scope_member(scope_id) {
+                    if let Some(error) = jet_foundation::Outcome::jet_test_expect_fail_error(
+                        expected_code.as_deref(), expected_message.as_deref(), Some((code, message)),
+                    ) {
+                        self.stderr.truncate(stderr_len);
+                        return Err(self.located_runtime_stop("E3001", "", 0, &error, scope.span));
+                    }
                 }
                 let Some(exit) = function.blocks.iter().find_map(|block| {
                     block.instructions.iter().any(|instruction| {
@@ -7892,11 +7901,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .flatten();
                 self.cleanup_scope_guards(frame_index, std::slice::from_ref(scope), span)?;
                 self.frames[frame_index].scopes.remove(found);
-                if let Some(MirTestScopeMember::ExpectFail { expected_code }) = member {
+                if let Some(MirTestScopeMember::ExpectFail { expected_code, expected_message }) = member {
                     if !expected_completed {
-                        let message = jet_foundation::Outcome::jet_test_expect_fail_message(
-                            expected_code.as_deref(),
-                        );
+                        let message = jet_foundation::Outcome::jet_test_expect_fail_error(
+                            expected_code.as_deref(), expected_message.as_deref(), None,
+                        ).expect("missing stop");
                         let error = self.located_runtime_stop("E3001", "", 0, &message, span);
                         return Err(error);
                     }
@@ -11652,7 +11661,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         if crate::scheduler::jet_scheduler_in_task() {
             std::panic::resume_unwind(Box::new(message.to_owned()));
         }
-        self.last_runtime_stop = Some("E3001".to_string());
+        self.last_runtime_stop = Some(("E3001".to_string(), message.to_string()));
         let file = self
             .program
             .source_files
@@ -13105,7 +13114,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         context: Option<&MirPanicContext>,
         span: Span,
     ) -> Diagnostic {
-        self.last_runtime_stop = Some("E3001".to_string());
+        self.last_runtime_stop = Some(("E3001".to_string(), jet_foundation::Outcome::jet_pool_stale_message().to_string()));
         let file = self
             .program
             .source_files
@@ -14483,7 +14492,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             &message,
             "",
         );
-        self.last_runtime_stop = Some("E3012".to_string());
+        self.last_runtime_stop = Some(("E3012".to_string(), message.clone()));
         self.stderr.push_str(&report.rendered);
         self.exit_code = report.exit_code;
         Ok(crate::Sema::Diagnostics::soft_exit(
@@ -15542,7 +15551,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         message: &str,
         span: Span,
     ) -> Diagnostic {
-        self.last_runtime_stop = Some(code.to_string());
+        self.last_runtime_stop = Some((code.to_string(), message.to_string()));
         let report = jet_foundation::Outcome::jet_render_runtime_stop(
             code, file, line, fn_name, source_line, col, caret_len, message, "",
         );

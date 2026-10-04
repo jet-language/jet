@@ -40,6 +40,8 @@ module.exports = grammar({
     [$.capability_type, $.union_type],
     [$.option_type, $.union_type],
     [$.fallible_type],
+    // A leading-dot scope statement can follow an impl item.
+    [$.impl_block],
     [$.loop_stmt, $._loop_head],
     [$._expr, $.if_expr],
     [$.named_type_field, $.lambda_param],
@@ -784,8 +786,13 @@ module.exports = grammar({
         $.region_stmt,
         $.live_stmt,
         $.marker_block_stmt,
+        $.scope_member_stmt,
         $.expr_stmt,
       ),
+
+    // D-DOTSCOPE1 / D-TEST-STOPMSG1=A: labels use the ordinary argument list.
+    scope_member_stmt: ($) =>
+      seq(".", field("name", $.identifier), optional($.arg_list), $.scoped_block),
 
     // A rule-introduced block: `#FX(IO) { … }` (D-EFF1),
     // named `#FX(grant: FS) { … }` (D-ABILITY-NAME2), `#Transact(order) { … }` (D-TXN4).

@@ -51,7 +51,7 @@ mod web_kernel {
         };
         use jet_foundation::Outcome::{
             jet_render_runtime_stop, jet_stream_take_failure_report, JetRuntimeDiagnostic,
-            JetTaskFailure,
+            JetTaskFailure, JetStreamFailure,
         };
 
         pub(crate) fn jet_runtime_stop_with_context(

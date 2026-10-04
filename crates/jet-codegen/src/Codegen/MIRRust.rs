@@ -4079,13 +4079,16 @@ impl<'a> RustEmitter<'a> {
         let member = self.test_scope_member(function, scope_id);
         if enter {
             return match member {
-                Some(MirTestScopeMember::ExpectFail { expected_code }) => {
+                Some(MirTestScopeMember::ExpectFail { expected_code, expected_message }) => {
                     let expected = expected_code
                         .as_deref()
                         .map(|code| format!("Some({code:?})"))
                         .unwrap_or_else(|| "None".to_string());
+                    let message = expected_message.as_deref()
+                        .map(|message| format!("Some({message:?})"))
+                        .unwrap_or_else(|| "None".to_string());
                     format!(
-                        "{root}jet_test_expect_fail_enter_scope({}, {expected})",
+                        "{root}jet_test_expect_fail_enter_scope({}, {expected}, {message})",
                         scope_id.0
                     )
                 }
@@ -4100,13 +4103,16 @@ impl<'a> RustEmitter<'a> {
             };
         }
         match member {
-            Some(MirTestScopeMember::ExpectFail { expected_code }) => {
+            Some(MirTestScopeMember::ExpectFail { expected_code, expected_message }) => {
                 let expected = expected_code
                     .as_deref()
                     .map(|code| format!("Some({code:?})"))
                     .unwrap_or_else(|| "None".to_string());
+                let message = expected_message.as_deref()
+                    .map(|message| format!("Some({message:?})"))
+                    .unwrap_or_else(|| "None".to_string());
                 format!(
-                    "if {root}jet_test_expect_fail_leave_scope({}).is_none() {{ {root}jet_test_expect_fail_unmet({expected}); }}",
+                    "if {root}jet_test_expect_fail_leave_scope({}).is_none() {{ {root}jet_test_expect_fail_unmet({expected}, {message}); }}",
                     scope_id.0
                 )
             }
@@ -14028,7 +14034,7 @@ impl<'a> RustEmitter<'a> {
                 );
                 let _ = writeln!(
                     out,
-                    "{:indent$}if let Some(__jet_scope) = {}jet_test_expect_fail_matching_scope() {{",
+                    "{:indent$}if let Some(__jet_scope) = {}jet_test_expect_fail_stopped_scope() {{",
                     "",
                     self.config.root_prefix,
                     indent = body_indent + 24

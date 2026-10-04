@@ -2842,7 +2842,7 @@ fn run() {
     .setup {
         base :: 1
     }
-    .expect_fail {
+    .expect_fail(E3001, message: \"expected stop\") {
         assert(false)
     }
     .timeout(500ms) {

@@ -3223,10 +3223,16 @@ but only `jet test` executes them. (D-DOTSCOPE1)
 
 - `.setup { ... }` is first, runs inline, and leaves its bindings visible to
   the rest of the test. It does not create a separate scope.
-- `.expect_fail { ... }` requires a runtime stop. It may name one E30xx stop
-  code, as in `.expect_fail(E3010) { ... }`; a different stop or a clean return
-  fails the claim. A matched failure is consumed and execution continues after
-  the region.
+- `.expect_fail { ... }` requires a runtime stop. It may name one registered
+  E30xx code and a non-empty string literal message, as in
+  `.expect_fail(E3001, message: "fingerprint collision") { ... }` or
+  `.expect_fail(message: "fingerprint collision") { ... }`. The message is a
+  plain, case-sensitive substring of the raw stop text, not a pattern or a
+  match on the rendered frame or `panic:` prefix (D-TEST-STOPMSG1=A). A wrong
+  code, wrong message, or clean return fails the claim; a mismatch reports
+  the expected text and actual code and message. Empty or non-literal text is
+  E0617. A matched stop is consumed and execution continues after the region.
+  This does not change the whole-test `expected_fail` known-bug mark.
 - `.timeout(duration) { ... }` takes one canonical duration value. Version 1
   compares elapsed time after the region completes; it does not interrupt a
   hung body.

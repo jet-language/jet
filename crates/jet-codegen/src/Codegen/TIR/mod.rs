@@ -6781,9 +6781,8 @@ pub enum ScopeMemberKind {
     /// `.setup { … }` — the body's statements are spliced inline (bindings leak
     /// to the rest of the test), running first.
     Setup,
-    /// `.expect_fail { … }` / `.expect_fail(E3010) { … }` — the region must
-    /// fail, optionally with the named runtime stop code.
-    ExpectFail(Option<String>),
+    /// D-TEST-STOPMSG1=A: require a stop, optionally checking code and raw message.
+    ExpectFail { code: Option<String>, message: Option<String> },
     /// `.timeout(dur) { … }` — post-hoc budget. The region runs to completion,
     /// then its elapsed time is compared against the canonical Duration value;
     /// over budget fails the test. (v1: post-hoc — does not interrupt a hang.)

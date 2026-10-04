@@ -339,7 +339,13 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, group: TLocal, limi
 
 fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, scope: MIRScopeID, body: [TStmt]) {
     jet_codegen_lower_block(&builder, body)
+    exit := jet_codegen_new_block(&builder, builder.function.span, "scope-member.exit")
+    join := jet_codegen_new_block(&builder, builder.function.span, "scope-member.join")
+    if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: exit})
+    jet_codegen_switch_block(&builder, exit)
     jet_codegen_leave_scope(&builder, scope)
+    if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join})
+    jet_codegen_switch_block(&builder, join)
 }
 
 fn jet_codegen_lower_scope_member(builder: &JetCodegenBuilder, kind: TScopeMemberKind, body: [TStmt], span: Span) {
@@ -348,9 +354,9 @@ fn jet_codegen_lower_scope_member(builder: &JetCodegenBuilder, kind: TScopeMembe
             jet_codegen_lower_statements(&builder, body)
             return
         }
-        .ExpectFail(expected) -> {
+        .ExpectFail(expected, message) -> {
             scope := jet_codegen_enter_scope(&builder, MIRScopeKind.ScopeMember, span, expected)
-            jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.ExpectFail{expected_code: expected})
+            jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.ExpectFail{expected_code: expected, expected_message: message})
             jet_codegen_lower_scope_member_body(&builder, scope, body)
             return
         }

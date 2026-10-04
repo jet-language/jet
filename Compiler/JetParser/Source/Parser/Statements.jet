@@ -106,6 +106,7 @@ fn parser_statement_is_keyword(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind == TOKEN_RETURN || token.kind == TOKEN_BREAK || token.kind == TOKEN_KW_YIELD -> return true
     if token.kind == TOKEN_KW_LOOP || token.kind == TOKEN_HASH || token.kind == TOKEN_AT -> return true
+    if parser_scope_member_ahead(&state) -> return true
     if token.kind == TOKEN_IDENT {
         word :: token.payload.decoded
         if parser_next_statement_ahead(&state) || word == "defer" -> return true
@@ -438,6 +439,7 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
     parser_skip_semicolons(&state)
     token :: parser_current(&state)
     state.statement_start = token.span.start
+    if parser_scope_member_ahead(&state) -> return parser_parse_scope_member(&state)
     if token.kind == {
         TOKEN_KW_IF -> parser_parse_if_statement(&state)
         TOKEN_KW_LOOP -> parser_parse_loop_statement(&state)
@@ -477,6 +479,38 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
             parser_parse_assignment_or_expression(&state)
         }
     }
+}
+
+fn parser_scope_member_ahead(state: &JetParserState) -> Bool Never! {
+    parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_IDENT
+        && (parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_LBRACE)
+}
+
+fn parser_parse_scope_member(state: &JetParserState) -> Stmt {
+    dot :: parser_bump(&state)
+    name :: parser_expect_name(&state, "for the scope-member name")
+    args := [Expr]{}
+    args_span := Span?{None}
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        open :: parser_bump(&state)
+        loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF {
+            if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON {
+                label :: parser_bump(&state)
+                parser_bump(&state)
+                value :: parser_parse_expression(&state, 1, 0)
+                &args.push(Expr.TupleLit{fields: [TupleField]{TupleField{name: label.payload.decoded, value: value.expr}}, span: parser_cover(label.span, value.span), ty: None})
+            } else {
+                value :: parser_parse_expression(&state, 1, 0)
+                &args.push(value.expr)
+            }
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            parser_expect(&state, TOKEN_COMMA, "between scope-member arguments")
+        }
+        close :: parser_expect(&state, TOKEN_RPAREN, "to close the scope-member arguments")
+        args_span = Val(parser_cover(open.span, close.span))
+    }
+    body :: parser_parse_block(&state)
+    Stmt.ScopeMember{name: name.payload.decoded, name_span: name.span, args: args, args_span: args_span, body: body.statements, dsl: false, dot_span: dot.span, span: parser_cover(dot.span, body.span)}
 }
 
 // Rust `stmt`: `next` is the loop-control word only before a line end, `}`,

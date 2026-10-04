@@ -21,6 +21,7 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "::", meaning: "immutable binding", decision: "D-BIND1" },
     LexicalEntry { spelling: ":=", meaning: "mutable binding", decision: "D-BIND1" },
     LexicalEntry { spelling: "#", meaning: "attached marker; #[A, B] stacks", decision: "D-VERDICT-732-1; D-MARK-STACK1" },
+    LexicalEntry { spelling: ".expect_fail(message: \"text\")", meaning: "test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring", decision: "D-TEST-STOPMSG1=A" },
     LexicalEntry { spelling: "#DevPanel", meaning: "exported typed devtools panel marker", decision: "D-DX-PLUGIN1=D" },
     LexicalEntry { spelling: "web.form(Model, action: handler)", meaning: "struct-derived headless form with progressive action", decision: "D-DX-FORM1" },
     LexicalEntry { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
@@ -146,6 +147,8 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // `--replay=`; D-RUN-SESSION1=A claims the exact `r/R/t/f/q` session keys.
 // Their canonical rows live in the private surface modules below and are
 // re-exported through this file; no parser or execution engine owns a copy.
+// D-TEST-STOPMSG1=A (card #4510): SCOPE_TEST_EXPECT_FAIL accepts an optional
+// E30xx code and `message: "text"`; SCOPE_TEST_EXPECT_MESSAGE names that label.
 // D-FAIL-EXIT1=A / D-FAIL-EDGE1=A (ratified 2026-08-06, cards #1533/#1536)
 // add no token: `fn run()` is the default-fallible entry, and the build target
 // selects the final report boundary. CLI, web, wasm, and service adapters
