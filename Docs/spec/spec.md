@@ -4009,6 +4009,9 @@ parameter and result contracts before code generation. There is no dynamic
 export lookup or missing-export fallback. Exported functions use a homogeneous
 `Int`, `Float`, `Bool`, or `Text` shape, or a recursively closed Component
 Model shape (E1260).
+The `packages/sandbox_mathkit` golden exercises `Bool` results and UTF-8 text
+round trips, including a non-ASCII name; its checked-in interface snapshot
+lists every named export used by the host.
 
 The loader reads the component under explicit resource-scoped `FS.Read`
 authority and preflights every declared WIT import. The guest's
