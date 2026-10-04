@@ -173,6 +173,10 @@ pub struct JetRustEmitContext {
     // Indexes into program.impls of every impl with a trait, per trait id key,
     // in program order.
     pub impls_by_trait: [String:[Int]]
+    // Indexes into program.impls of every impl with a trait, per trait name
+    // (`trait_ref.name`), in program order (MIRRust user_impls_by_trait and
+    // selected_trait_impl_for_type select by name).
+    pub impls_by_trait_name: [String:[Int]]
     // Row indexes built once per program so per-instruction and per-type
     // lookups never rescan whole MIR tables: first row per function, foreign
     // and trait id; first and last program.fields row per field id and the
@@ -931,6 +935,10 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
     impl_trait_slots := [String:Int]{}
     impl_trait_keys := [String]{}
     impl_trait_rows := [[Int]]{}
+    impls_by_trait_name := [String:[Int]]{}
+    impl_name_slots := [String:Int]{}
+    impl_name_keys := [String]{}
+    impl_name_rows := [[Int]]{}
     loop (index, implementation) in program.impls {
         if implementation.trait_ref == .Val(trait_ref) {
             trait_key :: jet_rust_emit_id_key(trait_ref.id.value)
@@ -942,9 +950,18 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
                 &impl_trait_rows.push([Int]{})
             }
             &impl_trait_rows[slot].push(index)
+            name_slot := impl_name_slots.get(trait_ref.name) ?? -1
+            if name_slot < 0 {
+                name_slot = impl_name_rows.len()
+                impl_name_slots[trait_ref.name] = name_slot
+                &impl_name_keys.push(trait_ref.name)
+                &impl_name_rows.push([Int]{})
+            }
+            &impl_name_rows[name_slot].push(index)
         }
     }
     loop slot in 0..<impl_trait_rows.len() -> impls_by_trait[impl_trait_keys[slot]] = impl_trait_rows[slot]
+    loop slot in 0..<impl_name_rows.len() -> impls_by_trait_name[impl_name_keys[slot]] = impl_name_rows[slot]
     ctx := JetRustEmitContext{
         program: program,
         config: config,
@@ -967,6 +984,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         type_index_by_key: type_index_by_key,
         type_index_by_name: type_index_by_name,
         impls_by_trait: impls_by_trait,
+        impls_by_trait_name: impls_by_trait_name,
         function_index_by_id: function_index_by_id,
         foreign_index_by_id: foreign_index_by_id,
         trait_index_by_id: trait_index_by_id,

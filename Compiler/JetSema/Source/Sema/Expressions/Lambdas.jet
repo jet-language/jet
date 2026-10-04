@@ -1854,6 +1854,10 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     loop name in direct_effects -> sema_expression_lambda_append_name(&effect_seed, name)
     lambda_work.meta.effect_direct = direct_effects
     lambda_work.meta.effect_solved = effect_seed
+    // Rust `check_lambda` (D-EFFECT-LAMBDA1): the lambda's call edges, so the
+    // enclosing function's effect node and the lambda's projected row both
+    // reach its callees.
+    lambda_work.meta.effect_call_edges = effect_edges
     lambda_work.meta.effect_direct_spans = [EffectRowEntry]{}
     loop effect_span in effect_spans {
         &lambda_work.meta.effect_direct_spans.push(EffectRowEntry{name: effect_span.name, span: effect_span.span})

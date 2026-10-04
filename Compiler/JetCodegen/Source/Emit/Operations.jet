@@ -780,20 +780,24 @@ fn jet_rust_emit_selected_equatable_impl(ctx: &JetRustEmitContext, ty: MIRType) 
 }
 
 // MIRRust selected_trait_impl_for_type: the selected impl of `trait_name`.
+// Rows are read in place; only a matching row is copied for the target check.
 fn jet_rust_emit_selected_trait_impl(ctx: &JetRustEmitContext, ty: MIRType, trait_name: String) -> MIRTraitRef? {
     nominal :: if ty.kind == {
         .Apply(name, _) -> Val(name.name)
         else -> String?{None}
     }
-    loop implementation in ctx.program.impls {
-        trait_ref :: implementation.trait_ref ?? next
-        if trait_ref.name != trait_name || !jet_rust_emit_impl_target_enabled(&ctx, implementation) -> next
-        if mir_type_same_checked_type(implementation.self_type, ty) -> return Val(trait_ref)
-        if nominal == .Val(name) {
-            if implementation.self_type.kind == {
-                .Apply(self_name, _) -> { if self_name.name == name -> return Val(trait_ref) }
+    rows :: ~(ctx.impls_by_trait_name.get(trait_name) ?? [Int]{})
+    loop row in rows {
+        matches := mir_type_same_checked_type(ctx.program.impls[row].self_type, ty)
+        if !matches && nominal == .Val(name) {
+            if ctx.program.impls[row].self_type.kind == {
+                .Apply(self_name, _) -> matches = self_name.name == name
                 else -> {}
             }
+        }
+        if matches {
+            implementation :: ~ctx.program.impls[row]
+            if jet_rust_emit_impl_target_enabled(&ctx, implementation) -> return implementation.trait_ref
         }
     }
     None
@@ -3700,17 +3704,17 @@ fn jet_rust_emit_numeric_conversion_value(ctx: &JetRustEmitContext, raw: String,
     cast
 }
 
+// The first type row with this id (the context index holds it).
 fn jet_rust_emit_compiler_builtin_for_type(ctx: &JetRustEmitContext, id: MIRTypeID) -> MIRCompilerBuiltin? {
-    loop definition in ctx.program.types {
-        if definition.id == id -> return definition.compiler_builtin
-    }
-    None
+    index :: jet_rust_emit_type_index(ctx, id) ?? return None
+    ctx.program.types[index].compiler_builtin
 }
 
 fn jet_rust_emit_default_err_struct(ctx: &JetRustEmitContext, id: MIRTypeID, values: [MIRFieldValue]) -> String Never! {
     definition := MIRTypeDef?{None}
-    loop candidate in ctx.program.types {
-        if candidate.id == id -> definition = Val(candidate)
+    // The last type row with this id, as the original full scan kept.
+    loop index in 0..<ctx.program.types.len() {
+        if ctx.program.types[index].id == id -> definition = Val(~ctx.program.types[index])
     }
     if definition == None {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "compiler-owned Err type row is missing", "the canonical default error constructor requires its checked field schema", None)

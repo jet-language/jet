@@ -718,7 +718,7 @@ fn jet_rust_emit_type_derives_allowed(definition: MIRTypeDef) -> Bool Never! {
 
 // The first type row matching the identity, nominal id, key or leaf name; the
 // context indexes hold each criterion's first row, so the minimum is that row.
-fn jet_rust_emit_structural_type_def(ctx: &JetRustEmitContext, ty: MIRType) -> MIRTypeDef? {
+fn jet_rust_emit_structural_type_row(ctx: JetRustEmitContext, ty: MIRType) -> Int? {
     if ty.kind == {
         .Apply(name, _) -> {
             identity :: ty.identity ?? name.id
@@ -734,11 +734,16 @@ fn jet_rust_emit_structural_type_def(ctx: &JetRustEmitContext, ty: MIRType) -> M
                     if best < 0 || index < best -> best = index
                 }
             }
-            if best >= 0 -> return Val(~ctx.program.types[best])
+            if best >= 0 -> return Val(best)
         }
         else -> {}
     }
     None
+}
+
+fn jet_rust_emit_structural_type_def(ctx: &JetRustEmitContext, ty: MIRType) -> MIRTypeDef? {
+    row :: jet_rust_emit_structural_type_row(ctx, ty) ?? return None
+    Val(~ctx.program.types[row])
 }
 
 fn jet_rust_emit_native_rust_derive_name_for_id(id: MIRTraitID) -> String? {
@@ -760,25 +765,18 @@ fn jet_rust_emit_is_native_rust_derive_name(name: String) -> Bool Never! {
     name == "Clone" || name == "Copy" || name == "Debug" || name == "Default" || name == "Eq" || name == "Hash" || name == "Ord" || name == "PartialEq" || name == "PartialOrd"
 }
 
+// The native-derive check is `jet_rust_emit_is_native_rust_derive_name`: each
+// of those names' trait ID maps back to it, and no other name's ID does.
 fn jet_rust_emit_capability_trait_ref(ctx: &JetRustEmitContext, trait_name: String) -> MIRTraitRef? {
+    if !jet_rust_emit_is_native_rust_derive_name(trait_name) -> return None
     expected_id :: mir_trait_id(trait_name)
-    native_name := jet_rust_emit_native_rust_derive_name_for_id(expected_id)
-    if native_name == None || (native_name ?? "") != trait_name -> return None
-    found := MIRTraitRef?{None}
-    loop candidate in jet_rust_emit_trait_rows(ctx, expected_id) {
-        if candidate.id != expected_id -> next
-        if candidate.name != trait_name || candidate.key == "" {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait row disagrees with its canonical identity", "native capability lookup selects the exact raw trait ID and uses the checked canonical row key", None)
-            return None
-        }
-        if found != None {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait identity is duplicated", "capability impl selection requires one checked row for the canonical trait ID", None)
-            return None
-        }
-        found = Val(MIRTraitRef{id: candidate.id, name: candidate.key})
+    index :: jet_rust_emit_trait_index(ctx, expected_id) ?? return Val(mir_trait_ref(trait_name))
+    if ctx.program.traits[index].id != expected_id -> return Val(mir_trait_ref(trait_name))
+    if ctx.program.traits[index].name != trait_name || ctx.program.traits[index].key == "" {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait row disagrees with its canonical identity", "native capability lookup selects the exact raw trait ID and uses the checked canonical row key", None)
+        return None
     }
-    if found != None -> return found
-    Val(mir_trait_ref(trait_name))
+    Val(MIRTraitRef{id: expected_id, name: ctx.program.traits[index].key})
 }
 
 fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: MIRType, trait_name: String) -> Bool Never! {
@@ -789,22 +787,27 @@ fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: MIR
     nominal_id :: target_id ?? return false
     expected_trait_ref :: jet_rust_emit_capability_trait_ref(&ctx, trait_name) ?? return false
     rows :: ~(ctx.impls_by_trait.get(jet_rust_emit_id_key(expected_trait_ref.id.value)) ?? [Int]{})
+    // Rows are read in place; only a matching row is copied for the target check.
     loop row in rows {
-        implementation :: ~ctx.program.impls[row]
-        if implementation.compiler_generated || implementation.trait_ref == None -> next
-        trait_ref :: implementation.trait_ref ?? MIRTraitRef{id: MIRTraitID{value: 0}, name: ""}
+        if ctx.program.impls[row].compiler_generated -> next
+        trait_ref :: ctx.program.impls[row].trait_ref ?? next
         if trait_ref.id != expected_trait_ref.id -> next
         if trait_ref.name != expected_trait_ref.name {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait name disagrees with its identity", "capability impl selection uses the exact trait ID; names are consistency data only", Val(implementation.span))
+            span :: ~ctx.program.impls[row].span
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait name disagrees with its identity", "capability impl selection uses the exact trait ID; names are consistency data only", Val(span))
             return false
         }
-        if !jet_rust_emit_module_selected(ctx, implementation.module_id) || !jet_rust_emit_impl_target_enabled(&ctx, implementation) -> next
-        if mir_type_same_checked_type(implementation.self_type, ty) -> return true
-        if implementation.self_type.kind == {
-            .Apply(name, _) -> {
-                if name.id == nominal_id -> return true
+        if !jet_rust_emit_module_selected(ctx, ctx.program.impls[row].module_id) -> next
+        matches := mir_type_same_checked_type(ctx.program.impls[row].self_type, ty)
+        if !matches {
+            if ctx.program.impls[row].self_type.kind == {
+                .Apply(name, _) -> matches = name.id == nominal_id
+                else -> {}
             }
-            else -> {}
+        }
+        if matches {
+            implementation :: ~ctx.program.impls[row]
+            if jet_rust_emit_impl_target_enabled(&ctx, implementation) -> return true
         }
     }
     false
@@ -813,31 +816,34 @@ fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: MIR
 // MIRRust derives_trait: the row derives a trait whose declaration has this name.
 fn jet_rust_emit_type_def_derives_trait(ctx: JetRustEmitContext, definition: MIRTypeDef, trait_name: String) -> Bool Never! {
     loop trait_id in definition.derives {
-        loop candidate in jet_rust_emit_trait_rows(ctx, trait_id) {
-            if candidate.id == trait_id && candidate.name == trait_name -> return true
-        }
+        index :: jet_rust_emit_trait_index(ctx, trait_id) ?? next
+        if ctx.program.traits[index].id == trait_id && ctx.program.traits[index].name == trait_name -> return true
     }
     false
 }
 
 // MIRRust selected_user_capability_impl for a trait selected by name (the
 // user impls keyed by `trait_ref.name`): a selected non-generated impl of
-// `trait_name` whose self type is `ty` or shares its nominal name.
+// `trait_name` whose self type is `ty` or shares its nominal name. Rows are
+// read in place; only a matching row is copied for the target check.
 fn jet_rust_emit_selected_user_impl_named(ctx: &JetRustEmitContext, ty: MIRType, trait_name: String) -> Bool Never! {
     nominal :: if ty.kind == {
         .Apply(name, _) -> Val(name.name)
         else -> String?{None}
     }
-    loop implementation in ctx.program.impls {
-        if implementation.compiler_generated -> next
-        trait_ref :: implementation.trait_ref ?? next
-        if trait_ref.name != trait_name || !jet_rust_emit_module_selected(ctx, implementation.module_id) || !jet_rust_emit_impl_target_enabled(&ctx, implementation) -> next
-        if mir_type_same_checked_type(implementation.self_type, ty) -> return true
-        if nominal == .Val(name) {
-            if implementation.self_type.kind == {
-                .Apply(self_name, _) -> { if self_name.name == name -> return true }
+    rows :: ~(ctx.impls_by_trait_name.get(trait_name) ?? [Int]{})
+    loop row in rows {
+        if ctx.program.impls[row].compiler_generated || !jet_rust_emit_module_selected(ctx, ctx.program.impls[row].module_id) -> next
+        matches := mir_type_same_checked_type(ctx.program.impls[row].self_type, ty)
+        if !matches && nominal == .Val(name) {
+            if ctx.program.impls[row].self_type.kind == {
+                .Apply(self_name, _) -> matches = self_name.name == name
                 else -> {}
             }
+        }
+        if matches {
+            implementation :: ~ctx.program.impls[row]
+            if jet_rust_emit_impl_target_enabled(&ctx, implementation) -> return true
         }
     }
     false
@@ -914,8 +920,10 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
                 return jet_rust_emit_type_derive_capability(&ctx, args[0], trait_name, &visiting, bindings, generic_params)
             }
             if jet_rust_emit_selected_user_capability_impl(&ctx, ty, trait_name) -> return true
-            definition := jet_rust_emit_structural_type_def(&ctx, ty)
-            if definition == None {
+            // The row is read in place; only its kind is copied, and only
+            // when this frame expands it (a cache or cycle hit never does).
+            row_index :: jet_rust_emit_structural_type_row(ctx, ty)
+            if row_index == None {
                 // MIRRust auto_derive_type_ready: a runtime handle implements
                 // neither Printable nor Debug, so a record holding one does
                 // not print structurally.
@@ -928,17 +936,18 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
                 loop arg in args { if !jet_rust_emit_type_derive_capability(&ctx, arg, trait_name, &visiting, bindings, generic_params) -> return false }
                 return true
             }
-            row :: definition ?? return false
-            if trait_name == "Clone" && row.ownership == MIROwnershipMode.Move -> return false
+            row :: row_index
+            if trait_name == "Clone" && ctx.program.types[row].ownership == MIROwnershipMode.Move -> return false
+            is_alias :: ctx.program.types[row].kind == .Alias(_)
             // MIRRust auto_derive_type_ready for the structural show impls:
             // a nominal field prints through its own generated `JetShow` /
             // `JetDebug` (its auto-Printable fact / Debug derive) or a
             // selected user `Printable` / `Debug` impl.
-            if (trait_name == "JetShow" || trait_name == "JetDebug") && !(row.kind == .Alias(_)) {
+            if (trait_name == "JetShow" || trait_name == "JetDebug") && !is_alias {
                 if jet_rust_emit_selected_user_impl_named(&ctx, ty, if trait_name == "JetShow" -> "Printable" else -> "Debug") -> return true
-                selected :: if trait_name == "JetShow" -> row.auto_printable else -> jet_rust_emit_type_def_derives_trait(ctx, row, "Debug")
+                selected :: if trait_name == "JetShow" -> ctx.program.types[row].auto_printable else -> jet_rust_emit_type_def_derives_trait(ctx, ctx.program.types[row], "Debug")
                 if !selected -> return false
-            } else if !jet_rust_emit_type_derives_allowed(row) {
+            } else if !jet_rust_emit_type_derives_allowed(ctx.program.types[row]) {
                 return false
             }
             // A nominal field compares through Rust `PartialEq` only when its
@@ -948,15 +957,16 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             // `Comparable` derive. An alias is transparent and answers for its
             // target. A union row is spelled as its synthetic carrier (see
             // `Union` above).
-            if (trait_name == "PartialEq" || trait_name == "Ord") && !(row.kind == .Alias(_)) {
-                if !jet_rust_emit_type_def_derives_trait(ctx, row, "Equatable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Equatable") || row.name.starts_with("__JetUnion_") -> return false
+            if (trait_name == "PartialEq" || trait_name == "Ord") && !is_alias {
+                if !jet_rust_emit_type_def_derives_trait(ctx, ctx.program.types[row], "Equatable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Equatable") || ctx.program.types[row].name.starts_with("__JetUnion_") -> return false
             }
-            if trait_name == "Ord" && !(row.kind == .Alias(_)) {
-                if !jet_rust_emit_type_def_derives_trait(ctx, row, "Comparable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Comparable") -> return false
+            if trait_name == "Ord" && !is_alias {
+                if !jet_rust_emit_type_def_derives_trait(ctx, ctx.program.types[row], "Comparable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Comparable") -> return false
             }
-            if visiting.contains(row.id) {
+            row_id :: ctx.program.types[row].id
+            if visiting.contains(row_id) {
                 position := 0
-                loop position < visiting.len() && visiting[position] != row.id {
+                loop position < visiting.len() && visiting[position] != row_id {
                     position += 1
                 }
                 if position < ctx.derive_capability_cycle_floor -> ctx.derive_capability_cycle_floor = position
@@ -965,8 +975,8 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             // A closed row's answer depends on the row alone: `false` means an
             // incapable leaf is reachable, and `true` is final once no cycle
             // assumption above this frame was used.
-            cacheable :: args.len() == 0 && row.generic_params.len() == 0 && bindings.len() == 0 && generic_params.len() == 0
-            cache_key :: "{trait_name}:{jet_rust_emit_id_key(row.id.value)}"
+            cacheable :: args.len() == 0 && ctx.program.types[row].generic_params.len() == 0 && bindings.len() == 0 && generic_params.len() == 0
+            cache_key :: "{trait_name}:{jet_rust_emit_id_key(row_id.value)}"
             if cacheable {
                 if ctx.derive_capability_cache.get(cache_key) == .Val(cached) -> return cached
             }
@@ -975,14 +985,16 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             ctx.derive_capability_cycle_floor = JET_RUST_EMIT_NO_CYCLE_FLOOR
             next_bindings := bindings
             next_generic_params := generic_params
-            loop parameter in row.generic_params -> &next_generic_params.push(parameter.name)
+            row_generic_params :: ~ctx.program.types[row].generic_params
+            loop parameter in row_generic_params -> &next_generic_params.push(parameter.name)
             index := 0
-            loop parameter in row.generic_params {
+            loop parameter in row_generic_params {
                 if index < args.len() -> &next_bindings.add(parameter.name, args[index]).drop("generic parameter names are unique per declaration")
                 index += 1
             }
-            &visiting.push(row.id)
-            result :: if row.kind == {
+            &visiting.push(row_id)
+            kind :: ~ctx.program.types[row].kind
+            result :: if kind == {
                 .Struct(fields, _) -> {
                     capable := true
                     loop field in fields {
