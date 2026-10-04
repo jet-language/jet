@@ -118,10 +118,10 @@ impl ApiSnapshot {
     }
 }
 
-/// The public function name in a `fn name(...) ...` line, or `None`.
+/// The public function name before its optional type parameters or parameter list.
 fn fn_name_of(line: &str) -> Option<String> {
     let rest = line.strip_prefix("fn ")?;
-    let end = rest.find('(').unwrap_or(rest.len());
+    let end = rest.find(['<', '(']).unwrap_or(rest.len());
     let name = rest[..end].trim();
     if name.is_empty() {
         None
@@ -1443,6 +1443,15 @@ mod tests {
             "1.0.0",
         );
         assert_ne!(read.capability_digest(), write.capability_digest());
+    }
+
+    #[test]
+    fn generic_function_name_round_trips_without_type_parameters() {
+        let text = "api_version = 1\npackage = mk\npublished_version = 0.1.0\nfn f<T>(x: &T) -> T\n";
+        let snapshot = ApiSnapshot::parse(text).unwrap();
+        assert_eq!(snapshot.funcs[0].name, "f");
+        assert_eq!(snapshot.funcs[0].signature, "fn f<T>(x: &T) -> T");
+        assert_eq!(ApiSnapshot::parse(&snapshot.write()).unwrap(), snapshot);
     }
 
     #[test]
