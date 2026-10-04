@@ -1262,7 +1262,7 @@ fn entry_rust_type(
         Kind::TraitObject(bounds) => {
             let traits = bounds
                 .iter()
-                .map(|bound| symbols.trait_symbol(&bound.name))
+                .map(|bound| symbols.trait_bound_symbol(bound))
                 .collect::<Result<Vec<_>, _>>()?;
             if traits.is_empty() {
                 return Err(BootstrapHostCodecError::InvalidMetadata(

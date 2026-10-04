@@ -758,13 +758,6 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, args: 
     }
     lowered
 }
-fn jet_codegen_is_collection_argument(ty: Type) -> Bool Never! {
-    if ty == {
-        .List(_) | .Map(_, _, _) | .FixedList(_, _) -> true
-        else -> false
-    }
-}
-
 fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, argument: TExpr, index: Int, record: CoreCallRecord, widen_to_vec: Bool) -> MIRCallArg {
     access := MIRAccess.Read
     place := MIRPlaceID?{None}
@@ -774,19 +767,17 @@ fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, argument: TExpr,
             place = Val(jet_codegen_lower_place_for_access(&builder, TPlace.Expr{value: value}, access))
         }
         .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .Move(_) | .ResourceTake(_) -> access = MIRAccess.Move
-        else -> if jet_codegen_is_collection_argument(argument.ty) -> access = MIRAccess.Move
+        else -> if jet_codegen_for_in_iter_element(argument.ty) != None -> access = MIRAccess.Move
     }
     if access == MIRAccess.Move && jet_codegen_ownership(argument.ty).mode == MIROwnershipMode.Copy -> access = MIRAccess.Read
+    // Rust `lower_core_call_arg`: only an owned iterator moves out of its own
+    // place (a Move-access place, as MovePlace requires); every other
+    // argument is lowered as a value, and its last use becomes a move later
+    // (LastUse.jet).
     value := if place == {
         None -> {
             move_place := MIRPlaceID?{None}
-            if access == MIRAccess.Move {
-                move_place = if argument.kind == {
-                    .Local(local) -> Val(jet_codegen_lower_local_place(&builder, local))
-                    .Field(_, _) -> Val(jet_codegen_lower_place_for_access(&builder, TPlace.Expr{value: argument}, MIRAccess.Read))
-                    else -> None
-                }
-            }
+            if access == MIRAccess.Move && jet_codegen_for_in_iter_element(argument.ty) != None -> move_place = jet_codegen_lower_expression_place(&builder, argument, MIRAccess.Move)
             if move_place == {
                 None -> jet_codegen_lower_expr(&builder, argument)
                 Val(id) -> jet_codegen_emit_value(&builder, argument.span, argument.ty, MIROperation.MovePlace{place: id})

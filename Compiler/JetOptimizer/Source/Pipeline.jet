@@ -227,7 +227,33 @@ fn mir_pass_validate_after(program: MIRProgram, pass: MIROptimizationPassID, ful
 // MIR Lint over the program `pass` produced; a failure names the pass and rule.
 fn mir_pass_lint(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
     failure :: mir_lint_program(program) ?? return None
-    Val(mir_pass_error(pass, .Lint, Val(failure.function), failure.span, "MIR lint failed after pass {mir_pass_name(pass)}: {mir_lint_error_text(failure)}"))
+    Val(mir_pass_lint_error(pass, failure))
+}
+
+fn mir_pass_lint_error(pass: MIROptimizationPassID, failure: MIRLintError) -> MIROptimizationError Never! {
+    mir_pass_error(pass, .Lint, Val(failure.function), failure.span, "MIR lint failed after pass {mir_pass_name(pass)}: {mir_lint_error_text(failure)}")
+}
+
+// Keep-going (driver) support: `error`, then every other function the check
+// that raised it (legality, or MIR Lint) rejects in `program` as it stands,
+// one failure per function in program order. The driver traps them all before
+// a single rerun, so reruns grow with the failing checks, not the failing
+// functions. An error naming no function is returned alone.
+pub fn mir_optimizer_function_failures(program: MIRProgram, error: MIROptimizationError) -> [MIROptimizationError] {
+    pass :: error.pass
+    lint :: error.kind == .Lint
+    reported :: error.function ?? return [MIROptimizationError]{error}
+    failures := [MIROptimizationError]{error}
+    if lint {
+        loop failure in mir_lint_program_scan(program, true) {
+            if failure.function != reported -> &failures.push(mir_pass_lint_error(pass, failure))
+        }
+        return failures
+    }
+    loop failure in mir_pass_validate_program_scan(program, pass, true) {
+        if failure.function != Val(reported) -> &failures.push(failure)
+    }
+    failures
 }
 
 fn mir_pass_name(pass: MIROptimizationPassID) -> String Never! {

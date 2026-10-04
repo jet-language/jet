@@ -8,6 +8,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     Lambda,
+    LambdaBody,
     NamedSpan,
     OrFallback,
     PatSlot,
@@ -848,6 +849,9 @@ fn sema_control_value_loop_attach_fallback(value: Expr, fallback: OrFallback, sc
                                 &diagnostics.push(sema_error("E0078", updated_lambda.span, "this finite value loop has no root loop for its exhaustion route", "the route must be attached to the expression loop itself", "use the finite loop-expression form"))
                                 return None
                             }
+                            // The route belongs to the lambda's own root loop
+                            // (Rust `attach_value_loop_route` pushes in place).
+                            updated_lambda.body = LambdaBody.Block{body: updated_statements}
                         }
                         else -> {
                             &diagnostics.push(sema_error("E0078", updated_lambda.span, "this finite value loop has no block body for its exhaustion route", "the route must be attached to the expression loop itself", "use the finite loop-expression form"))

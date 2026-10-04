@@ -139,17 +139,39 @@ fn mir_pass_legality_tables(program: MIRProgram) -> MIRPassLegalityTables {
 }
 
 fn mir_pass_validate_program(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
-    if program.schema_version != MIR_SCHEMA_VERSION -> return Val(mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema"))
+    failures :: mir_pass_validate_program_scan(program, pass, false)
+    if failures.len() == 0 -> return None
+    Val(failures[0])
+}
+
+// Function legality failures in program order, one per rejected function. A
+// program-level failure ends the scan; without `all` the first failure does.
+// `all` serves the keep-going driver, which traps every rejected function
+// before one rerun.
+fn mir_pass_validate_program_scan(program: MIRProgram, pass: MIROptimizationPassID, all: Bool) -> [MIROptimizationError] {
+    failures := [MIROptimizationError]{}
+    if program.schema_version != MIR_SCHEMA_VERSION {
+        &failures.push(mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema"))
+        return failures
+    }
     tables :: mir_pass_legality_tables(program)
     seen_functions := [U64:Bool]{}
     loop function in program.functions {
-        if function.id.value == 0 -> return Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function has a zero stable identity"))
-        if seen_functions.get(function.id.value) != None -> return Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function identity is duplicated"))
-        &seen_functions.add(function.id.value, true).drop("checked absent above")
-        failure :: mir_pass_validate_function(function, pass, tables)
-        if failure != None -> return Val(failure)
+        failure := MIROptimizationError?{None}
+        if {
+            function.id.value == 0 -> failure = Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function has a zero stable identity"))
+            seen_functions.get(function.id.value) != None -> failure = Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function identity is duplicated"))
+            else -> {
+                &seen_functions.add(function.id.value, true).drop("checked absent above")
+                failure = mir_pass_validate_function(function, pass, tables)
+            }
+        }
+        if failure == .Val(error) {
+            &failures.push(error)
+            if !all -> return failures
+        }
     }
-    None
+    failures
 }
 
 // Rust: crates/jet-foundation/src/MIR.rs::validate_function

@@ -44,6 +44,8 @@ use jet_foundation.[
     mir_type_is_integer,
     mir_type_is_numeric,
     mir_type_is_unit,
+    mir_view_copy_kind,
+    mir_view_copy_target_matches,
 ]
 
 // One rule family of Docs/spec/mir-lint.md; its name is part of the ICE text.
@@ -90,14 +92,25 @@ pub fn mir_lint_error_text(error: MIRLintError) -> String Never! {
 // Check every function of `program` against the MIR Lint rules.
 // Rust: none (Jet-only pass)
 pub fn mir_lint_program(program: MIRProgram) -> MIRLintError? Never! {
-    if program.functions.len() == 0 -> return None
+    failures :: mir_lint_program_scan(program, false)
+    if failures.len() == 0 -> return None
+    Val(failures[0])
+}
+
+// Lint failures in program order, one per rejected function; without `all`
+// the first failure ends the scan. `all` serves the keep-going driver, which
+// traps every rejected function before one rerun.
+fn mir_lint_program_scan(program: MIRProgram, all: Bool) -> [MIRLintError] Never! {
+    failures := [MIRLintError]{}
+    if program.functions.len() == 0 -> return failures
     ctx := mir_lint_context(mir_lint_index(program), program.functions[0])
     loop position in 0..<program.functions.len() {
         if position > 0 -> mir_lint_enter(&ctx, program.functions[position])
-        failure :: mir_lint_function(ctx)
-        if failure == .Val(error) -> return Val(error)
+        failure :: mir_lint_function(ctx) ?? next
+        &failures.push(failure)
+        if !all -> return failures
     }
-    None
+    failures
 }
 
 // A broken rule before the function and span are attached.
@@ -650,7 +663,16 @@ fn mir_lint_operation(ctx: MIRLintContext, position: Int, instruction: MIRInstru
             if mir_lint_place(ctx, place) == None -> return mir_lint_problem(op, "place {place.value} does not exist")
             mir_lint_without_result(instruction, "initialization")
         }
-        .Copy(value, _) | .Move(value) | .AttachTag(value, _) -> {
+        .Copy(value, fact) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            operand :: mir_lint_type_of(ctx, value) ?? return None
+            // A view materialization (`~view`) reads a View and produces the
+            // owning collection its copy kernel builds (View<str> -> String,
+            // View<T> -> [T]); every other copy keeps the operand's type.
+            if fact == .ViewMaterialize && mir_lint_view_materializes(operand, ty) -> return None
+            mir_lint_expect(ctx, op, "result", operand, ty)
+        }
+        .Move(value) | .AttachTag(value, _) -> {
             ty :: result ?? return mir_lint_no_result(op)
             operand :: mir_lint_type_of(ctx, value) ?? return None
             mir_lint_expect(ctx, op, "result", operand, ty)
@@ -658,6 +680,14 @@ fn mir_lint_operation(ctx: MIRLintContext, position: Int, instruction: MIRInstru
         .TraitBox(_, _) | .PatternCapture(_, _) -> if result == None -> mir_lint_no_result(op) else -> None
         else -> mir_lint_operation_values(ctx, instruction)
     }
+}
+
+// `Copy{v, view_materialize}`: the result owns what the view's copy kernel
+// builds from `v`.
+// Rust: none (Jet-only pass)
+fn mir_lint_view_materializes(source: MIRType, result: MIRType) -> Bool Never! {
+    kind :: mir_view_copy_kind(source) ?? return false
+    mir_view_copy_target_matches(kind, result)
 }
 
 // `mir_lint_operation` for constants, unary and binary operators and strings.

@@ -1190,6 +1190,24 @@ impl<'a> BootstrapCodecSymbols<'a> {
         Ok(self.symbol_or_record(symbol))
     }
 
+    /// The emitted symbol of one checked trait-object bound. A bound names its
+    /// trait by canonical key (equal to the declared name only when the
+    /// emitter keeps unqualified trait keys), so it matches the trait row by
+    /// its MIR identity, like every other trait-object bound consumer.
+    pub(crate) fn trait_bound_symbol(
+        &self,
+        bound: &jet_foundation::MIR::MirNominalRef,
+    ) -> Result<&str, BootstrapHostCodecError> {
+        let symbol = self
+            .metadata
+            .traits
+            .iter()
+            .find(|row| row.trait_id.0 == bound.id.0)
+            .map(|row| row.symbol.as_str())
+            .ok_or_else(|| BootstrapHostCodecError::MissingEntry(format!("trait `{}`", bound.name)));
+        Ok(self.symbol_or_record(symbol))
+    }
+
     pub(crate) fn trait_method_metadata(
         &self,
         trait_name: &str,

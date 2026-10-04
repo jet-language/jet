@@ -78,7 +78,7 @@ use jet_foundation.[
     mir_type_same_checked_type,
     mir_type_with_identity,
     stable_id,
-    type_identity_key,
+    type_mir_identity_key,
 ]
 
 struct MIRInlineIDMap { pub source: U64, pub target: U64 }
@@ -551,7 +551,7 @@ fn mir_pass_inline_type(ty: MIRType, substitutions: [MIRInlineTypeSubstitution])
     mapped :: mir_type_from_kind(kind)
     if kind == ty.kind -> return MIRType{kind: kind, identity: ty.identity, layout: mapped.layout}
     source_type :: mir_pass_inline_source_type(mapped)
-    mir_type_with_identity(mapped, mir_type_id(type_identity_key(source_type)))
+    mir_type_with_identity(mapped, mir_type_id(type_mir_identity_key(source_type)))
 }
 
 // Rebuild Source's checked type identity domain; MIR canonical keys are display

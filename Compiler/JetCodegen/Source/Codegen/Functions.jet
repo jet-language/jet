@@ -2892,6 +2892,34 @@ fn jet_codegen_find_indexed_impl(index: JetCodegenImplOwnerIndex, impls: [MIRImp
     first
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::retain_selected_derives.
+// A type keeps a derive only when it is a native Rust derive or an impl row of
+// that trait for that type joined the program. An unreached Core
+// `Equatable`/`Comparable` derive has no kept method
+// (`jet_codegen_reachable_core_rows`), so `jet_codegen_lower_impl_definition`
+// drops its impl row; its derive request goes with it instead of reaching the
+// emitter without a selected implementation. Self types match as in the
+// emitter's `jet_rust_emit_derived_impl_matches_type` (identity, or the head
+// of an applied nominal).
+fn jet_codegen_retain_selected_derives(types: &[MIRTypeDef], impls: [MIRImplDef]) Never! {
+    selected := [String:Bool]{}
+    loop implementation in impls {
+        trait_ref :: implementation.trait_ref ?? next
+        if implementation.self_type.identity == .Val(self_id) -> selected["{trait_ref.id.value}:{self_id.value}"] = true
+        if implementation.self_type.kind == .Apply(name, _) -> selected["{trait_ref.id.value}:{name.id.value}"] = true
+    }
+    loop index in 0..<types.len() {
+        derives :: types[index].derives
+        if derives.len() == 0 -> next
+        type_id :: types[index].id
+        kept := [MIRTraitID]{}
+        loop trait_id in derives {
+            if jet_codegen_native_rust_derive_name_for_id(trait_id) != None || selected.get("{trait_id.value}:{type_id.value}") != None -> &kept.push(trait_id)
+        }
+        if kept.len() != derives.len() -> types[index].derives = kept
+    }
+}
+
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::attach_orphan_methods
 fn jet_codegen_attach_orphan_methods(impls: &[MIRImplDef], functions: [MIRFunction], source_functions: [TFunc]) {
     // Every function id some impl already lists, kept current as orphans are
@@ -3256,6 +3284,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
         }
     }
     jet_codegen_attach_orphan_methods(&impls, all_function_rows, functions)
+    jet_codegen_retain_selected_derives(&types, impls)
     jet_codegen_bind_trait_impl_forms(&lowered_functions, impls)
     jet_codegen_ensure_referenced_traits(&traits, impls, all_function_rows, types)
     jet_codegen_sort_trait_definitions(&traits)

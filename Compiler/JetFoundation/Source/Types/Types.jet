@@ -566,6 +566,104 @@ pub fn type_identity_key(ty: Type) -> String Never! {
     identity_key(type_identity(ty))
 }
 
+// MIR identity key of a checked type. MIR keeps every internal tag in the type
+// identity (Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::type_identity_key,
+// `Tagged({marker:?};{inner})`); the checked identity above keeps only the
+// identity-bearing Core crypto tag. Without the tag, `SharedGuard<T>` behind its
+// read/edit tag and its untagged inner share one canonical instance row, whose
+// inner type then names the row itself. User tags stay transparent, as in Rust.
+pub fn type_mir_identity_key(ty: Type) -> String Never! {
+    key :: type_identity_key(ty)
+    if !type_has_mir_identity_tag(ty) -> return key
+    tags := [String]{}
+    type_mir_identity_tags(ty, "self", &tags)
+    "{key}|mir-tag:{tags.join("|mir-tag:")}"
+}
+
+// An internal tag the checked identity drops but MIR identity keeps.
+fn type_tag_is_mir_identity(marker: TagMarker) -> Bool Never! {
+    if marker == {
+        .User(_) -> false
+        .Internal(_) -> !tag_is_identity_bearing(marker)
+    }
+}
+
+fn type_has_mir_identity_tag(ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(marker, inner) -> type_tag_is_mir_identity(marker) || type_has_mir_identity_tag(inner)
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> type_has_mir_identity_tag(inner)
+        .Map(key, _, value) -> type_has_mir_identity_tag(key) || type_has_mir_identity_tag(value)
+        .Result(ok, err) -> type_has_mir_identity_tag(ok) || type_has_mir_identity_tag(err)
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params { if type_has_mir_identity_tag(param) -> return true }
+            if ret == .Val(value) -> return type_has_mir_identity_tag(value)
+            false
+        }
+        .Apply(_, args) -> {
+            loop arg in args { if type_has_mir_identity_tag(arg) -> return true }
+            false
+        }
+        .Tuple(fields) -> {
+            loop field in fields { if type_has_mir_identity_tag(field.ty) -> return true }
+            false
+        }
+        .Union(members) -> {
+            loop member in members { if type_has_mir_identity_tag(member) -> return true }
+            false
+        }
+        else -> false
+    }
+}
+
+// One `path=tag` fact per kept internal tag, at its position in the type.
+fn type_mir_identity_tags(ty: Type, path: String, tags: &[String]) Never! {
+    if ty == {
+        .Tagged(marker, inner) -> {
+            if marker == {
+                .User(_) -> type_mir_identity_tags(inner, path, &tags)
+                .Internal(internal_tag) -> {
+                    if type_tag_is_mir_identity(marker) -> &tags.push("{path}={type_internal_tag_name(internal_tag)}")
+                    type_mir_identity_tags(inner, "{path}.inner", &tags)
+                }
+            }
+        }
+        .List(inner) | .FixedList(inner, _) -> type_mir_identity_tags(inner, "{path}.element", &tags)
+        .Shared(inner) -> type_mir_identity_tags(inner, "{path}.inner", &tags)
+        .Option(inner) -> type_mir_identity_tags(inner, "{path}.some", &tags)
+        .InlineRange(inner, _, _) | .Quantity(inner, _) -> type_mir_identity_tags(inner, "{path}.base", &tags)
+        .Map(key, _, value) -> {
+            type_mir_identity_tags(key, "{path}.key", &tags)
+            type_mir_identity_tags(value, "{path}.value", &tags)
+        }
+        .Result(ok, err) -> {
+            type_mir_identity_tags(ok, "{path}.ok", &tags)
+            type_mir_identity_tags(err, "{path}.err", &tags)
+        }
+        .Fn(params, ret, _, _, _, _) -> {
+            loop (index, param) in params -> type_mir_identity_tags(param, "{path}.param.{index}", &tags)
+            if ret == .Val(value) -> type_mir_identity_tags(value, "{path}.return", &tags)
+        }
+        .Apply(_, args) -> loop (index, arg) in args -> type_mir_identity_tags(arg, "{path}.argument.{index}", &tags)
+        .Tuple(fields) -> loop field in fields -> type_mir_identity_tags(field.ty, "{path}.field.{field.name}", &tags)
+        .Union(members) -> loop (index, member) in members -> type_mir_identity_tags(member, "{path}.member.{index}", &tags)
+        else -> {}
+    }
+}
+
+fn type_internal_tag_name(internal_tag: InternalTag) -> String Never! {
+    if internal_tag == {
+        .CoreCryptoNominal -> "core.crypto"
+        .DeterministicClock -> "clock.deterministic"
+        .SystemClock -> "clock.system"
+        .ExpiringSecretLoan -> "expiring_secret.loan"
+        .SharedGuardRead -> "shared_guard.read"
+        .SharedGuardEdit -> "shared_guard.edit"
+        .TerminalFactSet -> "terminal.fact_set"
+        .CppCallbackABI -> "cpp.callback_abi"
+        .AllocatorView -> "allocator.view"
+    }
+}
+
 // Compare declaration identity without allocating a serialized key. Compile-
 // time facts and directional callable obligations remain separate judgments.
 pub fn type_identity_equal(left: Type, right: Type) -> Bool Never! {
