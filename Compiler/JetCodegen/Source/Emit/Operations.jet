@@ -303,7 +303,7 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
             if arg.place == .Val(place) -> jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Write) else -> jet_rust_emit_borrowed_value_reference(&ctx, function, arg.value, MIRAccess.Write)
         }
         // A moved argument is already the callee's own value.
-        arg.access == MIRAccess.Move -> jet_rust_emit_value_move(arg.value)
+        arg.access == MIRAccess.Move -> jet_rust_emit_value_move(ctx, arg.value)
         // MIRRust call_arg: the call-site copy fact sema recorded (implicit
         // or shared clone), copied once.
         copied -> jet_rust_emit_value_copy(ctx, function, arg.value, mir_copy_fact_for_ownership(if arg.shared_auto_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize, jet_rust_emit_value_mode(ctx, function, arg.value)))
@@ -599,8 +599,8 @@ fn jet_rust_emit_exact_int_binary(ctx: &JetRustEmitContext, function: MIRFunctio
     owned :: jet_rust_emit_exact_int_helper(op) ?? return None
     contextual :: op == MIRBinaryOp.Div || op == MIRBinaryOp.FloorDiv || op == MIRBinaryOp.Mod || op == MIRBinaryOp.Rem || op == MIRBinaryOp.Pow || op == MIRBinaryOp.Shl || op == MIRBinaryOp.Shr
     root :: ~ctx.config.root_prefix
-    left_text :: jet_rust_emit_value_reference(left, false)
-    right_text :: jet_rust_emit_value_reference(right, false)
+    left_text :: jet_rust_emit_value_reference(ctx, left, false)
+    right_text :: jet_rust_emit_value_reference(ctx, right, false)
     context := ""
     if contextual {
         loc :: location ?? {
@@ -650,7 +650,7 @@ fn jet_rust_emit_binary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIR
         operands :: [MIRValueID]{left, right}
         loop (index, value) in operands {
             borrowed :: positions.contains(index) || (index < route.signature.borrow_mask.len() && route.signature.borrow_mask[index]) || jet_rust_emit_canonical_math_borrow(symbol, index)
-            &args.push(if borrowed -> jet_rust_emit_value_reference(value, false) else -> jet_rust_emit_value_owned(ctx, function, value))
+            &args.push(if borrowed -> jet_rust_emit_value_reference(ctx, value, false) else -> jet_rust_emit_value_owned(ctx, function, value))
         }
         extras := [String]{}
         if dispatch_location == .Val(loc) {
@@ -673,7 +673,7 @@ fn jet_rust_emit_binary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIR
     if op == MIRBinaryOp.Add && left_ty.kind == MIRTypeKind.String && (right_ty.kind == MIRTypeKind.String || jet_rust_emit_is_string_view_type(right_ty)) {
         // The concatenation consumes its left operand: a take at its single
         // use, otherwise an owned read.
-        right_text :: if jet_rust_emit_is_string_view_type(right_ty) -> jet_rust_emit_value_owned(ctx, function, right) else -> jet_rust_emit_value_reference(right, false)
+        right_text :: if jet_rust_emit_is_string_view_type(right_ty) -> jet_rust_emit_value_owned(ctx, function, right) else -> jet_rust_emit_value_reference(ctx, right, false)
         return "(({jet_rust_emit_value_consume(ctx, function, left)}) + ({right_text}))"
     }
     if op == MIRBinaryOp.Eq || op == MIRBinaryOp.Ne {
@@ -700,7 +700,11 @@ fn jet_rust_emit_binary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIR
         return jet_rust_emit_primitive_binary(&ctx, op, "(*{left_text})", "(*{right_text})")
     }
     if jet_rust_emit_exact_int_binary(&ctx, function, op, left, right, location) == .Val(exact) -> return exact
-    if op == MIRBinaryOp.Compare -> return jet_rust_emit_primitive_binary(&ctx, op, jet_rust_emit_value_reference(left, false), jet_rust_emit_value_reference(right, false))
+    if op == MIRBinaryOp.Compare {
+        left_ref :: jet_rust_emit_value_reference(ctx, left, false)
+        right_ref :: jet_rust_emit_value_reference(ctx, right, false)
+        return jet_rust_emit_primitive_binary(&ctx, op, left_ref, right_ref)
+    }
     left_text :: jet_rust_emit_value_owned(ctx, function, left)
     right_text :: jet_rust_emit_value_owned(ctx, function, right)
     jet_rust_emit_primitive_binary(&ctx, op, left_text, right_text)
@@ -964,7 +968,8 @@ fn jet_rust_emit_unary_text(ctx: &JetRustEmitContext, op: MIRUnaryOp, value: Str
 
 fn jet_rust_emit_unary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIRUnaryOp, value: MIRValueID) -> String Never! {
     ty :: jet_rust_emit_value_type(ctx, function, value)
-    jet_rust_emit_unary_text(&ctx, op, "*({jet_rust_emit_value_reference(value, false)})", ty)
+    borrowed :: jet_rust_emit_value_reference(ctx, value, false)
+    jet_rust_emit_unary_text(&ctx, op, "*({borrowed})", ty)
 }
 
 // 0: not an integer; 1: exact `Int` (through refinements, tags and units);
@@ -986,7 +991,7 @@ fn jet_rust_emit_format_integer_kind(ty: MIRType) -> Int Never! {
 // selectors take the host `i64` precision.
 fn jet_rust_emit_string_format(ctx: &JetRustEmitContext, function: MIRFunction, format: MIRStringFormat, value: MIRValueID) -> String Never! {
     root :: ~ctx.config.root_prefix
-    borrowed :: jet_rust_emit_value_reference(value, false)
+    borrowed :: jet_rust_emit_value_reference(ctx, value, false)
     shown :: "{root}jet_fmt_display({borrowed})"
     if format == {
         .Display -> return shown
@@ -1559,14 +1564,14 @@ fn jet_rust_emit_foreign_argument(ctx: &JetRustEmitContext, function: MIRFunctio
     if foreign.handle != None {
         loop handle in ctx.program.handles {
             if jet_rust_emit_same_handle_type(handle.ty, parameter.ty) {
-                if arg.access == MIRAccess.Move -> return "({jet_rust_emit_value_move(arg.value)}).into_raw()"
+                if arg.access == MIRAccess.Move -> return "({jet_rust_emit_value_move(ctx, arg.value)}).into_raw()"
                 raw :: if {
                     arg.place != None -> {
                     selected := jet_rust_emit_place_reference(&ctx, function, arg.place ?? MIRPlaceID{value: 0}, arg.access)
                     selected
                     }
                     else -> {
-                    selected := jet_rust_emit_value_reference(arg.value, arg.access == MIRAccess.Write)
+                    selected := jet_rust_emit_value_reference(ctx, arg.value, arg.access == MIRAccess.Write)
                     selected
                     }
                 }
@@ -1693,7 +1698,7 @@ fn jet_rust_emit_managed_foreign_call(ctx: &JetRustEmitContext, function: MIRFun
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback unsubscribe ABI is invalid", "managed callback unsubscribe must consume exactly one registration handle", Val(foreign.span))
             return Val("unreachable!(\"managed callback unsubscribe ABI\")")
         }
-        registration :: jet_rust_emit_value_move(args[0].value)
+        registration :: jet_rust_emit_value_move(ctx, args[0].value)
         return Val("{ctx.config.root_prefix}jet_std::jet_ffi_callback_registration_unsubscribe_result(({registration}).into_raw())")
     }
     if transport == "emit-task" {
@@ -1859,10 +1864,10 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MIRFunction,
             else -> {
             source :: if {
                 arg.access == MIRAccess.Move -> {
-                if arg.place != None -> jet_rust_emit_place_move(&ctx, function, arg.place ?? MIRPlaceID{value: 0}) else -> jet_rust_emit_value_move(arg.value)
+                if arg.place != None -> jet_rust_emit_place_move(&ctx, function, arg.place ?? MIRPlaceID{value: 0}) else -> jet_rust_emit_value_move(ctx, arg.value)
                 }
                 else -> {
-                if arg.place != None -> jet_rust_emit_place_reference(&ctx, function, arg.place ?? MIRPlaceID{value: 0}, MIRAccess.Read) else -> jet_rust_emit_value_reference(arg.value, false)
+                if arg.place != None -> jet_rust_emit_place_reference(&ctx, function, arg.place ?? MIRPlaceID{value: 0}, MIRAccess.Read) else -> jet_rust_emit_value_reference(ctx, arg.value, false)
                 }
             }
             encoded := jet_rust_emit_c_abi_encode(&ctx, source, parameter.ty, arg.access == MIRAccess.Read, [MIRTypeID]{})
@@ -2641,7 +2646,7 @@ fn jet_rust_emit_index_operand(ctx: &JetRustEmitContext, function: MIRFunction, 
             .Tagged(_, base) -> ty = base
             .Quantity(base, _) -> ty = base
             .Int -> {
-                value :: jet_rust_emit_value_reference(index, false)
+                value :: jet_rust_emit_value_reference(ctx, index, false)
                 return "{ctx.config.root_prefix}jet_std::jet_int_owned_to_i64({value}).unwrap_or_else(|_| {ctx.config.root_prefix}jet_arithmetic_stop({jet_rust_emit_source_path(&ctx, location.file)}, {location.line}u32, \"index exceeds host range\"))"
             }
             else -> return jet_rust_emit_value_owned(ctx, function, index)
@@ -2661,7 +2666,7 @@ fn jet_rust_emit_columnar_read(ctx: &JetRustEmitContext, function: MIRFunction, 
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR columnar accessor route is not canonical", "columnar reads must use core.columnar.jet_columns_gather_cell with its checked three-argument borrow ABI", Val(function.span))
         return "unreachable!(\"invalid columnar accessor route\")"
     }
-    base_text :: jet_rust_emit_value_reference(base, false)
+    base_text :: jet_rust_emit_value_reference(ctx, base, false)
     index_text :: jet_rust_emit_index_operand(&ctx, function, index, location)
     field_name :: jet_rust_emit_field_name(&ctx, column)
     "({base_text}).cell({column_index}usize, {index_text}, {jet_rust_emit_source_path(&ctx, location.file)}, {location.line}u32).jet_col_{field_name}()"
@@ -2710,7 +2715,7 @@ fn jet_rust_emit_index(ctx: &JetRustEmitContext, function: MIRFunction, call: MI
         return "unreachable!(\"MIR index move\")"
     }
     base_text :: jet_rust_emit_borrowed_value_reference(&ctx, function, base, access)
-    index_text :: if kind == MIRIndexKind.Map -> jet_rust_emit_value_borrow(index) else -> jet_rust_emit_index_operand(&ctx, function, index, location)
+    index_text :: if kind == MIRIndexKind.Map -> jet_rust_emit_value_borrow(ctx, index) else -> jet_rust_emit_index_operand(&ctx, function, index, location)
     args :: jet_rust_emit_index_arguments(&ctx, function, call, base_text, index_text, location, Val(context))
     jet_rust_emit_prelude_args_exact(&ctx, function, call, args)
 }
@@ -2724,7 +2729,7 @@ fn jet_rust_emit_slice(ctx: &JetRustEmitContext, function: MIRFunction, call: MI
     line :: "{location.line}u32"
     base_text :: if mask.len() > 0 && mask[0] -> jet_rust_emit_borrowed_value_reference(&ctx, function, base, MIRAccess.Read) else -> jet_rust_emit_value_owned(ctx, function, base)
     if range == .Val(range_value) {
-        range_text :: if mask.len() > 1 && mask[1] -> jet_rust_emit_value_borrow(range_value) else -> jet_rust_emit_value_owned(ctx, function, range_value)
+        range_text :: if mask.len() > 1 && mask[1] -> jet_rust_emit_value_borrow(ctx, range_value) else -> jet_rust_emit_value_owned(ctx, function, range_value)
         return jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{base_text, range_text, file, line})
     }
     start_text :: jet_rust_emit_value_owned(ctx, function, start)
@@ -2780,7 +2785,8 @@ fn jet_rust_emit_enum_value(ctx: &JetRustEmitContext, function: MIRFunction, own
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR single variant construction payload arity mismatch", "single-payload variants construct from exactly one value", Val(function.span))
                 return "unreachable!(\"MIR variant payload arity\")"
             }
-            value := jet_rust_emit_native_int_payload_value(&ctx, function, args[0].value, payload_type, jet_rust_emit_value_move(args[0].value), location)
+            moved :: jet_rust_emit_value_move(ctx, args[0].value)
+            value := jet_rust_emit_native_int_payload_value(&ctx, function, args[0].value, payload_type, moved, location)
             if jet_rust_emit_equality_edge_boxed(ctx.program.types[row_index], variant) -> value = "Box::new({value})"
             if http_body {
                 if variant == "Text" -> return "{jet_rust_emit_type_name(&ctx, owner)}::from_text({value})"
@@ -2811,7 +2817,8 @@ fn jet_rust_emit_enum_value(ctx: &JetRustEmitContext, function: MIRFunction, own
                     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR named variant construction field order mismatch", "named variant arguments follow the declared field order", Val(function.span))
                     return "unreachable!(\"MIR variant field order\")"
                 }
-                value := jet_rust_emit_native_int_payload_value(&ctx, function, args[index].value, field.ty, jet_rust_emit_value_move(args[index].value), location)
+                moved :: jet_rust_emit_value_move(ctx, args[index].value)
+                value := jet_rust_emit_native_int_payload_value(&ctx, function, args[index].value, field.ty, moved, location)
                 if jet_rust_emit_equality_edge_boxed(ctx.program.types[row_index], "{variant}.{field.name}") -> value = "Box::new({value})"
                 if native {
                     if jet_rust_emit_native_int_input(&ctx, value, field.ty, location) == .Val(narrowed) -> value = narrowed
@@ -3082,7 +3089,7 @@ fn jet_rust_emit_value_single_use(ctx: JetRustEmitContext, value: MIRValueID) ->
 // The by-value read of `value`: a take when it is the value's only use in
 // its own block, otherwise an owned read (MIRRust value_consume).
 fn jet_rust_emit_value_consume(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
-    if jet_rust_emit_value_single_use(ctx, value) -> return jet_rust_emit_value_move(value)
+    if jet_rust_emit_value_single_use(ctx, value) -> return jet_rust_emit_value_move(ctx, value)
     jet_rust_emit_value_owned(ctx, function, value)
 }
 
@@ -3101,7 +3108,7 @@ fn jet_rust_emit_payload_take(ctx: &JetRustEmitContext, result: MIRValueID, subj
     members :: ctx.move_facts.payload_groups.get(subject_key) ?? return None
     if members[0].result != result -> return Val("{jet_rust_emit_payload_slot(result)}.take().expect(\"MIR payload\")")
     head :: jet_rust_emit_enum_variant_name(&ctx, owner, variant)
-    taken :: jet_rust_emit_value_move(subject)
+    taken :: jet_rust_emit_value_move(ctx, subject)
     if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
         if ctx.program.types[definition_index].kind == {
             .Enum(variants, _) -> {
@@ -3294,7 +3301,7 @@ fn jet_rust_emit_struct_literal(ctx: &JetRustEmitContext, type_id: MIRTypeID, fi
     loop field in fields {
         field_name :: jet_rust_emit_field_name(&ctx, field.field)
         field_type :: jet_rust_emit_field_row_type(&ctx, field.field) ?? MIRType{kind: MIRTypeKind.Bool, identity: None, layout: mir_type_layout(MIRTypeKind.Bool)}
-        value := jet_rust_emit_value_move(field.value)
+        value := jet_rust_emit_value_move(ctx, field.value)
         email_display := false
         if email_address && field_name == "display" {
             if field_type.kind == .Option(inner) -> email_display = inner.kind == MIRTypeKind.String
@@ -3353,7 +3360,7 @@ fn jet_rust_emit_field_read(ctx: &JetRustEmitContext, function: MIRFunction, bas
     unbox :: if boxed -> ".as_ref()" else -> ""
     // Borrow the base slot and copy only the projected field; never clone the
     // whole aggregate to read one of its fields.
-    value := "({jet_rust_emit_value_reference(base, false)}).{field_name}{unbox}.clone()"
+    value := "({jet_rust_emit_value_reference(ctx, base, false)}).{field_name}{unbox}.clone()"
     partial :: jet_rust_emit_partial_projected_value(&ctx, function, base, field)
     if partial == .Val(reference) {
         value = if boxed -> "({reference}).as_ref().clone()" else -> "(*({reference})).clone()"
@@ -3489,7 +3496,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
     digit_setup := ""
     if rounded && jet_rust_emit_value_type(ctx, function, parameters[digits_index]).kind == MIRTypeKind.Int {
         digits := parameters[digits_index]
-        digit_ref :: jet_rust_emit_value_reference(digits, false)
+        digit_ref :: jet_rust_emit_value_reference(ctx, digits, false)
         if target.kind == {
             .Result(_, error) -> {
                 if error.kind != MIRTypeKind.String -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "rounded unit conversion uses a non-String error carrier", "the checked rounded conversion route reports conversion failures as String", Val(function.span))
@@ -3538,7 +3545,7 @@ fn jet_rust_emit_conversion(ctx: &JetRustEmitContext, function: MIRFunction, val
     if conversion == MIRConversion.NumericCast -> return jet_rust_emit_numeric_cast(&ctx, function, value, target)
     // MIRRust: a SendFn conversion only retypes an existing SendFn local; the
     // `Arc` carrier moves through unchanged.
-    if conversion == MIRConversion.SendFn -> return jet_rust_emit_value_move(value)
+    if conversion == MIRConversion.SendFn -> return jet_rust_emit_value_move(ctx, value)
     if conversion == {
         .Prelude(call, location, fallibility) -> {
             route := jet_rust_emit_prelude_route(ctx, call, false)
@@ -3637,7 +3644,7 @@ fn jet_rust_emit_numeric_conversion(ctx: &JetRustEmitContext, function: MIRFunct
     symbol :: jet_rust_emit_prelude_symbol(&ctx, route.id)
     adapted :: if source.kind == MIRTypeKind.Int -> jet_rust_emit_exact_adapter_target(ctx.config.root_prefix, symbol) else -> symbol
     adapter :: adapted != symbol
-    input :: if adapter -> jet_rust_emit_value_reference(value, false) else -> jet_rust_emit_value_owned(ctx, function, value)
+    input :: if adapter -> jet_rust_emit_value_reference(ctx, value, false) else -> jet_rust_emit_value_owned(ctx, function, value)
     args := [String]{}
     if {
         member == "checked_widen" && fixed_source -> &args.push("({input}) as u64")
@@ -3766,15 +3773,15 @@ fn jet_rust_emit_default_err_struct(ctx: &JetRustEmitContext, id: MIRTypeID, val
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal omits cause", "the default error constructor requires its checked cause field", None)
         return "unreachable!(\"missing default Err cause\")"
     }
-    message_text := jet_rust_emit_value_move(message_value)
-    code_text := jet_rust_emit_value_move(code_value)
+    message_text := jet_rust_emit_value_move(ctx, message_value)
+    code_text := jet_rust_emit_value_move(ctx, code_value)
     // A Core-layer program spells `String` as `&'static str`, while the
     // Prelude constructor owns its text.
     if jet_rust_emit_is_core_layer(&ctx) {
         message_text = "String::from({message_text})"
         code_text = "({code_text}).map(String::from)"
     }
-    "{ctx.config.root_prefix}jet_err({message_text}, {code_text}, {jet_rust_emit_value_move(cause_value)})"
+    "{ctx.config.root_prefix}jet_err({message_text}, {code_text}, {jet_rust_emit_value_move(ctx, cause_value)})"
 }
 
 // MIRRust global_expression: a storage constant reads its persistent cell; a
@@ -4006,17 +4013,20 @@ fn jet_rust_emit_drop_value(ctx: &JetRustEmitContext, function: MIRFunction, val
         }
     }
     if kind == {
-        .Value | .Shared -> return "{{ drop({jet_rust_emit_value_move(value)}); () }}"
-        .View -> return "{{ drop({jet_rust_emit_value_move(value)}); () }}"
+        .Value | .Shared -> return "{{ drop({jet_rust_emit_value_move(ctx, value)}); () }}"
+        .View -> return "{{ drop({jet_rust_emit_value_move(ctx, value)}); () }}"
         .ForeignHandle -> {
             ty :: jet_rust_emit_value_type(ctx, function, value)
             loop handle in ctx.program.handles {
-                if jet_rust_emit_same_handle_type(handle.ty, ty) -> return jet_rust_emit_handle_drop(&ctx, function, jet_rust_emit_value_move(value), function.span, handle)
+                if jet_rust_emit_same_handle_type(handle.ty, ty) {
+                    moved :: jet_rust_emit_value_move(ctx, value)
+                    return jet_rust_emit_handle_drop(&ctx, function, moved, function.span, handle)
+                }
             }
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign-handle drop has no lifecycle row", "checked foreign-handle values must retain the canonical close operation required by MIR", Val(function.span))
             return "unreachable!(\"foreign handle lifecycle missing\")"
         }
-        .NoDrop -> return "{{ let _ = {jet_rust_emit_value_move(value)}; () }}"
+        .NoDrop -> return "{{ let _ = {jet_rust_emit_value_move(ctx, value)}; () }}"
     }
 }
 
@@ -4045,7 +4055,7 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
                 }
             }
             // MIRRust closure: a value operand is moved into an owned cell.
-            .Value(value) -> if capture.access == MIRAccess.Move || capture.ownership.mode == MIROwnershipMode.Owned -> jet_rust_emit_value_move(value) else -> jet_rust_emit_value_owned(ctx, outer, value)
+            .Value(value) -> if capture.access == MIRAccess.Move || capture.ownership.mode == MIROwnershipMode.Owned -> jet_rust_emit_value_move(ctx, value) else -> jet_rust_emit_value_owned(ctx, outer, value)
         }
         name :: jet_rust_emit_capture_name(capture.slot)
         value_operand :: if operand == {
@@ -4114,7 +4124,7 @@ fn jet_rust_emit_shared_guard_map(ctx: &JetRustEmitContext, function: MIRFunctio
     method := row.member
     if row.module_name == "core.cell_guard" && (method == "map_read" || method == "map_edit") -> method = "map"
     borrow :: if editable -> "&mut" else -> "&"
-    expression := jet_rust_emit_value_move(guard)
+    expression := jet_rust_emit_value_move(ctx, guard)
     loop field in path {
         project :: "|__jet_guard_value| ({borrow}__jet_guard_value.{jet_rust_emit_field_name(&ctx, field)})"
         if row.module_name == "core.cell_guard" -> expression = "({expression}).{method}({project})" else -> expression = "({expression}).{method}({field.value}i64, {project})"
@@ -4233,7 +4243,7 @@ fn jet_rust_emit_host_callback(ctx: &JetRustEmitContext, function: MIRFunction, 
             else -> &argument_text.push(name)
         }
     }
-    callback :: jet_rust_emit_value_move(callable)
+    callback :: jet_rust_emit_value_move(ctx, callable)
     arguments :: argument_text.join(", ")
     invocation := if send -> "__jet_callback({arguments})" else -> jet_rust_emit_fn_value_call("__jet_callback.clone()", [String]{arguments})
     if adapt_unit_result && returns_unit -> invocation = "{{ let _ = {invocation}; Ok(()) }}"
@@ -4273,7 +4283,7 @@ fn jet_rust_emit_host_callback_with_inputs(ctx: &JetRustEmitContext, function: M
             else -> &argument_text.push("({name}).clone()")
         }
     }
-    callback :: jet_rust_emit_value_move(callable)
+    callback :: jet_rust_emit_value_move(ctx, callable)
     invocation :: if send -> "__jet_callback({argument_text.join(", ")})" else -> jet_rust_emit_fn_value_call("__jet_callback.clone()", [String]{argument_text.join(", ")})
     "{{ let __jet_callback = {callback}; move |{parameter_text.join(", ")}| {invocation} }}"
 }
@@ -4468,7 +4478,7 @@ fn jet_rust_emit_prelude_receiver_call(ctx: &JetRustEmitContext, function: MIRFu
             receiver_text = jet_rust_emit_mutable_receiver_reference(&ctx, function, receiver)
         }
         row.signature.borrow_mask[0] -> receiver_text = jet_rust_emit_borrowed_value_reference(&ctx, function, receiver, MIRAccess.Read)
-        else -> receiver_text = jet_rust_emit_value_move(receiver)
+        else -> receiver_text = jet_rust_emit_value_move(ctx, receiver)
     }
     symbol :: jet_rust_emit_prelude_symbol(&ctx, call)
     if row.abi == MIRPreludeABI.Aggregate && row.module_name == "core.list" && row.member == "min_max_by" {
@@ -4508,7 +4518,7 @@ fn jet_rust_emit_semantic_values(ctx: &JetRustEmitContext, function: MIRFunction
     loop value in values {
         if {
             jet_rust_emit_host_borrow_callback_value(&ctx, function, value, false, false) == .Val(callback) -> &rendered.push(callback)
-            row.signature.borrow_mask[index] -> &rendered.push(jet_rust_emit_value_reference(value, false))
+            row.signature.borrow_mask[index] -> &rendered.push(jet_rust_emit_value_reference(ctx, value, false))
             else -> &rendered.push(jet_rust_emit_value_consume(ctx, function, value))
         }
         index += 1
@@ -4733,7 +4743,7 @@ fn jet_rust_emit_pattern_capture(ctx: &JetRustEmitContext, function: MIRFunction
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR pattern capture index has no descriptor", "checked pattern captures must reference one typed hole or binary rest descriptor from their match producer", Val(function.span))
         return "unreachable!(\"MIR pattern capture descriptor missing\")"
     }
-    "({jet_rust_emit_value_reference(matched, false)}).as_ref().unwrap_or_else(|_| unreachable!(\"MIR pattern capture unavailable\")).{index}.clone()"
+    "({jet_rust_emit_value_reference(ctx, matched, false)}).as_ref().unwrap_or_else(|_| unreachable!(\"MIR pattern capture unavailable\")).{index}.clone()"
 }
 
 fn jet_rust_emit_view_copy(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, result: MIRValueID?) -> String Never! {
@@ -4766,7 +4776,7 @@ fn jet_rust_emit_is_shared_guard_type(ty: MIRType) -> Bool Never! {
 // guard derefs to its guarded value, borrowed from the guard's own place.
 fn jet_rust_emit_deref(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
     if !jet_rust_emit_is_shared_guard_type(jet_rust_emit_value_type(ctx, function, value)) -> return "jet_mem::jet_sentry_read(({jet_rust_emit_value_owned(ctx, function, value)}), \"valid_ptr\")"
-    guard := jet_rust_emit_value_reference(value, false)
+    guard := jet_rust_emit_value_reference(ctx, value, false)
     if jet_rust_emit_find_value_instruction(ctx, function, value) == .Val(instruction) {
         if instruction.operation == {
             .AddressOf(place, _) | .ReadPlace(place) -> guard = jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)
@@ -4782,7 +4792,7 @@ fn jet_rust_emit_copy(ctx: &JetRustEmitContext, function: MIRFunction, value: MI
         mode :: jet_rust_emit_value_mode(ctx, function, value)
         // D-MEM-COPYSEM1: an owned source read only by this copy is dead
         // after it, so the copy takes it.
-        if mode == MIROwnershipMode.Owned || mode == MIROwnershipMode.Move -> return jet_rust_emit_value_move(value)
+        if mode == MIROwnershipMode.Owned || mode == MIROwnershipMode.Move -> return jet_rust_emit_value_move(ctx, value)
     }
     jet_rust_emit_value_copy(ctx, function, value, fact)
 }
@@ -4883,9 +4893,9 @@ fn jet_rust_emit_prelude_cursor_call(ctx: &JetRustEmitContext, function: MIRFunc
         return "unreachable!(\"MIR cursor route ABI\")"
     }
     cursor_text :: if access == {
-        .Read -> jet_rust_emit_value_reference(cursor, false)
-        .Write -> jet_rust_emit_value_reference(cursor, true)
-        .Move -> jet_rust_emit_value_move(cursor)
+        .Read -> jet_rust_emit_value_reference(ctx, cursor, false)
+        .Write -> jet_rust_emit_value_reference(ctx, cursor, true)
+        .Move -> jet_rust_emit_value_move(ctx, cursor)
     }
     jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{cursor_text})
 }
@@ -4912,7 +4922,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         .ReplacePlace(_, _) -> return "()"
         .InitializeUninit(_) -> return "()"
         .Copy(value, fact) -> return jet_rust_emit_copy(&ctx, function, value, fact, result)
-        .Move(value) -> return jet_rust_emit_value_move(value)
+        .Move(value) -> return jet_rust_emit_value_move(ctx, value)
         .Constant(value) -> {
             ty :: jet_rust_emit_value_type(ctx, function, result ?? MIRValueID{value: 0})
             return jet_rust_emit_constant(&ctx, value, ty)
@@ -4927,7 +4937,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                 target_ty = jet_rust_emit_checked_trait_box_target(&ctx, trait_id, Val(function.span))
             }
             loop value in values {
-                source := jet_rust_emit_value_move(value)
+                source := jet_rust_emit_value_move(ctx, value)
                 if target_ty == .Val(target) {
                     source_ty := jet_rust_emit_value_type(ctx, function, value)
                     action := jet_rust_emit_trait_box_source_needs_box(&ctx, source_ty, target, Val(function.span))
@@ -4951,17 +4961,17 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         }
         .BuildMap(entries) -> {
             rendered := [String]{}
-            loop entry in entries -> &rendered.push("({jet_rust_emit_value_move(entry.key)}, {jet_rust_emit_value_move(entry.value)})")
+            loop entry in entries -> &rendered.push("({jet_rust_emit_value_move(ctx, entry.key)}, {jet_rust_emit_value_move(ctx, entry.value)})")
             return "[{rendered.join(", ")}].into_iter().collect::<{ctx.config.root_prefix}JetMap<_,_>>()"
         }
         .EnumIs(subject, owner, variant) -> return jet_rust_emit_enum_is(&ctx, function, subject, owner, variant)
         .EnumPayload(subject, owner, variant, index) -> return jet_rust_emit_enum_payload(&ctx, function, result, subject, owner, variant, index)
         .OptionIsSome(subject) | .ResultIsOk(subject) -> return "matches!({jet_rust_emit_inspected_value_reference(&ctx, function, subject)}, Ok(_))"
-        .PatternMatched(subject) -> return "matches!({jet_rust_emit_value_reference(subject, false)}, Ok(_))"
+        .PatternMatched(subject) -> return "matches!({jet_rust_emit_value_reference(ctx, subject, false)}, Ok(_))"
         .OptionValue(subject) -> {
             // D-MEM-COPYSEM1: over a read parameter's place only the payload is copied.
             if jet_rust_emit_immutable_read_place(&ctx, function, subject) == .Val(place) -> return "match {jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)} {{ Ok(value) => value.clone(), Err(_) => unreachable!(\"MIR option payload missing\") }}"
-            return "match {jet_rust_emit_value_move(subject)} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}"
+            return "match {jet_rust_emit_value_move(ctx, subject)} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}"
         }
         .ResultValue(subject, ok) -> {
             if jet_rust_emit_immutable_read_place(&ctx, function, subject) == .Val(place) {
@@ -4969,8 +4979,8 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                 if ok -> return "match {reference} {{ Ok(value) => value.clone(), Err(_) => unreachable!(\"MIR result success payload missing\") }}"
                 return "match {reference} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error.clone() }}"
             }
-            if ok -> return "match {jet_rust_emit_value_move(subject)} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR result success payload missing\") }}"
-            return "match {jet_rust_emit_value_move(subject)} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error }}"
+            if ok -> return "match {jet_rust_emit_value_move(ctx, subject)} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR result success payload missing\") }}"
+            return "match {jet_rust_emit_value_move(ctx, subject)} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error }}"
         }
         .Struct(type_id, fields) -> return jet_rust_emit_struct_literal(&ctx, type_id, fields, [MIRFieldID]{})
         .PatternCapture(matched, index) -> return jet_rust_emit_pattern_capture(&ctx, function, matched, index, result)
@@ -4990,14 +5000,14 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         .Enum(type_id, variant, args) -> return jet_rust_emit_enum_value(&ctx, function, type_id, variant, args, location)
         .Tuple(_, fields) -> {
             rendered := [String]{}
-            loop field in fields -> &rendered.push(jet_rust_emit_value_move(field.value))
+            loop field in fields -> &rendered.push(jet_rust_emit_value_move(ctx, field.value))
             if rendered.len() == 1 -> return "({rendered[0]},)"
             return "({rendered.join(", ")})"
         }
-        .Present(value) -> return "Ok({jet_rust_emit_value_move(value)})"
-        .ResultOk(value) -> return "Ok({jet_rust_emit_value_move(value)})"
+        .Present(value) -> return "Ok({jet_rust_emit_value_move(ctx, value)})"
+        .ResultOk(value) -> return "Ok({jet_rust_emit_value_move(ctx, value)})"
         .Absent -> return "{ctx.config.root_prefix}JetOutcome::Err({ctx.config.root_prefix}JetAbsent)"
-        .ResultErr(value) -> return "Err({jet_rust_emit_value_move(value)})"
+        .ResultErr(value) -> return "Err({jet_rust_emit_value_move(ctx, value)})"
         .Call(callee, args, type_args) -> return jet_rust_emit_call(&ctx, function, callee, args, type_args, result)
         .IndirectCall(callee, args, type_args) -> return jet_rust_emit_call(&ctx, function, MIRCallee.Indirect{value: callee}, args, type_args, result)
         .Closure(target, captures, _) -> return jet_rust_emit_closure(&ctx, function, target, captures, result)
@@ -5011,7 +5021,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait boxing source is already a trait object", "checked TraitBox operations consume concrete values and must not rebox an existing trait object", Val(function.span))
                 return "unreachable!(\"MIR trait boxing source is already dynamic\")"
             }
-            return "Box::new({jet_rust_emit_value_move(value)}) as {jet_rust_emit_type(&ctx, target_ty)}"
+            return "Box::new({jet_rust_emit_value_move(ctx, value)}) as {jet_rust_emit_type(&ctx, target_ty)}"
         }
         .PtrFromAddr(address, element) -> {
             address_text := jet_rust_emit_value_owned(ctx, function, address)
@@ -5026,7 +5036,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         // `Option<T>` slot would change its type.
         .AddressOf(place, access) -> return if access != MIRAccess.Move -> jet_rust_emit_place_read(&ctx, function, place) else -> jet_rust_emit_place_reference(&ctx, function, place, access)
 .CoreCall(call, route, args, type_args, fallibility, data_plan) -> return jet_rust_emit_core_operation(&ctx, function, call, route, args, type_args, fallibility, data_plan, result, location)
-        .AttachTag(value, _) -> return jet_rust_emit_value_move(value)
+        .AttachTag(value, _) -> return jet_rust_emit_value_move(ctx, value)
         .Semantic(semantic) -> {
             if semantic == {
                 .DataEntriesToMap(call, local) -> {
@@ -5038,7 +5048,10 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                 .AmbientInput(call, prompt) -> return jet_rust_emit_ambient_input(&ctx, function, call, prompt)
                 .LayoutCompare(call, op, left, right) -> return "{jet_rust_emit_semantic_values(&ctx, function, call, [MIRValueID]{left, right})} /* layout_compare={jet_rust_emit_layout_compare_name(op)} */"
                 .LayoutLiteral(inner) -> return "{ctx.config.root_prefix}jet_layout::LinExpr::from_const(({jet_rust_emit_value_owned(ctx, function, inner)}) as f64)"
-                .ConditionNotify(call, condition, all) -> return jet_rust_emit_route_call(&ctx, call, [String]{jet_rust_emit_value_move(condition), if all -> "true" else -> "false"})
+                .ConditionNotify(call, condition, all) -> {
+                    moved :: jet_rust_emit_value_move(ctx, condition)
+                    return jet_rust_emit_route_call(&ctx, call, [String]{moved, if all -> "true" else -> "false"})
+                }
                 .AllocNew(call, _, _, args) -> {
                     rendered := [String]{}
                     loop arg in args -> &rendered.push(jet_rust_emit_call_arg(&ctx, function, arg))
@@ -5084,7 +5097,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                 .ReflectOf(type_name, path, display, fields) -> {
                     rendered := [String]{}
                     loop field in fields {
-                        &rendered.push("jet_reflect_field_new({jet_rust_emit_quote(field.name)}.to_string(), jet_reflect_value_from_field(&(*{jet_rust_emit_value_borrow(field.value)}), {jet_rust_emit_quote(field.type_name)}.to_string(), {jet_rust_emit_quote(field.path)}.to_string()))")
+                        &rendered.push("jet_reflect_field_new({jet_rust_emit_quote(field.name)}.to_string(), jet_reflect_value_from_field(&(*{jet_rust_emit_value_borrow(ctx, field.value)}), {jet_rust_emit_quote(field.type_name)}.to_string(), {jet_rust_emit_quote(field.path)}.to_string()))")
                     }
                     return "jet_reflect_value_finish({jet_rust_emit_quote(type_name)}.to_string(), {jet_rust_emit_quote(path)}.to_string(), {jet_rust_emit_value_owned(ctx, function, display)}, vec![{rendered.join(", ")}])"
                 }
@@ -5134,7 +5147,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                 .ReaderTakePattern(_, receiver_place, parts) -> return jet_rust_emit_reader_take_pattern(&ctx, function, receiver_place, parts, result)
                 .GCEdit(call, root, edges, edit, index, kind, site) -> return jet_rust_emit_gc_edit(&ctx, function, call, root, edges, edit, index, kind, site)
                 .TypedTextInterp(call, kind, literals, holes, trusted_html) -> return jet_rust_emit_typed_text_interp(&ctx, function, call, kind, literals, holes, trusted_html)
-                .CarrierFact(call, receiver, field, _) -> return "{jet_rust_emit_prelude_symbol(&ctx, call)}(&(*{jet_rust_emit_value_borrow(receiver)}), |__jet_report| __jet_report.{jet_rust_emit_field_name(&ctx, field)}.clone())"
+                .CarrierFact(call, receiver, field, _) -> return "{jet_rust_emit_prelude_symbol(&ctx, call)}(&(*{jet_rust_emit_value_borrow(ctx, receiver)}), |__jet_report| __jet_report.{jet_rust_emit_field_name(&ctx, field)}.clone())"
                 else -> {}
             }
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR semantic operation has no Jet source adapter", "semantic operations must retain one checked source-emission adapter before Rust source generation", Val(function.span))
@@ -5191,9 +5204,9 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             }
             consumed :: !by_value && !byte_loop && !shared_slice && (listed || keyed) && jet_rust_emit_value_single_use(ctx, collection)
             collection_text :: if {
-                by_value || consumed -> jet_rust_emit_value_move(collection)
-                shared_slice -> "&mut ({jet_rust_emit_value_reference(collection, false)}).as_slice()"
-                else -> jet_rust_emit_value_reference(collection, true)
+                by_value || consumed -> jet_rust_emit_value_move(ctx, collection)
+                shared_slice -> "&mut ({jet_rust_emit_value_reference(ctx, collection, false)}).as_slice()"
+                else -> jet_rust_emit_value_reference(ctx, collection, true)
             }
             step_text :: if step == .Val(step_value) -> jet_rust_emit_index_operand(&ctx, function, step_value, loc) else -> "0"
             has_step :: if step != None -> "true" else -> "false"
@@ -5203,16 +5216,16 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         }
         .LoopIterHasNext(call, cursor) -> {
             if ctx.ref_bindings.cursors.get(cursor.value) != None -> return "{{ let (items, at) = *{jet_rust_emit_value_slot(cursor)}.as_ref().expect(\"MIR value\"); at < items.len() }}"
-            if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_has_next({jet_rust_emit_value_reference(cursor, false)})"
+            if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_has_next({jet_rust_emit_value_reference(ctx, cursor, false)})"
             return jet_rust_emit_prelude_cursor_call(&ctx, function, call, cursor, MIRAccess.Read)
         }
         .LoopIterValue(call, cursor) -> {
-            if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_value({jet_rust_emit_value_reference(cursor, true)})"
+            if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_value({jet_rust_emit_value_reference(ctx, cursor, true)})"
             return jet_rust_emit_prelude_cursor_call(&ctx, function, call, cursor, MIRAccess.Write)
         }
         .LoopIterAdvance(call, cursor) -> {
             if ctx.ref_bindings.cursors.get(cursor.value) != None -> return "{{ {jet_rust_emit_value_slot(cursor)}.as_mut().expect(\"MIR value\").1 += 1; }}"
-            if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_advance({jet_rust_emit_value_reference(cursor, true)})"
+            if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_advance({jet_rust_emit_value_reference(ctx, cursor, true)})"
             return jet_rust_emit_prelude_cursor_call(&ctx, function, call, cursor, MIRAccess.Write)
         }
         .ScopeEnter(scope, member) -> return jet_rust_emit_scope_enter(&ctx, function, scope, member)

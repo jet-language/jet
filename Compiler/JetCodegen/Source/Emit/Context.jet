@@ -347,6 +347,18 @@ pub struct JetRustEmitBodyIndex {
     pub scope_rows: [U64:Int]{[U64:Int]{}}
     pub test_member_blocks: [U64:Int]{[U64:Int]{}}
     pub test_member_positions: [U64:Int]{[U64:Int]{}}
+    // MIRRust history_binding: the borrowed Parameter/Capture results whose
+    // users read the retained place itself (jet_rust_emit_place_bindings).
+    pub bindings: [U64:JetRustEmitPlaceBinding]{[U64:JetRustEmitPlaceBinding]{}}
+}
+
+// A borrowed Parameter/Capture binding: the place a shared borrow names, the
+// place a unique borrow names (Write access only), and whether its Rust
+// carrier is `Copy` (an owned read is then bitwise, else a clone).
+pub struct JetRustEmitPlaceBinding {
+    pub read: String
+    pub write: String?
+    pub bitwise: Bool
 }
 
 // One use of a value: its block position and instruction position, or -1

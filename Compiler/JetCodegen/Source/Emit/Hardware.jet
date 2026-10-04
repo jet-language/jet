@@ -402,7 +402,7 @@ fn jet_rust_emit_hardware_call(ctx: &JetRustEmitContext, function: MIRFunction, 
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware DMA wait receiver disagrees with checked buffer_ty", "DMA wait receivers are __JetDmaTransfer<buffer_ty> with no value arguments", Val(function.span))
                 return "unreachable!(\"hardware DMA wait receiver type\")"
             }
-            return "{root}jet_hardware_dma_wait_typed({jet_rust_emit_quote(profile_id)}, {jet_rust_emit_quote(channel)}, {jet_rust_emit_value_move(transfer)})"
+            return "{root}jet_hardware_dma_wait_typed({jet_rust_emit_quote(profile_id)}, {jet_rust_emit_quote(channel)}, {jet_rust_emit_value_move(ctx, transfer)})"
         }
     }
 }

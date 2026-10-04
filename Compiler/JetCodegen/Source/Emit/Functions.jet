@@ -2154,6 +2154,8 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     // The shared-capture plan reads the new index's partial-move rows.
     shared_locals :: jet_rust_emit_shared_capture_locals(ctx, function)
     ctx.body_index.shared_locals = shared_locals
+    bindings :: jet_rust_emit_place_bindings(ctx, function)
+    ctx.body_index.bindings = bindings
     move_facts :: jet_rust_emit_move_facts(&ctx, function)
     ctx.move_facts = move_facts
     owner_generic_params :: jet_rust_emit_function_owner_generic_params(&ctx, function)
@@ -2168,6 +2170,8 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     values_start :: lines.len()
     loop value in function.values {
         if ctx.ref_bindings.payloads.get(value.id.value) != None || ctx.ref_bindings.collections.get(value.id.value) != None -> next
+        // MIRRust emit_slots: a borrowed binding names its place; it has no slot.
+        if ctx.body_index.bindings.get(value.id.value) != None -> next
         // MIRRust emit_slots: an in-place loop cursor holds the walked list
         // and the next row.
         if ctx.ref_bindings.cursors.get(value.id.value) == .Val(place) {

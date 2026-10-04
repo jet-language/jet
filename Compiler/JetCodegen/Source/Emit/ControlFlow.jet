@@ -508,7 +508,7 @@ fn jet_rust_emit_cfg_run(ctx: &JetRustEmitContext, function: MIRFunction, plan: 
 }
 
 fn jet_rust_emit_return_expression(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID?) -> String Never! {
-    if value == .Val(operand) -> return jet_rust_emit_value_move(operand)
+    if value == .Val(operand) -> return jet_rust_emit_value_move(ctx, operand)
     if mir_type_is_unit(function.return_type) -> return "()"
     if function.failure == {
         .Result(success, _) -> {
@@ -678,7 +678,7 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
                 &items.push(jet_rust_emit_cfg_line("{indent}unreachable!(\"invalid MIR yield\");"))
                 }
                 else -> {
-                &items.push(jet_rust_emit_cfg_line("{indent}let _ = __jet_yield_tx.send_stream({jet_rust_emit_value_move(value)});"))
+                &items.push(jet_rust_emit_cfg_line("{indent}let _ = __jet_yield_tx.send_stream({jet_rust_emit_value_move(ctx, value)});"))
                 &items.push(jet_rust_emit_cfg_edge(block_id, resume, indent))
                 }
             }
@@ -699,7 +699,7 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
                         }
                     }
                 }
-                if !feeds_phi -> &items.push(jet_rust_emit_cfg_line("{indent}let _ = {jet_rust_emit_value_move(incoming_value)};"))
+                if !feeds_phi -> &items.push(jet_rust_emit_cfg_line("{indent}let _ = {jet_rust_emit_value_move(ctx, incoming_value)};"))
             }
             &items.push(jet_rust_emit_cfg_edge(block_id, target, indent))
         }
