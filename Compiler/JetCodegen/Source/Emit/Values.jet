@@ -674,6 +674,38 @@ fn jet_rust_emit_binding_uses_move_slot(ctx: JetRustEmitContext, function: MIRFu
     !mir_type_is_scalar(ty)
 }
 
+// MIRRust history_binding: a Parameter/Capture result names the retained
+// place, so MIRRust never stores it at entry; its users borrow or copy that
+// place where they read it. This emitter still reads the SSA slot of a value an
+// operand names itself, so the entry store of a borrowed (non-Move) binding is
+// skipped exactly when nothing reads that slot: every operand use is the drop
+// that releases nothing (jet_rust_emit_drop_value), and nothing moves out of a
+// place rooted at the binding (jet_rust_emit_place_move, partial moves).
+fn jet_rust_emit_unread_binding(ctx: &JetRustEmitContext, function: MIRFunction, instruction: MIRInstruction, value: MIRValueID) -> Bool Never! {
+    if ctx.body_index.function != (Val(function.id)) -> return false
+    access := MIRAccess.Move
+    if instruction.operation == {
+        .Parameter(index, _) -> access = jet_rust_emit_find_parameter(function, index).access
+        .Capture(slot) -> access = jet_rust_emit_capture_access(function, slot)
+        else -> return false
+    }
+    if access == MIRAccess.Move -> return false
+    loop user in jet_rust_emit_value_users(ctx, function, value) {
+        if user.instruction < 0 -> return false
+        if function.blocks[user.block].instructions[user.instruction].operation == {
+            .Drop(_, _) -> {}
+            else -> return false
+        }
+    }
+    loop row in function.places {
+        if row.base == {
+            .Parameter(base) | .Capture(base) -> { if base == value && ctx.body_index.moved_places.get(row.id.value) != None -> return false }
+            else -> {}
+        }
+    }
+    true
+}
+
 fn jet_rust_emit_parameter_place(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID, mutable: Bool) -> String Never! {
     instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? panic("MIR parameter place has no producer")
     if jet_rust_emit_binding_uses_move_slot(ctx, function, value) {
@@ -1683,6 +1715,18 @@ fn jet_rust_emit_place_borrowing_use(ctx: &JetRustEmitContext, function: MIRFunc
                     loop (index, arg) in args {
                         if arg != value -> next
                         if !mask[index + 1] || jet_rust_emit_builtin_native_int_arg(row, index, true, jet_rust_emit_value_type(ctx, function, arg)) -> return false
+                    }
+                    return true
+                }
+                // MIRRust borrowed_operation_use: a handle route lends every
+                // operand its mask borrows (jet_rust_emit_handle_method_values).
+                .HandleMethod(call, receiver, args, _, _) -> {
+                    row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return false
+                    mask :: row.signature.borrow_mask
+                    if mask.len() != args.len() + 1 -> return false
+                    if receiver == value && !mask[0] -> return false
+                    loop (index, arg) in args {
+                        if arg == value && !mask[index + 1] -> return false
                     }
                     return true
                 }

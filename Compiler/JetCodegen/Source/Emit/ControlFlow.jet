@@ -136,6 +136,9 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
         if ctx.ref_bindings.payloads.get(value.value) != None || ctx.ref_bindings.collections.get(value.value) != None -> return lines
         if jet_rust_emit_partial_projection_only(&ctx, function, value) -> return lines
         if jet_rust_emit_inspected_only(&ctx, function, value) -> return lines
+        // MIRRust emit_instruction: a Parameter/Capture result names its
+        // retained place; an unread binding stores no entry copy.
+        if jet_rust_emit_unread_binding(&ctx, function, instruction, value) -> return lines
     }
     // MIRRust: a HostBorrowCallback is a one-use boundary adapter its consuming
     // call inlines; an ordinary owned callable slot would erase the borrowed ABI.
